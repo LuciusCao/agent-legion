@@ -1,6 +1,8 @@
 import json
+import subprocess
 from pathlib import Path
 
+from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.download import download_video
@@ -138,9 +140,6 @@ def build_openclaw_runners(settings: Settings) -> list[OpenClawRunner]:
 
 def build_openclaw_runner(settings: Settings) -> OpenClawRunner:
     return build_openclaw_runners(settings)[0]
-
-
-from server.app.agents import AgentStatusManager
 
 
 def init_runners(settings: Settings, agent_manager: AgentStatusManager | None = None) -> None:
