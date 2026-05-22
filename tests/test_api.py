@@ -63,6 +63,28 @@ def test_add_question_without_url_waits_for_url(tmp_path):
     assert video["question_id"] == "Q001"
 
 
+def test_add_knowledge_without_url_fetches_source_v2_from_cms(tmp_path, monkeypatch):
+    monkeypatch.setattr("server.app.api.get_token", lambda env, config: "token")
+    monkeypatch.setattr(
+        "server.app.api.fetch_knowledge_url",
+        lambda code, api_url, token: "https://example.com/k001.mp4",
+    )
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    created = client.post(
+        "/api/videos",
+        json={"items": [{"content_type": "knowledge", "external_id": "K001", "title": "Knowledge 1"}]},
+    )
+
+    assert created.status_code == 200
+    video = created.json()["videos"][0]
+    assert video["id"] == "knowledge_K001"
+    assert video["source_url"] == "https://example.com/k001.mp4"
+    assert video["status"] == "queued"
+    assert video["current_phase"] == "download"
+
+
 def test_add_video_with_empty_url_still_waits_when_cms_fetch_fails(tmp_path, monkeypatch):
     def fail_token(env, config):
         raise RuntimeError("cms unavailable")

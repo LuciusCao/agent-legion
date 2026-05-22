@@ -151,9 +151,11 @@ class Database:
                 values,
             )
 
-    def start_phase(self, video_id: str, phase_key: str, command: list[str], log_path: str = "") -> dict[str, Any] | None:
+    def start_phase(
+        self, video_id: str, phase_key: str, command: list[str], log_path: str = ""
+    ) -> dict[str, Any] | None:
         with self.connect() as conn:
-            # 原子锁：只有 queued / missing_url 状态的视频才能变为 running
+            # Atomic claim: only videos ready to be claimed can transition to running.
             updated = conn.execute(
                 "update videos set current_phase=?, status='running', updated_at=current_timestamp where id=? and status in ('queued', 'missing_url')",
                 (phase_key, video_id),
@@ -169,6 +171,26 @@ class Database:
             )
             row = conn.execute("select * from phase_runs where id=?", (cur.lastrowid,)).fetchone()
         return dict(row)
+
+    def recover_running_videos(self) -> int:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                update phase_runs
+                set status='failed',
+                    exit_code=-1,
+                    error_message='worker interrupted before restart',
+                    finished_at=current_timestamp
+                where status='running'
+                """
+            )
+            return conn.execute(
+                """
+                update videos
+                set status='queued', error_message='', updated_at=current_timestamp
+                where status='running'
+                """
+            ).rowcount
 
     def finish_phase(self, run_id: int, status: str, exit_code: int | None, error_message: str) -> None:
         with self.connect() as conn:
