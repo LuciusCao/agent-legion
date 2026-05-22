@@ -480,11 +480,17 @@ function renderRerunPhaseOptions(video: VideoItem): void {
 function renderDetailView(): void {
   byId<HTMLDivElement>("listView").classList.toggle("hidden", activeView !== "list");
   byId<HTMLDivElement>("detailView").classList.toggle("hidden", activeView !== "detail");
+  renderChaptersStrip();
+  renderDetailTabs();
+  renderTabPanel();
+  updatePlayInfo();
 }
 
 async function selectVideo(id: string): Promise<void> {
   selectedId = id;
   activeView = "detail";
+  triggeredNodeIndexes = new Set();
+  currentSentence = [];
   const video = videos.find((item) => item.id === id);
   if (!video) return;
   selectedType = video.content_type;
@@ -492,7 +498,232 @@ async function selectVideo(id: string): Promise<void> {
   byId<HTMLParagraphElement>("detailSubtitle").textContent =
     `${TYPE_LABELS[video.content_type]} · ${video.external_id || "未填 ID"} · ${PHASE_LABELS[video.current_phase] ?? video.current_phase} · ${STATUS_LABELS[statusGroup(video)]}`;
   renderRerunPhaseOptions(video);
+  renderPlayer(video);
+  currentArtifacts = await api<VideoArtifacts>(`/api/videos/${video.id}/artifacts`);
+  currentLog = (await api<{ log: string }>(`/api/videos/${video.id}/logs`)).log || "暂无日志";
+  activeTab = video.content_type === "question" ? "subtitles" : "nodes";
   renderDetailView();
+}
+
+function renderPlayer(video: VideoItem): void {
+  const wrap = byId<HTMLDivElement>("playerWrap");
+  if (!video.source_url) {
+    wrap.innerHTML = `<div class="empty-state">等待视频 URL</div>`;
+    return;
+  }
+  wrap.innerHTML = `
+    <video id="player" controls src="/api/videos/${video.id}/video"></video>
+    <div class="subtitle-overlay"><div id="subtitleOverlay" class="subtitle-text"></div></div>
+    <div id="practiceOverlay" class="practice-toast hidden"></div>
+    <div id="sentenceOverlay" class="interaction-overlay hidden"></div>
+  `;
+  const player = byId<HTMLVideoElement>("player");
+  player.addEventListener("timeupdate", onTimeUpdate);
+  player.addEventListener("seeked", onTimeUpdate);
+}
+
+function onTimeUpdate(): void {
+  const player = document.getElementById("player") as HTMLVideoElement | null;
+  if (!player) return;
+  const time = player.currentTime;
+  const subtitle = currentArtifacts.subtitles.find((item) => time >= item.start && time < item.end);
+  const subtitleOverlay = document.getElementById("subtitleOverlay");
+  if (subtitleOverlay) subtitleOverlay.textContent = subtitle?.text ?? "";
+  currentArtifacts.interactions.forEach((node, index) => {
+    const trigger = Number(node.trigger_time ?? 0);
+    if (!triggeredNodeIndexes.has(index) && !player.paused && time >= trigger && time < trigger + 1.5) {
+      showInteraction(index);
+    }
+  });
+  renderChaptersStrip();
+  if (activeTab === "subtitles") renderTabPanel();
+  updatePlayInfo();
+}
+
+function seekTo(time: number): void {
+  const player = document.getElementById("player") as HTMLVideoElement | null;
+  if (player) player.currentTime = time;
+}
+
+function renderChaptersStrip(): void {
+  const player = document.getElementById("player") as HTMLVideoElement | null;
+  const time = player?.currentTime ?? 0;
+  byId<HTMLDivElement>("chaptersStrip").innerHTML = currentArtifacts.chapters
+    .map((chapter) => {
+      const active = time >= chapter.start_time && time < chapter.end_time ? "active" : "";
+      return `<button class="chapter-chip ${active}" data-time="${chapter.start_time}">${escapeHtml(chapter.title)}</button>`;
+    })
+    .join("");
+  byId<HTMLDivElement>("chaptersStrip").querySelectorAll<HTMLButtonElement>("[data-time]").forEach((button) => {
+    button.addEventListener("click", () => seekTo(Number(button.dataset.time ?? 0)));
+  });
+}
+
+function availableTabs(): Array<{ key: DetailTab; label: string }> {
+  const video = videos.find((item) => item.id === selectedId);
+  const tabs: Array<{ key: DetailTab; label: string }> = [
+    { key: "subtitles", label: "字幕" },
+    { key: "chapters", label: "章节" },
+    { key: "logs", label: "日志" },
+    { key: "metadata", label: "元数据" },
+  ];
+  if (video?.content_type !== "question") tabs.unshift({ key: "nodes", label: "互动节点" });
+  return tabs;
+}
+
+function renderDetailTabs(): void {
+  byId<HTMLElement>("detailTabs").innerHTML = availableTabs()
+    .map((tab) => `<button class="tab ${activeTab === tab.key ? "active" : ""}" data-tab="${tab.key}">${tab.label}</button>`)
+    .join("");
+  byId<HTMLElement>("detailTabs").querySelectorAll<HTMLButtonElement>("[data-tab]").forEach((button) => {
+    button.addEventListener("click", () => {
+      activeTab = (button.dataset.tab as DetailTab) ?? "subtitles";
+      renderDetailView();
+    });
+  });
+}
+
+function renderTabPanel(): void {
+  const panel = byId<HTMLDivElement>("tabPanel");
+  if (activeTab === "nodes") {
+    panel.innerHTML =
+      currentArtifacts.interactions
+        .map((node, index) => {
+          const type = String(node.node_type ?? node.type ?? "interaction");
+          const label = type === "example_practice" ? "例题试做" : "视频总结";
+          return `
+            <button class="node-card ${triggeredNodeIndexes.has(index) ? "answered" : ""}" data-node="${index}">
+              <strong>${label}</strong>
+              <span>${seconds(Number(node.trigger_time ?? 0))}</span>
+              <small>${escapeHtml(String(node.chapter_id ?? ""))}</small>
+            </button>
+          `;
+        })
+        .join("") || `<div class="empty-state">暂无互动节点</div>`;
+    panel.querySelectorAll<HTMLButtonElement>("[data-node]").forEach((button) => {
+      const node = currentArtifacts.interactions[Number(button.dataset.node ?? 0)];
+      button.addEventListener("click", () => seekTo(Number(node.trigger_time ?? 0)));
+    });
+    return;
+  }
+  if (activeTab === "subtitles") {
+    const player = document.getElementById("player") as HTMLVideoElement | null;
+    const time = player?.currentTime ?? 0;
+    panel.innerHTML = currentArtifacts.subtitles
+      .map((subtitle) => {
+        const active = time >= subtitle.start && time < subtitle.end ? "active" : "";
+        return `<button class="subtitle-row ${active}" data-time="${subtitle.start}"><time>${seconds(subtitle.start)} - ${seconds(subtitle.end)}</time><span>${escapeHtml(subtitle.text)}</span></button>`;
+      })
+      .join("") || `<div class="empty-state">暂无字幕</div>`;
+    panel.querySelectorAll<HTMLButtonElement>("[data-time]").forEach((button) => {
+      button.addEventListener("click", () => seekTo(Number(button.dataset.time ?? 0)));
+    });
+    return;
+  }
+  if (activeTab === "chapters") {
+    panel.innerHTML = currentArtifacts.chapters
+      .map((chapter) => `<button class="subtitle-row" data-time="${chapter.start_time}"><time>${seconds(chapter.start_time)} - ${seconds(chapter.end_time)}</time><span>${escapeHtml(chapter.title)}</span></button>`)
+      .join("") || `<div class="empty-state">暂无章节</div>`;
+    panel.querySelectorAll<HTMLButtonElement>("[data-time]").forEach((button) => {
+      button.addEventListener("click", () => seekTo(Number(button.dataset.time ?? 0)));
+    });
+    return;
+  }
+  if (activeTab === "logs") {
+    panel.innerHTML = `<pre>${escapeHtml(currentLog)}</pre>`;
+    return;
+  }
+  panel.innerHTML = `<pre>${escapeHtml(JSON.stringify(currentArtifacts.metadata ?? {}, null, 2))}</pre>`;
+}
+
+function hideOverlays(): void {
+  document.getElementById("practiceOverlay")?.classList.add("hidden");
+  document.getElementById("sentenceOverlay")?.classList.add("hidden");
+}
+
+function showInteraction(index: number): void {
+  const node = currentArtifacts.interactions[index];
+  const player = document.getElementById("player") as HTMLVideoElement | null;
+  if (player && !player.paused) player.pause();
+  triggeredNodeIndexes.add(index);
+  const type = String(node.node_type ?? node.type ?? "");
+  if (type === "example_practice") showPractice(node);
+  else showSentence(node);
+  renderTabPanel();
+}
+
+function showPractice(node: Record<string, unknown>): void {
+  hideOverlays();
+  const question = (node.question ?? {}) as Record<string, unknown>;
+  const overlay = byId<HTMLDivElement>("practiceOverlay");
+  overlay.innerHTML = `
+    <div class="practice-card">
+      <strong>例题试做</strong>
+      <p>${escapeHtml(String(question.instruction ?? "请先独立完成这道题"))}</p>
+      <small>${escapeHtml(String(question.hint ?? ""))}</small>
+      <div><button id="practiceSkipBtn">跳过</button><button id="practiceContinueBtn" class="primary-button">继续播放</button></div>
+    </div>
+  `;
+  overlay.classList.remove("hidden");
+  byId<HTMLButtonElement>("practiceSkipBtn").addEventListener("click", continueVideo);
+  byId<HTMLButtonElement>("practiceContinueBtn").addEventListener("click", continueVideo);
+}
+
+function showSentence(node: Record<string, unknown>): void {
+  hideOverlays();
+  const question = (node.question ?? {}) as Record<string, unknown>;
+  const options = ((question.options ?? []) as Array<Record<string, unknown>>).map((option) => String(option.text ?? ""));
+  currentSentence = [];
+  const overlay = byId<HTMLDivElement>("sentenceOverlay");
+  overlay.innerHTML = `
+    <div class="sentence-card">
+      <strong>视频总结</strong>
+      <p>点击词语，按顺序组成句子</p>
+      <div id="sentenceBox" class="sentence-box"></div>
+      <div id="wordBank" class="word-bank">${options.map((word) => `<button data-word="${escapeHtml(word)}">${escapeHtml(word)}</button>`).join("")}</div>
+      <div><button id="sentenceResetBtn">重置</button><button id="sentenceSkipBtn">跳过</button><button id="sentenceSubmitBtn" class="primary-button">提交</button></div>
+    </div>
+  `;
+  overlay.classList.remove("hidden");
+  overlay.querySelectorAll<HTMLButtonElement>("[data-word]").forEach((button) => {
+    button.addEventListener("click", () => {
+      currentSentence.push(button.dataset.word ?? "");
+      renderSentenceBox();
+    });
+  });
+  byId<HTMLButtonElement>("sentenceResetBtn").addEventListener("click", () => {
+    currentSentence = [];
+    renderSentenceBox();
+  });
+  byId<HTMLButtonElement>("sentenceSkipBtn").addEventListener("click", continueVideo);
+  byId<HTMLButtonElement>("sentenceSubmitBtn").addEventListener("click", continueVideo);
+  renderSentenceBox();
+}
+
+function renderSentenceBox(): void {
+  const box = document.getElementById("sentenceBox");
+  if (box) box.textContent = currentSentence.join(" / ") || "尚未选择";
+}
+
+function continueVideo(): void {
+  hideOverlays();
+  const player = document.getElementById("player") as HTMLVideoElement | null;
+  void player?.play();
+}
+
+function updatePlayInfo(): void {
+  const player = document.getElementById("player") as HTMLVideoElement | null;
+  const time = player?.currentTime ?? 0;
+  const chapter = currentArtifacts.chapters.find((item) => time >= item.start_time && time < item.end_time);
+  const subtitle = currentArtifacts.subtitles.find((item) => time >= item.start && time < item.end);
+  const nextNode = currentArtifacts.interactions.find((node) => Number(node.trigger_time ?? 0) > time);
+  byId<HTMLDivElement>("playInfoPanel").innerHTML = `
+    <h2>当前播放信息</h2>
+    <div class="info-row"><span>当前章节</span><strong>${escapeHtml(chapter?.title ?? "—")}</strong></div>
+    <div class="info-row"><span>播放时间</span><strong>${seconds(time)}</strong></div>
+    <div class="info-row"><span>下一个互动</span><strong>${nextNode ? seconds(Number(nextNode.trigger_time ?? 0)) : "无"}</strong></div>
+    <div class="info-row"><span>当前字幕</span><p>${escapeHtml(subtitle?.text ?? "—")}</p></div>
+  `;
 }
 
 function renderArtifacts(artifacts: VideoArtifacts): void {
@@ -578,25 +809,18 @@ byId<HTMLButtonElement>("rerunBtn").addEventListener("click", async () => {
   const phase = byId<HTMLSelectElement>("rerunPhase").value;
   await api(`/api/videos/${selectedId}/rerun`, { method: "POST", body: JSON.stringify({ phase }) });
   await refresh({ autoSelect: false });
+  await selectVideo(selectedId);
 });
 byId<HTMLButtonElement>("detailPackageBtn").addEventListener("click", () => {
   if (selectedId) void packageVideos([selectedId]);
 });
 byId<HTMLButtonElement>("deleteBtn").addEventListener("click", async () => {
   if (!selectedId) return;
-  const video = videos.find((item) => item.id === selectedId);
-  const label = video ? `${video.title} (${video.id})` : selectedId;
-  if (!window.confirm(`确定删除 ${label}？本地视频和处理产物目录也会删除。`)) return;
-  try {
-    await api(`/api/videos/${selectedId}`, { method: "DELETE" });
-    videos = videos.filter((item) => item.id !== selectedId);
-    selectedId = "";
-    clearSelection();
-    activeView = "list";
-    await refresh({ autoSelect: false });
-  } catch (error) {
-    window.alert(error instanceof Error ? error.message : "删除失败");
-  }
+  if (!window.confirm("确定删除该资源？本地视频和处理产物目录也会删除。")) return;
+  await api(`/api/videos/${selectedId}`, { method: "DELETE" });
+  selectedId = "";
+  activeView = "list";
+  await refresh({ autoSelect: false });
 });
 
 void refresh();
