@@ -8,6 +8,7 @@ from server.app.pipeline.artifacts import clear_artifacts_from
 from server.app.pipeline.common import get_video_id, parse_srt
 from server.app.pipeline.openclaw import AgentPhase, OpenClawRunner
 from server.app.pipeline.package import create_package
+from server.app.pipeline.phases import AGENT_PHASES
 from server.app.pipeline.transcribe import (
     TranscriptionProvider,
     run_transcription_with_providers,
@@ -143,6 +144,25 @@ def test_openclaw_runner_executes_template_and_validates_json(tmp_path):
 
     assert result.status == "completed"
     assert (tmp_path / "video" / "interactions.json").exists()
+
+
+def test_agent_reference_prompts_pass_video_dir_as_skill_io():
+    for phase in AGENT_PHASES.values():
+        text = phase.reference_path.read_text(encoding="utf-8")
+
+        assert "input_dir=Video directory" in text
+        assert "output_dir=Video directory" in text
+
+    content_review_text = AGENT_PHASES["content_review"].reference_path.read_text(encoding="utf-8")
+    assert "review_result.json" in content_review_text
+
+
+def test_interaction_prompt_does_not_require_preassemble_metadata():
+    text = AGENT_PHASES["interaction_generate"].reference_path.read_text(encoding="utf-8")
+
+    assert "metadata.json" in text
+    assert "不存在" in text
+    assert "不要依赖" in text
 
 
 def test_package_completed_videos(tmp_path):

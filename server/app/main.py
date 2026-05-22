@@ -1,5 +1,5 @@
 import threading
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -24,7 +24,7 @@ def create_app(
     stop_event = threading.Event()
 
     executor: ThreadPoolExecutor | None = None
-    running_futures: dict[str, "Future[bool]"] = {}  # type: ignore[name-defined]
+    running_futures: dict[str, Future[bool]] = {}
 
     agent_manager = AgentStatusManager()
 
