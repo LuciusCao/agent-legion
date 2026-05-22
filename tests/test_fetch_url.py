@@ -129,3 +129,13 @@ def test_lookup_question_video_not_found(monkeypatch):
 
     assert result.status == "not_found"
     assert result.url == ""
+
+
+def test_lookup_question_video_nonempty_error_payload_is_not_found(monkeypatch):
+    payload = {"data": {"message": "question not found", "code": 404}}
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: payload)
+
+    result = lookup_question_video("Q404", "https://cms.example/question", "token")
+
+    assert result.status == "not_found"
+    assert result.url == ""

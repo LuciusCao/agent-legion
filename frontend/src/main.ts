@@ -212,6 +212,11 @@ function filteredVideos(): VideoItem[] {
   });
 }
 
+function visibleSelectedIds(): string[] {
+  const visibleIds = new Set(filteredVideos().map((video) => video.id));
+  return Array.from(selectedIds).filter((id) => visibleIds.has(id));
+}
+
 async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     headers: { "Content-Type": "application/json", ...(init?.headers ?? {}) },
@@ -252,6 +257,7 @@ function renderStats(): void {
     button.addEventListener("click", () => {
       statusFilter = button.dataset.status ?? "all";
       byId<HTMLSelectElement>("statusFilter").value = statusFilter;
+      selectedIds.clear();
       renderListView();
     });
   });
@@ -388,8 +394,9 @@ function renderBatchToolbar(): void {
   toolbar.classList.toggle("hidden", !selectMode);
   if (!selectMode) return;
   const phases = selectedType === "question" ? QUESTION_PHASES : KNOWLEDGE_PHASES;
+  const selectedVisibleCount = visibleSelectedIds().length;
   toolbar.innerHTML = `
-    <span>已选 ${selectedIds.size} 项</span>
+    <span>已选 ${selectedVisibleCount} 项</span>
     <button id="selectVisibleBtn">全选当前结果</button>
     <button id="clearSelectedBtn">清空</button>
     <select id="batchPhase">
@@ -409,28 +416,41 @@ function renderBatchToolbar(): void {
   });
   byId<HTMLButtonElement>("batchRerunBtn").addEventListener("click", () => void batchRerun());
   byId<HTMLButtonElement>("batchDeleteBtn").addEventListener("click", () => void batchDelete());
-  byId<HTMLButtonElement>("batchPackageBtn").addEventListener("click", () => void packageVideos(Array.from(selectedIds)));
+  byId<HTMLButtonElement>("batchPackageBtn").addEventListener("click", () => void packageVideos(visibleSelectedIds()));
 }
 
 async function batchRerun(): Promise<void> {
-  if (selectedIds.size === 0) return;
+  const ids = visibleSelectedIds();
+  if (ids.length === 0) return;
   const phase = byId<HTMLSelectElement>("batchPhase").value;
-  await api<{ results: BatchResult[] }>("/api/videos/batch/rerun", {
+  const response = await api<{ results: BatchResult[] }>("/api/videos/batch/rerun", {
     method: "POST",
-    body: JSON.stringify({ video_ids: Array.from(selectedIds), phase }),
+    body: JSON.stringify({ video_ids: ids, phase }),
   });
+  showBatchResults("批量重跑", response.results);
   await refresh({ autoSelect: false });
 }
 
 async function batchDelete(): Promise<void> {
-  if (selectedIds.size === 0) return;
-  if (!window.confirm(`确定删除 ${selectedIds.size} 个资源？本地视频和产物目录也会删除。`)) return;
-  await api<{ results: BatchResult[] }>("/api/videos/batch/delete", {
+  const ids = visibleSelectedIds();
+  if (ids.length === 0) return;
+  if (!window.confirm(`确定删除 ${ids.length} 个资源？本地视频和产物目录也会删除。`)) return;
+  const response = await api<{ results: BatchResult[] }>("/api/videos/batch/delete", {
     method: "POST",
-    body: JSON.stringify({ video_ids: Array.from(selectedIds) }),
+    body: JSON.stringify({ video_ids: ids }),
   });
+  showBatchResults("批量删除", response.results);
   selectedIds.clear();
   await refresh({ autoSelect: false });
+}
+
+function showBatchResults(title: string, results: BatchResult[]): void {
+  const succeeded = results.filter((result) => ["deleted", "rerun"].includes(result.status)).length;
+  const failed = results.filter((result) => !["deleted", "rerun"].includes(result.status));
+  const details = failed
+    .map((result) => `${result.video_id}: ${result.message || result.status}`)
+    .join("\n");
+  window.alert(`${title}完成：成功 ${succeeded} 项，失败 ${failed.length} 项${details ? `\n${details}` : ""}`);
 }
 
 async function packageVideos(videoIds: string[]): Promise<void> {
@@ -659,7 +679,7 @@ function showInteraction(index: number): void {
 
 function showPractice(node: Record<string, unknown>): void {
   hideOverlays();
-  const question = (node.question ?? {}) as Record<string, unknown>;
+  const question = getInteractionQuestion(node);
   const overlay = byId<HTMLDivElement>("practiceOverlay");
   overlay.innerHTML = `
     <div class="practice-card">
@@ -676,7 +696,7 @@ function showPractice(node: Record<string, unknown>): void {
 
 function showSentence(node: Record<string, unknown>): void {
   hideOverlays();
-  const question = (node.question ?? {}) as Record<string, unknown>;
+  const question = getInteractionQuestion(node);
   const options = ((question.options ?? []) as Array<Record<string, unknown>>).map((option) => String(option.text ?? ""));
   currentSentence = [];
   const overlay = byId<HTMLDivElement>("sentenceOverlay");
@@ -703,6 +723,12 @@ function showSentence(node: Record<string, unknown>): void {
   byId<HTMLButtonElement>("sentenceSkipBtn").addEventListener("click", continueVideo);
   byId<HTMLButtonElement>("sentenceSubmitBtn").addEventListener("click", continueVideo);
   renderSentenceBox();
+}
+
+function getInteractionQuestion(node: Record<string, unknown>): Record<string, unknown> {
+  return node.question && typeof node.question === "object"
+    ? (node.question as Record<string, unknown>)
+    : node;
 }
 
 function renderSentenceBox(): void {
@@ -775,10 +801,12 @@ byId<HTMLDialogElement>("addDialog").querySelectorAll<HTMLButtonElement>("[data-
 });
 byId<HTMLInputElement>("searchInput").addEventListener("input", (event) => {
   searchQuery = (event.target as HTMLInputElement).value;
+  selectedIds.clear();
   renderListView();
 });
 byId<HTMLSelectElement>("statusFilter").addEventListener("change", (event) => {
   statusFilter = (event.target as HTMLSelectElement).value;
+  selectedIds.clear();
   renderListView();
 });
 
