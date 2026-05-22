@@ -38,7 +38,7 @@ def create_app(
                 continue
             agent_id = getattr(runner, "agent_id", f"runner-{runner_index}")
             for video in db.list_videos():
-                if video["status"] not in {"queued", "running", "missing_url"}:
+                if video["status"] not in {"queued", "missing_url"}:
                     continue
                 if video["id"] in running_futures:
                     continue
@@ -71,8 +71,9 @@ def create_app(
         thread = None
         if start_worker:
             agent_manager.discover()
-            workers = max_workers if max_workers is not None else max(1, len(agent_manager.agents))
-            init_runners(settings, agent_manager)
+            db.recover_running_videos()
+            runner_count = init_runners(settings, agent_manager)
+            workers = max_workers if max_workers is not None else max(1, runner_count)
             executor = ThreadPoolExecutor(max_workers=workers)
             thread = threading.Thread(target=worker_loop, name="video-hive-worker", daemon=True)
             thread.start()

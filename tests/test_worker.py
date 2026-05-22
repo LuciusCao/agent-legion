@@ -1,9 +1,15 @@
 import json
+import subprocess
 
 from server.app.db import Database
 from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.settings import load_settings
-from server.app.worker import process_next, process_video_once
+from server.app.worker import (
+    discover_openclaw_agents,
+    init_runners,
+    process_next,
+    process_video_once,
+)
 
 
 class TestProvider(TranscriptionProvider):
@@ -52,6 +58,59 @@ def test_worker_processes_assemble_phase(tmp_path):
     assert processed is True
     assert (video_dir / "metadata.json").exists()
     assert db.get_video("a")["status"] == "completed"
+
+
+def test_worker_resumes_running_video_after_restart(tmp_path):
+    settings = load_settings(data_dir=tmp_path)
+    db = Database(settings.data_dir / "app.sqlite")
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text(
+        json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始", "concepts": []}]),
+        encoding="utf-8",
+    )
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
+    )
+    db.update_video(video["id"], storage_dir=str(video_dir), current_phase="assemble", status="running")
+
+    assert db.recover_running_videos() == 1
+    processed = process_video_once(db, settings, video["id"])
+
+    assert processed is True
+    assert db.get_video(video["id"])["status"] == "completed"
+
+
+def test_discover_openclaw_agents_uses_cli_json(monkeypatch):
+    def fake_run(command, capture_output, text, timeout):
+        assert command == ["openclaw", "agents", "list", "--json"]
+        assert capture_output is True
+        assert text is True
+        assert timeout == 10
+        return subprocess.CompletedProcess(
+            command,
+            0,
+            stdout=json.dumps([{"id": "main"}, {"id": "agent_1"}]),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    assert discover_openclaw_agents() == ["main", "agent_1"]
+
+
+def test_init_runners_returns_explicit_runner_count(tmp_path):
+    settings = load_settings(data_dir=tmp_path)
+    settings.config["openclaw"]["runners"] = [
+        {"command_template": ["openclaw", "agent", "--agent", "main"]},
+        {"command_template": ["openclaw", "agent", "--agent", "agent_1"]},
+    ]
+
+    assert init_runners(settings) == 2
 
 
 def test_question_video_skips_interaction_and_content_review(tmp_path):
