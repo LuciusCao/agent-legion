@@ -11,7 +11,13 @@ from server.app.agents import AgentStatusManager
 from server.app.api import create_router
 from server.app.db import Database
 from server.app.settings import load_settings
-from server.app.worker import acquire_runner, init_runners, process_video_once, release_runner
+from server.app.worker import (
+    acquire_runner,
+    init_runners,
+    process_video_once,
+    recover_interrupted_videos,
+    release_runner,
+)
 
 
 def create_app(
@@ -71,7 +77,7 @@ def create_app(
         thread = None
         if start_worker:
             agent_manager.discover()
-            db.recover_running_videos()
+            recover_interrupted_videos(db, settings)
             runner_count = init_runners(settings, agent_manager)
             workers = max_workers if max_workers is not None else max(1, runner_count)
             executor = ThreadPoolExecutor(max_workers=workers)
