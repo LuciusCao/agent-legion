@@ -15,7 +15,7 @@ from server.app.services.video_actions import (
     batch_rerun_video_records,
     delete_video_record,
     rerun_video_record,
-    videos_for_package,
+    select_videos_for_package,
 )
 from server.app.settings import Settings
 from server.app.worker import process_next
@@ -140,8 +140,13 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
     @router.post("/package")
     def package_completed(request: PackageRequest | None = None) -> dict[str, str]:
         requested_ids = request.video_ids if request and request.video_ids else None
-        videos = videos_for_package(db, requested_ids)
-        package_path = create_package(videos, settings.packages_dir)
+        selection = select_videos_for_package(db, requested_ids)
+        if selection.missing_ids:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Videos not found: {', '.join(selection.missing_ids)}",
+            )
+        package_path = create_package(selection.videos, settings.packages_dir)
         return {
             "path": str(package_path),
             "download_url": f"/api/packages/{package_path.name}",

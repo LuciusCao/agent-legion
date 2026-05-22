@@ -1,10 +1,17 @@
 import shutil
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
 from server.app.settings import Settings
+
+
+@dataclass(frozen=True)
+class PackageSelection:
+    videos: list[dict[str, Any]]
+    missing_ids: list[str]
 
 
 def normalize_rerun_phase(video: dict[str, Any], phase: str) -> str:
@@ -78,12 +85,20 @@ def batch_rerun_video_records(
     return [rerun_video_record(db, settings, video_id, phase) for video_id in video_ids]
 
 
-def videos_for_package(
+def select_videos_for_package(
     db: Database,
     video_ids: list[str] | None = None,
-) -> list[dict[str, Any]]:
+) -> PackageSelection:
     if video_ids:
-        return [video for video_id in video_ids if (video := db.get_video(video_id))]
+        videos = []
+        missing_ids = []
+        for video_id in video_ids:
+            video = db.get_video(video_id)
+            if video:
+                videos.append(video)
+            else:
+                missing_ids.append(video_id)
+        return PackageSelection(videos=videos, missing_ids=missing_ids)
 
     completed = [video for video in db.list_videos() if video["status"] == "completed"]
-    return completed or db.list_videos()
+    return PackageSelection(videos=completed or db.list_videos(), missing_ids=[])
