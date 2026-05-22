@@ -122,7 +122,12 @@ def _extract_knowledge_title(item: dict[str, Any] | None, code: str) -> str:
 
 def _extract_question_item(payload: dict) -> dict[str, Any] | None:
     data = payload.get("data", {}) if isinstance(payload, dict) else {}
-    return data if isinstance(data, dict) and data else None
+    if not isinstance(data, dict) or not data:
+        return None
+    has_identity = any(data.get(key) for key in ("question_uuid", "uuid", "id", "question_id"))
+    has_content = any(data.get(key) for key in ("title", "question_title", "name", "stem", "content"))
+    has_video_data = isinstance(data.get("video_data"), list)
+    return data if has_identity or has_content or has_video_data else None
 
 
 def _extract_question_title(item: dict[str, Any] | None, uuid: str) -> str:
