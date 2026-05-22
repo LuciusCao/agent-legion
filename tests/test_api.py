@@ -237,3 +237,90 @@ def test_delete_video_removes_record_and_storage_dir(tmp_path):
     assert not g1_dir.exists()
     assert g2_dir.exists()
     assert [video["id"] for video in client.get("/api/videos").json()["videos"]] == ["g2"]
+
+
+def test_batch_delete_returns_per_video_results(tmp_path):
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+                {"url": "https://example.com/k2.mp4", "content_type": "knowledge", "external_id": "K002"},
+            ]
+        },
+    )
+
+    response = client.post(
+        "/api/videos/batch/delete",
+        json={"video_ids": ["knowledge_K001", "missing"]},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"] == [
+        {"video_id": "knowledge_K001", "status": "deleted", "message": ""},
+        {"video_id": "missing", "status": "not_found", "message": "Video not found"},
+    ]
+    assert [v["id"] for v in client.get("/api/videos").json()["videos"]] == ["knowledge_K002"]
+
+
+def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(tmp_path):
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {"url": "https://example.com/q1.mp4", "content_type": "question", "external_id": "Q001"},
+                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+            ]
+        },
+    )
+
+    response = client.post(
+        "/api/videos/batch/rerun",
+        json={"video_ids": ["question_Q001", "knowledge_K001", "missing"], "phase": "interaction_generate"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["results"] == [
+        {"video_id": "question_Q001", "status": "rerun", "phase": "assemble", "message": ""},
+        {"video_id": "knowledge_K001", "status": "rerun", "phase": "interaction_generate", "message": ""},
+        {"video_id": "missing", "status": "not_found", "phase": "interaction_generate", "message": "Video not found"},
+    ]
+    assert client.get("/api/videos/question_Q001").json()["video"]["current_phase"] == "assemble"
+
+
+def test_package_selected_videos_and_download(tmp_path):
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+                {"url": "https://example.com/k2.mp4", "content_type": "knowledge", "external_id": "K002"},
+            ]
+        },
+    )
+    for video_id in ["knowledge_K001", "knowledge_K002"]:
+        video_dir = tmp_path / "videos" / video_id
+        video_dir.mkdir(parents=True, exist_ok=True)
+        (video_dir / "metadata.json").write_text(f'{{"id":"{video_id}"}}', encoding="utf-8")
+
+    response = client.post("/api/package", json={"video_ids": ["knowledge_K002"]})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["download_url"].startswith("/api/packages/")
+    download = client.get(body["download_url"])
+    assert download.status_code == 200
+    assert download.headers["content-type"] in {"application/zip", "application/x-zip-compressed"}
+
+
+def test_package_download_rejects_path_traversal(tmp_path):
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+    response = client.get("/api/packages/%2e%2e/%2e%2e/%2e%2e/etc/passwd")
+    assert response.status_code == 404

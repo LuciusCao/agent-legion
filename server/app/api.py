@@ -31,6 +31,18 @@ class RerunRequest(BaseModel):
     phase: str
 
 
+class BatchVideoIdsRequest(BaseModel):
+    video_ids: list[str]
+
+
+class BatchRerunRequest(BatchVideoIdsRequest):
+    phase: str
+
+
+class PackageRequest(BaseModel):
+    video_ids: list[str] | None = None
+
+
 def create_router(db: Database, settings: Settings, agent_manager: AgentStatusManager) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -167,30 +179,84 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
             raise HTTPException(status_code=404, detail="Video not found")
         return {"video": video, "phase_runs": db.list_phase_runs(video_id)}
 
+    def _normalize_rerun_phase(video: dict[str, Any], phase: str) -> str:
+        if video["content_type"] == "question" and phase in {"interaction_generate", "content_review"}:
+            return "assemble"
+        return phase
+
+    def _delete_video_record(video_id: str) -> bool:
+        video = db.get_video(video_id)
+        if not video:
+            return False
+        video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
+        if video_dir.exists() and video_dir.is_dir():
+            shutil.rmtree(video_dir)
+        db.delete_video(video_id)
+        return True
+
+    @router.post("/videos/batch/delete")
+    def batch_delete_videos(request: BatchVideoIdsRequest) -> dict[str, Any]:
+        results = []
+        for video_id in request.video_ids:
+            if not _delete_video_record(video_id):
+                results.append(
+                    {"video_id": video_id, "status": "not_found", "message": "Video not found"}
+                )
+                continue
+            results.append({"video_id": video_id, "status": "deleted", "message": ""})
+        return {"results": results}
+
+    @router.post("/videos/batch/rerun")
+    def batch_rerun_videos(request: BatchRerunRequest) -> dict[str, Any]:
+        results = []
+        for video_id in request.video_ids:
+            video = db.get_video(video_id)
+            if not video:
+                results.append(
+                    {
+                        "video_id": video_id,
+                        "status": "not_found",
+                        "phase": request.phase,
+                        "message": "Video not found",
+                    }
+                )
+                continue
+            phase = _normalize_rerun_phase(video, request.phase)
+            video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
+            try:
+                clear_artifacts_from(video_dir, phase, video_id)
+            except ValueError as exc:
+                results.append(
+                    {
+                        "video_id": video_id,
+                        "status": "invalid_phase",
+                        "phase": phase,
+                        "message": str(exc),
+                    }
+                )
+                continue
+            db.update_video(video_id, current_phase=phase, status="queued", error_message="")
+            results.append({"video_id": video_id, "status": "rerun", "phase": phase, "message": ""})
+        return {"results": results}
+
     @router.post("/videos/{video_id}/rerun")
     def rerun_video(video_id: str, request: RerunRequest) -> dict[str, Any]:
         video = db.get_video(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
+        phase = _normalize_rerun_phase(video, request.phase)
         video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
-        if video["content_type"] == "question" and request.phase in {
-            "interaction_generate",
-            "content_review",
-        }:
-            request.phase = "assemble"
-        clear_artifacts_from(video_dir, request.phase, video_id)
-        db.update_video(video_id, current_phase=request.phase, status="queued", error_message="")
+        try:
+            clear_artifacts_from(video_dir, phase, video_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        db.update_video(video_id, current_phase=phase, status="queued", error_message="")
         return {"video": db.get_video(video_id)}
 
     @router.delete("/videos/{video_id}")
     def delete_video(video_id: str) -> dict[str, Any]:
-        video = db.get_video(video_id)
-        if not video:
+        if not _delete_video_record(video_id):
             raise HTTPException(status_code=404, detail="Video not found")
-        video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
-        if video_dir.exists() and video_dir.is_dir():
-            shutil.rmtree(video_dir)
-        db.delete_video(video_id)
         return {"deleted": True, "video_id": video_id}
 
     @router.get("/videos/{video_id}/artifacts")
@@ -223,12 +289,31 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
         return FileResponse(path, media_type="video/mp4")
 
     @router.post("/package")
-    def package_completed() -> dict[str, str]:
-        videos = [video for video in db.list_videos() if video["status"] == "completed"]
-        if not videos:
-            videos = db.list_videos()
+    def package_completed(request: PackageRequest | None = None) -> dict[str, str]:
+        requested_ids = request.video_ids if request and request.video_ids else None
+        if requested_ids:
+            videos = [video for video_id in requested_ids if (video := db.get_video(video_id))]
+        else:
+            videos = [video for video in db.list_videos() if video["status"] == "completed"]
+            if not videos:
+                videos = db.list_videos()
         package_path = create_package(videos, settings.packages_dir)
-        return {"path": str(package_path)}
+        return {
+            "path": str(package_path),
+            "download_url": f"/api/packages/{package_path.name}",
+        }
+
+    @router.get("/packages/{filename:path}")
+    def download_package(filename: str):
+        package_path = settings.packages_dir / filename
+        try:
+            resolved = package_path.resolve()
+            resolved.relative_to(settings.packages_dir.resolve())
+        except (ValueError, RuntimeError):
+            raise HTTPException(status_code=404, detail="Package not found") from None
+        if not resolved.exists():
+            raise HTTPException(status_code=404, detail="Package not found")
+        return FileResponse(resolved, media_type="application/zip", filename=filename)
 
     @router.post("/worker/tick")
     def worker_tick() -> dict[str, bool]:
