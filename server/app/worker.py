@@ -1,6 +1,8 @@
 import json
+import subprocess
 from pathlib import Path
 
+from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.download import download_video
@@ -79,7 +81,9 @@ def _build_agent_command(base_template: list[str], agent_id: str) -> list[str]:
     return result
 
 
-def build_openclaw_runners(settings: Settings) -> list[OpenClawRunner]:
+def build_openclaw_runners(
+    settings: Settings, discovered_agent_ids: list[str] | None = None
+) -> list[OpenClawRunner]:
     openclaw = settings.config.get("openclaw", {})
     base_cwd = (settings.root_dir / str(openclaw.get("cwd", "."))).resolve()
     timeout_seconds = int(openclaw.get("timeout_seconds", 600))
@@ -115,7 +119,7 @@ def build_openclaw_runners(settings: Settings) -> list[OpenClawRunner]:
 
     # 3. 如果模板包含 --agent，动态发现可用 agents
     if "--agent" in base_template:
-        agents = discover_openclaw_agents()
+        agents = discovered_agent_ids if discovered_agent_ids is not None else discover_openclaw_agents()
         if agents:
             return [
                 OpenClawRunner(
@@ -140,16 +144,15 @@ def build_openclaw_runner(settings: Settings) -> OpenClawRunner:
     return build_openclaw_runners(settings)[0]
 
 
-from server.app.agents import AgentStatusManager
-
-
-def init_runners(settings: Settings, agent_manager: AgentStatusManager | None = None) -> None:
+def init_runners(settings: Settings, agent_manager: AgentStatusManager | None = None) -> int:
     global _runners, _busy_indices
-    _runners = build_openclaw_runners(settings)
+    discovered_agent_ids = [agent.id for agent in agent_manager.agents] if agent_manager else None
+    _runners = build_openclaw_runners(settings, discovered_agent_ids)
     _busy_indices = set()
     if agent_manager:
         for i, runner in enumerate(_runners):
             runner.agent_id = agent_manager.agents[i].id if i < len(agent_manager.agents) else f"runner-{i}"
+    return len(_runners)
 
 
 def acquire_runner() -> tuple[int, OpenClawRunner]:
@@ -268,7 +271,7 @@ def process_next(
     openclaw_runner: OpenClawRunner | None = None,
 ) -> bool:
     for video in db.list_videos():
-        if video["status"] in {"queued", "running", "missing_url"} and process_video_once(
+        if video["status"] in {"queued", "missing_url"} and process_video_once(
             db, settings, video["id"], openclaw_runner=openclaw_runner
         ):
             return True
