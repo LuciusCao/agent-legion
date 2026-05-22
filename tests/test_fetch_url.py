@@ -14,6 +14,7 @@ class FakeResponse:
 
 def test_get_token_uses_configured_token_generator(monkeypatch):
     calls = []
+    monkeypatch.delenv("BASECMS_TOKEN", raising=False)
 
     def fake_post(url, json, headers, timeout):
         calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})

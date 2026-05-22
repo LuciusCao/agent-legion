@@ -25,6 +25,10 @@ openclaw:
   timeout_seconds: 600
   command_template:
     - openclaw
-    - run
-    - --prompt-file
-    - "{prompt_file}"
+    - agent
+    - --local
+    - --agent
+    - main
+    - --message
+    - "{prompt_text}"
+    - --json
