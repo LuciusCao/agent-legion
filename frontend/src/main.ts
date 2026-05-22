@@ -453,17 +453,6 @@ async function refresh(options: { autoSelect: boolean } = { autoSelect: false })
   renderListView();
 }
 
-// --- Safe stubs (will be fully replaced in Task 7) ---
-
-function renderVideos(): void {
-  // replaced by renderListView in Task 5-6; kept as stub for old call sites
-}
-
-function clearSelection(): void {
-  selectedId = "";
-  selectedIds.clear();
-}
-
 function seconds(value: number): string {
   const minutes = Math.floor(value / 60);
   const secs = Math.floor(value % 60);
@@ -498,9 +487,16 @@ async function selectVideo(id: string): Promise<void> {
   byId<HTMLParagraphElement>("detailSubtitle").textContent =
     `${TYPE_LABELS[video.content_type]} · ${video.external_id || "未填 ID"} · ${PHASE_LABELS[video.current_phase] ?? video.current_phase} · ${STATUS_LABELS[statusGroup(video)]}`;
   renderRerunPhaseOptions(video);
+  currentArtifacts = { subtitles: [], chapters: [], interactions: [], metadata: null };
+  currentLog = "";
   renderPlayer(video);
-  currentArtifacts = await api<VideoArtifacts>(`/api/videos/${video.id}/artifacts`);
-  currentLog = (await api<{ log: string }>(`/api/videos/${video.id}/logs`)).log || "暂无日志";
+  renderDetailView();
+  try {
+    currentArtifacts = await api<VideoArtifacts>(`/api/videos/${video.id}/artifacts`);
+    currentLog = (await api<{ log: string }>(`/api/videos/${video.id}/logs`)).log || "暂无日志";
+  } catch (err) {
+    currentLog = "加载资源失败";
+  }
   activeTab = video.content_type === "question" ? "subtitles" : "nodes";
   renderDetailView();
 }
@@ -535,8 +531,8 @@ function onTimeUpdate(): void {
       showInteraction(index);
     }
   });
-  renderChaptersStrip();
-  if (activeTab === "subtitles") renderTabPanel();
+  updateChapterActiveClass(time);
+  if (activeTab === "subtitles") updateSubtitleActiveClass(time);
   updatePlayInfo();
 }
 
@@ -545,13 +541,25 @@ function seekTo(time: number): void {
   if (player) player.currentTime = time;
 }
 
+function updateChapterActiveClass(time: number): void {
+  byId<HTMLDivElement>("chaptersStrip").querySelectorAll<HTMLButtonElement>(".chapter-chip").forEach((btn, i) => {
+    const ch = currentArtifacts.chapters[i];
+    btn.classList.toggle("active", ch && time >= ch.start_time && time < ch.end_time);
+  });
+}
+
+function updateSubtitleActiveClass(time: number): void {
+  byId<HTMLDivElement>("tabPanel").querySelectorAll<HTMLButtonElement>(".subtitle-row").forEach((btn) => {
+    const start = Number(btn.dataset.time ?? 0);
+    const end = Number(btn.dataset.end ?? Infinity);
+    btn.classList.toggle("active", time >= start && time < end);
+  });
+}
+
 function renderChaptersStrip(): void {
-  const player = document.getElementById("player") as HTMLVideoElement | null;
-  const time = player?.currentTime ?? 0;
   byId<HTMLDivElement>("chaptersStrip").innerHTML = currentArtifacts.chapters
     .map((chapter) => {
-      const active = time >= chapter.start_time && time < chapter.end_time ? "active" : "";
-      return `<button class="chapter-chip ${active}" data-time="${chapter.start_time}">${escapeHtml(chapter.title)}</button>`;
+      return `<button class="chapter-chip" data-time="${chapter.start_time}">${escapeHtml(chapter.title)}</button>`;
     })
     .join("");
   byId<HTMLDivElement>("chaptersStrip").querySelectorAll<HTMLButtonElement>("[data-time]").forEach((button) => {
@@ -607,12 +615,9 @@ function renderTabPanel(): void {
     return;
   }
   if (activeTab === "subtitles") {
-    const player = document.getElementById("player") as HTMLVideoElement | null;
-    const time = player?.currentTime ?? 0;
     panel.innerHTML = currentArtifacts.subtitles
       .map((subtitle) => {
-        const active = time >= subtitle.start && time < subtitle.end ? "active" : "";
-        return `<button class="subtitle-row ${active}" data-time="${subtitle.start}"><time>${seconds(subtitle.start)} - ${seconds(subtitle.end)}</time><span>${escapeHtml(subtitle.text)}</span></button>`;
+        return `<button class="subtitle-row" data-time="${subtitle.start}" data-end="${subtitle.end}"><time>${seconds(subtitle.start)} - ${seconds(subtitle.end)}</time><span>${escapeHtml(subtitle.text)}</span></button>`;
       })
       .join("") || `<div class="empty-state">暂无字幕</div>`;
     panel.querySelectorAll<HTMLButtonElement>("[data-time]").forEach((button) => {
@@ -726,10 +731,6 @@ function updatePlayInfo(): void {
   `;
 }
 
-function renderArtifacts(artifacts: VideoArtifacts): void {
-  // will be replaced in Task 7; kept as stub
-}
-
 function connectAgentsWs(): void {
   const protocol = location.protocol === "https:" ? "wss:" : "ws:";
   const ws = new WebSocket(`${protocol}//${location.host}/api/agents`);
@@ -801,6 +802,8 @@ byId<HTMLFormElement>("addForm").addEventListener("submit", async (event) => {
 });
 
 byId<HTMLButtonElement>("backBtn").addEventListener("click", () => {
+  const player = document.getElementById("player") as HTMLVideoElement | null;
+  player?.pause();
   activeView = "list";
   renderListView();
 });
