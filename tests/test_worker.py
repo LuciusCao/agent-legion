@@ -1,6 +1,7 @@
 import json
 import subprocess
 
+from server.app.agents import AgentStatus, AgentStatusManager
 from server.app.db import Database
 from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.settings import load_settings
@@ -11,6 +12,69 @@ from server.app.worker import (
     process_video_once,
     recover_interrupted_videos,
 )
+
+
+def test_agent_status_includes_current_video_details():
+    manager = AgentStatusManager()
+    manager.agents = [AgentStatus(id="main", name="Main", busy=False)]
+
+    manager.set_busy(
+        "main",
+        {
+            "id": "knowledge_K001",
+            "title": "奇函数",
+            "content_type": "knowledge",
+            "external_id": "K001",
+            "current_phase": "transcribe",
+        },
+    )
+
+    assert manager.to_dicts() == [
+        {
+            "id": "main",
+            "name": "Main",
+            "busy": True,
+            "current_video_id": "knowledge_K001",
+            "current_title": "奇函数",
+            "current_content_type": "knowledge",
+            "current_external_id": "K001",
+            "current_phase": "transcribe",
+        }
+    ]
+
+    manager.set_idle("main")
+    assert manager.to_dicts() == [
+        {
+            "id": "main",
+            "name": "Main",
+            "busy": False,
+            "current_video_id": None,
+            "current_title": "",
+            "current_content_type": "",
+            "current_external_id": "",
+            "current_phase": "",
+        }
+    ]
+
+
+def test_agent_status_set_busy_with_string_id():
+    manager = AgentStatusManager()
+    manager.agents = [AgentStatus(id="main", name="Main", busy=False)]
+
+    manager.set_busy("main", "abc")
+
+    assert manager.to_dicts() == [
+        {
+            "id": "main",
+            "name": "Main",
+            "busy": True,
+            "current_video_id": "abc",
+            "current_title": "",
+            "current_content_type": "",
+            "current_external_id": "",
+            "current_phase": "",
+        }
+    ]
 
 
 class TestProvider(TranscriptionProvider):

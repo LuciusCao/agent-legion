@@ -13,6 +13,10 @@ class AgentStatus:
     name: str
     busy: bool
     current_video_id: str | None = None
+    current_title: str = ""
+    current_content_type: str = ""
+    current_external_id: str = ""
+    current_phase: str = ""
 
 
 class AgentStatusManager:
@@ -48,11 +52,17 @@ class AgentStatusManager:
     def get_all(self) -> list[AgentStatus]:
         return list(self.agents)
 
-    def set_busy(self, agent_id: str, video_id: str) -> None:
+    def set_busy(self, agent_id: str, video: str | dict[str, Any]) -> None:
+        video_id = video if isinstance(video, str) else str(video.get("id", ""))
         for agent in self.agents:
             if agent.id == agent_id:
                 agent.busy = True
                 agent.current_video_id = video_id
+                if isinstance(video, dict):
+                    agent.current_title = str(video.get("title", ""))
+                    agent.current_content_type = str(video.get("content_type", ""))
+                    agent.current_external_id = str(video.get("external_id", ""))
+                    agent.current_phase = str(video.get("current_phase", ""))
                 break
         self._broadcast()
 
@@ -61,6 +71,10 @@ class AgentStatusManager:
             if agent.id == agent_id:
                 agent.busy = False
                 agent.current_video_id = None
+                agent.current_title = ""
+                agent.current_content_type = ""
+                agent.current_external_id = ""
+                agent.current_phase = ""
                 break
         self._broadcast()
 
@@ -71,6 +85,10 @@ class AgentStatusManager:
                 "name": a.name,
                 "busy": a.busy,
                 "current_video_id": a.current_video_id,
+                "current_title": a.current_title,
+                "current_content_type": a.current_content_type,
+                "current_external_id": a.current_external_id,
+                "current_phase": a.current_phase,
             }
             for a in self.agents
         ]
