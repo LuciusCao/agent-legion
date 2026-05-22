@@ -1,4 +1,5 @@
 .venv/
+.env
 .uv-cache/
 .ruff_cache/
 .pytest_cache/
@@ -9,4 +10,3 @@ frontend/node_modules/
 frontend/dist/
 *.log
 docs/superpowers/plans/
-

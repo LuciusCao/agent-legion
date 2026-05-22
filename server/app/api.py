@@ -8,6 +8,7 @@ from pydantic import BaseModel
 
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
+from server.app.pipeline.fetch_url import fetch_knowledge_url, fetch_question_url, get_token
 from server.app.pipeline.package import create_package
 from server.app.pipeline.reader import read_artifacts
 from server.app.settings import Settings
@@ -36,20 +37,40 @@ def create_router(db: Database, settings: Settings) -> APIRouter:
     def health() -> dict[str, bool]:
         return {"ok": True}
 
+    def _try_fetch_url(item: VideoInput) -> str:
+        if item.url:
+            return item.url
+        cms = settings.config.get("cms", {})
+        if not cms or not item.external_id:
+            return item.url
+        try:
+            env = cms.get("env", "prod")
+            token = get_token(env, cms)
+            if item.content_type == "knowledge":
+                api_url = cms.get("knowledge_url")
+                fetched = fetch_knowledge_url(item.external_id, api_url, token)
+            else:
+                api_url = cms.get("question_url")
+                fetched = fetch_question_url(item.external_id, api_url, token)
+        except Exception:
+            return item.url
+        return fetched or item.url
+
     @router.post("/videos")
     def add_videos(request: AddVideosRequest) -> dict[str, Any]:
         videos = []
         for item in request.items:
+            url = _try_fetch_url(item)
             video = db.create_video(
-                item.url,
+                url,
                 item.title,
                 content_type=item.content_type,
                 external_id=item.external_id,
             )
             video_dir = settings.videos_dir / video["id"]
             video_dir.mkdir(parents=True, exist_ok=True)
-            status = "queued" if item.url else "missing_url"
-            current_phase = "download" if item.url else "waiting_for_url"
+            status = "queued" if url else "missing_url"
+            current_phase = "download" if url else "waiting_for_url"
             db.update_video(
                 video["id"],
                 storage_dir=str(video_dir),
