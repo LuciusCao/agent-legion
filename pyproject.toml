@@ -1,0 +1,36 @@
+[project]
+name = "video-hive"
+version = "0.1.0"
+description = "Local educational video processing queue and preview tool"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi",
+  "pyyaml",
+  "requests",
+  "uvicorn",
+]
+
+[dependency-groups]
+dev = [
+  "httpx",
+  "pytest",
+  "ruff",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+  ".uv-cache",
+  ".venv",
+  "frontend/dist",
+  "frontend/node_modules",
+]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["E501"]
