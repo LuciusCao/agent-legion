@@ -48,7 +48,7 @@ def create_app(
                     continue
                 if video["id"] in running_futures:
                     continue
-                agent_manager.set_busy(agent_id, video["id"])
+                agent_manager.set_busy(agent_id, video)
                 future = executor.submit(
                     process_video_once,
                     db,
