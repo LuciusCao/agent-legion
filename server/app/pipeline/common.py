@@ -15,11 +15,11 @@ def normalize_identifier(value: str) -> str:
 
 
 def make_record_id(source_url: str, content_type: str, external_id: str) -> str:
-    if source_url:
-        return get_video_id(source_url)
     normalized = normalize_identifier(external_id)
     if normalized:
         return f"{content_type}_{normalized}"
+    if source_url:
+        return get_video_id(source_url)
     return "video"
 
 

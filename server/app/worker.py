@@ -4,6 +4,7 @@ from pathlib import Path
 from server.app.db import Database
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.download import download_video
+from server.app.pipeline.fetch_url import fetch_knowledge_url, fetch_question_url, get_token
 from server.app.pipeline.openclaw import OpenClawRunner
 from server.app.pipeline.phases import AGENT_PHASES, next_phase
 from server.app.pipeline.transcribe import (
@@ -61,13 +62,37 @@ def process_video_once(
     openclaw_runner: OpenClawRunner | None = None,
 ) -> bool:
     video = db.get_video(video_id)
-    if not video or video["status"] not in {"queued", "running"}:
+    if not video or video["status"] not in {"queued", "running", "missing_url"}:
         return False
 
     phase = video["current_phase"]
     if phase == "waiting_for_url" or not video["source_url"]:
-        db.update_video(video_id, status="missing_url", current_phase="waiting_for_url")
-        return False
+        cms = settings.config.get("cms", {})
+        fetched_url = ""
+        try:
+            if cms and video.get("external_id"):
+                env = cms.get("env", "prod")
+                token = get_token(env, cms)
+                if video.get("content_type") == "knowledge":
+                    api_url = cms.get("knowledge_url")
+                    fetched_url = fetch_knowledge_url(video["external_id"], api_url, token) or ""
+                else:
+                    api_url = cms.get("question_url")
+                    fetched_url = fetch_question_url(video["external_id"], api_url, token) or ""
+        except Exception:
+            fetched_url = ""
+        if fetched_url:
+            db.update_video(
+                video_id,
+                source_url=fetched_url,
+                status="queued",
+                current_phase="download",
+            )
+            video = db.get_video(video_id)
+            phase = video["current_phase"]
+        else:
+            db.update_video(video_id, status="missing_url", current_phase="waiting_for_url")
+            return False
     video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
     video_dir.mkdir(parents=True, exist_ok=True)
     log_path = settings.logs_dir / f"{video_id}-{phase}.log"
@@ -125,6 +150,8 @@ def process_video_once(
 
 def process_next(db: Database, settings: Settings) -> bool:
     for video in db.list_videos():
-        if video["status"] in {"queued", "running"}:
-            return process_video_once(db, settings, video["id"])
+        if video["status"] in {"queued", "running", "missing_url"} and process_video_once(
+            db, settings, video["id"]
+        ):
+            return True
     return False

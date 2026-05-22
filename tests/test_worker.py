@@ -3,7 +3,7 @@ import json
 from server.app.db import Database
 from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.settings import load_settings
-from server.app.worker import process_video_once
+from server.app.worker import process_next, process_video_once
 
 
 class TestProvider(TranscriptionProvider):
@@ -63,7 +63,7 @@ def test_question_video_skips_interaction_and_content_review(tmp_path):
         content_type="question",
         external_id="Q001",
     )
-    video_dir = settings.videos_dir / "q1"
+    video_dir = settings.videos_dir / "question_Q001"
     video_dir.mkdir(parents=True)
     (video_dir / "subtitles.srt").write_text(
         "1\n00:00:00,000 --> 00:00:02,000\n题目讲解\n", encoding="utf-8"
@@ -72,12 +72,12 @@ def test_question_video_skips_interaction_and_content_review(tmp_path):
         json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "解析", "concepts": []}]),
         encoding="utf-8",
     )
-    db.update_video("q1", storage_dir=str(video_dir), current_phase="chapter_generate", status="queued")
+    db.update_video("question_Q001", storage_dir=str(video_dir), current_phase="chapter_generate", status="queued")
 
     processed = process_video_once(db, settings, video["id"])
 
     assert processed is True
-    updated = db.get_video("q1")
+    updated = db.get_video("question_Q001")
     assert updated["current_phase"] == "assemble"
     assert updated["status"] == "queued"
 
@@ -89,3 +89,56 @@ def test_missing_url_video_is_not_processed(tmp_path):
 
     assert process_video_once(db, settings, "question_Q001") is False
     assert db.get_video("question_Q001")["status"] == "missing_url"
+
+
+def test_worker_retries_missing_url_video_from_cms(tmp_path, monkeypatch):
+    settings = load_settings(data_dir=tmp_path)
+    db = Database(settings.data_dir / "app.sqlite")
+    db.create_video("", "Question 1", content_type="question", external_id="Q001")
+
+    monkeypatch.setattr("server.app.worker.get_token", lambda env, config: "token")
+    monkeypatch.setattr(
+        "server.app.worker.fetch_question_url",
+        lambda uuid, api_url, token: "https://example.com/q001.mp4",
+    )
+    monkeypatch.setattr(
+        "server.app.worker.download_video",
+        lambda url, output_path: output_path.write_bytes(b"fake"),
+    )
+
+    processed = process_video_once(db, settings, "question_Q001")
+
+    video = db.get_video("question_Q001")
+    assert processed is True
+    assert video["source_url"] == "https://example.com/q001.mp4"
+    assert video["current_phase"] == "transcribe"
+
+
+def test_process_next_continues_after_unresolved_missing_url(tmp_path):
+    settings = load_settings(data_dir=tmp_path)
+    settings.config["cms"] = {}
+    db = Database(settings.data_dir / "app.sqlite")
+    video = db.create_video("https://example.com/a.mp4", "A")
+    db.create_video("", "Question 1", content_type="question", external_id="Q001")
+    with db.connect() as conn:
+        conn.execute("update videos set created_at='2000-01-01 00:00:00' where id=?", (video["id"],))
+        conn.execute(
+            "update videos set created_at='2999-01-01 00:00:00' where id=?",
+            ("question_Q001",),
+        )
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text(
+        json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始", "concepts": []}]),
+        encoding="utf-8",
+    )
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
+    )
+    db.update_video(video["id"], storage_dir=str(video_dir), current_phase="assemble", status="queued")
+
+    assert process_next(db, settings) is True
+    assert db.get_video(video["id"])["status"] == "completed"

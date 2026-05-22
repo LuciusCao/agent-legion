@@ -10,6 +10,16 @@ asr:
   sensevoice:
     script: /Users/user/CatPuru/projects/cms-extensions/engineering/pipeline/scripts/transcribe_sensevoice.py
     model_dir: /Users/user/CatPuru/projects/cms-extensions/models/SenseVoiceSmall
+cms:
+  env: prod
+  knowledge_url: "http://cms.internal.example.com/v2/knowledge/detail?bank_version=v5&country_id=1&subject_id=2"
+  question_url: "http://cms.internal.example.com/v2/question/detail?bank_version=v5&country_id=1&subject_id=2"
+  token: ""
+  token_gen:
+    app_id: ""
+    nonce: ""
+    secret: ""
+    url: ""
 openclaw:
   cwd: .
   timeout_seconds: 600
