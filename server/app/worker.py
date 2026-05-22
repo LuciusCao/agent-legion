@@ -4,6 +4,7 @@ from pathlib import Path
 
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
+from server.app.pipeline.artifacts import clear_artifacts_from
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.download import download_video
 from server.app.pipeline.fetch_url import fetch_knowledge_url, fetch_question_url, get_token
@@ -169,6 +170,18 @@ def release_runner(index: int) -> None:
     _busy_indices.discard(index)
 
 
+def recover_interrupted_videos(db: Database, settings: Settings) -> int:
+    running_videos = [video for video in db.list_videos() if video["status"] == "running"]
+    for video in running_videos:
+        phase = video["current_phase"]
+        if not phase:
+            continue
+        video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video["id"]
+        if video_dir.exists():
+            clear_artifacts_from(video_dir, phase, video["id"])
+    return db.recover_running_videos()
+
+
 def process_video_once(
     db: Database,
     settings: Settings,
@@ -184,6 +197,7 @@ def process_video_once(
     if phase == "waiting_for_url" or not video["source_url"]:
         cms = settings.config.get("cms", {})
         fetched_url = ""
+        fetch_error = ""
         try:
             if cms and video.get("external_id"):
                 env = cms.get("env", "prod")
@@ -194,19 +208,28 @@ def process_video_once(
                 else:
                     api_url = cms.get("question_url")
                     fetched_url = fetch_question_url(video["external_id"], api_url, token) or ""
-        except Exception:
+        except Exception as exc:
             fetched_url = ""
+            fetch_error = f"fetch url failed: {exc}"
         if fetched_url:
             db.update_video(
                 video_id,
                 source_url=fetched_url,
                 status="queued",
                 current_phase="download",
+                error_message="",
             )
             video = db.get_video(video_id)
             phase = video["current_phase"]
         else:
-            db.update_video(video_id, status="missing_url", current_phase="waiting_for_url")
+            if not fetch_error and cms and video.get("external_id"):
+                fetch_error = "fetch url failed: CMS did not return a video URL"
+            db.update_video(
+                video_id,
+                status="missing_url",
+                current_phase="waiting_for_url",
+                error_message=fetch_error,
+            )
             return False
     video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
     video_dir.mkdir(parents=True, exist_ok=True)

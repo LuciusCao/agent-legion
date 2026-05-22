@@ -9,6 +9,7 @@ from server.app.worker import (
     init_runners,
     process_next,
     process_video_once,
+    recover_interrupted_videos,
 )
 
 
@@ -17,6 +18,23 @@ class TestProvider(TranscriptionProvider):
 
     def transcribe(self, video_path, output_path, title):
         output_path.write_text("1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8")
+
+
+class ChapterRunner:
+    def __init__(self):
+        self.calls = 0
+
+    def run(self, phase, video_id, video_dir, prompt_dir, log_path):
+        self.calls += 1
+        (video_dir / "chapters_raw.json").write_text(
+            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
+            encoding="utf-8",
+        )
+        (video_dir / "chapters.json").write_text(
+            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
+            encoding="utf-8",
+        )
+        return type("Result", (), {"status": "completed", "error_message": ""})()
 
 
 def test_worker_processes_transcribe_phase(tmp_path):
@@ -85,6 +103,32 @@ def test_worker_resumes_running_video_after_restart(tmp_path):
     assert db.get_video(video["id"])["status"] == "completed"
 
 
+def test_recovered_agent_phase_clears_partial_outputs_before_rerun(tmp_path):
+    settings = load_settings(data_dir=tmp_path)
+    db = Database(settings.data_dir / "app.sqlite")
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles_reviewed.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text("{bad json", encoding="utf-8")
+    db.update_video(
+        video["id"],
+        storage_dir=str(video_dir),
+        current_phase="chapter_generate",
+        status="running",
+    )
+    runner = ChapterRunner()
+
+    assert recover_interrupted_videos(db, settings) == 1
+    processed = process_video_once(db, settings, video["id"], openclaw_runner=runner)
+
+    assert processed is True
+    assert runner.calls == 1
+    assert db.get_video(video["id"])["current_phase"] == "interaction_generate"
+
+
 def test_discover_openclaw_agents_uses_cli_json(monkeypatch):
     def fake_run(command, capture_output, text, timeout):
         assert command == ["openclaw", "agents", "list", "--json"]
@@ -148,6 +192,25 @@ def test_missing_url_video_is_not_processed(tmp_path):
 
     assert process_video_once(db, settings, "question_Q001") is False
     assert db.get_video("question_Q001")["status"] == "missing_url"
+
+
+def test_missing_url_fetch_error_is_visible(tmp_path, monkeypatch):
+    settings = load_settings(data_dir=tmp_path)
+    db = Database(settings.data_dir / "app.sqlite")
+    db.create_video("", "Knowledge 1", content_type="knowledge", external_id="K001")
+
+    monkeypatch.setattr("server.app.worker.get_token", lambda env, config: "token")
+
+    def fail_fetch(code, api_url, token):
+        raise RuntimeError("cms timeout")
+
+    monkeypatch.setattr("server.app.worker.fetch_knowledge_url", fail_fetch)
+
+    assert process_video_once(db, settings, "knowledge_K001") is False
+    video = db.get_video("knowledge_K001")
+    assert video["status"] == "missing_url"
+    assert video["current_phase"] == "waiting_for_url"
+    assert "cms timeout" in video["error_message"]
 
 
 def test_worker_retries_missing_url_video_from_cms(tmp_path, monkeypatch):
