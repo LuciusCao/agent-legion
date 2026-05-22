@@ -1,4 +1,5 @@
 from server.app.pipeline import fetch_url
+from server.app.pipeline.fetch_url import lookup_knowledge_video, lookup_question_video
 
 
 class FakeResponse:
@@ -49,3 +50,82 @@ def test_get_token_returns_none_without_configured_credentials(monkeypatch):
     monkeypatch.delenv("BASECMS_TOKEN_URL", raising=False)
 
     assert fetch_url.get_token("prod", {}) is None
+
+
+
+def test_lookup_knowledge_video_found_with_url(monkeypatch):
+    payload = {
+        "data": {
+            "knowledge_code": "K001",
+            "knowledge_name": "奇函数",
+            "resource": [
+                {
+                    "resource_type": 1,
+                    "video_data": {"source_v2": "https://example.com/k001.mp4"},
+                }
+            ],
+        }
+    }
+
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: payload)
+
+    result = lookup_knowledge_video("K001", "https://cms.example/knowledge", "token")
+
+    assert result.status == "found"
+    assert result.url == "https://example.com/k001.mp4"
+    assert result.title == "奇函数"
+
+
+def test_lookup_knowledge_video_found_without_url(monkeypatch):
+    payload = {"data": {"knowledge_code": "K001", "knowledge_name": "奇函数", "resource": []}}
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: payload)
+
+    result = lookup_knowledge_video("K001", "https://cms.example/knowledge", "token")
+
+    assert result.status == "missing_url"
+    assert result.url == ""
+    assert result.title == "奇函数"
+
+
+def test_lookup_knowledge_video_not_found(monkeypatch):
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: {"data": None})
+
+    result = lookup_knowledge_video("K404", "https://cms.example/knowledge", "token")
+
+    assert result.status == "not_found"
+    assert result.url == ""
+
+
+def test_lookup_question_video_found_with_url(monkeypatch):
+    payload = {
+        "data": {
+            "question_uuid": "Q001",
+            "title": "题目一",
+            "video_data": [{"source": "https://example.com/q001.mp4"}],
+        }
+    }
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: payload)
+
+    result = lookup_question_video("Q001", "https://cms.example/question", "token")
+
+    assert result.status == "found"
+    assert result.url == "https://example.com/q001.mp4"
+    assert result.title == "题目一"
+
+
+def test_lookup_question_video_found_without_url(monkeypatch):
+    payload = {"data": {"question_uuid": "Q001", "title": "题目一", "video_data": []}}
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: payload)
+    result = lookup_question_video("Q001", "https://cms.example/question", "token")
+    assert result.status == "missing_url"
+    assert result.url == ""
+    assert result.title == "题目一"
+
+
+def test_lookup_question_video_not_found(monkeypatch):
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: {"data": {}})
+
+    result = lookup_question_video("Q404", "https://cms.example/question", "token")
+
+    assert result.status == "not_found"
+    assert result.url == ""
