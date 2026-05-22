@@ -104,7 +104,11 @@ def _extract_knowledge_url(code: str, payload: dict) -> str | None:
             if rtype not in {1, 2}:
                 continue
             video_data = res.get("video_data") or {}
-            source_url = video_data.get("source_url", "")
+            source_url = (
+                video_data.get("source_url", "")
+                or video_data.get("source", "")
+                or video_data.get("source_v2", "")
+            )
             if source_url:
                 return source_url
     return None

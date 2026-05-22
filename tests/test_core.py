@@ -6,6 +6,7 @@ from pathlib import Path
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
 from server.app.pipeline.common import get_video_id, parse_srt
+from server.app.pipeline.fetch_url import _extract_knowledge_url
 from server.app.pipeline.openclaw import AgentPhase, OpenClawRunner
 from server.app.pipeline.package import create_package
 from server.app.pipeline.transcribe import (
@@ -111,6 +112,24 @@ def test_transcribe_auto_falls_back_to_sensevoice(tmp_path):
     assert result.srt_entry_count == 2
     assert "fallback" in result.validation_summary
     assert validate_srt((tmp_path / "subtitles.srt").read_text(encoding="utf-8"), 20).ok
+
+
+def test_extract_knowledge_url_accepts_source_v2():
+    payload = {
+        "data": {
+            "knowledge_code": "K001",
+            "resource": [
+                {
+                    "resource_type": 1,
+                    "video_data": {
+                        "source_v2": "https://example.com/k001.mp4",
+                    },
+                }
+            ],
+        }
+    }
+
+    assert _extract_knowledge_url("K001", payload) == "https://example.com/k001.mp4"
 
 
 def test_openclaw_runner_executes_template_and_validates_json(tmp_path):
