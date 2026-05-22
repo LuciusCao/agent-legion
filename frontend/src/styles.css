@@ -208,6 +208,65 @@ video {
   background: #e8f4ef;
 }
 
+.agent-panel {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  padding: 12px;
+  background: #ffffff;
+  border: 1px solid #d9e0dc;
+  border-radius: 8px;
+}
+
+.agent-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  border: 1px solid #d9e0dc;
+  background: #f8faf9;
+  font-size: 13px;
+}
+
+.agent-card.busy {
+  background: #fff0f0;
+  border-color: #e8b4b0;
+}
+
+.agent-card.idle {
+  background: #e8f4ef;
+  border-color: #a3d9c6;
+}
+
+.agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #c75146;
+}
+
+.agent-card.idle .agent-dot {
+  background: #176b5b;
+}
+
+.agent-name {
+  font-weight: 600;
+}
+
+.agent-status {
+  color: #63736d;
+}
+
+.agent-video {
+  color: #8a6d3b;
+  font-size: 11px;
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 pre {
   max-height: 180px;
   overflow: auto;

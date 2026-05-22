@@ -2,7 +2,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, WebSocket
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
@@ -11,6 +11,7 @@ from server.app.pipeline.artifacts import clear_artifacts_from
 from server.app.pipeline.fetch_url import fetch_knowledge_url, fetch_question_url, get_token
 from server.app.pipeline.package import create_package
 from server.app.pipeline.reader import read_artifacts
+from server.app.agents import AgentStatusManager
 from server.app.settings import Settings
 from server.app.worker import process_next
 
@@ -30,12 +31,27 @@ class RerunRequest(BaseModel):
     phase: str
 
 
-def create_router(db: Database, settings: Settings) -> APIRouter:
+def create_router(db: Database, settings: Settings, agent_manager: AgentStatusManager) -> APIRouter:
     router = APIRouter(prefix="/api")
 
     @router.get("/health")
     def health() -> dict[str, bool]:
         return {"ok": True}
+
+    @router.get("/agents")
+    def list_agents() -> dict[str, Any]:
+        return {"agents": agent_manager.to_dicts()}
+
+    @router.websocket("/agents")
+    async def agents_ws(websocket: WebSocket) -> None:
+        await agent_manager.connect(websocket)
+        try:
+            while True:
+                await websocket.receive_text()
+        except Exception:
+            pass
+        finally:
+            agent_manager.disconnect(websocket)
 
     def _try_fetch_url(item: VideoInput) -> str:
         if item.url:

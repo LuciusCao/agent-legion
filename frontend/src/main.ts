@@ -13,6 +13,13 @@ type VideoItem = {
   error_message: string;
 };
 
+type AgentStatus = {
+  id: string;
+  name: string;
+  busy: boolean;
+  current_video_id: string | null;
+};
+
 type VideoArtifacts = {
   subtitles: Array<{ index: number; start: number; end: number; text: string }>;
   chapters: Array<{ id: string; start_time: number; end_time: number; title: string }>;
@@ -27,6 +34,7 @@ if (!app) {
 
 let videos: VideoItem[] = [];
 let selectedId = "";
+let agents: AgentStatus[] = [];
 
 app.innerHTML = `
   <main class="shell">
@@ -68,6 +76,7 @@ app.innerHTML = `
           <button id="packageBtn">打包完成项</button>
         </div>
       </header>
+      <div id="agentPanel" class="agent-panel"></div>
       <div class="content-grid">
         <section class="preview">
           <video id="player" controls></video>
@@ -111,6 +120,43 @@ async function api<T>(path: string, init?: RequestInit): Promise<T> {
   });
   if (!response.ok) throw new Error(await response.text());
   return (await response.json()) as T;
+}
+
+function renderAgents(): void {
+  const panel = byId<HTMLDivElement>("agentPanel");
+  if (agents.length === 0) {
+    panel.innerHTML = "";
+    return;
+  }
+  panel.innerHTML = agents
+    .map(
+      (agent) => `
+        <div class="agent-card ${agent.busy ? "busy" : "idle"}">
+          <span class="agent-dot"></span>
+          <span class="agent-name">${agent.name}</span>
+          <span class="agent-status">${agent.busy ? "处理中" : "空闲"}</span>
+          ${agent.current_video_id ? `<span class="agent-video">${agent.current_video_id}</span>` : ""}
+        </div>
+      `,
+    )
+    .join("");
+}
+
+function connectAgentsWs(): void {
+  const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+  const ws = new WebSocket(`${protocol}//${location.host}/api/agents`);
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data) as AgentStatus[];
+      agents = data;
+      renderAgents();
+    } catch {
+      // ignore
+    }
+  };
+  ws.onclose = () => {
+    setTimeout(connectAgentsWs, 3000);
+  };
 }
 
 function renderVideos(): void {
@@ -269,3 +315,4 @@ byId<HTMLButtonElement>("packageBtn").addEventListener("click", async () => {
 });
 
 void refresh();
+connectAgentsWs();
