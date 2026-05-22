@@ -3,7 +3,7 @@ from server.app.services.intake import add_video_items, normalized_content_type
 from server.app.services.video_actions import (
     batch_rerun_video_records,
     delete_video_record,
-    videos_for_package,
+    select_videos_for_package,
 )
 from server.app.settings import load_settings
 
@@ -76,8 +76,13 @@ def test_delete_video_record_removes_storage_and_package_selection_defaults(tmp_
     storage_dir.mkdir(parents=True)
     db.update_video(completed["id"], storage_dir=str(storage_dir))
 
-    assert [video["id"] for video in videos_for_package(db)] == [completed["id"]]
-    assert [video["id"] for video in videos_for_package(db, [queued["id"]])] == [queued["id"]]
+    default_selection = select_videos_for_package(db)
+    explicit_selection = select_videos_for_package(db, [queued["id"], "missing"])
+
+    assert [video["id"] for video in default_selection.videos] == [completed["id"]]
+    assert default_selection.missing_ids == []
+    assert [video["id"] for video in explicit_selection.videos] == [queued["id"]]
+    assert explicit_selection.missing_ids == ["missing"]
     assert delete_video_record(db, settings, completed["id"]) is True
     assert db.get_video(completed["id"]) is None
     assert not storage_dir.exists()

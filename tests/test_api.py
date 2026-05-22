@@ -319,6 +319,16 @@ def test_package_selected_videos_and_download(tmp_path):
     assert download.headers["content-type"] in {"application/zip", "application/x-zip-compressed"}
 
 
+def test_package_selected_missing_video_returns_404(tmp_path):
+    app = create_app(data_dir=tmp_path)
+    client = TestClient(app)
+
+    response = client.post("/api/package", json={"video_ids": ["missing"]})
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Videos not found: missing"
+
+
 def test_package_download_rejects_path_traversal(tmp_path):
     app = create_app(data_dir=tmp_path)
     client = TestClient(app)
