@@ -151,18 +151,21 @@ class Database:
                 values,
             )
 
-    def start_phase(self, video_id: str, phase_key: str, command: list[str], log_path: str = "") -> dict[str, Any]:
+    def start_phase(self, video_id: str, phase_key: str, command: list[str], log_path: str = "") -> dict[str, Any] | None:
         with self.connect() as conn:
+            # 原子锁：只有 queued / missing_url 状态的视频才能变为 running
+            updated = conn.execute(
+                "update videos set current_phase=?, status='running', updated_at=current_timestamp where id=? and status in ('queued', 'missing_url')",
+                (phase_key, video_id),
+            ).rowcount
+            if updated == 0:
+                return None
             cur = conn.execute(
                 """
                 insert into phase_runs(video_id, phase_key, status, command_json, log_path)
                 values (?, ?, 'running', ?, ?)
                 """,
                 (video_id, phase_key, json.dumps(command), log_path),
-            )
-            conn.execute(
-                "update videos set current_phase=?, status='running', updated_at=current_timestamp where id=?",
-                (phase_key, video_id),
             )
             row = conn.execute("select * from phase_runs where id=?", (cur.lastrowid,)).fetchone()
         return dict(row)

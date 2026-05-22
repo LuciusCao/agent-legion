@@ -23,6 +23,9 @@ cms:
 openclaw:
   cwd: .
   timeout_seconds: 600
+  # 基础命令模板（如果包含 --agent，程序启动时会自动调用
+  # "openclaw agents list --json" 动态发现可用 agent，并为每个 agent
+  # 生成一个独立的 runner。如果模板不含 --agent，则只创建单个 runner）
   command_template:
     - openclaw
     - agent
@@ -32,3 +35,23 @@ openclaw:
     - --message
     - "{prompt_text}"
     - --json
+  # 显式 runner 配置（可选，优先级高于动态发现）
+  # runners:
+  #   - command_template:
+  #       - openclaw
+  #       - agent
+  #       - --local
+  #       - --agent
+  #       - main
+  #       - --message
+  #       - "{prompt_text}"
+  #       - --json
+  #   - command_template:
+  #       - openclaw
+  #       - agent
+  #       - --local
+  #       - --agent
+  #       - agent_1
+  #       - --message
+  #       - "{prompt_text}"
+  #       - --json
