@@ -3,6 +3,7 @@ import hmac
 import json
 import os
 import time
+from dataclasses import dataclass
 from typing import Any
 
 import requests
@@ -65,6 +66,14 @@ def _fetch_json(url: str, params: dict[str, Any], token: str | None, timeout: in
     return resp.json()
 
 
+@dataclass(frozen=True)
+class CmsVideoLookup:
+    status: str
+    url: str = ""
+    title: str = ""
+    payload: dict[str, Any] | None = None
+
+
 def _iter_knowledge_items(payload: dict) -> Any:
     if isinstance(payload, list):
         yield from payload
@@ -90,6 +99,36 @@ def _iter_knowledge_items(payload: dict) -> Any:
             yield v
         elif isinstance(v, list):
             yield from v
+
+
+def _first_knowledge_item(payload: dict) -> dict[str, Any] | None:
+    for item in _iter_knowledge_items(payload):
+        if isinstance(item, dict):
+            return item
+    return None
+
+
+def _extract_knowledge_title(item: dict[str, Any] | None, code: str) -> str:
+    if not item:
+        return code
+    return str(
+        item.get("knowledge_name")
+        or item.get("name")
+        or item.get("title")
+        or item.get("knowledge_code")
+        or code
+    )
+
+
+def _extract_question_item(payload: dict) -> dict[str, Any] | None:
+    data = payload.get("data", {}) if isinstance(payload, dict) else {}
+    return data if isinstance(data, dict) and data else None
+
+
+def _extract_question_title(item: dict[str, Any] | None, uuid: str) -> str:
+    if not item:
+        return uuid
+    return str(item.get("title") or item.get("question_title") or item.get("name") or uuid)
 
 
 def _extract_knowledge_url(code: str, payload: dict) -> str | None:
@@ -140,13 +179,37 @@ def get_token(env: str, config: dict[str, Any] | None = None) -> str | None:
     return None
 
 
-def fetch_knowledge_url(code: str, api_url: str | None = None, token: str | None = None) -> str | None:
+def lookup_knowledge_video(
+    code: str, api_url: str | None = None, token: str | None = None
+) -> CmsVideoLookup:
     url = api_url or DEFAULT_KNOWLEDGE_URL
     payload = _fetch_json(url, {"code": code}, token)
-    return _extract_knowledge_url(code, payload)
+    item = _first_knowledge_item(payload)
+    if item is None:
+        return CmsVideoLookup("not_found", payload=payload)
+    video_url = _extract_knowledge_url(code, payload) or ""
+    status = "found" if video_url else "missing_url"
+    return CmsVideoLookup(status, video_url, _extract_knowledge_title(item, code), payload)
+
+
+def lookup_question_video(
+    uuid: str, api_url: str | None = None, token: str | None = None
+) -> CmsVideoLookup:
+    url = api_url or DEFAULT_QUESTION_URL
+    payload = _fetch_json(url, {"uuid": uuid}, token)
+    item = _extract_question_item(payload)
+    if item is None:
+        return CmsVideoLookup("not_found", payload=payload)
+    video_url = _extract_question_url(payload) or ""
+    status = "found" if video_url else "missing_url"
+    return CmsVideoLookup(status, video_url, _extract_question_title(item, uuid), payload)
+
+
+def fetch_knowledge_url(code: str, api_url: str | None = None, token: str | None = None) -> str | None:
+    result = lookup_knowledge_video(code, api_url, token)
+    return result.url or None
 
 
 def fetch_question_url(uuid: str, api_url: str | None = None, token: str | None = None) -> str | None:
-    url = api_url or DEFAULT_QUESTION_URL
-    payload = _fetch_json(url, {"uuid": uuid}, token)
-    return _extract_question_url(payload)
+    result = lookup_question_video(uuid, api_url, token)
+    return result.url or None
