@@ -9,7 +9,8 @@ def assemble_video(video: dict, video_dir: Path) -> dict:
     if not srt_path.exists():
         srt_path = video_dir / "subtitles.srt"
     subtitles = parse_srt(srt_path.read_text(encoding="utf-8")) if srt_path.exists() else []
-    chapters = json.loads((video_dir / "chapters.json").read_text(encoding="utf-8"))
+    chapters_data = json.loads((video_dir / "chapters.json").read_text(encoding="utf-8"))
+    chapters = chapters_data.get("chapters", []) if isinstance(chapters_data, dict) else chapters_data
     interactions_path = video_dir / "interactions.json"
     if interactions_path.exists():
         interactions_data = json.loads(interactions_path.read_text(encoding="utf-8"))

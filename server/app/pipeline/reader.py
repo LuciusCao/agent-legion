@@ -15,7 +15,8 @@ def read_artifacts(video_dir: Path) -> dict:
     if not srt_path.exists():
         srt_path = video_dir / "subtitles.srt"
     subtitles = parse_srt(srt_path.read_text(encoding="utf-8")) if srt_path.exists() else []
-    chapters = read_json(video_dir / "chapters.json") or []
+    chapters_data = read_json(video_dir / "chapters.json") or []
+    chapters = chapters_data.get("chapters", []) if isinstance(chapters_data, dict) else chapters_data
     interactions_data = read_json(video_dir / "interactions.json") or {}
     interactions = interactions_data.get("interactions", []) if isinstance(interactions_data, dict) else []
     metadata = read_json(video_dir / "metadata.json")
