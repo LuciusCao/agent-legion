@@ -46,9 +46,9 @@ def test_add_video_list_artifacts_and_rerun(tmp_path):
 
 
 def test_add_question_without_url_waits_for_url(tmp_path, monkeypatch):
-    monkeypatch.setattr("server.app.api.get_token", lambda env, config: "token")
+    monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.api.lookup_question_video",
+        "server.app.services.intake.lookup_question_video",
         lambda uuid, api_url, token: type(
             "Lookup", (), {"status": "missing_url", "url": "", "title": "Question 1"}
         )(),
@@ -71,9 +71,9 @@ def test_add_question_without_url_waits_for_url(tmp_path, monkeypatch):
 
 
 def test_add_knowledge_without_url_fetches_source_v2_from_cms(tmp_path, monkeypatch):
-    monkeypatch.setattr("server.app.api.get_token", lambda env, config: "token")
+    monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.api.lookup_knowledge_video",
+        "server.app.services.intake.lookup_knowledge_video",
         lambda code, api_url, token: type(
             "Lookup", (), {"status": "found", "url": "https://example.com/k001.mp4", "title": "Knowledge 1"}
         )(),
@@ -98,7 +98,7 @@ def test_add_video_with_empty_url_still_waits_when_cms_fetch_fails(tmp_path, mon
     def fail_token(env, config):
         raise RuntimeError("cms unavailable")
 
-    monkeypatch.setattr("server.app.api.get_token", fail_token)
+    monkeypatch.setattr("server.app.services.intake.get_token", fail_token)
     app = create_app(data_dir=tmp_path)
     client = TestClient(app)
 
@@ -113,9 +113,9 @@ def test_add_video_with_empty_url_still_waits_when_cms_fetch_fails(tmp_path, mon
 
 
 def test_add_knowledge_without_url_rejects_cms_not_found(tmp_path, monkeypatch):
-    monkeypatch.setattr("server.app.api.get_token", lambda env, config: "token")
+    monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.api.lookup_knowledge_video",
+        "server.app.services.intake.lookup_knowledge_video",
         lambda code, api_url, token: type("Lookup", (), {"status": "not_found", "url": "", "title": ""})(),
     )
     app = create_app(data_dir=tmp_path)
@@ -135,9 +135,9 @@ def test_add_knowledge_without_url_rejects_cms_not_found(tmp_path, monkeypatch):
 
 
 def test_add_question_without_url_creates_missing_url_when_cms_resource_exists(tmp_path, monkeypatch):
-    monkeypatch.setattr("server.app.api.get_token", lambda env, config: "token")
+    monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.api.lookup_question_video",
+        "server.app.services.intake.lookup_question_video",
         lambda uuid, api_url, token: type(
             "Lookup", (), {"status": "missing_url", "url": "", "title": "Question 1"}
         )(),
@@ -162,8 +162,8 @@ def test_add_without_url_reports_fetch_failed_when_cms_errors(tmp_path, monkeypa
     def fail_lookup(code, api_url, token):
         raise RuntimeError("cms unavailable")
 
-    monkeypatch.setattr("server.app.api.get_token", lambda env, config: "token")
-    monkeypatch.setattr("server.app.api.lookup_knowledge_video", fail_lookup)
+    monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
+    monkeypatch.setattr("server.app.services.intake.lookup_knowledge_video", fail_lookup)
     app = create_app(data_dir=tmp_path)
     client = TestClient(app)
 
