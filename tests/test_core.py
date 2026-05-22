@@ -3,6 +3,8 @@ import os
 import zipfile
 from pathlib import Path
 
+import pytest
+
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
 from server.app.pipeline.common import get_video_id, parse_srt
@@ -50,6 +52,16 @@ def test_database_creates_video_and_phase_run(tmp_path):
     assert videos[0]["status"] == "completed"
     assert runs[0]["phase_key"] == "download"
     assert runs[0]["exit_code"] == 0
+
+
+def test_database_update_video_rejects_unknown_fields(tmp_path):
+    db = Database(tmp_path / "app.sqlite")
+    video = db.create_video("https://example.com/path/a.mp4", "Title A")
+
+    with pytest.raises(ValueError, match="Unknown video fields"):
+        db.update_video(video["id"], status="queued", bad_field="x")
+
+    assert db.get_video(video["id"])["status"] == "queued"
 
 
 def test_parse_srt_and_video_id():

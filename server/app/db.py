@@ -5,6 +5,20 @@ from typing import Any
 
 from server.app.pipeline.common import make_record_id
 
+VIDEO_UPDATE_FIELDS = {
+    "source_url",
+    "title",
+    "content_type",
+    "external_id",
+    "knowledge_code",
+    "question_id",
+    "storage_dir",
+    "current_phase",
+    "status",
+    "duration",
+    "error_message",
+}
+
 
 class Database:
     def __init__(self, path: Path):
@@ -152,6 +166,9 @@ class Database:
     def update_video(self, video_id: str, **fields: Any) -> None:
         if not fields:
             return
+        unknown_fields = sorted(set(fields) - VIDEO_UPDATE_FIELDS)
+        if unknown_fields:
+            raise ValueError(f"Unknown video fields: {', '.join(unknown_fields)}")
         assignments = ", ".join(f"{key}=?" for key in fields)
         values = list(fields.values()) + [video_id]
         with self.connect() as conn:
