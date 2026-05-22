@@ -1,0 +1,20 @@
+data_dir: data
+server:
+  host: 127.0.0.1
+  port: 8000
+asr:
+  provider: auto
+  whisper:
+    binary: /opt/homebrew/Cellar/whisper-cpp/1.8.4/bin/whisper-cli
+    model: ~/.cache/whisper.cpp/ggml-medium.bin
+  sensevoice:
+    script: /Users/user/CatPuru/projects/cms-extensions/engineering/pipeline/scripts/transcribe_sensevoice.py
+    model_dir: /Users/user/CatPuru/projects/cms-extensions/models/SenseVoiceSmall
+openclaw:
+  cwd: .
+  timeout_seconds: 600
+  command_template:
+    - openclaw
+    - run
+    - --prompt-file
+    - "{prompt_file}"
