@@ -9,7 +9,7 @@ from pydantic import BaseModel
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
-from server.app.pipeline.fetch_url import fetch_knowledge_url, fetch_question_url, get_token
+from server.app.pipeline.fetch_url import get_token, lookup_knowledge_video, lookup_question_video
 from server.app.pipeline.package import create_package
 from server.app.pipeline.reader import read_artifacts
 from server.app.settings import Settings
@@ -53,35 +53,85 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
         finally:
             agent_manager.disconnect(websocket)
 
-    def _try_fetch_url(item: VideoInput) -> str:
+    def _normalized_content_type(value: str) -> str:
+        return value if value in {"knowledge", "question"} else "knowledge"
+
+    def _resolve_video_input(item: VideoInput) -> tuple[str, str, str, str]:
+        content_type = _normalized_content_type(item.content_type)
+        external_id = item.external_id.strip()
         if item.url:
-            return item.url
+            return "created", item.url.strip(), item.title.strip(), ""
+        if not external_id:
+            return "invalid", "", "", "缺少资源 ID"
+
         cms = settings.config.get("cms", {})
-        if not cms or not item.external_id:
-            return item.url
-        try:
-            env = cms.get("env", "prod")
-            token = get_token(env, cms)
-            if item.content_type == "knowledge":
-                api_url = cms.get("knowledge_url")
-                fetched = fetch_knowledge_url(item.external_id, api_url, token)
-            else:
-                api_url = cms.get("question_url")
-                fetched = fetch_question_url(item.external_id, api_url, token)
-        except Exception:
-            return item.url
-        return fetched or item.url
+        if not cms:
+            return "fetch_failed", "", "", "CMS 配置缺失，无法校验资源是否存在"
+
+        env = cms.get("env", "prod")
+        token = get_token(env, cms)
+        if content_type == "knowledge":
+            lookup = lookup_knowledge_video(external_id, cms.get("knowledge_url"), token)
+        else:
+            lookup = lookup_question_video(external_id, cms.get("question_url"), token)
+
+        if lookup.status == "not_found":
+            return "not_found", "", "", "资源不存在"
+        if lookup.status == "missing_url":
+            return "created_missing_url", "", item.title.strip() or lookup.title, ""
+        return "created", lookup.url, item.title.strip() or lookup.title, ""
 
     @router.post("/videos")
     def add_videos(request: AddVideosRequest) -> dict[str, Any]:
         videos = []
+        results = []
         for item in request.items:
-            url = _try_fetch_url(item)
+            content_type = _normalized_content_type(item.content_type)
+            external_id = item.external_id.strip()
+
+            if external_id:
+                existing = db.find_video_by_identity(content_type, external_id)
+                if existing:
+                    results.append(
+                        {
+                            "external_id": external_id,
+                            "content_type": content_type,
+                            "status": "duplicate",
+                            "message": "资源已在队列中",
+                            "video": existing,
+                        }
+                    )
+                    continue
+
+            try:
+                result_status, url, title, message = _resolve_video_input(item)
+            except Exception as exc:
+                results.append(
+                    {
+                        "external_id": external_id,
+                        "content_type": content_type,
+                        "status": "fetch_failed",
+                        "message": str(exc),
+                    }
+                )
+                continue
+
+            if result_status in {"invalid", "not_found", "fetch_failed"}:
+                results.append(
+                    {
+                        "external_id": external_id,
+                        "content_type": content_type,
+                        "status": result_status,
+                        "message": message,
+                    }
+                )
+                continue
+
             video = db.create_video(
                 url,
-                item.title,
-                content_type=item.content_type,
-                external_id=item.external_id,
+                title,
+                content_type=content_type,
+                external_id=external_id,
             )
             video_dir = settings.videos_dir / video["id"]
             video_dir.mkdir(parents=True, exist_ok=True)
@@ -93,8 +143,18 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
                 status=status,
                 current_phase=current_phase,
             )
-            videos.append(db.get_video(video["id"]))
-        return {"videos": videos}
+            saved = db.get_video(video["id"])
+            videos.append(saved)
+            results.append(
+                {
+                    "external_id": external_id,
+                    "content_type": content_type,
+                    "status": result_status,
+                    "message": "",
+                    "video": saved,
+                }
+            )
+        return {"videos": videos, "results": results}
 
     @router.get("/videos")
     def list_videos() -> dict[str, Any]:

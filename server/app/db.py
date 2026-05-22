@@ -136,6 +136,15 @@ class Database:
         with self.connect() as conn:
             return self._row(conn.execute("select * from videos where id=?", (video_id,)).fetchone())
 
+    def find_video_by_identity(self, content_type: str, external_id: str) -> dict[str, Any] | None:
+        with self.connect() as conn:
+            return self._row(
+                conn.execute(
+                    "select * from videos where content_type=? and external_id=?",
+                    (content_type, external_id),
+                ).fetchone()
+            )
+
     def list_videos(self) -> list[dict[str, Any]]:
         with self.connect() as conn:
             return [dict(row) for row in conn.execute("select * from videos order by created_at desc, id")]
