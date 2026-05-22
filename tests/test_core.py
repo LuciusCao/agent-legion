@@ -1,4 +1,5 @@
 import json
+import os
 import zipfile
 from pathlib import Path
 
@@ -12,6 +13,7 @@ from server.app.pipeline.transcribe import (
     run_transcription_with_providers,
     validate_srt,
 )
+from server.app.settings import load_env_file
 
 
 class BadProvider(TranscriptionProvider):
@@ -60,6 +62,22 @@ def test_parse_srt_and_video_id():
         {"index": 1, "start": 0.0, "end": 1.5, "text": "你好"},
         {"index": 2, "start": 1.5, "end": 3.0, "text": "继续"},
     ]
+
+
+def test_load_env_file_preserves_quoted_secret_values(tmp_path, monkeypatch):
+    monkeypatch.delenv("BASECMS_SECRET", raising=False)
+    monkeypatch.setenv("BASECMS_TOKEN", "already-set")
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        'BASECMS_TOKEN="from-file"\n'
+        'BASECMS_SECRET="fake#secret$value"\n',
+        encoding="utf-8",
+    )
+
+    load_env_file(env_file)
+
+    assert os.environ["BASECMS_TOKEN"] == "already-set"
+    assert os.environ["BASECMS_SECRET"] == "fake#secret$value"
 
 
 def test_clear_artifacts_from_keeps_earlier_outputs(tmp_path):
