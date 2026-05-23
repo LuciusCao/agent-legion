@@ -34,6 +34,7 @@ class AgentStatusManager:
                 timeout=10,
             )
             if result.returncode != 0:
+                self.agents = []
                 return []
             data = json.loads(result.stdout)
             self.agents = [
