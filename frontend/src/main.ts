@@ -132,7 +132,7 @@ app.innerHTML = `
           <button type="button" data-add-type="knowledge" class="active">知识点</button>
           <button type="button" data-add-type="question">题目</button>
         </div>
-        <textarea id="resourceIdsInput" placeholder="一行一个知识点 code 或题目 ID"></textarea>
+        <textarea id="resourceIdsInput" placeholder="一行一个知识点code，或者一行多个知识点用逗号分割"></textarea>
         <footer class="dialog-footer">
           <button id="addSubmitBtn" type="submit" class="primary-button">加入队列</button>
         </footer>
@@ -409,7 +409,7 @@ byId<HTMLFormElement>("addForm").addEventListener("submit", async (event) => {
   const input = byId<HTMLTextAreaElement>("resourceIdsInput");
   const ids = input.value
     .split("\n")
-    .map((line) => line.trim())
+    .flatMap((line) => line.split(",").map((s) => s.trim()))
     .filter(Boolean);
   if (ids.length === 0) return;
   const response = await api<{ videos: VideoItem[]; results: AddResult[] }>("/api/videos", {

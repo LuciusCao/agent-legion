@@ -48,7 +48,9 @@ export function renderAddDialogType(addContentType: ContentType): void {
     .querySelectorAll<HTMLButtonElement>("[data-add-type]")
     .forEach((button) => button.classList.toggle("active", button.dataset.addType === addContentType));
   byId<HTMLTextAreaElement>("resourceIdsInput").placeholder =
-    addContentType === "knowledge" ? "一行一个知识点 code" : "一行一个题目 ID";
+    addContentType === "knowledge"
+      ? "一行一个知识点code，或者一行多个知识点用逗号分割"
+      : "一行一个题目ID，或者一行多个题目用逗号分割";
 }
 
 export function renderAddResults(results: AddResult[]): void {
