@@ -410,6 +410,17 @@ pre {
   flex-wrap: wrap;
 }
 
+/* Add dialog type buttons */
+.type-btn {
+  flex: 1;
+}
+
+.type-btn.active {
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  border-color: var(--md-sys-color-secondary-container);
+}
+
 /* Add results */
 .add-results {
   display: grid;
