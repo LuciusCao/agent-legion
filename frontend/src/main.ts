@@ -430,7 +430,16 @@ byId<HTMLButtonElement>("backBtn").addEventListener("click", () => {
 byId<HTMLButtonElement>("rerunBtn").addEventListener("click", async () => {
   if (!selectedId) return;
   const phase = byId<HTMLSelectElement>("rerunPhase").value;
-  await api(`/api/videos/${selectedId}/rerun`, { method: "POST", body: JSON.stringify({ phase }) });
+  try {
+    await api(`/api/videos/${selectedId}/rerun`, { method: "POST", body: JSON.stringify({ phase }) });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    if (msg.includes("currently being processed")) {
+      window.alert("该资源正在被处理中，请等待当前阶段完成后再重跑。");
+      return;
+    }
+    throw err;
+  }
   await refresh({ autoSelect: false });
   await selectVideo(selectedId);
 });
