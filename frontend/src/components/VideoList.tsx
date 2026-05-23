@@ -49,7 +49,7 @@ export function VideoList() {
         const items = grouped[group] || [];
         if (items.length === 0) return null;
         return (
-          <md-outlined-card key={group} className="resource-group">
+          <div key={group} className="resource-group card-outlined">
             <div className="group-header">
               <h2>{STATUS_LABELS[group] || group}</h2>
               <span className="label-small">{items.length} 项</span>
@@ -84,7 +84,7 @@ export function VideoList() {
                 );
               })}
             </md-list>
-          </md-outlined-card>
+          </div>
         );
       })}
     </div>

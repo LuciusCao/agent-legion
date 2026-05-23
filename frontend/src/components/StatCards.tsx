@@ -24,14 +24,14 @@ export function StatCards() {
   return (
     <div className="stats-panel">
       {items.map((item) => (
-        <md-elevated-card
+        <div
           key={item.key}
-          className={`stat-card ${statusFilter === item.key ? "active" : ""}`}
+          className={`stat-card card-elevated ${statusFilter === item.key ? "active" : ""}`}
           onClick={() => setStatusFilter(item.key)}
         >
           <strong>{counts[item.key] ?? 0}</strong>
           <span>{item.label}</span>
-        </md-elevated-card>
+        </div>
       ))}
     </div>
   );

@@ -43,8 +43,8 @@ export function AddDialog() {
       <div slot="headline">添加资源</div>
       <form slot="content" onSubmit={handleSubmit}>
         <div style={{ display: "grid", gap: "14px" }}>
-          <md-segmented-button-set>
-            <md-segmented-button
+          <md-outlined-segmented-button-set>
+            <md-outlined-segmented-button
               label="知识点"
               selected={addContentType === "knowledge"}
               onClick={() => setAddContentType("knowledge")}
@@ -54,7 +54,7 @@ export function AddDialog() {
               selected={addContentType === "question"}
               onClick={() => setAddContentType("question")}
             />
-          </md-segmented-button-set>
+          </md-outlined-segmented-button-set>
           <md-outlined-text-field
             ref={textareaRef}
             type="textarea"

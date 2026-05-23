@@ -42,7 +42,7 @@ export function BatchToolbar() {
   };
 
   return (
-    <md-elevated-card className="batch-toolbar">
+    <div className="batch-toolbar card-elevated">
       <span>已选择 {count} 项</span>
       <div className="batch-actions">
         <md-outlined-button onClick={toggleSelectMode}>退出多选</md-outlined-button>
@@ -54,6 +54,6 @@ export function BatchToolbar() {
           删除
         </md-text-button>
       </div>
-    </md-elevated-card>
+    </div>
   );
 }

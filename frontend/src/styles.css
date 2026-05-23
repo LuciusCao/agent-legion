@@ -51,6 +51,19 @@ h1 {
   font-size: 22px;
 }
 
+/* Material card replacements */
+.card-outlined {
+  background: var(--md-sys-color-surface);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 12px;
+}
+
+.card-elevated {
+  background: var(--md-sys-color-surface);
+  border-radius: 12px;
+  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+}
+
 /* Stats */
 .stats-panel {
   display: grid;

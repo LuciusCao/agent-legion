@@ -9,7 +9,7 @@ export function NodePanel() {
       {nodes.map((node, i) => {
         const answered = triggeredNodeIndexes.has(i);
         return (
-          <md-outlined-card key={i} className={`node-card ${answered ? "answered" : ""}`}>
+          <div key={i} className={`node-card card-outlined ${answered ? "answered" : ""}`}>
             <div className="node-main">
               <span style={{ fontVariantNumeric: "tabular-nums" }}>
                 {formatTime(Number(node.trigger_time ?? 0))}
@@ -24,7 +24,7 @@ export function NodePanel() {
                 ))}
               </div>
             )}
-          </md-outlined-card>
+          </div>
         );
       })}
     </div>
