@@ -35,15 +35,22 @@ export type Chapter = {
   title: string;
 };
 
+export type InteractionOption = {
+  id: string;
+  text: string;
+  is_distractor: boolean;
+};
+
 export type InteractionNode = {
-  trigger_time?: number | string;
-  node_type?: string;
+  id?: string;
   type?: string;
-  content?: {
-    question?: string;
-    options?: string[];
-    word_bank?: string[];
-  };
+  trigger_time?: number;
+  instruction?: string;
+  hint?: string;
+  reference_sentence?: string;
+  options?: InteractionOption[];
+  answer?: string[];
+  grading_mode?: string;
 };
 
 export type VideoArtifacts = {
