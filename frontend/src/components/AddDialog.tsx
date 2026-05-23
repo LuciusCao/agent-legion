@@ -41,22 +41,24 @@ export function AddDialog() {
   if (!addDialogOpen) return null;
 
   return (
-    <md-dialog open onClosed={handleClose}>
+    <md-dialog open onClosed={handleClose} style={{ minWidth: "520px", "--md-dialog-container-color": "#ffffff" } as React.CSSProperties}>
       <div slot="headline">添加资源</div>
-      <form slot="content" onSubmit={handleSubmit}>
-        <div style={{ display: "grid", gap: "14px" }}>
-          <md-outlined-segmented-button-set>
-            <md-outlined-segmented-button
-              label="知识点"
-              selected={addContentType === "knowledge"}
+      <form slot="content" id="add-resource-form" onSubmit={handleSubmit}>
+        <div style={{ display: "grid", gap: "16px", minWidth: "460px" }}>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <md-outlined-button
+              className={addContentType === "knowledge" ? "type-btn active" : "type-btn"}
               onClick={() => setAddContentType("knowledge")}
-            />
-            <md-outlined-segmented-button
-              label="题目"
-              selected={addContentType === "question"}
+            >
+              知识点
+            </md-outlined-button>
+            <md-outlined-button
+              className={addContentType === "question" ? "type-btn active" : "type-btn"}
               onClick={() => setAddContentType("question")}
-            />
-          </md-outlined-segmented-button-set>
+            >
+              题目
+            </md-outlined-button>
+          </div>
           <md-outlined-text-field
             ref={textareaRef}
             type="textarea"
@@ -79,7 +81,7 @@ export function AddDialog() {
       </form>
       <div slot="actions">
         <md-text-button type="button" onClick={handleClose}>取消</md-text-button>
-        <md-filled-button type="submit" disabled={isSubmitting}>
+        <md-filled-button type="submit" form="add-resource-form" disabled={isSubmitting}>
           {isSubmitting ? "处理中..." : "加入队列"}
         </md-filled-button>
       </div>
