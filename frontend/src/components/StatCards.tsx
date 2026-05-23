@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { STATUS_LABELS } from "../labels";
+import { statusGroup } from "../helpers";
 
 const STATUSES = ["missing_url", "queued", "running", "failed", "completed"];
 
@@ -10,7 +11,7 @@ export function StatCards() {
   const counts = useMemo(() => {
     const map: Record<string, number> = { all: videos.length };
     STATUSES.forEach((s) => {
-      map[s] = videos.filter((v) => v.status === s).length;
+      map[s] = videos.filter((v) => statusGroup(v) === s).length;
     });
     return map;
   }, [videos]);

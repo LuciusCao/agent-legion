@@ -2,7 +2,7 @@ import { useState, useRef, useCallback } from "react";
 import { useUiStore } from "../stores/uiStore";
 import { api } from "../api";
 import { parseResourceIds } from "../helpers";
-import type { AddResult } from "../types";
+import type { AddResult, VideoItem } from "../types";
 
 export function AddDialog() {
   const { addDialogOpen, addContentType, closeAddDialog, setAddContentType } = useUiStore();
@@ -18,7 +18,7 @@ export function AddDialog() {
       if (ids.length === 0) return;
       setIsSubmitting(true);
       try {
-        const response = await api<{ videos: any[]; results: AddResult[] }>("/api/videos", {
+        const response = await api<{ videos: VideoItem[]; results: AddResult[] }>("/api/videos", {
           method: "POST",
           body: JSON.stringify({
             items: ids.map((externalId) => ({ content_type: addContentType, external_id: externalId })),
@@ -40,8 +40,8 @@ export function AddDialog() {
 
   return (
     <md-dialog open={addDialogOpen} onClosed={handleClose}>
+      <div slot="headline">添加资源</div>
       <form slot="content" onSubmit={handleSubmit}>
-        <div slot="headline">添加资源</div>
         <div style={{ display: "grid", gap: "14px" }}>
           <md-segmented-button-set>
             <md-segmented-button
@@ -74,13 +74,13 @@ export function AddDialog() {
             </div>
           )}
         </div>
-        <div slot="actions">
-          <md-text-button type="button" onClick={handleClose}>取消</md-text-button>
-          <md-filled-button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? "处理中..." : "加入队列"}
-          </md-filled-button>
-        </div>
       </form>
+      <div slot="actions">
+        <md-text-button type="button" onClick={handleClose}>取消</md-text-button>
+        <md-filled-button type="submit" disabled={isSubmitting}>
+          {isSubmitting ? "处理中..." : "加入队列"}
+        </md-filled-button>
+      </div>
     </md-dialog>
   );
 }

@@ -54,17 +54,24 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
 
   loadArtifacts: async (id) => {
     try {
-      const data = await api<any>(`/api/videos/${id}/artifacts`);
+      const data = await api<{
+        subtitles?: Array<{ index: number; start: number; end: number; text: string }>;
+        chapters?: Array<{ id?: string; start_time?: number; start?: number; end_time?: number; end?: number; title: string }>;
+        interactions?: Array<Record<string, unknown>>;
+        metadata?: Record<string, unknown> | null;
+        review?: Record<string, unknown> | null;
+        checklist?: Record<string, unknown> | null;
+      }>(`/api/videos/${id}/artifacts`);
       set({
         artifacts: {
           subtitles: data.subtitles || [],
-          chapters: (data.chapters || []).map((c: any) => ({
+          chapters: (data.chapters || []).map((c) => ({
             id: c.id,
-            start: c.start_time ?? c.start,
-            end: c.end_time ?? c.end,
+            start: c.start_time ?? c.start ?? 0,
+            end: c.end_time ?? c.end ?? 0,
             title: c.title,
           })),
-          interactions: data.interactions || [],
+          interactions: (data.interactions || []) as VideoArtifacts["interactions"],
           metadata: data.metadata || null,
           review: data.review || null,
           checklist: data.checklist || null,
