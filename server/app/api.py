@@ -48,14 +48,56 @@ class PackageRequest(BaseModel):
     video_ids: list[str] | None = None
 
 
+class HealthResponse(BaseModel):
+    ok: bool
+
+
+class AgentStatusResponse(BaseModel):
+    id: str
+    name: str
+    busy: bool
+    current_video_id: str | None = None
+    current_title: str = ""
+    current_content_type: str = ""
+    current_external_id: str = ""
+    current_phase: str = ""
+
+
+class AgentsResponse(BaseModel):
+    agents: list[AgentStatusResponse]
+
+
+class DeleteResult(BaseModel):
+    video_id: str
+    status: str
+    message: str
+
+
+class BatchDeleteResponse(BaseModel):
+    results: list[DeleteResult]
+
+
+class RerunResult(DeleteResult):
+    phase: str
+
+
+class BatchRerunResponse(BaseModel):
+    results: list[RerunResult]
+
+
+class PackageResponse(BaseModel):
+    path: str
+    download_url: str
+
+
 def create_router(db: Database, settings: Settings, agent_manager: AgentStatusManager) -> APIRouter:
     router = APIRouter(prefix="/api")
 
-    @router.get("/health")
-    def health() -> dict[str, bool]:
+    @router.get("/health", response_model=HealthResponse)
+    def health() -> HealthResponse:
         return {"ok": True}
 
-    @router.get("/agents")
+    @router.get("/agents", response_model=AgentsResponse)
     def list_agents() -> dict[str, Any]:
         return {"agents": agent_manager.to_dicts()}
 
@@ -85,11 +127,11 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
             raise HTTPException(status_code=404, detail="Video not found")
         return {"video": video, "phase_runs": db.list_phase_runs(video_id)}
 
-    @router.post("/videos/batch/delete")
+    @router.post("/videos/batch/delete", response_model=BatchDeleteResponse)
     def batch_delete_videos(request: BatchVideoIdsRequest) -> dict[str, Any]:
         return {"results": batch_delete_video_records(db, settings, request.video_ids)}
 
-    @router.post("/videos/batch/rerun")
+    @router.post("/videos/batch/rerun", response_model=BatchRerunResponse)
     def batch_rerun_videos(request: BatchRerunRequest) -> dict[str, Any]:
         return {"results": batch_rerun_video_records(db, settings, request.video_ids, request.phase)}
 
@@ -137,7 +179,7 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
             return PlainTextResponse("Video not downloaded yet", status_code=404)
         return FileResponse(path, media_type="video/mp4")
 
-    @router.post("/package")
+    @router.post("/package", response_model=PackageResponse)
     def package_completed(request: PackageRequest | None = None) -> dict[str, str]:
         requested_ids = request.video_ids if request and request.video_ids else None
         selection = select_videos_for_package(db, requested_ids)
