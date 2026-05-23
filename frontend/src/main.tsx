@@ -1,0 +1,19 @@
+import { StrictMode } from "react";
+import { createRoot } from "react-dom/client";
+import { BrowserRouter } from "react-router-dom";
+import { applyTheme } from "./theme";
+import App from "./App";
+import "./styles.css";
+
+applyTheme();
+
+const root = document.getElementById("app");
+if (!root) throw new Error("App root not found");
+
+createRoot(root).render(
+  <StrictMode>
+    <BrowserRouter>
+      <App />
+    </BrowserRouter>
+  </StrictMode>
+);
