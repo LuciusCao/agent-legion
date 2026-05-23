@@ -8,6 +8,7 @@ interface DetailState {
   log: string;
   activeTab: DetailTab;
   triggeredNodeIndexes: Set<number>;
+  dismissedNodeIndexes: Set<number>;
   currentSentence: string[];
   isLoading: boolean;
   loadVideo: (id: string) => Promise<void>;
@@ -36,6 +37,7 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
   log: "",
   activeTab: "nodes",
   triggeredNodeIndexes: new Set(),
+  dismissedNodeIndexes: new Set(),
   currentSentence: [],
   isLoading: false,
 
@@ -44,7 +46,7 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
     try {
       const data = await api<{ video: VideoItem }>(`/api/videos/${id}`);
       const video = data.video || null;
-      set({ currentVideo: video, triggeredNodeIndexes: new Set(), currentSentence: [] });
+      set({ currentVideo: video, triggeredNodeIndexes: new Set(), dismissedNodeIndexes: new Set(), currentSentence: [] });
       if (video) {
         set({ activeTab: video.content_type === "question" ? "subtitles" : "nodes" });
       }
@@ -104,9 +106,11 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
 
   dismissInteraction: (index) => {
     set((state) => {
-      const next = new Set(state.triggeredNodeIndexes);
-      next.delete(index);
-      return { triggeredNodeIndexes: next };
+      const nextTriggered = new Set(state.triggeredNodeIndexes);
+      nextTriggered.delete(index);
+      const nextDismissed = new Set(state.dismissedNodeIndexes);
+      nextDismissed.add(index);
+      return { triggeredNodeIndexes: nextTriggered, dismissedNodeIndexes: nextDismissed };
     });
   },
 

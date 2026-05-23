@@ -28,6 +28,7 @@ export function DetailPage() {
     log,
     activeTab,
     triggeredNodeIndexes,
+    dismissedNodeIndexes,
     currentSentence,
     loadVideo,
     loadArtifacts,
@@ -61,13 +62,13 @@ export function DetailPage() {
 
       artifacts.interactions.forEach((node, index) => {
         const trigger = Number(node.trigger_time ?? 0);
-        if (!triggeredNodeIndexes.has(index) && !player.paused && time >= trigger && time < trigger + 1.5) {
+        if (!triggeredNodeIndexes.has(index) && !dismissedNodeIndexes.has(index) && !player.paused && time >= trigger && time < trigger + 1.5) {
           player.pause();
           triggerInteraction(index);
         }
       });
     },
-    [artifacts, triggeredNodeIndexes, triggerInteraction]
+    [artifacts, triggeredNodeIndexes, dismissedNodeIndexes, triggerInteraction]
   );
 
   const handleSeek = useCallback((time: number) => {
