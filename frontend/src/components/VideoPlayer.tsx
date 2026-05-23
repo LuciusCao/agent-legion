@@ -5,13 +5,26 @@ interface VideoPlayerProps {
   video: VideoItem;
   artifacts: VideoArtifacts;
   onTimeUpdate: (time: number) => void;
+  videoRef?: React.Ref<HTMLVideoElement>;
 }
 
-export function VideoPlayer({ video, artifacts, onTimeUpdate }: VideoPlayerProps) {
-  const playerRef = useRef<HTMLVideoElement>(null);
+export function VideoPlayer({ video, artifacts: _artifacts, onTimeUpdate, videoRef }: VideoPlayerProps) {
+  const internalRef = useRef<HTMLVideoElement>(null);
+
+  const setRefs = useCallback(
+    (node: HTMLVideoElement | null) => {
+      internalRef.current = node;
+      if (typeof videoRef === "function") {
+        videoRef(node);
+      } else if (videoRef) {
+        (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node;
+      }
+    },
+    [videoRef]
+  );
 
   const handleTimeUpdate = useCallback(() => {
-    const player = playerRef.current;
+    const player = internalRef.current;
     if (!player) return;
     onTimeUpdate(player.currentTime);
   }, [onTimeUpdate]);
@@ -24,7 +37,7 @@ export function VideoPlayer({ video, artifacts, onTimeUpdate }: VideoPlayerProps
     <div className="player-wrap">
       {videoUrl ? (
         <video
-          ref={playerRef}
+          ref={setRefs}
           id="player"
           src={videoUrl}
           controls
