@@ -17,6 +17,7 @@ from server.app.pipeline.transcribe import (
     run_transcription_with_providers,
     validate_srt,
 )
+from server.app.records import PHASE_RUN_FIELDS, VIDEO_RECORD_FIELDS
 from server.app.settings import load_env_file
 
 
@@ -52,6 +53,18 @@ def test_database_creates_video_and_phase_run(tmp_path):
     assert videos[0]["status"] == "completed"
     assert runs[0]["phase_key"] == "download"
     assert runs[0]["exit_code"] == 0
+
+
+def test_database_rows_match_declared_record_fields(tmp_path):
+    db = Database(tmp_path / "app.sqlite")
+    video = db.create_video("https://example.com/path/a.mp4", "Title A")
+    run = db.start_phase(video["id"], "download", ["python3", "download.py"])
+
+    assert set(video) == VIDEO_RECORD_FIELDS
+    assert set(db.get_video(video["id"])) == VIDEO_RECORD_FIELDS
+    assert set(db.list_videos()[0]) == VIDEO_RECORD_FIELDS
+    assert set(run) == PHASE_RUN_FIELDS
+    assert set(db.list_phase_runs(video["id"])[0]) == PHASE_RUN_FIELDS
 
 
 def test_database_update_video_rejects_unknown_fields(tmp_path):

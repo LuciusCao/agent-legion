@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.pipeline.common import make_record_id
+from server.app.records import PhaseRunRecord, VideoRecord
 
 VIDEO_UPDATE_FIELDS = {
     "source_url",
@@ -94,7 +95,7 @@ class Database:
                 if column not in existing_columns:
                     conn.execute(statement)
 
-    def _row(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
+    def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
         return dict(row) if row else None
 
     def create_video(
@@ -104,7 +105,7 @@ class Database:
         storage_dir: str = "",
         content_type: str = "knowledge",
         external_id: str = "",
-    ) -> dict[str, Any]:
+    ) -> VideoRecord:
         content_type = content_type if content_type in {"knowledge", "question"} else "knowledge"
         video_id = make_record_id(source_url, content_type, external_id)
         status = "queued" if source_url else "missing_url"
@@ -146,11 +147,11 @@ class Database:
             row = conn.execute("select * from videos where id=?", (video_id,)).fetchone()
         return dict(row)
 
-    def get_video(self, video_id: str) -> dict[str, Any] | None:
+    def get_video(self, video_id: str) -> VideoRecord | None:
         with self.connect() as conn:
             return self._row(conn.execute("select * from videos where id=?", (video_id,)).fetchone())
 
-    def find_video_by_identity(self, content_type: str, external_id: str) -> dict[str, Any] | None:
+    def find_video_by_identity(self, content_type: str, external_id: str) -> VideoRecord | None:
         with self.connect() as conn:
             return self._row(
                 conn.execute(
@@ -159,7 +160,7 @@ class Database:
                 ).fetchone()
             )
 
-    def list_videos(self) -> list[dict[str, Any]]:
+    def list_videos(self) -> list[VideoRecord]:
         with self.connect() as conn:
             return [dict(row) for row in conn.execute("select * from videos order by created_at desc, id")]
 
@@ -179,7 +180,7 @@ class Database:
 
     def start_phase(
         self, video_id: str, phase_key: str, command: list[str], log_path: str = ""
-    ) -> dict[str, Any] | None:
+    ) -> PhaseRunRecord | None:
         with self.connect() as conn:
             # Atomic claim: only videos ready to be claimed can transition to running.
             updated = conn.execute(
@@ -239,7 +240,7 @@ class Database:
                     (status, error_message, run["video_id"]),
                 )
 
-    def list_phase_runs(self, video_id: str) -> list[dict[str, Any]]:
+    def list_phase_runs(self, video_id: str) -> list[PhaseRunRecord]:
         with self.connect() as conn:
             return [
                 dict(row)

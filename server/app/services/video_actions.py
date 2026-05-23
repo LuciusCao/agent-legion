@@ -1,20 +1,20 @@
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
+from server.app.records import VideoRecord
 from server.app.settings import Settings
 
 
 @dataclass(frozen=True)
 class PackageSelection:
-    videos: list[dict[str, Any]]
+    videos: list[VideoRecord]
     missing_ids: list[str]
 
 
-def normalize_rerun_phase(video: dict[str, Any], phase: str) -> str:
+def normalize_rerun_phase(video: VideoRecord, phase: str) -> str:
     if video["content_type"] == "question" and phase in {"interaction_generate", "content_review"}:
         return "assemble"
     return phase
