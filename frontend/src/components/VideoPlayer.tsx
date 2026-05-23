@@ -9,7 +9,7 @@ interface VideoPlayerProps {
 }
 
 export function VideoPlayer({ video, artifacts: _artifacts, onTimeUpdate, videoRef }: VideoPlayerProps) {
-  const internalRef = useRef<HTMLVideoElement>(null);
+  const internalRef = useRef<HTMLVideoElement | null>(null);
 
   const setRefs = useCallback(
     (node: HTMLVideoElement | null) => {
@@ -17,7 +17,7 @@ export function VideoPlayer({ video, artifacts: _artifacts, onTimeUpdate, videoR
       if (typeof videoRef === "function") {
         videoRef(node);
       } else if (videoRef) {
-        (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node;
+        (videoRef as any).current = node;
       }
     },
     [videoRef]
@@ -30,7 +30,7 @@ export function VideoPlayer({ video, artifacts: _artifacts, onTimeUpdate, videoR
   }, [onTimeUpdate]);
 
   const videoUrl = video.storage_dir
-    ? `/api/videos/${video.id}/stream`
+    ? `/api/videos/${video.id}/video`
     : "";
 
   return (

@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useUiStore } from "../stores/uiStore";
 import { PHASE_LABELS } from "../labels";
 import type { VideoItem } from "../types";
@@ -22,6 +22,7 @@ const PHASES = [
 export function RerunDialog({ video, onConfirm }: RerunDialogProps) {
   const { rerunDialogOpen, closeRerunDialog } = useUiStore();
   const [selectedPhase, setSelectedPhase] = useState("download");
+  const radioRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const handleConfirm = useCallback(() => {
     onConfirm(selectedPhase);
@@ -34,6 +35,16 @@ export function RerunDialog({ video, onConfirm }: RerunDialogProps) {
       : PHASES
     : PHASES;
 
+  useEffect(() => {
+    if (!rerunDialogOpen) return;
+    availablePhases.forEach((phase) => {
+      const el = radioRefs.current.get(phase);
+      if (el) {
+        (el as any).checked = phase === selectedPhase;
+      }
+    });
+  }, [rerunDialogOpen, selectedPhase, availablePhases]);
+
   if (!rerunDialogOpen) return null;
 
   return (
@@ -43,7 +54,17 @@ export function RerunDialog({ video, onConfirm }: RerunDialogProps) {
         <md-list>
           {availablePhases.map((phase) => (
             <md-list-item key={phase} type="button" onClick={() => setSelectedPhase(phase)}>
-              <md-radio slot="start" checked={selectedPhase === phase} />
+              <md-radio
+                slot="start"
+                name="rerun-phase"
+                ref={(el: HTMLElement | null) => {
+                  if (el) {
+                    radioRefs.current.set(phase, el);
+                  } else {
+                    radioRefs.current.delete(phase);
+                  }
+                }}
+              />
               <div slot="headline">{PHASE_LABELS[phase] || phase}</div>
             </md-list-item>
           ))}

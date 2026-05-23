@@ -4,12 +4,12 @@
 
 Video Hive is a local processing console for educational videos. It maintains a queue of video links, distinguishes between **knowledge videos** and **question explanation videos**, downloads and transcribes them, runs the applicable external agent stages through `openclaw`, previews partial and final artifacts in a web UI, and packages completed results into a ZIP with per-video JSON and a manifest.
 
-The project is a monorepo with a Python FastAPI backend and a vanilla TypeScript frontend built with Vite.
+The project is a monorepo with a Python FastAPI backend and a React + TypeScript frontend built with Vite.
 
 ## Technology Stack
 
 - **Backend**: Python 3.11+, FastAPI, Uvicorn, SQLite, PyYAML, Requests
-- **Frontend**: TypeScript, Vite (no framework — plain DOM manipulation)
+- **Frontend**: React 18, TypeScript 5.8, Vite, React Router v6, Zustand, `@material/web` (Material 3 Web Components)
 - **Package Management**: `uv` for Python; `npm` for the frontend
 - **Linting / Formatting**: Ruff (Python)
 - **Testing**: pytest
@@ -29,6 +29,11 @@ video-hive/
 │   │   ├── db.py               # SQLite database wrapper
 │   │   ├── settings.py         # Settings loader from YAML
 │   │   ├── worker.py           # Background worker loop + per-video phase processing
+│   │   ├── agents.py           # OpenClaw agent discovery and status tracking
+│   │   ├── records.py          # TypedDict type definitions for DB records
+│   │   ├── services/           # Business logic services
+│   │   │   ├── intake.py       # Video intake (add, URL resolution)
+│   │   │   └── video_actions.py # Batch rerun, delete, package selection
 │   │   └── pipeline/           # Pipeline stage implementations
 │   │       ├── common.py       # URL-to-id parsing, SRT parse/format helpers
 │   │       ├── phases.py       # Phase list and agent-phase definitions
@@ -39,6 +44,7 @@ video-hive/
 │   │       ├── artifacts.py    # Artifact cleanup on rerun
 │   │       ├── reader.py       # Artifact reader for the API
 │   │       ├── package.py      # ZIP packaging of completed videos
+│   │       ├── fetch_url.py    # CMS API integration for knowledge/question lookups
 │   │       └── references/     # Markdown prompt references for openclaw phases
 │   │           ├── phase-03-subtitle-review.md
 │   │           ├── phase-04-chapter-generate.md
@@ -47,14 +53,45 @@ video-hive/
 ├── frontend/
 │   ├── package.json
 │   ├── tsconfig.json
+│   ├── vite.config.ts
 │   ├── index.html
 │   └── src/
-│       ├── main.ts             # All UI logic (single file)
-│       └── styles.css
+│       ├── main.tsx            # React entry point
+│       ├── App.tsx             # Router shell (React Router)
+│       ├── api.ts              # Thin fetch wrapper
+│       ├── types.ts            # Shared TypeScript types
+│       ├── labels.ts           # UI labels & phase lists
+│       ├── helpers.ts          # Pure utility functions
+│       ├── theme.ts            # MD3 CSS custom properties
+│       ├── styles.css          # Global styles
+│       ├── pages/              # Route-level pages
+│       │   ├── ListPage.tsx
+│       │   └── DetailPage.tsx
+│       ├── components/         # Reusable UI components
+│       │   ├── AddDialog.tsx
+│       │   ├── AgentPanel.tsx
+│       │   ├── BatchToolbar.tsx
+│       │   ├── ChapterStrip.tsx
+│       │   ├── DetailTabs.tsx
+│       │   ├── InteractionOverlay.tsx
+│       │   ├── MetadataPanel.tsx
+│       │   ├── NodePanel.tsx
+│       │   ├── RerunDialog.tsx
+│       │   ├── StatCards.tsx
+│       │   ├── SubtitlePanel.tsx
+│       │   ├── VideoList.tsx
+│       │   └── VideoPlayer.tsx
+│       └── stores/             # Zustand state stores
+│           ├── videoStore.ts
+│           ├── uiStore.ts
+│           └── detailStore.ts
 ├── tests/
-│   ├── test_core.py            # Pipeline, DB, and provider unit tests
+│   ├── test_core.py            # Pipeline utility unit tests
 │   ├── test_api.py             # FastAPI endpoint tests with TestClient
-│   └── test_worker.py          # Worker-phase integration tests
+│   ├── test_worker.py          # Worker-phase integration tests
+│   ├── test_agents.py          # AgentStatusManager unit tests
+│   ├── test_fetch_url.py       # CMS token/video lookup tests
+│   └── test_services.py        # Service layer unit tests
 └── data/                       # Runtime data (gitignored)
     ├── video_hive.sqlite
     ├── videos/
@@ -85,7 +122,7 @@ cd frontend
 npm run dev
 ```
 
-The Vite dev server runs on `127.0.0.1`. In development you may need a proxy to avoid CORS issues when the frontend calls the backend API.
+The Vite dev server runs on `http://localhost:5173`. `vite.config.ts` already proxies `/api` requests to the backend at `http://127.0.0.1:8000`, so open the browser at **5173** for development.
 
 ### Production-Style Frontend Build
 
@@ -94,7 +131,7 @@ cd frontend
 npm run build
 ```
 
-After `frontend/dist` exists, the FastAPI backend serves it automatically from the same origin.
+After `frontend/dist` exists, the FastAPI backend serves it automatically from the same origin at `http://127.0.0.1:8000`. Use 8000 for integration testing or when verifying the production build; use 5173 for daily development iteration.
 
 ### Lint
 
@@ -139,7 +176,7 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 - **Ignored rule**: `E501` (line too long)
 - Use Python 3.11+ syntax: union types with `|`, builtin generics like `dict[str, Any]`.
 - Keep imports sorted; Ruff handles import sorting automatically.
-- The frontend is a single vanilla TypeScript file with no framework. Keep DOM manipulation imperative and straightforward.
+- The frontend uses React 18 with functional components and hooks. Keep components small and focused; extract reusable logic into helpers or stores.
 
 ## Runtime Architecture
 
@@ -175,7 +212,9 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 
 ### Frontend
 
-- Single-page app rendered into `#app` via plain `innerHTML` and event listeners.
+- React 18 SPA with two routes (`/` list view, `/videos/:id` detail view) managed by React Router v6.
+- State management via Zustand: `videoStore` (list & filtering), `detailStore` (selected video & artifacts), `uiStore` (dialogs, agent status, WebSocket).
+- UI built with `@material/web` Material 3 Web Components plus custom CSS.
 - Fetches data from `/api/*` endpoints.
 - UI labels are in Chinese (e.g., "加入队列", "重跑", "打包完成项").
 - Video player supports clicking subtitle/chapter/interaction timestamps to seek.

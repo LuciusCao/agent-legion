@@ -1,10 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { render } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import { AgentPanel } from "./AgentPanel";
 
 describe("AgentPanel", () => {
-  it("renders nothing when no agents", () => {
-    const { container } = render(<AgentPanel />);
-    expect(container.firstChild).toBeNull();
+  it("renders empty state when no agents", () => {
+    render(<AgentPanel />);
+    expect(screen.getByText(/暂无运行中的 Agent/)).toBeInTheDocument();
   });
 });
