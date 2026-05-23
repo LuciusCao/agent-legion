@@ -8,7 +8,7 @@ export function AgentPanel() {
   const idleCount = agents.length - busyCount;
 
   return (
-    <md-outlined-card className="agent-panel">
+    <div className="agent-panel card-outlined">
       <div className="agent-summary">
         Agent 状态：共 {agents.length} 个，{busyCount} 个忙碌，{idleCount} 个空闲
       </div>
@@ -21,6 +21,6 @@ export function AgentPanel() {
           </div>
         ))}
       </div>
-    </md-outlined-card>
+    </div>
   );
 }
