@@ -1,6 +1,7 @@
 import { useEffect } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
+import { STATUS_LABELS } from "../labels";
 import { AgentPanel } from "../components/AgentPanel";
 import { StatCards } from "../components/StatCards";
 import { VideoList } from "../components/VideoList";
@@ -63,7 +64,7 @@ export function ListPage() {
           {["all", "missing_url", "queued", "running", "failed", "completed"].map((s) => (
             <md-filter-chip
               key={s}
-              label={s === "all" ? "全部" : s}
+              label={s === "all" ? "全部" : (STATUS_LABELS[s] || s)}
               selected={statusFilter === s}
               onClick={() => useVideoStore.getState().setStatusFilter(s)}
             />

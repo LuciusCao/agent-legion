@@ -34,8 +34,10 @@ export function RerunDialog({ video, onConfirm }: RerunDialogProps) {
       : PHASES
     : PHASES;
 
+  if (!rerunDialogOpen) return null;
+
   return (
-    <md-dialog open={rerunDialogOpen} onClosed={closeRerunDialog}>
+    <md-dialog open onClosed={closeRerunDialog}>
       <div slot="headline">选择重跑阶段</div>
       <form slot="content" method="dialog">
         <md-list>
