@@ -2,6 +2,7 @@ from typing import Any, Protocol
 
 from server.app.db import Database
 from server.app.pipeline.fetch_url import get_token, lookup_knowledge_video, lookup_question_video
+from server.app.records import VideoRecord
 from server.app.settings import Settings
 
 CONTENT_TYPES = {"knowledge", "question"}
@@ -49,7 +50,7 @@ def add_video_items(
     settings: Settings,
     items: list[VideoInputLike],
 ) -> dict[str, Any]:
-    videos: list[dict[str, Any] | None] = []
+    videos: list[VideoRecord | None] = []
     results: list[dict[str, Any]] = []
 
     for item in items:
