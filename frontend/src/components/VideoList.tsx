@@ -5,7 +5,7 @@ import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from "../labels";
 import { statusGroup } from "../helpers";
 import type { VideoItem } from "../types";
 
-const GROUP_ORDER = ["missing_url", "queued", "running", "failed", "completed"];
+const GROUP_ORDER = ["queued", "running", "failed", "completed"];
 
 export function VideoList() {
   const navigate = useNavigate();
@@ -22,7 +22,7 @@ export function VideoList() {
   const filtered = useMemo(() => {
     return videos.filter((v) => {
       if (v.content_type !== selectedType) return false;
-      if (statusFilter !== "all" && v.status !== statusFilter) return false;
+      if (statusFilter !== "all" && statusGroup(v) !== statusFilter) return false;
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         const haystack = `${v.external_id} ${v.title} ${v.id}`.toLowerCase();

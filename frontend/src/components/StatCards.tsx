@@ -3,11 +3,10 @@ import { useVideoStore } from "../stores/videoStore";
 import { STATUS_LABELS } from "../labels";
 import { statusGroup } from "../helpers";
 
-const STATUSES = ["missing_url", "queued", "running", "failed", "completed"];
+const STATUSES = ["queued", "running", "failed", "completed"];
 
 const STATUS_ICONS: Record<string, string> = {
   all: "inventory_2",
-  missing_url: "link_off",
   queued: "schedule",
   running: "sync",
   failed: "error",
@@ -27,7 +26,10 @@ export function StatCards() {
 
   const items = [
     { key: "all", label: "全部" },
-    ...STATUSES.map((s) => ({ key: s, label: STATUS_LABELS[s] || s })),
+    ...STATUSES.map((s) => ({
+      key: s,
+      label: STATUS_LABELS[s] || s,
+    })),
   ];
 
   return (

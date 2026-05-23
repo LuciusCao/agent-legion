@@ -308,6 +308,38 @@ def test_add_duplicate_identity_reports_duplicate(client):
     assert len(client.get("/api/videos").json()["videos"]) == 1
 
 
+def test_add_duplicate_direct_url_without_external_id_reports_duplicate(client):
+    first = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/videos/lesson-a.mp4",
+                    "title": "First Title",
+                }
+            ]
+        },
+    )
+    second = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/videos/lesson-a.mp4",
+                    "title": "Second Title",
+                }
+            ]
+        },
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json()["results"][0]["status"] == "duplicate"
+    videos = client.get("/api/videos").json()["videos"]
+    assert len(videos) == 1
+    assert videos[0]["title"] == "First Title"
+
+
 def test_delete_video_removes_record_and_storage_dir(tmp_path, client):
 
     client.post(
@@ -413,6 +445,38 @@ def test_package_selected_missing_video_returns_404(client):
 
     assert response.status_code == 404
     assert response.json()["detail"] == "Videos not found: missing"
+
+
+def test_package_with_empty_selection_returns_400(client):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+            ]
+        },
+    )
+
+    response = client.post("/api/package", json={"video_ids": []})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "No videos selected for packaging"
+
+
+def test_package_without_completed_videos_returns_400(client):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+            ]
+        },
+    )
+
+    response = client.post("/api/package")
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "No completed videos available for packaging"
 
 
 def test_package_download_rejects_path_traversal(client):

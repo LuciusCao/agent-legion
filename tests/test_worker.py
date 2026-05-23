@@ -4,7 +4,13 @@ import subprocess
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool, discover_openclaw_agents
 from server.app.settings import load_settings
-from server.app.worker import process_next, process_video_once
+from server.app.worker import (
+    WorkerCapacity,
+    get_phase_concurrency_limit,
+    pick_next_work,
+    process_next,
+    process_video_once,
+)
 from tests.conftest import ChapterRunner, TestProvider
 
 
@@ -218,3 +224,27 @@ def test_process_next_continues_after_unresolved_missing_url(db, settings):
 
     assert process_next(db, settings) is True
     assert db.get_video(video["id"])["status"] == "completed"
+
+
+def test_local_phase_can_be_scheduled_without_openclaw_runner(db, settings):
+    download_video = db.create_video("https://example.com/a.mp4", "A")
+    db.create_video("https://example.com/b.mp4", "B")
+    db.update_video("b", current_phase="subtitle_review", status="queued")
+
+    work = pick_next_work(
+        db.list_videos(),
+        running_video_ids=set(),
+        capacity=WorkerCapacity(free_runner=None, running_local_counts={}),
+        settings=settings,
+    )
+
+    assert work is not None
+    assert work.video["id"] == download_video["id"]
+    assert work.kind == "local"
+
+
+def test_transcribe_concurrency_limit_is_configurable(settings):
+    settings.config["worker"] = {"phase_concurrency": {"transcribe": 3}}
+
+    assert get_phase_concurrency_limit(settings, "download") == 10
+    assert get_phase_concurrency_limit(settings, "transcribe") == 3

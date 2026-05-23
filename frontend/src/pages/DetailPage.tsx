@@ -8,6 +8,7 @@ import { ChapterStrip } from "../components/ChapterStrip";
 import { InteractionOverlay } from "../components/InteractionOverlay";
 import { DetailTabs } from "../components/DetailTabs";
 import { SubtitlePanel } from "../components/SubtitlePanel";
+import { ChapterPanel } from "../components/ChapterPanel";
 import { NodePanel } from "../components/NodePanel";
 import { MetadataPanel } from "../components/MetadataPanel";
 import { RerunDialog } from "../components/RerunDialog";
@@ -179,9 +180,7 @@ export function DetailPage() {
         <div className="tab-panel">
           {activeTab === "subtitles" && <SubtitlePanel currentTime={currentTime} onSeek={handleSeek} />}
           {activeTab === "nodes" && <NodePanel />}
-          {activeTab === "chapters" && (
-            <SubtitlePanel currentTime={currentTime} onSeek={handleSeek} />
-          )}
+          {activeTab === "chapters" && <ChapterPanel onSeek={handleSeek} />}
           {activeTab === "metadata" && <MetadataPanel />}
           {activeTab === "review" && (
             <div className="tab-panel">

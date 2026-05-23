@@ -7,7 +7,7 @@ export type VideoFilter = {
 };
 
 export function statusGroup(video: VideoItem): string {
-  if (video.status === "missing_url" || video.current_phase === "waiting_for_url") return "missing_url";
+  if (video.status === "missing_url" || video.current_phase === "waiting_for_url") return "failed";
   if (video.status === "failed") return "failed";
   if (video.status === "completed") return "completed";
   if (video.status === "running") return "running";
