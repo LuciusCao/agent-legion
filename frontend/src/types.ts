@@ -1,6 +1,6 @@
 export type ContentType = "knowledge" | "question";
 export type ViewName = "list" | "detail";
-export type DetailTab = "nodes" | "subtitles" | "chapters" | "logs" | "metadata";
+export type DetailTab = "nodes" | "subtitles" | "chapters" | "logs" | "metadata" | "review";
 
 export type VideoItem = {
   id: string;
@@ -33,6 +33,7 @@ export type Chapter = {
 };
 
 export type InteractionNode = {
+  trigger_time?: number | string;
   node_type?: string;
   type?: string;
   content?: {
@@ -45,7 +46,7 @@ export type InteractionNode = {
 export type VideoArtifacts = {
   subtitles: Array<{ index: number; start: number; end: number; text: string }>;
   chapters: Array<{ id: string; start_time: number; end_time: number; title: string }>;
-  interactions: Array<Record<string, unknown>>;
+  interactions: InteractionNode[];
   metadata: Record<string, unknown> | null;
   review: Record<string, unknown> | null;
   checklist: Record<string, unknown> | null;
