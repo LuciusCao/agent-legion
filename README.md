@@ -103,6 +103,12 @@ Full check before committing or handing work off:
 
 The quick gate runs Ruff, backend tests, and frontend tests. The full gate runs the quick gate plus the production-style frontend build.
 
+Install the optional local Git pre-commit hook to run the quick gate before each commit:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
 Equivalent commands:
 
 ```bash
