@@ -78,6 +78,11 @@ export function VideoList() {
                       <small>
                         {TYPE_LABELS[video.content_type]} · {video.external_id || "未填 ID"} · {PHASE_LABELS[video.current_phase] || video.current_phase}
                       </small>
+                      {video.error_message && (
+                        <small className="error-text" title={video.error_message}>
+                          {video.error_message}
+                        </small>
+                      )}
                     </div>
                     <md-assist-chip slot="end" label={STATUS_LABELS[statusGroup(video)] || video.status} />
                   </md-list-item>

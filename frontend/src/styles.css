@@ -410,6 +410,13 @@ pre {
   flex-wrap: wrap;
 }
 
+.error-text {
+  color: var(--md-sys-color-error);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Add dialog type buttons */
 .type-btn {
   flex: 1;
