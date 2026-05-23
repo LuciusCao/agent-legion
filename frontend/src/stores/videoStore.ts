@@ -23,7 +23,7 @@ interface VideoState {
   batchPackage: (ids: string[]) => Promise<{ path: string; download_url: string }>;
 }
 
-export const useVideoStore = create<VideoState>((set, get) => ({
+export const useVideoStore = create<VideoState>((set, _get) => ({
   videos: [],
   selectedType: "knowledge",
   statusFilter: "all",

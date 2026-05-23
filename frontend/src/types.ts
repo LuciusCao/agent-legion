@@ -14,6 +14,7 @@ export type VideoItem = {
   current_phase: string;
   error_message: string;
   storage_dir?: string;
+  duration?: number;
 };
 
 export type AgentStatus = {
@@ -28,7 +29,9 @@ export type AgentStatus = {
 };
 
 export type Chapter = {
+  id?: string;
   start: number;
+  end?: number;
   title: string;
 };
 
@@ -45,7 +48,7 @@ export type InteractionNode = {
 
 export type VideoArtifacts = {
   subtitles: Array<{ index: number; start: number; end: number; text: string }>;
-  chapters: Array<{ id: string; start_time: number; end_time: number; title: string }>;
+  chapters: Chapter[];
   interactions: InteractionNode[];
   metadata: Record<string, unknown> | null;
   review: Record<string, unknown> | null;

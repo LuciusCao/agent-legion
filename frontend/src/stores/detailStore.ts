@@ -29,7 +29,7 @@ const emptyArtifacts: VideoArtifacts = {
   checklist: null,
 };
 
-export const useDetailStore = create<DetailState>((set, get) => ({
+export const useDetailStore = create<DetailState>((set, _get) => ({
   currentVideo: null,
   artifacts: emptyArtifacts,
   log: "",
@@ -54,8 +54,22 @@ export const useDetailStore = create<DetailState>((set, get) => ({
 
   loadArtifacts: async (id) => {
     try {
-      const data = await api<VideoArtifacts>(`/api/videos/${id}/artifacts`);
-      set({ artifacts: data });
+      const data = await api<any>(`/api/videos/${id}/artifacts`);
+      set({
+        artifacts: {
+          subtitles: data.subtitles || [],
+          chapters: (data.chapters || []).map((c: any) => ({
+            id: c.id,
+            start: c.start_time ?? c.start,
+            end: c.end_time ?? c.end,
+            title: c.title,
+          })),
+          interactions: data.interactions || [],
+          metadata: data.metadata || null,
+          review: data.review || null,
+          checklist: data.checklist || null,
+        },
+      });
     } catch {
       set({ artifacts: emptyArtifacts });
     }
