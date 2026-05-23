@@ -38,8 +38,10 @@ export function AddDialog() {
     closeAddDialog();
   }, [closeAddDialog]);
 
+  if (!addDialogOpen) return null;
+
   return (
-    <md-dialog open={addDialogOpen} onClosed={handleClose}>
+    <md-dialog open onClosed={handleClose}>
       <div slot="headline">添加资源</div>
       <form slot="content" onSubmit={handleSubmit}>
         <div style={{ display: "grid", gap: "14px" }}>
@@ -49,7 +51,7 @@ export function AddDialog() {
               selected={addContentType === "knowledge"}
               onClick={() => setAddContentType("knowledge")}
             />
-            <md-segmented-button
+            <md-outlined-segmented-button
               label="题目"
               selected={addContentType === "question"}
               onClick={() => setAddContentType("question")}
