@@ -124,6 +124,12 @@ Before committing, handing work off, or claiming a cross-stack change is complet
 
 The quick gate runs Ruff, pytest, and frontend Vitest. The full gate runs the quick gate plus the frontend production build.
 
+To install the optional local pre-commit hook that runs the quick gate before each commit:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
 ## Code Style Guidelines
 
 - **Formatter / Linter**: Ruff
