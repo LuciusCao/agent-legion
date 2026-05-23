@@ -50,8 +50,8 @@ function getReviewScore(review: Record<string, unknown> | null): number | null {
 
 export function renderRerunPhaseOptions(video: VideoItem): void {
   const phases = video.content_type === "question" ? QUESTION_PHASES : KNOWLEDGE_PHASES;
-  byId<HTMLSelectElement>("rerunPhase").innerHTML = phases
-    .map((phase) => `<option value="${phase}">${PHASE_LABELS[phase]}</option>`)
+  byId<HTMLDivElement>("rerunPhaseList").innerHTML = phases
+    .map((phase) => `<button type="button" class="rerun-phase-btn" data-phase="${phase}">${PHASE_LABELS[phase]}</button>`)
     .join("");
 }
 

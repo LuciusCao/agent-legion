@@ -391,3 +391,39 @@ pre { margin: 0; white-space: pre-wrap; font-size: 12px; }
 @media (max-width: 980px) {
   .preview-layout { grid-template-columns: 1fr; }
 }
+
+.rerun-dialog {
+  width: min(400px, calc(100vw - 32px));
+  border: 0;
+  border-radius: 8px;
+  padding: 0;
+}
+
+.rerun-dialog::backdrop {
+  background: rgb(0 0 0 / 0.35);
+}
+
+.rerun-dialog form {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.rerun-phase-list {
+  display: grid;
+  gap: 8px;
+}
+
+.rerun-phase-btn {
+  padding: 10px 14px;
+  border: 1px solid #e3e9ec;
+  border-radius: 6px;
+  background: #fff;
+  cursor: pointer;
+  text-align: left;
+  font-size: 0.95rem;
+}
+
+.rerun-phase-btn:hover {
+  background: #f1f5f9;
+}

@@ -102,7 +102,6 @@ app.innerHTML = `
           <p id="detailSubtitle"></p>
         </div>
         <div class="detail-actions">
-          <select id="rerunPhase"></select>
           <button id="rerunBtn">重跑</button>
           <button id="detailPackageBtn">打包</button>
           <button id="deleteBtn" class="danger-button">删除</button>
@@ -138,6 +137,16 @@ app.innerHTML = `
           <button id="addSubmitBtn" type="submit" class="primary-button">加入队列</button>
         </footer>
         <div id="addResults" class="add-results"></div>
+      </form>
+    </dialog>
+
+    <dialog id="rerunDialog" class="rerun-dialog">
+      <form method="dialog">
+        <header class="dialog-header">
+          <h3>选择重跑阶段</h3>
+          <button id="rerunDialogClose" type="button" class="icon-button">×</button>
+        </header>
+        <div id="rerunPhaseList" class="rerun-phase-list"></div>
       </form>
     </dialog>
   </main>
@@ -427,9 +436,19 @@ byId<HTMLButtonElement>("backBtn").addEventListener("click", () => {
   activeView = "list";
   renderListView();
 });
-byId<HTMLButtonElement>("rerunBtn").addEventListener("click", async () => {
+byId<HTMLButtonElement>("rerunBtn").addEventListener("click", () => {
   if (!selectedId) return;
-  const phase = byId<HTMLSelectElement>("rerunPhase").value;
+  byId<HTMLDialogElement>("rerunDialog").showModal();
+});
+byId<HTMLButtonElement>("rerunDialogClose").addEventListener("click", () => {
+  byId<HTMLDialogElement>("rerunDialog").close();
+});
+byId<HTMLDialogElement>("rerunDialog").addEventListener("click", async (event) => {
+  const target = event.target as HTMLElement;
+  if (!target.classList.contains("rerun-phase-btn")) return;
+  const phase = target.dataset.phase;
+  if (!phase || !selectedId) return;
+  byId<HTMLDialogElement>("rerunDialog").close();
   try {
     await api(`/api/videos/${selectedId}/rerun`, { method: "POST", body: JSON.stringify({ phase }) });
   } catch (err) {
