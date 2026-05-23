@@ -25,6 +25,7 @@ class AgentStatusManager:
         self._clients: set[WebSocket] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._busy_video_ids: set[str] = set()
+        self._agent_video_ids: dict[str, str] = {}
 
     def discover(self) -> list[AgentStatus]:
         try:
@@ -58,6 +59,7 @@ class AgentStatusManager:
         video_id = video if isinstance(video, str) else str(video.get("id", ""))
         if video_id:
             self._busy_video_ids.add(video_id)
+            self._agent_video_ids[agent_id] = video_id
         for agent in self.agents:
             if agent.id == agent_id:
                 agent.busy = True
@@ -71,10 +73,11 @@ class AgentStatusManager:
         self._broadcast()
 
     def set_idle(self, agent_id: str) -> None:
+        video_id = self._agent_video_ids.pop(agent_id, "")
+        if video_id:
+            self._busy_video_ids.discard(video_id)
         for agent in self.agents:
             if agent.id == agent_id:
-                if agent.current_video_id:
-                    self._busy_video_ids.discard(agent.current_video_id)
                 agent.busy = False
                 agent.current_video_id = None
                 agent.current_title = ""
