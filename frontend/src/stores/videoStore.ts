@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { VideoItem, ContentType } from "../types";
 import { api } from "../api";
+import { useUiStore } from "./uiStore";
 
 interface VideoState {
   videos: VideoItem[];
@@ -37,6 +38,9 @@ export const useVideoStore = create<VideoState>((set, _get) => ({
     try {
       const data = await api<{ videos: VideoItem[] }>("/api/videos");
       set({ videos: data.videos });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      useUiStore.getState().showToast(`加载失败: ${message}`, "error");
     } finally {
       set({ isLoading: false });
     }

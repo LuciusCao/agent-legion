@@ -22,6 +22,8 @@ interface UiState {
   clearToast: () => void;
 }
 
+let wsInstance: WebSocket | null = null;
+
 export const useUiStore = create<UiState>((set) => ({
   agents: [],
   addDialogOpen: false,
@@ -31,8 +33,12 @@ export const useUiStore = create<UiState>((set) => ({
 
   connectAgentsWs: () => {
     const protocol = location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${location.host}/api/agents`);
-    ws.onmessage = (event) => {
+    if (wsInstance) {
+      wsInstance.onclose = null;
+      wsInstance.close();
+    }
+    wsInstance = new WebSocket(`${protocol}//${location.host}/api/agents`);
+    wsInstance.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data) as AgentStatus[];
         set({ agents: data });
@@ -40,12 +46,10 @@ export const useUiStore = create<UiState>((set) => ({
         // ignore
       }
     };
-    ws.onclose = () => {
+    wsInstance.onclose = () => {
       setTimeout(() => {
-        set((state) => {
-          state.connectAgentsWs();
-          return {};
-        });
+        const { connectAgentsWs } = useUiStore.getState();
+        connectAgentsWs();
       }, 3000);
     };
   },
