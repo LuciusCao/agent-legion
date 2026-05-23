@@ -139,3 +139,14 @@ def test_set_busy_accepts_string_video_id():
             "current_phase": "",
         }
     ]
+
+
+def test_set_idle_clears_busy_video_for_synthetic_runner_id():
+    manager = AgentStatusManager()
+
+    manager.set_busy("runner-0", "knowledge_K001")
+    assert manager.is_video_busy("knowledge_K001") is True
+
+    manager.set_idle("runner-0")
+
+    assert manager.is_video_busy("knowledge_K001") is False
