@@ -21,11 +21,13 @@ def read_artifacts(video_dir: Path) -> dict:
     interactions = interactions_data.get("interactions", []) if isinstance(interactions_data, dict) else []
     metadata = read_json(video_dir / "metadata.json")
     review = read_json(video_dir / "review_result.json")
+    checklist = read_json(video_dir / "checklist.json")
     return {
         "subtitles": subtitles,
         "chapters": chapters,
         "interactions": interactions,
         "metadata": metadata,
         "review": review,
+        "checklist": checklist,
     }
 
