@@ -71,7 +71,6 @@ def test_add_video_list_artifacts_and_rerun(tmp_path):
 
 def test_artifacts_endpoint_includes_checklist_and_review(tmp_path):
     import json
-    from pathlib import Path
 
     app = create_app(data_dir=tmp_path)
     client = TestClient(app)

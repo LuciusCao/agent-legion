@@ -4,6 +4,7 @@ import { api } from "./api";
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from "./labels";
 import {
   filterVideos,
+  parseResourceIds,
   statusGroup,
   visibleSelectedIds as getVisibleSelectedIds,
 } from "./helpers";
@@ -407,10 +408,7 @@ byId<HTMLSelectElement>("statusFilter").addEventListener("change", (event) => {
 byId<HTMLFormElement>("addForm").addEventListener("submit", async (event) => {
   event.preventDefault();
   const input = byId<HTMLTextAreaElement>("resourceIdsInput");
-  const ids = input.value
-    .split("\n")
-    .flatMap((line) => line.split(",").map((s) => s.trim()))
-    .filter(Boolean);
+  const ids = parseResourceIds(input.value);
   if (ids.length === 0) return;
   const response = await api<{ videos: VideoItem[]; results: AddResult[] }>("/api/videos", {
     method: "POST",
