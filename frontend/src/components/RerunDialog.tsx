@@ -49,7 +49,7 @@ export function RerunDialog({ video, onConfirm }: RerunDialogProps) {
   if (!rerunDialogOpen) return null;
 
   return (
-    <md-dialog open onClosed={closeRerunDialog}>
+    <md-dialog open onClosed={closeRerunDialog} style={{ "--md-dialog-container-color": "#ffffff" } as React.CSSProperties}>
       <div slot="headline">选择重跑阶段</div>
       <form slot="content" method="dialog">
         <md-list>
