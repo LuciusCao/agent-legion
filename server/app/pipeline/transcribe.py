@@ -83,6 +83,8 @@ class WhisperCppProvider(TranscriptionProvider):
                 "--output-srt",
                 "-of",
                 str(out_stem),
+                "--vad-thold",
+                "0.6",
             ],
             check=True,
         )
