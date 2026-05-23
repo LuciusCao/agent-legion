@@ -12,6 +12,7 @@ from server.app.pipeline.fetch_url import _extract_knowledge_url
 from server.app.pipeline.openclaw import AgentPhase, OpenClawRunner
 from server.app.pipeline.package import create_package
 from server.app.pipeline.phases import AGENT_PHASES
+from server.app.pipeline.reader import read_artifacts
 from server.app.pipeline.transcribe import (
     TranscriptionProvider,
     run_transcription_with_providers,
@@ -229,3 +230,30 @@ def test_package_completed_videos(tmp_path):
     assert "manifest.json" in names
     assert "a/metadata.json" in names
     assert "a/interactions.json" in names
+
+
+def test_read_artifacts_includes_checklist(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8"
+    )
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"interactions": []}), encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text(
+        json.dumps({"chapters": []}), encoding="utf-8"
+    )
+    (video_dir / "checklist.json").write_text(
+        json.dumps({"video_id": "v1", "checklist": {"content_usability": {"issues": []}}}),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps({"score": 100, "status": "published"}), encoding="utf-8"
+    )
+
+    result = read_artifacts(video_dir)
+    assert result["checklist"] is not None
+    assert result["checklist"]["checklist"]["content_usability"]["issues"] == []
+    assert result["review"] is not None
+    assert result["review"]["score"] == 100

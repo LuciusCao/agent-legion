@@ -49,7 +49,7 @@ let searchQuery = "";
 let selectMode = false;
 let selectedIds = new Set<string>();
 let agents: AgentStatus[] = [];
-let currentArtifacts: VideoArtifacts = { subtitles: [], chapters: [], interactions: [], metadata: null };
+let currentArtifacts: VideoArtifacts = { subtitles: [], chapters: [], interactions: [], metadata: null, review: null, checklist: null };
 let currentLog = "";
 let activeTab: DetailTab = "nodes";
 let triggeredNodeIndexes = new Set<number>();
@@ -281,7 +281,7 @@ async function selectVideo(id: string): Promise<void> {
   byId<HTMLParagraphElement>("detailSubtitle").textContent =
     `${TYPE_LABELS[video.content_type]} · ${video.external_id || "未填 ID"} · ${PHASE_LABELS[video.current_phase] ?? video.current_phase} · ${STATUS_LABELS[statusGroup(video)]}`;
   renderRerunPhaseOptions(video);
-  currentArtifacts = { subtitles: [], chapters: [], interactions: [], metadata: null };
+  currentArtifacts = { subtitles: [], chapters: [], interactions: [], metadata: null, review: null, checklist: null };
   currentLog = "";
   renderPlayer(video, onTimeUpdate);
   renderDetailView();

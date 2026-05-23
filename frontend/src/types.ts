@@ -31,6 +31,8 @@ export type VideoArtifacts = {
   chapters: Array<{ id: string; start_time: number; end_time: number; title: string }>;
   interactions: Array<Record<string, unknown>>;
   metadata: Record<string, unknown> | null;
+  review: Record<string, unknown> | null;
+  checklist: Record<string, unknown> | null;
 };
 
 export type AddResult = {
