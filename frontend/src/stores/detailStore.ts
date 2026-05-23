@@ -41,8 +41,8 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
   loadVideo: async (id) => {
     set({ isLoading: true });
     try {
-      const data = await api<{ videos: VideoItem[] }>("/api/videos");
-      const video = data.videos.find((v) => v.id === id) || null;
+      const data = await api<{ video: VideoItem }>(`/api/videos/${id}`);
+      const video = data.video || null;
       set({ currentVideo: video });
       if (video) {
         set({ activeTab: video.content_type === "question" ? "subtitles" : "nodes" });

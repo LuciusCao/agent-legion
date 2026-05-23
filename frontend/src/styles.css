@@ -65,28 +65,36 @@ h1 {
 }
 
 /* Stats */
-.stats-panel {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 10px;
+.stats-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
   margin-top: 16px;
 }
 
-.stat-card {
-  display: grid;
+.stat-pill {
+  display: inline-flex;
+  align-items: center;
   gap: 6px;
-  text-align: left;
-  padding: 12px;
-  min-height: 68px;
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface);
   cursor: pointer;
+  font-size: 14px;
+  user-select: none;
 }
 
-.stat-card.active {
+.stat-pill.active {
   background: var(--md-sys-color-primary-container);
+  border-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary-container);
 }
 
-.stat-card strong {
-  font-size: 22px;
+.stat-pill md-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
 }
 
 /* Agent */
@@ -134,6 +142,25 @@ h1 {
 
 .agent-card.idle .agent-dot {
   background: var(--md-sys-color-primary);
+}
+
+.agent-pill {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+}
+
+.agent-card.busy .agent-pill {
+  background: var(--md-sys-color-error);
+  color: var(--md-sys-color-on-error);
+}
+
+.agent-card.idle .agent-pill {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
 }
 
 /* Batch toolbar */
@@ -408,8 +435,8 @@ pre {
 
 /* Responsive */
 @media (max-width: 900px) {
-  .stats-panel {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+  .stats-pills {
+    gap: 6px;
   }
 
   .filters-row,

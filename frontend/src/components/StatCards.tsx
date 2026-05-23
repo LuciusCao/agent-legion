@@ -5,6 +5,15 @@ import { statusGroup } from "../helpers";
 
 const STATUSES = ["missing_url", "queued", "running", "failed", "completed"];
 
+const STATUS_ICONS: Record<string, string> = {
+  all: "inventory_2",
+  missing_url: "link_off",
+  queued: "schedule",
+  running: "sync",
+  failed: "error",
+  completed: "check_circle",
+};
+
 export function StatCards() {
   const { videos, statusFilter, setStatusFilter } = useVideoStore();
 
@@ -22,15 +31,15 @@ export function StatCards() {
   ];
 
   return (
-    <div className="stats-panel">
+    <div className="stats-pills">
       {items.map((item) => (
         <div
           key={item.key}
-          className={`stat-card card-elevated ${statusFilter === item.key ? "active" : ""}`}
+          className={`stat-pill ${statusFilter === item.key ? "active" : ""}`}
           onClick={() => setStatusFilter(item.key)}
         >
-          <strong>{counts[item.key] ?? 0}</strong>
-          <span>{item.label}</span>
+          <md-icon>{STATUS_ICONS[item.key] || "help"}</md-icon>
+          <span>{item.label}（{counts[item.key] ?? 0}）</span>
         </div>
       ))}
     </div>

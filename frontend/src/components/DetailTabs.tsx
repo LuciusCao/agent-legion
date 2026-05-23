@@ -12,17 +12,19 @@ const TABS: { key: DetailTab; label: string; types: ContentType[] }[] = [
 export function DetailTabs({ contentType }: { contentType: ContentType }) {
   const { activeTab, setActiveTab } = useDetailStore();
   const visibleTabs = TABS.filter((t) => t.types.includes(contentType));
+  const activeIndex = visibleTabs.findIndex((t) => t.key === activeTab);
 
   return (
-    <md-tabs>
+    <md-tabs
+      active-tab-index={activeIndex >= 0 ? activeIndex : 0}
+      onChange={(e: React.FormEvent<HTMLElement>) => {
+        const idx = (e.currentTarget as any).activeTabIndex;
+        const tab = visibleTabs[idx];
+        if (tab) setActiveTab(tab.key);
+      }}
+    >
       {visibleTabs.map((tab) => (
-        <md-primary-tab
-          key={tab.key}
-          active={activeTab === tab.key}
-          onClick={() => setActiveTab(tab.key)}
-        >
-          {tab.label}
-        </md-primary-tab>
+        <md-primary-tab key={tab.key}>{tab.label}</md-primary-tab>
       ))}
     </md-tabs>
   );

@@ -24,7 +24,7 @@ describe("detailStore", () => {
 
   it("loads video and sets active tab", async () => {
     mockApi.mockResolvedValueOnce({
-      videos: [{ id: "v1", title: "Test", content_type: "question", status: "queued" }],
+      video: { id: "v1", title: "Test", content_type: "question", status: "queued" },
     });
     await useDetailStore.getState().loadVideo("v1");
     expect(useDetailStore.getState().currentVideo?.id).toBe("v1");
