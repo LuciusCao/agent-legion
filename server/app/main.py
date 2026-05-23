@@ -10,14 +10,10 @@ from fastapi.staticfiles import StaticFiles
 from server.app.agents import AgentStatusManager
 from server.app.api import create_router
 from server.app.db import Database
+from server.app.pipeline.recovery import recover_interrupted_videos
+from server.app.pipeline.runners import RunnerPool
 from server.app.settings import load_settings
-from server.app.worker import (
-    acquire_runner,
-    init_runners,
-    process_video_once,
-    recover_interrupted_videos,
-    release_runner,
-)
+from server.app.worker import process_video_once
 
 
 def create_app(
@@ -33,12 +29,16 @@ def create_app(
     running_futures: dict[str, Future[bool]] = {}
 
     agent_manager = AgentStatusManager()
+    runner_pool: RunnerPool | None = None
 
     def worker_loop() -> None:
         while not stop_event.is_set():
             submitted = False
+            if runner_pool is None:
+                stop_event.wait(1)
+                continue
             try:
-                runner_index, runner = acquire_runner()
+                runner_index, runner = runner_pool.acquire()
             except RuntimeError:
                 stop_event.wait(1)
                 continue
@@ -61,24 +61,33 @@ def create_app(
                 future.add_done_callback(
                     lambda _f, vid=video["id"], idx=runner_index, aid=agent_id: (
                         running_futures.pop(vid, None),
-                        release_runner(idx),
+                        runner_pool.release(idx),
                         agent_manager.set_idle(aid),
                     )
                 )
                 submitted = True
                 break
             else:
-                release_runner(runner_index)
+                runner_pool.release(runner_index)
             stop_event.wait(1 if submitted else 3)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal executor
+        nonlocal executor, runner_pool
         thread = None
         if start_worker:
             agent_manager.discover()
             recover_interrupted_videos(db, settings)
-            runner_count = init_runners(settings, agent_manager)
+            runner_pool = RunnerPool.from_settings(
+                settings, [a.id for a in agent_manager.agents]
+            )
+            for i, runner in enumerate(runner_pool.all_runners()):
+                runner.agent_id = (
+                    agent_manager.agents[i].id
+                    if i < len(agent_manager.agents)
+                    else f"runner-{i}"
+                )
+            runner_count = runner_pool.size()
             workers = max_workers if max_workers is not None else max(1, runner_count)
             executor = ThreadPoolExecutor(max_workers=workers)
             thread = threading.Thread(target=worker_loop, name="video-hive-worker", daemon=True)

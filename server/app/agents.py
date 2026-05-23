@@ -1,10 +1,10 @@
 import asyncio
-import json
-import subprocess
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import WebSocket
+
+from server.app.pipeline.runners import list_openclaw_agents
 
 
 @dataclass
@@ -29,24 +29,14 @@ class AgentStatusManager:
 
     def discover(self) -> list[AgentStatus]:
         try:
-            result = subprocess.run(
-                ["openclaw", "agents", "list", "--json"],
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            if result.returncode != 0:
-                self.agents = []
-                return []
-            data = json.loads(result.stdout)
+            records = list_openclaw_agents(timeout=10)
             self.agents = [
                 AgentStatus(
-                    id=a["id"],
-                    name=a.get("identityName") or a["id"],
+                    id=r["id"],
+                    name=r.get("identityName") or r["id"],
                     busy=False,
                 )
-                for a in data
-                if isinstance(a, dict) and "id" in a
+                for r in records
             ]
         except Exception:
             self.agents = []
