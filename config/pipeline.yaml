@@ -2,6 +2,15 @@ data_dir: data
 server:
   host: 127.0.0.1
   port: 8000
+worker:
+  # Local phases do not consume openclaw runners. Tune these based on disk,
+  # network, and ASR capacity.
+  phase_concurrency:
+    download: 10
+    transcribe: 2
+    assemble: 10
+    package: 10
+    waiting_for_url: 10
 asr:
   provider: auto
   whisper:

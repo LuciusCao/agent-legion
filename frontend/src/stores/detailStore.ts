@@ -43,7 +43,7 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
     try {
       const data = await api<{ video: VideoItem }>(`/api/videos/${id}`);
       const video = data.video || null;
-      set({ currentVideo: video });
+      set({ currentVideo: video, triggeredNodeIndexes: new Set(), currentSentence: [] });
       if (video) {
         set({ activeTab: video.content_type === "question" ? "subtitles" : "nodes" });
       }

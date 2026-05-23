@@ -25,9 +25,10 @@ const video = (overrides: Partial<VideoItem>): VideoItem => ({
 });
 
 describe("statusGroup", () => {
-  it("treats waiting_for_url as missing_url even if status differs", () => {
+  it("treats missing URLs as failed in the list status group", () => {
+    expect(statusGroup(video({ status: "missing_url" }))).toBe("failed");
     expect(statusGroup(video({ status: "queued", current_phase: "waiting_for_url" }))).toBe(
-      "missing_url",
+      "failed",
     );
   });
 
@@ -41,6 +42,13 @@ describe("statusGroup", () => {
 describe("filterVideos", () => {
   const videos = [
     video({ id: "knowledge_K001", external_id: "K001", title: "奇函数", status: "completed" }),
+    video({
+      id: "knowledge_K002",
+      external_id: "K002",
+      title: "未上架视频",
+      status: "missing_url",
+      current_phase: "waiting_for_url",
+    }),
     video({
       id: "question_Q001",
       content_type: "question",
@@ -60,6 +68,16 @@ describe("filterVideos", () => {
         searchQuery: "q001",
       }).map((item) => item.id),
     ).toEqual(["question_Q001"]);
+  });
+
+  it("includes missing URLs when filtering failed resources", () => {
+    expect(
+      filterVideos(videos, {
+        selectedType: "knowledge",
+        statusFilter: "failed",
+        searchQuery: "k002",
+      }).map((item) => item.id),
+    ).toEqual(["knowledge_K002"]);
   });
 });
 

@@ -35,4 +35,19 @@ describe("detailStore", () => {
     useDetailStore.getState().triggerInteraction(0);
     expect(useDetailStore.getState().triggeredNodeIndexes.has(0)).toBe(true);
   });
+
+  it("resets interaction state when loading a different video", async () => {
+    useDetailStore.setState({
+      triggeredNodeIndexes: new Set([0, 2]),
+      currentSentence: ["old", "state"],
+    });
+    mockApi.mockResolvedValueOnce({
+      video: { id: "v2", title: "Fresh", content_type: "knowledge", status: "queued" },
+    });
+
+    await useDetailStore.getState().loadVideo("v2");
+
+    expect(useDetailStore.getState().triggeredNodeIndexes.size).toBe(0);
+    expect(useDetailStore.getState().currentSentence).toEqual([]);
+  });
 });

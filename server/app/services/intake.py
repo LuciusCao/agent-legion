@@ -1,6 +1,7 @@
 from typing import Any, Protocol
 
 from server.app.db import Database
+from server.app.pipeline.common import make_record_id
 from server.app.pipeline.fetch_url import get_token, lookup_knowledge_video, lookup_question_video
 from server.app.records import VideoRecord
 from server.app.settings import Settings
@@ -59,6 +60,20 @@ def add_video_items(
 
         if external_id:
             existing = db.find_video_by_identity(content_type, external_id)
+            if existing:
+                results.append(
+                    {
+                        "external_id": external_id,
+                        "content_type": content_type,
+                        "status": "duplicate",
+                        "message": "资源已在队列中",
+                        "video": existing,
+                    }
+                )
+                continue
+        elif item.url:
+            video_id = make_record_id(item.url.strip(), content_type, external_id)
+            existing = db.get_video(video_id)
             if existing:
                 results.append(
                     {

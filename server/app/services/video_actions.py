@@ -100,7 +100,7 @@ def select_videos_for_package(
     db: Database,
     video_ids: list[str] | None = None,
 ) -> PackageSelection:
-    if video_ids:
+    if video_ids is not None:
         videos = []
         missing_ids = []
         for video_id in video_ids:
@@ -112,4 +112,4 @@ def select_videos_for_package(
         return PackageSelection(videos=videos, missing_ids=missing_ids)
 
     completed = [video for video in db.list_videos() if video["status"] == "completed"]
-    return PackageSelection(videos=completed or db.list_videos(), missing_ids=[])
+    return PackageSelection(videos=completed, missing_ids=[])

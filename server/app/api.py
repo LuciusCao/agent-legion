@@ -183,13 +183,17 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
 
     @router.post("/package", response_model=PackageResponse)
     def package_completed(request: PackageRequest | None = None) -> dict[str, str]:
-        requested_ids = request.video_ids if request and request.video_ids else None
+        requested_ids = request.video_ids if request is not None else None
         selection = select_videos_for_package(db, requested_ids)
         if selection.missing_ids:
             raise HTTPException(
                 status_code=404,
                 detail=f"Videos not found: {', '.join(selection.missing_ids)}",
             )
+        if request is not None and requested_ids == []:
+            raise HTTPException(status_code=400, detail="No videos selected for packaging")
+        if not selection.videos:
+            raise HTTPException(status_code=400, detail="No completed videos available for packaging")
         package_path = create_package(selection.videos, settings.packages_dir)
         return {
             "path": str(package_path),

@@ -13,7 +13,13 @@ from server.app.db import Database
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool
 from server.app.settings import load_settings
-from server.app.worker import process_video_once
+from server.app.worker import (
+    DEFAULT_PHASE_CONCURRENCY,
+    WorkerCapacity,
+    get_phase_concurrency_limit,
+    pick_next_work,
+    process_video_once,
+)
 
 
 def create_app(
@@ -27,6 +33,8 @@ def create_app(
 
     executor: ThreadPoolExecutor | None = None
     running_futures: dict[str, Future[bool]] = {}
+    running_local_counts: dict[str, int] = {}
+    running_lock = threading.Lock()
 
     agent_manager = AgentStatusManager()
     runner_pool: RunnerPool | None = None
@@ -34,20 +42,37 @@ def create_app(
     def worker_loop() -> None:
         while not stop_event.is_set():
             submitted = False
-            if runner_pool is None:
-                stop_event.wait(1)
+            runner_slot = None
+            if runner_pool is not None:
+                try:
+                    runner_slot = runner_pool.acquire()
+                except RuntimeError:
+                    runner_slot = None
+            with running_lock:
+                running_video_ids = set(running_futures)
+                local_counts = dict(running_local_counts)
+            work = pick_next_work(
+                db.list_videos(),
+                running_video_ids=running_video_ids,
+                capacity=WorkerCapacity(
+                    free_runner=runner_slot,
+                    running_local_counts=local_counts,
+                ),
+                settings=settings,
+            )
+            if work is None:
+                if runner_slot is not None and runner_pool is not None:
+                    runner_pool.release(runner_slot[0])
+                stop_event.wait(3)
                 continue
-            try:
-                runner_index, runner = runner_pool.acquire()
-            except RuntimeError:
-                stop_event.wait(1)
-                continue
-            agent_id = getattr(runner, "agent_id", f"runner-{runner_index}")
-            for video in db.list_videos():
-                if video["status"] not in {"queued", "missing_url"}:
+
+            video = work.video
+            if work.kind == "agent":
+                if runner_slot is None:
+                    stop_event.wait(1)
                     continue
-                if video["id"] in running_futures:
-                    continue
+                runner_index, runner = runner_slot
+                agent_id = getattr(runner, "agent_id", f"runner-{runner_index}")
                 agent_manager.set_busy(agent_id, video)
                 future = executor.submit(
                     process_video_once,
@@ -57,19 +82,51 @@ def create_app(
                     None,
                     runner,
                 )
-                running_futures[video["id"]] = future
+                with running_lock:
+                    running_futures[video["id"]] = future
                 future.add_done_callback(
-                    lambda _f, vid=video["id"], idx=runner_index, aid=agent_id: (
-                        running_futures.pop(vid, None),
-                        runner_pool.release(idx),
-                        agent_manager.set_idle(aid),
+                    lambda _f, vid=video["id"], idx=runner_index, aid=agent_id: finish_agent_work(
+                        vid, idx, aid
                     )
                 )
                 submitted = True
-                break
             else:
-                runner_pool.release(runner_index)
+                if runner_slot is not None and runner_pool is not None:
+                    runner_pool.release(runner_slot[0])
+                future = executor.submit(process_video_once, db, settings, video["id"])
+                with running_lock:
+                    running_futures[video["id"]] = future
+                    running_local_counts[work.phase] = running_local_counts.get(work.phase, 0) + 1
+                future.add_done_callback(
+                    lambda _f, vid=video["id"], phase=work.phase: finish_local_work(vid, phase)
+                )
+                submitted = True
             stop_event.wait(1 if submitted else 3)
+
+    def finish_agent_work(video_id: str, runner_index: int, agent_id: str) -> None:
+        with running_lock:
+            running_futures.pop(video_id, None)
+        if runner_pool is not None:
+            runner_pool.release(runner_index)
+        agent_manager.set_idle(agent_id)
+
+    def finish_local_work(video_id: str, phase: str) -> None:
+        with running_lock:
+            running_futures.pop(video_id, None)
+            next_count = running_local_counts.get(phase, 0) - 1
+            if next_count > 0:
+                running_local_counts[phase] = next_count
+            else:
+                running_local_counts.pop(phase, None)
+
+    def configured_worker_count(runner_count: int) -> int:
+        if max_workers is not None:
+            return max_workers
+        local_slots = sum(
+            get_phase_concurrency_limit(settings, phase)
+            for phase in DEFAULT_PHASE_CONCURRENCY
+        )
+        return max(1, runner_count + local_slots)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -88,7 +145,7 @@ def create_app(
                     else f"runner-{i}"
                 )
             runner_count = runner_pool.size()
-            workers = max_workers if max_workers is not None else max(1, runner_count)
+            workers = configured_worker_count(runner_count)
             executor = ThreadPoolExecutor(max_workers=workers)
             thread = threading.Thread(target=worker_loop, name="video-hive-worker", daemon=True)
             thread.start()
