@@ -108,6 +108,22 @@ UV_CACHE_DIR=.uv-cache uv run ruff check .
 UV_CACHE_DIR=.uv-cache uv run pytest -q
 ```
 
+### Quality Gates
+
+For normal local development, run the quick gate:
+
+```bash
+./scripts/check-quick.sh
+```
+
+Before committing, handing work off, or claiming a cross-stack change is complete, run the full gate:
+
+```bash
+./scripts/check.sh
+```
+
+The quick gate runs Ruff, pytest, and frontend Vitest. The full gate runs the quick gate plus the frontend production build.
+
 ## Code Style Guidelines
 
 - **Formatter / Linter**: Ruff

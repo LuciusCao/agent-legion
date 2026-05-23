@@ -87,12 +87,29 @@ npm run build
 
 After `frontend/dist` exists, the FastAPI backend serves it from `http://127.0.0.1:8000`.
 
-## Test
+## Quality Gates
+
+Quick local check for normal development:
+
+```bash
+./scripts/check-quick.sh
+```
+
+Full check before committing or handing work off:
+
+```bash
+./scripts/check.sh
+```
+
+The quick gate runs Ruff, backend tests, and frontend tests. The full gate runs the quick gate plus the production-style frontend build.
+
+Equivalent commands:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run ruff check .
 UV_CACHE_DIR=.uv-cache uv run pytest -q
 cd frontend
+npm run test
 npm run build
 ```
 
