@@ -1,0 +1,86 @@
+import { useState, useRef, useCallback } from "react";
+import { useUiStore } from "../stores/uiStore";
+import { api } from "../api";
+import { parseResourceIds } from "../helpers";
+import type { AddResult } from "../types";
+
+export function AddDialog() {
+  const { addDialogOpen, addContentType, closeAddDialog, setAddContentType } = useUiStore();
+  const [results, setResults] = useState<AddResult[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const handleSubmit = useCallback(
+    async (e: React.FormEvent) => {
+      e.preventDefault();
+      const input = textareaRef.current?.value || "";
+      const ids = parseResourceIds(input);
+      if (ids.length === 0) return;
+      setIsSubmitting(true);
+      try {
+        const response = await api<{ videos: any[]; results: AddResult[] }>("/api/videos", {
+          method: "POST",
+          body: JSON.stringify({
+            items: ids.map((externalId) => ({ content_type: addContentType, external_id: externalId })),
+          }),
+        });
+        setResults(response.results);
+        if (textareaRef.current) textareaRef.current.value = "";
+      } finally {
+        setIsSubmitting(false);
+      }
+    },
+    [addContentType]
+  );
+
+  const handleClose = useCallback(() => {
+    setResults([]);
+    closeAddDialog();
+  }, [closeAddDialog]);
+
+  return (
+    <md-dialog open={addDialogOpen} onClosed={handleClose}>
+      <form slot="content" onSubmit={handleSubmit}>
+        <div slot="headline">添加资源</div>
+        <div style={{ display: "grid", gap: "14px" }}>
+          <md-segmented-button-set>
+            <md-segmented-button
+              label="知识点"
+              selected={addContentType === "knowledge"}
+              onClick={() => setAddContentType("knowledge")}
+            />
+            <md-segmented-button
+              label="题目"
+              selected={addContentType === "question"}
+              onClick={() => setAddContentType("question")}
+            />
+          </md-segmented-button-set>
+          <md-outlined-text-field
+            ref={textareaRef}
+            type="textarea"
+            rows={8}
+            label="资源 ID"
+            placeholder="一行一个知识点code，或者一行多个知识点用逗号分割"
+          />
+          {results.length > 0 && (
+            <div className="add-results">
+              {results.map((r, i) => (
+                <div key={i} className="add-result">
+                  <span>{r.external_id}</span>
+                  <span>{r.status}</span>
+                  <span>{r.message || ""}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div slot="actions">
+          <md-text-button type="button" onClick={handleClose}>取消</md-text-button>
+          <md-filled-button type="submit" disabled={isSubmitting}>
+            {isSubmitting ? "处理中..." : "加入队列"}
+          </md-filled-button>
+        </div>
+      </form>
+    </md-dialog>
+  );
+}
