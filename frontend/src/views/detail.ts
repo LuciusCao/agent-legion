@@ -20,6 +20,34 @@ const byId = <T extends HTMLElement>(id: string): T => {
   return el as T;
 };
 
+function getNodeIssues(checklist: Record<string, unknown> | null, nodeId: string): Array<{ title: string; detail: string }> {
+  if (!checklist || typeof checklist !== "object") return [];
+  const checklistData = checklist.checklist as Record<string, unknown> | undefined;
+  if (!checklistData || typeof checklistData !== "object") return [];
+  const issues: Array<{ title: string; detail: string }> = [];
+  for (const dimension of Object.values(checklistData)) {
+    if (!dimension || typeof dimension !== "object") continue;
+    const dimIssues = (dimension as Record<string, unknown>).issues as Array<Record<string, unknown>> | undefined;
+    if (!Array.isArray(dimIssues)) continue;
+    for (const issue of dimIssues) {
+      if (issue.node_id === nodeId) {
+        issues.push({
+          title: String(issue.title ?? "未命名问题"),
+          detail: String(issue.detail ?? ""),
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+function getReviewScore(review: Record<string, unknown> | null): number | null {
+  if (!review || typeof review !== "object") return null;
+  const score = review.overall_score ?? review.score;
+  if (typeof score === "number") return score;
+  return null;
+}
+
 export function renderRerunPhaseOptions(video: VideoItem): void {
   const phases = video.content_type === "question" ? QUESTION_PHASES : KNOWLEDGE_PHASES;
   byId<HTMLSelectElement>("rerunPhase").innerHTML = phases
@@ -165,11 +193,29 @@ function renderTabPanel(ctx: DetailViewContext): void {
         .map((node, index) => {
           const type = String(node.node_type ?? node.type ?? "interaction");
           const label = type === "example_practice" ? "例题试做" : "视频总结";
+          const nodeId = String(node.id ?? "");
+          const issues = getNodeIssues(ctx.currentArtifacts.checklist, nodeId);
+          const score = getReviewScore(ctx.currentArtifacts.review);
+          const hasIssues = issues.length > 0;
+          const reviewHtml = issues.length
+            ? `<div class="node-review">
+                 <div class="review-header ${hasIssues ? "has-issues" : ""}">
+                   <span>审核：${hasIssues ? `⚠️ ${issues.length} 个问题` : "通过 ✅"}</span>
+                   ${score !== null ? `<span>评分：${score}</span>` : ""}
+                 </div>
+                 ${issues.map((issue) => `<div class="issue"><strong>• ${escapeHtml(issue.title)}</strong><p>${escapeHtml(issue.detail)}</p></div>`).join("")}
+               </div>`
+            : score !== null
+              ? `<div class="node-review"><div class="review-header"><span>审核：通过 ✅</span><span>评分：${score}</span></div></div>`
+              : "";
           return `
             <button class="node-card ${ctx.triggeredNodeIndexes.has(index) ? "answered" : ""}" data-node="${index}">
-              <strong>${label}</strong>
-              <span>${seconds(Number(node.trigger_time ?? 0))}</span>
-              <small>${escapeHtml(String(node.chapter_id ?? ""))}</small>
+              <div class="node-main">
+                <strong>${label}</strong>
+                <span>${seconds(Number(node.trigger_time ?? 0))}</span>
+                <small>${escapeHtml(String(node.chapter_id ?? ""))}</small>
+              </div>
+              ${reviewHtml}
             </button>
           `;
         })
