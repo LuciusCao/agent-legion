@@ -7,7 +7,7 @@ worker:
   # network, and ASR capacity.
   phase_concurrency:
     download: 10
-    transcribe: 2
+    transcribe: 1
     assemble: 10
     package: 10
     waiting_for_url: 10
@@ -41,6 +41,8 @@ openclaw:
     - --local
     - --agent
     - main
+    - --session-id
+    - "{video_id}-{timestamp}"
     - --message
     - "{prompt_text}"
     - --json
