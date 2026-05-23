@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from server.app.pipeline.phases import PHASES
+
 PHASE_OUTPUTS = {
     "download": ["{video_id}.mp4"],
     "transcribe": ["subtitles.srt", "transcription.json"],
@@ -11,7 +13,7 @@ PHASE_OUTPUTS = {
     "package": [],
 }
 
-PHASE_ORDER = list(PHASE_OUTPUTS)
+PHASE_ORDER = list(PHASES)
 
 
 def clear_artifacts_from(video_dir: Path, phase: str, video_id: str) -> None:

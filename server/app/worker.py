@@ -1,15 +1,13 @@
 import json
-import subprocess
 from pathlib import Path
 
-from server.app.agents import AgentStatusManager
 from server.app.db import Database
-from server.app.pipeline.artifacts import clear_artifacts_from
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.download import download_video
 from server.app.pipeline.fetch_url import fetch_knowledge_url, fetch_question_url, get_token
 from server.app.pipeline.openclaw import OpenClawRunner
 from server.app.pipeline.phases import AGENT_PHASES, next_phase
+from server.app.pipeline.runners import build_openclaw_runner
 from server.app.pipeline.transcribe import (
     SenseVoiceProvider,
     TranscriptionProvider,
@@ -41,145 +39,16 @@ def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
             model=str(whisper.get("model", "")),
         ),
         SenseVoiceProvider(
-            script=str(settings.root_dir / str(sensevoice.get("script", "scripts/sensevoice_srt.py"))),
-            model_dir=str(settings.root_dir / str(sensevoice.get("model_dir", "models/SenseVoiceSmall"))),
+            script=str(
+                settings.root_dir / str(sensevoice.get("script", "scripts/sensevoice_srt.py"))
+            ),
+            model_dir=str(
+                settings.root_dir
+                / str(sensevoice.get("model_dir", "models/SenseVoiceSmall"))
+            ),
         ),
     ]
     return providers
-
-
-_runners: list[OpenClawRunner] = []
-_busy_indices: set[int] = set()
-
-
-def discover_openclaw_agents(timeout: int = 10) -> list[str]:
-    try:
-        result = subprocess.run(
-            ["openclaw", "agents", "list", "--json"],
-            capture_output=True,
-            text=True,
-            timeout=timeout,
-        )
-        if result.returncode != 0:
-            return []
-        agents = json.loads(result.stdout)
-        return [a["id"] for a in agents if isinstance(a, dict) and "id" in a]
-    except Exception:
-        return []
-
-
-def _build_agent_command(base_template: list[str], agent_id: str) -> list[str]:
-    result: list[str] = []
-    i = 0
-    while i < len(base_template):
-        part = base_template[i]
-        if part == "--agent" and i + 1 < len(base_template):
-            result.extend(["--agent", agent_id])
-            i += 2
-        else:
-            result.append(part)
-            i += 1
-    return result
-
-
-def build_openclaw_runners(
-    settings: Settings, discovered_agent_ids: list[str] | None = None
-) -> list[OpenClawRunner]:
-    openclaw = settings.config.get("openclaw", {})
-    base_cwd = (settings.root_dir / str(openclaw.get("cwd", "."))).resolve()
-    timeout_seconds = int(openclaw.get("timeout_seconds", 600))
-
-    # 1. 显式配置的 runners（最高优先级）
-    runners_config = openclaw.get("runners")
-    if runners_config:
-        return [
-            OpenClawRunner(
-                command_template=list(r["command_template"]),
-                cwd=base_cwd,
-                timeout_seconds=timeout_seconds,
-            )
-            for r in runners_config
-        ]
-
-    # 2. 基础命令模板
-    base_template = list(
-        openclaw.get(
-            "command_template",
-            [
-                "openclaw",
-                "agent",
-                "--local",
-                "--agent",
-                "main",
-                "--message",
-                "{prompt_text}",
-                "--json",
-            ],
-        )
-    )
-
-    # 3. 如果模板包含 --agent，动态发现可用 agents
-    if "--agent" in base_template:
-        agents = discovered_agent_ids if discovered_agent_ids is not None else discover_openclaw_agents()
-        if agents:
-            return [
-                OpenClawRunner(
-                    command_template=_build_agent_command(base_template, agent_id),
-                    cwd=base_cwd,
-                    timeout_seconds=timeout_seconds,
-                )
-                for agent_id in agents
-            ]
-
-    # 4. 回退：单个默认 runner
-    return [
-        OpenClawRunner(
-            command_template=base_template,
-            cwd=base_cwd,
-            timeout_seconds=timeout_seconds,
-        )
-    ]
-
-
-def build_openclaw_runner(settings: Settings) -> OpenClawRunner:
-    return build_openclaw_runners(settings)[0]
-
-
-def init_runners(settings: Settings, agent_manager: AgentStatusManager | None = None) -> int:
-    global _runners, _busy_indices
-    discovered_agent_ids = [agent.id for agent in agent_manager.agents] if agent_manager else None
-    _runners = build_openclaw_runners(settings, discovered_agent_ids)
-    _busy_indices = set()
-    if agent_manager:
-        for i, runner in enumerate(_runners):
-            runner.agent_id = agent_manager.agents[i].id if i < len(agent_manager.agents) else f"runner-{i}"
-    return len(_runners)
-
-
-def acquire_runner() -> tuple[int, OpenClawRunner]:
-    if not _runners:
-        raise RuntimeError("Runners not initialized. Call init_runners() first.")
-    for i, runner in enumerate(_runners):
-        if i not in _busy_indices:
-            _busy_indices.add(i)
-            return i, runner
-    raise RuntimeError("No free runner available")
-
-
-def release_runner(index: int) -> None:
-    _busy_indices.discard(index)
-
-
-def recover_interrupted_videos(db: Database, settings: Settings) -> int:
-    running_videos = [video for video in db.list_videos() if video["status"] == "running"]
-    for video in running_videos:
-        phase = video["current_phase"]
-        if not phase:
-            continue
-        video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video["id"]
-        if video_dir.exists():
-            clear_artifacts_from(video_dir, phase, video["id"])
-    return db.recover_running_videos()
 
 
 def process_video_once(
@@ -251,7 +120,9 @@ def process_video_once(
                 mode=str(settings.config.get("asr", {}).get("provider", "auto")),
                 providers=active_providers,
             )
-            log_path.write_text(json.dumps(result.__dict__, ensure_ascii=False, indent=2), encoding="utf-8")
+            log_path.write_text(
+                json.dumps(result.__dict__, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
         elif phase in AGENT_PHASES:
             agent_phase = AGENT_PHASES[phase]
             if not phase_outputs_sufficient(video_dir, phase, agent_phase.expected_outputs):
