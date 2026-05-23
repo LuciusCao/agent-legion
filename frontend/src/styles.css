@@ -372,8 +372,15 @@ h1 {
 .tab { border: 0; border-bottom: 2px solid transparent; border-radius: 0; }
 .tab.active { border-bottom-color: #176b5b; color: #0f4d41; font-weight: 700; }
 .tab-panel { display: grid; gap: 8px; max-height: 360px; overflow: auto; }
-.node-card, .subtitle-row { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; width: 100%; padding: 10px; text-align: left; }
+.node-card { display: flex; flex-direction: column; align-items: stretch; gap: 0; width: 100%; padding: 10px; text-align: left; }
+.node-main { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; width: 100%; }
 .node-card.answered { background: #e8f4ef; border-color: #176b5b; }
+.node-review { margin-top: 0.5rem; padding-top: 0.5rem; border-top: 1px solid #e3e9ec; font-size: 0.85rem; text-align: left; }
+.review-header { display: flex; justify-content: space-between; color: #059669; font-weight: 500; margin-bottom: 0.25rem; }
+.review-header.has-issues { color: #d97706; }
+.issue { margin-top: 0.4rem; color: #374151; }
+.issue p { margin: 0.15rem 0 0; color: #6b7280; font-size: 0.8rem; }
+.subtitle-row { display: grid; grid-template-columns: 120px 1fr auto; gap: 10px; width: 100%; padding: 10px; text-align: left; }
 .subtitle-row.active { background: #e8f4ef; border-color: #176b5b; }
 pre { margin: 0; white-space: pre-wrap; font-size: 12px; }
 .practice-toast, .interaction-overlay { position: absolute; inset: 0; display: grid; place-items: center; background: rgb(0 0 0 / 0.45); }
