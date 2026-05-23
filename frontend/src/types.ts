@@ -13,6 +13,7 @@ export type VideoItem = {
   status: string;
   current_phase: string;
   error_message: string;
+  storage_dir?: string;
 };
 
 export type AgentStatus = {
@@ -24,6 +25,21 @@ export type AgentStatus = {
   current_content_type?: ContentType | "";
   current_external_id?: string;
   current_phase?: string;
+};
+
+export type Chapter = {
+  start: number;
+  title: string;
+};
+
+export type InteractionNode = {
+  node_type?: string;
+  type?: string;
+  content?: {
+    question?: string;
+    options?: string[];
+    word_bank?: string[];
+  };
 };
 
 export type VideoArtifacts = {
