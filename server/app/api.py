@@ -133,13 +133,15 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
 
     @router.post("/videos/batch/rerun", response_model=BatchRerunResponse)
     def batch_rerun_videos(request: BatchRerunRequest) -> dict[str, Any]:
-        return {"results": batch_rerun_video_records(db, settings, request.video_ids, request.phase)}
+        return {"results": batch_rerun_video_records(db, settings, request.video_ids, request.phase, agent_manager)}
 
     @router.post("/videos/{video_id}/rerun")
     def rerun_video(video_id: str, request: RerunRequest) -> dict[str, Any]:
-        result = rerun_video_record(db, settings, video_id, request.phase)
+        result = rerun_video_record(db, settings, video_id, request.phase, agent_manager)
         if result["status"] == "not_found":
             raise HTTPException(status_code=404, detail="Video not found")
+        if result["status"] == "busy":
+            raise HTTPException(status_code=409, detail=result["message"])
         if result["status"] == "invalid_phase":
             raise HTTPException(status_code=400, detail=result["message"])
         return {"video": db.get_video(video_id)}

@@ -2,6 +2,7 @@ import shutil
 from dataclasses import dataclass
 from pathlib import Path
 
+from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
 from server.app.records import VideoRecord
@@ -36,6 +37,7 @@ def rerun_video_record(
     settings: Settings,
     video_id: str,
     phase: str,
+    agent_manager: AgentStatusManager | None = None,
 ) -> dict[str, str]:
     video = db.get_video(video_id)
     if not video:
@@ -44,6 +46,14 @@ def rerun_video_record(
             "status": "not_found",
             "phase": phase,
             "message": "Video not found",
+        }
+
+    if agent_manager is not None and agent_manager.is_video_busy(video_id):
+        return {
+            "video_id": video_id,
+            "status": "busy",
+            "phase": phase,
+            "message": "Video is currently being processed",
         }
 
     normalized_phase = normalize_rerun_phase(video, phase)
@@ -81,8 +91,9 @@ def batch_rerun_video_records(
     settings: Settings,
     video_ids: list[str],
     phase: str,
+    agent_manager: AgentStatusManager | None = None,
 ) -> list[dict[str, str]]:
-    return [rerun_video_record(db, settings, video_id, phase) for video_id in video_ids]
+    return [rerun_video_record(db, settings, video_id, phase, agent_manager) for video_id in video_ids]
 
 
 def select_videos_for_package(
