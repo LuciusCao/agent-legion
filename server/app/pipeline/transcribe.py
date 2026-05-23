@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -83,9 +84,6 @@ class WhisperCppProvider(TranscriptionProvider):
                 "--output-srt",
                 "-of",
                 str(out_stem),
-                "--vad",
-                "-vt",
-                "0.6",
             ],
             check=True,
         )
@@ -108,7 +106,7 @@ class SenseVoiceProvider(TranscriptionProvider):
         video_id = video_path.stem
         script_output_dir = output_path.parent.parent if output_path.parent.name == video_id else output_path.parent
         cmd = [
-            "python3",
+            sys.executable,
             str(self.script),
             "--input",
             str(video_path),
