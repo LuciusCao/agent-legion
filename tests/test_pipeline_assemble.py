@@ -44,9 +44,9 @@ def test_assemble_video_creates_metadata_and_report(tmp_path):
     assert metadata["duration"] == 5.0
     assert metadata["content_type"] == "knowledge"
     assert len(metadata["chapters"]) == 1
-    assert len(metadata["nodes"]) == 1
-    assert metadata["nodes"][0]["id"] == "I1"
-    assert metadata["nodes"][0]["trigger_time"] == 1
+    assert len(metadata["interactions"]) == 1
+    assert metadata["interactions"][0]["id"] == "I1"
+    assert metadata["interactions"][0]["trigger_time"] == 1
     assert metadata["review_details"]["score"] == 95
     assert metadata["status"] == "已完成"
 
@@ -87,7 +87,7 @@ def test_assemble_video_creates_empty_interactions_stub_for_question(tmp_path):
     video = {"id": "question_Q001", "title": "Q1", "content_type": "question", "external_id": "Q001"}
     metadata = assemble_video(video, video_dir)
 
-    assert metadata["nodes"] == []
+    assert metadata["interactions"] == []
     assert (video_dir / "interactions.json").exists()
     saved = json.loads((video_dir / "interactions.json").read_text(encoding="utf-8"))
     assert saved == {"version": "1.0", "interactions": []}

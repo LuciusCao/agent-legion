@@ -114,7 +114,7 @@ describe("DetailPage", () => {
       .mockResolvedValueOnce({
         subtitles: [{ index: 1, start: 1, end: 3, text: "字幕内容" }],
         chapters: [{ id: "c1", start: 12, end: 30, title: "第一章" }],
-        interactions: [{ trigger_time: 5, content: { question: "节点内容" } }],
+        interactions: [{ trigger_time: 5, instruction: "节点内容" }],
         metadata: null,
         review: null,
         checklist: null,

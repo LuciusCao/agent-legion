@@ -11,23 +11,55 @@ interface InteractionOverlayProps {
 export function InteractionOverlay({
   node,
   currentSentence,
-  onWordClick,
+  onWordClick: _onWordClick,
   onReset,
   onContinue,
 }: InteractionOverlayProps) {
   if (!node) return null;
 
-  const type = String(node.node_type ?? node.type ?? "");
+  const type = String(node.type ?? "");
 
   if (type === "example_practice") {
     return (
       <div className="interaction-overlay">
         <div className="practice-card">
-          <p>{node.content?.question || "练习"}</p>
-          <div>
-            {(node.content?.options || []).map((opt: string, i: number) => (
+          <p>{node.instruction || "练习"}</p>
+          {node.hint && (
+            <p style={{ fontSize: "0.875rem", color: "var(--md-sys-color-outline)" }}>
+              提示：{node.hint}
+            </p>
+          )}
+          {node.options && node.options.length > 0 && (
+            <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "12px" }}>
+              {node.options.map((opt, i) => (
+                <md-outlined-button key={i} onClick={onContinue}>
+                  {opt.text}
+                </md-outlined-button>
+              ))}
+            </div>
+          )}
+          <div style={{ marginTop: "12px" }}>
+            <md-filled-button onClick={onContinue}>继续</md-filled-button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  if (node.options && node.options.length > 0) {
+    return (
+      <div className="interaction-overlay">
+        <div className="practice-card">
+          <p>{node.instruction || "互动"}</p>
+          {node.reference_sentence && (
+            <p style={{ fontSize: "0.875rem", color: "var(--md-sys-color-outline)" }}>
+              {node.reference_sentence}
+            </p>
+          )}
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "12px" }}>
+            {node.options.map((opt, i) => (
               <md-outlined-button key={i} onClick={onContinue}>
-                {opt}
+                {opt.text}
               </md-outlined-button>
             ))}
           </div>
@@ -36,18 +68,12 @@ export function InteractionOverlay({
     );
   }
 
-  const wordBank: string[] = node.content?.word_bank || [];
-
+  // Fallback: sentence-building or generic interaction
   return (
     <div className="interaction-overlay">
       <div className="sentence-card">
-        <p>{node.content?.question || "连词成句"}</p>
+        <p>{node.instruction || "连词成句"}</p>
         <div className="sentence-box">{currentSentence.join(" ")}</div>
-        <div className="word-bank">
-          {wordBank.map((word, i) => (
-            <md-suggestion-chip key={i} label={word} onClick={() => onWordClick(word)} />
-          ))}
-        </div>
         <div>
           <md-text-button onClick={onReset}>重置</md-text-button>
           <md-filled-button onClick={onContinue}>确认</md-filled-button>

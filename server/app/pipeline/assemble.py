@@ -21,15 +21,6 @@ def assemble_video(video: dict, video_dir: Path) -> dict:
         )
     interactions = interactions_data.get("interactions", [])
     duration = subtitles[-1]["end"] if subtitles else 0
-    nodes = [
-        {
-            "id": item.get("id", f"N{index + 1}"),
-            "trigger_time": item.get("trigger_time", 0),
-            "type": item.get("type", "interaction"),
-            "question": {k: v for k, v in item.items() if k not in {"id", "trigger_time", "type"}},
-        }
-        for index, item in enumerate(interactions)
-    ]
     review_path = video_dir / "review_result.json"
     review_details = json.loads(review_path.read_text(encoding="utf-8")) if review_path.exists() else {}
     metadata = {
@@ -43,7 +34,7 @@ def assemble_video(video: dict, video_dir: Path) -> dict:
         "question_id": video.get("question_id", ""),
         "status": "已完成",
         "chapters": chapters,
-        "nodes": nodes,
+        "interactions": interactions,
         "subtitles": subtitles,
         "review_details": review_details,
     }

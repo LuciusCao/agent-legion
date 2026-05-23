@@ -14,13 +14,13 @@ export function NodePanel() {
               <span style={{ fontVariantNumeric: "tabular-nums" }}>
                 {formatTime(Number(node.trigger_time ?? 0))}
               </span>
-              <span>{node.content?.question || "交互节点"}</span>
-              <md-assist-chip label={String(node.node_type ?? node.type ?? "")} />
+              <span>{node.instruction || "交互节点"}</span>
+              <md-assist-chip label={String(node.type ?? "")} />
             </div>
-            {node.content?.options && (
+            {node.options && node.options.length > 0 && (
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
-                {node.content.options.map((opt: string, j: number) => (
-                  <md-outlined-button key={j} disabled={answered}>{opt}</md-outlined-button>
+                {node.options.map((opt, j) => (
+                  <md-outlined-button key={j} disabled={answered}>{opt.text}</md-outlined-button>
                 ))}
               </div>
             )}
