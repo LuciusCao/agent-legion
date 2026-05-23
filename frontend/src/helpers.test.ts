@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  escapeHtml,
   filterVideos,
   getInteractionQuestion,
+  parseResourceIds,
   statusGroup,
   visibleSelectedIds,
 } from "./helpers";
@@ -81,5 +83,24 @@ describe("getInteractionQuestion", () => {
     const node = { instruction: "暂停思考", hint: "提示" };
 
     expect(getInteractionQuestion(node)).toEqual(node);
+  });
+});
+
+describe("escapeHtml", () => {
+  it("escapes text before it is placed into HTML strings", () => {
+    expect(escapeHtml(`<img src=x onerror="alert('x')">`)).toBe(
+      "&lt;img src=x onerror=&quot;alert(&#039;x&#039;)&quot;&gt;",
+    );
+  });
+});
+
+describe("parseResourceIds", () => {
+  it("splits ids by newlines and comma variants while trimming empty entries", () => {
+    expect(parseResourceIds(" K001, K002\n\nQ001，Q002 ")).toEqual([
+      "K001",
+      "K002",
+      "Q001",
+      "Q002",
+    ]);
   });
 });

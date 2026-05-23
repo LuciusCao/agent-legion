@@ -50,6 +50,13 @@ export function escapeHtml(value: string): string {
   });
 }
 
+export function parseResourceIds(value: string): string[] {
+  return value
+    .split(/[\n,，]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
 export function seconds(value: number): string {
   const minutes = Math.floor(value / 60);
   const secs = Math.floor(value % 60);
