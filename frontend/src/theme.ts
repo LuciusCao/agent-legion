@@ -1,5 +1,5 @@
 /**
- * MD3 Cyan theme tokens for @material/web
+ * MD3 Neutral (black/white/gray) theme tokens for @material/web
  */
 export const applyTheme = (): void => {
   const root = document.documentElement;
