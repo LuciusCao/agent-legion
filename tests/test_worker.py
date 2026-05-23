@@ -1,45 +1,14 @@
 import json
 import subprocess
 
-from server.app.db import Database
-from server.app.pipeline.transcribe import TranscriptionProvider
+from server.app.pipeline.recovery import recover_interrupted_videos
+from server.app.pipeline.runners import RunnerPool, discover_openclaw_agents
 from server.app.settings import load_settings
-from server.app.worker import (
-    discover_openclaw_agents,
-    init_runners,
-    process_next,
-    process_video_once,
-    recover_interrupted_videos,
-)
+from server.app.worker import process_next, process_video_once
+from tests.conftest import ChapterRunner, TestProvider
 
 
-class TestProvider(TranscriptionProvider):
-    name = "sensevoice"
-
-    def transcribe(self, video_path, output_path, title):
-        output_path.write_text("1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8")
-
-
-class ChapterRunner:
-    def __init__(self):
-        self.calls = 0
-
-    def run(self, phase, video_id, video_dir, prompt_dir, log_path):
-        self.calls += 1
-        (video_dir / "chapters_raw.json").write_text(
-            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
-            encoding="utf-8",
-        )
-        (video_dir / "chapters.json").write_text(
-            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
-            encoding="utf-8",
-        )
-        return type("Result", (), {"status": "completed", "error_message": ""})()
-
-
-def test_worker_processes_transcribe_phase(tmp_path):
-    settings = load_settings(data_dir=tmp_path)
-    db = Database(settings.data_dir / "app.sqlite")
+def test_worker_processes_transcribe_phase(db, settings):
     video = db.create_video("https://example.com/a.mp4", "A")
     video_dir = settings.videos_dir / "a"
     video_dir.mkdir(parents=True)
@@ -53,9 +22,7 @@ def test_worker_processes_transcribe_phase(tmp_path):
     assert db.get_video("a")["current_phase"] == "subtitle_review"
 
 
-def test_worker_processes_assemble_phase(tmp_path):
-    settings = load_settings(data_dir=tmp_path)
-    db = Database(settings.data_dir / "app.sqlite")
+def test_worker_processes_assemble_phase(db, settings):
     video = db.create_video("https://example.com/a.mp4", "A")
     video_dir = settings.videos_dir / "a"
     video_dir.mkdir(parents=True)
@@ -78,9 +45,7 @@ def test_worker_processes_assemble_phase(tmp_path):
     assert db.get_video("a")["status"] == "completed"
 
 
-def test_worker_resumes_running_video_after_restart(tmp_path):
-    settings = load_settings(data_dir=tmp_path)
-    db = Database(settings.data_dir / "app.sqlite")
+def test_worker_resumes_running_video_after_restart(db, settings):
     video = db.create_video("https://example.com/a.mp4", "A")
     video_dir = settings.videos_dir / "a"
     video_dir.mkdir(parents=True)
@@ -103,9 +68,7 @@ def test_worker_resumes_running_video_after_restart(tmp_path):
     assert db.get_video(video["id"])["status"] == "completed"
 
 
-def test_recovered_agent_phase_clears_partial_outputs_before_rerun(tmp_path):
-    settings = load_settings(data_dir=tmp_path)
-    db = Database(settings.data_dir / "app.sqlite")
+def test_recovered_agent_phase_clears_partial_outputs_before_rerun(db, settings):
     video = db.create_video("https://example.com/a.mp4", "A")
     video_dir = settings.videos_dir / "a"
     video_dir.mkdir(parents=True)
@@ -147,19 +110,18 @@ def test_discover_openclaw_agents_uses_cli_json(monkeypatch):
     assert discover_openclaw_agents() == ["main", "agent_1"]
 
 
-def test_init_runners_returns_explicit_runner_count(tmp_path):
+def test_runner_pool_from_settings_returns_explicit_runner_count(tmp_path):
     settings = load_settings(data_dir=tmp_path)
     settings.config["openclaw"]["runners"] = [
         {"command_template": ["openclaw", "agent", "--agent", "main"]},
         {"command_template": ["openclaw", "agent", "--agent", "agent_1"]},
     ]
 
-    assert init_runners(settings) == 2
+    pool = RunnerPool.from_settings(settings)
+    assert pool.size() == 2
 
 
-def test_question_video_skips_interaction_and_content_review(tmp_path):
-    settings = load_settings(data_dir=tmp_path)
-    db = Database(settings.data_dir / "app.sqlite")
+def test_question_video_skips_interaction_and_content_review(db, settings):
     video = db.create_video(
         "https://example.com/q1.mp4",
         "Q1",
@@ -185,18 +147,14 @@ def test_question_video_skips_interaction_and_content_review(tmp_path):
     assert updated["status"] == "queued"
 
 
-def test_missing_url_video_is_not_processed(tmp_path):
-    settings = load_settings(data_dir=tmp_path)
-    db = Database(settings.data_dir / "app.sqlite")
+def test_missing_url_video_is_not_processed(db, settings):
     db.create_video("", "Question 1", content_type="question", external_id="Q001")
 
     assert process_video_once(db, settings, "question_Q001") is False
     assert db.get_video("question_Q001")["status"] == "missing_url"
 
 
-def test_missing_url_fetch_error_is_visible(tmp_path, monkeypatch):
-    settings = load_settings(data_dir=tmp_path)
-    db = Database(settings.data_dir / "app.sqlite")
+def test_missing_url_fetch_error_is_visible(db, settings, monkeypatch):
     db.create_video("", "Knowledge 1", content_type="knowledge", external_id="K001")
 
     monkeypatch.setattr("server.app.worker.get_token", lambda env, config: "token")
@@ -213,9 +171,7 @@ def test_missing_url_fetch_error_is_visible(tmp_path, monkeypatch):
     assert "cms timeout" in video["error_message"]
 
 
-def test_worker_retries_missing_url_video_from_cms(tmp_path, monkeypatch):
-    settings = load_settings(data_dir=tmp_path)
-    db = Database(settings.data_dir / "app.sqlite")
+def test_worker_retries_missing_url_video_from_cms(db, settings, monkeypatch):
     db.create_video("", "Question 1", content_type="question", external_id="Q001")
 
     monkeypatch.setattr("server.app.worker.get_token", lambda env, config: "token")
@@ -236,10 +192,8 @@ def test_worker_retries_missing_url_video_from_cms(tmp_path, monkeypatch):
     assert video["current_phase"] == "transcribe"
 
 
-def test_process_next_continues_after_unresolved_missing_url(tmp_path):
-    settings = load_settings(data_dir=tmp_path)
+def test_process_next_continues_after_unresolved_missing_url(db, settings):
     settings.config["cms"] = {}
-    db = Database(settings.data_dir / "app.sqlite")
     video = db.create_video("https://example.com/a.mp4", "A")
     db.create_video("", "Question 1", content_type="question", external_id="Q001")
     with db.connect() as conn:

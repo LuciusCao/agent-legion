@@ -1,13 +1,8 @@
-
-from fastapi.testclient import TestClient
-
-from server.app.main import create_app
+import json
+import subprocess
 
 
-def test_core_api_routes_declare_response_models(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
-
+def test_core_api_routes_declare_response_models(client):
     schema = client.get("/openapi.json").json()
     paths = schema["paths"]
 
@@ -28,9 +23,55 @@ def test_core_api_routes_declare_response_models(tmp_path):
     ] == {"$ref": "#/components/schemas/PackageResponse"}
 
 
-def test_add_video_list_artifacts_and_rerun(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
+def test_agents_websocket_sends_initial_list(client, monkeypatch):
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=json.dumps([{"id": "main", "identityName": "Main"}]),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    agent_manager = client.app.state.agent_manager
+    agent_manager.discover()
+
+    with client.websocket_connect("/api/agents") as ws:
+        data = ws.receive_json()
+        assert len(data) == 1
+        assert data[0]["id"] == "main"
+        assert data[0]["name"] == "Main"
+        assert data[0]["busy"] is False
+
+
+def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
+    def fake_run(cmd, **kwargs):
+        return subprocess.CompletedProcess(
+            cmd,
+            0,
+            stdout=json.dumps([{"id": "main"}]),
+            stderr="",
+        )
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    agent_manager = client.app.state.agent_manager
+    agent_manager.discover()
+
+    with client.websocket_connect("/api/agents") as ws:
+        ws.receive_json()
+        agent_manager.set_busy("main", {"id": "v1", "title": "T1", "content_type": "knowledge", "external_id": "K001", "current_phase": "download"})
+        data = ws.receive_json()
+        assert data[0]["busy"] is True
+        assert data[0]["current_video_id"] == "v1"
+        assert data[0]["current_title"] == "T1"
+
+        agent_manager.set_idle("main")
+        data = ws.receive_json()
+        assert data[0]["busy"] is False
+        assert data[0]["current_video_id"] is None
+
+
+def test_add_video_list_artifacts_and_rerun(tmp_path, client):
 
     created = client.post(
         "/api/videos",
@@ -69,11 +110,8 @@ def test_add_video_list_artifacts_and_rerun(tmp_path):
     assert not (video_dir / "subtitles.srt").exists()
 
 
-def test_artifacts_endpoint_includes_checklist_and_review(tmp_path):
+def test_artifacts_endpoint_includes_checklist_and_review(tmp_path, client):
     import json
-
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
 
     created = client.post(
         "/api/videos",
@@ -117,7 +155,7 @@ def test_artifacts_endpoint_includes_checklist_and_review(tmp_path):
     assert artifacts["review"]["score"] == 95
 
 
-def test_add_question_without_url_waits_for_url(tmp_path, monkeypatch):
+def test_add_question_without_url_waits_for_url(tmp_path, monkeypatch, client):
     monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
         "server.app.services.intake.lookup_question_video",
@@ -125,8 +163,6 @@ def test_add_question_without_url_waits_for_url(tmp_path, monkeypatch):
             "Lookup", (), {"status": "missing_url", "url": "", "title": "Question 1"}
         )(),
     )
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
 
     created = client.post(
         "/api/videos",
@@ -142,7 +178,7 @@ def test_add_question_without_url_waits_for_url(tmp_path, monkeypatch):
     assert video["question_id"] == "Q001"
 
 
-def test_add_knowledge_without_url_fetches_source_v2_from_cms(tmp_path, monkeypatch):
+def test_add_knowledge_without_url_fetches_source_v2_from_cms(tmp_path, monkeypatch, client):
     monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
         "server.app.services.intake.lookup_knowledge_video",
@@ -150,8 +186,6 @@ def test_add_knowledge_without_url_fetches_source_v2_from_cms(tmp_path, monkeypa
             "Lookup", (), {"status": "found", "url": "https://example.com/k001.mp4", "title": "Knowledge 1"}
         )(),
     )
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
 
     created = client.post(
         "/api/videos",
@@ -166,13 +200,11 @@ def test_add_knowledge_without_url_fetches_source_v2_from_cms(tmp_path, monkeypa
     assert video["current_phase"] == "download"
 
 
-def test_add_video_with_empty_url_still_waits_when_cms_fetch_fails(tmp_path, monkeypatch):
+def test_add_video_with_empty_url_still_waits_when_cms_fetch_fails(tmp_path, monkeypatch, client):
     def fail_token(env, config):
         raise RuntimeError("cms unavailable")
 
     monkeypatch.setattr("server.app.services.intake.get_token", fail_token)
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
 
     response = client.post(
         "/api/videos",
@@ -184,14 +216,12 @@ def test_add_video_with_empty_url_still_waits_when_cms_fetch_fails(tmp_path, mon
     assert client.get("/api/videos").json()["videos"] == []
 
 
-def test_add_knowledge_without_url_rejects_cms_not_found(tmp_path, monkeypatch):
+def test_add_knowledge_without_url_rejects_cms_not_found(tmp_path, monkeypatch, client):
     monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
         "server.app.services.intake.lookup_knowledge_video",
         lambda code, api_url, token: type("Lookup", (), {"status": "not_found", "url": "", "title": ""})(),
     )
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
 
     response = client.post(
         "/api/videos",
@@ -206,7 +236,7 @@ def test_add_knowledge_without_url_rejects_cms_not_found(tmp_path, monkeypatch):
     assert client.get("/api/videos").json()["videos"] == []
 
 
-def test_add_question_without_url_creates_missing_url_when_cms_resource_exists(tmp_path, monkeypatch):
+def test_add_question_without_url_creates_missing_url_when_cms_resource_exists(tmp_path, monkeypatch, client):
     monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
         "server.app.services.intake.lookup_question_video",
@@ -214,8 +244,6 @@ def test_add_question_without_url_creates_missing_url_when_cms_resource_exists(t
             "Lookup", (), {"status": "missing_url", "url": "", "title": "Question 1"}
         )(),
     )
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
 
     response = client.post(
         "/api/videos",
@@ -230,14 +258,12 @@ def test_add_question_without_url_creates_missing_url_when_cms_resource_exists(t
     assert result["video"]["current_phase"] == "waiting_for_url"
 
 
-def test_add_without_url_reports_fetch_failed_when_cms_errors(tmp_path, monkeypatch):
+def test_add_without_url_reports_fetch_failed_when_cms_errors(tmp_path, monkeypatch, client):
     def fail_lookup(code, api_url, token):
         raise RuntimeError("cms unavailable")
 
     monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr("server.app.services.intake.lookup_knowledge_video", fail_lookup)
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
 
     response = client.post(
         "/api/videos",
@@ -249,9 +275,7 @@ def test_add_without_url_reports_fetch_failed_when_cms_errors(tmp_path, monkeypa
     assert client.get("/api/videos").json()["videos"] == []
 
 
-def test_add_duplicate_identity_reports_duplicate(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
+def test_add_duplicate_identity_reports_duplicate(client):
 
     first = client.post(
         "/api/videos",
@@ -284,9 +308,7 @@ def test_add_duplicate_identity_reports_duplicate(tmp_path):
     assert len(client.get("/api/videos").json()["videos"]) == 1
 
 
-def test_delete_video_removes_record_and_storage_dir(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
+def test_delete_video_removes_record_and_storage_dir(tmp_path, client):
 
     client.post(
         "/api/videos",
@@ -311,9 +333,7 @@ def test_delete_video_removes_record_and_storage_dir(tmp_path):
     assert [video["id"] for video in client.get("/api/videos").json()["videos"]] == ["g2"]
 
 
-def test_batch_delete_returns_per_video_results(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
+def test_batch_delete_returns_per_video_results(client):
     client.post(
         "/api/videos",
         json={
@@ -337,9 +357,7 @@ def test_batch_delete_returns_per_video_results(tmp_path):
     assert [v["id"] for v in client.get("/api/videos").json()["videos"]] == ["knowledge_K002"]
 
 
-def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
+def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(client):
     client.post(
         "/api/videos",
         json={
@@ -364,9 +382,7 @@ def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(tmp
     assert client.get("/api/videos/question_Q001").json()["video"]["current_phase"] == "assemble"
 
 
-def test_package_selected_videos_and_download(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
+def test_package_selected_videos_and_download(tmp_path, client):
     client.post(
         "/api/videos",
         json={
@@ -391,9 +407,7 @@ def test_package_selected_videos_and_download(tmp_path):
     assert download.headers["content-type"] in {"application/zip", "application/x-zip-compressed"}
 
 
-def test_package_selected_missing_video_returns_404(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
+def test_package_selected_missing_video_returns_404(client):
 
     response = client.post("/api/package", json={"video_ids": ["missing"]})
 
@@ -401,8 +415,6 @@ def test_package_selected_missing_video_returns_404(tmp_path):
     assert response.json()["detail"] == "Videos not found: missing"
 
 
-def test_package_download_rejects_path_traversal(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    client = TestClient(app)
+def test_package_download_rejects_path_traversal(client):
     response = client.get("/api/packages/%2e%2e/%2e%2e/%2e%2e/etc/passwd")
     assert response.status_code == 404
