@@ -33,6 +33,7 @@ export function DetailPage() {
     loadArtifacts,
     loadLog,
     triggerInteraction,
+    dismissInteraction,
     pushWord,
     resetSentence,
     clearSentence,
@@ -73,10 +74,16 @@ export function DetailPage() {
     if (playerRef.current) playerRef.current.currentTime = time;
   }, []);
 
+  const activeNodeIndex = Array.from(triggeredNodeIndexes).pop();
+  const activeNode = activeNodeIndex !== undefined ? artifacts.interactions[activeNodeIndex] : null;
+
   const handleContinue = useCallback(() => {
     clearSentence();
+    if (activeNodeIndex !== undefined) {
+      dismissInteraction(activeNodeIndex);
+    }
     playerRef.current?.play();
-  }, [clearSentence]);
+  }, [clearSentence, activeNodeIndex, dismissInteraction]);
 
   const handleDelete = useCallback(async () => {
     if (!id || !window.confirm("确定删除该资源？本地视频和处理产物目录也会删除。")) return;
@@ -112,9 +119,6 @@ export function DetailPage() {
     },
     [id, fetchVideos, showToast]
   );
-
-  const activeNodeIndex = Array.from(triggeredNodeIndexes).pop();
-  const activeNode = activeNodeIndex !== undefined ? artifacts.interactions[activeNodeIndex] : null;
 
   return (
     <section className="view detail-view">
@@ -182,7 +186,7 @@ export function DetailPage() {
         {currentVideo && <DetailTabs contentType={currentVideo.content_type} />}
         <div className="tab-panel">
           {activeTab === "subtitles" && <SubtitlePanel currentTime={currentTime} onSeek={handleSeek} />}
-          {activeTab === "nodes" && <NodePanel />}
+          {activeTab === "nodes" && <NodePanel onSeek={handleSeek} />}
           {activeTab === "chapters" && <ChapterPanel onSeek={handleSeek} />}
           {activeTab === "metadata" && <MetadataPanel />}
           {activeTab === "review" && (
