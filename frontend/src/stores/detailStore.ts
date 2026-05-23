@@ -15,6 +15,7 @@ interface DetailState {
   loadLog: (id: string) => Promise<void>;
   setActiveTab: (tab: DetailTab) => void;
   triggerInteraction: (index: number) => void;
+  dismissInteraction: (index: number) => void;
   resetSentence: () => void;
   pushWord: (word: string) => void;
   clearSentence: () => void;
@@ -97,6 +98,14 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
     set((state) => {
       const next = new Set(state.triggeredNodeIndexes);
       next.add(index);
+      return { triggeredNodeIndexes: next };
+    });
+  },
+
+  dismissInteraction: (index) => {
+    set((state) => {
+      const next = new Set(state.triggeredNodeIndexes);
+      next.delete(index);
       return { triggeredNodeIndexes: next };
     });
   },

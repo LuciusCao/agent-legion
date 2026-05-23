@@ -33,3 +33,8 @@ export const KNOWLEDGE_PHASES = [
 ];
 
 export const QUESTION_PHASES = ["download", "transcribe", "subtitle_review", "chapter_generate", "assemble"];
+
+export const INTERACTION_TYPE_LABELS: Record<string, string> = {
+  example_practice: "例题试做",
+  interaction_summary: "互动小结",
+};
