@@ -191,13 +191,22 @@ h1 {
   flex-wrap: wrap;
 }
 
-.tabs-with-actions {
+.stats-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+
+.stats-actions {
   display: flex;
   align-items: center;
   gap: 4px;
 }
 
-.tabs-with-actions md-icon-button.active-icon {
+.stats-actions md-icon-button.active-icon {
   --md-icon-button-icon-color: var(--md-sys-color-primary);
 }
 
