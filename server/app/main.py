@@ -1,3 +1,4 @@
+import asyncio
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
 from contextlib import asynccontextmanager
@@ -133,6 +134,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal executor, runner_pool
+        video_event_manager._loop = asyncio.get_running_loop()
         thread = None
         if start_worker:
             agent_manager.discover()

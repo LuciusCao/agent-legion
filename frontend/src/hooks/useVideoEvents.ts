@@ -23,9 +23,9 @@ export function useVideoEvents() {
     };
 
     source.onerror = () => {
-      // Auto-reconnect is handled by the browser; just ensure the
-      // current list is fresh when the connection drops.
-      fetchVideos();
+      // Browser auto-reconnects automatically. If it permanently fails,
+      // the next successful reconnect will deliver missed updates.
+      // No need to spam fetchVideos() on every retry attempt.
     };
 
     return () => source.close();
