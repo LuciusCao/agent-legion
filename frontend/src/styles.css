@@ -232,26 +232,11 @@ h1 {
   white-space: nowrap;
 }
 
-/* Resource title row */
-.resource-title-row {
-  display: grid;
-  grid-template-columns: 1fr 176px;
-  align-items: center;
-  gap: 12px;
-  min-width: 0;
-}
-
-.resource-title-row strong {
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .status-end {
   display: flex;
-  justify-content: flex-end;
-  min-width: 80px;
+  align-items: center;
+  gap: 12px;
+  min-width: 260px;
 }
 
 /* Phase stepper */
