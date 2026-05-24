@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
 import { AgentPanel } from "../components/AgentPanel";
@@ -17,10 +17,21 @@ export function ListPage() {
     fetchVideos,
   } = useVideoStore();
   const { openAddDialog } = useUiStore();
+  const tabsRef = useRef<(HTMLElement & { activeTabIndex: number }) | null>(null);
 
   useEffect(() => {
     fetchVideos();
   }, [fetchVideos]);
+
+  useEffect(() => {
+    const tabs = tabsRef.current;
+    if (!tabs) return;
+    const handleChange = () => {
+      setSelectedType(tabs.activeTabIndex === 0 ? "knowledge" : "question");
+    };
+    tabs.addEventListener("change", handleChange);
+    return () => tabs.removeEventListener("change", handleChange);
+  }, [setSelectedType]);
 
   return (
     <section className="view workbench-view">
@@ -46,11 +57,8 @@ export function ListPage() {
 
       <section className="filters-row">
         <md-tabs
+          ref={tabsRef}
           active-tab-index={selectedType === "knowledge" ? 0 : 1}
-          onChange={(e: React.FormEvent<HTMLElement>) => {
-            const idx = (e.currentTarget as any).activeTabIndex;
-            setSelectedType(idx === 0 ? "knowledge" : "question");
-          }}
         >
           <md-primary-tab>知识点</md-primary-tab>
           <md-primary-tab>题目</md-primary-tab>
