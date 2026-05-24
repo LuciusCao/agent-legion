@@ -252,10 +252,12 @@ h1 {
   display: flex;
   align-items: center;
   gap: 4px;
+  width: 176px;
+  flex-shrink: 0;
 }
 
 .step-bar {
-  width: 28px;
+  flex: 1;
   height: 5px;
   border-radius: 3px;
   background: var(--md-sys-color-outline-variant);
