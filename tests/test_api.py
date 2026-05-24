@@ -501,21 +501,63 @@ def test_video_event_manager_broadcast():
         manager._clients.add(queue)
 
         manager.broadcast({"id": "v1", "status": "running"})
-        await asyncio.sleep(0.05)
-
-        assert not queue.empty()
-        payload = await queue.get()
+        await asyncio.sleep(0)  # yield so call_soon callback runs
+        payload = await asyncio.wait_for(queue.get(), timeout=1.0)
         data = json.loads(payload)
         assert data["type"] == "video_updated"
         assert data["video"]["id"] == "v1"
 
         manager.broadcast_delete("v1")
-        await asyncio.sleep(0.05)
-
-        payload = await queue.get()
+        await asyncio.sleep(0)
+        payload = await asyncio.wait_for(queue.get(), timeout=1.0)
         data = json.loads(payload)
         assert data["type"] == "video_deleted"
         assert data["video_id"] == "v1"
+
+    asyncio.run(_test())
+
+
+def test_video_event_manager_max_clients():
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from server.app.events import VideoEventManager
+
+    async def _test():
+        manager = VideoEventManager()
+        manager._loop = asyncio.get_running_loop()
+
+        for _ in range(VideoEventManager.MAX_CLIENTS + 5):
+            await manager.connect(MagicMock())
+
+        assert len(manager._clients) == VideoEventManager.MAX_CLIENTS
+
+    asyncio.run(_test())
+
+
+def test_video_event_manager_queue_full_cleanup():
+    import asyncio
+
+    from server.app.events import VideoEventManager
+
+    async def _test():
+        manager = VideoEventManager()
+        manager._loop = asyncio.get_running_loop()
+        full_queue = asyncio.Queue(maxsize=1)
+        full_queue.put_nowait("block")
+        manager._clients.add(full_queue)
+
+        normal_queue = asyncio.Queue()
+        manager._clients.add(normal_queue)
+
+        manager.broadcast({"id": "v1", "status": "running"})
+        await asyncio.sleep(0)
+
+        # Full queue should have been evicted
+        assert full_queue not in manager._clients
+        # Normal queue should have received the message
+        payload = await asyncio.wait_for(normal_queue.get(), timeout=1.0)
+        assert "v1" in payload
 
     asyncio.run(_test())
 
@@ -547,7 +589,7 @@ def test_database_broadcast_on_create_and_delete(client):
         assert created.status_code == 200
         video_id = created.json()["videos"][0]["id"]
 
-        await asyncio.sleep(0.05)
+        await asyncio.sleep(0)
         # Drain creation events
         while not queue.empty():
             await queue.get()
@@ -556,9 +598,8 @@ def test_database_broadcast_on_create_and_delete(client):
         deleted = client.delete(f"/api/videos/{video_id}")
         assert deleted.status_code == 200
 
-        await asyncio.sleep(0.05)
-        assert not queue.empty()
-        payload = await queue.get()
+        await asyncio.sleep(0)
+        payload = await asyncio.wait_for(queue.get(), timeout=1.0)
         data = json.loads(payload)
         assert data["type"] == "video_deleted"
         assert data["video_id"] == video_id
