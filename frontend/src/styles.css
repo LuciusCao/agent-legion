@@ -234,7 +234,8 @@ h1 {
 
 /* Resource title row */
 .resource-title-row {
-  display: flex;
+  display: grid;
+  grid-template-columns: 1fr 176px;
   align-items: center;
   gap: 12px;
   min-width: 0;
@@ -245,6 +246,12 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.status-end {
+  display: flex;
+  justify-content: flex-end;
+  min-width: 80px;
 }
 
 /* Phase stepper */
