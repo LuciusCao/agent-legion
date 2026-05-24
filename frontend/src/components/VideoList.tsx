@@ -99,7 +99,9 @@ export function VideoList() {
                   </small>
                 )}
               </div>
-              <md-assist-chip slot="end" label={STATUS_LABELS[statusGroup(video)] || video.status} />
+              <div slot="end" className="status-end">
+                <md-assist-chip label={STATUS_LABELS[statusGroup(video)] || video.status} />
+              </div>
             </md-list-item>
           );
         })}
