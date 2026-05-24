@@ -232,6 +232,34 @@ h1 {
   white-space: nowrap;
 }
 
+/* Phase stepper */
+.phase-stepper {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+}
+
+.step-bar {
+  width: 28px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--md-sys-color-outline-variant);
+  transition: background 200ms ease;
+}
+
+.step-bar.completed {
+  background: #22c55e;
+}
+
+.step-bar.running {
+  background: #3b82f6;
+}
+
+.step-bar.failed {
+  background: #ef4444;
+}
+
 /* Detail view */
 .detail-view {
   display: grid;
