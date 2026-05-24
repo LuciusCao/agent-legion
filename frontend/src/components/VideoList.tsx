@@ -85,9 +85,8 @@ export function VideoList() {
                   }}
                 />
               )}
-              <div slot="headline" className="resource-title-row">
+              <div slot="headline">
                 <strong>{video.title || "未命名"}</strong>
-                <PhaseStepper video={video} />
               </div>
               <div slot="supporting-text">
                 <small>
@@ -100,6 +99,7 @@ export function VideoList() {
                 )}
               </div>
               <div slot="end" className="status-end">
+                <PhaseStepper video={video} />
                 <md-assist-chip label={STATUS_LABELS[statusGroup(video)] || video.status} />
               </div>
             </md-list-item>
