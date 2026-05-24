@@ -13,14 +13,14 @@ describe("ListPage", () => {
     mockApi.mockReset();
   });
 
-  it("renders page title", () => {
+  it("renders list page", () => {
     mockApi.mockResolvedValueOnce({ videos: [] });
     render(
       <MemoryRouter>
         <ListPage />
       </MemoryRouter>
     );
-    expect(screen.getByText("Video Hive")).toBeInTheDocument();
+    expect(screen.getByText("知识点")).toBeInTheDocument();
   });
 
   it("filters list by content type when tab changes", async () => {

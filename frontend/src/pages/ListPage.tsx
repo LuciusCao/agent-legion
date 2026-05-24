@@ -35,13 +35,6 @@ export function ListPage() {
 
   return (
     <section className="view workbench-view">
-      <header className="topbar">
-        <div>
-          <h1>Video Hive</h1>
-          <p className="title-medium">资源处理队列</p>
-        </div>
-      </header>
-
       <AgentPanel />
 
       <section className="filters-row">
