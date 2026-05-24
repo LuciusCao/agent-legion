@@ -131,25 +131,25 @@ export function DetailPage() {
         <div className="detail-title-block">
           <h1>{currentVideo?.title || "未选择资源"}</h1>
           {currentVideo && (
-            <>
-              <p>
-                {TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}
-              </p>
-              <div className="detail-progress">
-                <span className={`phase-name ${currentVideo.status === "running" ? "running-text" : ""}`}>
-                  {PHASE_LABELS[currentVideo.current_phase] || currentVideo.current_phase}
-                </span>
-                <PhaseStepper video={currentVideo} />
-                <span className={`status-badge ${statusGroup(currentVideo)}`}>
-                  {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
-                </span>
-              </div>
-            </>
+            <p>
+              {TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}
+            </p>
           )}
           {currentVideo?.error_message && (
             <p className="error-text" style={{ marginTop: 4 }}>{currentVideo.error_message}</p>
           )}
         </div>
+        {currentVideo && (
+          <div className="detail-progress">
+            <span className={`phase-name ${currentVideo.status === "running" ? "running-text" : ""}`}>
+              {PHASE_LABELS[currentVideo.current_phase] || currentVideo.current_phase}
+            </span>
+            <PhaseStepper video={currentVideo} />
+            <span className={`status-badge ${statusGroup(currentVideo)}`}>
+              {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
+            </span>
+          </div>
+        )}
         <div className="detail-actions">
           <md-text-button onClick={openRerunDialog}>重跑</md-text-button>
           <md-text-button onClick={handlePackage}>打包</md-text-button>
