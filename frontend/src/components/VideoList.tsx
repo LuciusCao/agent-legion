@@ -103,7 +103,9 @@ export function VideoList() {
                 <span className={`phase-name ${video.status === "running" ? "running" : ""}`}>
                   {PHASE_LABELS[video.current_phase] || video.current_phase}
                 </span>
-                <md-assist-chip label={STATUS_LABELS[statusGroup(video)] || video.status} />
+                <span className={`status-badge ${statusGroup(video)}`}>
+                  {STATUS_LABELS[statusGroup(video)] || video.status}
+                </span>
               </div>
             </md-list-item>
           );
