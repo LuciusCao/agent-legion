@@ -250,6 +250,30 @@ h1 {
   font-weight: 600;
 }
 
+.status-badge {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  white-space: nowrap;
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.status-badge.running {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.status-badge.failed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.status-badge.completed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
 @keyframes pulse-blue {
   0%, 100% {
     opacity: 1;
