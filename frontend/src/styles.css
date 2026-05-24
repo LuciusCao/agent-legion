@@ -256,8 +256,12 @@ h1 {
   flex-shrink: 0;
 }
 
-.step-bar {
+.phase-stepper .step {
   flex: 1;
+}
+
+.step-bar {
+  width: 100%;
   height: 5px;
   border-radius: 3px;
   background: var(--md-sys-color-outline-variant);
