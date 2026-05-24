@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
+import { useVideoEvents } from "../hooks/useVideoEvents";
 import { AgentPanel } from "../components/AgentPanel";
 import { StatCards } from "../components/StatCards";
 import { VideoList } from "../components/VideoList";
@@ -9,7 +10,6 @@ import { AddDialog } from "../components/AddDialog";
 
 export function ListPage() {
   const {
-    videos,
     selectedType,
     setSelectedType,
     setSearchQuery,
@@ -20,23 +20,11 @@ export function ListPage() {
   const { openAddDialog } = useUiStore();
   const tabsRef = useRef<(HTMLElement & { activeTabIndex: number }) | null>(null);
 
-  const hasRunning = videos.some((v) => v.status === "running");
-
   useEffect(() => {
     fetchVideos();
-    const ms = hasRunning ? 3000 : 30000;
-    const interval = setInterval(() => {
-      if (document.visibilityState === "visible") fetchVideos();
-    }, ms);
-    const onVisible = () => {
-      if (document.visibilityState === "visible") fetchVideos();
-    };
-    document.addEventListener("visibilitychange", onVisible);
-    return () => {
-      clearInterval(interval);
-      document.removeEventListener("visibilitychange", onVisible);
-    };
-  }, [fetchVideos, hasRunning]);
+  }, [fetchVideos]);
+
+  useVideoEvents();
 
   useEffect(() => {
     const tabs = tabsRef.current;

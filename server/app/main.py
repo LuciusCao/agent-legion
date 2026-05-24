@@ -10,6 +10,7 @@ from fastapi.staticfiles import StaticFiles
 from server.app.agents import AgentStatusManager
 from server.app.api import create_router
 from server.app.db import Database
+from server.app.events import VideoEventManager
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool
 from server.app.settings import load_settings
@@ -37,6 +38,7 @@ def create_app(
     running_lock = threading.Lock()
 
     agent_manager = AgentStatusManager()
+    video_event_manager = VideoEventManager()
     runner_pool: RunnerPool | None = None
 
     def worker_loop() -> None:
@@ -160,7 +162,12 @@ def create_app(
     app.state.settings = settings
     app.state.db = db
     app.state.agent_manager = agent_manager
-    app.include_router(create_router(db, settings, agent_manager))
+    app.state.video_event_manager = video_event_manager
+
+    db._on_change = video_event_manager.broadcast
+    db._on_delete = video_event_manager.broadcast_delete
+
+    app.include_router(create_router(db, settings, agent_manager, video_event_manager))
 
     frontend_dist = settings.root_dir / "frontend" / "dist"
     if frontend_dist.exists():

@@ -12,6 +12,8 @@ interface VideoState {
   selectedIds: Set<string>;
   isLoading: boolean;
   fetchVideos: () => Promise<void>;
+  mergeVideo: (video: VideoItem) => void;
+  removeVideo: (videoId: string) => void;
   setSelectedType: (type: ContentType) => void;
   setStatusFilter: (status: string) => void;
   setSearchQuery: (query: string) => void;
@@ -44,6 +46,25 @@ export const useVideoStore = create<VideoState>((set, _get) => ({
     } finally {
       set({ isLoading: false });
     }
+  },
+
+  mergeVideo: (video) => {
+    set((state) => {
+      const index = state.videos.findIndex((v) => v.id === video.id);
+      if (index >= 0) {
+        const next = [...state.videos];
+        next[index] = video;
+        return { videos: next };
+      }
+      return { videos: [video, ...state.videos] };
+    });
+  },
+
+  removeVideo: (videoId) => {
+    set((state) => ({
+      videos: state.videos.filter((v) => v.id !== videoId),
+      selectedIds: new Set([...state.selectedIds].filter((id) => id !== videoId)),
+    }));
   },
 
   setSelectedType: (type) => {

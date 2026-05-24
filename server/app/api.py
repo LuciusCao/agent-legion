@@ -1,12 +1,13 @@
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, WebSocket
+from fastapi import APIRouter, HTTPException, Request, WebSocket
 from fastapi.responses import FileResponse, PlainTextResponse
 from pydantic import BaseModel
 
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
+from server.app.events import VideoEventManager
 from server.app.pipeline.package import create_package
 from server.app.pipeline.reader import read_artifacts
 from server.app.services.intake import add_video_items
@@ -90,7 +91,7 @@ class PackageResponse(BaseModel):
     download_url: str
 
 
-def create_router(db: Database, settings: Settings, agent_manager: AgentStatusManager) -> APIRouter:
+def create_router(db: Database, settings: Settings, agent_manager: AgentStatusManager, video_event_manager: VideoEventManager) -> APIRouter:
     router = APIRouter(prefix="/api")
 
     @router.get("/health", response_model=HealthResponse)
@@ -111,6 +112,10 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
             pass
         finally:
             agent_manager.disconnect(websocket)
+
+    @router.get("/videos/events")
+    async def videos_events(request: Request):
+        return await video_event_manager.connect(request)
 
     @router.post("/videos")
     def add_videos(request: AddVideosRequest) -> dict[str, Any]:

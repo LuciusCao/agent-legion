@@ -22,8 +22,10 @@ VIDEO_UPDATE_FIELDS = {
 
 
 class Database:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, on_change=None, on_delete=None):
         self.path = path
+        self._on_change = on_change
+        self._on_delete = on_delete
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
 
@@ -98,6 +100,13 @@ class Database:
     def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
         return dict(row) if row else None
 
+    def _notify(self, video_id: str) -> None:
+        if self._on_change is None:
+            return
+        video = self.get_video(video_id)
+        if video:
+            self._on_change(video)
+
     def create_video(
         self,
         source_url: str,
@@ -145,7 +154,9 @@ class Database:
                 ),
             )
             row = conn.execute("select * from videos where id=?", (video_id,)).fetchone()
-        return dict(row)
+        video = dict(row)
+        self._notify(video_id)
+        return video
 
     def get_video(self, video_id: str) -> VideoRecord | None:
         with self.connect() as conn:
@@ -177,6 +188,7 @@ class Database:
                 f"update videos set {assignments}, updated_at=current_timestamp where id=?",
                 values,
             )
+        self._notify(video_id)
 
     def start_phase(
         self, video_id: str, phase_key: str, command: list[str], log_path: str = ""
@@ -197,10 +209,16 @@ class Database:
                 (video_id, phase_key, json.dumps(command), log_path),
             )
             row = conn.execute("select * from phase_runs where id=?", (cur.lastrowid,)).fetchone()
+        self._notify(video_id)
         return dict(row)
 
     def recover_running_videos(self) -> int:
+        video_ids = []
         with self.connect() as conn:
+            video_ids = [
+                row["id"]
+                for row in conn.execute("select id from videos where status='running'")
+            ]
             conn.execute(
                 """
                 update phase_runs
@@ -211,15 +229,19 @@ class Database:
                 where status='running'
                 """
             )
-            return conn.execute(
+            conn.execute(
                 """
                 update videos
                 set status='queued', error_message='', updated_at=current_timestamp
                 where status='running'
                 """
-            ).rowcount
+            )
+        for vid in video_ids:
+            self._notify(vid)
+        return len(video_ids)
 
     def finish_phase(self, run_id: int, status: str, exit_code: int | None, error_message: str) -> None:
+        video_id = None
         with self.connect() as conn:
             run = conn.execute("select * from phase_runs where id=?", (run_id,)).fetchone()
             conn.execute(
@@ -231,14 +253,17 @@ class Database:
                 (status, exit_code, error_message, run_id),
             )
             if run:
+                video_id = run["video_id"]
                 conn.execute(
                     """
                     update videos
                     set status=?, error_message=?, updated_at=current_timestamp
                     where id=?
                     """,
-                    (status, error_message, run["video_id"]),
+                    (status, error_message, video_id),
                 )
+        if video_id:
+            self._notify(video_id)
 
     def list_phase_runs(self, video_id: str) -> list[PhaseRunRecord]:
         with self.connect() as conn:
@@ -254,3 +279,5 @@ class Database:
             conn.execute("delete from phase_runs where video_id=?", (video_id,))
             conn.execute("delete from transcription_runs where video_id=?", (video_id,))
             conn.execute("delete from videos where id=?", (video_id,))
+        if self._on_delete is not None:
+            self._on_delete(video_id)
