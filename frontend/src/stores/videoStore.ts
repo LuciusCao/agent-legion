@@ -11,6 +11,7 @@ interface VideoState {
   selectMode: boolean;
   selectedIds: Set<string>;
   isLoading: boolean;
+  sseConnected: boolean;
   fetchVideos: () => Promise<void>;
   mergeVideo: (video: VideoItem) => void;
   removeVideo: (videoId: string) => void;
@@ -21,6 +22,7 @@ interface VideoState {
   toggleVideoSelection: (id: string) => void;
   selectAllVisible: () => void;
   clearSelection: () => void;
+  setSseConnected: (connected: boolean) => void;
   batchDelete: (ids: string[]) => Promise<{ results: Array<{ video_id: string; status: string; message?: string }> }>;
   batchRerun: (ids: string[], phase: string) => Promise<{ results: Array<{ video_id: string; status: string; message?: string }> }>;
   batchPackage: (ids: string[]) => Promise<{ path: string; download_url: string }>;
@@ -34,6 +36,7 @@ export const useVideoStore = create<VideoState>((set, _get) => ({
   selectMode: false,
   selectedIds: new Set(),
   isLoading: false,
+  sseConnected: true,
 
   fetchVideos: async () => {
     set({ isLoading: true });
@@ -109,6 +112,7 @@ export const useVideoStore = create<VideoState>((set, _get) => ({
   },
 
   clearSelection: () => set({ selectedIds: new Set() }),
+  setSseConnected: (connected) => set({ sseConnected: connected }),
 
   batchDelete: async (ids) => {
     return api("/api/videos/batch/delete", {

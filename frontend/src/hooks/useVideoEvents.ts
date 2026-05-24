@@ -1,33 +1,63 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useVideoStore } from "../stores/videoStore";
 
 export function useVideoEvents() {
-  const { mergeVideo, removeVideo, fetchVideos } = useVideoStore();
+  const { mergeVideo, removeVideo, setSseConnected } = useVideoStore();
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     if (typeof EventSource === "undefined") return;
-    const source = new EventSource("/api/videos/events");
 
-    source.onmessage = (event) => {
-      if (!event.data || event.data.startsWith(":heartbeat")) return;
-      try {
-        const payload = JSON.parse(event.data);
-        if (payload.type === "video_updated" && payload.video) {
-          mergeVideo(payload.video);
-        } else if (payload.type === "video_deleted" && payload.video_id) {
-          removeVideo(payload.video_id);
+    let source: EventSource | null = null;
+    let reconnectDelay = 1000;
+    const maxReconnectDelay = 30000;
+
+    const connect = () => {
+      if (source) return;
+      source = new EventSource("/api/videos/events");
+
+      source.onopen = () => {
+        reconnectDelay = 1000;
+        setSseConnected(true);
+      };
+
+      source.onmessage = (event) => {
+        if (!event.data || event.data.startsWith(":heartbeat")) return;
+        try {
+          const payload = JSON.parse(event.data);
+          if (payload.type === "video_updated" && payload.video) {
+            mergeVideo(payload.video);
+          } else if (payload.type === "video_deleted" && payload.video_id) {
+            removeVideo(payload.video_id);
+          }
+        } catch {
+          // ignore invalid payloads
         }
-      } catch {
-        // ignore invalid payloads
+      };
+
+      source.onerror = () => {
+        setSseConnected(false);
+        if (source) {
+          source.close();
+          source = null;
+        }
+        // Exponential backoff reconnect
+        reconnectTimerRef.current = setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
+          connect();
+        }, reconnectDelay);
+      };
+    };
+
+    connect();
+
+    return () => {
+      if (reconnectTimerRef.current) {
+        clearTimeout(reconnectTimerRef.current);
+      }
+      if (source) {
+        source.close();
       }
     };
-
-    source.onerror = () => {
-      // Browser auto-reconnects automatically. If it permanently fails,
-      // the next successful reconnect will deliver missed updates.
-      // No need to spam fetchVideos() on every retry attempt.
-    };
-
-    return () => source.close();
-  }, [mergeVideo, removeVideo, fetchVideos]);
+  }, [mergeVideo, removeVideo, setSseConnected]);
 }

@@ -199,7 +199,7 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
             raise HTTPException(status_code=400, detail="No videos selected for packaging")
         if not selection.videos:
             raise HTTPException(status_code=400, detail="No completed videos available for packaging")
-        package_path = create_package(selection.videos, settings.packages_dir)
+        package_path = create_package(selection.videos, settings.packages_dir, settings.videos_dir)
         return {
             "path": str(package_path),
             "download_url": f"/api/packages/{package_path.name}",

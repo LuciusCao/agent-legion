@@ -24,3 +24,33 @@ def test_package_completed_videos(tmp_path):
     assert "manifest.json" in names
     assert "a/metadata.json" in names
     assert "a/interactions.json" in names
+
+
+def test_package_fallback_to_videos_base_dir_when_storage_dir_empty(tmp_path):
+    video_dir = tmp_path / "videos" / "b"
+    video_dir.mkdir(parents=True)
+    (video_dir / "metadata.json").write_text(json.dumps({"video_id": "b"}), encoding="utf-8")
+
+    package_path = create_package(
+        videos=[{"id": "b", "title": "B", "source_url": "", "storage_dir": ""}],
+        packages_dir=tmp_path / "packages",
+        videos_base_dir=tmp_path / "videos",
+    )
+
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+
+    assert "b/metadata.json" in names
+
+
+def test_package_skips_video_when_no_storage_dir_and_no_fallback(tmp_path):
+    package_path = create_package(
+        videos=[{"id": "c", "title": "C", "source_url": "", "storage_dir": ""}],
+        packages_dir=tmp_path / "packages",
+    )
+
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+
+    assert "manifest.json" in names
+    assert "c/" not in " ".join(names)

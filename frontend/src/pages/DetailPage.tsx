@@ -55,12 +55,23 @@ export function DetailPage() {
     useCallback((state) => state.videos.find((v) => v.id === id), [id]),
   );
 
+  const prevPhaseRef = useRef<string | null>(null);
+  const prevStatusRef = useRef<string | null>(null);
+
   useEffect(() => {
     if (!id || !storeVideo) return;
-    loadVideo(id);
-    loadArtifacts(id);
-    loadLog(id);
-  }, [id, storeVideo, loadVideo, loadArtifacts, loadLog]);
+    const currentPhase = storeVideo.current_phase;
+    const currentStatus = storeVideo.status;
+    if (
+      prevPhaseRef.current !== null &&
+      (prevPhaseRef.current !== currentPhase || prevStatusRef.current !== currentStatus)
+    ) {
+      loadArtifacts(id);
+      loadLog(id);
+    }
+    prevPhaseRef.current = currentPhase;
+    prevStatusRef.current = currentStatus;
+  }, [id, storeVideo, loadArtifacts, loadLog]);
 
   const handleTimeUpdate = useCallback(
     (time: number) => {

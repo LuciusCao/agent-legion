@@ -7,9 +7,10 @@ from server.app.pipeline.download import download_video
 
 
 class FakeResponse:
-    def __init__(self, content: bytes, status_code: int = 200):
+    def __init__(self, content: bytes, status_code: int = 200, headers: dict | None = None):
         self._content = content
         self.status_code = status_code
+        self.headers = headers or {}
 
     def raise_for_status(self):
         if self.status_code >= 400:
@@ -67,3 +68,45 @@ def test_download_video_raises_on_http_error(tmp_path):
         return_value=FakeResponse(b"", status_code=404),
     ), pytest.raises(requests.HTTPError):
         download_video("https://example.com/missing.mp4", output)
+
+
+def test_download_video_rejects_non_video_mime_type(tmp_path):
+    output = tmp_path / "video.mp4"
+
+    with patch(
+        "server.app.pipeline.download.requests.get",
+        return_value=FakeResponse(b"<html></html>", headers={"content-type": "text/html"}),
+    ), pytest.raises(ValueError, match="Expected video content"):
+        download_video("https://example.com/trap.mp4", output)
+
+    assert not output.exists()
+
+
+def test_download_video_cleans_up_partial_file_on_error(tmp_path):
+    output = tmp_path / "video.mp4"
+
+    class BrokenResponse:
+        def __init__(self):
+            self.status_code = 200
+            self.headers = {"content-type": "video/mp4"}
+
+        def raise_for_status(self):
+            pass
+
+        def iter_content(self, chunk_size):
+            yield b"partial"
+            raise RuntimeError("connection reset")
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    with patch(
+        "server.app.pipeline.download.requests.get",
+        return_value=BrokenResponse(),
+    ), pytest.raises(RuntimeError, match="connection reset"):
+        download_video("https://example.com/broken.mp4", output)
+
+    assert not output.exists()

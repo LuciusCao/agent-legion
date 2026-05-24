@@ -12,7 +12,7 @@ PACKAGE_FILES = [
 ]
 
 
-def create_package(videos: list[dict], packages_dir: Path) -> Path:
+def create_package(videos: list[dict], packages_dir: Path, videos_base_dir: Path | None = None) -> Path:
     packages_dir.mkdir(parents=True, exist_ok=True)
     package_path = packages_dir / f"video-hive-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.zip"
     manifest = {
@@ -34,7 +34,13 @@ def create_package(videos: list[dict], packages_dir: Path) -> Path:
     with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         for video in videos:
-            video_dir = Path(video["storage_dir"])
+            storage_dir = video.get("storage_dir", "")
+            if storage_dir:
+                video_dir = Path(storage_dir)
+            elif videos_base_dir is not None:
+                video_dir = videos_base_dir / video["id"]
+            else:
+                continue
             for name in PACKAGE_FILES:
                 path = video_dir / name
                 if path.exists():

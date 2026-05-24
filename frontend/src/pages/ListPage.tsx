@@ -16,6 +16,7 @@ export function ListPage() {
     toggleSelectMode,
     selectMode,
     fetchVideos,
+    sseConnected,
   } = useVideoStore();
   const { openAddDialog } = useUiStore();
   const tabsRef = useRef<(HTMLElement & { activeTabIndex: number }) | null>(null);
@@ -58,6 +59,11 @@ export function ListPage() {
       <div className="stats-row">
         <StatCards />
         <div className="stats-actions">
+          {!sseConnected && (
+            <span className="sse-status" title="实时连接已断开，正在尝试重连…">
+              <md-icon style={{ color: "var(--md-sys-color-error)" }}>cloud_off</md-icon>
+            </span>
+          )}
           <md-icon-button onClick={() => fetchVideos()} title="刷新">
             <md-icon>refresh</md-icon>
           </md-icon-button>
