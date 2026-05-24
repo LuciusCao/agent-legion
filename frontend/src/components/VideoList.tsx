@@ -85,11 +85,11 @@ export function VideoList() {
                   }}
                 />
               )}
-              <div slot="headline" className="resource-main">
-                <div className="resource-title-row">
-                  <strong>{video.title || "未命名"}</strong>
-                  <PhaseStepper video={video} />
-                </div>
+              <div slot="headline" className="resource-title-row">
+                <strong>{video.title || "未命名"}</strong>
+                <PhaseStepper video={video} />
+              </div>
+              <div slot="supporting-text">
                 <small>
                   {TYPE_LABELS[video.content_type]} · {video.external_id || "未填 ID"} · {PHASE_LABELS[video.current_phase] || video.current_phase}
                 </small>
