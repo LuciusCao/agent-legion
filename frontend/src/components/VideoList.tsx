@@ -86,9 +86,12 @@ export function VideoList() {
                 />
               )}
               <div slot="headline" className="resource-main">
-                <strong>{video.title || "未命名"}</strong>
+                <div className="resource-title-row">
+                  <strong>{video.title || "未命名"}</strong>
+                  <PhaseStepper video={video} />
+                </div>
                 <small>
-                  {TYPE_LABELS[video.content_type]} · {video.external_id || "未填 ID"}
+                  {TYPE_LABELS[video.content_type]} · {video.external_id || "未填 ID"} · {PHASE_LABELS[video.current_phase] || video.current_phase}
                 </small>
                 {video.error_message && (
                   <small className="error-text" title={video.error_message}>
@@ -96,13 +99,7 @@ export function VideoList() {
                   </small>
                 )}
               </div>
-              <div slot="end" className="video-end">
-                <PhaseStepper video={video} />
-                <span className="progress-label">
-                  {PHASE_LABELS[video.current_phase] || video.current_phase}
-                </span>
-                <md-assist-chip label={STATUS_LABELS[statusGroup(video)] || video.status} />
-              </div>
+              <md-assist-chip slot="end" label={STATUS_LABELS[statusGroup(video)] || video.status} />
             </md-list-item>
           );
         })}
