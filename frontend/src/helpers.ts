@@ -62,3 +62,40 @@ export function seconds(value: number): string {
   const secs = Math.floor(value % 60);
   return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
+
+const KNOWLEDGE_PHASE_SEQUENCE = [
+  "download",
+  "transcribe",
+  "subtitle_review",
+  "chapter_generate",
+  "interaction_generate",
+  "content_review",
+  "assemble",
+  "package",
+];
+
+const QUESTION_PHASE_SEQUENCE = [
+  "download",
+  "transcribe",
+  "subtitle_review",
+  "chapter_generate",
+  "assemble",
+  "package",
+];
+
+export function computeProgress(video: VideoItem): number {
+  if (video.status === "completed") return 1;
+  if (video.current_phase === "waiting_for_url") return 0;
+
+  const phases =
+    video.content_type === "question"
+      ? QUESTION_PHASE_SEQUENCE
+      : KNOWLEDGE_PHASE_SEQUENCE;
+  const index = phases.indexOf(video.current_phase);
+  if (index === -1) return 0;
+
+  if (video.status === "running") {
+    return (index + 0.5) / phases.length;
+  }
+  return index / phases.length;
+}
