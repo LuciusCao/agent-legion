@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  computeProgress,
   escapeHtml,
   filterVideos,
   getInteractionQuestion,
@@ -120,5 +121,39 @@ describe("parseResourceIds", () => {
       "Q001",
       "Q002",
     ]);
+  });
+});
+
+describe("computeProgress", () => {
+  it("returns 1 for completed videos", () => {
+    expect(computeProgress(video({ status: "completed", current_phase: "package" }))).toBe(1);
+  });
+
+  it("returns 0 for waiting_for_url", () => {
+    expect(computeProgress(video({ status: "missing_url", current_phase: "waiting_for_url" }))).toBe(0);
+  });
+
+  it("computes knowledge progress correctly", () => {
+    // queued at download -> 0/8
+    expect(computeProgress(video({ status: "queued", current_phase: "download" }))).toBe(0);
+    // running at download -> 0.5/8
+    expect(computeProgress(video({ status: "running", current_phase: "download" }))).toBe(0.5 / 8);
+    // queued at transcribe -> 1/8
+    expect(computeProgress(video({ status: "queued", current_phase: "transcribe" }))).toBe(1 / 8);
+    // running at package -> 7.5/8
+    expect(computeProgress(video({ status: "running", current_phase: "package" }))).toBe(7.5 / 8);
+  });
+
+  it("computes question progress correctly", () => {
+    // queued at download -> 0/6
+    expect(computeProgress(video({ content_type: "question", status: "queued", current_phase: "download" }))).toBe(0);
+    // running at assemble -> 4.5/6
+    expect(computeProgress(video({ content_type: "question", status: "running", current_phase: "assemble" }))).toBe(4.5 / 6);
+    // completed
+    expect(computeProgress(video({ content_type: "question", status: "completed", current_phase: "package" }))).toBe(1);
+  });
+
+  it("returns 0 for unknown phase", () => {
+    expect(computeProgress(video({ status: "queued", current_phase: "unknown" }))).toBe(0);
   });
 });

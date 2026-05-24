@@ -2,7 +2,7 @@ import { useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVideoStore } from "../stores/videoStore";
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from "../labels";
-import { statusGroup } from "../helpers";
+import { computeProgress, statusGroup } from "../helpers";
 
 export function VideoList() {
   const navigate = useNavigate();
@@ -87,8 +87,14 @@ export function VideoList() {
               <div slot="headline" className="resource-main">
                 <strong>{video.title || "未命名"}</strong>
                 <small>
-                  {TYPE_LABELS[video.content_type]} · {video.external_id || "未填 ID"} · {PHASE_LABELS[video.current_phase] || video.current_phase}
+                  {TYPE_LABELS[video.content_type]} · {video.external_id || "未填 ID"}
                 </small>
+                <div className="progress-row">
+                  <md-linear-progress value={computeProgress(video)} />
+                  <span className="progress-label">
+                    {PHASE_LABELS[video.current_phase] || video.current_phase} · {Math.round(computeProgress(video) * 100)}%
+                  </span>
+                </div>
                 {video.error_message && (
                   <small className="error-text" title={video.error_message}>
                     {video.error_message}
