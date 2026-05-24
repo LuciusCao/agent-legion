@@ -12,8 +12,9 @@ import { ChapterPanel } from "../components/ChapterPanel";
 import { NodePanel } from "../components/NodePanel";
 import { MetadataPanel } from "../components/MetadataPanel";
 import { RerunDialog } from "../components/RerunDialog";
-import { TYPE_LABELS, PHASE_LABELS } from "../labels";
+import { TYPE_LABELS, PHASE_LABELS, STATUS_LABELS } from "../labels";
 import { statusGroup } from "../helpers";
+import { PhaseStepper } from "../components/PhaseStepper";
 import { api } from "../api";
 
 export function DetailPage() {
@@ -129,9 +130,22 @@ export function DetailPage() {
         </md-icon-button>
         <div className="detail-title-block">
           <h1>{currentVideo?.title || "未选择资源"}</h1>
-          <p>
-            {currentVideo && `${TYPE_LABELS[currentVideo.content_type]} · ${currentVideo.external_id || "未填 ID"} · ${PHASE_LABELS[currentVideo.current_phase] || currentVideo.current_phase} · ${statusGroup(currentVideo)}`}
-          </p>
+          {currentVideo && (
+            <>
+              <p>
+                {TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}
+              </p>
+              <div className="detail-progress">
+                <span className={`phase-name ${currentVideo.status === "running" ? "running-text" : ""}`}>
+                  {PHASE_LABELS[currentVideo.current_phase] || currentVideo.current_phase}
+                </span>
+                <PhaseStepper video={currentVideo} />
+                <span className={`status-badge ${statusGroup(currentVideo)}`}>
+                  {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
+                </span>
+              </div>
+            </>
+          )}
           {currentVideo?.error_message && (
             <p className="error-text" style={{ marginTop: 4 }}>{currentVideo.error_message}</p>
           )}
