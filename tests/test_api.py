@@ -1,3 +1,4 @@
+import asyncio
 import json
 import subprocess
 
@@ -482,3 +483,84 @@ def test_package_without_completed_videos_returns_400(client):
 def test_package_download_rejects_path_traversal(client):
     response = client.get("/api/packages/%2e%2e/%2e%2e/%2e%2e/etc/passwd")
     assert response.status_code == 404
+
+
+# SSE tests
+
+
+def test_video_event_manager_broadcast():
+    import asyncio
+    import json
+
+    from server.app.events import VideoEventManager
+
+    async def _test():
+        manager = VideoEventManager()
+        manager._loop = asyncio.get_running_loop()
+        queue = asyncio.Queue()
+        manager._clients.add(queue)
+
+        manager.broadcast({"id": "v1", "status": "running"})
+        await asyncio.sleep(0.05)
+
+        assert not queue.empty()
+        payload = await queue.get()
+        data = json.loads(payload)
+        assert data["type"] == "video_updated"
+        assert data["video"]["id"] == "v1"
+
+        manager.broadcast_delete("v1")
+        await asyncio.sleep(0.05)
+
+        payload = await queue.get()
+        data = json.loads(payload)
+        assert data["type"] == "video_deleted"
+        assert data["video_id"] == "v1"
+
+    asyncio.run(_test())
+
+
+def test_database_broadcast_on_create_and_delete(client):
+    import json
+
+    async def _test():
+        event_manager = client.app.state.video_event_manager
+        event_manager._loop = asyncio.get_running_loop()
+
+        queue = asyncio.Queue()
+        event_manager._clients.add(queue)
+
+        # Create video triggers broadcast (create_video + update_video may both fire)
+        created = client.post(
+            "/api/videos",
+            json={
+                "items": [
+                    {
+                        "url": "https://example.com/sse_test.mp4",
+                        "title": "SSE Test",
+                        "content_type": "knowledge",
+                        "external_id": "SSE001",
+                    }
+                ]
+            },
+        )
+        assert created.status_code == 200
+        video_id = created.json()["videos"][0]["id"]
+
+        await asyncio.sleep(0.05)
+        # Drain creation events
+        while not queue.empty():
+            await queue.get()
+
+        # Delete video triggers broadcast_delete
+        deleted = client.delete(f"/api/videos/{video_id}")
+        assert deleted.status_code == 200
+
+        await asyncio.sleep(0.05)
+        assert not queue.empty()
+        payload = await queue.get()
+        data = json.loads(payload)
+        assert data["type"] == "video_deleted"
+        assert data["video_id"] == video_id
+
+    asyncio.run(_test())

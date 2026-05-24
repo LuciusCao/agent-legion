@@ -51,6 +51,17 @@ export function DetailPage() {
     loadLog(id);
   }, [id, loadVideo, loadArtifacts, loadLog]);
 
+  const storeVideo = useVideoStore(
+    useCallback((state) => state.videos.find((v) => v.id === id), [id]),
+  );
+
+  useEffect(() => {
+    if (!id || !storeVideo) return;
+    loadVideo(id);
+    loadArtifacts(id);
+    loadLog(id);
+  }, [id, storeVideo, loadVideo, loadArtifacts, loadLog]);
+
   const handleTimeUpdate = useCallback(
     (time: number) => {
       setCurrentTime(time);
