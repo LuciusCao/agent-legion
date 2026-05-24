@@ -1,4 +1,4 @@
-import { useMemo } from "react";
+import { useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVideoStore } from "../stores/videoStore";
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from "../labels";
@@ -18,6 +18,7 @@ export function VideoList() {
     selectedIds,
     toggleVideoSelection,
   } = useVideoStore();
+  const checkboxRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const filtered = useMemo(() => {
     return videos.filter((v) => {
@@ -42,6 +43,15 @@ export function VideoList() {
     });
     return map;
   }, [filtered]);
+
+  useEffect(() => {
+    filtered.forEach((v) => {
+      const el = checkboxRefs.current.get(v.id);
+      if (el) {
+        (el as any).checked = selectedIds.has(v.id);
+      }
+    });
+  }, [selectedIds, filtered]);
 
   return (
     <div className="grouped-list">
@@ -71,7 +81,17 @@ export function VideoList() {
                     }}
                   >
                     {selectMode && (
-                      <md-checkbox slot="start" checked={isSelected} />
+                      <md-checkbox
+                        slot="start"
+                        ref={(el) => {
+                          if (el) checkboxRefs.current.set(video.id, el);
+                          else checkboxRefs.current.delete(video.id);
+                        }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleVideoSelection(video.id);
+                        }}
+                      />
                     )}
                     <div slot="headline" className="resource-main">
                       <strong>{video.title || "未命名"}</strong>
