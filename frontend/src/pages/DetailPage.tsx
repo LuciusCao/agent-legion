@@ -44,18 +44,29 @@ export function DetailPage() {
   const { openRerunDialog, showToast } = useUiStore();
   const { fetchVideos } = useVideoStore();
 
+  const isActive = currentVideo?.status === "running";
+
   useEffect(() => {
     if (!id) return;
-    loadVideo(id);
-    loadArtifacts(id);
-    loadLog(id);
-    const interval = setInterval(() => {
+    const refresh = () => {
       loadVideo(id);
       loadArtifacts(id);
       loadLog(id);
-    }, 3000);
-    return () => clearInterval(interval);
-  }, [id, loadVideo, loadArtifacts, loadLog]);
+    };
+    refresh();
+    const ms = isActive ? 3000 : 30000;
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") refresh();
+    }, ms);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+  }, [id, loadVideo, loadArtifacts, loadLog, isActive]);
 
   const handleTimeUpdate = useCallback(
     (time: number) => {
