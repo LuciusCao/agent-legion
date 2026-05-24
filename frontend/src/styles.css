@@ -265,6 +265,8 @@ h1 {
 
 .phase-stepper .step {
   flex: 1;
+  display: flex;
+  align-items: center;
 }
 
 .step-bar {
