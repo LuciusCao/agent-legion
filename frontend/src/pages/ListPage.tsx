@@ -21,6 +21,8 @@ export function ListPage() {
 
   useEffect(() => {
     fetchVideos();
+    const interval = setInterval(fetchVideos, 3000);
+    return () => clearInterval(interval);
   }, [fetchVideos]);
 
   useEffect(() => {

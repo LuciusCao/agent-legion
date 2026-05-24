@@ -49,6 +49,12 @@ export function DetailPage() {
     loadVideo(id);
     loadArtifacts(id);
     loadLog(id);
+    const interval = setInterval(() => {
+      loadVideo(id);
+      loadArtifacts(id);
+      loadLog(id);
+    }, 3000);
+    return () => clearInterval(interval);
   }, [id, loadVideo, loadArtifacts, loadLog]);
 
   const handleTimeUpdate = useCallback(
