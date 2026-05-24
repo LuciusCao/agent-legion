@@ -110,7 +110,7 @@ export function DetailPage() {
       try {
         await api(`/api/videos/${id}/rerun`, { method: "POST", body: JSON.stringify({ phase }) });
         showToast("重跑已提交", "success");
-        await fetchVideos();
+        await Promise.all([fetchVideos(), loadVideo(id), loadLog(id)]);
       } catch (err) {
         if (err instanceof Error && err.message.includes("currently being processed")) {
           showToast("该资源正在被处理中，请等待当前阶段完成后再重跑。", "error");
@@ -119,7 +119,7 @@ export function DetailPage() {
         }
       }
     },
-    [id, fetchVideos, showToast]
+    [id, fetchVideos, loadVideo, loadLog, showToast]
   );
 
   return (
