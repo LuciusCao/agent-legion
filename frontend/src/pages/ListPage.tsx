@@ -45,14 +45,23 @@ export function ListPage() {
       <AgentPanel />
 
       <section className="filters-row">
-        <div className="tabs-with-actions">
-          <md-tabs
-            ref={tabsRef}
-            active-tab-index={selectedType === "knowledge" ? 0 : 1}
-          >
-            <md-primary-tab>知识点</md-primary-tab>
-            <md-primary-tab>题目</md-primary-tab>
-          </md-tabs>
+        <md-tabs
+          ref={tabsRef}
+          active-tab-index={selectedType === "knowledge" ? 0 : 1}
+        >
+          <md-primary-tab>知识点</md-primary-tab>
+          <md-primary-tab>题目</md-primary-tab>
+        </md-tabs>
+        <md-outlined-text-field
+          type="search"
+          placeholder="搜索 ID、标题或内部记录"
+          onInput={(e: React.FormEvent<HTMLElement>) => setSearchQuery((e.target as HTMLInputElement).value)}
+        />
+      </section>
+
+      <div className="stats-row">
+        <StatCards />
+        <div className="stats-actions">
           <md-icon-button onClick={() => fetchVideos()} title="刷新">
             <md-icon>refresh</md-icon>
           </md-icon-button>
@@ -63,14 +72,7 @@ export function ListPage() {
             <md-icon>add</md-icon>
           </md-icon-button>
         </div>
-        <md-outlined-text-field
-          type="search"
-          placeholder="搜索 ID、标题或内部记录"
-          onInput={(e: React.FormEvent<HTMLElement>) => setSearchQuery((e.target as HTMLInputElement).value)}
-        />
-      </section>
-
-      <StatCards />
+      </div>
       <BatchToolbar />
       <VideoList />
       <AddDialog />
