@@ -232,12 +232,19 @@ h1 {
   white-space: nowrap;
 }
 
+/* Video list item end area */
+.video-end {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 4px;
+}
+
 /* Phase stepper */
 .phase-stepper {
   display: flex;
   align-items: center;
   gap: 4px;
-  flex: 1;
 }
 
 .step-bar {
