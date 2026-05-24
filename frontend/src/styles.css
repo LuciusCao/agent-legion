@@ -234,9 +234,34 @@ h1 {
 
 .status-end {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  min-width: 260px;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 176px;
+}
+
+.phase-name {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.phase-name.running {
+  color: #3b82f6;
+  font-weight: 600;
+}
+
+@keyframes pulse-blue {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.step-bar.running {
+  background: #3b82f6;
+  animation: pulse-blue 1.4s ease-in-out infinite;
 }
 
 /* Phase stepper */

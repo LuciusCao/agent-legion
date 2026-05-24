@@ -90,7 +90,7 @@ export function VideoList() {
               </div>
               <div slot="supporting-text">
                 <small>
-                  {TYPE_LABELS[video.content_type]} · {video.external_id || "未填 ID"} · {PHASE_LABELS[video.current_phase] || video.current_phase}
+                  {TYPE_LABELS[video.content_type]} · {video.external_id || "未填 ID"}
                 </small>
                 {video.error_message && (
                   <small className="error-text" title={video.error_message}>
@@ -100,6 +100,9 @@ export function VideoList() {
               </div>
               <div slot="end" className="status-end">
                 <PhaseStepper video={video} />
+                <span className={`phase-name ${video.status === "running" ? "running" : ""}`}>
+                  {PHASE_LABELS[video.current_phase] || video.current_phase}
+                </span>
                 <md-assist-chip label={STATUS_LABELS[statusGroup(video)] || video.status} />
               </div>
             </md-list-item>
