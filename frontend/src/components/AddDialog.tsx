@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback } from "react";
 import { useUiStore } from "../stores/uiStore";
 import { api } from "../api";
-import { parseResourceIds } from "../helpers";
+import { parseResourceInputs } from "../helpers";
 import type { AddResult, VideoItem } from "../types";
 
 export function AddDialog() {
@@ -12,14 +12,14 @@ export function AddDialog() {
 
   const handleSubmit = useCallback(async () => {
     const input = textareaRef.current?.value || "";
-    const ids = parseResourceIds(input);
-    if (ids.length === 0) return;
+    const items = parseResourceInputs(input);
+    if (items.length === 0) return;
     setIsSubmitting(true);
     try {
       const response = await api<{ videos: VideoItem[]; results: AddResult[] }>("/api/videos", {
         method: "POST",
         body: JSON.stringify({
-          items: ids.map((externalId) => ({ content_type: addContentType, external_id: externalId })),
+          items: items.map((item) => ({ content_type: addContentType, external_id: item.external_id, source_uuid: item.source_uuid })),
         }),
       });
       setResults(response.results);
@@ -38,8 +38,8 @@ export function AddDialog() {
 
   const placeholder =
     addContentType === "knowledge"
-      ? "一行一个知识点code，例如：x09010402"
-      : "一行一个题目ID，例如：q12345678";
+      ? "一行一个知识点code，例如：x09010402\n或带source_uuid：x09010402,uuid-xxx"
+      : "一行一个题目ID，例如：q12345678\n或带source_uuid：q12345678,uuid-xxx";
 
   return (
     <md-dialog open onClosed={handleClose} style={{ minWidth: "520px", "--md-dialog-container-color": "#ffffff" } as React.CSSProperties}>

@@ -9,6 +9,7 @@ class VideoRecord(TypedDict):
     external_id: str
     knowledge_code: str
     question_id: str
+    source_uuid: str
     storage_dir: str
     current_phase: str
     status: str

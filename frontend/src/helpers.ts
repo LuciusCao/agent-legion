@@ -57,6 +57,21 @@ export function parseResourceIds(value: string): string[] {
     .filter(Boolean);
 }
 
+export function parseResourceInputs(value: string): { external_id: string; source_uuid: string }[] {
+  return value
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(",").map((p) => p.trim());
+      return {
+        external_id: parts[0] || "",
+        source_uuid: parts[1] || "",
+      };
+    })
+    .filter((item) => item.external_id);
+}
+
 export function seconds(value: number): string {
   const minutes = Math.floor(value / 60);
   const secs = Math.floor(value % 60);
