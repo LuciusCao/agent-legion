@@ -1,4 +1,5 @@
 import type { Chapter } from "../types";
+import styles from "./ChapterStrip.module.css";
 
 interface ChapterStripProps {
   chapters: Chapter[];
@@ -14,14 +15,14 @@ export function ChapterStrip({ chapters, currentTime, onSeek }: ChapterStripProp
   };
 
   return (
-    <div className="chapters-strip">
-      <span className="chapter-label">章节</span>
+    <div className={styles.chaptersStrip}>
+      <span className={styles.chapterLabel}>章节</span>
       {chapters.map((chapter, index) => {
         const isActive = currentTime >= chapter.start && currentTime < (chapters[index + 1]?.start ?? Infinity);
         return (
           <md-suggestion-chip
             key={index}
-            class={isActive ? "active" : ""}
+            class={isActive ? styles.active : ""}
             label={`${formatTime(chapter.start)} ${chapter.title}`}
             onClick={() => onSeek(chapter.start)}
           />

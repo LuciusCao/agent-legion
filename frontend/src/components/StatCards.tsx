@@ -2,6 +2,7 @@ import { useMemo } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { STATUS_LABELS } from "../labels";
 import { statusGroup } from "../helpers";
+import styles from "./StatCards.module.css";
 
 const STATUSES = ["queued", "running", "failed", "completed"];
 
@@ -37,11 +38,11 @@ export function StatCards() {
   ];
 
   return (
-    <div className="stats-pills">
+    <div className={styles.statsPills}>
       {items.map((item) => (
         <div
           key={item.key}
-          className={`stat-pill ${statusFilter === item.key ? "active" : ""}`}
+          className={`${styles.statPill} ${statusFilter === item.key ? styles.active : ""}`}
           onClick={() => setStatusFilter(item.key)}
         >
           <md-icon>{FILTER_ICONS[item.key] || "help"}</md-icon>
@@ -50,16 +51,16 @@ export function StatCards() {
       ))}
       {statusFilter === "completed" && (
         <>
-          <span className="pill-divider" />
+          <span className={styles.pillDivider} />
           <div
-            className={`stat-pill ${packedFilter === "packed" ? "active" : ""}`}
+            className={`${styles.statPill} ${packedFilter === "packed" ? styles.active : ""}`}
             onClick={() => setPackedFilter(packedFilter === "packed" ? "all" : "packed")}
           >
             <md-icon>{FILTER_ICONS.packed}</md-icon>
             <span>已打包（{counts.packed ?? 0}）</span>
           </div>
           <div
-            className={`stat-pill ${packedFilter === "unpacked" ? "active" : ""}`}
+            className={`${styles.statPill} ${packedFilter === "unpacked" ? styles.active : ""}`}
             onClick={() => setPackedFilter(packedFilter === "unpacked" ? "all" : "unpacked")}
           >
             <md-icon>{FILTER_ICONS.unpacked}</md-icon>

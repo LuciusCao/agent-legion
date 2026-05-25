@@ -3,6 +3,7 @@ import { useUiStore } from "../stores/uiStore";
 import { api } from "../api";
 import { parseResourceInputs } from "../helpers";
 import type { AddResult, VideoItem } from "../types";
+import styles from "./AddDialog.module.css";
 
 export function AddDialog() {
   const { addDialogOpen, addContentType, closeAddDialog, setAddContentType } = useUiStore();
@@ -48,13 +49,13 @@ export function AddDialog() {
         <div style={{ display: "grid", gap: "16px", minWidth: "460px" }}>
           <div style={{ display: "flex", gap: "8px" }}>
             <md-outlined-button
-              className={addContentType === "knowledge" ? "type-btn active" : "type-btn"}
+              className={addContentType === "knowledge" ? `${styles.typeBtn} ${styles.active}` : styles.typeBtn}
               onClick={() => setAddContentType("knowledge")}
             >
               知识点
             </md-outlined-button>
             <md-outlined-button
-              className={addContentType === "question" ? "type-btn active" : "type-btn"}
+              className={addContentType === "question" ? `${styles.typeBtn} ${styles.active}` : styles.typeBtn}
               onClick={() => setAddContentType("question")}
             >
               题目
@@ -68,9 +69,9 @@ export function AddDialog() {
             placeholder={placeholder}
           />
           {results.length > 0 && (
-            <div className="add-results">
+            <div className={styles.addResults}>
               {results.map((r, i) => (
-                <div key={i} className="add-result">
+                <div key={i} className={styles.addResult}>
                   <span>{r.external_id}</span>
                   <span>{r.status}</span>
                   <span>{r.message || ""}</span>

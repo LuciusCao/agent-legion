@@ -3,6 +3,7 @@ import type { PhaseRun, TranscriptionRun, ContentType } from "../types";
 import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES, STATUS_LABELS, STATUS_ICONS } from "../labels";
 import { formatDuration } from "../lib/formatters";
 import { TranscriptionDetails } from "./TranscriptionDetails";
+import styles from "./PhaseRunsPanel.module.css";
 
 
 interface PhaseRunsPanelProps {
@@ -57,6 +58,26 @@ function buildItem(
 
   return { run, label: PHASE_LABELS[run.phase_key], tool, queueTime, processTime };
 }
+
+const NODE_STATUS_CLASS: Record<string, string> = {
+  completed: styles.statusCompleted,
+  running: styles.statusRunning,
+  failed: styles.statusFailed,
+};
+
+const CONTENT_STATUS_CLASS: Record<string, string> = {
+  completed: styles.statusCompleted,
+  running: styles.statusRunning,
+  failed: styles.statusFailed,
+};
+
+const BADGE_STATUS_CLASS: Record<string, string> = {
+  completed: styles.completed,
+  running: styles.running,
+  failed: styles.failed,
+  pending: styles.pending,
+  queued: styles.queued,
+};
 
 export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: PhaseRunsPanelProps) {
   const [now, setNow] = useState(Date.now());
@@ -142,16 +163,16 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
   const items = viewMode === "latest" ? latestItems : historyItems;
 
   return (
-    <div className="phase-runs-panel">
+    <div className={styles.phaseRunsPanel}>
       {summary.totalCount > 0 && (
-        <div className="phase-runs-summary">
-          <div className="summary-main">
-            <span className="summary-count">
+        <div className={styles.phaseRunsSummary}>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryCount}>
               {summary.completedCount} / {summary.totalCount}
             </span>
-            <span className="summary-label">阶段完成</span>
+            <span className={styles.summaryLabel}>阶段完成</span>
           </div>
-          <div className="summary-meta">
+          <div className={styles.summaryMeta}>
             <md-text-button onClick={() => setViewMode((v) => (v === "latest" ? "history" : "latest"))}>
               {viewMode === "latest" ? "历史" : "当前"}
             </md-text-button>
@@ -161,8 +182,8 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
 
       {items.length === 0 && <p className="empty-state">暂无处理记录</p>}
 
-      <div className="phase-timeline">
-        <div className="phase-timeline-items">
+      <div className={styles.phaseTimeline}>
+        <div className={styles.phaseTimelineItems}>
           {items.map((item, idx) => {
             const icon = STATUS_ICONS[item.run.status] || "help";
             const statusText = STATUS_LABELS[item.run.status] || item.run.status;
@@ -173,61 +194,61 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
             const canExpand = hasError || hasTransDetails;
 
             return (
-              <div key={item.run.id} className="phase-timeline-item">
-                <div className="timeline-left">
+              <div key={item.run.id} className={styles.phaseTimelineItem}>
+                <div className={styles.timelineLeft}>
                   <div
-                    className={`timeline-node status-${item.run.status} ${
-                      item.run.status === "running" ? "spinning" : ""
+                    className={`${styles.timelineNode} ${NODE_STATUS_CLASS[item.run.status] || ""} ${
+                      item.run.status === "running" ? styles.spinning : ""
                     }`}
                   >
                     <md-icon>{icon}</md-icon>
                   </div>
-                  {idx < items.length - 1 && <div className="timeline-line" />}
+                  {idx < items.length - 1 && <div className={styles.timelineLine} />}
                 </div>
 
-                <div className={`timeline-content status-${item.run.status}`}>
-                  <div className="timeline-header">
-                    <span className="timeline-name">
+                <div className={`${styles.timelineContent} ${CONTENT_STATUS_CLASS[item.run.status] || ""}`}>
+                  <div className={styles.timelineHeader}>
+                    <span className={styles.timelineName}>
                       {item.label}
                       {item.occurrence && item.occurrence > 1 ? (
-                        <span className="occurrence-badge"> 第{item.occurrence}次</span>
+                        <span className={styles.occurrenceBadge}> 第{item.occurrence}次</span>
                       ) : null}
                     </span>
-                    <span className={`timeline-status-badge ${item.run.status}`}>{statusText}</span>
+                    <span className={`${styles.timelineStatusBadge} ${BADGE_STATUS_CLASS[item.run.status] || ""}`}>{statusText}</span>
                   </div>
 
                   {item.tool && (
-                    <div className="timeline-meta">
-                      <md-icon className="meta-icon">build_circle</md-icon>
-                      <span className="timeline-tool">{item.tool}</span>
+                    <div className={styles.timelineMeta}>
+                      <md-icon className={styles.metaIcon}>build_circle</md-icon>
+                      <span className={styles.timelineTool}>{item.tool}</span>
                     </div>
                   )}
 
-                  <div className="timeline-times">
+                  <div className={styles.timelineTimes}>
                     <span>
-                      <md-icon className="meta-icon">schedule</md-icon>
+                      <md-icon className={styles.metaIcon}>schedule</md-icon>
                       排队 {formatDuration(item.queueTime)}
                     </span>
                     <span>
-                      <md-icon className="meta-icon">timer</md-icon>
+                      <md-icon className={styles.metaIcon}>timer</md-icon>
                       处理 {formatDuration(item.processTime)}
                     </span>
                   </div>
 
                   {canExpand && (
-                    <button className="timeline-detail-toggle" onClick={() => toggleDetail(item.run.id)}>
+                    <button className={styles.timelineDetailToggle} onClick={() => toggleDetail(item.run.id)}>
                       {hasError ? (
                         <>
-                          <md-icon className="toggle-icon">error</md-icon>
+                          <md-icon className={styles.toggleIcon}>error</md-icon>
                           错误详情
                         </>
                       ) : (
                         <>
-                          <md-icon className="toggle-icon">text_fields</md-icon>
+                          <md-icon className={styles.toggleIcon}>text_fields</md-icon>
                           转录详情
                         </>
                       )}
-                      <md-icon className="toggle-icon">
+                      <md-icon className={styles.toggleIcon}>
                         {isDetailExpanded ? "expand_less" : "expand_more"}
                       </md-icon>
                     </button>
