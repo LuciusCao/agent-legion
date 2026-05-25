@@ -280,17 +280,23 @@ def process_video_once(
         db.finish_phase(run["id"], "failed", 1, str(exc))
         return True
 
-    if phase == "assemble" and settings.config.get("cleanup_video_after_assemble", False):
-        mp4_path = video_dir / f"{video_id}.mp4"
-        if mp4_path.exists():
-            mp4_path.unlink()
-
     following = next_phase(phase, video.get("content_type", "knowledge"))
     db.finish_phase(run["id"], "completed", 0, "")
     if following is None:
         db.update_video(video_id, current_phase=phase, status="completed", error_message="")
     else:
         db.update_video(video_id, current_phase=following, status="queued", error_message="")
+
+    if phase == "assemble" and settings.config.get("cleanup_video_after_assemble", False):
+        mp4_path = video_dir / f"{video_id}.mp4"
+        if mp4_path.exists():
+            try:
+                mp4_path.unlink()
+            except OSError as exc:
+                if log_path.exists():
+                    existing = log_path.read_text(encoding="utf-8")
+                    log_path.write_text(f"{existing}\nCleanup warning: {exc}", encoding="utf-8")
+
     return True
 
 

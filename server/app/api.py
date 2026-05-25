@@ -203,7 +203,7 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
             return FileResponse(path, media_type="video/mp4")
         source_url = video.get("source_url", "")
         if source_url:
-            return RedirectResponse(source_url)
+            return RedirectResponse(source_url, status_code=302)
         return PlainTextResponse("Video not downloaded yet", status_code=404)
 
     @router.post("/package", response_model=PackageResponse)

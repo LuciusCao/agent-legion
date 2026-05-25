@@ -603,7 +603,7 @@ def test_video_file_redirects_to_source_url_when_local_missing(tmp_path, client)
     # Do not create local mp4
 
     response = client.get("/api/videos/v1/video", follow_redirects=False)
-    assert response.status_code == 307
+    assert response.status_code == 302
     assert response.headers["location"] == "https://example.com/v1.mp4"
 
 
