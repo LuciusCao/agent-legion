@@ -226,6 +226,12 @@ def process_next(
     openclaw_runner: OpenClawRunner | None = None,
 ) -> bool:
     for video in db.list_videos():
+        if (
+            openclaw_runner is None
+            and video["status"] == "queued"
+            and phase_requires_openclaw(video["current_phase"])
+        ):
+            continue
         if video["status"] in {"queued", "missing_url"} and process_video_once(
             db, settings, video["id"], openclaw_runner=openclaw_runner
         ):
