@@ -60,14 +60,16 @@ export function DetailPage() {
     loadLog(id);
   }, [id, loadVideo, loadArtifacts, loadLog]);
 
-  useEffect(() => {
+  const syncHeight = useCallback(() => {
     const main = previewMainRef.current;
     const sidebar = sidebarRef.current;
     if (!main || !sidebar) return;
+    sidebar.style.maxHeight = `${main.getBoundingClientRect().height}px`;
+  }, []);
 
-    const syncHeight = () => {
-      sidebar.style.maxHeight = `${main.getBoundingClientRect().height}px`;
-    };
+  useEffect(() => {
+    const main = previewMainRef.current;
+    if (!main) return;
 
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -79,13 +81,23 @@ export function DetailPage() {
 
     syncHeight();
     observer.observe(main);
-    // Resync after the next paint to catch Material Web Component async upgrades
-    const rafId = requestAnimationFrame(syncHeight);
+    // Double rAF to catch Material Web Component async upgrades
+    let innerRaf = 0;
+    const outerRaf = requestAnimationFrame(() => {
+      syncHeight();
+      innerRaf = requestAnimationFrame(syncHeight);
+    });
     return () => {
       observer.disconnect();
-      cancelAnimationFrame(rafId);
+      cancelAnimationFrame(outerRaf);
+      cancelAnimationFrame(innerRaf);
     };
-  }, []);
+  }, [syncHeight]);
+
+  // Re-sync when content that affects left-side height changes
+  useEffect(() => {
+    syncHeight();
+  }, [currentVideo, artifacts.chapters.length, syncHeight]);
 
   const prevPhaseRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);
@@ -218,7 +230,7 @@ export function DetailPage() {
             <md-icon>restart_alt</md-icon>
           </md-icon-button>
           <md-icon-button
-            disabled={(!currentVideo || currentVideo.status !== "completed" || !!currentVideo.packed) || undefined}
+            disabled={(!currentVideo || currentVideo.status !== "completed") || undefined}
             onClick={handlePackage}
             title="打包"
           >
