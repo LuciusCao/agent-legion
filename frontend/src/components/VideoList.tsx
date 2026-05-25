@@ -2,7 +2,7 @@ import { useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVideoStore } from "../stores/videoStore";
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from "../labels";
-import { statusGroup } from "../helpers";
+import { statusGroup, filterVideos } from "../helpers";
 import { PhaseStepper } from "./PhaseStepper";
 
 export function VideoList() {
@@ -12,6 +12,7 @@ export function VideoList() {
     selectedType,
     statusFilter,
     searchQuery,
+    packedFilter,
     selectMode,
     packageSelectMode,
     selectedIds,
@@ -20,17 +21,8 @@ export function VideoList() {
   const checkboxRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   const filtered = useMemo(() => {
-    return videos.filter((v) => {
-      if (v.content_type !== selectedType) return false;
-      if (statusFilter !== "all" && statusGroup(v) !== statusFilter) return false;
-      if (searchQuery) {
-        const q = searchQuery.toLowerCase();
-        const haystack = `${v.external_id} ${v.title} ${v.id}`.toLowerCase();
-        if (!haystack.includes(q)) return false;
-      }
-      return true;
-    });
-  }, [videos, selectedType, statusFilter, searchQuery]);
+    return filterVideos(videos, { selectedType, statusFilter, searchQuery, packedFilter });
+  }, [videos, selectedType, statusFilter, searchQuery, packedFilter]);
 
   useEffect(() => {
     filtered.forEach((v) => {
@@ -80,7 +72,7 @@ export function VideoList() {
               {(selectMode || packageSelectMode) && (
                 <md-checkbox
                   slot="start"
-                  disabled={packageSelectMode && video.status !== "completed"}
+                  disabled={(packageSelectMode && video.status !== "completed") || undefined}
                   ref={(el: HTMLElement | null) => {
                     if (el) checkboxRefs.current.set(video.id, el);
                     else checkboxRefs.current.delete(video.id);
