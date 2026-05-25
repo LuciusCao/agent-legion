@@ -22,7 +22,6 @@ DEFAULT_PHASE_CONCURRENCY = {
     "download": 10,
     "transcribe": 2,
     "assemble": 10,
-    "package": 10,
     "waiting_for_url": 10,
 }
 
@@ -199,10 +198,6 @@ def process_video_once(
                     raise RuntimeError(result.error_message)
         elif phase == "assemble":
             assemble_video(video, video_dir)
-        elif phase == "package":
-            db.update_video(video_id, status="completed")
-            db.finish_phase(run["id"], "completed", 0, "")
-            return True
         else:
             raise ValueError(f"Unknown phase: {phase}")
     except Exception as exc:
@@ -213,8 +208,8 @@ def process_video_once(
 
     following = next_phase(phase, video.get("content_type", "knowledge"))
     db.finish_phase(run["id"], "completed", 0, "")
-    if following == "package" or following is None:
-        db.update_video(video_id, current_phase="assemble", status="completed", error_message="")
+    if following is None:
+        db.update_video(video_id, current_phase=phase, status="completed", error_message="")
     else:
         db.update_video(video_id, current_phase=following, status="queued", error_message="")
     return True

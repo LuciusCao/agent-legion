@@ -16,6 +16,13 @@ const mockApi = vi.mocked(api);
 
 describe("DetailPage", () => {
   beforeEach(() => {
+    global.ResizeObserver = vi.fn().mockImplementation(function () {
+      return {
+        observe: vi.fn(),
+        disconnect: vi.fn(),
+        unobserve: vi.fn(),
+      };
+    });
     useDetailStore.setState({
       currentVideo: null,
       artifacts: { subtitles: [], chapters: [], interactions: [], metadata: null, review: null, checklist: null },

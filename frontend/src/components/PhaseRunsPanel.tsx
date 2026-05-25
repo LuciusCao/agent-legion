@@ -10,7 +10,6 @@ const KNOWLEDGE_PHASES = [
   "interaction_generate",
   "content_review",
   "assemble",
-  "package",
 ];
 
 const QUESTION_PHASES = [
@@ -19,7 +18,6 @@ const QUESTION_PHASES = [
   "subtitle_review",
   "chapter_generate",
   "assemble",
-  "package",
 ];
 
 const STATUS_ICONS: Record<string, string> = {
@@ -143,18 +141,6 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
     const latestRuns = latestItems.map((item) => item.run);
     const completedCount = latestRuns.filter((r) => r.status === "completed").length;
 
-    let totalTime = 0;
-    if (sorted.length > 0) {
-      const earliestStart = new Date(sorted[0].started_at).getTime();
-      const latestEnd = sorted.reduce((max, run) => {
-        if (run.finished_at) {
-          return Math.max(max, new Date(run.finished_at).getTime());
-        }
-        return max;
-      }, now);
-      totalTime = latestEnd - earliestStart;
-    }
-
     const hasRunning = latestRuns.some((r) => r.status === "running");
     const hasFailed = latestRuns.some((r) => r.status === "failed");
     const isCompleted = completedCount >= allPhases.length;
@@ -168,7 +154,7 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
     return {
       latestItems,
       historyItems,
-      summary: { completedCount, totalCount: allPhases.length, totalTime, status },
+      summary: { completedCount, totalCount: allPhases.length, status },
     };
   }, [phaseRuns, transcriptionRuns, now, allPhases]);
 
@@ -209,12 +195,8 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
             <span className="summary-label">阶段完成</span>
           </div>
           <div className="summary-meta">
-            <span className="summary-time">{formatDuration(summary.totalTime)}</span>
-            <span className={`summary-status-badge ${summary.status}`}>
-              {STATUS_TEXT[summary.status] || summary.status}
-            </span>
             <md-text-button onClick={() => setViewMode((v) => (v === "latest" ? "history" : "latest"))}>
-              {viewMode === "latest" ? "查看历史轮次" : "返回当前进度"}
+              {viewMode === "latest" ? "历史" : "当前"}
             </md-text-button>
           </div>
         </div>

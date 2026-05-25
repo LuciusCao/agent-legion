@@ -169,7 +169,7 @@ describe("parseResourceInputs", () => {
 
 describe("computeProgress", () => {
   it("returns 1 for completed videos", () => {
-    expect(computeProgress(video({ status: "completed", current_phase: "package" }))).toBe(1);
+    expect(computeProgress(video({ status: "completed", current_phase: "assemble" }))).toBe(1);
   });
 
   it("returns 0 for waiting_for_url", () => {
@@ -177,23 +177,23 @@ describe("computeProgress", () => {
   });
 
   it("computes knowledge progress correctly", () => {
-    // queued at download -> 0/8
+    // queued at download -> 0/7
     expect(computeProgress(video({ status: "queued", current_phase: "download" }))).toBe(0);
-    // running at download -> 0.5/8
-    expect(computeProgress(video({ status: "running", current_phase: "download" }))).toBe(0.5 / 8);
-    // queued at transcribe -> 1/8
-    expect(computeProgress(video({ status: "queued", current_phase: "transcribe" }))).toBe(1 / 8);
-    // running at package -> 7.5/8
-    expect(computeProgress(video({ status: "running", current_phase: "package" }))).toBe(7.5 / 8);
+    // running at download -> 0.5/7
+    expect(computeProgress(video({ status: "running", current_phase: "download" }))).toBe(0.5 / 7);
+    // queued at transcribe -> 1/7
+    expect(computeProgress(video({ status: "queued", current_phase: "transcribe" }))).toBe(1 / 7);
+    // running at assemble -> 6.5/7
+    expect(computeProgress(video({ status: "running", current_phase: "assemble" }))).toBe(6.5 / 7);
   });
 
   it("computes question progress correctly", () => {
     // queued at download -> 0/6
     expect(computeProgress(video({ content_type: "question", status: "queued", current_phase: "download" }))).toBe(0);
-    // running at assemble -> 4.5/6
-    expect(computeProgress(video({ content_type: "question", status: "running", current_phase: "assemble" }))).toBe(4.5 / 6);
+    // running at assemble -> 4.5/5
+    expect(computeProgress(video({ content_type: "question", status: "running", current_phase: "assemble" }))).toBe(4.5 / 5);
     // completed
-    expect(computeProgress(video({ content_type: "question", status: "completed", current_phase: "package" }))).toBe(1);
+    expect(computeProgress(video({ content_type: "question", status: "completed", current_phase: "assemble" }))).toBe(1);
   });
 
   it("returns 0 for unknown phase", () => {
@@ -211,7 +211,6 @@ describe("getPhases", () => {
       "interaction_generate",
       "content_review",
       "assemble",
-      "package",
     ]);
   });
 
@@ -222,17 +221,15 @@ describe("getPhases", () => {
       "subtitle_review",
       "chapter_generate",
       "assemble",
-      "package",
     ]);
   });
 });
 
 describe("canRerunFrom", () => {
   it("returns true for any phase when video is completed", () => {
-    const completed = makeVideo({ status: "completed", current_phase: "package" });
+    const completed = makeVideo({ status: "completed", current_phase: "assemble" });
     expect(canRerunFrom(completed, "download")).toBe(true);
     expect(canRerunFrom(completed, "assemble")).toBe(true);
-    expect(canRerunFrom(completed, "package")).toBe(true);
   });
 
   it("returns true when selected phase is at or before current phase", () => {
@@ -240,7 +237,6 @@ describe("canRerunFrom", () => {
     expect(canRerunFrom(v, "download")).toBe(true);
     expect(canRerunFrom(v, "chapter_generate")).toBe(true);
     expect(canRerunFrom(v, "assemble")).toBe(false);
-    expect(canRerunFrom(v, "package")).toBe(false);
   });
 
   it("returns false for unknown current_phase", () => {

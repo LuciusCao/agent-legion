@@ -38,7 +38,7 @@ class TestCanRerunFrom:
             content_type="question",
             external_id="Q001",
         )
-        db.update_video(video["id"], status="failed", current_phase="package")
+        db.update_video(video["id"], status="failed", current_phase="assemble")
         video = db.get_video(video["id"])
 
         for phase in QUESTION_PHASES:

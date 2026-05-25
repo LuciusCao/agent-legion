@@ -10,7 +10,6 @@ PHASES = [
     "interaction_generate",
     "content_review",
     "assemble",
-    "package",
 ]
 
 
@@ -50,7 +49,6 @@ KNOWLEDGE_PHASES = [
     "interaction_generate",
     "content_review",
     "assemble",
-    "package",
 ]
 
 QUESTION_PHASES = [
@@ -59,7 +57,6 @@ QUESTION_PHASES = [
     "subtitle_review",
     "chapter_generate",
     "assemble",
-    "package",
 ]
 
 

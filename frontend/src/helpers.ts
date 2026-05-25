@@ -100,7 +100,6 @@ const KNOWLEDGE_PHASE_SEQUENCE = [
   "interaction_generate",
   "content_review",
   "assemble",
-  "package",
 ];
 
 const QUESTION_PHASE_SEQUENCE = [
@@ -109,7 +108,6 @@ const QUESTION_PHASE_SEQUENCE = [
   "subtitle_review",
   "chapter_generate",
   "assemble",
-  "package",
 ];
 
 export function computeProgress(video: VideoItem): number {

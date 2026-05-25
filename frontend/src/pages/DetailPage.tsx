@@ -24,6 +24,8 @@ export function DetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const playerRef = useRef<HTMLVideoElement>(null);
+  const previewMainRef = useRef<HTMLDivElement>(null);
+  const sidebarRef = useRef<HTMLElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
 
   const {
@@ -57,6 +59,23 @@ export function DetailPage() {
     loadArtifacts(id);
     loadLog(id);
   }, [id, loadVideo, loadArtifacts, loadLog]);
+
+  useEffect(() => {
+    const main = previewMainRef.current;
+    const sidebar = sidebarRef.current;
+    if (!main || !sidebar) return;
+
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target === main) {
+          sidebar.style.maxHeight = `${entry.contentRect.height}px`;
+        }
+      }
+    });
+
+    observer.observe(main);
+    return () => observer.disconnect();
+  }, []);
 
   const prevPhaseRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);
@@ -201,7 +220,7 @@ export function DetailPage() {
       </header>
 
       <section className="preview-layout">
-        <div className="preview-main">
+        <div className="preview-main" ref={previewMainRef}>
           {currentVideo && (
             <VideoPlayer
               video={currentVideo}
@@ -216,7 +235,7 @@ export function DetailPage() {
             onSeek={handleSeek}
           />
         </div>
-        <aside className="phase-runs-sidebar">
+        <aside className="phase-runs-sidebar" ref={sidebarRef}>
           <PhaseRunsPanel phaseRuns={phaseRuns} transcriptionRuns={transcriptionRuns} contentType={currentVideo?.content_type} />
         </aside>
       </section>

@@ -10,7 +10,6 @@ PHASE_OUTPUTS = {
     "interaction_generate": ["interactions.json"],
     "content_review": ["checklist.json", "review_result.json"],
     "assemble": ["metadata.json", "report.md"],
-    "package": [],
 }
 
 PHASE_ORDER = list(PHASES)
