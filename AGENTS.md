@@ -44,6 +44,7 @@ video-hive/
 │   │       ├── artifacts.py    # Artifact cleanup on rerun
 │   │       ├── reader.py       # Artifact reader for the API
 │   │       ├── package.py      # ZIP packaging of completed videos
+│   │       ├── upload_params.py # Assemble upload_params.json in llm_claude format
 │   │       ├── fetch_url.py    # CMS API integration for knowledge/question lookups
 │   │       └── references/     # Markdown prompt references for openclaw phases
 │   │           ├── phase-03-subtitle-review.md
@@ -193,7 +194,7 @@ To install the optional local pre-commit hook that runs the quick gate before ea
   4. `chapter_generate` — openclaw agent
   5. `interaction_generate` — openclaw agent
   6. `content_review` — openclaw agent
-  7. `assemble` — produce `metadata.json` and `report.md`
+  7. `assemble` — produce `metadata.json`, `report.md`, and `upload_params.json`
   8. `package` — mark as completed
 
   **Question explanation videos** (`question`) — skip interaction and content review:
@@ -203,6 +204,12 @@ To install the optional local pre-commit hook that runs the quick gate before ea
   4. `chapter_generate`
   5. `assemble`
   6. `package`
+
+- The `assemble` phase also writes `upload_params.json` per video, transforming artifacts into the same format used by the `llm_claude` downstream pipeline:
+  - subtitles → `sequence` + `start_time/end_time` in milliseconds + cleaned text
+  - chapters → `clips_uuid` + `start_time/end_time` in milliseconds
+  - interactions → split into `example_problem_trial` and `interaction_summary`, with options mapped to A/B/C/D keys and per-interaction `review_status` / `review_msg` extracted from `review_result.json`
+- `upload_params.json` is included in the ZIP package alongside the other artifacts.
 
 - Videos can be added with an empty URL. They are stored with `status: missing_url` and `current_phase: waiting_for_url`; the worker skips them until a URL is supplied later.
 - If a phase fails, the video status becomes `failed` and the error is stored in the DB and log file.
@@ -218,7 +225,7 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 - Fetches data from `/api/*` endpoints.
 - UI labels are in Chinese (e.g., "加入队列", "重跑", "打包完成项").
 - Video player supports clicking subtitle/chapter/interaction timestamps to seek.
-- The add-video form includes a type selector (知识点 / 题目解析) and an `external_id` field.
+- The add-video form includes a type selector (知识点 / 题目解析), an `external_id` field, and an optional `source_uuid`. Batch input supports `external_id,source_uuid` per line (source_uuid is optional).
 - The video list and detail header display the content type label and `external_id`.
 - The phase panel and rerun dropdown adapt to the video's `content_type`; knowledge-only phases are hidden/disabled for `question` videos.
 - A **删除** button in the toolbar prompts for confirmation before calling `DELETE /api/videos/{video_id}` and clearing the selection.
@@ -226,11 +233,11 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 ### Database
 
 - SQLite with four tables:
-  - `videos` — queue entries. Columns include `content_type` (`knowledge`|`question`), `external_id`, `knowledge_code`, `question_id`, `source_url`, `title`, `current_phase`, `status`, `duration`, `storage_dir`.
+  - `videos` — queue entries. Columns include `content_type` (`knowledge`|`question`), `external_id`, `knowledge_code`, `question_id`, `source_uuid`, `source_url`, `title`, `current_phase`, `status`, `duration`, `storage_dir`.
   - `phase_runs` — per-phase execution history
   - `transcription_runs` — transcription attempt history (whisper / SenseVoice)
   - `packages` — created package paths
-- The DB initializer runs lightweight migrations (`alter table add column`) so existing `videos` tables gain `content_type`, `external_id`, `knowledge_code`, and `question_id` without data loss.
+- The DB initializer runs lightweight migrations (`alter table add column`) so existing `videos` tables gain `content_type`, `external_id`, `knowledge_code`, `question_id`, and `source_uuid` without data loss.
 - `delete_video()` performs cascading deletes: it removes matching rows from `phase_runs` and `transcription_runs` before deleting the `videos` row.
 
 ## Configuration
@@ -256,6 +263,7 @@ Each video carries identity fields that flow into `metadata.json` and the packag
 - `external_id` — the knowledge code or question ID supplied at intake
 - `knowledge_code` — populated from `external_id` when `content_type == "knowledge"`
 - `question_id` — populated from `external_id` when `content_type == "question"`
+- `source_uuid` — optional CMS source UUID, supplied at intake or left empty
 
 Question explanation videos do not produce interaction nodes. Their `metadata.json` keeps `nodes: []`, and `interactions.json` is written as an empty stub if it does not exist.
 
