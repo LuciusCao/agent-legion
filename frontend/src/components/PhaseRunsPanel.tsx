@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PhaseRun, TranscriptionRun, ContentType } from "../types";
 import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES, STATUS_LABELS, STATUS_ICONS } from "../labels";
+import { formatDuration } from "../lib/formatters";
+import { TranscriptionDetails } from "./TranscriptionDetails";
 
 
 interface PhaseRunsPanelProps {
@@ -125,18 +127,6 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
     };
   }, [phaseRuns, transcriptionRuns, now, allPhases]);
 
-  function formatDuration(ms: number): string {
-    if (ms <= 0) return "—";
-    const sec = Math.floor(ms / 1000);
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    if (m >= 60) {
-      const h = Math.floor(m / 60);
-      return `${h}时${m % 60}分${s}秒`;
-    }
-    return m > 0 ? `${m}分${s}秒` : `${s}秒`;
-  }
-
   function toggleDetail(runId: number) {
     setExpandedDetails((prev) => {
       const next = new Set(prev);
@@ -248,36 +238,11 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
                   )}
 
                   {isDetailExpanded && hasTransDetails && (
-                    <div className="timeline-detail-content transcription">
-                      <div className="trans-row">
-                        <span className="trans-key">Provider</span>
-                        <span className="trans-value">{transPrimary?.provider || "—"}</span>
-                      </div>
-                      {transPrimary && transPrimary.srt_entry_count > 0 && (
-                        <div className="trans-row">
-                          <span className="trans-key">字幕条目</span>
-                          <span className="trans-value">{transPrimary.srt_entry_count}</span>
-                        </div>
-                      )}
-                      {transPrimary?.validation_summary && (
-                        <div className="trans-row">
-                          <span className="trans-key">验证结果</span>
-                          <span className="trans-value">{transPrimary.validation_summary}</span>
-                        </div>
-                      )}
-                      {transFallback?.fallback_reason && (
-                        <div className="trans-row">
-                          <span className="trans-key">Fallback</span>
-                          <span className="trans-value">{transFallback.fallback_reason}</span>
-                        </div>
-                      )}
-                      {transcriptionRuns.length > 1 && (
-                        <div className="trans-row">
-                          <span className="trans-key">尝试次数</span>
-                          <span className="trans-value">{transcriptionRuns.length}</span>
-                        </div>
-                      )}
-                    </div>
+                    <TranscriptionDetails
+                      primary={transPrimary}
+                      fallback={transFallback}
+                      totalCount={transcriptionRuns.length}
+                    />
                   )}
                 </div>
               </div>

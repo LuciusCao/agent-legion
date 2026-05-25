@@ -20,6 +20,18 @@ export function escapeHtml(value: string): string {
   });
 }
 
+export function formatDuration(ms: number): string {
+  if (ms <= 0) return "—";
+  const sec = Math.floor(ms / 1000);
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m >= 60) {
+    const h = Math.floor(m / 60);
+    return `${h}时${m % 60}分${s}秒`;
+  }
+  return m > 0 ? `${m}分${s}秒` : `${s}秒`;
+}
+
 export function formatInteractionStats(stats: Record<string, InteractionStats> | undefined): string {
   if (!stats) return "";
   const parts: string[] = [];
