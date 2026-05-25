@@ -45,8 +45,8 @@ describe("PhaseRunsPanel", () => {
       makeRun(2, "transcribe", "running", { started_at: "2024-01-01T00:00:35Z" }),
     ];
     render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
-    fireEvent.click(screen.getByText("查看历史轮次"));
-    expect(screen.getByText("返回当前进度")).toBeInTheDocument();
+    fireEvent.click(screen.getByText("历史"));
+    expect(screen.getByText("当前")).toBeInTheDocument();
     expect(screen.getByText("下载")).toBeInTheDocument();
     expect(screen.getByText("转录")).toBeInTheDocument();
   });
@@ -62,7 +62,7 @@ describe("PhaseRunsPanel", () => {
       }),
     ];
     render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
-    fireEvent.click(screen.getByText("查看历史轮次"));
+    fireEvent.click(screen.getByText("历史"));
     expect(screen.getByText(/第2次/)).toBeInTheDocument();
   });
 
@@ -72,7 +72,7 @@ describe("PhaseRunsPanel", () => {
       makeRun(2, "transcribe", "running", { started_at: "2024-01-01T00:01:00Z" }),
     ];
     render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
-    expect(screen.getByText(/1\s*\/\s*8/)).toBeInTheDocument();
+    expect(screen.getByText(/1\s*\/\s*7/)).toBeInTheDocument();
     const badges = screen.getAllByText("处理中");
     expect(badges.length).toBeGreaterThanOrEqual(1);
   });
@@ -86,17 +86,15 @@ describe("PhaseRunsPanel", () => {
       makeRun(5, "interaction_generate", "completed", { finished_at: "2024-01-01T00:04:30Z" }),
       makeRun(6, "content_review", "completed", { finished_at: "2024-01-01T00:05:30Z" }),
       makeRun(7, "assemble", "completed", { finished_at: "2024-01-01T00:06:30Z" }),
-      makeRun(8, "package", "completed", { finished_at: "2024-01-01T00:07:30Z" }),
-      makeRun(9, "transcribe", "running", { started_at: "2024-01-01T00:10:00Z" }),
+      makeRun(8, "transcribe", "running", { started_at: "2024-01-01T00:10:00Z" }),
     ];
 
     render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
 
-    expect(screen.getByText(/1\s*\/\s*8/)).toBeInTheDocument();
+    expect(screen.getByText(/1\s*\/\s*7/)).toBeInTheDocument();
     expect(screen.getByText("下载")).toBeInTheDocument();
     expect(screen.getByText("转录")).toBeInTheDocument();
     expect(screen.queryByText("字幕审核")).not.toBeInTheDocument();
-    expect(screen.queryByText("打包")).not.toBeInTheDocument();
   });
 
   it("shows empty state when no phase runs exist", () => {

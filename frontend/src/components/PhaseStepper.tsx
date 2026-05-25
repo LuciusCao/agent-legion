@@ -9,7 +9,6 @@ const KNOWLEDGE_PHASES = [
   "interaction_generate",
   "content_review",
   "assemble",
-  "package",
 ];
 
 const QUESTION_PHASES = [
@@ -18,7 +17,6 @@ const QUESTION_PHASES = [
   "subtitle_review",
   "chapter_generate",
   "assemble",
-  "package",
 ];
 
 type StepState = "completed" | "running" | "failed" | "pending";

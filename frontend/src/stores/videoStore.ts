@@ -33,7 +33,7 @@ interface VideoState {
   batchPackage: (ids: string[]) => Promise<{ path: string; download_url: string }>;
 }
 
-export const useVideoStore = create<VideoState>((set, _get) => ({
+export const useVideoStore = create<VideoState>((set, get) => ({
   videos: [],
   selectedType: "knowledge",
   statusFilter: "all",
@@ -146,7 +146,7 @@ export const useVideoStore = create<VideoState>((set, _get) => ({
   },
 
   batchPackage: async (ids) => {
-    const result = await api("/api/package", {
+    const result = await api<{ path: string; download_url: string }>("/api/package", {
       method: "POST",
       body: JSON.stringify({ video_ids: ids }),
     });
