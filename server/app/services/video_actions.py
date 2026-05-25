@@ -5,6 +5,7 @@ from pathlib import Path
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
+from server.app.pipeline.phases import phase_sequence
 from server.app.records import VideoRecord
 from server.app.settings import Settings
 
@@ -25,8 +26,6 @@ def normalize_rerun_phase(video: VideoRecord, phase: str) -> str:
 def can_rerun_from(video: VideoRecord, phase: str) -> bool:
     if video["status"] == "completed":
         return True
-    from server.app.pipeline.phases import phase_sequence
-
     phases = phase_sequence(video["content_type"])
     current = video["current_phase"]
     if current not in phases or phase not in phases:
