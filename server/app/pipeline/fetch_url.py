@@ -71,6 +71,7 @@ class CmsVideoLookup:
     status: str
     url: str = ""
     title: str = ""
+    source_uuid: str = ""
     payload: dict[str, Any] | None = None
 
 
@@ -136,7 +137,7 @@ def _extract_question_title(item: dict[str, Any] | None, uuid: str) -> str:
     return str(item.get("title") or item.get("question_title") or item.get("name") or uuid)
 
 
-def _extract_knowledge_url(code: str, payload: dict) -> str | None:
+def _extract_knowledge_url(code: str, payload: dict) -> tuple[str | None, str | None]:
     for item in _iter_knowledge_items(payload):
         if not isinstance(item, dict):
             continue
@@ -153,22 +154,24 @@ def _extract_knowledge_url(code: str, payload: dict) -> str | None:
                 or video_data.get("source", "")
                 or video_data.get("source_v2", "")
             )
+            source_uuid = video_data.get("source_uuid", "")
             if source_url:
-                return source_url
-    return None
+                return source_url, source_uuid
+    return None, None
 
 
-def _extract_question_url(payload: dict) -> str | None:
+def _extract_question_url(payload: dict) -> tuple[str | None, str | None]:
     data = payload.get("data", {}) if isinstance(payload, dict) else {}
     if not isinstance(data, dict):
-        return None
+        return None, None
     for vd in data.get("video_data", []) or []:
         if not isinstance(vd, dict):
             continue
         source_url = vd.get("source", "") or vd.get("source_v2", "")
+        source_uuid = vd.get("source_uuid", "")
         if source_url:
-            return source_url
-    return None
+            return source_url, source_uuid
+    return None, None
 
 
 def get_token(env: str, config: dict[str, Any] | None = None) -> str | None:
@@ -192,9 +195,9 @@ def lookup_knowledge_video(
     item = _first_knowledge_item(payload)
     if item is None:
         return CmsVideoLookup("not_found", payload=payload)
-    video_url = _extract_knowledge_url(code, payload) or ""
+    video_url, source_uuid = _extract_knowledge_url(code, payload)
     status = "found" if video_url else "missing_url"
-    return CmsVideoLookup(status, video_url, _extract_knowledge_title(item, code), payload)
+    return CmsVideoLookup(status, video_url or "", _extract_knowledge_title(item, code), source_uuid or "", payload)
 
 
 def lookup_question_video(
@@ -205,16 +208,9 @@ def lookup_question_video(
     item = _extract_question_item(payload)
     if item is None:
         return CmsVideoLookup("not_found", payload=payload)
-    video_url = _extract_question_url(payload) or ""
+    video_url, source_uuid = _extract_question_url(payload)
     status = "found" if video_url else "missing_url"
-    return CmsVideoLookup(status, video_url, _extract_question_title(item, uuid), payload)
+    return CmsVideoLookup(status, video_url or "", _extract_question_title(item, uuid), source_uuid or "", payload)
 
 
-def fetch_knowledge_url(code: str, api_url: str | None = None, token: str | None = None) -> str | None:
-    result = lookup_knowledge_video(code, api_url, token)
-    return result.url or None
 
-
-def fetch_question_url(uuid: str, api_url: str | None = None, token: str | None = None) -> str | None:
-    result = lookup_question_video(uuid, api_url, token)
-    return result.url or None
