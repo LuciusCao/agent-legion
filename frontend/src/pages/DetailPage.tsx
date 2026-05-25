@@ -174,7 +174,7 @@ export function DetailPage() {
       body: JSON.stringify({ video_ids: [id] }),
     });
     await Promise.all([fetchVideos(), loadVideo(id)]);
-    triggerDownload(result.download_url);
+    await triggerDownload(result.download_url);
   }, [id, fetchVideos, loadVideo]);
 
   const handleRerun = useCallback(

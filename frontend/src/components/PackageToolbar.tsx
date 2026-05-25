@@ -18,7 +18,7 @@ export function PackageToolbar() {
     if (!hasSelection) return;
     const result = await batchPackage(Array.from(selectedIds));
     togglePackageSelectMode();
-    triggerDownload(result.download_url);
+    await triggerDownload(result.download_url);
   };
 
   return (
