@@ -3,11 +3,13 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from server.app.cms.client import get_token
+from server.app.cms.knowledge import lookup_knowledge_video
+from server.app.cms.question import lookup_question_video
 from server.app.db import Database
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.common import resolve_video_dir
 from server.app.pipeline.download import download_video
-from server.app.pipeline.fetch_url import get_token, lookup_knowledge_video, lookup_question_video
 from server.app.pipeline.openclaw import OpenClawRunner
 from server.app.pipeline.phases import AGENT_PHASES, next_phase
 from server.app.pipeline.runners import build_openclaw_runner
@@ -17,7 +19,6 @@ from server.app.pipeline.transcribe import (
     WhisperCppProvider,
     run_transcription_with_providers,
 )
-from server.app.pipeline.validators import validate_phase_outputs
 from server.app.settings import Settings
 
 DEFAULT_PHASE_CONCURRENCY = {
@@ -88,6 +89,71 @@ def phase_outputs_sufficient(video_dir: Path, phase_key: str, output_names: list
         return (video_dir / "subtitles_reviewed.srt").exists()
     return expected_outputs_exist(video_dir, output_names)
 
+
+def validate_phase_outputs(video_dir: Path, phase_key: str) -> None:
+    """Validate agent phase output format. Raise ValueError on invalid data."""
+
+    def _load_json(path: Path) -> Any:
+        if not path.exists():
+            raise ValueError(f"Missing required file: {path.name}")
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    if phase_key == "subtitle_review":
+        report = _load_json(video_dir / "subtitle_review_report.json")
+        if not isinstance(report, dict):
+            raise ValueError("subtitle_review_report.json must be a JSON object")
+        srt_path = video_dir / "subtitles_reviewed.srt"
+        if not srt_path.exists():
+            raise ValueError("subtitles_reviewed.srt is missing after subtitle_review")
+
+    elif phase_key == "chapter_generate":
+        data = _load_json(video_dir / "chapters.json")
+        chapters = data.get("chapters", []) if isinstance(data, dict) else data
+        if not isinstance(chapters, list):
+            raise ValueError("chapters.json must contain a list of chapters")
+        if not chapters:
+            raise ValueError("chapters.json must contain at least one chapter")
+        for idx, ch in enumerate(chapters):
+            if not isinstance(ch, dict):
+                raise ValueError(f"Chapter {idx + 1} must be an object")
+            if "end_time" not in ch and "end" not in ch:
+                raise ValueError(
+                    f"Chapter {idx + 1} ('{ch.get('title', '')}') is missing 'end_time'. "
+                    f"The chapter_generate agent must output 'end_time' for every chapter."
+                )
+            if not ch.get("title"):
+                raise ValueError(f"Chapter {idx + 1} is missing 'title'")
+
+    elif phase_key == "interaction_generate":
+        data = _load_json(video_dir / "interactions.json")
+        interactions = data.get("interactions", []) if isinstance(data, dict) else data
+        if not isinstance(interactions, list):
+            raise ValueError("interactions.json must contain an 'interactions' array")
+        for idx, inter in enumerate(interactions):
+            if not isinstance(inter, dict):
+                raise ValueError(f"Interaction {idx + 1} must be an object")
+            if not inter.get("id"):
+                raise ValueError(f"Interaction {idx + 1} is missing 'id'")
+            itype = inter.get("type", "")
+            if itype not in {"example_practice", "video_summary", "interaction_summary"}:
+                raise ValueError(
+                    f"Interaction {idx + 1} has unknown type '{itype}'. "
+                    f"Expected one of: example_practice, video_summary, interaction_summary"
+                )
+            if "trigger_time" not in inter:
+                raise ValueError(f"Interaction {idx + 1} ('{inter.get('id')}') is missing 'trigger_time'")
+            if not inter.get("instruction"):
+                raise ValueError(f"Interaction {idx + 1} ('{inter.get('id')}') is missing 'instruction'")
+
+    elif phase_key == "content_review":
+        checklist = _load_json(video_dir / "checklist.json")
+        if not isinstance(checklist, dict):
+            raise ValueError("checklist.json must be a JSON object")
+        review = _load_json(video_dir / "review_result.json")
+        if not isinstance(review, dict):
+            raise ValueError("review_result.json must be a JSON object")
+        if "reviews" not in review:
+            raise ValueError("review_result.json is missing 'reviews' array")
 
 
 def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
@@ -190,6 +256,14 @@ def process_video_once(
             )
             log_path.write_text(
                 json.dumps(result.__dict__, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            db.record_transcription_run(
+                video_id=video_id,
+                provider=result.provider,
+                status="completed",
+                srt_entry_count=result.srt_entry_count,
+                validation_summary=result.validation_summary,
+                fallback_reason=result.fallback_reason,
             )
         elif phase in AGENT_PHASES:
             agent_phase = AGENT_PHASES[phase]

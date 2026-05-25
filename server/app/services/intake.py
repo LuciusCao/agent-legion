@@ -1,8 +1,10 @@
 from typing import Any, Protocol
 
+from server.app.cms.client import get_token
+from server.app.cms.knowledge import lookup_knowledge_video
+from server.app.cms.question import lookup_question_video
 from server.app.db import Database
 from server.app.pipeline.common import make_record_id
-from server.app.pipeline.fetch_url import get_token, lookup_knowledge_video, lookup_question_video
 from server.app.records import VideoRecord
 from server.app.settings import Settings
 
