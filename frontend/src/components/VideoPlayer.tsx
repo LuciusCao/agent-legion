@@ -1,5 +1,6 @@
 import { useRef, useCallback } from "react";
 import type { VideoItem, VideoArtifacts } from "../types";
+import styles from "./VideoPlayer.module.css";
 
 interface VideoPlayerProps {
   video: VideoItem;
@@ -42,7 +43,7 @@ export function VideoPlayer({ video, artifacts, onTimeUpdate, videoRef }: VideoP
     : "";
 
   return (
-    <div className="player-wrap">
+    <div className={styles.playerWrap}>
       {videoUrl ? (
         <video
           ref={setRefs}
@@ -54,8 +55,8 @@ export function VideoPlayer({ video, artifacts, onTimeUpdate, videoRef }: VideoP
       ) : (
         <div className="empty-state">视频文件未下载</div>
       )}
-      <div className="subtitle-overlay">
-        <span ref={subtitleRef} className="subtitle-text" />
+      <div className={styles.subtitleOverlay}>
+        <span ref={subtitleRef} className={styles.subtitleText} />
       </div>
     </div>
   );
