@@ -67,7 +67,7 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
 
         return (
           <div
-            key={i}
+            key={node.id ?? i}
             className={`node-card card-outlined ${answered ? "answered" : ""}`}
             onClick={() => {
               onSeek?.(triggerTime);
@@ -83,9 +83,12 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
               <md-assist-chip label={typeLabel} />
             </div>
             {node.options && node.options.length > 0 && (
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
+              <div
+                style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}
+                onClick={(e) => e.stopPropagation()}
+              >
                 {node.options.map((opt, j) => (
-                  <md-outlined-button key={j} disabled={answered || undefined}>{opt.text}</md-outlined-button>
+                  <md-outlined-button key={opt.id ?? j} disabled={answered || undefined}>{opt.text}</md-outlined-button>
                 ))}
               </div>
             )}
