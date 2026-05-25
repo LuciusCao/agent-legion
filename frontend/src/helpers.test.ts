@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canRerunFrom,
   computeProgress,
   escapeHtml,
   filterVideos,
   getInteractionQuestion,
+  getPhases,
   parseResourceInputs,
   parseResourceIds,
   statusGroup,
@@ -19,6 +21,21 @@ const video = (overrides: Partial<VideoItem>): VideoItem => ({
   content_type: "knowledge",
   external_id: "K001",
   knowledge_code: "K001",
+  question_id: "",
+  source_uuid: "",
+  status: "queued",
+  current_phase: "download",
+  error_message: "",
+  ...overrides,
+});
+
+const makeVideo = (overrides: Partial<VideoItem> = {}): VideoItem => ({
+  id: "v1",
+  title: "Test",
+  source_url: "",
+  content_type: "knowledge",
+  external_id: "",
+  knowledge_code: "",
   question_id: "",
   source_uuid: "",
   status: "queued",
@@ -175,5 +192,58 @@ describe("computeProgress", () => {
 
   it("returns 0 for unknown phase", () => {
     expect(computeProgress(video({ status: "queued", current_phase: "unknown" }))).toBe(0);
+  });
+});
+
+describe("getPhases", () => {
+  it("returns knowledge phases for knowledge", () => {
+    expect(getPhases("knowledge")).toEqual([
+      "download",
+      "transcribe",
+      "subtitle_review",
+      "chapter_generate",
+      "interaction_generate",
+      "content_review",
+      "assemble",
+      "package",
+    ]);
+  });
+
+  it("returns question phases for question", () => {
+    expect(getPhases("question")).toEqual([
+      "download",
+      "transcribe",
+      "subtitle_review",
+      "chapter_generate",
+      "assemble",
+      "package",
+    ]);
+  });
+});
+
+describe("canRerunFrom", () => {
+  it("returns true for any phase when video is completed", () => {
+    const completed = makeVideo({ status: "completed", current_phase: "package" });
+    expect(canRerunFrom(completed, "download")).toBe(true);
+    expect(canRerunFrom(completed, "assemble")).toBe(true);
+    expect(canRerunFrom(completed, "package")).toBe(true);
+  });
+
+  it("returns true when selected phase is at or before current phase", () => {
+    const v = makeVideo({ status: "running", current_phase: "chapter_generate" });
+    expect(canRerunFrom(v, "download")).toBe(true);
+    expect(canRerunFrom(v, "chapter_generate")).toBe(true);
+    expect(canRerunFrom(v, "assemble")).toBe(false);
+    expect(canRerunFrom(v, "package")).toBe(false);
+  });
+
+  it("returns false for unknown current_phase", () => {
+    const v = makeVideo({ status: "running", current_phase: "unknown_phase" });
+    expect(canRerunFrom(v, "download")).toBe(false);
+  });
+
+  it("returns false for unknown phase argument", () => {
+    const v = makeVideo({ status: "running", current_phase: "download" });
+    expect(canRerunFrom(v, "unknown_phase")).toBe(false);
   });
 });

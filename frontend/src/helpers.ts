@@ -128,3 +128,16 @@ export function computeProgress(video: VideoItem): number {
   }
   return index / phases.length;
 }
+
+export function getPhases(contentType: ContentType): string[] {
+  return contentType === "question" ? QUESTION_PHASE_SEQUENCE : KNOWLEDGE_PHASE_SEQUENCE;
+}
+
+export function canRerunFrom(video: VideoItem, phase: string): boolean {
+  if (video.status === "completed") return true;
+  const phases = getPhases(video.content_type);
+  const currentIdx = phases.indexOf(video.current_phase);
+  const phaseIdx = phases.indexOf(phase);
+  if (currentIdx === -1 || phaseIdx === -1) return false;
+  return phaseIdx <= currentIdx;
+}
