@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act } from "@testing-library/react";
-import { RerunDialog } from "./RerunDialog";
+import { BatchRerunDialog } from "./BatchRerunDialog";
 import { useVideoStore } from "../stores/videoStore";
 
 const mockApi = vi.fn();
@@ -8,7 +8,7 @@ vi.mock("../api", () => ({
   api: (...args: any[]) => mockApi(...args),
 }));
 
-describe("RerunDialog", () => {
+describe("BatchRerunDialog", () => {
   beforeEach(() => {
     mockApi.mockReset();
     useVideoStore.setState({
@@ -51,7 +51,7 @@ describe("RerunDialog", () => {
 
   it("renders chips and video list", () => {
     const { container } = render(
-      <RerunDialog open videoIds={["v1", "v2"]} onClose={() => {}} />,
+      <BatchRerunDialog open videoIds={["v1", "v2"]} onClose={() => {}} />,
     );
 
     expect(screen.getByText("选择重跑阶段")).toBeInTheDocument();
@@ -63,7 +63,7 @@ describe("RerunDialog", () => {
 
   it("marks non-rerunnable videos when selecting a later phase", () => {
     const { container } = render(
-      <RerunDialog open videoIds={["v1", "v2"]} onClose={() => {}} />,
+      <BatchRerunDialog open videoIds={["v1", "v2"]} onClose={() => {}} />,
     );
 
     // By default "download" is selected, both videos can rerun
@@ -73,7 +73,7 @@ describe("RerunDialog", () => {
     const assembleChip = container.querySelector('md-filter-chip[label="组装"]');
     expect(assembleChip).toBeInTheDocument();
     act(() => {
-      assembleChip!.click();
+      (assembleChip as HTMLElement).click();
     });
 
     expect(screen.getByText(/当前处于 字幕审校/)).toBeInTheDocument();
@@ -85,7 +85,7 @@ describe("RerunDialog", () => {
       .mockResolvedValueOnce({ videos: [] });
 
     const onClose = vi.fn();
-    render(<RerunDialog open videoIds={["v1", "v2"]} onClose={onClose} />);
+    render(<BatchRerunDialog open videoIds={["v1", "v2"]} onClose={onClose} />);
 
     await act(async () => {
       screen.getByText("重跑 2 个视频").click();

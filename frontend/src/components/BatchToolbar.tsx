@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
-import { RerunDialog } from "./RerunDialog";
+import { BatchRerunDialog } from "./BatchRerunDialog";
 
 export function BatchToolbar() {
   const {
@@ -69,7 +69,7 @@ export function BatchToolbar() {
           </md-icon-button>
         </div>
       </div>
-      <RerunDialog
+      <BatchRerunDialog
         open={rerunDialogOpen}
         videoIds={Array.from(selectedIds)}
         onClose={() => setRerunDialogOpen(false)}
