@@ -28,6 +28,9 @@ describe("useVideoPhaseEvents", () => {
       currentVideo: null,
       phaseRuns: [],
       transcriptionRuns: [],
+      log: "",
+      activeTab: "nodes",
+      isLoading: false,
     });
   });
 
