@@ -1,0 +1,64 @@
+.agent-panel {
+  margin-top: 12px;
+  padding: 12px;
+}
+
+.agent-summary {
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.agent-list {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.agent-card {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+}
+
+.agent-card.busy {
+  background: var(--md-sys-color-error-container);
+  border-color: var(--md-sys-color-error);
+}
+
+.agent-card.idle {
+  background: var(--md-sys-color-primary-container);
+  border-color: var(--md-sys-color-primary);
+}
+
+.agent-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--md-sys-color-error);
+}
+
+.agent-card.idle .agent-dot {
+  background: var(--md-sys-color-primary);
+}
+
+.agent-pill {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 8px;
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+}
+
+.agent-card.busy .agent-pill {
+  background: var(--md-sys-color-error);
+  color: var(--md-sys-color-on-error);
+}
+
+.agent-card.idle .agent-pill {
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+}

@@ -1,5 +1,6 @@
 import { useDetailStore } from "../stores/detailStore";
 import { INTERACTION_TYPE_LABELS } from "../labels";
+import styles from "./NodePanel.module.css";
 
 interface ReviewEntry {
   item_id: string;
@@ -68,14 +69,14 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
         return (
           <div
             key={node.id ?? i}
-            className={`node-card card-outlined ${answered ? "answered" : ""}`}
+            className={`${styles.nodeCard} card-outlined ${answered ? styles.answered : ""}`}
             onClick={() => {
               onSeek?.(triggerTime);
               replayInteraction?.(i);
             }}
             style={{ cursor: "pointer" }}
           >
-            <div className="node-main">
+            <div className={styles.nodeMain}>
               <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--md-sys-color-primary)" }}>
                 {formatTime(triggerTime)}
               </span>

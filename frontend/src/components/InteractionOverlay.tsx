@@ -1,4 +1,5 @@
 import type { InteractionNode } from "../types";
+import styles from "./InteractionOverlay.module.css";
 
 interface InteractionOverlayProps {
   node: InteractionNode | null;
@@ -21,8 +22,8 @@ export function InteractionOverlay({
 
   if (type === "example_practice") {
     return (
-      <div className="interaction-overlay">
-        <div className="practice-card">
+      <div className={styles.interactionOverlay}>
+        <div className={styles.practiceCard}>
           <p>{node.instruction || "练习"}</p>
           {node.hint && (
             <p style={{ fontSize: "0.875rem", color: "var(--md-sys-color-outline)" }}>
@@ -48,8 +49,8 @@ export function InteractionOverlay({
 
   if (node.options && node.options.length > 0) {
     return (
-      <div className="interaction-overlay">
-        <div className="practice-card">
+      <div className={styles.interactionOverlay}>
+        <div className={styles.practiceCard}>
           <p>{node.instruction || "互动"}</p>
           {node.reference_sentence && (
             <p style={{ fontSize: "0.875rem", color: "var(--md-sys-color-outline)" }}>
@@ -71,10 +72,10 @@ export function InteractionOverlay({
   // Fallback: sentence-building or generic interaction
   const words = node.answer || [];
   return (
-    <div className="interaction-overlay">
-      <div className="sentence-card">
+    <div className={styles.interactionOverlay}>
+      <div className={styles.sentenceCard}>
         <p>{node.instruction || "连词成句"}</p>
-        <div className="sentence-box">{currentSentence.join(" ")}</div>
+        <div className={styles.sentenceBox}>{currentSentence.join(" ")}</div>
         {words.length > 0 && (
           <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
             {words.map((word, index) => (
