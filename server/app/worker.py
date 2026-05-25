@@ -156,12 +156,14 @@ def process_video_once(
         else:
             if not fetch_error and cms and video.get("external_id"):
                 fetch_error = "fetch url failed: CMS did not return a video URL"
-            db.update_video(
-                video_id,
-                status="missing_url",
-                current_phase="waiting_for_url",
-                error_message=fetch_error,
-            )
+            update_fields: dict[str, Any] = {
+                "status": "missing_url",
+                "current_phase": "waiting_for_url",
+                "error_message": fetch_error,
+            }
+            if fetched_source_uuid:
+                update_fields["source_uuid"] = fetched_source_uuid
+            db.update_video(video_id, **update_fields)
             return False
     video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
     video_dir.mkdir(parents=True, exist_ok=True)

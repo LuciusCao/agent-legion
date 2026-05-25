@@ -213,11 +213,4 @@ def lookup_question_video(
     return CmsVideoLookup(status, video_url or "", _extract_question_title(item, uuid), source_uuid or "", payload)
 
 
-def fetch_knowledge_url(code: str, api_url: str | None = None, token: str | None = None) -> str | None:
-    result = lookup_knowledge_video(code, api_url, token)
-    return result.url or None
 
-
-def fetch_question_url(uuid: str, api_url: str | None = None, token: str | None = None) -> str | None:
-    result = lookup_question_video(uuid, api_url, token)
-    return result.url or None
