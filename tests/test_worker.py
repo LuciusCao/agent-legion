@@ -264,6 +264,24 @@ def test_local_phase_can_be_scheduled_without_openclaw_runner(db, settings):
     assert work.kind == "local"
 
 
+def test_process_next_skips_agent_phase_without_runner(db, settings):
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8"
+    )
+    db.update_video(
+        video["id"],
+        storage_dir=str(video_dir),
+        current_phase="subtitle_review",
+        status="queued",
+    )
+
+    assert process_next(db, settings) is False
+    assert db.get_video(video["id"])["status"] == "queued"
+
+
 def test_transcribe_concurrency_limit_is_configurable(settings):
     settings.config["worker"] = {"phase_concurrency": {"transcribe": 3}}
 

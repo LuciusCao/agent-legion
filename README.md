@@ -180,5 +180,5 @@ Useful endpoints:
 - `POST /api/videos/{video_id}/rerun`
 - `GET /api/videos/{video_id}/artifacts`
 - `GET /api/videos/{video_id}/logs`
-- `POST /api/worker/tick`
+- `POST /api/worker/tick` processes one local non-agent phase; agent phases are handled by the background worker runner pool.
 - `POST /api/package`
