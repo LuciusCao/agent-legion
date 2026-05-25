@@ -52,7 +52,7 @@ describe("DetailPage", () => {
     mockApi.mockReset();
   });
 
-  it("syncs sidebar height immediately on mount", async () => {
+  it("keeps the topbar, player, and phase panel in the upper layout without inline height", async () => {
     mockApi
       .mockResolvedValueOnce({
         video: {
@@ -82,15 +82,6 @@ describe("DetailPage", () => {
       })
       .mockResolvedValueOnce({ log: "ok" });
 
-    const spy = vi
-      .spyOn(Element.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: Element) {
-        if (this.classList.contains("preview-main")) {
-          return { height: 300 } as DOMRect;
-        }
-        return { height: 0, width: 0, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => {} } as unknown as DOMRect;
-      });
-
     render(
       <MemoryRouter initialEntries={["/videos/v1"]}>
         <Routes>
@@ -103,12 +94,15 @@ describe("DetailPage", () => {
       expect(screen.getByText("Video 1")).toBeInTheDocument();
     });
 
-    try {
-      const sidebar = document.querySelector(".phase-runs-sidebar") as HTMLElement;
-      expect(sidebar.style.height).toBe("300px");
-    } finally {
-      spy.mockRestore();
-    }
+    const upper = document.querySelector(".detail-upper");
+    const primary = document.querySelector(".detail-primary");
+    const topbar = document.querySelector(".detail-topbar");
+    const sidebar = document.querySelector(".phase-runs-sidebar") as HTMLElement;
+
+    expect(upper).toContainElement(primary);
+    expect(upper).toContainElement(sidebar);
+    expect(primary).toContainElement(topbar);
+    expect(sidebar.style.height).toBe("");
   });
 
   it("renders chapter content when chapters tab is active", async () => {
