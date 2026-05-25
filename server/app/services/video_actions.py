@@ -22,6 +22,18 @@ def normalize_rerun_phase(video: VideoRecord, phase: str) -> str:
     return phase
 
 
+def can_rerun_from(video: VideoRecord, phase: str) -> bool:
+    if video["status"] == "completed":
+        return True
+    from server.app.pipeline.phases import phase_sequence
+
+    phases = phase_sequence(video["content_type"])
+    current = video["current_phase"]
+    if current not in phases or phase not in phases:
+        return False
+    return phases.index(phase) <= phases.index(current)
+
+
 def delete_video_record(db: Database, settings: Settings, video_id: str) -> bool:
     video = db.get_video(video_id)
     if not video:
@@ -58,6 +70,14 @@ def rerun_video_record(
         }
 
     normalized_phase = normalize_rerun_phase(video, phase)
+    if not can_rerun_from(video, normalized_phase):
+        return {
+            "video_id": video_id,
+            "status": "skipped",
+            "phase": normalized_phase,
+            "message": f"当前处于 {video['current_phase']} 阶段，无法从 {normalized_phase} 重跑",
+        }
+
     video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
     try:
         clear_artifacts_from(video_dir, normalized_phase, video_id)
