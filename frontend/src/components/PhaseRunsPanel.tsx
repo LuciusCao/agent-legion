@@ -1,22 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PhaseRun, TranscriptionRun, ContentType } from "../types";
-import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES } from "../labels";
+import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES, STATUS_LABELS, STATUS_ICONS } from "../labels";
 
-const STATUS_ICONS: Record<string, string> = {
-  completed: "check_circle",
-  running: "sync",
-  failed: "error",
-  queued: "schedule",
-  pending: "radio_button_unchecked",
-};
-
-const STATUS_TEXT: Record<string, string> = {
-  completed: "已完成",
-  running: "处理中",
-  failed: "失败",
-  queued: "排队中",
-  pending: "待处理",
-};
 
 interface PhaseRunsPanelProps {
   phaseRuns: PhaseRun[];
@@ -190,7 +175,7 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
         <div className="phase-timeline-items">
           {items.map((item, idx) => {
             const icon = STATUS_ICONS[item.run.status] || "help";
-            const statusText = STATUS_TEXT[item.run.status] || item.run.status;
+            const statusText = STATUS_LABELS[item.run.status] || item.run.status;
             const hasError = !!item.run.error_message;
             const isTranscribe = item.run.phase_key === "transcribe";
             const hasTransDetails = isTranscribe && transcriptionRuns.length > 0;

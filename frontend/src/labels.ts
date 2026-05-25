@@ -8,6 +8,15 @@ export const STATUS_LABELS: Record<string, string> = {
   running: "处理中",
   failed: "失败",
   completed: "已完成",
+  pending: "待处理",
+};
+
+export const STATUS_ICONS: Record<string, string> = {
+  completed: "check_circle",
+  running: "sync",
+  failed: "error",
+  queued: "schedule",
+  pending: "radio_button_unchecked",
 };
 
 export const PHASE_LABELS: Record<string, string> = {
