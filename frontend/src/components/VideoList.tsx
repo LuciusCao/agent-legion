@@ -66,8 +66,12 @@ export function VideoList() {
               type="button"
               className={`${isSelected ? "active" : ""} ${packageSelectMode && video.status !== "completed" ? "dimmed" : ""}`}
               onClick={() => {
-                if (selectMode || packageSelectMode) {
+                if (selectMode) {
                   toggleVideoSelection(video.id);
+                } else if (packageSelectMode) {
+                  if (video.status === "completed") {
+                    toggleVideoSelection(video.id);
+                  }
                 } else {
                   navigate(`/videos/${video.id}`);
                 }
