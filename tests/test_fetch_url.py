@@ -139,3 +139,79 @@ def test_lookup_question_video_nonempty_error_payload_is_not_found(monkeypatch):
 
     assert result.status == "not_found"
     assert result.url == ""
+
+
+def test_lookup_knowledge_video_extracts_source_uuid_from_video_data(monkeypatch):
+    payload = {
+        "data": {
+            "knowledge_code": "K001",
+            "knowledge_name": "奇函数",
+            "resource": [
+                {
+                    "resource_type": 1,
+                    "video_data": {
+                        "source_v2": "https://example.com/k001.mp4",
+                        "source_uuid": "uuid-k001-abc",
+                    },
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: payload)
+    result = lookup_knowledge_video("K001", "https://cms.example/knowledge", "token")
+    assert result.status == "found"
+    assert result.url == "https://example.com/k001.mp4"
+    assert result.source_uuid == "uuid-k001-abc"
+
+
+def test_lookup_knowledge_video_source_uuid_empty_when_not_present(monkeypatch):
+    payload = {
+        "data": {
+            "knowledge_code": "K001",
+            "knowledge_name": "奇函数",
+            "resource": [
+                {
+                    "resource_type": 1,
+                    "video_data": {"source_url": "https://example.com/k001.mp4"},
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: payload)
+    result = lookup_knowledge_video("K001", "https://cms.example/knowledge", "token")
+    assert result.status == "found"
+    assert result.source_uuid == ""
+
+
+def test_lookup_question_video_extracts_source_uuid_from_video_data(monkeypatch):
+    payload = {
+        "data": {
+            "question_uuid": "Q001",
+            "title": "题目一",
+            "video_data": [
+                {
+                    "source": "https://example.com/q001.mp4",
+                    "source_uuid": "uuid-q001-xyz",
+                }
+            ],
+        }
+    }
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: payload)
+    result = lookup_question_video("Q001", "https://cms.example/question", "token")
+    assert result.status == "found"
+    assert result.url == "https://example.com/q001.mp4"
+    assert result.source_uuid == "uuid-q001-xyz"
+
+
+def test_lookup_question_video_source_uuid_empty_when_not_present(monkeypatch):
+    payload = {
+        "data": {
+            "question_uuid": "Q001",
+            "title": "题目一",
+            "video_data": [{"source": "https://example.com/q001.mp4"}],
+        }
+    }
+    monkeypatch.setattr("server.app.pipeline.fetch_url._fetch_json", lambda *args, **kwargs: payload)
+    result = lookup_question_video("Q001", "https://cms.example/question", "token")
+    assert result.status == "found"
+    assert result.source_uuid == ""

@@ -189,7 +189,7 @@ def test_missing_url_fetch_error_is_visible(db, settings, monkeypatch):
     def fail_fetch(code, api_url, token):
         raise RuntimeError("cms timeout")
 
-    monkeypatch.setattr("server.app.worker.fetch_knowledge_url", fail_fetch)
+    monkeypatch.setattr("server.app.worker.lookup_knowledge_video", fail_fetch)
 
     assert process_video_once(db, settings, "knowledge_K001") is False
     video = db.get_video("knowledge_K001")
@@ -203,8 +203,10 @@ def test_worker_retries_missing_url_video_from_cms(db, settings, monkeypatch):
 
     monkeypatch.setattr("server.app.worker.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.worker.fetch_question_url",
-        lambda uuid, api_url, token: "https://example.com/q001.mp4",
+        "server.app.worker.lookup_question_video",
+        lambda uuid, api_url, token: type(
+            "Lookup", (), {"status": "found", "url": "https://example.com/q001.mp4", "title": "Question 1", "source_uuid": "uuid-q001"}
+        )(),
     )
     monkeypatch.setattr(
         "server.app.worker.download_video",
@@ -216,6 +218,7 @@ def test_worker_retries_missing_url_video_from_cms(db, settings, monkeypatch):
     video = db.get_video("question_Q001")
     assert processed is True
     assert video["source_url"] == "https://example.com/q001.mp4"
+    assert video["source_uuid"] == "uuid-q001"
     assert video["current_phase"] == "transcribe"
 
 
