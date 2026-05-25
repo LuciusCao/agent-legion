@@ -27,6 +27,11 @@ def test_worker_processes_transcribe_phase(db, settings):
     assert processed is True
     assert (video_dir / "subtitles.srt").exists()
     assert db.get_video("a")["current_phase"] == "subtitle_review"
+    transcription_runs = db.list_transcription_runs("a")
+    assert len(transcription_runs) == 1
+    assert transcription_runs[0]["provider"] == "sensevoice"
+    assert transcription_runs[0]["status"] == "completed"
+    assert transcription_runs[0]["srt_entry_count"] == 1
 
 
 def test_worker_processes_assemble_phase(db, settings):

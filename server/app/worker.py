@@ -255,6 +255,14 @@ def process_video_once(
             log_path.write_text(
                 json.dumps(result.__dict__, ensure_ascii=False, indent=2), encoding="utf-8"
             )
+            db.record_transcription_run(
+                video_id=video_id,
+                provider=result.provider,
+                status="completed",
+                srt_entry_count=result.srt_entry_count,
+                validation_summary=result.validation_summary,
+                fallback_reason=result.fallback_reason,
+            )
         elif phase in AGENT_PHASES:
             agent_phase = AGENT_PHASES[phase]
             if not phase_outputs_sufficient(video_dir, phase, agent_phase.expected_outputs):
