@@ -230,7 +230,7 @@ export function DetailPage() {
             <md-icon>restart_alt</md-icon>
           </md-icon-button>
           <md-icon-button
-            disabled={(!currentVideo || currentVideo.status !== "completed" || !!currentVideo.packed) || undefined}
+            disabled={(!currentVideo || currentVideo.status !== "completed") || undefined}
             onClick={handlePackage}
             title="打包"
           >
