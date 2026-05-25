@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useCallback } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
 import { useVideoEvents } from "../hooks/useVideoEvents";
@@ -23,14 +23,14 @@ export function ListPage() {
   } = useVideoStore();
   const { openAddDialog, showToast } = useUiStore();
 
-  const handleFetchVideos = async () => {
+  const handleFetchVideos = useCallback(async () => {
     await fetchVideos();
     const err = useVideoStore.getState().error;
     if (err) {
       showToast(`加载失败: ${err}`, "error");
       useVideoStore.getState().clearError();
     }
-  };
+  }, [fetchVideos, showToast]);
   const tabsRef = useRef<(HTMLElement & { activeTabIndex: number }) | null>(null);
 
   useEffect(() => {
