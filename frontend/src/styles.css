@@ -369,6 +369,19 @@ h1 {
   gap: 16px;
 }
 
+.detail-upper {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 360px;
+  align-items: start;
+  gap: 16px;
+}
+
+.detail-primary {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+}
+
 .detail-progress {
   display: flex;
   align-items: center;
@@ -385,19 +398,6 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-}
-
-.preview-layout {
-  display: grid;
-  grid-template-columns: 3fr 1fr;
-  gap: 16px;
-}
-
-.preview-main {
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  overflow: hidden;
 }
 
 .player-wrap {
@@ -457,10 +457,12 @@ h1 {
 }
 
 .phase-runs-sidebar {
+  align-self: start;
   background: var(--md-sys-color-surface);
   border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 12px;
   padding: 16px;
+  max-height: calc(100vh - 40px);
 }
 
 .detail-bottom {
@@ -471,7 +473,7 @@ h1 {
 .phase-runs-sidebar {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  overflow: auto;
   min-height: 0;
 }
 
@@ -996,8 +998,12 @@ pre {
     flex-direction: column;
   }
 
-  .preview-layout {
+  .detail-upper {
     grid-template-columns: 1fr;
+  }
+
+  .phase-runs-sidebar {
+    max-height: none;
   }
 }
 
