@@ -46,4 +46,10 @@ def create_package(videos: list[dict], packages_dir: Path, videos_base_dir: Path
                 path = video_dir / name
                 if path.exists():
                     zf.write(path, f"{video['id']}/{name}")
+            reviewed_srt = video_dir / "subtitles_reviewed.srt"
+            srt = video_dir / "subtitles.srt"
+            if reviewed_srt.exists():
+                zf.write(reviewed_srt, f"{video['id']}/subtitles.srt")
+            elif srt.exists():
+                zf.write(srt, f"{video['id']}/subtitles.srt")
     return package_path
