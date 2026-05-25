@@ -138,6 +138,7 @@ class VideoEventManager:
             json.dumps({
                 "type": "phase_runs_updated",
                 "video_id": video_id,
+                "video": video,
                 "phase_runs": phase_runs,
                 "transcription_runs": transcription_runs,
             }),

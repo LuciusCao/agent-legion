@@ -13,6 +13,7 @@ from server.app.settings import Settings
 class PackageSelection:
     videos: list[VideoRecord]
     missing_ids: list[str]
+    incomplete_ids: list[str]
 
 
 def normalize_rerun_phase(video: VideoRecord, phase: str) -> str:
@@ -103,13 +104,16 @@ def select_videos_for_package(
     if video_ids is not None:
         videos = []
         missing_ids = []
+        incomplete_ids = []
         for video_id in video_ids:
             video = db.get_video(video_id)
-            if video:
+            if video and video["status"] == "completed":
                 videos.append(video)
+            elif video:
+                incomplete_ids.append(video_id)
             else:
                 missing_ids.append(video_id)
-        return PackageSelection(videos=videos, missing_ids=missing_ids)
+        return PackageSelection(videos=videos, missing_ids=missing_ids, incomplete_ids=incomplete_ids)
 
     completed = [video for video in db.list_videos() if video["status"] == "completed"]
-    return PackageSelection(videos=completed, missing_ids=[])
+    return PackageSelection(videos=completed, missing_ids=[], incomplete_ids=[])

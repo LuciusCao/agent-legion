@@ -25,7 +25,13 @@ export function BatchToolbar() {
     if (!window.confirm(`确定删除 ${count} 个资源？`)) return;
     const result = await batchDelete(Array.from(selectedIds));
     const succeeded = result.results.filter((r) => r.status === "deleted").length;
-    showToast(`删除完成：成功 ${succeeded} 项`, "success");
+    const failed = result.results.length - succeeded;
+    showToast(
+      failed > 0
+        ? `删除完成：成功 ${succeeded} 项，失败 ${failed} 项`
+        : `删除完成：成功 ${succeeded} 项`,
+      failed > 0 ? "error" : "success",
+    );
     clearSelection();
     await fetchVideos();
   };

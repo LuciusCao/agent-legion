@@ -41,4 +41,41 @@ describe("videoStore", () => {
     useVideoStore.getState().toggleVideoSelection("v1");
     expect(useVideoStore.getState().selectedIds.has("v1")).toBe(false);
   });
+
+  it("selects all videos visible under grouped status filters", () => {
+    useVideoStore.setState({
+      videos: [
+        {
+          id: "missing",
+          title: "Missing URL",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "K001",
+          knowledge_code: "K001",
+          question_id: "",
+          status: "missing_url",
+          current_phase: "waiting_for_url",
+          error_message: "",
+        },
+        {
+          id: "queued",
+          title: "Queued",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "K002",
+          knowledge_code: "K002",
+          question_id: "",
+          status: "queued",
+          current_phase: "download",
+          error_message: "",
+        },
+      ],
+      selectedType: "knowledge",
+      statusFilter: "failed",
+    });
+
+    useVideoStore.getState().selectAllVisible();
+
+    expect(useVideoStore.getState().selectedIds).toEqual(new Set(["missing"]));
+  });
 });

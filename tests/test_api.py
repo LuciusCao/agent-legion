@@ -429,6 +429,7 @@ def test_package_selected_videos_and_download(tmp_path, client):
         video_dir = tmp_path / "videos" / video_id
         video_dir.mkdir(parents=True, exist_ok=True)
         (video_dir / "metadata.json").write_text(f'{{"id":"{video_id}"}}', encoding="utf-8")
+        client.app.state.db.update_video(video_id, status="completed")
 
     response = client.post("/api/package", json={"video_ids": ["knowledge_K002"]})
 
@@ -438,6 +439,22 @@ def test_package_selected_videos_and_download(tmp_path, client):
     download = client.get(body["download_url"])
     assert download.status_code == 200
     assert download.headers["content-type"] in {"application/zip", "application/x-zip-compressed"}
+
+
+def test_package_selected_unfinished_video_returns_400(client):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+            ]
+        },
+    )
+
+    response = client.post("/api/package", json={"video_ids": ["knowledge_K001"]})
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "No completed videos selected for packaging"
 
 
 def test_package_selected_missing_video_returns_404(client):

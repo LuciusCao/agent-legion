@@ -59,8 +59,9 @@ def test_delete_video_record_removes_storage_and_package_selection_defaults(db, 
 
     assert [video["id"] for video in default_selection.videos] == [completed["id"]]
     assert default_selection.missing_ids == []
-    assert [video["id"] for video in explicit_selection.videos] == [queued["id"]]
+    assert [video["id"] for video in explicit_selection.videos] == []
     assert explicit_selection.missing_ids == ["missing"]
+    assert explicit_selection.incomplete_ids == [queued["id"]]
     assert delete_video_record(db, settings, completed["id"]) is True
     assert db.get_video(completed["id"]) is None
     assert not storage_dir.exists()

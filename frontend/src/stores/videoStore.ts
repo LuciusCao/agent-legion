@@ -2,6 +2,7 @@ import { create } from "zustand";
 import type { VideoItem, ContentType } from "../types";
 import { api } from "../api";
 import { useUiStore } from "./uiStore";
+import { filterVideos } from "../helpers";
 
 interface VideoState {
   videos: VideoItem[];
@@ -97,15 +98,10 @@ export const useVideoStore = create<VideoState>((set, _get) => ({
 
   selectAllVisible: () => {
     set((state) => {
-      const filtered = state.videos.filter((v) => {
-        if (state.selectedType && v.content_type !== state.selectedType) return false;
-        if (state.statusFilter !== "all" && v.status !== state.statusFilter) return false;
-        if (state.searchQuery) {
-          const q = state.searchQuery.toLowerCase();
-          const haystack = `${v.external_id} ${v.title} ${v.id}`.toLowerCase();
-          if (!haystack.includes(q)) return false;
-        }
-        return true;
+      const filtered = filterVideos(state.videos, {
+        selectedType: state.selectedType,
+        statusFilter: state.statusFilter,
+        searchQuery: state.searchQuery,
       });
       return { selectedIds: new Set(filtered.map((v) => v.id)) };
     });
