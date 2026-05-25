@@ -52,7 +52,7 @@ describe("DetailPage", () => {
     mockApi.mockReset();
   });
 
-  it("syncs sidebar maxHeight immediately on mount", async () => {
+  it("syncs sidebar height immediately on mount", async () => {
     mockApi
       .mockResolvedValueOnce({
         video: {
@@ -105,7 +105,7 @@ describe("DetailPage", () => {
 
     try {
       const sidebar = document.querySelector(".phase-runs-sidebar") as HTMLElement;
-      expect(sidebar.style.maxHeight).toBe("300px");
+      expect(sidebar.style.height).toBe("300px");
     } finally {
       spy.mockRestore();
     }

@@ -64,14 +64,15 @@ export function DetailPage() {
     const main = previewMainRef.current;
     const sidebar = sidebarRef.current;
     if (!main || !sidebar) return;
-    sidebar.style.maxHeight = `${main.getBoundingClientRect().height}px`;
+    // Use height (not maxHeight) to force exact alignment regardless of content
+    sidebar.style.height = `${main.getBoundingClientRect().height}px`;
   }, []);
 
   useEffect(() => {
     const main = previewMainRef.current;
     if (!main) return;
 
-    const observer = new ResizeObserver((entries) => {
+    const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (entry.target === main) {
           syncHeight();
@@ -80,15 +81,17 @@ export function DetailPage() {
     });
 
     syncHeight();
-    observer.observe(main);
-    // Double rAF to catch Material Web Component async upgrades
+    resizeObserver.observe(main);
+
+    // Double rAF catches Material Web Component upgrades after first paint
     let innerRaf = 0;
     const outerRaf = requestAnimationFrame(() => {
       syncHeight();
       innerRaf = requestAnimationFrame(syncHeight);
     });
+
     return () => {
-      observer.disconnect();
+      resizeObserver.disconnect();
       cancelAnimationFrame(outerRaf);
       cancelAnimationFrame(innerRaf);
     };
