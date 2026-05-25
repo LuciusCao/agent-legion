@@ -132,6 +132,7 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
     def list_videos() -> dict[str, Any]:
         videos = db.list_videos()
         for video in videos:
+            video["packed"] = bool(video.get("packed", 0))
             if video.get("content_type") == "knowledge":
                 video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else settings.videos_dir / video["id"]
                 stats = compute_interaction_stats(video_dir)
@@ -145,7 +146,7 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         return {
-            "video": video,
+            "video": {**video, "packed": bool(video.get("packed", 0))},
             "phase_runs": db.list_phase_runs(video_id),
             "transcription_runs": db.list_transcription_runs(video_id),
         }
