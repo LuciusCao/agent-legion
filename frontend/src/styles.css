@@ -287,6 +287,7 @@ h1 {
   font-weight: 600;
   white-space: nowrap;
   font-variant-numeric: tabular-nums;
+  margin-right: 8px;
 }
 
 .status-badge {

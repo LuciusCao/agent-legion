@@ -1,3 +1,4 @@
+import { INTERACTION_TYPE_LABELS } from "./labels";
 import type { ContentType, InteractionStats, VideoItem } from "./types";
 
 export type VideoFilter = {
@@ -159,14 +160,16 @@ export function formatInteractionStats(stats: Record<string, InteractionStats> |
   const order = ["example_practice", "interaction_summary", "video_summary"];
   for (const type of order) {
     if (stats[type]) {
+      const label = INTERACTION_TYPE_LABELS[type] || type;
       const { passed, total } = stats[type];
-      parts.push(`${passed}/${total}`);
+      parts.push(`${label} ${passed}/${total}`);
     }
   }
   for (const [type, { passed, total }] of Object.entries(stats)) {
     if (!order.includes(type)) {
-      parts.push(`${passed}/${total}`);
+      const label = INTERACTION_TYPE_LABELS[type] || type;
+      parts.push(`${label} ${passed}/${total}`);
     }
   }
-  return parts.join(" ");
+  return parts.join(" ｜ ");
 }

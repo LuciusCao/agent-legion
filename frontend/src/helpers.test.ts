@@ -261,7 +261,9 @@ describe("formatInteractionStats", () => {
   });
 
   it("formats single type stats", () => {
-    expect(formatInteractionStats({ example_practice: { passed: 2, total: 3 } })).toBe("2/3");
+    expect(formatInteractionStats({ example_practice: { passed: 2, total: 3 } })).toBe(
+      "例题试做 2/3",
+    );
   });
 
   it("formats multiple types in order", () => {
@@ -270,7 +272,7 @@ describe("formatInteractionStats", () => {
         example_practice: { passed: 2, total: 3 },
         interaction_summary: { passed: 1, total: 1 },
       }),
-    ).toBe("2/3 1/1");
+    ).toBe("例题试做 2/3 ｜ 互动小结 1/1");
   });
 
   it("puts unknown types after known types", () => {
@@ -279,7 +281,7 @@ describe("formatInteractionStats", () => {
         unknown_type: { passed: 1, total: 2 },
         example_practice: { passed: 2, total: 3 },
       }),
-    ).toBe("2/3 1/2");
+    ).toBe("例题试做 2/3 ｜ unknown_type 1/2");
   });
 
   it("treats video_summary same as interaction_summary in order", () => {
@@ -288,6 +290,6 @@ describe("formatInteractionStats", () => {
         video_summary: { passed: 1, total: 1 },
         example_practice: { passed: 2, total: 3 },
       }),
-    ).toBe("2/3 1/1");
+    ).toBe("例题试做 2/3 ｜ 互动小结 1/1");
   });
 });
