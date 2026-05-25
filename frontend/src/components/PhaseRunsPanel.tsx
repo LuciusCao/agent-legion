@@ -1,41 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PhaseRun, TranscriptionRun, ContentType } from "../types";
-import { PHASE_LABELS } from "../labels";
+import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES, STATUS_LABELS, STATUS_ICONS } from "../labels";
+import { formatDuration } from "../lib/formatters";
+import { TranscriptionDetails } from "./TranscriptionDetails";
 import styles from "./PhaseRunsPanel.module.css";
 
-const KNOWLEDGE_PHASES = [
-  "download",
-  "transcribe",
-  "subtitle_review",
-  "chapter_generate",
-  "interaction_generate",
-  "content_review",
-  "assemble",
-];
-
-const QUESTION_PHASES = [
-  "download",
-  "transcribe",
-  "subtitle_review",
-  "chapter_generate",
-  "assemble",
-];
-
-const STATUS_ICONS: Record<string, string> = {
-  completed: "check_circle",
-  running: "sync",
-  failed: "error",
-  queued: "schedule",
-  pending: "radio_button_unchecked",
-};
-
-const STATUS_TEXT: Record<string, string> = {
-  completed: "已完成",
-  running: "处理中",
-  failed: "失败",
-  queued: "排队中",
-  pending: "待处理",
-};
 
 interface PhaseRunsPanelProps {
   phaseRuns: PhaseRun[];
@@ -117,9 +86,25 @@ function buildItem(
   return { run, label: PHASE_LABELS[run.phase_key], tool, queueTime, processTime };
 }
 
-function statusClass(status: string) {
-  return styles[`status${status.charAt(0).toUpperCase() + status.slice(1)}`];
-}
+const NODE_STATUS_CLASS: Record<string, string> = {
+  completed: styles.statusCompleted,
+  running: styles.statusRunning,
+  failed: styles.statusFailed,
+};
+
+const CONTENT_STATUS_CLASS: Record<string, string> = {
+  completed: styles.statusCompleted,
+  running: styles.statusRunning,
+  failed: styles.statusFailed,
+};
+
+const BADGE_STATUS_CLASS: Record<string, string> = {
+  completed: styles.completed,
+  running: styles.running,
+  failed: styles.failed,
+  pending: styles.pending,
+  queued: styles.queued,
+};
 
 export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: PhaseRunsPanelProps) {
   const [now, setNow] = useState(Date.now());
@@ -190,18 +175,6 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
     };
   }, [phaseRuns, transcriptionRuns, now, allPhases]);
 
-  function formatDuration(ms: number): string {
-    if (ms <= 0) return "—";
-    const sec = Math.floor(ms / 1000);
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    if (m >= 60) {
-      const h = Math.floor(m / 60);
-      return `${h}时${m % 60}分${s}秒`;
-    }
-    return m > 0 ? `${m}分${s}秒` : `${s}秒`;
-  }
-
   function toggleDetail(runId: number) {
     setExpandedDetails((prev) => {
       const next = new Set(prev);
@@ -240,7 +213,7 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
         <div className={styles.phaseTimelineItems}>
           {items.map((item, idx) => {
             const icon = STATUS_ICONS[item.run.status] || "help";
-            const statusText = STATUS_TEXT[item.run.status] || item.run.status;
+            const statusText = STATUS_LABELS[item.run.status] || item.run.status;
             const hasError = !!item.run.error_message;
             const isTranscribe = item.run.phase_key === "transcribe";
             const hasTransDetails = isTranscribe && transcriptionRuns.length > 0;
@@ -251,7 +224,7 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
               <div key={item.run.id} className={styles.phaseTimelineItem}>
                 <div className={styles.timelineLeft}>
                   <div
-                    className={`${styles.timelineNode} ${statusClass(item.run.status)} ${
+                    className={`${styles.timelineNode} ${NODE_STATUS_CLASS[item.run.status] || ""} ${
                       item.run.status === "running" ? styles.spinning : ""
                     }`}
                   >
@@ -260,7 +233,7 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
                   {idx < items.length - 1 && <div className={styles.timelineLine} />}
                 </div>
 
-                <div className={`${styles.timelineContent} ${statusClass(item.run.status)}`}>
+                <div className={`${styles.timelineContent} ${CONTENT_STATUS_CLASS[item.run.status] || ""}`}>
                   <div className={styles.timelineHeader}>
                     <span className={styles.timelineName}>
                       {item.label}
@@ -268,7 +241,7 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
                         <span className={styles.occurrenceBadge}> 第{item.occurrence}次</span>
                       ) : null}
                     </span>
-                    <span className={`${styles.timelineStatusBadge} ${styles[item.run.status]}`}>{statusText}</span>
+                    <span className={`${styles.timelineStatusBadge} ${BADGE_STATUS_CLASS[item.run.status] || ""}`}>{statusText}</span>
                   </div>
 
                   {item.tool && (
@@ -309,40 +282,15 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
                   )}
 
                   {isDetailExpanded && hasError && (
-                    <div className={`${styles.timelineDetailContent} ${styles.error}`}>{item.run.error_message}</div>
+                    <div className="timeline-detail-content error">{item.run.error_message}</div>
                   )}
 
                   {isDetailExpanded && hasTransDetails && (
-                    <div className={`${styles.timelineDetailContent} ${styles.transcription}`}>
-                      <div className={styles.transRow}>
-                        <span className={styles.transKey}>Provider</span>
-                        <span className={styles.transValue}>{transPrimary?.provider || "—"}</span>
-                      </div>
-                      {transPrimary && transPrimary.srt_entry_count > 0 && (
-                        <div className={styles.transRow}>
-                          <span className={styles.transKey}>字幕条目</span>
-                          <span className={styles.transValue}>{transPrimary.srt_entry_count}</span>
-                        </div>
-                      )}
-                      {transPrimary?.validation_summary && (
-                        <div className={styles.transRow}>
-                          <span className={styles.transKey}>验证结果</span>
-                          <span className={styles.transValue}>{transPrimary.validation_summary}</span>
-                        </div>
-                      )}
-                      {transFallback?.fallback_reason && (
-                        <div className={styles.transRow}>
-                          <span className={styles.transKey}>Fallback</span>
-                          <span className={styles.transValue}>{transFallback.fallback_reason}</span>
-                        </div>
-                      )}
-                      {transcriptionRuns.length > 1 && (
-                        <div className={styles.transRow}>
-                          <span className={styles.transKey}>尝试次数</span>
-                          <span className={styles.transValue}>{transcriptionRuns.length}</span>
-                        </div>
-                      )}
-                    </div>
+                    <TranscriptionDetails
+                      primary={transPrimary}
+                      fallback={transFallback}
+                      totalCount={transcriptionRuns.length}
+                    />
                   )}
                 </div>
               </div>

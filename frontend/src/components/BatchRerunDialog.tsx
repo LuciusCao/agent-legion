@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useVideoStore } from "../stores/videoStore";
+import { useUiStore } from "../stores/uiStore";
 import { getPhases, canRerunFrom } from "../helpers";
 import type { VideoItem } from "../types";
 
@@ -22,6 +23,7 @@ type BatchRerunDialogProps = {
 
 export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogProps) {
   const { videos, batchRerun, clearSelection, fetchVideos } = useVideoStore();
+  const { showToast } = useUiStore();
   const [selectedPhase, setSelectedPhase] = useState("download");
 
   if (!open) return null;
@@ -42,6 +44,11 @@ export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogPr
     onClose();
     clearSelection();
     await fetchVideos();
+    const err = useVideoStore.getState().error;
+    if (err) {
+      showToast(`加载失败: ${err}`, "error");
+      useVideoStore.getState().clearError();
+    }
   };
 
   return (

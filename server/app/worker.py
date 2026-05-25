@@ -3,11 +3,14 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from server.app.cms.client import get_token
+from server.app.cms.knowledge import lookup_knowledge_video
+from server.app.cms.question import lookup_question_video
 from server.app.db import Database
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.common import resolve_video_dir
 from server.app.pipeline.download import download_video
-from server.app.pipeline.fetch_url import get_token, lookup_knowledge_video, lookup_question_video
+from server.app.pipeline.executor import PhaseContext, PhaseExecutorRegistry
 from server.app.pipeline.openclaw import OpenClawRunner
 from server.app.pipeline.phases import AGENT_PHASES, next_phase
 from server.app.pipeline.runners import build_openclaw_runner
@@ -176,6 +179,66 @@ def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
     return providers
 
 
+def _handle_download(ctx: PhaseContext) -> None:
+    download_video(ctx.video["source_url"], ctx.video_dir / f"{ctx.video['id']}.mp4")
+
+
+def _handle_transcribe(ctx: PhaseContext) -> None:
+    active_providers = ctx.providers or build_default_providers(ctx.settings)
+    result = run_transcription_with_providers(
+        video_path=ctx.video_dir / f"{ctx.video['id']}.mp4",
+        output_dir=ctx.video_dir,
+        title=ctx.video["title"],
+        duration=float(ctx.video.get("duration") or 0),
+        mode=str(ctx.settings.config.get("asr", {}).get("provider", "auto")),
+        providers=active_providers,
+    )
+    ctx.log_path.write_text(
+        json.dumps(result.__dict__, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    ctx.db.record_transcription_run(
+        video_id=ctx.video["id"],
+        provider=result.provider,
+        status="completed",
+        srt_entry_count=result.srt_entry_count,
+        validation_summary=result.validation_summary,
+        fallback_reason=result.fallback_reason,
+    )
+
+
+def _handle_agent_phase(ctx: PhaseContext) -> None:
+    phase = ctx.video["current_phase"]
+    agent_phase = AGENT_PHASES[phase]
+    if not phase_outputs_sufficient(ctx.video_dir, phase, agent_phase.expected_outputs):
+        runner = ctx.openclaw_runner or build_openclaw_runner(ctx.settings)
+        result = runner.run(
+            phase=agent_phase,
+            video_id=ctx.video["id"],
+            video_dir=ctx.video_dir,
+            prompt_dir=ctx.settings.data_dir / "prompts",
+            log_path=ctx.log_path,
+        )
+        if getattr(result, "command", None):
+            ctx.db.update_phase_command(ctx.run["id"], result.command)
+        if result.status != "completed":
+            raise RuntimeError(result.error_message)
+    validate_phase_outputs(ctx.video_dir, phase)
+
+
+def _handle_assemble(ctx: PhaseContext) -> None:
+    assemble_video(ctx.video, ctx.video_dir)
+
+
+_default_registry = PhaseExecutorRegistry()
+_default_registry.register("download", _handle_download)
+_default_registry.register("transcribe", _handle_transcribe)
+_default_registry.register("subtitle_review", _handle_agent_phase)
+_default_registry.register("chapter_generate", _handle_agent_phase)
+_default_registry.register("interaction_generate", _handle_agent_phase)
+_default_registry.register("content_review", _handle_agent_phase)
+_default_registry.register("assemble", _handle_assemble)
+
+
 def process_video_once(
     db: Database,
     settings: Settings,
@@ -240,49 +303,17 @@ def process_video_once(
         return False
 
     try:
-        if phase == "download":
-            download_video(video["source_url"], video_dir / f"{video_id}.mp4")
-        elif phase == "transcribe":
-            active_providers = providers or build_default_providers(settings)
-            result = run_transcription_with_providers(
-                video_path=video_dir / f"{video_id}.mp4",
-                output_dir=video_dir,
-                title=video["title"],
-                duration=float(video.get("duration") or 0),
-                mode=str(settings.config.get("asr", {}).get("provider", "auto")),
-                providers=active_providers,
-            )
-            log_path.write_text(
-                json.dumps(result.__dict__, ensure_ascii=False, indent=2), encoding="utf-8"
-            )
-            db.record_transcription_run(
-                video_id=video_id,
-                provider=result.provider,
-                status="completed",
-                srt_entry_count=result.srt_entry_count,
-                validation_summary=result.validation_summary,
-                fallback_reason=result.fallback_reason,
-            )
-        elif phase in AGENT_PHASES:
-            agent_phase = AGENT_PHASES[phase]
-            if not phase_outputs_sufficient(video_dir, phase, agent_phase.expected_outputs):
-                runner = openclaw_runner or build_openclaw_runner(settings)
-                result = runner.run(
-                    phase=agent_phase,
-                    video_id=video_id,
-                    video_dir=video_dir,
-                    prompt_dir=settings.data_dir / "prompts",
-                    log_path=log_path,
-                )
-                if getattr(result, "command", None):
-                    db.update_phase_command(run["id"], result.command)
-                if result.status != "completed":
-                    raise RuntimeError(result.error_message)
-                validate_phase_outputs(video_dir, phase)
-        elif phase == "assemble":
-            assemble_video(video, video_dir)
-        else:
-            raise ValueError(f"Unknown phase: {phase}")
+        ctx = PhaseContext(
+            video=video,
+            video_dir=video_dir,
+            settings=settings,
+            db=db,
+            log_path=log_path,
+            providers=providers,
+            openclaw_runner=openclaw_runner,
+            run=run,
+        )
+        _default_registry.execute(phase, ctx)
     except Exception as exc:
         if not log_path.exists():
             log_path.write_text(str(exc), encoding="utf-8")

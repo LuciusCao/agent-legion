@@ -19,9 +19,9 @@ export type VideoItem = {
   status: string;
   current_phase: string;
   error_message: string;
-  storage_dir?: string;
-  duration?: number;
-  packed?: boolean;
+  storage_dir: string;
+  duration: number;
+  packed: boolean;
   interaction_stats?: Record<string, InteractionStats>;
 };
 

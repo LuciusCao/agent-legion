@@ -20,6 +20,7 @@ describe("videoStore", () => {
       packageSelectMode: false,
       selectedIds: new Set(),
       isLoading: false,
+      error: null,
     });
     mockApi.mockClear();
   });

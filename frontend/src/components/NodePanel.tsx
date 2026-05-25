@@ -1,4 +1,5 @@
-import { useDetailStore } from "../stores/detailStore";
+import { useArtifactStore } from "../stores/artifactStore";
+import { useInteractionStore } from "../stores/interactionStore";
 import { INTERACTION_TYPE_LABELS } from "../labels";
 import styles from "./NodePanel.module.css";
 
@@ -49,7 +50,8 @@ interface NodePanelProps {
 }
 
 export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
-  const { artifacts, triggeredNodeIndexes } = useDetailStore();
+  const { artifacts } = useArtifactStore();
+  const { triggeredNodeIndexes } = useInteractionStore();
   const nodes = artifacts.interactions;
   const reviewMap = getReviewMap(artifacts.review);
   const globalStatus = getGlobalStatus(artifacts.review);

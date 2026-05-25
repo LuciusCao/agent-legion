@@ -3,6 +3,7 @@ import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
 import { BatchRerunDialog } from "./BatchRerunDialog";
 import { BatchDeleteDialog } from "./BatchDeleteDialog";
+import styles from "./BatchToolbar.module.css";
 
 export function BatchToolbar() {
   const {
@@ -37,6 +38,11 @@ export function BatchToolbar() {
     clearSelection();
     setDeleteDialogOpen(false);
     await fetchVideos();
+    const err = useVideoStore.getState().error;
+    if (err) {
+      showToast(`加载失败: ${err}`, "error");
+      useVideoStore.getState().clearError();
+    }
   };
 
   const handleRerun = () => {
@@ -51,9 +57,9 @@ export function BatchToolbar() {
 
   return (
     <>
-      <div className="batch-toolbar card-elevated">
+      <div className={`${styles.batchToolbar} card-elevated`}>
         <span>已选择 {count} 项</span>
-        <div className="batch-actions">
+        <div className={styles.batchActions}>
           <md-text-button onClick={selectAllVisible}>全选</md-text-button>
           <md-text-button onClick={clearSelection}>取消选择</md-text-button>
           <md-icon-button disabled={(!hasSelection) || undefined} onClick={handleRerun} title="重跑">

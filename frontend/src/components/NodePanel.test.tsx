@@ -1,12 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { NodePanel } from "./NodePanel";
-import { useDetailStore } from "../stores/detailStore";
+import { useArtifactStore } from "../stores/artifactStore";
+import { useInteractionStore } from "../stores/interactionStore";
 import styles from "./NodePanel.module.css";
 
 describe("NodePanel", () => {
   beforeEach(() => {
-    useDetailStore.setState({
+    useArtifactStore.setState({
       artifacts: {
         subtitles: [],
         chapters: [],
@@ -23,7 +24,11 @@ describe("NodePanel", () => {
         review: null,
         checklist: null,
       },
+    });
+    useInteractionStore.setState({
       triggeredNodeIndexes: new Set(),
+      dismissedNodeIndexes: new Set(),
+      currentSentence: [],
     });
   });
 
@@ -39,7 +44,7 @@ describe("NodePanel", () => {
   });
 
   it("shows review status badge when review has matching item_id", () => {
-    useDetailStore.setState({
+    useArtifactStore.setState({
       artifacts: {
         subtitles: [],
         chapters: [],
@@ -67,7 +72,7 @@ describe("NodePanel", () => {
   });
 
   it("falls back to global status when no per-node review exists", () => {
-    useDetailStore.setState({
+    useArtifactStore.setState({
       artifacts: {
         subtitles: [],
         chapters: [],

@@ -1,0 +1,157 @@
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from pydantic import BaseModel
+
+from ..agents import AgentStatusManager
+from ..db import Database
+from ..events import VideoEventManager
+from ..pipeline.common import resolve_video_dir
+from ..services.intake import add_video_items
+from ..services.interaction_stats import compute_interaction_stats
+from ..services.video_actions import (
+    batch_delete_video_records,
+    batch_rerun_video_records,
+    delete_video_record,
+    rerun_video_record,
+)
+from ..settings import Settings
+
+
+class VideoInput(BaseModel):
+    url: str = ""
+    title: str = ""
+    content_type: str = "knowledge"
+    external_id: str = ""
+    source_uuid: str = ""
+
+
+class AddVideosRequest(BaseModel):
+    items: list[VideoInput]
+
+
+class RerunRequest(BaseModel):
+    phase: str
+
+
+class BatchVideoIdsRequest(BaseModel):
+    video_ids: list[str]
+
+
+class BatchRerunRequest(BatchVideoIdsRequest):
+    phase: str
+
+
+class DeleteResult(BaseModel):
+    video_id: str
+    status: str
+    message: str
+
+
+class BatchDeleteResponse(BaseModel):
+    results: list[DeleteResult]
+
+
+class RerunResult(DeleteResult):
+    phase: str
+
+
+class BatchRerunResponse(BaseModel):
+    results: list[RerunResult]
+
+
+def create_videos_router(
+    db: Database,
+    settings: Settings,
+    agent_manager: AgentStatusManager,
+    video_event_manager: VideoEventManager,
+) -> APIRouter:
+    router = APIRouter(prefix="/videos", tags=["videos"])
+
+    @router.get("/events")
+    async def videos_events(request: Request):
+        return await video_event_manager.connect(request)
+
+    @router.get("/{video_id}/events")
+    async def video_detail_events(request: Request, video_id: str):
+        return await video_event_manager.connect_video(request, video_id)
+
+    @router.post("")
+    def add_videos(request: AddVideosRequest) -> dict[str, Any]:
+        return add_video_items(db, settings, request.items)
+
+    @router.get("")
+    def list_videos() -> dict[str, Any]:
+        videos = db.list_videos()
+        for video in videos:
+            video["packed"] = bool(video.get("packed", 0))
+            if video.get("content_type") == "knowledge":
+                video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else settings.videos_dir / video["id"]
+                stats = compute_interaction_stats(video_dir)
+                if stats:
+                    video["interaction_stats"] = stats
+        return {"videos": videos}
+
+    @router.get("/{video_id}")
+    def get_video(video_id: str) -> dict[str, Any]:
+        video = db.get_video(video_id)
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        return {
+            "video": {**video, "packed": bool(video.get("packed", 0))},
+            "phase_runs": db.list_phase_runs(video_id),
+            "transcription_runs": db.list_transcription_runs(video_id),
+        }
+
+    @router.post("/batch/delete", response_model=BatchDeleteResponse)
+    def batch_delete_videos(request: BatchVideoIdsRequest) -> dict[str, Any]:
+        return {"results": batch_delete_video_records(db, settings, request.video_ids)}
+
+    @router.post("/batch/rerun", response_model=BatchRerunResponse)
+    def batch_rerun_videos(request: BatchRerunRequest) -> dict[str, Any]:
+        return {"results": batch_rerun_video_records(db, settings, request.video_ids, request.phase, agent_manager)}
+
+    @router.post("/{video_id}/rerun")
+    def rerun_video(video_id: str, request: RerunRequest) -> dict[str, Any]:
+        result = rerun_video_record(db, settings, video_id, request.phase, agent_manager)
+        if result["status"] == "not_found":
+            raise HTTPException(status_code=404, detail="Video not found")
+        if result["status"] == "busy":
+            raise HTTPException(status_code=409, detail=result["message"])
+        if result["status"] == "invalid_phase":
+            raise HTTPException(status_code=400, detail=result["message"])
+        return {"video": db.get_video(video_id)}
+
+    @router.delete("/{video_id}")
+    def delete_video(video_id: str) -> dict[str, Any]:
+        if not delete_video_record(db, settings, video_id):
+            raise HTTPException(status_code=404, detail="Video not found")
+        return {"deleted": True, "video_id": video_id}
+
+    @router.get("/{video_id}/logs")
+    def logs(video_id: str) -> dict[str, str]:
+        runs = db.list_phase_runs(video_id)
+        if not runs:
+            return {"log": ""}
+        log_path = Path(runs[-1]["log_path"])
+        if not log_path.exists():
+            return {"log": ""}
+        return {"log": log_path.read_text(encoding="utf-8")[-8000:]}
+
+    @router.get("/{video_id}/video")
+    def video_file(video_id: str):
+        video = db.get_video(video_id)
+        if not video:
+            raise HTTPException(status_code=404, detail="Video not found")
+        video_dir = resolve_video_dir(video, settings.videos_dir)
+        path = video_dir / f"{video_id}.mp4"
+        if path.exists():
+            return FileResponse(path, media_type="video/mp4")
+        source_url = video.get("source_url", "")
+        if source_url:
+            return RedirectResponse(source_url, status_code=302)
+        return PlainTextResponse("Video not downloaded yet", status_code=404)
+
+    return router
