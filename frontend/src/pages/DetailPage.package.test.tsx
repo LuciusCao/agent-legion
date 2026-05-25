@@ -22,7 +22,7 @@ describe("DetailPage package button", () => {
       currentVideo: null,
       artifacts: { subtitles: [], chapters: [], interactions: [], metadata: null, review: null, checklist: null },
       log: "",
-      activeTab: "chapters",
+      activeTab: "subtitles",
       triggeredNodeIndexes: new Set(),
       currentSentence: [],
       isLoading: false,

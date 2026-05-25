@@ -1,6 +1,6 @@
 export type ContentType = "knowledge" | "question";
 export type ViewName = "list" | "detail";
-export type DetailTab = "nodes" | "subtitles" | "chapters" | "logs" | "metadata";
+export type DetailTab = "nodes" | "subtitles" | "logs" | "metadata";
 
 export type InteractionStats = {
   passed: number;

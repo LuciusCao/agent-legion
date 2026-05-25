@@ -4,7 +4,6 @@ import type { DetailTab, ContentType } from "../types";
 
 const TABS: { key: DetailTab; label: string; types: ContentType[] }[] = [
   { key: "subtitles", label: "字幕", types: ["knowledge", "question"] },
-  { key: "chapters", label: "章节", types: ["knowledge", "question"] },
   { key: "nodes", label: "交互节点", types: ["knowledge"] },
   { key: "metadata", label: "元数据", types: ["knowledge", "question"] },
 ];
