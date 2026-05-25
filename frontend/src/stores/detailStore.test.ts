@@ -32,6 +32,14 @@ describe("detailStore", () => {
     expect(useDetailStore.getState().activeTab).toBe("subtitles");
   });
 
+  it("sets active tab to subtitles for knowledge videos", async () => {
+    mockApi.mockResolvedValueOnce({
+      video: { id: "v2", title: "Test K", content_type: "knowledge", status: "queued" },
+    });
+    await useDetailStore.getState().loadVideo("v2");
+    expect(useDetailStore.getState().activeTab).toBe("subtitles");
+  });
+
   it("triggers interaction", () => {
     useDetailStore.getState().triggerInteraction(0);
     expect(useDetailStore.getState().triggeredNodeIndexes.has(0)).toBe(true);
