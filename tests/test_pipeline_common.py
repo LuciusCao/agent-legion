@@ -31,4 +31,4 @@ def test_extract_knowledge_url_accepts_source_v2():
         }
     }
 
-    assert _extract_knowledge_url("K001", payload) == "https://example.com/k001.mp4"
+    assert _extract_knowledge_url("K001", payload) == ("https://example.com/k001.mp4", "")
