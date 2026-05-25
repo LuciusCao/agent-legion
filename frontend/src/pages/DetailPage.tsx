@@ -126,10 +126,6 @@ export function DetailPage() {
       const player = playerRef.current;
       if (!player) return;
 
-      const subtitle = artifacts.subtitles.find((s) => time >= s.start && time < s.end);
-      const overlay = document.getElementById("subtitleOverlay");
-      if (overlay) overlay.textContent = subtitle?.text ?? "";
-
       artifacts.interactions.forEach((node, index) => {
         const trigger = Number(node.trigger_time ?? 0);
         if (!triggeredNodeIndexes.has(index) && !dismissedNodeIndexes.has(index) && !player.paused && time >= trigger && time < trigger + 1.5) {

@@ -201,8 +201,10 @@ class Database:
         unknown_fields = sorted(set(fields) - VIDEO_UPDATE_FIELDS)
         if unknown_fields:
             raise ValueError(f"Unknown video fields: {', '.join(unknown_fields)}")
-        assignments = ", ".join(f"{key}=?" for key in fields)
-        values = list(fields.values()) + [video_id]
+        # Build assignments strictly from the whitelist to avoid any f-string risk
+        ordered_keys = [k for k in fields if k in VIDEO_UPDATE_FIELDS]
+        assignments = ", ".join(f"{key}=?" for key in ordered_keys)
+        values = [fields[key] for key in ordered_keys] + [video_id]
         with self.connect() as conn:
             conn.execute(
                 f"update videos set {assignments}, updated_at=current_timestamp where id=?",

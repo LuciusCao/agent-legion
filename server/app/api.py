@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.events import VideoEventManager
+from server.app.pipeline.common import resolve_video_dir
 from server.app.pipeline.package import create_package
 from server.app.pipeline.reader import read_artifacts
 from server.app.services.intake import add_video_items
@@ -179,8 +180,7 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
         video = db.get_video(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
-        video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
-        return read_artifacts(video_dir)
+        return read_artifacts(resolve_video_dir(video, settings.videos_dir))
 
     @router.get("/videos/{video_id}/logs")
     def logs(video_id: str) -> dict[str, str]:
@@ -197,8 +197,7 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
         video = db.get_video(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
-        video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
-        path = video_dir / f"{video_id}.mp4"
+        path = resolve_video_dir(video, settings.videos_dir) / f"{video_id}.mp4"
         if not path.exists():
             return PlainTextResponse("Video not downloaded yet", status_code=404)
         return FileResponse(path, media_type="video/mp4")
@@ -231,13 +230,16 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
 
     @router.get("/packages/{filename:path}")
     def download_package(filename: str):
+        # Reject empty filenames and path traversal attempts
+        if not filename or filename.startswith("/") or ".." in Path(filename).parts:
+            raise HTTPException(status_code=404, detail="Package not found")
         package_path = settings.packages_dir / filename
         try:
             resolved = package_path.resolve()
             resolved.relative_to(settings.packages_dir.resolve())
         except (ValueError, RuntimeError):
             raise HTTPException(status_code=404, detail="Package not found") from None
-        if not resolved.exists():
+        if not resolved.exists() or not resolved.is_file():
             raise HTTPException(status_code=404, detail="Package not found")
         return FileResponse(resolved, media_type="application/zip", filename=filename)
 
