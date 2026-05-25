@@ -92,9 +92,11 @@ h1 {
 }
 
 .pill-divider {
+  display: inline-block;
   width: 1px;
+  height: 24px;
   background: var(--md-sys-color-outline-variant);
-  margin: 4px 4px;
+  margin: 0 4px;
 }
 
 .stat-pill md-icon {
