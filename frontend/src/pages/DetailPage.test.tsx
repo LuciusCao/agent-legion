@@ -202,7 +202,7 @@ describe("DetailPage", () => {
 
     const tabs = document.querySelector("md-tabs") as HTMLElement & { activeTabIndex: number };
     act(() => {
-      tabs.activeTabIndex = 2;
+      tabs.activeTabIndex = 1;
       tabs.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
