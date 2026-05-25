@@ -16,6 +16,7 @@ describe("detailStore", () => {
       log: "",
       activeTab: "nodes",
       triggeredNodeIndexes: new Set(),
+      dismissedNodeIndexes: new Set(),
       currentSentence: [],
       isLoading: false,
     });
@@ -48,6 +49,18 @@ describe("detailStore", () => {
     await useDetailStore.getState().loadVideo("v2");
 
     expect(useDetailStore.getState().triggeredNodeIndexes.size).toBe(0);
+    expect(useDetailStore.getState().currentSentence).toEqual([]);
+  });
+
+  it("replayInteraction resets dismissed and re-triggers node", () => {
+    useDetailStore.getState().triggerInteraction(0);
+    useDetailStore.getState().dismissInteraction(0);
+    expect(useDetailStore.getState().triggeredNodeIndexes.has(0)).toBe(false);
+    expect(useDetailStore.getState().dismissedNodeIndexes.has(0)).toBe(true);
+
+    useDetailStore.getState().replayInteraction(0);
+    expect(useDetailStore.getState().triggeredNodeIndexes.has(0)).toBe(true);
+    expect(useDetailStore.getState().dismissedNodeIndexes.has(0)).toBe(false);
     expect(useDetailStore.getState().currentSentence).toEqual([]);
   });
 });
