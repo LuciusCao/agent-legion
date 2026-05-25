@@ -548,6 +548,20 @@ def test_package_download_rejects_path_traversal(client):
     assert response.status_code == 404
 
 
+def test_package_download_rejects_empty_and_directory(client):
+    # Empty filename should 404
+    response = client.get("/api/packages/")
+    assert response.status_code == 404
+
+    # Leading slash should 404
+    response = client.get("/api/packages/%2fetc%2fpasswd")
+    assert response.status_code == 404
+
+    # Directory traversal via dot-dot should 404
+    response = client.get("/api/packages/foo/bar/../baz")
+    assert response.status_code == 404
+
+
 # SSE tests
 
 
