@@ -106,7 +106,7 @@ def test_add_video_list_artifacts_and_rerun(tmp_path, client):
     artifacts = client.get("/api/videos/knowledge_K001/artifacts").json()
     assert artifacts["subtitles"][0]["text"] == "你好"
 
-    rerun = client.post("/api/videos/knowledge_K001/rerun", json={"phase": "transcribe"})
+    rerun = client.post("/api/videos/knowledge_K001/rerun", json={"phase": "download"})
     assert rerun.status_code == 200
     assert not (video_dir / "subtitles.srt").exists()
 
@@ -390,7 +390,7 @@ def test_batch_delete_returns_per_video_results(client):
     assert [v["id"] for v in client.get("/api/videos").json()["videos"]] == ["knowledge_K002"]
 
 
-def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(client):
+def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(client, db):
     client.post(
         "/api/videos",
         json={
@@ -400,6 +400,8 @@ def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(cli
             ]
         },
     )
+    db.update_video("question_Q001", status="completed")
+    db.update_video("knowledge_K001", status="completed")
 
     response = client.post(
         "/api/videos/batch/rerun",
