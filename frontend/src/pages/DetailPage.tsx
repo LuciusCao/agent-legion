@@ -16,7 +16,7 @@ import { MetadataPanel } from "../components/MetadataPanel";
 import { RerunDialog } from "../components/RerunDialog";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { TYPE_LABELS, PHASE_LABELS, STATUS_LABELS } from "../labels";
-import { statusGroup } from "../helpers";
+import { statusGroup, triggerDownload } from "../helpers";
 import { PhaseStepper } from "../components/PhaseStepper";
 import { api } from "../api";
 
@@ -152,8 +152,9 @@ export function DetailPage() {
       method: "POST",
       body: JSON.stringify({ video_ids: [id] }),
     });
-    window.location.href = result.download_url;
-  }, [id]);
+    await Promise.all([fetchVideos(), loadVideo(id)]);
+    triggerDownload(result.download_url);
+  }, [id, fetchVideos, loadVideo]);
 
   const handleRerun = useCallback(
     async (phase: string) => {

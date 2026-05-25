@@ -134,6 +134,16 @@ export function getPhases(contentType: ContentType): string[] {
   return contentType === "question" ? QUESTION_PHASE_SEQUENCE : KNOWLEDGE_PHASE_SEQUENCE;
 }
 
+export function triggerDownload(url: string) {
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "";
+  a.style.display = "none";
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+}
+
 export function canRerunFrom(video: VideoItem, phase: string): boolean {
   if (video.status === "completed") return true;
   const phases = getPhases(video.content_type);
