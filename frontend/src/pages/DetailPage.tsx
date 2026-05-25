@@ -24,8 +24,6 @@ export function DetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const playerRef = useRef<HTMLVideoElement>(null);
-  const previewMainRef = useRef<HTMLDivElement>(null);
-  const sidebarRef = useRef<HTMLElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
 
   const {
@@ -59,48 +57,6 @@ export function DetailPage() {
     loadArtifacts(id);
     loadLog(id);
   }, [id, loadVideo, loadArtifacts, loadLog]);
-
-  const syncHeight = useCallback(() => {
-    const main = previewMainRef.current;
-    const sidebar = sidebarRef.current;
-    if (!main || !sidebar) return;
-    // Use height (not maxHeight) to force exact alignment regardless of content
-    sidebar.style.height = `${main.getBoundingClientRect().height}px`;
-  }, []);
-
-  useEffect(() => {
-    const main = previewMainRef.current;
-    if (!main) return;
-
-    const resizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        if (entry.target === main) {
-          syncHeight();
-        }
-      }
-    });
-
-    syncHeight();
-    resizeObserver.observe(main);
-
-    // Double rAF catches Material Web Component upgrades after first paint
-    let innerRaf = 0;
-    const outerRaf = requestAnimationFrame(() => {
-      syncHeight();
-      innerRaf = requestAnimationFrame(syncHeight);
-    });
-
-    return () => {
-      resizeObserver.disconnect();
-      cancelAnimationFrame(outerRaf);
-      cancelAnimationFrame(innerRaf);
-    };
-  }, [syncHeight]);
-
-  // Re-sync when content that affects left-side height changes
-  useEffect(() => {
-    syncHeight();
-  }, [currentVideo, artifacts.chapters.length, syncHeight]);
 
   const prevPhaseRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);
@@ -197,52 +153,52 @@ export function DetailPage() {
 
   return (
     <section className="view detail-view">
-      <header className="detail-topbar">
-        <md-icon-button onClick={() => navigate("/")}>
-          <md-icon>arrow_back</md-icon>
-        </md-icon-button>
-        <div className="detail-title-block">
-          <h1>{currentVideo?.title || "未选择资源"}</h1>
-          {currentVideo && (
-            <p>
-              {TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}
-            </p>
-          )}
-          {currentVideo?.error_message && (
-            <p className="error-text" style={{ marginTop: 4 }}>{currentVideo.error_message}</p>
-          )}
-        </div>
-        {currentVideo && (
-          <div className="detail-progress">
-            <span className={`phase-name ${currentVideo.status === "running" ? "running-text" : ""}`}>
-              {PHASE_LABELS[currentVideo.current_phase]}
-            </span>
-            <PhaseStepper video={currentVideo} />
-            <span className={`status-badge ${statusGroup(currentVideo)}`}>
-              {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
-            </span>
-            {!!currentVideo.packed && <span className="packed-badge">已打包</span>}
-          </div>
-        )}
-        <div className="detail-actions">
-          <md-icon-button onClick={openRerunDialog} title="重跑">
-            <md-icon>restart_alt</md-icon>
-          </md-icon-button>
-          <md-icon-button
-            disabled={(!currentVideo || currentVideo.status !== "completed") || undefined}
-            onClick={handlePackage}
-            title="打包"
-          >
-            <md-icon>inventory_2</md-icon>
-          </md-icon-button>
-          <md-icon-button style={{ color: "var(--md-sys-color-error)" }} onClick={openDeleteDialog} title="删除">
-            <md-icon>delete</md-icon>
-          </md-icon-button>
-        </div>
-      </header>
+      <section className="detail-upper">
+        <div className="detail-primary">
+          <header className="detail-topbar">
+            <md-icon-button onClick={() => navigate("/")}>
+              <md-icon>arrow_back</md-icon>
+            </md-icon-button>
+            <div className="detail-title-block">
+              <h1>{currentVideo?.title || "未选择资源"}</h1>
+              {currentVideo && (
+                <p>
+                  {TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}
+                </p>
+              )}
+              {currentVideo?.error_message && (
+                <p className="error-text" style={{ marginTop: 4 }}>{currentVideo.error_message}</p>
+              )}
+            </div>
+            {currentVideo && (
+              <div className="detail-progress">
+                <span className={`phase-name ${currentVideo.status === "running" ? "running-text" : ""}`}>
+                  {PHASE_LABELS[currentVideo.current_phase]}
+                </span>
+                <PhaseStepper video={currentVideo} />
+                <span className={`status-badge ${statusGroup(currentVideo)}`}>
+                  {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
+                </span>
+                {!!currentVideo.packed && <span className="packed-badge">已打包</span>}
+              </div>
+            )}
+            <div className="detail-actions">
+              <md-icon-button onClick={openRerunDialog} title="重跑">
+                <md-icon>restart_alt</md-icon>
+              </md-icon-button>
+              <md-icon-button
+                disabled={(!currentVideo || currentVideo.status !== "completed") || undefined}
+                onClick={handlePackage}
+                title="打包"
+              >
+                <md-icon>inventory_2</md-icon>
+              </md-icon-button>
+              <md-icon-button style={{ color: "var(--md-sys-color-error)" }} onClick={openDeleteDialog} title="删除">
+                <md-icon>delete</md-icon>
+              </md-icon-button>
+            </div>
+          </header>
 
-      <section className="preview-layout">
-        <div className="preview-main" ref={previewMainRef}>
           {currentVideo && (
             <VideoPlayer
               video={currentVideo}
@@ -257,7 +213,7 @@ export function DetailPage() {
             onSeek={handleSeek}
           />
         </div>
-        <aside className="phase-runs-sidebar" ref={sidebarRef}>
+        <aside className="phase-runs-sidebar">
           <PhaseRunsPanel phaseRuns={phaseRuns} transcriptionRuns={transcriptionRuns} contentType={currentVideo?.content_type} />
         </aside>
       </section>
@@ -285,4 +241,3 @@ export function DetailPage() {
     </section>
   );
 }
-
