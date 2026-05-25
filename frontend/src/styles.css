@@ -432,33 +432,100 @@ h1 {
   --md-suggestion-chip-label-text-color: var(--md-sys-color-on-primary);
 }
 
-.play-info-panel,
+.phase-runs-sidebar,
 .detail-bottom {
   background: var(--md-sys-color-surface-variant);
   border-radius: 12px;
   padding: 14px;
 }
 
-.play-info-panel {
+.phase-runs-sidebar {
   display: grid;
   align-content: start;
   gap: 12px;
+  overflow-y: auto;
 }
 
-.info-row {
+.phase-runs-panel {
   display: grid;
-  gap: 4px;
-  padding-bottom: 10px;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+  align-content: start;
+  gap: 10px;
 }
 
-.info-row span {
+.phase-runs-panel h3 {
+  font-size: 14px;
   color: var(--md-sys-color-on-surface-variant);
-  font-size: 12px;
+  margin: 0;
 }
 
-.info-row p {
-  line-height: 1.5;
+.phase-runs-list {
+  display: grid;
+  gap: 8px;
+  max-height: 60vh;
+  overflow-y: auto;
+}
+
+.phase-run-item {
+  background: var(--md-sys-color-surface);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: grid;
+  gap: 6px;
+}
+
+.phase-run-item.status-running {
+  border-color: var(--md-sys-color-primary);
+  box-shadow: 0 0 0 1px var(--md-sys-color-primary);
+}
+
+.phase-run-item.status-failed {
+  border-color: var(--md-sys-color-error);
+}
+
+.phase-run-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.phase-run-name {
+  font-weight: 500;
+  font-size: 14px;
+}
+
+.phase-run-status {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  text-transform: uppercase;
+}
+
+.phase-run-status.running {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.phase-run-status.completed {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+
+.phase-run-status.failed {
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+}
+
+.phase-run-tool {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.phase-run-times {
+  display: flex;
+  gap: 12px;
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 /* Tabs */

@@ -1,11 +1,13 @@
 import { create } from "zustand";
-import type { VideoItem, VideoArtifacts, DetailTab } from "../types";
+import type { VideoItem, VideoArtifacts, DetailTab, PhaseRun, TranscriptionRun } from "../types";
 import { api } from "../api";
 
 interface DetailState {
   currentVideo: VideoItem | null;
   artifacts: VideoArtifacts;
   log: string;
+  phaseRuns: PhaseRun[];
+  transcriptionRuns: TranscriptionRun[];
   activeTab: DetailTab;
   triggeredNodeIndexes: Set<number>;
   dismissedNodeIndexes: Set<number>;
@@ -14,6 +16,8 @@ interface DetailState {
   loadVideo: (id: string) => Promise<void>;
   loadArtifacts: (id: string) => Promise<void>;
   loadLog: (id: string) => Promise<void>;
+  loadPhaseRuns: (id: string) => Promise<void>;
+  updatePhaseRuns: (phaseRuns: PhaseRun[], transcriptionRuns: TranscriptionRun[]) => void;
   setActiveTab: (tab: DetailTab) => void;
   triggerInteraction: (index: number) => void;
   dismissInteraction: (index: number) => void;
@@ -35,6 +39,8 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
   currentVideo: null,
   artifacts: emptyArtifacts,
   log: "",
+  phaseRuns: [],
+  transcriptionRuns: [],
   activeTab: "nodes",
   triggeredNodeIndexes: new Set(),
   dismissedNodeIndexes: new Set(),
@@ -44,9 +50,16 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
   loadVideo: async (id) => {
     set({ isLoading: true });
     try {
-      const data = await api<{ video: VideoItem }>(`/api/videos/${id}`);
+      const data = await api<{ video: VideoItem; phase_runs: PhaseRun[]; transcription_runs: TranscriptionRun[] }>(`/api/videos/${id}`);
       const video = data.video || null;
-      set({ currentVideo: video, triggeredNodeIndexes: new Set(), dismissedNodeIndexes: new Set(), currentSentence: [] });
+      set({
+        currentVideo: video,
+        phaseRuns: data.phase_runs || [],
+        transcriptionRuns: data.transcription_runs || [],
+        triggeredNodeIndexes: new Set(),
+        dismissedNodeIndexes: new Set(),
+        currentSentence: [],
+      });
       if (video) {
         set({ activeTab: video.content_type === "question" ? "subtitles" : "nodes" });
       }
@@ -92,6 +105,19 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
     } catch {
       set({ log: "加载日志失败" });
     }
+  },
+
+  loadPhaseRuns: async (id) => {
+    try {
+      const data = await api<{ phase_runs: PhaseRun[]; transcription_runs: TranscriptionRun[] }>(`/api/videos/${id}`);
+      set({ phaseRuns: data.phase_runs || [], transcriptionRuns: data.transcription_runs || [] });
+    } catch {
+      // ignore
+    }
+  },
+
+  updatePhaseRuns: (phaseRuns, transcriptionRuns) => {
+    set({ phaseRuns, transcriptionRuns });
   },
 
   setActiveTab: (tab) => set({ activeTab: tab }),

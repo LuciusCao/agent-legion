@@ -5,13 +5,16 @@ import { useUiStore } from "../stores/uiStore";
 import { useVideoStore } from "../stores/videoStore";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { ChapterStrip } from "../components/ChapterStrip";
+import { PhaseRunsPanel } from "../components/PhaseRunsPanel";
 import { InteractionOverlay } from "../components/InteractionOverlay";
+import { useVideoPhaseEvents } from "../hooks/useVideoPhaseEvents";
 import { DetailTabs } from "../components/DetailTabs";
 import { SubtitlePanel } from "../components/SubtitlePanel";
 import { ChapterPanel } from "../components/ChapterPanel";
 import { NodePanel } from "../components/NodePanel";
 import { MetadataPanel } from "../components/MetadataPanel";
 import { RerunDialog } from "../components/RerunDialog";
+import { DeleteDialog } from "../components/DeleteDialog";
 import { TYPE_LABELS, PHASE_LABELS, STATUS_LABELS } from "../labels";
 import { statusGroup } from "../helpers";
 import { PhaseStepper } from "../components/PhaseStepper";
@@ -26,7 +29,8 @@ export function DetailPage() {
   const {
     currentVideo,
     artifacts,
-    log,
+    phaseRuns,
+    transcriptionRuns,
     activeTab,
     triggeredNodeIndexes,
     dismissedNodeIndexes,
@@ -41,8 +45,10 @@ export function DetailPage() {
     clearSentence,
   } = useDetailStore();
 
-  const { openRerunDialog, showToast } = useUiStore();
+  const { openRerunDialog, openDeleteDialog, showToast } = useUiStore();
   const { fetchVideos } = useVideoStore();
+
+  useVideoPhaseEvents(id);
 
   useEffect(() => {
     if (!id) return;
@@ -109,8 +115,8 @@ export function DetailPage() {
     playerRef.current?.play();
   }, [clearSentence, activeNodeIndex, dismissInteraction]);
 
-  const handleDelete = useCallback(async () => {
-    if (!id || !window.confirm("确定删除该资源？本地视频和处理产物目录也会删除。")) return;
+  const handleDeleteConfirm = useCallback(async () => {
+    if (!id) return;
     await api(`/api/videos/${id}`, { method: "DELETE" });
     showToast("删除成功", "success");
     await fetchVideos();
@@ -173,11 +179,15 @@ export function DetailPage() {
           </div>
         )}
         <div className="detail-actions">
-          <md-text-button onClick={openRerunDialog}>重跑</md-text-button>
-          <md-text-button onClick={handlePackage}>打包</md-text-button>
-          <md-text-button style={{ color: "var(--md-sys-color-error)" }} onClick={handleDelete}>
-            删除
-          </md-text-button>
+          <md-icon-button onClick={openRerunDialog} title="重跑">
+            <md-icon>restart_alt</md-icon>
+          </md-icon-button>
+          <md-icon-button onClick={handlePackage} title="打包">
+            <md-icon>inventory_2</md-icon>
+          </md-icon-button>
+          <md-icon-button style={{ color: "var(--md-sys-color-error)" }} onClick={openDeleteDialog} title="删除">
+            <md-icon>delete</md-icon>
+          </md-icon-button>
         </div>
       </header>
 
@@ -197,25 +207,8 @@ export function DetailPage() {
             onSeek={handleSeek}
           />
         </div>
-        <aside className="play-info-panel">
-          <div className="info-row">
-            <span>当前时间</span>
-            <p>{formatTime(currentTime)}</p>
-          </div>
-          <div className="info-row">
-            <span>总时长</span>
-            <p>{currentVideo?.duration ? formatTime(currentVideo.duration) : "—"}</p>
-          </div>
-          <div className="info-row">
-            <span>当前章节</span>
-            <p>
-              {artifacts.chapters.find((c, i, arr) => currentTime >= c.start && currentTime < (arr[i + 1]?.start ?? Infinity))?.title || "—"}
-            </p>
-          </div>
-          <div className="info-row">
-            <span>日志</span>
-            <pre style={{ maxHeight: "200px", overflow: "auto" }}>{log}</pre>
-          </div>
+        <aside className="phase-runs-sidebar">
+          <PhaseRunsPanel phaseRuns={phaseRuns} transcriptionRuns={transcriptionRuns} />
         </aside>
       </section>
 
@@ -243,6 +236,7 @@ export function DetailPage() {
       />
 
       <RerunDialog video={currentVideo} onConfirm={handleRerun} />
+      <DeleteDialog onConfirm={handleDeleteConfirm} />
     </section>
   );
 }
