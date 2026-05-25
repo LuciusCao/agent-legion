@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { NodePanel } from "./NodePanel";
 import { useDetailStore } from "../stores/detailStore";
+import styles from "./NodePanel.module.css";
 
 describe("NodePanel", () => {
   beforeEach(() => {
@@ -31,7 +32,7 @@ describe("NodePanel", () => {
     const replayInteraction = vi.fn();
 
     render(<NodePanel onSeek={onSeek} replayInteraction={replayInteraction} />);
-    const card = screen.getByText("Test instruction").closest(".node-card");
+    const card = screen.getByText("Test instruction").closest(`.${styles.nodeCard}`);
     fireEvent.click(card!);
     expect(onSeek).toHaveBeenCalledWith(90);
     expect(replayInteraction).toHaveBeenCalledWith(0);

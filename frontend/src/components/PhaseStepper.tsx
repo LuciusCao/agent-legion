@@ -1,5 +1,6 @@
 import { PHASE_LABELS } from "../labels";
 import type { VideoItem } from "../types";
+import styles from "./PhaseStepper.module.css";
 
 const KNOWLEDGE_PHASES = [
   "download",
@@ -39,12 +40,12 @@ export function PhaseStepper({ video }: { video: VideoItem }) {
   const currentIndex = phases.indexOf(video.current_phase);
 
   return (
-    <div className="phase-stepper">
+    <div className={styles.phaseStepper}>
       {phases.map((phase, index) => {
         const state = getStepState(video, index, currentIndex);
         return (
-          <div key={phase} className="step" title={PHASE_LABELS[phase]}>
-            <div className={`step-bar ${state}`} />
+          <div key={phase} className={styles.step} title={PHASE_LABELS[phase]}>
+            <div className={`${styles.stepBar} ${styles[state]}`} />
           </div>
         );
       })}

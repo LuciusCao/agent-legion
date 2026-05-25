@@ -4,6 +4,7 @@ import { useVideoStore } from "../stores/videoStore";
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from "../labels";
 import { statusGroup, filterVideos, formatInteractionStats } from "../helpers";
 import { PhaseStepper } from "./PhaseStepper";
+import styles from "./VideoList.module.css";
 
 export function VideoList() {
   const navigate = useNavigate();
@@ -35,7 +36,7 @@ export function VideoList() {
 
   if (filtered.length === 0) {
     return (
-      <div className="video-list">
+      <div className={styles.videoList}>
         <div className="empty-state">
           <md-icon style={{ fontSize: "48px", color: "var(--md-sys-color-outline)" }}>inbox</md-icon>
           <p className="title-medium">暂无{selectedType === "knowledge" ? "知识点" : "题目"}视频</p>
@@ -48,7 +49,7 @@ export function VideoList() {
   }
 
   return (
-    <div className="video-list">
+    <div className={styles.videoList}>
       <md-list>
         {filtered.map((video) => {
           const isSelected = selectedIds.has(video.id);
@@ -96,9 +97,9 @@ export function VideoList() {
                   </small>
                 )}
               </div>
-              <div slot="end" className="status-end">
+              <div slot="end" className={styles.statusEnd}>
                 {video.content_type === "knowledge" && video.interaction_stats && (
-                  <span className="interaction-stats" title="互动节点通过状态">
+                  <span className={styles.interactionStats} title="互动节点通过状态">
                     {formatInteractionStats(video.interaction_stats)}
                   </span>
                 )}

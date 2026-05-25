@@ -1,4 +1,5 @@
 import { useUiStore } from "../stores/uiStore";
+import styles from "./AgentPanel.module.css";
 
 export function AgentPanel() {
   const { agents } = useUiStore();
@@ -6,19 +7,19 @@ export function AgentPanel() {
   const idleCount = agents.length - busyCount;
 
   return (
-    <div className="agent-panel card-outlined">
-      <div className="agent-summary">
+    <div className={`${styles.agentPanel} card-outlined`}>
+      <div className={styles.agentSummary}>
         Agent 状态：共 {agents.length} 个，{busyCount} 个忙碌，{idleCount} 个空闲
       </div>
       {agents.length === 0 ? (
         <div className="empty-state">暂无运行中的 Agent</div>
       ) : (
-        <div className="agent-list">
+        <div className={styles.agentList}>
           {agents.map((agent, i) => (
-            <div key={i} className={`agent-card ${agent.busy ? "busy" : "idle"}`}>
-              <span className="agent-dot" />
+            <div key={i} className={`${styles.agentCard} ${agent.busy ? styles.busy : styles.idle}`}>
+              <span className={styles.agentDot} />
               <span>{agent.name}</span>
-              <span className="agent-pill">{agent.busy ? "忙碌" : "空闲"}</span>
+              <span className={styles.agentPill}>{agent.busy ? "忙碌" : "空闲"}</span>
             </div>
           ))}
         </div>

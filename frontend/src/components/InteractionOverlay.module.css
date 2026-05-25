@@ -1,0 +1,31 @@
+.interaction-overlay {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgb(0 0 0 / 0.45);
+  z-index: 200;
+}
+
+.practice-card,
+.sentence-card {
+  width: min(520px, calc(100% - 48px));
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 12px;
+  background: var(--md-sys-color-surface);
+}
+
+.sentence-box {
+  min-height: 44px;
+  padding: 12px;
+  border: 1px dashed var(--md-sys-color-outline);
+  border-radius: 4px;
+}
+
+.word-bank {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}

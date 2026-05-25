@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PhaseRun, TranscriptionRun, ContentType } from "../types";
 import { PHASE_LABELS } from "../labels";
+import styles from "./PhaseRunsPanel.module.css";
 
 const KNOWLEDGE_PHASES = [
   "download",
@@ -116,6 +117,10 @@ function buildItem(
   return { run, label: PHASE_LABELS[run.phase_key], tool, queueTime, processTime };
 }
 
+function statusClass(status: string) {
+  return styles[`status${status.charAt(0).toUpperCase() + status.slice(1)}`];
+}
+
 export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: PhaseRunsPanelProps) {
   const [now, setNow] = useState(Date.now());
   const [viewMode, setViewMode] = useState<"latest" | "history">("latest");
@@ -212,16 +217,16 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
   const items = viewMode === "latest" ? latestItems : historyItems;
 
   return (
-    <div className="phase-runs-panel">
+    <div className={styles.phaseRunsPanel}>
       {summary.totalCount > 0 && (
-        <div className="phase-runs-summary">
-          <div className="summary-main">
-            <span className="summary-count">
+        <div className={styles.phaseRunsSummary}>
+          <div className={styles.summaryMain}>
+            <span className={styles.summaryCount}>
               {summary.completedCount} / {summary.totalCount}
             </span>
-            <span className="summary-label">阶段完成</span>
+            <span className={styles.summaryLabel}>阶段完成</span>
           </div>
-          <div className="summary-meta">
+          <div className={styles.summaryMeta}>
             <md-text-button onClick={() => setViewMode((v) => (v === "latest" ? "history" : "latest"))}>
               {viewMode === "latest" ? "历史" : "当前"}
             </md-text-button>
@@ -231,8 +236,8 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
 
       {items.length === 0 && <p className="empty-state">暂无处理记录</p>}
 
-      <div className="phase-timeline">
-        <div className="phase-timeline-items">
+      <div className={styles.phaseTimeline}>
+        <div className={styles.phaseTimelineItems}>
           {items.map((item, idx) => {
             const icon = STATUS_ICONS[item.run.status] || "help";
             const statusText = STATUS_TEXT[item.run.status] || item.run.status;
@@ -243,98 +248,98 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
             const canExpand = hasError || hasTransDetails;
 
             return (
-              <div key={item.run.id} className="phase-timeline-item">
-                <div className="timeline-left">
+              <div key={item.run.id} className={styles.phaseTimelineItem}>
+                <div className={styles.timelineLeft}>
                   <div
-                    className={`timeline-node status-${item.run.status} ${
-                      item.run.status === "running" ? "spinning" : ""
+                    className={`${styles.timelineNode} ${statusClass(item.run.status)} ${
+                      item.run.status === "running" ? styles.spinning : ""
                     }`}
                   >
                     <md-icon>{icon}</md-icon>
                   </div>
-                  {idx < items.length - 1 && <div className="timeline-line" />}
+                  {idx < items.length - 1 && <div className={styles.timelineLine} />}
                 </div>
 
-                <div className={`timeline-content status-${item.run.status}`}>
-                  <div className="timeline-header">
-                    <span className="timeline-name">
+                <div className={`${styles.timelineContent} ${statusClass(item.run.status)}`}>
+                  <div className={styles.timelineHeader}>
+                    <span className={styles.timelineName}>
                       {item.label}
                       {item.occurrence && item.occurrence > 1 ? (
-                        <span className="occurrence-badge"> 第{item.occurrence}次</span>
+                        <span className={styles.occurrenceBadge}> 第{item.occurrence}次</span>
                       ) : null}
                     </span>
-                    <span className={`timeline-status-badge ${item.run.status}`}>{statusText}</span>
+                    <span className={`${styles.timelineStatusBadge} ${styles[item.run.status]}`}>{statusText}</span>
                   </div>
 
                   {item.tool && (
-                    <div className="timeline-meta">
-                      <md-icon className="meta-icon">build_circle</md-icon>
-                      <span className="timeline-tool">{item.tool}</span>
+                    <div className={styles.timelineMeta}>
+                      <md-icon className={styles.metaIcon}>build_circle</md-icon>
+                      <span className={styles.timelineTool}>{item.tool}</span>
                     </div>
                   )}
 
-                  <div className="timeline-times">
+                  <div className={styles.timelineTimes}>
                     <span>
-                      <md-icon className="meta-icon">schedule</md-icon>
+                      <md-icon className={styles.metaIcon}>schedule</md-icon>
                       排队 {formatDuration(item.queueTime)}
                     </span>
                     <span>
-                      <md-icon className="meta-icon">timer</md-icon>
+                      <md-icon className={styles.metaIcon}>timer</md-icon>
                       处理 {formatDuration(item.processTime)}
                     </span>
                   </div>
 
                   {canExpand && (
-                    <button className="timeline-detail-toggle" onClick={() => toggleDetail(item.run.id)}>
+                    <button className={styles.timelineDetailToggle} onClick={() => toggleDetail(item.run.id)}>
                       {hasError ? (
                         <>
-                          <md-icon className="toggle-icon">error</md-icon>
+                          <md-icon className={styles.toggleIcon}>error</md-icon>
                           错误详情
                         </>
                       ) : (
                         <>
-                          <md-icon className="toggle-icon">text_fields</md-icon>
+                          <md-icon className={styles.toggleIcon}>text_fields</md-icon>
                           转录详情
                         </>
                       )}
-                      <md-icon className="toggle-icon">
+                      <md-icon className={styles.toggleIcon}>
                         {isDetailExpanded ? "expand_less" : "expand_more"}
                       </md-icon>
                     </button>
                   )}
 
                   {isDetailExpanded && hasError && (
-                    <div className="timeline-detail-content error">{item.run.error_message}</div>
+                    <div className={`${styles.timelineDetailContent} ${styles.error}`}>{item.run.error_message}</div>
                   )}
 
                   {isDetailExpanded && hasTransDetails && (
-                    <div className="timeline-detail-content transcription">
-                      <div className="trans-row">
-                        <span className="trans-key">Provider</span>
-                        <span className="trans-value">{transPrimary?.provider || "—"}</span>
+                    <div className={`${styles.timelineDetailContent} ${styles.transcription}`}>
+                      <div className={styles.transRow}>
+                        <span className={styles.transKey}>Provider</span>
+                        <span className={styles.transValue}>{transPrimary?.provider || "—"}</span>
                       </div>
                       {transPrimary && transPrimary.srt_entry_count > 0 && (
-                        <div className="trans-row">
-                          <span className="trans-key">字幕条目</span>
-                          <span className="trans-value">{transPrimary.srt_entry_count}</span>
+                        <div className={styles.transRow}>
+                          <span className={styles.transKey}>字幕条目</span>
+                          <span className={styles.transValue}>{transPrimary.srt_entry_count}</span>
                         </div>
                       )}
                       {transPrimary?.validation_summary && (
-                        <div className="trans-row">
-                          <span className="trans-key">验证结果</span>
-                          <span className="trans-value">{transPrimary.validation_summary}</span>
+                        <div className={styles.transRow}>
+                          <span className={styles.transKey}>验证结果</span>
+                          <span className={styles.transValue}>{transPrimary.validation_summary}</span>
                         </div>
                       )}
                       {transFallback?.fallback_reason && (
-                        <div className="trans-row">
-                          <span className="trans-key">Fallback</span>
-                          <span className="trans-value">{transFallback.fallback_reason}</span>
+                        <div className={styles.transRow}>
+                          <span className={styles.transKey}>Fallback</span>
+                          <span className={styles.transValue}>{transFallback.fallback_reason}</span>
                         </div>
                       )}
                       {transcriptionRuns.length > 1 && (
-                        <div className="trans-row">
-                          <span className="trans-key">尝试次数</span>
-                          <span className="trans-value">{transcriptionRuns.length}</span>
+                        <div className={styles.transRow}>
+                          <span className={styles.transKey}>尝试次数</span>
+                          <span className={styles.transValue}>{transcriptionRuns.length}</span>
                         </div>
                       )}
                     </div>
