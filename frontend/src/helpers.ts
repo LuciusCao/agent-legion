@@ -72,7 +72,7 @@ export function parseResourceInputs(value: string): { external_id: string; sourc
     .map((line) => line.trim())
     .filter(Boolean)
     .forEach((line) => {
-      const pair = line.split(",").map((part) => part.trim()).filter(Boolean);
+      const pair = line.split(/[,，]/).map((part) => part.trim()).filter(Boolean);
       if (pair.length === 2 && looksLikeSourceUuid(pair[1])) {
         items.push({ external_id: pair[0], source_uuid: pair[1] });
         return;

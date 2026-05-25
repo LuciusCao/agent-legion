@@ -124,7 +124,7 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
 
         return {
           run,
-          label: PHASE_LABELS[run.phase_key] || run.phase_key,
+          label: PHASE_LABELS[run.phase_key],
           tool,
           queueTime,
           processTime,

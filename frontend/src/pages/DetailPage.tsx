@@ -174,7 +174,7 @@ export function DetailPage() {
         {currentVideo && (
           <div className="detail-progress">
             <span className={`phase-name ${currentVideo.status === "running" ? "running-text" : ""}`}>
-              {PHASE_LABELS[currentVideo.current_phase] || currentVideo.current_phase}
+              {PHASE_LABELS[currentVideo.current_phase]}
             </span>
             <PhaseStepper video={currentVideo} />
             <span className={`status-badge ${statusGroup(currentVideo)}`}>
