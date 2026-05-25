@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
 import { BatchRerunDialog } from "./BatchRerunDialog";
+import { BatchDeleteDialog } from "./BatchDeleteDialog";
 
 export function BatchToolbar() {
   const {
@@ -16,15 +17,14 @@ export function BatchToolbar() {
   const { showToast } = useUiStore();
 
   const [rerunDialogOpen, setRerunDialogOpen] = useState(false);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
 
   if (!selectMode) return null;
 
   const count = selectedIds.size;
   const hasSelection = count > 0;
 
-  const handleDelete = async () => {
-    if (!hasSelection) return;
-    if (!window.confirm(`确定删除 ${count} 个资源？`)) return;
+  const handleDeleteConfirm = async () => {
     const result = await batchDelete(Array.from(selectedIds));
     const succeeded = result.results.filter((r) => r.status === "deleted").length;
     const failed = result.results.length - succeeded;
@@ -35,12 +35,18 @@ export function BatchToolbar() {
       failed > 0 ? "error" : "success",
     );
     clearSelection();
+    setDeleteDialogOpen(false);
     await fetchVideos();
   };
 
   const handleRerun = () => {
     if (!hasSelection) return;
     setRerunDialogOpen(true);
+  };
+
+  const handleDelete = () => {
+    if (!hasSelection) return;
+    setDeleteDialogOpen(true);
   };
 
   return (
@@ -63,6 +69,12 @@ export function BatchToolbar() {
         open={rerunDialogOpen}
         videoIds={Array.from(selectedIds)}
         onClose={() => setRerunDialogOpen(false)}
+      />
+      <BatchDeleteDialog
+        open={deleteDialogOpen}
+        count={count}
+        onClose={() => setDeleteDialogOpen(false)}
+        onConfirm={handleDeleteConfirm}
       />
     </>
   );

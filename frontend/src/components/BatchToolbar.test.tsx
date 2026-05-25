@@ -56,10 +56,10 @@ describe("BatchToolbar", () => {
       selectedIds: new Set(["v1", "v2"]),
       isLoading: false,
     });
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+
   });
 
-  it("shows an error toast when batch delete has failed items", async () => {
+  it("opens delete dialog and shows an error toast when batch delete has failed items", async () => {
     mockApi
       .mockResolvedValueOnce({
         results: [
@@ -73,6 +73,12 @@ describe("BatchToolbar", () => {
 
     await act(async () => {
       screen.getByTitle("删除").click();
+    });
+
+    expect(screen.getByText("确认删除")).toBeInTheDocument();
+
+    await act(async () => {
+      screen.getByText("删除").click();
     });
 
     await waitFor(() => {
