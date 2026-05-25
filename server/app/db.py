@@ -28,6 +28,7 @@ VIDEO_UPDATE_FIELDS = {
     "status",
     "duration",
     "error_message",
+    "packed",
 }
 
 
@@ -104,6 +105,7 @@ class Database:
                 "knowledge_code": "alter table videos add column knowledge_code text not null default ''",
                 "question_id": "alter table videos add column question_id text not null default ''",
                 "source_uuid": "alter table videos add column source_uuid text not null default ''",
+                "packed": "alter table videos add column packed integer not null default 0",
             }
             for column, statement in migrations.items():
                 if column not in existing_columns:
@@ -141,9 +143,9 @@ class Database:
                 """
                 insert into videos(
                   id, source_url, title, content_type, external_id, knowledge_code,
-                  question_id, source_uuid, storage_dir, current_phase, status
+                  question_id, source_uuid, storage_dir, current_phase, status, packed
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                   source_url=excluded.source_url,
                   title=excluded.title,
@@ -168,6 +170,7 @@ class Database:
                     storage_dir,
                     current_phase,
                     status,
+                    0,
                 ),
             )
             row = conn.execute("select * from videos where id=?", (video_id,)).fetchone()
