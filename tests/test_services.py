@@ -2,6 +2,7 @@ from server.app.services.intake import add_video_items, normalized_content_type
 from server.app.services.video_actions import (
     batch_rerun_video_records,
     delete_video_record,
+    rerun_video_record,
     select_videos_for_package,
 )
 from tests.conftest import InputItem
@@ -66,3 +67,32 @@ def test_delete_video_record_removes_storage_and_package_selection_defaults(db, 
     assert delete_video_record(db, settings, completed["id"]) is True
     assert db.get_video(completed["id"]) is None
     assert not storage_dir.exists()
+
+
+def test_rerun_transcribe_downgrades_to_download_when_mp4_missing(db, settings):
+    db.create_video("https://example.com/v1.mp4", "V1")
+    video_dir = settings.videos_dir / "v1"
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
+    db.update_video("v1", storage_dir=str(video_dir), status="completed", current_phase="package")
+
+    result = rerun_video_record(db, settings, "v1", "transcribe")
+
+    assert result["status"] == "rerun"
+    assert result["phase"] == "download"
+    assert db.get_video("v1")["current_phase"] == "download"
+
+
+def test_rerun_transcribe_stays_transcribe_when_mp4_exists(db, settings):
+    db.create_video("https://example.com/v1.mp4", "V1")
+    video_dir = settings.videos_dir / "v1"
+    video_dir.mkdir(parents=True)
+    (video_dir / "v1.mp4").write_bytes(b"fake")
+    (video_dir / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
+    db.update_video("v1", storage_dir=str(video_dir), status="completed", current_phase="package")
+
+    result = rerun_video_record(db, settings, "v1", "transcribe")
+
+    assert result["status"] == "rerun"
+    assert result["phase"] == "transcribe"
+    assert db.get_video("v1")["current_phase"] == "transcribe"

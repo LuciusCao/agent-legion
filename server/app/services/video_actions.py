@@ -78,6 +78,9 @@ def rerun_video_record(
         }
 
     video_dir = resolve_video_dir(video, settings.videos_dir)
+
+    if normalized_phase == "transcribe" and not (video_dir / f"{video_id}.mp4").exists():
+        normalized_phase = "download"
     try:
         clear_artifacts_from(video_dir, normalized_phase, video_id)
     except ValueError as exc:

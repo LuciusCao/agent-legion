@@ -29,6 +29,10 @@ cms:
     nonce: ""
     secret: ""
     url: ""
+# Optional: delete the local MP4 after the assemble phase completes to save disk space.
+# Playback will fall back to source_url via redirect. Default is false.
+cleanup_video_after_assemble: false
+
 openclaw:
   cwd: .
   timeout_seconds: 600
