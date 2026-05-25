@@ -199,7 +199,7 @@ export function DetailPage() {
             <span className={`status-badge ${statusGroup(currentVideo)}`}>
               {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
             </span>
-            {currentVideo.packed && <span className="packed-badge">已打包</span>}
+            {!!currentVideo.packed && <span className="packed-badge">已打包</span>}
           </div>
         )}
         <div className="detail-actions">
