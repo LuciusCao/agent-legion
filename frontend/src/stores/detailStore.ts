@@ -66,7 +66,7 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
         currentSentence: [],
       });
       if (video) {
-        set({ activeTab: video.content_type === "question" ? "subtitles" : "nodes" });
+        set({ activeTab: "subtitles" });
       }
     } finally {
       set({ isLoading: false });
