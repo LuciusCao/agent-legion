@@ -42,9 +42,9 @@ function formatIssue(issue: { title?: string; details?: string }): string {
 }
 
 const STATUS_LABELS: Record<string, { text: string; color: string }> = {
-  published: { text: "已通过", color: "var(--md-sys-color-primary)" },
-  pending_review: { text: "待审", color: "var(--md-sys-color-tertiary)" },
-  rejected: { text: "驳回", color: "var(--md-sys-color-error)" },
+  published: { text: "已通过", color: "#2e7d32" },
+  pending_review: { text: "待审", color: "#ed6c02" },
+  rejected: { text: "驳回", color: "#ba1a1a" },
 };
 
 export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
