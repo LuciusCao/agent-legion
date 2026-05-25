@@ -11,7 +11,6 @@ export function BatchToolbar() {
     clearSelection,
     selectAllVisible,
     batchDelete,
-    batchPackage,
     fetchVideos,
   } = useVideoStore();
   const { showToast } = useUiStore();
@@ -39,12 +38,6 @@ export function BatchToolbar() {
     await fetchVideos();
   };
 
-  const handlePackage = async () => {
-    if (!hasSelection) return;
-    const result = await batchPackage(Array.from(selectedIds));
-    window.location.href = result.download_url;
-  };
-
   const handleRerun = () => {
     if (!hasSelection) return;
     setRerunDialogOpen(true);
@@ -55,18 +48,15 @@ export function BatchToolbar() {
       <div className="batch-toolbar card-elevated">
         <span>已选择 {count} 项</span>
         <div className="batch-actions">
-          <md-outlined-button onClick={toggleSelectMode}>退出多选</md-outlined-button>
           <md-text-button onClick={selectAllVisible}>全选</md-text-button>
-          <md-text-button onClick={clearSelection}>取消</md-text-button>
+          <md-text-button onClick={clearSelection}>取消选择</md-text-button>
           <md-icon-button disabled={(!hasSelection) || undefined} onClick={handleRerun} title="重跑">
             <md-icon>restart_alt</md-icon>
-          </md-icon-button>
-          <md-icon-button disabled={(!hasSelection) || undefined} onClick={handlePackage} title="打包">
-            <md-icon>inventory_2</md-icon>
           </md-icon-button>
           <md-icon-button disabled={(!hasSelection) || undefined} style={{ color: "var(--md-sys-color-error)" }} onClick={handleDelete} title="删除">
             <md-icon>delete</md-icon>
           </md-icon-button>
+          <md-outlined-button onClick={toggleSelectMode}>退出多选</md-outlined-button>
         </div>
       </div>
       <BatchRerunDialog
