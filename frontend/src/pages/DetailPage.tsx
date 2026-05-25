@@ -212,7 +212,7 @@ export function DetailPage() {
           />
         </div>
         <aside className="phase-runs-sidebar">
-          <PhaseRunsPanel phaseRuns={phaseRuns} transcriptionRuns={transcriptionRuns} />
+          <PhaseRunsPanel phaseRuns={phaseRuns} transcriptionRuns={transcriptionRuns} contentType={currentVideo?.content_type} />
         </aside>
       </section>
 
