@@ -91,6 +91,12 @@ h1 {
   color: var(--md-sys-color-on-primary-container);
 }
 
+.pill-divider {
+  width: 1px;
+  background: var(--md-sys-color-outline-variant);
+  margin: 4px 4px;
+}
+
 .stat-pill md-icon {
   font-size: 16px;
   width: 16px;

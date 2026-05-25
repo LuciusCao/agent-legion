@@ -11,16 +11,20 @@ const STATUS_ICONS: Record<string, string> = {
   running: "sync",
   failed: "error",
   completed: "check_circle",
+  packed: "archive",
+  unpacked: "inventory_2",
 };
 
 export function StatCards() {
-  const { videos, statusFilter, setStatusFilter } = useVideoStore();
+  const { videos, statusFilter, setStatusFilter, packedFilter, setPackedFilter } = useVideoStore();
 
   const counts = useMemo(() => {
     const map: Record<string, number> = { all: videos.length };
     STATUSES.forEach((s) => {
       map[s] = videos.filter((v) => statusGroup(v) === s).length;
     });
+    map.packed = videos.filter((v) => v.packed).length;
+    map.unpacked = videos.filter((v) => !v.packed).length;
     return map;
   }, [videos]);
 
@@ -44,6 +48,25 @@ export function StatCards() {
           <span>{item.label}（{counts[item.key] ?? 0}）</span>
         </div>
       ))}
+      {statusFilter === "completed" && (
+        <>
+          <span className="pill-divider" />
+          <div
+            className={`stat-pill ${packedFilter === "packed" ? "active" : ""}`}
+            onClick={() => setPackedFilter(packedFilter === "packed" ? "all" : "packed")}
+          >
+            <md-icon>{STATUS_ICONS.packed}</md-icon>
+            <span>已打包（{counts.packed ?? 0}）</span>
+          </div>
+          <div
+            className={`stat-pill ${packedFilter === "unpacked" ? "active" : ""}`}
+            onClick={() => setPackedFilter(packedFilter === "unpacked" ? "all" : "unpacked")}
+          >
+            <md-icon>{STATUS_ICONS.unpacked}</md-icon>
+            <span>未打包（{counts.unpacked ?? 0}）</span>
+          </div>
+        </>
+      )}
     </div>
   );
 }
