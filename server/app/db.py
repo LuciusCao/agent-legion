@@ -274,6 +274,15 @@ class Database:
                 )
             ]
 
+    def list_transcription_runs(self, video_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    "select * from transcription_runs where video_id=? order by id", (video_id,)
+                )
+            ]
+
     def delete_video(self, video_id: str) -> None:
         with self.connect() as conn:
             conn.execute("delete from phase_runs where video_id=?", (video_id,))
