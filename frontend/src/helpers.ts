@@ -1,4 +1,4 @@
-import { INTERACTION_TYPE_LABELS } from "./labels";
+import { INTERACTION_TYPE_LABELS, KNOWLEDGE_PHASES, QUESTION_PHASES } from "./labels";
 import type { ContentType, InteractionStats, VideoItem } from "./types";
 
 export type VideoFilter = {
@@ -96,32 +96,12 @@ export function seconds(value: number): string {
   return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
 
-const KNOWLEDGE_PHASE_SEQUENCE = [
-  "download",
-  "transcribe",
-  "subtitle_review",
-  "chapter_generate",
-  "interaction_generate",
-  "content_review",
-  "assemble",
-];
-
-const QUESTION_PHASE_SEQUENCE = [
-  "download",
-  "transcribe",
-  "subtitle_review",
-  "chapter_generate",
-  "assemble",
-];
-
 export function computeProgress(video: VideoItem): number {
   if (video.status === "completed") return 1;
   if (video.current_phase === "waiting_for_url") return 0;
 
   const phases =
-    video.content_type === "question"
-      ? QUESTION_PHASE_SEQUENCE
-      : KNOWLEDGE_PHASE_SEQUENCE;
+    video.content_type === "question" ? QUESTION_PHASES : KNOWLEDGE_PHASES;
   const index = phases.indexOf(video.current_phase);
   if (index === -1) return 0;
 
@@ -132,7 +112,7 @@ export function computeProgress(video: VideoItem): number {
 }
 
 export function getPhases(contentType: ContentType): string[] {
-  return contentType === "question" ? QUESTION_PHASE_SEQUENCE : KNOWLEDGE_PHASE_SEQUENCE;
+  return contentType === "question" ? QUESTION_PHASES : KNOWLEDGE_PHASES;
 }
 
 export async function triggerDownload(url: string) {

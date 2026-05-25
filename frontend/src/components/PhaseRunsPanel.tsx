@@ -1,24 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { PhaseRun, TranscriptionRun, ContentType } from "../types";
-import { PHASE_LABELS } from "../labels";
-
-const KNOWLEDGE_PHASES = [
-  "download",
-  "transcribe",
-  "subtitle_review",
-  "chapter_generate",
-  "interaction_generate",
-  "content_review",
-  "assemble",
-];
-
-const QUESTION_PHASES = [
-  "download",
-  "transcribe",
-  "subtitle_review",
-  "chapter_generate",
-  "assemble",
-];
+import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES } from "../labels";
 
 const STATUS_ICONS: Record<string, string> = {
   completed: "check_circle",
