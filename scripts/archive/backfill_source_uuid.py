@@ -13,8 +13,10 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
+from server.app.cms.client import get_token
+from server.app.cms.knowledge import lookup_knowledge_video
+from server.app.cms.question import lookup_question_video
 from server.app.db import Database
-from server.app.pipeline.fetch_url import get_token, lookup_knowledge_video, lookup_question_video
 from server.app.settings import load_settings
 
 

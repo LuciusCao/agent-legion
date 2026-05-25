@@ -29,3 +29,10 @@
   gap: 8px;
   flex-wrap: wrap;
 }
+
+.error-text {
+  color: var(--md-sys-color-error);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

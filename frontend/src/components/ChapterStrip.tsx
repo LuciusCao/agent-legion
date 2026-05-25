@@ -22,7 +22,7 @@ export function ChapterStrip({ chapters, currentTime, onSeek }: ChapterStripProp
         return (
           <md-suggestion-chip
             key={index}
-            class={isActive ? "active" : ""}
+            class={isActive ? styles.active : ""}
             label={`${formatTime(chapter.start)} ${chapter.title}`}
             onClick={() => onSeek(chapter.start)}
           />

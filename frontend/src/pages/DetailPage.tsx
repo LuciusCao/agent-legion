@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useDetailStore } from "../stores/detailStore";
+import { useArtifactStore } from "../stores/artifactStore";
+import { useInteractionStore } from "../stores/interactionStore";
 import { useUiStore } from "../stores/uiStore";
 import { useVideoStore } from "../stores/videoStore";
 import { VideoPlayer } from "../components/VideoPlayer";
@@ -29,26 +31,40 @@ export function DetailPage() {
 
   const {
     currentVideo,
-    artifacts,
     phaseRuns,
     transcriptionRuns,
     activeTab,
+    loadVideo,
+    loadLog,
+  } = useDetailStore();
+
+  const {
+    artifacts,
+    loadArtifacts,
+  } = useArtifactStore();
+
+  const {
     triggeredNodeIndexes,
     dismissedNodeIndexes,
     currentSentence,
-    loadVideo,
-    loadArtifacts,
-    loadLog,
     triggerInteraction,
     dismissInteraction,
     replayInteraction,
     pushWord,
     resetSentence,
     clearSentence,
-  } = useDetailStore();
+  } = useInteractionStore();
 
   const { openRerunDialog, openDeleteDialog, showToast } = useUiStore();
   const { fetchVideos } = useVideoStore();
+
+  const checkFetchError = () => {
+    const err = useVideoStore.getState().error;
+    if (err) {
+      showToast(`加载失败: ${err}`, "error");
+      useVideoStore.getState().clearError();
+    }
+  };
 
   useVideoPhaseEvents(id);
 
@@ -146,6 +162,7 @@ export function DetailPage() {
       await api(`/api/videos/${id}`, { method: "DELETE" });
       showToast("删除成功", "success");
       await fetchVideos();
+      checkFetchError();
       navigate("/");
       return true;
     } catch (err) {
@@ -162,6 +179,7 @@ export function DetailPage() {
       body: JSON.stringify({ video_ids: [id] }),
     });
     await Promise.all([fetchVideos(), loadVideo(id)]);
+    checkFetchError();
     await triggerDownload(result.download_url);
   }, [id, fetchVideos, loadVideo]);
 
@@ -172,6 +190,7 @@ export function DetailPage() {
         await api(`/api/videos/${id}/rerun`, { method: "POST", body: JSON.stringify({ phase }) });
         showToast("重跑已提交", "success");
         await Promise.all([fetchVideos(), loadVideo(id), loadLog(id)]);
+        checkFetchError();
       } catch (err) {
         if (err instanceof Error && err.message.includes("currently being processed")) {
           showToast("该资源正在被处理中，请等待当前阶段完成后再重跑。", "error");

@@ -39,6 +39,7 @@ def test_assemble_video_creates_metadata_and_report(tmp_path):
         "external_id": "K001",
         "knowledge_code": "K001",
         "question_id": "",
+        "source_uuid": "source-uuid-1",
     }
     metadata = assemble_video(video, video_dir)
 
@@ -46,6 +47,7 @@ def test_assemble_video_creates_metadata_and_report(tmp_path):
     assert metadata["title"] == "Test Video"
     assert metadata["duration"] == 5.0
     assert metadata["content_type"] == "knowledge"
+    assert metadata["source_uuid"] == "source-uuid-1"
     assert len(metadata["chapters"]) == 1
     assert len(metadata["interactions"]) == 1
     assert metadata["interactions"][0]["id"] == "I1"

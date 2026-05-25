@@ -1,24 +1,6 @@
-import { PHASE_LABELS } from "../labels";
+import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES } from "../labels";
 import type { VideoItem } from "../types";
 import styles from "./PhaseStepper.module.css";
-
-const KNOWLEDGE_PHASES = [
-  "download",
-  "transcribe",
-  "subtitle_review",
-  "chapter_generate",
-  "interaction_generate",
-  "content_review",
-  "assemble",
-];
-
-const QUESTION_PHASES = [
-  "download",
-  "transcribe",
-  "subtitle_review",
-  "chapter_generate",
-  "assemble",
-];
 
 type StepState = "completed" | "running" | "failed" | "pending";
 

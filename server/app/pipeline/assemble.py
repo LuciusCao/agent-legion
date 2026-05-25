@@ -33,6 +33,7 @@ def assemble_video(video: dict, video_dir: Path) -> dict:
         "external_id": video.get("external_id", ""),
         "knowledge_code": video.get("knowledge_code", ""),
         "question_id": video.get("question_id", ""),
+        "source_uuid": video.get("source_uuid", ""),
         "status": "已完成",
         "chapters": chapters,
         "interactions": interactions,

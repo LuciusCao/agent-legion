@@ -49,13 +49,13 @@ export function AddDialog() {
         <div style={{ display: "grid", gap: "16px", minWidth: "460px" }}>
           <div style={{ display: "flex", gap: "8px" }}>
             <md-outlined-button
-              className={`${styles.typeBtn} ${addContentType === "knowledge" ? styles.active : ""}`}
+              className={addContentType === "knowledge" ? `${styles.typeBtn} ${styles.active}` : styles.typeBtn}
               onClick={() => setAddContentType("knowledge")}
             >
               知识点
             </md-outlined-button>
             <md-outlined-button
-              className={`${styles.typeBtn} ${addContentType === "question" ? styles.active : ""}`}
+              className={addContentType === "question" ? `${styles.typeBtn} ${styles.active}` : styles.typeBtn}
               onClick={() => setAddContentType("question")}
             >
               题目

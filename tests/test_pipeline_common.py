@@ -1,7 +1,7 @@
 from pathlib import Path
 
+from server.app.cms.knowledge import _extract_knowledge_url
 from server.app.pipeline.common import get_video_id, parse_srt, resolve_video_dir
-from server.app.pipeline.fetch_url import _extract_knowledge_url
 
 
 def test_parse_srt_and_video_id():

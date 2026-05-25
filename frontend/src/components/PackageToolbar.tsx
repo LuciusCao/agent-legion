@@ -1,5 +1,6 @@
 import { useVideoStore } from "../stores/videoStore";
 import { triggerDownload } from "../helpers";
+import styles from "./BatchToolbar.module.css";
 
 export function PackageToolbar() {
   const {
@@ -22,9 +23,9 @@ export function PackageToolbar() {
   };
 
   return (
-    <div className="batch-toolbar card-elevated">
+    <div className={`${styles.batchToolbar} card-elevated`}>
       <span>已选择 {count} 项</span>
-      <div className="batch-actions">
+      <div className={styles.batchActions}>
         <md-text-button onClick={selectPackageAll}>全选</md-text-button>
         <md-text-button onClick={selectPackageUnpacked}>仅选未打包</md-text-button>
         <md-text-button onClick={clearSelection}>取消选择</md-text-button>

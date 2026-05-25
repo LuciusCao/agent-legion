@@ -14,16 +14,26 @@ def test_package_completed_videos(tmp_path):
     )
 
     package_path = create_package(
-        videos=[{"id": "a", "title": "A", "source_url": "https://example.com/a.mp4", "storage_dir": str(video_dir)}],
+        videos=[
+            {
+                "id": "a",
+                "title": "A",
+                "source_url": "https://example.com/a.mp4",
+                "storage_dir": str(video_dir),
+                "source_uuid": "source-uuid-1",
+            }
+        ],
         packages_dir=tmp_path / "packages",
     )
 
     with zipfile.ZipFile(package_path) as zf:
         names = set(zf.namelist())
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
 
     assert "manifest.json" in names
     assert "a/metadata.json" in names
     assert "a/interactions.json" in names
+    assert manifest["videos"][0]["source_uuid"] == "source-uuid-1"
 
 
 def test_package_includes_reviewed_subtitles_when_available(tmp_path):
