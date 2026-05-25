@@ -2,6 +2,11 @@ export type ContentType = "knowledge" | "question";
 export type ViewName = "list" | "detail";
 export type DetailTab = "nodes" | "subtitles" | "chapters" | "logs" | "metadata" | "review";
 
+export type InteractionStats = {
+  passed: number;
+  total: number;
+};
+
 export type VideoItem = {
   id: string;
   title: string;
@@ -17,6 +22,7 @@ export type VideoItem = {
   storage_dir?: string;
   duration?: number;
   packed?: boolean;
+  interaction_stats?: Record<string, InteractionStats>;
 };
 
 export type AgentStatus = {

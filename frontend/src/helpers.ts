@@ -1,4 +1,4 @@
-import type { ContentType, VideoItem } from "./types";
+import type { ContentType, InteractionStats, VideoItem } from "./types";
 
 export type VideoFilter = {
   selectedType: ContentType;
@@ -151,4 +151,22 @@ export function canRerunFrom(video: VideoItem, phase: string): boolean {
   const phaseIdx = phases.indexOf(phase);
   if (currentIdx === -1 || phaseIdx === -1) return false;
   return phaseIdx <= currentIdx;
+}
+
+export function formatInteractionStats(stats: Record<string, InteractionStats> | undefined): string {
+  if (!stats) return "";
+  const parts: string[] = [];
+  const order = ["example_practice", "interaction_summary", "video_summary"];
+  for (const type of order) {
+    if (stats[type]) {
+      const { passed, total } = stats[type];
+      parts.push(`${passed}/${total}`);
+    }
+  }
+  for (const [type, { passed, total }] of Object.entries(stats)) {
+    if (!order.includes(type)) {
+      parts.push(`${passed}/${total}`);
+    }
+  }
+  return parts.join(" ");
 }
