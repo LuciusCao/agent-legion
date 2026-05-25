@@ -57,19 +57,33 @@ export function parseResourceIds(value: string): string[] {
     .filter(Boolean);
 }
 
+function looksLikeSourceUuid(value: string): boolean {
+  return (
+    /^uuid[-_]/i.test(value) ||
+    /^[0-9a-f]{32}$/i.test(value) ||
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value)
+  );
+}
+
 export function parseResourceInputs(value: string): { external_id: string; source_uuid: string }[] {
-  return value
+  const items: { external_id: string; source_uuid: string }[] = [];
+  value
     .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
-    .map((line) => {
-      const parts = line.split(",").map((p) => p.trim());
-      return {
-        external_id: parts[0] || "",
-        source_uuid: parts[1] || "",
-      };
-    })
-    .filter((item) => item.external_id);
+    .forEach((line) => {
+      const pair = line.split(",").map((part) => part.trim()).filter(Boolean);
+      if (pair.length === 2 && looksLikeSourceUuid(pair[1])) {
+        items.push({ external_id: pair[0], source_uuid: pair[1] });
+        return;
+      }
+      line
+        .split(/[,，]/)
+        .map((part) => part.trim())
+        .filter(Boolean)
+        .forEach((externalId) => items.push({ external_id: externalId, source_uuid: "" }));
+    });
+  return items;
 }
 
 export function seconds(value: number): string {

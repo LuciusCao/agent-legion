@@ -5,6 +5,7 @@ import {
   escapeHtml,
   filterVideos,
   getInteractionQuestion,
+  parseResourceInputs,
   parseResourceIds,
   statusGroup,
   visibleSelectedIds,
@@ -121,6 +122,24 @@ describe("parseResourceIds", () => {
       "K002",
       "Q001",
       "Q002",
+    ]);
+  });
+});
+
+describe("parseResourceInputs", () => {
+  it("keeps comma-separated batch ids as separate resources", () => {
+    expect(parseResourceInputs(" K001, K002\n\nQ001，Q002 ")).toEqual([
+      { external_id: "K001", source_uuid: "" },
+      { external_id: "K002", source_uuid: "" },
+      { external_id: "Q001", source_uuid: "" },
+      { external_id: "Q002", source_uuid: "" },
+    ]);
+  });
+
+  it("parses one external id and source uuid pair per line", () => {
+    expect(parseResourceInputs("K001,uuid-1\nK002,uuid-2")).toEqual([
+      { external_id: "K001", source_uuid: "uuid-1" },
+      { external_id: "K002", source_uuid: "uuid-2" },
     ]);
   });
 });
