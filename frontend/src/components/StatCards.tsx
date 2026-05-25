@@ -5,7 +5,7 @@ import { statusGroup } from "../helpers";
 
 const STATUSES = ["queued", "running", "failed", "completed"];
 
-const STATUS_ICONS: Record<string, string> = {
+const FILTER_ICONS: Record<string, string> = {
   all: "inventory_2",
   queued: "schedule",
   running: "sync",
@@ -44,7 +44,7 @@ export function StatCards() {
           className={`stat-pill ${statusFilter === item.key ? "active" : ""}`}
           onClick={() => setStatusFilter(item.key)}
         >
-          <md-icon>{STATUS_ICONS[item.key] || "help"}</md-icon>
+          <md-icon>{FILTER_ICONS[item.key] || "help"}</md-icon>
           <span>{item.label}（{counts[item.key] ?? 0}）</span>
         </div>
       ))}
@@ -55,14 +55,14 @@ export function StatCards() {
             className={`stat-pill ${packedFilter === "packed" ? "active" : ""}`}
             onClick={() => setPackedFilter(packedFilter === "packed" ? "all" : "packed")}
           >
-            <md-icon>{STATUS_ICONS.packed}</md-icon>
+            <md-icon>{FILTER_ICONS.packed}</md-icon>
             <span>已打包（{counts.packed ?? 0}）</span>
           </div>
           <div
             className={`stat-pill ${packedFilter === "unpacked" ? "active" : ""}`}
             onClick={() => setPackedFilter(packedFilter === "unpacked" ? "all" : "unpacked")}
           >
-            <md-icon>{STATUS_ICONS.unpacked}</md-icon>
+            <md-icon>{FILTER_ICONS.unpacked}</md-icon>
             <span>未打包（{counts.unpacked ?? 0}）</span>
           </div>
         </>
