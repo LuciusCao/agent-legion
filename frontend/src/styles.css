@@ -465,6 +465,47 @@ h1 {
   overflow-y: auto;
 }
 
+.phase-round {
+  display: grid;
+  gap: 6px;
+}
+
+.phase-round-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface-variant);
+  transition: background 0.15s;
+}
+
+.phase-round-header:hover:not(:disabled) {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.phase-round-header:disabled {
+  cursor: default;
+}
+
+.phase-round-header md-icon {
+  font-size: 18px;
+  width: 18px;
+  height: 18px;
+}
+
+.phase-round-items {
+  display: grid;
+  gap: 8px;
+  padding-left: 4px;
+}
+
 .phase-run-item {
   background: var(--md-sys-color-surface);
   border: 1px solid var(--md-sys-color-outline-variant);
