@@ -69,7 +69,6 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
-  margin-top: 16px;
 }
 
 .stat-pill {
@@ -193,7 +192,7 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 18px;
+  margin-top: 14px;
   flex-wrap: wrap;
 }
 
@@ -202,7 +201,7 @@ h1 {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 16px;
+  margin-top: 10px;
   flex-wrap: wrap;
 }
 
