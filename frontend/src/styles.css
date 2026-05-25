@@ -9,6 +9,18 @@ body {
   background: var(--md-sys-color-surface);
 }
 
+:root {
+  --status-running-bg: #dbeafe;
+  --status-running-text: #1d4ed8;
+  --status-running-border: #3b82f6;
+  --status-completed-bg: #dcfce7;
+  --status-completed-text: #15803d;
+  --status-completed-border: #22c55e;
+  --status-failed-bg: #fee2e2;
+  --status-failed-text: #b91c1c;
+  --status-failed-border: #ef4444;
+}
+
 button,
 textarea,
 select,
@@ -277,7 +289,7 @@ h1 {
 }
 
 .phase-name.running-text {
-  color: #3b82f6;
+  color: var(--status-running-border);
   font-weight: 600;
 }
 
@@ -299,18 +311,18 @@ h1 {
 }
 
 .status-badge.running {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
 }
 
 .status-badge.failed {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
 }
 
 .status-badge.completed {
-  background: #dcfce7;
-  color: #15803d;
+  background: var(--status-completed-bg);
+  color: var(--status-completed-text);
 }
 
 @keyframes pulse-blue {
@@ -323,7 +335,7 @@ h1 {
 }
 
 .step-bar.running {
-  background: #3b82f6;
+  background: var(--status-running-border);
   animation: pulse-blue 1.4s ease-in-out infinite;
 }
 
@@ -351,15 +363,15 @@ h1 {
 }
 
 .step-bar.completed {
-  background: #22c55e;
+  background: var(--status-completed-border);
 }
 
 .step-bar.running {
-  background: #3b82f6;
+  background: var(--status-running-border);
 }
 
 .step-bar.failed {
-  background: #ef4444;
+  background: var(--status-failed-border);
 }
 
 /* Detail view */
@@ -537,18 +549,18 @@ h1 {
 }
 
 .summary-status-badge.running {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
 }
 
 .summary-status-badge.completed {
-  background: #dcfce7;
-  color: #15803d;
+  background: var(--status-completed-bg);
+  color: var(--status-completed-text);
 }
 
 .summary-status-badge.failed {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
 }
 
 .summary-status-badge.pending {
@@ -652,21 +664,21 @@ h1 {
 }
 
 .timeline-node.status-completed {
-  background: #dcfce7;
-  border-color: #22c55e;
-  color: #15803d;
+  background: var(--status-completed-bg);
+  border-color: var(--status-completed-border);
+  color: var(--status-completed-text);
 }
 
 .timeline-node.status-running {
-  background: #dbeafe;
-  border-color: #3b82f6;
-  color: #1d4ed8;
+  background: var(--status-running-bg);
+  border-color: var(--status-running-border);
+  color: var(--status-running-text);
 }
 
 .timeline-node.status-failed {
-  background: #fee2e2;
-  border-color: #ef4444;
-  color: #b91c1c;
+  background: var(--status-failed-bg);
+  border-color: var(--status-failed-border);
+  color: var(--status-failed-text);
 }
 
 .timeline-node.spinning md-icon {
@@ -731,18 +743,18 @@ h1 {
 }
 
 .timeline-status-badge.running {
-  background: #dbeafe;
-  color: #1d4ed8;
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
 }
 
 .timeline-status-badge.completed {
-  background: #dcfce7;
-  color: #15803d;
+  background: var(--status-completed-bg);
+  color: var(--status-completed-text);
 }
 
 .timeline-status-badge.failed {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
 }
 
 .timeline-status-badge.pending,
@@ -979,8 +991,8 @@ pre {
   padding: 4px 8px;
   border-radius: 12px;
   white-space: nowrap;
-  background: #dcfce7;
-  color: #15803d;
+  background: var(--status-completed-bg);
+  color: var(--status-completed-text);
 }
 
 /* Responsive */
