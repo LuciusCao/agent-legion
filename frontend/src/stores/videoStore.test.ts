@@ -17,6 +17,7 @@ describe("videoStore", () => {
       statusFilter: "all",
       searchQuery: "",
       selectMode: false,
+      packageSelectMode: false,
       selectedIds: new Set(),
       isLoading: false,
     });
@@ -33,6 +34,36 @@ describe("videoStore", () => {
   it("toggles select mode", () => {
     useVideoStore.getState().toggleSelectMode();
     expect(useVideoStore.getState().selectMode).toBe(true);
+  });
+
+  it("toggles package select mode", () => {
+    useVideoStore.getState().togglePackageSelectMode();
+    expect(useVideoStore.getState().packageSelectMode).toBe(true);
+    expect(useVideoStore.getState().selectMode).toBe(false);
+    useVideoStore.getState().togglePackageSelectMode();
+    expect(useVideoStore.getState().packageSelectMode).toBe(false);
+  });
+
+  it("selects all completed videos in package mode", () => {
+    useVideoStore.setState({
+      videos: [
+        { id: "v1", title: "A", source_url: "", content_type: "knowledge", external_id: "K001", knowledge_code: "K001", question_id: "", source_uuid: "", status: "completed", current_phase: "package", error_message: "" },
+        { id: "v2", title: "B", source_url: "", content_type: "knowledge", external_id: "K002", knowledge_code: "K002", question_id: "", source_uuid: "", status: "running", current_phase: "download", error_message: "" },
+      ],
+    });
+    useVideoStore.getState().selectPackageAll();
+    expect(useVideoStore.getState().selectedIds).toEqual(new Set(["v1"]));
+  });
+
+  it("selects only unpacked completed videos", () => {
+    useVideoStore.setState({
+      videos: [
+        { id: "v1", title: "A", source_url: "", content_type: "knowledge", external_id: "K001", knowledge_code: "K001", question_id: "", source_uuid: "", status: "completed", current_phase: "package", error_message: "", packed: true },
+        { id: "v2", title: "B", source_url: "", content_type: "knowledge", external_id: "K002", knowledge_code: "K002", question_id: "", source_uuid: "", status: "completed", current_phase: "package", error_message: "", packed: false },
+      ],
+    });
+    useVideoStore.getState().selectPackageUnpacked();
+    expect(useVideoStore.getState().selectedIds).toEqual(new Set(["v2"]));
   });
 
   it("toggles video selection", () => {

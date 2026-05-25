@@ -10,6 +10,7 @@ interface VideoState {
   statusFilter: string;
   searchQuery: string;
   selectMode: boolean;
+  packageSelectMode: boolean;
   selectedIds: Set<string>;
   isLoading: boolean;
   sseConnected: boolean;
@@ -20,8 +21,11 @@ interface VideoState {
   setStatusFilter: (status: string) => void;
   setSearchQuery: (query: string) => void;
   toggleSelectMode: () => void;
+  togglePackageSelectMode: () => void;
   toggleVideoSelection: (id: string) => void;
   selectAllVisible: () => void;
+  selectPackageAll: () => void;
+  selectPackageUnpacked: () => void;
   clearSelection: () => void;
   setSseConnected: (connected: boolean) => void;
   batchDelete: (ids: string[]) => Promise<{ results: Array<{ video_id: string; status: string; message?: string }> }>;
@@ -35,6 +39,7 @@ export const useVideoStore = create<VideoState>((set, _get) => ({
   statusFilter: "all",
   searchQuery: "",
   selectMode: false,
+  packageSelectMode: false,
   selectedIds: new Set(),
   isLoading: false,
   sseConnected: true,
@@ -84,8 +89,24 @@ export const useVideoStore = create<VideoState>((set, _get) => ({
   },
 
   toggleSelectMode: () => {
-    set((state) => ({ selectMode: !state.selectMode, selectedIds: new Set() }));
+    set((state) => ({ selectMode: !state.selectMode, packageSelectMode: false, selectedIds: new Set() }));
   },
+
+  togglePackageSelectMode: () => set((state) => ({
+    packageSelectMode: !state.packageSelectMode,
+    selectMode: false,
+    selectedIds: new Set(),
+  })),
+
+  selectPackageAll: () => set((state) => {
+    const completed = state.videos.filter((v) => v.status === "completed");
+    return { selectedIds: new Set(completed.map((v) => v.id)) };
+  }),
+
+  selectPackageUnpacked: () => set((state) => {
+    const unpacked = state.videos.filter((v) => v.status === "completed" && !v.packed);
+    return { selectedIds: new Set(unpacked.map((v) => v.id)) };
+  }),
 
   toggleVideoSelection: (id) => {
     set((state) => {
@@ -125,9 +146,11 @@ export const useVideoStore = create<VideoState>((set, _get) => ({
   },
 
   batchPackage: async (ids) => {
-    return api("/api/package", {
+    const result = await api("/api/package", {
       method: "POST",
       body: JSON.stringify({ video_ids: ids }),
     });
+    await get().fetchVideos();
+    return result;
   },
 }));

@@ -16,6 +16,7 @@ export type VideoItem = {
   error_message: string;
   storage_dir?: string;
   duration?: number;
+  packed?: boolean;
 };
 
 export type AgentStatus = {

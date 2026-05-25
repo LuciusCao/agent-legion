@@ -180,13 +180,18 @@ export function DetailPage() {
             <span className={`status-badge ${statusGroup(currentVideo)}`}>
               {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
             </span>
+            {currentVideo.packed && <span className="packed-badge">已打包</span>}
           </div>
         )}
         <div className="detail-actions">
           <md-icon-button onClick={openRerunDialog} title="重跑">
             <md-icon>restart_alt</md-icon>
           </md-icon-button>
-          <md-icon-button onClick={handlePackage} title="打包">
+          <md-icon-button
+            disabled={!currentVideo || currentVideo.status !== "completed" || currentVideo.packed}
+            onClick={handlePackage}
+            title="打包"
+          >
             <md-icon>inventory_2</md-icon>
           </md-icon-button>
           <md-icon-button style={{ color: "var(--md-sys-color-error)" }} onClick={openDeleteDialog} title="删除">

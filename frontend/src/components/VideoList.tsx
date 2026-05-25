@@ -13,6 +13,7 @@ export function VideoList() {
     statusFilter,
     searchQuery,
     selectMode,
+    packageSelectMode,
     selectedIds,
     toggleVideoSelection,
   } = useVideoStore();
@@ -63,18 +64,19 @@ export function VideoList() {
             <md-list-item
               key={video.id}
               type="button"
-              className={isSelected ? "active" : ""}
+              className={`${isSelected ? "active" : ""} ${packageSelectMode && video.status !== "completed" ? "dimmed" : ""}`}
               onClick={() => {
-                if (selectMode) {
+                if (selectMode || packageSelectMode) {
                   toggleVideoSelection(video.id);
                 } else {
                   navigate(`/videos/${video.id}`);
                 }
               }}
             >
-              {selectMode && (
+              {(selectMode || packageSelectMode) && (
                 <md-checkbox
                   slot="start"
+                  disabled={packageSelectMode && video.status !== "completed"}
                   ref={(el: HTMLElement | null) => {
                     if (el) checkboxRefs.current.set(video.id, el);
                     else checkboxRefs.current.delete(video.id);
@@ -106,6 +108,7 @@ export function VideoList() {
                 <span className={`status-badge ${statusGroup(video)}`}>
                   {STATUS_LABELS[statusGroup(video)] || video.status}
                 </span>
+                {video.packed && <span className="packed-badge">已打包</span>}
               </div>
             </md-list-item>
           );
