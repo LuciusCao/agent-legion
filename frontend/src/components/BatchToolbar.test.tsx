@@ -82,4 +82,14 @@ describe("BatchToolbar", () => {
       });
     });
   });
+
+  it("opens rerun dialog when rerun button is clicked", async () => {
+    render(<BatchToolbar />);
+
+    await act(async () => {
+      screen.getByTitle("重跑").click();
+    });
+
+    expect(screen.getByText("选择重跑阶段")).toBeInTheDocument();
+  });
 });

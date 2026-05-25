@@ -1,5 +1,7 @@
+import { useState } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
+import { RerunDialog } from "./RerunDialog";
 
 export function BatchToolbar() {
   const {
@@ -10,10 +12,11 @@ export function BatchToolbar() {
     selectAllVisible,
     batchDelete,
     batchPackage,
-    batchRerun,
     fetchVideos,
   } = useVideoStore();
   const { showToast } = useUiStore();
+
+  const [rerunDialogOpen, setRerunDialogOpen] = useState(false);
 
   if (!selectMode) return null;
 
@@ -42,32 +45,35 @@ export function BatchToolbar() {
     window.location.href = result.download_url;
   };
 
-  const handleRerun = async () => {
+  const handleRerun = () => {
     if (!hasSelection) return;
-    const result = await batchRerun(Array.from(selectedIds), "download");
-    const succeeded = result.results.filter((r) => r.status === "rerun").length;
-    showToast(`重跑完成：成功 ${succeeded} 项`, "success");
-    clearSelection();
-    await fetchVideos();
+    setRerunDialogOpen(true);
   };
 
   return (
-    <div className="batch-toolbar card-elevated">
-      <span>已选择 {count} 项</span>
-      <div className="batch-actions">
-        <md-outlined-button onClick={toggleSelectMode}>退出多选</md-outlined-button>
-        <md-text-button onClick={selectAllVisible}>全选</md-text-button>
-        <md-text-button onClick={clearSelection}>取消</md-text-button>
-        <md-icon-button disabled={(!hasSelection) || undefined} onClick={handleRerun} title="重跑">
-          <md-icon>restart_alt</md-icon>
-        </md-icon-button>
-        <md-icon-button disabled={(!hasSelection) || undefined} onClick={handlePackage} title="打包">
-          <md-icon>inventory_2</md-icon>
-        </md-icon-button>
-        <md-icon-button disabled={(!hasSelection) || undefined} style={{ color: "var(--md-sys-color-error)" }} onClick={handleDelete} title="删除">
-          <md-icon>delete</md-icon>
-        </md-icon-button>
+    <>
+      <div className="batch-toolbar card-elevated">
+        <span>已选择 {count} 项</span>
+        <div className="batch-actions">
+          <md-outlined-button onClick={toggleSelectMode}>退出多选</md-outlined-button>
+          <md-text-button onClick={selectAllVisible}>全选</md-text-button>
+          <md-text-button onClick={clearSelection}>取消</md-text-button>
+          <md-icon-button disabled={(!hasSelection) || undefined} onClick={handleRerun} title="重跑">
+            <md-icon>restart_alt</md-icon>
+          </md-icon-button>
+          <md-icon-button disabled={(!hasSelection) || undefined} onClick={handlePackage} title="打包">
+            <md-icon>inventory_2</md-icon>
+          </md-icon-button>
+          <md-icon-button disabled={(!hasSelection) || undefined} style={{ color: "var(--md-sys-color-error)" }} onClick={handleDelete} title="删除">
+            <md-icon>delete</md-icon>
+          </md-icon-button>
+        </div>
       </div>
-    </div>
+      <RerunDialog
+        open={rerunDialogOpen}
+        videoIds={Array.from(selectedIds)}
+        onClose={() => setRerunDialogOpen(false)}
+      />
+    </>
   );
 }
