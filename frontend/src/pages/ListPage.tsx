@@ -6,6 +6,7 @@ import { AgentPanel } from "../components/AgentPanel";
 import { StatCards } from "../components/StatCards";
 import { VideoList } from "../components/VideoList";
 import { BatchToolbar } from "../components/BatchToolbar";
+import { PackageToolbar } from "../components/PackageToolbar";
 import { AddDialog } from "../components/AddDialog";
 
 export function ListPage() {
@@ -14,7 +15,9 @@ export function ListPage() {
     setSelectedType,
     setSearchQuery,
     toggleSelectMode,
+    togglePackageSelectMode,
     selectMode,
+    packageSelectMode,
     fetchVideos,
     sseConnected,
   } = useVideoStore();
@@ -70,12 +73,15 @@ export function ListPage() {
           <md-icon-button onClick={toggleSelectMode} title={selectMode ? "完成" : "多选"} className={selectMode ? "active-icon" : ""}>
             <md-icon>{selectMode ? "close" : "checklist"}</md-icon>
           </md-icon-button>
+          <md-icon-button onClick={togglePackageSelectMode} title={packageSelectMode ? "完成" : "打包"} className={packageSelectMode ? "active-icon" : ""}>
+            <md-icon>{packageSelectMode ? "close" : "inventory_2"}</md-icon>
+          </md-icon-button>
           <md-icon-button onClick={openAddDialog} title="添加">
             <md-icon>add</md-icon>
           </md-icon-button>
         </div>
       </div>
-      <BatchToolbar />
+      {packageSelectMode ? <PackageToolbar /> : <BatchToolbar />}
       <VideoList />
       <AddDialog />
     </section>

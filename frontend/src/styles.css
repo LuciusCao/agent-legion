@@ -936,6 +936,20 @@ pre {
   color: var(--md-sys-color-on-surface-variant);
 }
 
+.dimmed {
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.packed-badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+  background: #dcfce7;
+  color: #15803d;
+}
+
 /* Responsive */
 @media (max-width: 900px) {
   .stats-pills {
