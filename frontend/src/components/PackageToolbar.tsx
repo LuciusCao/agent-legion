@@ -1,4 +1,5 @@
 import { useVideoStore } from "../stores/videoStore";
+import { triggerDownload } from "../helpers";
 
 export function PackageToolbar() {
   const {
@@ -8,7 +9,6 @@ export function PackageToolbar() {
     selectPackageUnpacked,
     clearSelection,
     batchPackage,
-    fetchVideos,
   } = useVideoStore();
 
   const count = selectedIds.size;
@@ -17,9 +17,8 @@ export function PackageToolbar() {
   const handlePackage = async () => {
     if (!hasSelection) return;
     const result = await batchPackage(Array.from(selectedIds));
-    window.location.href = result.download_url;
     togglePackageSelectMode();
-    await fetchVideos();
+    triggerDownload(result.download_url);
   };
 
   return (
