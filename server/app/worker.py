@@ -280,6 +280,11 @@ def process_video_once(
         db.finish_phase(run["id"], "failed", 1, str(exc))
         return True
 
+    if phase == "assemble" and settings.config.get("cleanup_video_after_assemble", False):
+        mp4_path = video_dir / f"{video_id}.mp4"
+        if mp4_path.exists():
+            mp4_path.unlink()
+
     following = next_phase(phase, video.get("content_type", "knowledge"))
     db.finish_phase(run["id"], "completed", 0, "")
     if following is None:
