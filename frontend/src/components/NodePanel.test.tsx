@@ -7,6 +7,8 @@ describe("NodePanel", () => {
   beforeEach(() => {
     useDetailStore.setState({
       artifacts: {
+        subtitles: [],
+        chapters: [],
         interactions: [
           {
             trigger_time: 90,
@@ -15,6 +17,9 @@ describe("NodePanel", () => {
             options: [{ id: "a", text: "Option A", is_distractor: false }],
           },
         ],
+        metadata: null,
+        review: null,
+        checklist: null,
       },
       triggeredNodeIndexes: new Set(),
     });
