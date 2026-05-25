@@ -2,7 +2,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, WebSocket
-from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
 from pydantic import BaseModel
 
 from server.app.agents import AgentStatusManager
@@ -199,9 +199,12 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
             raise HTTPException(status_code=404, detail="Video not found")
         video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
         path = video_dir / f"{video_id}.mp4"
-        if not path.exists():
-            return PlainTextResponse("Video not downloaded yet", status_code=404)
-        return FileResponse(path, media_type="video/mp4")
+        if path.exists():
+            return FileResponse(path, media_type="video/mp4")
+        source_url = video.get("source_url", "")
+        if source_url:
+            return RedirectResponse(source_url)
+        return PlainTextResponse("Video not downloaded yet", status_code=404)
 
     @router.post("/package", response_model=PackageResponse)
     def package_completed(request: PackageRequest | None = None) -> dict[str, str]:
