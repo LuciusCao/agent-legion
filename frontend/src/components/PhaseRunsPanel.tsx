@@ -115,8 +115,12 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
       }
     }
 
+    const latestRun = sorted[sorted.length - 1];
+    const latestPhaseIndex = latestRun ? allPhases.indexOf(latestRun.phase_key) : -1;
+    const currentPhases = latestPhaseIndex >= 0 ? allPhases.slice(0, latestPhaseIndex + 1) : [];
+
     const latestItems: TimelineItem[] = [];
-    for (const phase of allPhases) {
+    for (const phase of currentPhases) {
       const run = latestByPhase.get(phase);
       if (run) {
         const prev = latestItems.length > 0 ? latestItems[latestItems.length - 1].run : null;
@@ -136,7 +140,7 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
     }
 
     // --- summary: always based on latest record of each phase ---
-    const latestRuns = Array.from(latestByPhase.values());
+    const latestRuns = latestItems.map((item) => item.run);
     const completedCount = latestRuns.filter((r) => r.status === "completed").length;
 
     let totalTime = 0;

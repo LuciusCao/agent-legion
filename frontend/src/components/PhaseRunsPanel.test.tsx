@@ -77,6 +77,28 @@ describe("PhaseRunsPanel", () => {
     expect(badges.length).toBeGreaterThanOrEqual(1);
   });
 
+  it("does not include stale downstream phases in latest view after a middle-phase rerun", () => {
+    const runs = [
+      makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
+      makeRun(2, "transcribe", "completed", { finished_at: "2024-01-01T00:01:30Z" }),
+      makeRun(3, "subtitle_review", "completed", { finished_at: "2024-01-01T00:02:30Z" }),
+      makeRun(4, "chapter_generate", "completed", { finished_at: "2024-01-01T00:03:30Z" }),
+      makeRun(5, "interaction_generate", "completed", { finished_at: "2024-01-01T00:04:30Z" }),
+      makeRun(6, "content_review", "completed", { finished_at: "2024-01-01T00:05:30Z" }),
+      makeRun(7, "assemble", "completed", { finished_at: "2024-01-01T00:06:30Z" }),
+      makeRun(8, "package", "completed", { finished_at: "2024-01-01T00:07:30Z" }),
+      makeRun(9, "transcribe", "running", { started_at: "2024-01-01T00:10:00Z" }),
+    ];
+
+    render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
+
+    expect(screen.getByText(/1\s*\/\s*8/)).toBeInTheDocument();
+    expect(screen.getByText("下载")).toBeInTheDocument();
+    expect(screen.getByText("转录")).toBeInTheDocument();
+    expect(screen.queryByText("字幕审核")).not.toBeInTheDocument();
+    expect(screen.queryByText("打包")).not.toBeInTheDocument();
+  });
+
   it("shows empty state when no phase runs exist", () => {
     render(<PhaseRunsPanel phaseRuns={[]} transcriptionRuns={[]} contentType="knowledge" />);
     expect(screen.getByText("暂无处理记录")).toBeInTheDocument();
