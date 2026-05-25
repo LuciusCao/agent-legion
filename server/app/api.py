@@ -130,7 +130,11 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
         video = db.get_video(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
-        return {"video": video, "phase_runs": db.list_phase_runs(video_id)}
+        return {
+            "video": video,
+            "phase_runs": db.list_phase_runs(video_id),
+            "transcription_runs": db.list_transcription_runs(video_id),
+        }
 
     @router.post("/videos/batch/delete", response_model=BatchDeleteResponse)
     def batch_delete_videos(request: BatchVideoIdsRequest) -> dict[str, Any]:
