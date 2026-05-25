@@ -112,7 +112,7 @@ export function VideoList() {
                 <span className={`status-badge ${statusGroup(video)}`}>
                   {STATUS_LABELS[statusGroup(video)] || video.status}
                 </span>
-                {video.packed && <span className="packed-badge">已打包</span>}
+                {!!video.packed && <span className="packed-badge">已打包</span>}
               </div>
             </md-list-item>
           );
