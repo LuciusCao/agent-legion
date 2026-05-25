@@ -76,3 +76,28 @@ export type BatchResult = {
   phase?: string;
   message: string;
 };
+
+export type PhaseRun = {
+  id: number;
+  video_id: string;
+  phase_key: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  command_json: string;
+  exit_code: number | null;
+  log_path: string;
+  error_message: string;
+};
+
+export type TranscriptionRun = {
+  id: number;
+  video_id: string;
+  provider: string;
+  status: string;
+  started_at: string;
+  finished_at: string | null;
+  srt_entry_count: number;
+  validation_summary: string;
+  fallback_reason: string;
+};
