@@ -3,9 +3,10 @@ import { INTERACTION_TYPE_LABELS } from "../labels";
 
 interface NodePanelProps {
   onSeek?: (time: number) => void;
+  replayInteraction?: (index: number) => void;
 }
 
-export function NodePanel({ onSeek }: NodePanelProps) {
+export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
   const { artifacts, triggeredNodeIndexes } = useDetailStore();
   const nodes = artifacts.interactions;
 
@@ -16,11 +17,19 @@ export function NodePanel({ onSeek }: NodePanelProps) {
         const triggerTime = Number(node.trigger_time ?? 0);
         const typeLabel = INTERACTION_TYPE_LABELS[String(node.type ?? "")] || String(node.type ?? "");
         return (
-          <div key={i} className={`node-card card-outlined ${answered ? "answered" : ""}`}>
+          <div
+            key={i}
+            className={`node-card card-outlined ${answered ? "answered" : ""}`}
+            onClick={() => {
+              onSeek?.(triggerTime);
+              replayInteraction?.(i);
+            }}
+            style={{ cursor: "pointer" }}
+          >
             <div className="node-main">
-              <md-text-button onClick={() => onSeek?.(triggerTime)} style={{ fontVariantNumeric: "tabular-nums" }}>
+              <span style={{ fontVariantNumeric: "tabular-nums", color: "var(--md-sys-color-primary)" }}>
                 {formatTime(triggerTime)}
-              </md-text-button>
+              </span>
               <span>{node.instruction || "交互节点"}</span>
               <md-assist-chip label={typeLabel} />
             </div>
