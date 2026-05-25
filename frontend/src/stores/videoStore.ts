@@ -1,7 +1,6 @@
 import { create } from "zustand";
 import type { VideoItem, ContentType } from "../types";
 import { api } from "../api";
-import { useUiStore } from "./uiStore";
 import { filterVideos } from "../helpers";
 
 interface VideoState {
@@ -15,7 +14,9 @@ interface VideoState {
   selectedIds: Set<string>;
   isLoading: boolean;
   sseConnected: boolean;
+  error: string | null;
   fetchVideos: () => Promise<void>;
+  clearError: () => void;
   mergeVideo: (video: VideoItem) => void;
   removeVideo: (videoId: string) => void;
   setSelectedType: (type: ContentType) => void;
@@ -46,19 +47,22 @@ export const useVideoStore = create<VideoState>((set, get) => ({
   selectedIds: new Set(),
   isLoading: false,
   sseConnected: true,
+  error: null,
 
   fetchVideos: async () => {
-    set({ isLoading: true });
+    set({ isLoading: true, error: null });
     try {
       const data = await api<{ videos: VideoItem[] }>("/api/videos");
-      set({ videos: data.videos });
+      set({ videos: data.videos, error: null });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      useUiStore.getState().showToast(`加载失败: ${message}`, "error");
+      set({ error: message });
     } finally {
       set({ isLoading: false });
     }
   },
+
+  clearError: () => set({ error: null }),
 
   mergeVideo: (video) => {
     set((state) => {

@@ -21,12 +21,21 @@ export function ListPage() {
     fetchVideos,
     sseConnected,
   } = useVideoStore();
-  const { openAddDialog } = useUiStore();
+  const { openAddDialog, showToast } = useUiStore();
+
+  const handleFetchVideos = async () => {
+    await fetchVideos();
+    const err = useVideoStore.getState().error;
+    if (err) {
+      showToast(`加载失败: ${err}`, "error");
+      useVideoStore.getState().clearError();
+    }
+  };
   const tabsRef = useRef<(HTMLElement & { activeTabIndex: number }) | null>(null);
 
   useEffect(() => {
-    fetchVideos();
-  }, [fetchVideos]);
+    handleFetchVideos();
+  }, [handleFetchVideos]);
 
   useVideoEvents();
 
@@ -67,7 +76,7 @@ export function ListPage() {
               <md-icon style={{ color: "var(--md-sys-color-error)" }}>cloud_off</md-icon>
             </span>
           )}
-          <md-icon-button onClick={() => fetchVideos()} title="刷新">
+          <md-icon-button onClick={handleFetchVideos} title="刷新">
             <md-icon>refresh</md-icon>
           </md-icon-button>
           <md-icon-button onClick={toggleSelectMode} title={selectMode ? "完成" : "多选"} className={selectMode ? "active-icon" : ""}>

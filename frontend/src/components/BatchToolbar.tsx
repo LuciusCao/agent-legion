@@ -37,6 +37,11 @@ export function BatchToolbar() {
     clearSelection();
     setDeleteDialogOpen(false);
     await fetchVideos();
+    const err = useVideoStore.getState().error;
+    if (err) {
+      showToast(`加载失败: ${err}`, "error");
+      useVideoStore.getState().clearError();
+    }
   };
 
   const handleRerun = () => {

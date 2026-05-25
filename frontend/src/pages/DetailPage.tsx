@@ -51,6 +51,14 @@ export function DetailPage() {
   const { openRerunDialog, openDeleteDialog, showToast } = useUiStore();
   const { fetchVideos } = useVideoStore();
 
+  const checkFetchError = () => {
+    const err = useVideoStore.getState().error;
+    if (err) {
+      showToast(`加载失败: ${err}`, "error");
+      useVideoStore.getState().clearError();
+    }
+  };
+
   useVideoPhaseEvents(id);
 
   useEffect(() => {
@@ -158,6 +166,7 @@ export function DetailPage() {
       await api(`/api/videos/${id}`, { method: "DELETE" });
       showToast("删除成功", "success");
       await fetchVideos();
+      checkFetchError();
       navigate("/");
       return true;
     } catch (err) {
@@ -174,6 +183,7 @@ export function DetailPage() {
       body: JSON.stringify({ video_ids: [id] }),
     });
     await Promise.all([fetchVideos(), loadVideo(id)]);
+    checkFetchError();
     await triggerDownload(result.download_url);
   }, [id, fetchVideos, loadVideo]);
 
@@ -184,6 +194,7 @@ export function DetailPage() {
         await api(`/api/videos/${id}/rerun`, { method: "POST", body: JSON.stringify({ phase }) });
         showToast("重跑已提交", "success");
         await Promise.all([fetchVideos(), loadVideo(id), loadLog(id)]);
+        checkFetchError();
       } catch (err) {
         if (err instanceof Error && err.message.includes("currently being processed")) {
           showToast("该资源正在被处理中，请等待当前阶段完成后再重跑。", "error");
