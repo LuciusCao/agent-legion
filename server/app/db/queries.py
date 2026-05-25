@@ -1,0 +1,302 @@
+import json
+import sqlite3
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from server.app.db.notifications import NotificationHub
+from server.app.db.schema import init_db
+from server.app.pipeline.common import make_record_id
+from server.app.records import PhaseRunRecord, VideoRecord
+
+
+def _iso(dt_str: str | None) -> str | None:
+    """Convert SQLite timestamp (UTC) to ISO 8601 format with timezone."""
+    if not dt_str:
+        return None
+    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+    return dt.isoformat()
+
+
+VIDEO_UPDATE_FIELDS = {
+    "source_url",
+    "title",
+    "content_type",
+    "external_id",
+    "knowledge_code",
+    "question_id",
+    "source_uuid",
+    "storage_dir",
+    "current_phase",
+    "status",
+    "duration",
+    "error_message",
+    "packed",
+}
+
+
+class VideoQueries:
+    def __init__(self, path: Path, hub: NotificationHub | None = None):
+        self.path = path
+        self._hub = hub
+        init_db(path)
+
+    def connect(self) -> sqlite3.Connection:
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        return conn
+
+    def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
+        return dict(row) if row else None
+
+    def _notify(self, video_id: str) -> None:
+        if self._hub is None:
+            return
+        video = self.get_video(video_id)
+        self._hub.emit_change(video)
+        phase_runs = self.list_phase_runs(video_id)
+        transcription_runs = self.list_transcription_runs(video_id)
+        self._hub.emit_detail_change(video_id, video or {}, phase_runs, transcription_runs)
+
+    def create_video(
+        self,
+        source_url: str,
+        title: str = "",
+        storage_dir: str = "",
+        content_type: str = "knowledge",
+        external_id: str = "",
+        source_uuid: str = "",
+    ) -> VideoRecord:
+        content_type = content_type if content_type in {"knowledge", "question"} else "knowledge"
+        video_id = make_record_id(source_url, content_type, external_id)
+        status = "queued" if source_url else "missing_url"
+        current_phase = "download" if source_url else "waiting_for_url"
+        knowledge_code = external_id if content_type == "knowledge" else ""
+        question_id = external_id if content_type == "question" else ""
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into videos(
+                  id, source_url, title, content_type, external_id, knowledge_code,
+                  question_id, source_uuid, storage_dir, current_phase, status, packed
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                on conflict(id) do update set
+                  source_url=excluded.source_url,
+                  title=excluded.title,
+                  content_type=excluded.content_type,
+                  external_id=excluded.external_id,
+                  knowledge_code=excluded.knowledge_code,
+                  question_id=excluded.question_id,
+                  source_uuid=excluded.source_uuid,
+                  current_phase=excluded.current_phase,
+                  status=excluded.status,
+                  updated_at=current_timestamp
+                """,
+                (
+                    video_id,
+                    source_url,
+                    title or external_id or video_id,
+                    content_type,
+                    external_id,
+                    knowledge_code,
+                    question_id,
+                    source_uuid,
+                    storage_dir,
+                    current_phase,
+                    status,
+                    0,
+                ),
+            )
+            row = conn.execute("select * from videos where id=?", (video_id,)).fetchone()
+        video = dict(row)
+        self._notify(video_id)
+        return video
+
+    def get_video(self, video_id: str) -> VideoRecord | None:
+        with self.connect() as conn:
+            return self._row(conn.execute("select * from videos where id=?", (video_id,)).fetchone())
+
+    def find_video_by_identity(self, content_type: str, external_id: str) -> VideoRecord | None:
+        with self.connect() as conn:
+            return self._row(
+                conn.execute(
+                    "select * from videos where content_type=? and external_id=?",
+                    (content_type, external_id),
+                ).fetchone()
+            )
+
+    def list_videos(self) -> list[VideoRecord]:
+        with self.connect() as conn:
+            return [dict(row) for row in conn.execute("select * from videos order by created_at desc, id")]
+
+    def update_video(self, video_id: str, **fields: Any) -> None:
+        if not fields:
+            return
+        unknown_fields = sorted(set(fields) - VIDEO_UPDATE_FIELDS)
+        if unknown_fields:
+            raise ValueError(f"Unknown video fields: {', '.join(unknown_fields)}")
+        ordered_keys = [k for k in fields if k in VIDEO_UPDATE_FIELDS]
+        assignments = ", ".join(f"{key}=?" for key in ordered_keys)
+        values = [fields[key] for key in ordered_keys] + [video_id]
+        with self.connect() as conn:
+            conn.execute(
+                f"update videos set {assignments}, updated_at=current_timestamp where id=?",
+                values,
+            )
+        self._notify(video_id)
+
+    def start_phase(
+        self, video_id: str, phase_key: str, command: list[str], log_path: str = ""
+    ) -> PhaseRunRecord | None:
+        with self.connect() as conn:
+            updated = conn.execute(
+                "update videos set current_phase=?, status='running', updated_at=current_timestamp where id=? and status in ('queued', 'missing_url')",
+                (phase_key, video_id),
+            ).rowcount
+            if updated == 0:
+                return None
+            cur = conn.execute(
+                """
+                insert into phase_runs(video_id, phase_key, status, command_json, log_path)
+                values (?, ?, 'running', ?, ?)
+                """,
+                (video_id, phase_key, json.dumps(command), log_path),
+            )
+            row = conn.execute("select * from phase_runs where id=?", (cur.lastrowid,)).fetchone()
+        self._notify(video_id)
+        return dict(row)
+
+    def recover_running_videos(self) -> int:
+        video_ids = []
+        with self.connect() as conn:
+            video_ids = [
+                row["id"]
+                for row in conn.execute("select id from videos where status='running'")
+            ]
+            conn.execute(
+                """
+                update phase_runs
+                set status='failed',
+                    exit_code=-1,
+                    error_message='worker interrupted before restart',
+                    finished_at=current_timestamp
+                where status='running'
+                """
+            )
+            conn.execute(
+                """
+                update videos
+                set status='queued', error_message='', updated_at=current_timestamp
+                where status='running'
+                """
+            )
+        for vid in video_ids:
+            self._notify(vid)
+        return len(video_ids)
+
+    def finish_phase(self, run_id: int, status: str, exit_code: int | None, error_message: str) -> None:
+        video_id = None
+        with self.connect() as conn:
+            run = conn.execute("select * from phase_runs where id=?", (run_id,)).fetchone()
+            conn.execute(
+                """
+                update phase_runs
+                set status=?, exit_code=?, error_message=?, finished_at=current_timestamp
+                where id=?
+                """,
+                (status, exit_code, error_message, run_id),
+            )
+            if run:
+                video_id = run["video_id"]
+                conn.execute(
+                    """
+                    update videos
+                    set status=?, error_message=?, updated_at=current_timestamp
+                    where id=?
+                    """,
+                    (status, error_message, video_id),
+                )
+        if video_id:
+            self._notify(video_id)
+
+    def update_phase_command(self, run_id: int, command: list[str]) -> None:
+        video_id = None
+        with self.connect() as conn:
+            run = conn.execute("select video_id from phase_runs where id=?", (run_id,)).fetchone()
+            conn.execute(
+                "update phase_runs set command_json=? where id=?",
+                (json.dumps(command), run_id),
+            )
+            if run:
+                video_id = run["video_id"]
+        if video_id:
+            self._notify(video_id)
+
+    def record_transcription_run(
+        self,
+        video_id: str,
+        provider: str,
+        status: str,
+        srt_entry_count: int,
+        validation_summary: str,
+        fallback_reason: str,
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into transcription_runs(
+                  video_id,
+                  provider,
+                  status,
+                  finished_at,
+                  srt_entry_count,
+                  validation_summary,
+                  fallback_reason
+                )
+                values (?, ?, ?, current_timestamp, ?, ?, ?)
+                """,
+                (
+                    video_id,
+                    provider,
+                    status,
+                    srt_entry_count,
+                    validation_summary,
+                    fallback_reason,
+                ),
+            )
+        self._notify(video_id)
+
+    def list_phase_runs(self, video_id: str) -> list[PhaseRunRecord]:
+        with self.connect() as conn:
+            rows = [
+                dict(row)
+                for row in conn.execute(
+                    "select * from phase_runs where video_id=? order by id", (video_id,)
+                )
+            ]
+            for row in rows:
+                row["started_at"] = _iso(row["started_at"]) or ""
+                row["finished_at"] = _iso(row["finished_at"])
+            return rows
+
+    def list_transcription_runs(self, video_id: str) -> list[dict[str, Any]]:
+        with self.connect() as conn:
+            rows = [
+                dict(row)
+                for row in conn.execute(
+                    "select * from transcription_runs where video_id=? order by id", (video_id,)
+                )
+            ]
+            for row in rows:
+                row["started_at"] = _iso(row["started_at"]) or ""
+                row["finished_at"] = _iso(row["finished_at"])
+            return rows
+
+    def delete_video(self, video_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute("delete from phase_runs where video_id=?", (video_id,))
+            conn.execute("delete from transcription_runs where video_id=?", (video_id,))
+            conn.execute("delete from videos where id=?", (video_id,))
+        if self._hub is not None:
+            self._hub.emit_delete(video_id)
