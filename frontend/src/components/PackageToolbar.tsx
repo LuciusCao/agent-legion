@@ -6,6 +6,7 @@ export function PackageToolbar() {
     togglePackageSelectMode,
     selectPackageAll,
     selectPackageUnpacked,
+    clearSelection,
     batchPackage,
     fetchVideos,
   } = useVideoStore();
@@ -26,11 +27,12 @@ export function PackageToolbar() {
       <span>已选择 {count} 项</span>
       <div className="batch-actions">
         <md-text-button onClick={selectPackageAll}>全选</md-text-button>
-        <md-text-button onClick={selectPackageUnpacked}>仅选择未打包</md-text-button>
-        <md-outlined-button onClick={togglePackageSelectMode}>取消</md-outlined-button>
-        <md-filled-button disabled={!hasSelection} onClick={handlePackage}>
-          打包 {count > 0 ? `(${count})` : ""}
-        </md-filled-button>
+        <md-text-button onClick={selectPackageUnpacked}>仅选未打包</md-text-button>
+        <md-text-button onClick={clearSelection}>取消选择</md-text-button>
+        <md-icon-button disabled={(!hasSelection) || undefined} onClick={handlePackage} title="打包">
+          <md-icon>inventory_2</md-icon>
+        </md-icon-button>
+        <md-outlined-button onClick={togglePackageSelectMode}>退出多选</md-outlined-button>
       </div>
     </div>
   );

@@ -17,8 +17,8 @@ describe("PackageToolbar", () => {
   it("renders action buttons", () => {
     render(<PackageToolbar />);
     expect(screen.getByText("全选")).toBeInTheDocument();
-    expect(screen.getByText("仅选择未打包")).toBeInTheDocument();
-    expect(screen.getByText("取消")).toBeInTheDocument();
-    expect(screen.getByText(/^打包$/)).toBeInTheDocument();
+    expect(screen.getByText("仅选未打包")).toBeInTheDocument();
+    expect(screen.getByText("取消选择")).toBeInTheDocument();
+    expect(screen.getByText("退出多选")).toBeInTheDocument();
   });
 });
