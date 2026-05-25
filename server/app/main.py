@@ -7,12 +7,12 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from server.app.agents import AgentStatusManager
-from server.app.api import create_router
 from server.app.db import Database
 from server.app.db.notifications import NotificationHub
 from server.app.events import VideoEventManager
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool
+from server.app.routes import create_router
 from server.app.settings import load_settings
 from server.app.worker_thread import WorkerThread
 
