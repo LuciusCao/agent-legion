@@ -25,6 +25,7 @@ interface DetailState {
   setActiveTab: (tab: DetailTab) => void;
   triggerInteraction: (index: number) => void;
   dismissInteraction: (index: number) => void;
+  replayInteraction: (index: number) => void;
   resetSentence: () => void;
   pushWord: (word: string) => void;
   clearSentence: () => void;
@@ -145,6 +146,21 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
       const nextDismissed = new Set(state.dismissedNodeIndexes);
       nextDismissed.add(index);
       return { triggeredNodeIndexes: nextTriggered, dismissedNodeIndexes: nextDismissed };
+    });
+  },
+
+  replayInteraction: (index) => {
+    set((state) => {
+      const nextTriggered = new Set(state.triggeredNodeIndexes);
+      const nextDismissed = new Set(state.dismissedNodeIndexes);
+      nextTriggered.delete(index);
+      nextDismissed.delete(index);
+      nextTriggered.add(index);
+      return {
+        triggeredNodeIndexes: nextTriggered,
+        dismissedNodeIndexes: nextDismissed,
+        currentSentence: [],
+      };
     });
   },
 

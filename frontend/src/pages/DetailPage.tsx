@@ -40,6 +40,7 @@ export function DetailPage() {
     loadLog,
     triggerInteraction,
     dismissInteraction,
+    replayInteraction,
     pushWord,
     resetSentence,
     clearSentence,
@@ -219,7 +220,7 @@ export function DetailPage() {
         {currentVideo && <DetailTabs contentType={currentVideo.content_type} />}
         <div className="tab-panel">
           {activeTab === "subtitles" && <SubtitlePanel currentTime={currentTime} onSeek={handleSeek} />}
-          {activeTab === "nodes" && <NodePanel onSeek={handleSeek} />}
+          {activeTab === "nodes" && <NodePanel onSeek={handleSeek} replayInteraction={replayInteraction} />}
           {activeTab === "chapters" && <ChapterPanel onSeek={handleSeek} />}
           {activeTab === "metadata" && <MetadataPanel />}
           {activeTab === "review" && (
@@ -243,3 +244,4 @@ export function DetailPage() {
     </section>
   );
 }
+

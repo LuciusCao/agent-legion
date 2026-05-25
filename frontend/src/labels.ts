@@ -37,4 +37,5 @@ export const QUESTION_PHASES = ["download", "transcribe", "subtitle_review", "ch
 export const INTERACTION_TYPE_LABELS: Record<string, string> = {
   example_practice: "例题试做",
   interaction_summary: "互动小结",
+  video_summary: "互动小结",
 };
