@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PhaseRunsPanel } from "./PhaseRunsPanel";
+import type { TranscriptionRun } from "../types";
 
 function makeRun(
   id: number,
@@ -24,6 +25,20 @@ function makeRun(
     exit_code: status === "completed" ? 0 : null,
     log_path: "",
     error_message: opts.error_message ?? "",
+  };
+}
+
+function makeTranscriptionRun(provider: string, status = "completed"): TranscriptionRun {
+  return {
+    id: 1,
+    video_id: "v1",
+    provider,
+    status,
+    started_at: "2024-01-01T00:00:00Z",
+    finished_at: "2024-01-01T00:00:30Z",
+    srt_entry_count: 12,
+    validation_summary: "ok",
+    fallback_reason: "",
   };
 }
 
@@ -100,5 +115,67 @@ describe("PhaseRunsPanel", () => {
   it("shows empty state when no phase runs exist", () => {
     render(<PhaseRunsPanel phaseRuns={[]} transcriptionRuns={[]} contentType="knowledge" />);
     expect(screen.getByText("暂无处理记录")).toBeInTheDocument();
+  });
+
+  it("shows the transcription engine display name for transcribe runs", () => {
+    const runs = [
+      makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
+      makeRun(2, "transcribe", "completed", { finished_at: "2024-01-01T00:01:00Z" }),
+    ];
+
+    render(
+      <PhaseRunsPanel
+        phaseRuns={runs}
+        transcriptionRuns={[makeTranscriptionRun("whisper")]}
+        contentType="knowledge"
+      />
+    );
+
+    expect(screen.getByText("whisper.cpp")).toBeInTheDocument();
+    expect(screen.queryByText("transcribe")).not.toBeInTheDocument();
+  });
+
+  it("shows SenseVoice for sensevoice transcription runs", () => {
+    const runs = [
+      makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
+      makeRun(2, "transcribe", "completed", { finished_at: "2024-01-01T00:01:00Z" }),
+    ];
+
+    render(
+      <PhaseRunsPanel
+        phaseRuns={runs}
+        transcriptionRuns={[makeTranscriptionRun("sensevoice")]}
+        contentType="knowledge"
+      />
+    );
+
+    expect(screen.getByText("SenseVoice")).toBeInTheDocument();
+  });
+
+  it("keeps a transcribe tool fallback when transcription run details are not loaded", () => {
+    const runs = [
+      makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
+      makeRun(2, "transcribe", "running", { started_at: "2024-01-01T00:01:00Z" }),
+    ];
+
+    render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
+
+    expect(screen.getByText("transcribe")).toBeInTheDocument();
+  });
+
+  it("shows the openclaw agent name for agent phase runs", () => {
+    const runs = [
+      makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
+      makeRun(2, "transcribe", "completed", { finished_at: "2024-01-01T00:01:00Z" }),
+      makeRun(3, "subtitle_review", "completed", {
+        finished_at: "2024-01-01T00:02:00Z",
+        command_json: JSON.stringify(["openclaw", "agent", "--agent", "agent_1"]),
+      }),
+    ];
+
+    render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
+
+    expect(screen.getByText("openclaw-agent_1")).toBeInTheDocument();
+    expect(screen.queryByText("openclaw")).not.toBeInTheDocument();
   });
 });

@@ -200,20 +200,6 @@ h1 {
   color: var(--status-completed-text);
 }
 
-@keyframes pulse-blue {
-  0%, 100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.35;
-  }
-}
-
-.step-bar.running {
-  background: var(--status-running-border);
-  animation: pulse-blue 1.4s ease-in-out infinite;
-}
-
 /* Detail view */
 .detail-view {
   display: grid;
