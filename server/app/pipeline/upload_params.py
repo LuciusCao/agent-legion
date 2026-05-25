@@ -80,8 +80,37 @@ def _map_review_status(status: str) -> int:
 
 
 def _build_review_msg(issues: list) -> str:
-    msgs = [iss.get("details", "") for iss in issues if iss.get("details")]
+    msgs = []
+    for issue in issues:
+        title = issue.get("title", "")
+        details = issue.get("details", "")
+        if title and details:
+            msgs.append(f"{title}：{details}")
+        elif details:
+            msgs.append(details)
+        elif title:
+            msgs.append(title)
     return "；".join(msgs)
+
+
+def _checklist_reviews(checklist_data: dict) -> list[dict]:
+    issues_by_node: dict[str, list] = {}
+    checklist = checklist_data.get("checklist", {})
+    if not isinstance(checklist, dict):
+        return []
+    for dimension in checklist.values():
+        if not isinstance(dimension, dict):
+            continue
+        for issue in dimension.get("issues", []):
+            if not isinstance(issue, dict):
+                continue
+            node_id = issue.get("node_id", "")
+            if node_id:
+                issues_by_node.setdefault(node_id, []).append(issue)
+    return [
+        {"item_id": node_id, "status": "pending_review", "issues": issues}
+        for node_id, issues in issues_by_node.items()
+    ]
 
 
 def split_interactions(
@@ -184,13 +213,28 @@ def build_upload_params(video: dict, video_dir: Path) -> dict:
             interactions = inter_data
 
     reviews = []
+    default_review_status = "pending_review"
     review_result_path = video_dir / "review_result.json"
     if review_result_path.exists():
         try:
             review_data = json.loads(review_result_path.read_text(encoding="utf-8"))
+            default_review_status = review_data.get("status", default_review_status)
             reviews = review_data.get("reviews", [])
         except (json.JSONDecodeError, ValueError):
             pass
+    checklist_path = video_dir / "checklist.json"
+    if checklist_path.exists():
+        try:
+            checklist_data = json.loads(checklist_path.read_text(encoding="utf-8"))
+            reviews.extend(_checklist_reviews(checklist_data))
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+    reviewed_ids = {review.get("item_id", "") for review in reviews}
+    for inter in interactions:
+        inter_id = inter.get("id", "")
+        if inter_id and inter_id not in reviewed_ids:
+            reviews.append({"item_id": inter_id, "status": default_review_status, "issues": []})
 
     trials, summaries = split_interactions(interactions, reviews)
 

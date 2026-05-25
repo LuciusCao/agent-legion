@@ -1,6 +1,7 @@
 import json
 
 from server.app.pipeline.assemble import assemble_video
+from server.app.pipeline.upload_params import build_upload_params
 
 
 def test_assemble_video_creates_metadata_and_report(tmp_path):
@@ -108,3 +109,55 @@ def test_assemble_video_without_review_result(tmp_path):
     metadata = assemble_video(video, video_dir)
 
     assert metadata["review_details"] == {}
+
+
+def test_upload_params_uses_checklist_node_issues_for_interaction_review(tmp_path):
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {
+                        "id": "node-1",
+                        "type": "example_practice",
+                        "trigger_time": 1,
+                        "instruction": "试一试",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps({"score": 80, "status": "published"}), encoding="utf-8"
+    )
+    (video_dir / "checklist.json").write_text(
+        json.dumps(
+            {
+                "checklist": {
+                    "interaction_timing": {
+                        "issues": [
+                            {
+                                "node_id": "node-1",
+                                "title": "触发过早",
+                                "details": "应在讲解结束后触发",
+                            }
+                        ]
+                    }
+                }
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    params = build_upload_params({"id": "v1"}, video_dir)
+
+    trial = params["example_problem_trial_json"][0]
+    assert trial["review_status"] == 2
+    assert trial["review_msg"] == "触发过早：应在讲解结束后触发"
