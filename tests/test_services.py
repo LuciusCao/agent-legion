@@ -23,6 +23,7 @@ def test_intake_normalizes_unknown_content_type_and_creates_storage(db, settings
 
 def test_batch_rerun_uses_same_normalization_as_single_rerun(db, settings):
     db.create_video("https://example.com/q1.mp4", content_type="question", external_id="Q001")
+    db.update_video("question_Q001", status="completed")
 
     results = batch_rerun_video_records(
         db,
