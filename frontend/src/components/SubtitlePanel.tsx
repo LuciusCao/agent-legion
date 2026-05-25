@@ -1,8 +1,8 @@
 import { useMemo } from "react";
-import { useDetailStore } from "../stores/detailStore";
+import { useArtifactStore } from "../stores/artifactStore";
 
 export function SubtitlePanel({ currentTime, onSeek }: { currentTime: number; onSeek: (time: number) => void }) {
-  const { artifacts } = useDetailStore();
+  const { artifacts } = useArtifactStore();
   const subtitles = artifacts.subtitles;
 
   const activeIndex = useMemo(() => {

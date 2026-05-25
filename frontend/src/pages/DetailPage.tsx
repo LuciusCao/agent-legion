@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useDetailStore } from "../stores/detailStore";
+import { useArtifactStore } from "../stores/artifactStore";
+import { useInteractionStore } from "../stores/interactionStore";
 import { useUiStore } from "../stores/uiStore";
 import { useVideoStore } from "../stores/videoStore";
 import { VideoPlayer } from "../components/VideoPlayer";
@@ -28,23 +30,29 @@ export function DetailPage() {
 
   const {
     currentVideo,
-    artifacts,
     phaseRuns,
     transcriptionRuns,
     activeTab,
+    loadVideo,
+    loadLog,
+  } = useDetailStore();
+
+  const {
+    artifacts,
+    loadArtifacts,
+  } = useArtifactStore();
+
+  const {
     triggeredNodeIndexes,
     dismissedNodeIndexes,
     currentSentence,
-    loadVideo,
-    loadArtifacts,
-    loadLog,
     triggerInteraction,
     dismissInteraction,
     replayInteraction,
     pushWord,
     resetSentence,
     clearSentence,
-  } = useDetailStore();
+  } = useInteractionStore();
 
   const { openRerunDialog, openDeleteDialog, showToast } = useUiStore();
   const { fetchVideos } = useVideoStore();

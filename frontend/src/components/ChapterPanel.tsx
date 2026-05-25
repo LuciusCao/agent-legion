@@ -1,7 +1,7 @@
-import { useDetailStore } from "../stores/detailStore";
+import { useArtifactStore } from "../stores/artifactStore";
 
 export function ChapterPanel({ onSeek }: { onSeek: (time: number) => void }) {
-  const { artifacts } = useDetailStore();
+  const { artifacts } = useArtifactStore();
   const chapters = artifacts.chapters;
 
   if (!chapters.length) {

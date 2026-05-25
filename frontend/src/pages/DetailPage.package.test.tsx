@@ -3,6 +3,8 @@ import { render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { DetailPage } from "./DetailPage";
 import { useDetailStore } from "../stores/detailStore";
+import { useArtifactStore } from "../stores/artifactStore";
+import { useInteractionStore } from "../stores/interactionStore";
 import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
 
@@ -20,12 +22,17 @@ describe("DetailPage package button", () => {
     });
     useDetailStore.setState({
       currentVideo: null,
-      artifacts: { subtitles: [], chapters: [], interactions: [], metadata: null, review: null, checklist: null },
       log: "",
       activeTab: "chapters",
-      triggeredNodeIndexes: new Set(),
-      currentSentence: [],
       isLoading: false,
+    });
+    useArtifactStore.setState({
+      artifacts: { subtitles: [], chapters: [], interactions: [], metadata: null, review: null, checklist: null },
+    });
+    useInteractionStore.setState({
+      triggeredNodeIndexes: new Set(),
+      dismissedNodeIndexes: new Set(),
+      currentSentence: [],
     });
     useVideoStore.setState({
       videos: [],
