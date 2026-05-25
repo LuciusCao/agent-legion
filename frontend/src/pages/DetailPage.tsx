@@ -57,17 +57,13 @@ export function DetailPage() {
     loadLog(id);
   }, [id, loadVideo, loadArtifacts, loadLog]);
 
-  const storeVideo = useVideoStore(
-    useCallback((state) => state.videos.find((v) => v.id === id), [id]),
-  );
-
   const prevPhaseRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);
 
   useEffect(() => {
-    if (!id || !storeVideo) return;
-    const currentPhase = storeVideo.current_phase;
-    const currentStatus = storeVideo.status;
+    if (!id || !currentVideo) return;
+    const currentPhase = currentVideo.current_phase;
+    const currentStatus = currentVideo.status;
     if (
       prevPhaseRef.current !== null &&
       (prevPhaseRef.current !== currentPhase || prevStatusRef.current !== currentStatus)
@@ -77,7 +73,7 @@ export function DetailPage() {
     }
     prevPhaseRef.current = currentPhase;
     prevStatusRef.current = currentStatus;
-  }, [id, storeVideo, loadArtifacts, loadLog]);
+  }, [id, currentVideo, loadArtifacts, loadLog]);
 
   const handleTimeUpdate = useCallback(
     (time: number) => {
@@ -116,11 +112,18 @@ export function DetailPage() {
   }, [clearSentence, activeNodeIndex, dismissInteraction]);
 
   const handleDeleteConfirm = useCallback(async () => {
-    if (!id) return;
-    await api(`/api/videos/${id}`, { method: "DELETE" });
-    showToast("删除成功", "success");
-    await fetchVideos();
-    navigate("/");
+    if (!id) return false;
+    try {
+      await api(`/api/videos/${id}`, { method: "DELETE" });
+      showToast("删除成功", "success");
+      await fetchVideos();
+      navigate("/");
+      return true;
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      showToast(`删除失败: ${message}`, "error");
+      return false;
+    }
   }, [id, navigate, fetchVideos, showToast]);
 
   const handlePackage = useCallback(async () => {
@@ -239,10 +242,4 @@ export function DetailPage() {
       <DeleteDialog onConfirm={handleDeleteConfirm} />
     </section>
   );
-}
-
-function formatTime(seconds: number) {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m}:${s.toString().padStart(2, "0")}`;
 }

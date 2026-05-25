@@ -17,7 +17,11 @@ interface DetailState {
   loadArtifacts: (id: string) => Promise<void>;
   loadLog: (id: string) => Promise<void>;
   loadPhaseRuns: (id: string) => Promise<void>;
-  updatePhaseRuns: (phaseRuns: PhaseRun[], transcriptionRuns: TranscriptionRun[]) => void;
+  updatePhaseRuns: (
+    phaseRuns: PhaseRun[],
+    transcriptionRuns: TranscriptionRun[],
+    video?: VideoItem,
+  ) => void;
   setActiveTab: (tab: DetailTab) => void;
   triggerInteraction: (index: number) => void;
   dismissInteraction: (index: number) => void;
@@ -116,8 +120,12 @@ export const useDetailStore = create<DetailState>((set, _get) => ({
     }
   },
 
-  updatePhaseRuns: (phaseRuns, transcriptionRuns) => {
-    set({ phaseRuns, transcriptionRuns });
+  updatePhaseRuns: (phaseRuns, transcriptionRuns, video) => {
+    set({
+      phaseRuns,
+      transcriptionRuns,
+      ...(video ? { currentVideo: video } : {}),
+    });
   },
 
   setActiveTab: (tab) => set({ activeTab: tab }),

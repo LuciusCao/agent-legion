@@ -14,7 +14,7 @@ PACKAGE_FILES = [
 
 def create_package(videos: list[dict], packages_dir: Path, videos_base_dir: Path | None = None) -> Path:
     packages_dir.mkdir(parents=True, exist_ok=True)
-    package_path = packages_dir / f"video-hive-{datetime.now(UTC).strftime('%Y%m%d%H%M%S')}.zip"
+    package_path = packages_dir / f"video-hive-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}.zip"
     manifest = {
         "created_at": datetime.now(UTC).isoformat(),
         "videos": [

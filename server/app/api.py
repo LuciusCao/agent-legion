@@ -203,6 +203,11 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
                 status_code=404,
                 detail=f"Videos not found: {', '.join(selection.missing_ids)}",
             )
+        if selection.incomplete_ids:
+            raise HTTPException(
+                status_code=400,
+                detail="No completed videos selected for packaging",
+            )
         if request is not None and requested_ids == []:
             raise HTTPException(status_code=400, detail="No videos selected for packaging")
         if not selection.videos:

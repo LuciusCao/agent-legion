@@ -54,3 +54,18 @@ def test_package_skips_video_when_no_storage_dir_and_no_fallback(tmp_path):
 
     assert "manifest.json" in names
     assert "c/" not in " ".join(names)
+
+
+def test_packages_created_in_same_second_do_not_overwrite_each_other(tmp_path):
+    first = create_package(
+        videos=[{"id": "a", "title": "A", "source_url": "", "storage_dir": ""}],
+        packages_dir=tmp_path / "packages",
+    )
+    second = create_package(
+        videos=[{"id": "b", "title": "B", "source_url": "", "storage_dir": ""}],
+        packages_dir=tmp_path / "packages",
+    )
+
+    assert first != second
+    assert first.exists()
+    assert second.exists()

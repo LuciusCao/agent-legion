@@ -268,6 +268,19 @@ class Database:
         if video_id:
             self._notify(video_id)
 
+    def update_phase_command(self, run_id: int, command: list[str]) -> None:
+        video_id = None
+        with self.connect() as conn:
+            run = conn.execute("select video_id from phase_runs where id=?", (run_id,)).fetchone()
+            conn.execute(
+                "update phase_runs set command_json=? where id=?",
+                (json.dumps(command), run_id),
+            )
+            if run:
+                video_id = run["video_id"]
+        if video_id:
+            self._notify(video_id)
+
     def list_phase_runs(self, video_id: str) -> list[PhaseRunRecord]:
         with self.connect() as conn:
             return [

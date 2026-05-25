@@ -11,7 +11,7 @@ interface InteractionOverlayProps {
 export function InteractionOverlay({
   node,
   currentSentence,
-  onWordClick: _onWordClick,
+  onWordClick,
   onReset,
   onContinue,
 }: InteractionOverlayProps) {
@@ -69,11 +69,21 @@ export function InteractionOverlay({
   }
 
   // Fallback: sentence-building or generic interaction
+  const words = node.answer || [];
   return (
     <div className="interaction-overlay">
       <div className="sentence-card">
         <p>{node.instruction || "连词成句"}</p>
         <div className="sentence-box">{currentSentence.join(" ")}</div>
+        {words.length > 0 && (
+          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+            {words.map((word, index) => (
+              <md-outlined-button key={`${word}-${index}`} onClick={() => onWordClick(word)}>
+                {word}
+              </md-outlined-button>
+            ))}
+          </div>
+        )}
         <div>
           <md-text-button onClick={onReset}>重置</md-text-button>
           <md-filled-button onClick={onContinue}>确认</md-filled-button>

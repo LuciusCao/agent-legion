@@ -98,6 +98,27 @@ def test_recovered_agent_phase_clears_partial_outputs_before_rerun(db, settings)
     assert db.get_video(video["id"])["current_phase"] == "interaction_generate"
 
 
+def test_agent_phase_records_rendered_command(db, settings):
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles_reviewed.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8"
+    )
+    db.update_video(
+        video["id"],
+        storage_dir=str(video_dir),
+        current_phase="chapter_generate",
+        status="queued",
+    )
+    runner = ChapterRunner()
+
+    assert process_video_once(db, settings, video["id"], openclaw_runner=runner) is True
+
+    runs = db.list_phase_runs(video["id"])
+    assert json.loads(runs[-1]["command_json"]) != []
+
+
 def test_discover_openclaw_agents_uses_cli_json(monkeypatch):
     def fake_run(command, capture_output, text, timeout):
         assert command == ["openclaw", "agents", "list", "--json"]

@@ -25,7 +25,7 @@ export function useVideoPhaseEvents(videoId: string | undefined) {
         try {
           const payload = JSON.parse(event.data);
           if (payload.type === "phase_runs_updated" && payload.phase_runs) {
-            updatePhaseRuns(payload.phase_runs, payload.transcription_runs || []);
+            updatePhaseRuns(payload.phase_runs, payload.transcription_runs || [], payload.video);
           }
         } catch {
           // ignore

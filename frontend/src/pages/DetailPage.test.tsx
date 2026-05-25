@@ -39,6 +39,7 @@ describe("DetailPage", () => {
       addDialogOpen: false,
       addContentType: "knowledge",
       rerunDialogOpen: false,
+      deleteDialogOpen: false,
       toast: null,
     });
     mockApi.mockReset();
@@ -143,5 +144,65 @@ describe("DetailPage", () => {
       expect(screen.getByText("第一章")).toBeInTheDocument();
     });
     expect(screen.queryByText("节点内容")).not.toBeInTheDocument();
+  });
+
+  it("keeps delete dialog open and shows an error when deleting fails", async () => {
+    mockApi
+      .mockResolvedValueOnce({
+        video: {
+          id: "v1",
+          title: "Video 1",
+          source_url: "https://example.com/v1.mp4",
+          content_type: "knowledge",
+          external_id: "K001",
+          knowledge_code: "K001",
+          question_id: "",
+          status: "completed",
+          current_phase: "assemble",
+          error_message: "",
+          storage_dir: "/tmp/v1",
+          duration: 120,
+        },
+        phase_runs: [],
+        transcription_runs: [],
+      })
+      .mockResolvedValueOnce({
+        subtitles: [],
+        chapters: [],
+        interactions: [],
+        metadata: null,
+        review: null,
+        checklist: null,
+      })
+      .mockResolvedValueOnce({ log: "ok" })
+      .mockRejectedValueOnce(new Error("delete failed"));
+
+    render(
+      <MemoryRouter initialEntries={["/videos/v1"]}>
+        <Routes>
+          <Route path="/videos/:id" element={<DetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Video 1")).toBeInTheDocument();
+    });
+
+    act(() => {
+      useUiStore.getState().openDeleteDialog();
+    });
+
+    await act(async () => {
+      screen.getByText("删除").click();
+    });
+
+    await waitFor(() => {
+      expect(useUiStore.getState().deleteDialogOpen).toBe(true);
+      expect(useUiStore.getState().toast).toEqual({
+        message: "删除失败: delete failed",
+        type: "error",
+      });
+    });
   });
 });

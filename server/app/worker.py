@@ -193,6 +193,8 @@ def process_video_once(
                     prompt_dir=settings.data_dir / "prompts",
                     log_path=log_path,
                 )
+                if getattr(result, "command", None):
+                    db.update_phase_command(run["id"], result.command)
                 if result.status != "completed":
                     raise RuntimeError(result.error_message)
         elif phase == "assemble":

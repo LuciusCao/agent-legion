@@ -65,7 +65,15 @@ class ChapterRunner:
             json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
             encoding="utf-8",
         )
-        return type("Result", (), {"status": "completed", "error_message": ""})()
+        return type(
+            "Result",
+            (),
+            {
+                "status": "completed",
+                "error_message": "",
+                "command": ["openclaw", "chapter_generate", video_id],
+            },
+        )()
 
 
 class InputItem:
