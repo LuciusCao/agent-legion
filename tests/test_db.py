@@ -35,3 +35,22 @@ def test_database_update_video_rejects_unknown_fields(db):
         db.update_video(video["id"], status="queued", bad_field="x")
 
     assert db.get_video(video["id"])["status"] == "queued"
+
+
+def test_database_update_video_builds_sql_from_whitelist(db):
+    """Valid fields are updated; the SQL construction uses only whitelisted keys."""
+    video = db.create_video("https://example.com/path/a.mp4", "Title A")
+
+    db.update_video(
+        video["id"],
+        status="running",
+        current_phase="transcribe",
+        title="Updated Title",
+    )
+
+    updated = db.get_video(video["id"])
+    assert updated["status"] == "running"
+    assert updated["current_phase"] == "transcribe"
+    assert updated["title"] == "Updated Title"
+    # source_url should remain unchanged
+    assert updated["source_url"] == "https://example.com/path/a.mp4"

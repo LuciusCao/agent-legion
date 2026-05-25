@@ -5,6 +5,7 @@ from typing import Any
 
 from server.app.db import Database
 from server.app.pipeline.assemble import assemble_video
+from server.app.pipeline.common import resolve_video_dir
 from server.app.pipeline.download import download_video
 from server.app.pipeline.fetch_url import get_token, lookup_knowledge_video, lookup_question_video
 from server.app.pipeline.openclaw import OpenClawRunner
@@ -165,7 +166,7 @@ def process_video_once(
                 update_fields["source_uuid"] = fetched_source_uuid
             db.update_video(video_id, **update_fields)
             return False
-    video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
+    video_dir = resolve_video_dir(video, settings.videos_dir)
     video_dir.mkdir(parents=True, exist_ok=True)
     log_path = settings.logs_dir / f"{video_id}-{phase}.log"
     run = db.start_phase(video_id, phase, [], str(log_path))

@@ -1,6 +1,24 @@
 from server.app.pipeline.openclaw import AgentPhase, OpenClawRunner
 
 
+def test_openclaw_runner_sanitizes_null_bytes_in_prompt(tmp_path):
+    """Prompt text containing null bytes should be sanitized before substitution."""
+    command = [
+        "python3",
+        "-c",
+        "import pathlib, sys; pathlib.Path(sys.argv[1]).write_text('ok', encoding='utf-8')",
+        "{prompt_text}",
+    ]
+    runner = OpenClawRunner(command_template=command, cwd=tmp_path, timeout_seconds=10)
+    # Inject a prompt file with embedded null bytes
+    prompt_file = tmp_path / "bad.md"
+    prompt_file.write_text("hello\x00world", encoding="utf-8")
+    rendered = runner.render_command(video_id="v1", video_dir=tmp_path, prompt_file=prompt_file)
+    prompt_arg = rendered[-1]
+    assert "\x00" not in prompt_arg
+    assert prompt_arg == "helloworld"
+
+
 def test_openclaw_runner_executes_template_and_validates_json(tmp_path):
     command = [
         "python3",
