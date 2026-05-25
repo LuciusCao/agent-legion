@@ -65,16 +65,26 @@ export function DetailPage() {
     const sidebar = sidebarRef.current;
     if (!main || !sidebar) return;
 
+    const syncHeight = () => {
+      sidebar.style.maxHeight = `${main.getBoundingClientRect().height}px`;
+    };
+
     const observer = new ResizeObserver((entries) => {
       for (const entry of entries) {
         if (entry.target === main) {
-          sidebar.style.maxHeight = `${entry.contentRect.height}px`;
+          syncHeight();
         }
       }
     });
 
+    syncHeight();
     observer.observe(main);
-    return () => observer.disconnect();
+    // Resync after the next paint to catch Material Web Component async upgrades
+    const rafId = requestAnimationFrame(syncHeight);
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(rafId);
+    };
   }, []);
 
   const prevPhaseRef = useRef<string | null>(null);
