@@ -8,8 +8,9 @@ interface VideoPlayerProps {
   videoRef?: React.Ref<HTMLVideoElement>;
 }
 
-export function VideoPlayer({ video, artifacts: _artifacts, onTimeUpdate, videoRef }: VideoPlayerProps) {
+export function VideoPlayer({ video, artifacts, onTimeUpdate, videoRef }: VideoPlayerProps) {
   const internalRef = useRef<HTMLVideoElement | null>(null);
+  const subtitleRef = useRef<HTMLSpanElement | null>(null);
 
   const setRefs = useCallback(
     (node: HTMLVideoElement | null) => {
@@ -17,7 +18,7 @@ export function VideoPlayer({ video, artifacts: _artifacts, onTimeUpdate, videoR
       if (typeof videoRef === "function") {
         videoRef(node);
       } else if (videoRef) {
-        (videoRef as any).current = node;
+        (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node;
       }
     },
     [videoRef]
@@ -26,8 +27,15 @@ export function VideoPlayer({ video, artifacts: _artifacts, onTimeUpdate, videoR
   const handleTimeUpdate = useCallback(() => {
     const player = internalRef.current;
     if (!player) return;
-    onTimeUpdate(player.currentTime);
-  }, [onTimeUpdate]);
+    const time = player.currentTime;
+    onTimeUpdate(time);
+
+    // Update subtitle text directly via ref to avoid React re-render on every frame
+    if (subtitleRef.current) {
+      const subtitle = artifacts.subtitles.find((s) => time >= s.start && time < s.end);
+      subtitleRef.current.textContent = subtitle?.text ?? "";
+    }
+  }, [onTimeUpdate, artifacts.subtitles]);
 
   const videoUrl = video.storage_dir
     ? `/api/videos/${video.id}/video`
@@ -47,7 +55,7 @@ export function VideoPlayer({ video, artifacts: _artifacts, onTimeUpdate, videoR
         <div className="empty-state">视频文件未下载</div>
       )}
       <div className="subtitle-overlay">
-        <span id="subtitleOverlay" className="subtitle-text" />
+        <span ref={subtitleRef} className="subtitle-text" />
       </div>
     </div>
   );

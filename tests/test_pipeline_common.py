@@ -1,4 +1,6 @@
-from server.app.pipeline.common import get_video_id, parse_srt
+from pathlib import Path
+
+from server.app.pipeline.common import get_video_id, parse_srt, resolve_video_dir
 from server.app.pipeline.fetch_url import _extract_knowledge_url
 
 
@@ -32,3 +34,10 @@ def test_extract_knowledge_url_accepts_source_v2():
     }
 
     assert _extract_knowledge_url("K001", payload) == ("https://example.com/k001.mp4", "")
+
+
+def test_resolve_video_dir_prefers_storage_dir():
+    videos_dir = Path("/data/videos")
+    assert resolve_video_dir({"id": "v1", "storage_dir": "/custom/dir"}, videos_dir) == Path("/custom/dir")
+    assert resolve_video_dir({"id": "v1", "storage_dir": ""}, videos_dir) == Path("/data/videos/v1")
+    assert resolve_video_dir({"id": "v1"}, videos_dir) == Path("/data/videos/v1")

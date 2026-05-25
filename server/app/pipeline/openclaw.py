@@ -26,6 +26,11 @@ class OpenClawRunner:
         self.cwd = cwd
         self.timeout_seconds = timeout_seconds
 
+    @staticmethod
+    def _sanitize_replacement(value: str) -> str:
+        """Remove null bytes from replacement strings to prevent argument injection via embedded NUL terminators."""
+        return value.replace("\x00", "")
+
     def render_command(self, video_id: str, video_dir: Path, prompt_file: Path) -> list[str]:
         import time
         prompt_text = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else ""
@@ -33,7 +38,7 @@ class OpenClawRunner:
             "{video_id}": video_id,
             "{video_dir}": str(video_dir),
             "{prompt_file}": str(prompt_file),
-            "{prompt_text}": prompt_text,
+            "{prompt_text}": self._sanitize_replacement(prompt_text),
             "{timestamp}": str(int(time.time())),
         }
         rendered = []
@@ -67,6 +72,7 @@ class OpenClawRunner:
                 completed = subprocess.run(
                     command,
                     cwd=self.cwd,
+                    shell=False,
                     text=True,
                     stdout=log,
                     stderr=subprocess.STDOUT,

@@ -1,10 +1,10 @@
 import shutil
 from dataclasses import dataclass
-from pathlib import Path
 
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
+from server.app.pipeline.common import resolve_video_dir
 from server.app.pipeline.phases import phase_sequence
 from server.app.records import VideoRecord
 from server.app.settings import Settings
@@ -37,7 +37,7 @@ def delete_video_record(db: Database, settings: Settings, video_id: str) -> bool
     video = db.get_video(video_id)
     if not video:
         return False
-    video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
+    video_dir = resolve_video_dir(video, settings.videos_dir)
     if video_dir.exists() and video_dir.is_dir():
         shutil.rmtree(video_dir)
     db.delete_video(video_id)
@@ -77,7 +77,7 @@ def rerun_video_record(
             "message": f"当前处于 {video['current_phase']} 阶段，无法从 {normalized_phase} 重跑",
         }
 
-    video_dir = Path(video["storage_dir"]) if video["storage_dir"] else settings.videos_dir / video_id
+    video_dir = resolve_video_dir(video, settings.videos_dir)
     try:
         clear_artifacts_from(video_dir, normalized_phase, video_id)
     except ValueError as exc:
