@@ -97,14 +97,14 @@ export function VideoList() {
                 )}
               </div>
               <div slot="end" className="status-end">
-                <span className={`phase-name ${video.status === "running" ? "running" : ""}`}>
-                  {PHASE_LABELS[video.current_phase]}
-                </span>
                 {video.content_type === "knowledge" && video.interaction_stats && (
                   <span className="interaction-stats" title="互动节点通过状态">
                     {formatInteractionStats(video.interaction_stats)}
                   </span>
                 )}
+                <span className={`phase-name ${video.status === "running" ? "running" : ""}`}>
+                  {PHASE_LABELS[video.current_phase]}
+                </span>
                 <PhaseStepper video={video} />
                 <span className={`status-badge ${statusGroup(video)}`}>
                   {STATUS_LABELS[statusGroup(video)] || video.status}
