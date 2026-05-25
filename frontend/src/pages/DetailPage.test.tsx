@@ -197,19 +197,19 @@ describe("DetailPage", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("节点内容")).toBeInTheDocument();
+      expect(screen.getByText("字幕内容")).toBeInTheDocument();
     });
 
     const tabs = document.querySelector("md-tabs") as HTMLElement & { activeTabIndex: number };
     act(() => {
-      tabs.activeTabIndex = 2;
+      tabs.activeTabIndex = 1;
       tabs.dispatchEvent(new Event("change", { bubbles: true }));
     });
 
     await waitFor(() => {
       expect(screen.getByText("第一章")).toBeInTheDocument();
     });
-    expect(screen.queryByText("节点内容")).not.toBeInTheDocument();
+    expect(screen.queryByText("字幕内容")).not.toBeInTheDocument();
   });
 
   it("keeps delete dialog open and shows an error when deleting fails", async () => {

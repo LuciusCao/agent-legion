@@ -37,9 +37,9 @@ function formatIssue(issue: { title?: string; details?: string }): string {
 }
 
 const STATUS_LABELS: Record<string, { text: string; color: string }> = {
-  published: { text: "已通过", color: "var(--md-sys-color-primary)" },
-  pending_review: { text: "待审", color: "var(--md-sys-color-tertiary)" },
-  rejected: { text: "驳回", color: "var(--md-sys-color-error)" },
+  published: { text: "已通过", color: "#2e7d32" },
+  pending_review: { text: "待审", color: "#ed6c02" },
+  rejected: { text: "驳回", color: "#ba1a1a" },
 };
 
 interface NodePanelProps {
@@ -64,9 +64,10 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
         const status = nodeReview?.status || globalStatus;
         const statusInfo = status ? STATUS_LABELS[status] : undefined;
         const issues = nodeReview?.issues?.filter((issue) => formatIssue(issue)) ?? [];
+
         return (
           <div
-            key={i}
+            key={node.id ?? i}
             className={`node-card card-outlined ${answered ? "answered" : ""}`}
             onClick={() => {
               onSeek?.(triggerTime);
@@ -82,15 +83,24 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
               <md-assist-chip label={typeLabel} />
             </div>
             {node.options && node.options.length > 0 && (
-              <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
+              <div
+                style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}
+                onClick={(e) => e.stopPropagation()}
+              >
                 {node.options.map((opt, j) => (
-                  <md-outlined-button key={j} disabled={answered || undefined}>{opt.text}</md-outlined-button>
+                  <md-outlined-button key={opt.id ?? j} disabled={answered || undefined}>{opt.text}</md-outlined-button>
                 ))}
               </div>
             )}
             {statusInfo && (
               <div style={{ marginTop: "10px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                <span style={{ fontSize: "0.75rem", fontWeight: 600, color: statusInfo.color }}>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 600,
+                    color: statusInfo.color,
+                  }}
+                >
                   {statusInfo.text}
                 </span>
                 {issues.length > 0 && (
