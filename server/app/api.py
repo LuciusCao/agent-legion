@@ -11,6 +11,7 @@ from server.app.events import VideoEventManager
 from server.app.pipeline.package import create_package
 from server.app.pipeline.reader import read_artifacts
 from server.app.services.intake import add_video_items
+from server.app.services.interaction_stats import compute_interaction_stats
 from server.app.services.video_actions import (
     batch_delete_video_records,
     batch_rerun_video_records,
@@ -128,7 +129,14 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
 
     @router.get("/videos")
     def list_videos() -> dict[str, Any]:
-        return {"videos": db.list_videos()}
+        videos = db.list_videos()
+        for video in videos:
+            if video.get("content_type") == "knowledge":
+                video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else settings.videos_dir / video["id"]
+                stats = compute_interaction_stats(video_dir)
+                if stats:
+                    video["interaction_stats"] = stats
+        return {"videos": videos}
 
     @router.get("/videos/{video_id}")
     def get_video(video_id: str) -> dict[str, Any]:
