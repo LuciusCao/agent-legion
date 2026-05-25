@@ -32,7 +32,7 @@ export function PackageToolbar() {
         <md-icon-button disabled={(!hasSelection) || undefined} onClick={handlePackage} title="打包">
           <md-icon>inventory_2</md-icon>
         </md-icon-button>
-        <md-outlined-button onClick={togglePackageSelectMode}>退出打包</md-outlined-button>
+        <md-outlined-button onClick={togglePackageSelectMode}>退出</md-outlined-button>
       </div>
     </div>
   );

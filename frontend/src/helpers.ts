@@ -4,6 +4,7 @@ export type VideoFilter = {
   selectedType: ContentType;
   statusFilter: string;
   searchQuery: string;
+  packedFilter?: "all" | "packed" | "unpacked";
 };
 
 export function statusGroup(video: VideoItem): string {
@@ -19,6 +20,8 @@ export function filterVideos(videos: VideoItem[], filter: VideoFilter): VideoIte
   return videos.filter((video) => {
     if (video.content_type !== filter.selectedType) return false;
     if (filter.statusFilter !== "all" && statusGroup(video) !== filter.statusFilter) return false;
+    if (filter.packedFilter === "packed" && !video.packed) return false;
+    if (filter.packedFilter === "unpacked" && !!video.packed) return false;
     if (!query) return true;
     return [video.id, video.title, video.external_id].some((value) =>
       value.toLowerCase().includes(query),

@@ -9,6 +9,7 @@ interface VideoState {
   selectedType: ContentType;
   statusFilter: string;
   searchQuery: string;
+  packedFilter: "all" | "packed" | "unpacked";
   selectMode: boolean;
   packageSelectMode: boolean;
   selectedIds: Set<string>;
@@ -20,6 +21,7 @@ interface VideoState {
   setSelectedType: (type: ContentType) => void;
   setStatusFilter: (status: string) => void;
   setSearchQuery: (query: string) => void;
+  setPackedFilter: (filter: "all" | "packed" | "unpacked") => void;
   toggleSelectMode: () => void;
   togglePackageSelectMode: () => void;
   toggleVideoSelection: (id: string) => void;
@@ -38,6 +40,7 @@ export const useVideoStore = create<VideoState>((set, get) => ({
   selectedType: "knowledge",
   statusFilter: "all",
   searchQuery: "",
+  packedFilter: "all",
   selectMode: false,
   packageSelectMode: false,
   selectedIds: new Set(),
@@ -81,11 +84,19 @@ export const useVideoStore = create<VideoState>((set, get) => ({
   },
 
   setStatusFilter: (status) => {
-    set({ statusFilter: status, selectedIds: new Set() });
+    set({
+      statusFilter: status,
+      selectedIds: new Set(),
+      ...(status !== "completed" ? { packedFilter: "all" } : {}),
+    });
   },
 
   setSearchQuery: (query) => {
     set({ searchQuery: query, selectedIds: new Set() });
+  },
+
+  setPackedFilter: (filter) => {
+    set({ packedFilter: filter, selectedIds: new Set() });
   },
 
   toggleSelectMode: () => {
@@ -123,6 +134,7 @@ export const useVideoStore = create<VideoState>((set, get) => ({
         selectedType: state.selectedType,
         statusFilter: state.statusFilter,
         searchQuery: state.searchQuery,
+        packedFilter: state.packedFilter,
       });
       return { selectedIds: new Set(filtered.map((v) => v.id)) };
     });

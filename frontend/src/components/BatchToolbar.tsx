@@ -62,7 +62,7 @@ export function BatchToolbar() {
           <md-icon-button disabled={(!hasSelection) || undefined} style={{ color: "var(--md-sys-color-error)" }} onClick={handleDelete} title="删除">
             <md-icon>delete</md-icon>
           </md-icon-button>
-          <md-outlined-button onClick={toggleSelectMode}>退出多选</md-outlined-button>
+          <md-outlined-button onClick={toggleSelectMode}>退出</md-outlined-button>
         </div>
       </div>
       <BatchRerunDialog
