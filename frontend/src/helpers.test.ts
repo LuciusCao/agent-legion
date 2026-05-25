@@ -5,6 +5,7 @@ import {
   computeProgress,
   escapeHtml,
   filterVideos,
+  formatInteractionStats,
   getInteractionQuestion,
   getPhases,
   parseResourceInputs,
@@ -247,5 +248,46 @@ describe("canRerunFrom", () => {
   it("returns false for unknown phase argument", () => {
     const v = makeVideo({ status: "running", current_phase: "download" });
     expect(canRerunFrom(v, "unknown_phase")).toBe(false);
+  });
+});
+
+describe("formatInteractionStats", () => {
+  it("returns empty string for undefined stats", () => {
+    expect(formatInteractionStats(undefined)).toBe("");
+  });
+
+  it("returns empty string for empty stats", () => {
+    expect(formatInteractionStats({})).toBe("");
+  });
+
+  it("formats single type stats", () => {
+    expect(formatInteractionStats({ example_practice: { passed: 2, total: 3 } })).toBe("2/3");
+  });
+
+  it("formats multiple types in order", () => {
+    expect(
+      formatInteractionStats({
+        example_practice: { passed: 2, total: 3 },
+        interaction_summary: { passed: 1, total: 1 },
+      }),
+    ).toBe("2/3 1/1");
+  });
+
+  it("puts unknown types after known types", () => {
+    expect(
+      formatInteractionStats({
+        unknown_type: { passed: 1, total: 2 },
+        example_practice: { passed: 2, total: 3 },
+      }),
+    ).toBe("2/3 1/2");
+  });
+
+  it("treats video_summary same as interaction_summary in order", () => {
+    expect(
+      formatInteractionStats({
+        video_summary: { passed: 1, total: 1 },
+        example_practice: { passed: 2, total: 3 },
+      }),
+    ).toBe("2/3 1/1");
   });
 });

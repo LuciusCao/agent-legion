@@ -2,7 +2,7 @@ import { useMemo, useRef, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useVideoStore } from "../stores/videoStore";
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from "../labels";
-import { statusGroup, filterVideos } from "../helpers";
+import { statusGroup, filterVideos, formatInteractionStats } from "../helpers";
 import { PhaseStepper } from "./PhaseStepper";
 
 export function VideoList() {
@@ -100,6 +100,11 @@ export function VideoList() {
                 <span className={`phase-name ${video.status === "running" ? "running" : ""}`}>
                   {PHASE_LABELS[video.current_phase]}
                 </span>
+                {video.content_type === "knowledge" && video.interaction_stats && (
+                  <span className="interaction-stats" title="互动节点通过状态">
+                    {formatInteractionStats(video.interaction_stats)}
+                  </span>
+                )}
                 <PhaseStepper video={video} />
                 <span className={`status-badge ${statusGroup(video)}`}>
                   {STATUS_LABELS[statusGroup(video)] || video.status}
