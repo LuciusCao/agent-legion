@@ -52,6 +52,65 @@ describe("DetailPage", () => {
     mockApi.mockReset();
   });
 
+  it("syncs sidebar maxHeight immediately on mount", async () => {
+    mockApi
+      .mockResolvedValueOnce({
+        video: {
+          id: "v1",
+          title: "Video 1",
+          source_url: "https://example.com/v1.mp4",
+          content_type: "knowledge",
+          external_id: "K001",
+          knowledge_code: "K001",
+          question_id: "",
+          status: "completed",
+          current_phase: "assemble",
+          error_message: "",
+          storage_dir: "/tmp/v1",
+          duration: 120,
+        },
+        phase_runs: [],
+        transcription_runs: [],
+      })
+      .mockResolvedValueOnce({
+        subtitles: [],
+        chapters: [],
+        interactions: [],
+        metadata: null,
+        review: null,
+        checklist: null,
+      })
+      .mockResolvedValueOnce({ log: "ok" });
+
+    const spy = vi
+      .spyOn(Element.prototype, "getBoundingClientRect")
+      .mockImplementation(function (this: Element) {
+        if (this.classList.contains("preview-main")) {
+          return { height: 300 } as DOMRect;
+        }
+        return { height: 0, width: 0, top: 0, left: 0, bottom: 0, right: 0, x: 0, y: 0, toJSON: () => {} } as unknown as DOMRect;
+      });
+
+    render(
+      <MemoryRouter initialEntries={["/videos/v1"]}>
+        <Routes>
+          <Route path="/videos/:id" element={<DetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("Video 1")).toBeInTheDocument();
+    });
+
+    try {
+      const sidebar = document.querySelector(".phase-runs-sidebar") as HTMLElement;
+      expect(sidebar.style.maxHeight).toBe("300px");
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it("renders chapter content when chapters tab is active", async () => {
     mockApi
       .mockResolvedValueOnce({
