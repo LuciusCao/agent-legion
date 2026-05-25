@@ -15,6 +15,7 @@ class VideoInputLike(Protocol):
     title: str
     content_type: str
     external_id: str
+    source_uuid: str
 
 
 def normalized_content_type(value: str) -> str:
@@ -115,6 +116,7 @@ def add_video_items(
             title,
             content_type=content_type,
             external_id=external_id,
+            source_uuid=getattr(item, "source_uuid", ""),
         )
         video_dir = settings.videos_dir / video["id"]
         video_dir.mkdir(parents=True, exist_ok=True)

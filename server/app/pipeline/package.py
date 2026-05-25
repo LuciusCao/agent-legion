@@ -9,6 +9,7 @@ PACKAGE_FILES = [
     "interactions.json",
     "review_result.json",
     "report.md",
+    "upload_params.json",
 ]
 
 

@@ -10,6 +10,7 @@ export type VideoItem = {
   external_id: string;
   knowledge_code: string;
   question_id: string;
+  source_uuid: string;
   status: string;
   current_phase: string;
   error_message: string;

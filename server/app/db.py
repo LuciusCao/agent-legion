@@ -22,6 +22,7 @@ VIDEO_UPDATE_FIELDS = {
     "external_id",
     "knowledge_code",
     "question_id",
+    "source_uuid",
     "storage_dir",
     "current_phase",
     "status",
@@ -102,6 +103,7 @@ class Database:
                 "external_id": "alter table videos add column external_id text not null default ''",
                 "knowledge_code": "alter table videos add column knowledge_code text not null default ''",
                 "question_id": "alter table videos add column question_id text not null default ''",
+                "source_uuid": "alter table videos add column source_uuid text not null default ''",
             }
             for column, statement in migrations.items():
                 if column not in existing_columns:
@@ -126,6 +128,7 @@ class Database:
         storage_dir: str = "",
         content_type: str = "knowledge",
         external_id: str = "",
+        source_uuid: str = "",
     ) -> VideoRecord:
         content_type = content_type if content_type in {"knowledge", "question"} else "knowledge"
         video_id = make_record_id(source_url, content_type, external_id)
@@ -138,9 +141,9 @@ class Database:
                 """
                 insert into videos(
                   id, source_url, title, content_type, external_id, knowledge_code,
-                  question_id, storage_dir, current_phase, status
+                  question_id, source_uuid, storage_dir, current_phase, status
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                   source_url=excluded.source_url,
                   title=excluded.title,
@@ -148,6 +151,7 @@ class Database:
                   external_id=excluded.external_id,
                   knowledge_code=excluded.knowledge_code,
                   question_id=excluded.question_id,
+                  source_uuid=excluded.source_uuid,
                   current_phase=excluded.current_phase,
                   status=excluded.status,
                   updated_at=current_timestamp
@@ -160,6 +164,7 @@ class Database:
                     external_id,
                     knowledge_code,
                     question_id,
+                    source_uuid,
                     storage_dir,
                     current_phase,
                     status,

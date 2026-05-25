@@ -27,6 +27,7 @@ class VideoInput(BaseModel):
     title: str = ""
     content_type: str = "knowledge"
     external_id: str = ""
+    source_uuid: str = ""
 
 
 class AddVideosRequest(BaseModel):

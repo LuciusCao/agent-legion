@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from server.app.pipeline.common import parse_srt
+from server.app.pipeline.upload_params import write_upload_params
 
 
 def assemble_video(video: dict, video_dir: Path) -> dict:
@@ -40,4 +41,5 @@ def assemble_video(video: dict, video_dir: Path) -> dict:
     }
     (video_dir / "metadata.json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding="utf-8")
     (video_dir / "report.md").write_text(f"# {metadata['title']}\n\n已完成组装。\n", encoding="utf-8")
+    write_upload_params(video, video_dir)
     return metadata

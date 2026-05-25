@@ -19,6 +19,7 @@ const video = (overrides: Partial<VideoItem>): VideoItem => ({
   external_id: "K001",
   knowledge_code: "K001",
   question_id: "",
+  source_uuid: "",
   status: "queued",
   current_phase: "download",
   error_message: "",
