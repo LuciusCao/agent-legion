@@ -1,10 +1,19 @@
 import json
 import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from server.app.pipeline.common import make_record_id
 from server.app.records import PhaseRunRecord, VideoRecord
+
+
+def _iso(dt_str: str | None) -> str | None:
+    """Convert SQLite timestamp (UTC) to ISO 8601 format with timezone."""
+    if not dt_str:
+        return None
+    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+    return dt.isoformat()
 
 VIDEO_UPDATE_FIELDS = {
     "source_url",
@@ -283,21 +292,29 @@ class Database:
 
     def list_phase_runs(self, video_id: str) -> list[PhaseRunRecord]:
         with self.connect() as conn:
-            return [
+            rows = [
                 dict(row)
                 for row in conn.execute(
                     "select * from phase_runs where video_id=? order by id", (video_id,)
                 )
             ]
+            for row in rows:
+                row["started_at"] = _iso(row["started_at"]) or ""
+                row["finished_at"] = _iso(row["finished_at"])
+            return rows
 
     def list_transcription_runs(self, video_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:
-            return [
+            rows = [
                 dict(row)
                 for row in conn.execute(
                     "select * from transcription_runs where video_id=? order by id", (video_id,)
                 )
             ]
+            for row in rows:
+                row["started_at"] = _iso(row["started_at"]) or ""
+                row["finished_at"] = _iso(row["finished_at"])
+            return rows
 
     def delete_video(self, video_id: str) -> None:
         with self.connect() as conn:
