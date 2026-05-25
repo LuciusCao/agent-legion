@@ -48,7 +48,7 @@ openclaw:
     - --session-id
     - "{video_id}-{timestamp}"
     - --thinking
-    - on
+    - "on"
     - --message
     - "{prompt_text}"
     - --json
