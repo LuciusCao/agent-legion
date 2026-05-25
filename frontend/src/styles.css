@@ -373,7 +373,7 @@ h1 {
 
 .preview-layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 320px;
+  grid-template-columns: 3fr 1fr;
   gap: 16px;
 }
 
@@ -417,6 +417,14 @@ h1 {
   gap: 8px;
   overflow-x: auto;
   padding: 10px 0;
+}
+
+.chapter-label {
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  align-self: center;
+  white-space: nowrap;
+  padding-right: 4px;
 }
 
 .chapter-chip.active {
