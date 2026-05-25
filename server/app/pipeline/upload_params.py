@@ -59,17 +59,11 @@ def build_subtitles(srt_text: str) -> list[dict]:
     return out
 
 
-def build_clips(chapters: list[dict], video_duration: float = 0) -> list[dict]:
+def build_clips(chapters: list[dict]) -> list[dict]:
     out = []
-    for i, c in enumerate(chapters):
+    for c in chapters:
         start = c.get("start_time") if "start_time" in c else c.get("start", 0)
         end = c.get("end_time") if "end_time" in c else c.get("end", 0)
-        if not end:
-            if i + 1 < len(chapters):
-                next_c = chapters[i + 1]
-                end = next_c.get("start_time") if "start_time" in next_c else next_c.get("start", 0)
-            else:
-                end = video_duration
         out.append(
             {
                 "clips_uuid": _new_uuid32(),
@@ -205,11 +199,10 @@ def build_upload_params(video: dict, video_dir: Path) -> dict:
     clips = []
     if chapters_path.exists():
         chapters_raw = json.loads(chapters_path.read_text(encoding="utf-8"))
-        video_duration = float(video.get("duration", 0))
         if isinstance(chapters_raw, list):
-            clips = build_clips(chapters_raw, video_duration)
+            clips = build_clips(chapters_raw)
         elif isinstance(chapters_raw, dict):
-            clips = build_clips(chapters_raw.get("chapters", []), video_duration)
+            clips = build_clips(chapters_raw.get("chapters", []))
 
     interactions = []
     if interactions_path.exists():

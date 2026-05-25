@@ -87,6 +87,22 @@ def phase_outputs_sufficient(video_dir: Path, phase_key: str, output_names: list
     return expected_outputs_exist(video_dir, output_names)
 
 
+def validate_phase_outputs(video_dir: Path, phase_key: str) -> None:
+    """Validate agent phase output format. Raise ValueError on invalid data."""
+    if phase_key == "chapter_generate":
+        path = video_dir / "chapters.json"
+        if not path.exists():
+            return
+        data = json.loads(path.read_text(encoding="utf-8"))
+        chapters = data.get("chapters", []) if isinstance(data, dict) else data
+        for idx, ch in enumerate(chapters):
+            if "end_time" not in ch and "end" not in ch:
+                raise ValueError(
+                    f"Chapter {idx + 1} ('{ch.get('title', '')}') is missing 'end_time'. "
+                    f"The chapter_generate agent must output 'end_time' for every chapter."
+                )
+
+
 def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
     asr = settings.config.get("asr", {})
     whisper = asr.get("whisper", {})
@@ -203,6 +219,7 @@ def process_video_once(
                     db.update_phase_command(run["id"], result.command)
                 if result.status != "completed":
                     raise RuntimeError(result.error_message)
+                validate_phase_outputs(video_dir, phase)
         elif phase == "assemble":
             assemble_video(video, video_dir)
         else:

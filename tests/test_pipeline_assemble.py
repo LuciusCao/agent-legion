@@ -1,5 +1,7 @@
 import json
 
+import pytest
+
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.upload_params import build_upload_params
 
@@ -163,57 +165,40 @@ def test_upload_params_uses_checklist_node_issues_for_interaction_review(tmp_pat
     assert trial["review_msg"] == "触发过早：应在讲解结束后触发"
 
 
-def test_upload_params_infers_missing_end_time_from_next_chapter(tmp_path):
-    """When chapters lack end_time, infer it from next chapter's start_time."""
+def test_validate_phase_outputs_rejects_chapter_without_end_time(tmp_path):
+    """validate_phase_outputs must raise when a chapter lacks end_time."""
+    from server.app.worker import validate_phase_outputs
+
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
-    (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8"
-    )
     (video_dir / "chapters.json").write_text(
         json.dumps(
             [
-                {"start_time": 0, "title": "引入"},
+                {"start_time": 0, "end_time": 10, "title": "引入"},
                 {"start_time": 18, "title": "讲解"},
-                {"start_time": 60, "title": "总结"},
             ]
         ),
         encoding="utf-8",
     )
-    (video_dir / "interactions.json").write_text(
-        json.dumps({"interactions": []}), encoding="utf-8"
-    )
 
-    params = build_upload_params({"id": "v1", "duration": 90}, video_dir)
-    clips = params["clips_json"]
-
-    assert len(clips) == 3
-    assert clips[0]["start_time"] == 0
-    assert clips[0]["end_time"] == 18000
-    assert clips[1]["start_time"] == 18000
-    assert clips[1]["end_time"] == 60000
-    assert clips[2]["start_time"] == 60000
-    assert clips[2]["end_time"] == 90000
+    with pytest.raises(ValueError, match="missing 'end_time'"):
+        validate_phase_outputs(video_dir, "chapter_generate")
 
 
-def test_upload_params_uses_video_duration_for_last_chapter_without_end(tmp_path):
-    """When the last chapter lacks end_time, use video duration."""
+def test_validate_phase_outputs_passes_with_complete_chapters(tmp_path):
+    """validate_phase_outputs should not raise when all chapters have end_time."""
+    from server.app.worker import validate_phase_outputs
+
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
-    (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8"
-    )
     (video_dir / "chapters.json").write_text(
-        json.dumps([{"start_time": 0, "title": "全篇"}]),
+        json.dumps(
+            [
+                {"start_time": 0, "end_time": 10, "title": "引入"},
+                {"start_time": 10, "end_time": 60, "title": "讲解"},
+            ]
+        ),
         encoding="utf-8",
     )
-    (video_dir / "interactions.json").write_text(
-        json.dumps({"interactions": []}), encoding="utf-8"
-    )
 
-    params = build_upload_params({"id": "v1", "duration": 120}, video_dir)
-    clips = params["clips_json"]
-
-    assert len(clips) == 1
-    assert clips[0]["start_time"] == 0
-    assert clips[0]["end_time"] == 120000
+    validate_phase_outputs(video_dir, "chapter_generate")
