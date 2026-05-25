@@ -499,6 +499,50 @@ def test_package_without_completed_videos_returns_400(client):
     assert response.json()["detail"] == "No completed videos available for packaging"
 
 
+def test_package_sets_packed_true(tmp_path, client):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+            ]
+        },
+    )
+    video_id = "knowledge_K001"
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
+    client.app.state.db.update_video(video_id, status="completed")
+
+    response = client.post("/api/package", json={"video_ids": [video_id]})
+
+    assert response.status_code == 200
+    video = client.app.state.db.get_video(video_id)
+    assert video["packed"] == 1
+
+
+def test_rerun_clears_packed(tmp_path, client):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+            ]
+        },
+    )
+    video_id = "knowledge_K001"
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
+    client.app.state.db.update_video(video_id, status="completed", current_phase="package", packed=1)
+
+    response = client.post(f"/api/videos/{video_id}/rerun", json={"phase": "assemble"})
+
+    assert response.status_code == 200
+    video = client.app.state.db.get_video(video_id)
+    assert video["packed"] == 0
+
+
 def test_package_download_rejects_path_traversal(client):
     response = client.get("/api/packages/%2e%2e/%2e%2e/%2e%2e/etc/passwd")
     assert response.status_code == 404

@@ -88,7 +88,7 @@ def rerun_video_record(
             "message": str(exc),
         }
 
-    db.update_video(video_id, current_phase=normalized_phase, status="queued", error_message="")
+    db.update_video(video_id, current_phase=normalized_phase, status="queued", error_message="", packed=0)
     return {"video_id": video_id, "status": "rerun", "phase": normalized_phase, "message": ""}
 
 
