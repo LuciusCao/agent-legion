@@ -45,7 +45,7 @@ export function PhaseStepper({ video }: { video: VideoItem }) {
       {phases.map((phase, index) => {
         const state = getStepState(video, index, currentIndex);
         return (
-          <div key={phase} className="step" title={PHASE_LABELS[phase] || phase}>
+          <div key={phase} className="step" title={PHASE_LABELS[phase]}>
             <div className={`step-bar ${state}`} />
           </div>
         );

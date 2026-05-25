@@ -142,6 +142,12 @@ describe("parseResourceInputs", () => {
       { external_id: "K002", source_uuid: "uuid-2" },
     ]);
   });
+
+  it("parses full-width comma external id and source uuid pairs", () => {
+    expect(parseResourceInputs("K001，uuid-1")).toEqual([
+      { external_id: "K001", source_uuid: "uuid-1" },
+    ]);
+  });
 });
 
 describe("computeProgress", () => {

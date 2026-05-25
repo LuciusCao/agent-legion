@@ -14,10 +14,10 @@ export const PHASE_LABELS: Record<string, string> = {
   waiting_for_url: "未获取到视频",
   download: "下载",
   transcribe: "转录",
-  subtitle_review: "字幕 review",
+  subtitle_review: "字幕审核",
   chapter_generate: "章节生成",
   interaction_generate: "互动生成",
-  content_review: "内容 review",
+  content_review: "内容审核",
   assemble: "组装",
   package: "打包",
 };

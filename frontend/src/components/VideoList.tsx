@@ -101,7 +101,7 @@ export function VideoList() {
               <div slot="end" className="status-end">
                 <PhaseStepper video={video} />
                 <span className={`phase-name ${video.status === "running" ? "running" : ""}`}>
-                  {PHASE_LABELS[video.current_phase] || video.current_phase}
+                  {PHASE_LABELS[video.current_phase]}
                 </span>
                 <span className={`status-badge ${statusGroup(video)}`}>
                   {STATUS_LABELS[statusGroup(video)] || video.status}

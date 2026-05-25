@@ -66,7 +66,7 @@ export function RerunDialog({ video, onConfirm }: RerunDialogProps) {
                   }
                 }}
               />
-              <div slot="headline">{PHASE_LABELS[phase] || phase}</div>
+              <div slot="headline">{PHASE_LABELS[phase]}</div>
             </md-list-item>
           ))}
         </md-list>
