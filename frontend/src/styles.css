@@ -475,18 +475,15 @@ h1 {
   border-radius: 12px;
   padding: 16px;
   max-height: min(var(--detail-primary-height, calc(100vh - 40px)), calc(100vh - 40px));
+  display: flex;
+  flex-direction: column;
+  overflow: auto;
+  min-height: 0;
 }
 
 .detail-bottom {
   border-top: 1px solid var(--md-sys-color-outline-variant);
   padding-top: 14px;
-}
-
-.phase-runs-sidebar {
-  display: flex;
-  flex-direction: column;
-  overflow: auto;
-  min-height: 0;
 }
 
 /* Phase runs panel */
