@@ -19,6 +19,6 @@ describe("PackageToolbar", () => {
     expect(screen.getByText("全选")).toBeInTheDocument();
     expect(screen.getByText("仅选未打包")).toBeInTheDocument();
     expect(screen.getByText("取消选择")).toBeInTheDocument();
-    expect(screen.getByText("退出多选")).toBeInTheDocument();
+    expect(screen.getByText("退出打包")).toBeInTheDocument();
   });
 });
