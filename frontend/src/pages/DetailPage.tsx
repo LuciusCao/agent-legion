@@ -258,11 +258,6 @@ export function DetailPage() {
           {activeTab === "nodes" && <NodePanel onSeek={handleSeek} replayInteraction={replayInteraction} />}
           {activeTab === "chapters" && <ChapterPanel onSeek={handleSeek} />}
           {activeTab === "metadata" && <MetadataPanel />}
-          {activeTab === "review" && (
-            <div className="tab-panel">
-              <pre>{JSON.stringify(artifacts.review, null, 2)}</pre>
-            </div>
-          )}
         </div>
       </section>
 
