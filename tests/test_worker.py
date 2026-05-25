@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool, discover_openclaw_agents
@@ -98,6 +99,37 @@ def test_worker_keeps_mp4_after_assemble_when_config_disabled(db, settings):
 
     assert processed is True
     assert (video_dir / "a.mp4").exists()
+    assert (video_dir / "metadata.json").exists()
+
+
+def test_worker_assemble_succeeds_even_when_cleanup_fails(db, settings, monkeypatch):
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "a.mp4").write_bytes(b"fake mp4")
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text(
+        json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始", "concepts": []}]),
+        encoding="utf-8",
+    )
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
+    )
+    db.update_video("a", storage_dir=str(video_dir), current_phase="assemble", status="queued")
+
+    settings.config["cleanup_video_after_assemble"] = True
+
+    def raise_permission_error(self):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "unlink", raise_permission_error)
+
+    processed = process_video_once(db, settings, video["id"])
+
+    assert processed is True
+    assert db.get_video("a")["status"] == "completed"
     assert (video_dir / "metadata.json").exists()
 
 
