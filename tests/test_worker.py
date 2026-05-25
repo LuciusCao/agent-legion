@@ -27,6 +27,11 @@ def test_worker_processes_transcribe_phase(db, settings):
     assert processed is True
     assert (video_dir / "subtitles.srt").exists()
     assert db.get_video("a")["current_phase"] == "subtitle_review"
+    transcription_runs = db.list_transcription_runs("a")
+    assert len(transcription_runs) == 1
+    assert transcription_runs[0]["provider"] == "sensevoice"
+    assert transcription_runs[0]["status"] == "completed"
+    assert transcription_runs[0]["srt_entry_count"] == 1
 
 
 def test_worker_processes_assemble_phase(db, settings):
@@ -199,6 +204,26 @@ def test_agent_phase_records_rendered_command(db, settings):
 
     runs = db.list_phase_runs(video["id"])
     assert json.loads(runs[-1]["command_json"]) != []
+
+
+def test_existing_invalid_agent_output_fails_instead_of_advancing(db, settings):
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "chapters.json").write_text("{bad json", encoding="utf-8")
+    db.update_video(
+        video["id"],
+        storage_dir=str(video_dir),
+        current_phase="chapter_generate",
+        status="queued",
+    )
+
+    processed = process_video_once(db, settings, video["id"])
+
+    assert processed is True
+    updated = db.get_video(video["id"])
+    assert updated["status"] == "failed"
+    assert updated["current_phase"] == "chapter_generate"
 
 
 def test_discover_openclaw_agents_uses_cli_json(monkeypatch):

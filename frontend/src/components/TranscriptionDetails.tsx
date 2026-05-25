@@ -1,5 +1,4 @@
 import type { TranscriptionRun } from "../types";
-import { formatDuration } from "../lib/formatters";
 
 interface TranscriptionDetailsProps {
   primary: TranscriptionRun | undefined;

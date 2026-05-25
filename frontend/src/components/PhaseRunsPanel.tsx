@@ -21,6 +21,38 @@ interface TimelineItem {
   occurrence?: number;
 }
 
+function formatTranscriptionProvider(provider: string | undefined): string {
+  if (!provider) return "transcribe";
+  const normalized = provider.toLowerCase();
+  if (normalized === "whisper") return "whisper.cpp";
+  if (normalized === "sensevoice") return "SenseVoice";
+  return provider;
+}
+
+function extractOpenClawAgentName(commandJson: string): string {
+  try {
+    const command = JSON.parse(commandJson) as unknown;
+    if (!Array.isArray(command)) return "";
+    const parts = command.map((part) => String(part));
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] === "--agent" && parts[i + 1]) {
+        return parts[i + 1];
+      }
+      if (parts[i].startsWith("--agent=")) {
+        return parts[i].slice("--agent=".length);
+      }
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function formatOpenClawAgentName(commandJson: string): string {
+  const agentName = extractOpenClawAgentName(commandJson);
+  return agentName ? `openclaw-${agentName}` : "";
+}
+
 function buildItem(
   run: PhaseRun,
   prevRun: PhaseRun | null,
@@ -46,14 +78,9 @@ function buildItem(
   let tool = "";
   if (run.phase_key === "transcribe") {
     const tr = transcriptionRuns.find((t) => t.status !== "fallback");
-    tool = tr?.provider || "transcribe";
+    tool = formatTranscriptionProvider(tr?.provider);
   } else {
-    try {
-      const cmd = JSON.parse(run.command_json) as string[];
-      tool = cmd[0] || "";
-    } catch {
-      tool = "";
-    }
+    tool = formatOpenClawAgentName(run.command_json);
   }
 
   return { run, label: PHASE_LABELS[run.phase_key], tool, queueTime, processTime };

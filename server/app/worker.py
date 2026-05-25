@@ -222,7 +222,7 @@ def _handle_agent_phase(ctx: PhaseContext) -> None:
             ctx.db.update_phase_command(ctx.run["id"], result.command)
         if result.status != "completed":
             raise RuntimeError(result.error_message)
-        validate_phase_outputs(ctx.video_dir, phase)
+    validate_phase_outputs(ctx.video_dir, phase)
 
 
 def _handle_assemble(ctx: PhaseContext) -> None:

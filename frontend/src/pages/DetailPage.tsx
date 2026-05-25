@@ -26,6 +26,8 @@ export function DetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const playerRef = useRef<HTMLVideoElement>(null);
+  const detailPrimaryRef = useRef<HTMLDivElement>(null);
+  const phaseSidebarRef = useRef<HTMLElement>(null);
   const [currentTime, setCurrentTime] = useState(0);
 
   const {
@@ -73,6 +75,37 @@ export function DetailPage() {
     loadArtifacts(id);
     loadLog(id);
   }, [id, loadVideo, loadArtifacts, loadLog]);
+
+  const syncPhaseSidebarMaxHeight = useCallback(() => {
+    const primary = detailPrimaryRef.current;
+    const sidebar = phaseSidebarRef.current;
+    if (!primary || !sidebar) return;
+
+    sidebar.style.setProperty(
+      "--detail-primary-height",
+      `${primary.getBoundingClientRect().height}px`
+    );
+  }, []);
+
+  useEffect(() => {
+    const primary = detailPrimaryRef.current;
+    if (!primary) return;
+
+    const resizeObserver = new ResizeObserver(syncPhaseSidebarMaxHeight);
+    resizeObserver.observe(primary);
+    syncPhaseSidebarMaxHeight();
+
+    const raf = requestAnimationFrame(syncPhaseSidebarMaxHeight);
+
+    return () => {
+      resizeObserver.disconnect();
+      cancelAnimationFrame(raf);
+    };
+  }, [syncPhaseSidebarMaxHeight]);
+
+  useEffect(() => {
+    syncPhaseSidebarMaxHeight();
+  }, [currentVideo, artifacts.chapters.length, syncPhaseSidebarMaxHeight]);
 
   const prevPhaseRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);
@@ -173,7 +206,7 @@ export function DetailPage() {
   return (
     <section className="view detail-view">
       <section className="detail-upper">
-        <div className="detail-primary">
+        <div className="detail-primary" ref={detailPrimaryRef}>
           <header className="detail-topbar">
             <md-icon-button onClick={() => navigate("/")}>
               <md-icon>arrow_back</md-icon>
@@ -232,7 +265,7 @@ export function DetailPage() {
             onSeek={handleSeek}
           />
         </div>
-        <aside className="phase-runs-sidebar">
+        <aside className="phase-runs-sidebar" ref={phaseSidebarRef}>
           <PhaseRunsPanel phaseRuns={phaseRuns} transcriptionRuns={transcriptionRuns} contentType={currentVideo?.content_type} />
         </aside>
       </section>
