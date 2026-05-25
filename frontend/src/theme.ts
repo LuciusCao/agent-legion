@@ -28,3 +28,9 @@ export const applyTheme = (): void => {
     root.style.setProperty(key, value);
   });
 };
+
+export const STATUS_COLORS = {
+  running: { bg: "#dbeafe", text: "#1d4ed8", border: "#3b82f6" },
+  completed: { bg: "#dcfce7", text: "#15803d", border: "#22c55e" },
+  failed: { bg: "#fee2e2", text: "#b91c1c", border: "#ef4444" },
+} as const;
