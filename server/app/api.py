@@ -117,6 +117,10 @@ def create_router(db: Database, settings: Settings, agent_manager: AgentStatusMa
     async def videos_events(request: Request):
         return await video_event_manager.connect(request)
 
+    @router.get("/videos/{video_id}/events")
+    async def video_detail_events(request: Request, video_id: str):
+        return await video_event_manager.connect_video(request, video_id)
+
     @router.post("/videos")
     def add_videos(request: AddVideosRequest) -> dict[str, Any]:
         return add_video_items(db, settings, request.items)

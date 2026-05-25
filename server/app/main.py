@@ -168,6 +168,7 @@ def create_app(
 
     db._on_change = video_event_manager.broadcast
     db._on_delete = video_event_manager.broadcast_delete
+    db._on_detail_change = video_event_manager.broadcast_video_detail
 
     app.include_router(create_router(db, settings, agent_manager, video_event_manager))
 

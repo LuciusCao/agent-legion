@@ -22,10 +22,11 @@ VIDEO_UPDATE_FIELDS = {
 
 
 class Database:
-    def __init__(self, path: Path, on_change=None, on_delete=None):
+    def __init__(self, path: Path, on_change=None, on_delete=None, on_detail_change=None):
         self.path = path
         self._on_change = on_change
         self._on_delete = on_delete
+        self._on_detail_change = on_detail_change
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._init()
 
@@ -101,11 +102,13 @@ class Database:
         return dict(row) if row else None
 
     def _notify(self, video_id: str) -> None:
-        if self._on_change is None:
-            return
         video = self.get_video(video_id)
-        if video:
+        if self._on_change is not None and video:
             self._on_change(video)
+        if self._on_detail_change is not None:
+            phase_runs = self.list_phase_runs(video_id)
+            transcription_runs = self.list_transcription_runs(video_id)
+            self._on_detail_change(video_id, video or {}, phase_runs, transcription_runs)
 
     def create_video(
         self,
