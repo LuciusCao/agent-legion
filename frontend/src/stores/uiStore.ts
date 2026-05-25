@@ -11,6 +11,7 @@ interface UiState {
   addDialogOpen: boolean;
   addContentType: ContentType;
   rerunDialogOpen: boolean;
+  deleteDialogOpen: boolean;
   toast: Toast | null;
   connectAgentsWs: () => void;
   openAddDialog: () => void;
@@ -18,6 +19,8 @@ interface UiState {
   setAddContentType: (type: ContentType) => void;
   openRerunDialog: () => void;
   closeRerunDialog: () => void;
+  openDeleteDialog: () => void;
+  closeDeleteDialog: () => void;
   showToast: (message: string, type: "success" | "error") => void;
   clearToast: () => void;
 }
@@ -29,6 +32,7 @@ export const useUiStore = create<UiState>((set) => ({
   addDialogOpen: false,
   addContentType: "knowledge",
   rerunDialogOpen: false,
+  deleteDialogOpen: false,
   toast: null,
 
   connectAgentsWs: () => {
@@ -59,6 +63,8 @@ export const useUiStore = create<UiState>((set) => ({
   setAddContentType: (type) => set({ addContentType: type }),
   openRerunDialog: () => set({ rerunDialogOpen: true }),
   closeRerunDialog: () => set({ rerunDialogOpen: false }),
+  openDeleteDialog: () => set({ deleteDialogOpen: true }),
+  closeDeleteDialog: () => set({ deleteDialogOpen: false }),
   showToast: (message, type) => set({ toast: { message, type } }),
   clearToast: () => set({ toast: null }),
 }));
