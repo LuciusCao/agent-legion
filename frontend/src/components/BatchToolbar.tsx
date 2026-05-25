@@ -52,11 +52,15 @@ export function BatchToolbar() {
         <md-outlined-button onClick={toggleSelectMode}>退出多选</md-outlined-button>
         <md-text-button onClick={selectAllVisible}>全选</md-text-button>
         <md-text-button onClick={clearSelection}>取消</md-text-button>
-        <md-text-button disabled={!hasSelection} onClick={handleRerun}>重跑</md-text-button>
-        <md-filled-button disabled={!hasSelection} onClick={handlePackage}>打包</md-filled-button>
-        <md-text-button disabled={!hasSelection} style={{ color: "var(--md-sys-color-error)" }} onClick={handleDelete}>
-          删除
-        </md-text-button>
+        <md-icon-button disabled={(!hasSelection) || undefined} onClick={handleRerun} title="重跑">
+          <md-icon>restart_alt</md-icon>
+        </md-icon-button>
+        <md-icon-button disabled={(!hasSelection) || undefined} onClick={handlePackage} title="打包">
+          <md-icon>inventory_2</md-icon>
+        </md-icon-button>
+        <md-icon-button disabled={(!hasSelection) || undefined} style={{ color: "var(--md-sys-color-error)" }} onClick={handleDelete} title="删除">
+          <md-icon>delete</md-icon>
+        </md-icon-button>
       </div>
     </div>
   );

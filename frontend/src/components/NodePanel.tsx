@@ -27,7 +27,7 @@ export function NodePanel({ onSeek }: NodePanelProps) {
             {node.options && node.options.length > 0 && (
               <div style={{ display: "flex", gap: "8px", flexWrap: "wrap", marginTop: "8px" }}>
                 {node.options.map((opt, j) => (
-                  <md-outlined-button key={j} disabled={answered}>{opt.text}</md-outlined-button>
+                  <md-outlined-button key={j} disabled={answered || undefined}>{opt.text}</md-outlined-button>
                 ))}
               </div>
             )}
