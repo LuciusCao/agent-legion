@@ -6,7 +6,7 @@ from typing import Any
 from server.app.db import Database
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.download import download_video
-from server.app.pipeline.fetch_url import fetch_knowledge_url, fetch_question_url, get_token
+from server.app.pipeline.fetch_url import get_token, lookup_knowledge_video, lookup_question_video
 from server.app.pipeline.openclaw import OpenClawRunner
 from server.app.pipeline.phases import AGENT_PHASES, next_phase
 from server.app.pipeline.runners import build_openclaw_runner
@@ -124,6 +124,7 @@ def process_video_once(
     if phase == "waiting_for_url" or not video["source_url"]:
         cms = settings.config.get("cms", {})
         fetched_url = ""
+        fetched_source_uuid = ""
         fetch_error = ""
         try:
             if cms and video.get("external_id"):
@@ -131,21 +132,25 @@ def process_video_once(
                 token = get_token(env, cms)
                 if video.get("content_type") == "knowledge":
                     api_url = cms.get("knowledge_url")
-                    fetched_url = fetch_knowledge_url(video["external_id"], api_url, token) or ""
+                    lookup = lookup_knowledge_video(video["external_id"], api_url, token)
                 else:
                     api_url = cms.get("question_url")
-                    fetched_url = fetch_question_url(video["external_id"], api_url, token) or ""
+                    lookup = lookup_question_video(video["external_id"], api_url, token)
+                fetched_url = lookup.url or ""
+                fetched_source_uuid = lookup.source_uuid or ""
         except Exception as exc:
             fetched_url = ""
             fetch_error = f"fetch url failed: {exc}"
         if fetched_url:
-            db.update_video(
-                video_id,
-                source_url=fetched_url,
-                status="queued",
-                current_phase="download",
-                error_message="",
-            )
+            update_fields: dict[str, Any] = {
+                "source_url": fetched_url,
+                "status": "queued",
+                "current_phase": "download",
+                "error_message": "",
+            }
+            if fetched_source_uuid:
+                update_fields["source_uuid"] = fetched_source_uuid
+            db.update_video(video_id, **update_fields)
             video = db.get_video(video_id)
             phase = video["current_phase"]
         else:

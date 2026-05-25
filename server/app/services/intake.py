@@ -22,17 +22,17 @@ def normalized_content_type(value: str) -> str:
     return value if value in CONTENT_TYPES else "knowledge"
 
 
-def resolve_video_input(item: VideoInputLike, settings: Settings) -> tuple[str, str, str, str]:
+def resolve_video_input(item: VideoInputLike, settings: Settings) -> tuple[str, str, str, str, str]:
     content_type = normalized_content_type(item.content_type)
     external_id = item.external_id.strip()
     if item.url:
-        return "created", item.url.strip(), item.title.strip(), ""
+        return "created", item.url.strip(), item.title.strip(), "", ""
     if not external_id:
-        return "invalid", "", "", "缺少资源 ID"
+        return "invalid", "", "", "缺少资源 ID", ""
 
     cms = settings.config.get("cms", {})
     if not cms:
-        return "fetch_failed", "", "", "CMS 配置缺失，无法校验资源是否存在"
+        return "fetch_failed", "", "", "CMS 配置缺失，无法校验资源是否存在", ""
 
     token = get_token(cms.get("env", "prod"), cms)
     if content_type == "knowledge":
@@ -41,10 +41,10 @@ def resolve_video_input(item: VideoInputLike, settings: Settings) -> tuple[str, 
         lookup = lookup_question_video(external_id, cms.get("question_url"), token)
 
     if lookup.status == "not_found":
-        return "not_found", "", "", "资源不存在"
+        return "not_found", "", "", "资源不存在", ""
     if lookup.status == "missing_url":
-        return "created_missing_url", "", item.title.strip() or lookup.title, ""
-    return "created", lookup.url, item.title.strip() or lookup.title, ""
+        return "created_missing_url", "", item.title.strip() or lookup.title, "", lookup.source_uuid
+    return "created", lookup.url, item.title.strip() or lookup.title, "", lookup.source_uuid
 
 
 def add_video_items(
@@ -88,7 +88,7 @@ def add_video_items(
                 continue
 
         try:
-            result_status, url, title, message = resolve_video_input(item, settings)
+            result_status, url, title, message, cms_source_uuid = resolve_video_input(item, settings)
         except Exception as exc:
             results.append(
                 {
@@ -111,12 +111,13 @@ def add_video_items(
             )
             continue
 
+        source_uuid = getattr(item, "source_uuid", "") or cms_source_uuid
         video = db.create_video(
             url,
             title,
             content_type=content_type,
             external_id=external_id,
-            source_uuid=getattr(item, "source_uuid", ""),
+            source_uuid=source_uuid,
         )
         video_dir = settings.videos_dir / video["id"]
         video_dir.mkdir(parents=True, exist_ok=True)
