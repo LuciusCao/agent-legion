@@ -6,11 +6,10 @@ import { useInteractionStore } from "../stores/interactionStore";
 import { useUiStore } from "../stores/uiStore";
 import { useVideoStore } from "../stores/videoStore";
 import { VideoPlayer } from "../components/VideoPlayer";
-import { ChapterStrip } from "../components/ChapterStrip";
+import { TimelineStrip } from "../components/TimelineStrip";
 import { PhaseRunsPanel } from "../components/PhaseRunsPanel";
 import { InteractionOverlay } from "../components/InteractionOverlay";
 import { useVideoPhaseEvents } from "../hooks/useVideoPhaseEvents";
-import { DetailTabs } from "../components/DetailTabs";
 import { SubtitlePanel } from "../components/SubtitlePanel";
 import { NodePanel } from "../components/NodePanel";
 import { MetadataPanel } from "../components/MetadataPanel";
@@ -21,6 +20,8 @@ import { statusGroup, triggerDownload } from "../helpers";
 import { PhaseStepper } from "../components/PhaseStepper";
 import { api } from "../api";
 
+type MoreDialogType = "subtitles" | "nodes" | "metadata" | null;
+
 export function DetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -29,12 +30,13 @@ export function DetailPage() {
   const phaseSidebarRef = useRef<HTMLElement>(null);
   const previousPlaybackTimeRef = useRef<number | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
+  const [moreDialogOpen, setMoreDialogOpen] = useState(false);
+  const [moreDialogType, setMoreDialogType] = useState<MoreDialogType>(null);
 
   const {
     currentVideo,
     phaseRuns,
     transcriptionRuns,
-    activeTab,
     loadVideo,
     loadLog,
   } = useDetailStore();
@@ -216,6 +218,16 @@ export function DetailPage() {
     [id, fetchVideos, loadVideo, loadLog, showToast]
   );
 
+  const openMoreDialog = (type: MoreDialogType) => {
+    setMoreDialogOpen(false);
+    setMoreDialogType(type);
+  };
+
+  const closeMoreDialog = () => {
+    setMoreDialogOpen(false);
+    setMoreDialogType(null);
+  };
+
   return (
     <section className="view detail-view">
       <section className="detail-upper">
@@ -258,6 +270,9 @@ export function DetailPage() {
               >
                 <md-icon>inventory_2</md-icon>
               </md-icon-button>
+              <md-icon-button id="more-menu-btn" onClick={() => setMoreDialogOpen(true)} title="更多">
+                <md-icon>more_vert</md-icon>
+              </md-icon-button>
               <md-icon-button style={{ color: "var(--md-sys-color-error)" }} onClick={openDeleteDialog} title="删除">
                 <md-icon>delete</md-icon>
               </md-icon-button>
@@ -272,11 +287,17 @@ export function DetailPage() {
               videoRef={playerRef}
             />
           )}
-          <ChapterStrip
-            chapters={artifacts.chapters}
-            currentTime={currentTime}
-            onSeek={handleSeek}
-          />
+
+          {currentVideo && (
+            <TimelineStrip
+              chapters={artifacts.chapters}
+              interactions={artifacts.interactions}
+              duration={currentVideo.duration}
+              currentTime={currentTime}
+              onSeek={handleSeek}
+              onReplayInteraction={replayInteraction}
+            />
+          )}
         </div>
         <aside className="phase-runs-sidebar" ref={phaseSidebarRef}>
           <PhaseRunsPanel
@@ -289,15 +310,6 @@ export function DetailPage() {
         </aside>
       </section>
 
-      <section className="detail-bottom">
-        {currentVideo && <DetailTabs contentType={currentVideo.content_type} />}
-        <div className="tab-panel">
-          {activeTab === "subtitles" && <SubtitlePanel currentTime={currentTime} onSeek={handleSeek} />}
-          {activeTab === "nodes" && <NodePanel onSeek={handleSeek} replayInteraction={replayInteraction} />}
-          {activeTab === "metadata" && <MetadataPanel />}
-        </div>
-      </section>
-
       <InteractionOverlay
         node={activeNode}
         currentSentence={currentSentence}
@@ -308,6 +320,105 @@ export function DetailPage() {
 
       <RerunDialog video={currentVideo} onConfirm={handleRerun} />
       <DeleteDialog onConfirm={handleDeleteConfirm} />
+
+      {/* More menu dialog */}
+      {moreDialogOpen && (
+        <md-dialog
+          open
+          onClosed={closeMoreDialog}
+          style={{ "--md-dialog-container-color": "#ffffff" } as React.CSSProperties}
+        >
+          <div slot="headline">更多信息</div>
+          <div slot="content" style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: "200px" }}>
+            <md-text-button
+              style={{ justifyContent: "flex-start" }}
+              onClick={() => openMoreDialog("subtitles")}
+            >
+              <md-icon slot="icon">subtitles</md-icon>
+              字幕
+            </md-text-button>
+            {currentVideo?.content_type === "knowledge" && (
+              <md-text-button
+                style={{ justifyContent: "flex-start" }}
+                onClick={() => openMoreDialog("nodes")}
+              >
+                <md-icon slot="icon">account_tree</md-icon>
+                交互节点
+              </md-text-button>
+            )}
+            <md-text-button
+              style={{ justifyContent: "flex-start" }}
+              onClick={() => openMoreDialog("metadata")}
+            >
+              <md-icon slot="icon">data_object</md-icon>
+              元数据
+            </md-text-button>
+          </div>
+          <div slot="actions">
+            <md-text-button onClick={closeMoreDialog}>关闭</md-text-button>
+          </div>
+        </md-dialog>
+      )}
+
+      {/* Interaction nodes dialog */}
+      {moreDialogType === "nodes" && (
+        <md-dialog
+          open
+          onClosed={closeMoreDialog}
+          style={{ "--md-dialog-container-color": "#ffffff", maxWidth: "760px", width: "90vw" } as React.CSSProperties}
+        >
+          <div slot="headline">交互节点</div>
+          <div slot="content" style={{ maxHeight: "60vh", overflow: "auto", padding: "8px 0" }}>
+            <NodePanel
+              onSeek={(time) => {
+                handleSeek(time);
+                closeMoreDialog();
+              }}
+              replayInteraction={replayInteraction}
+            />
+          </div>
+          <div slot="actions">
+            <md-text-button onClick={closeMoreDialog}>关闭</md-text-button>
+          </div>
+        </md-dialog>
+      )}
+
+      {/* Subtitle dialog */}
+      {moreDialogType === "subtitles" && (
+        <md-dialog
+          open
+          onClosed={closeMoreDialog}
+          style={{ "--md-dialog-container-color": "#ffffff", maxWidth: "720px", width: "90vw" } as React.CSSProperties}
+        >
+          <div slot="headline">字幕</div>
+          <div slot="content" style={{ maxHeight: "60vh", overflow: "auto", padding: "8px 0" }}>
+            <SubtitlePanel currentTime={currentTime} onSeek={(time) => {
+              handleSeek(time);
+              closeMoreDialog();
+            }} />
+          </div>
+          <div slot="actions">
+            <md-text-button onClick={closeMoreDialog}>关闭</md-text-button>
+          </div>
+        </md-dialog>
+      )}
+
+      {/* Metadata dialog */}
+      {moreDialogType === "metadata" && (
+        <md-dialog
+          open
+          onClosed={closeMoreDialog}
+          style={{ "--md-dialog-container-color": "#ffffff", maxWidth: "640px", width: "90vw" } as React.CSSProperties}
+        >
+          <div slot="headline">元数据</div>
+          <div slot="content" style={{ maxHeight: "60vh", overflow: "auto" }}>
+            <MetadataPanel />
+          </div>
+          <div slot="actions">
+            <md-text-button onClick={closeMoreDialog}>关闭</md-text-button>
+          </div>
+        </md-dialog>
+      )}
     </section>
   );
 }

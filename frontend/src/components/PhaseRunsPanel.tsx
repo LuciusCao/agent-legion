@@ -151,8 +151,9 @@ export function PhaseRunsPanel({
     const latestItems: TimelineItem[] = [];
     for (const phase of currentPhases) {
       let run = latestByPhase.get(phase);
-      const phaseWasRerun = run ? sorted.some((candidate) => (
-        candidate.phase_key === phase && candidate.id < run.id
+      const runId = run?.id;
+      const phaseWasRerun = runId !== undefined ? sorted.some((candidate) => (
+        candidate.phase_key === phase && candidate.id < runId
       )) : false;
       if (
         currentPhase === phase &&

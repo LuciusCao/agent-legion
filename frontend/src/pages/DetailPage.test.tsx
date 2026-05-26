@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { DetailPage } from "./DetailPage";
 import { useDetailStore } from "../stores/detailStore";
@@ -136,7 +136,7 @@ describe("DetailPage", () => {
     }
   });
 
-  it("switches tab panel when a material tab change event fires", async () => {
+  it("renders timeline with chapters and interactions", async () => {
     mockApi
       .mockResolvedValueOnce({
         video: {
@@ -153,6 +153,8 @@ describe("DetailPage", () => {
           storage_dir: "/tmp/v1",
           duration: 120,
         },
+        phase_runs: [],
+        transcription_runs: [],
       })
       .mockResolvedValueOnce({
         subtitles: [{ index: 1, start: 1, end: 3, text: "字幕内容" }],
@@ -173,19 +175,67 @@ describe("DetailPage", () => {
     );
 
     await waitFor(() => {
-      expect(screen.getByText("字幕内容")).toBeInTheDocument();
+      expect(screen.getByText("Video 1")).toBeInTheDocument();
     });
 
-    const tabs = document.querySelector("md-tabs") as HTMLElement & { activeTabIndex: number };
-    act(() => {
-      tabs.activeTabIndex = 1;
-      tabs.dispatchEvent(new Event("change", { bubbles: true }));
-    });
+    // Timeline should show both chapters and interactions as chips
+    // ChapterStrip + TimelineStrip both render md-suggestion-chip elements
+    const chips = document.querySelectorAll("md-suggestion-chip");
+    expect(chips.length).toBeGreaterThanOrEqual(2);
+
+    // Subtitles should not be visible by default (in dialog only)
+    expect(document.querySelector("md-dialog")).not.toBeInTheDocument();
+  });
+
+  it("opens interaction details from the more menu and replays a node", async () => {
+    mockApi
+      .mockResolvedValueOnce({
+        video: {
+          id: "v1",
+          title: "Video 1",
+          source_url: "https://example.com/v1.mp4",
+          content_type: "knowledge",
+          external_id: "K001",
+          knowledge_code: "K001",
+          question_id: "",
+          status: "completed",
+          current_phase: "assemble",
+          error_message: "",
+          storage_dir: "/tmp/v1",
+          duration: 120,
+        },
+        phase_runs: [],
+        transcription_runs: [],
+      })
+      .mockResolvedValueOnce({
+        subtitles: [],
+        chapters: [],
+        interactions: [{ id: "n1", trigger_time: 5, instruction: "节点内容", answer: ["hello"] }],
+        metadata: null,
+        review: null,
+        checklist: null,
+      })
+      .mockResolvedValueOnce({ log: "ok" });
+
+    render(
+      <MemoryRouter initialEntries={["/videos/v1"]}>
+        <Routes>
+          <Route path="/videos/:id" element={<DetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
 
     await waitFor(() => {
-      expect(screen.getByText("节点内容")).toBeInTheDocument();
+      expect(screen.getByText("Video 1")).toBeInTheDocument();
     });
-    expect(screen.queryByText("字幕内容")).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle("更多"));
+    fireEvent.click(screen.getByText("交互节点"));
+
+    const nodeEntry = await screen.findByText("节点内容");
+    fireEvent.click(nodeEntry);
+
+    expect(await screen.findByText("hello")).toBeInTheDocument();
   });
 
   it("exposes the full detail title through a custom hover tooltip", async () => {
