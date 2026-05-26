@@ -63,7 +63,7 @@ function makeVideo(overrides: Partial<VideoItem> = {}): VideoItem {
 }
 
 describe("PhaseRunsPanel", () => {
-  it("renders the phase stepper above the summary when video context is provided", () => {
+  it("renders the phase stepper and history toggle in the header when video context is provided", () => {
     const runs = [
       makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
       makeRun(2, "transcribe", "running", { started_at: "2024-01-01T00:00:35Z" }),
@@ -79,9 +79,10 @@ describe("PhaseRunsPanel", () => {
     );
 
     const stepper = document.querySelector('[class*="phaseStepper"]');
-    const summary = screen.getByText(/1\s*\/\s*7/).closest("div");
+    const toggle = screen.getByText("历史");
     expect(stepper).toBeInTheDocument();
-    expect(stepper?.compareDocumentPosition(summary!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+    expect(toggle).toBeInTheDocument();
+    expect(toggle.closest('[class*="panelStepper"]')).toBe(stepper?.parentElement);
   });
 
   it("renders latest view by default", () => {
@@ -100,7 +101,7 @@ describe("PhaseRunsPanel", () => {
       makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
       makeRun(2, "transcribe", "running", { started_at: "2024-01-01T00:00:35Z" }),
     ];
-    render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
+    render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} video={makeVideo()} contentType="knowledge" />);
     fireEvent.click(screen.getByText("历史"));
     expect(screen.getByText("当前")).toBeInTheDocument();
     expect(screen.getByText("下载")).toBeInTheDocument();
@@ -117,18 +118,17 @@ describe("PhaseRunsPanel", () => {
         error_message: "fail",
       }),
     ];
-    render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
+    render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} video={makeVideo()} contentType="knowledge" />);
     fireEvent.click(screen.getByText("历史"));
     expect(screen.getByText(/第2次/)).toBeInTheDocument();
   });
 
-  it("shows correct summary after rerun from transcribe", () => {
+  it("shows running status after rerun from transcribe", () => {
     const runs = [
       makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
       makeRun(2, "transcribe", "running", { started_at: "2024-01-01T00:01:00Z" }),
     ];
     render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
-    expect(screen.getByText(/1\s*\/\s*7/)).toBeInTheDocument();
     const badges = screen.getAllByText("处理中");
     expect(badges.length).toBeGreaterThanOrEqual(1);
   });
@@ -147,7 +147,6 @@ describe("PhaseRunsPanel", () => {
 
     render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
 
-    expect(screen.getByText(/1\s*\/\s*7/)).toBeInTheDocument();
     expect(screen.getByText("下载")).toBeInTheDocument();
     expect(screen.getByText("转录")).toBeInTheDocument();
     expect(screen.queryByText("字幕审核")).not.toBeInTheDocument();
@@ -195,7 +194,6 @@ describe("PhaseRunsPanel", () => {
       />
     );
 
-    expect(screen.getByText(/1\s*\/\s*7/)).toBeInTheDocument();
     expect(screen.getByText("下载")).toBeInTheDocument();
     expect(screen.getByText("转录")).toBeInTheDocument();
     expect(screen.getByText("排队中")).toBeInTheDocument();

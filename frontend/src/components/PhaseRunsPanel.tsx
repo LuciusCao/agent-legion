@@ -130,7 +130,7 @@ export function PhaseRunsPanel({
 
   const allPhases = contentType === "question" ? QUESTION_PHASES : KNOWLEDGE_PHASES;
 
-  const { latestItems, historyItems, summary } = useMemo(() => {
+  const { latestItems, historyItems } = useMemo(() => {
     const sorted = [...phaseRuns].sort((a, b) => a.id - b.id);
 
     // --- latestItems: each phase's latest record, in pipeline order ---
@@ -194,24 +194,9 @@ export function PhaseRunsPanel({
       historyItems.push({ ...buildItem(run, prev, now, transcriptionRuns), occurrence: count });
     }
 
-    // --- summary: always based on latest record of each phase ---
-    const latestRuns = latestItems.map((item) => item.run);
-    const completedCount = latestRuns.filter((r) => r.status === "completed").length;
-
-    const hasRunning = latestRuns.some((r) => r.status === "running");
-    const hasFailed = latestRuns.some((r) => r.status === "failed");
-    const isCompleted = completedCount >= allPhases.length;
-
-    let status: string;
-    if (hasRunning) status = "running";
-    else if (hasFailed) status = "failed";
-    else if (isCompleted) status = "completed";
-    else status = "pending";
-
     return {
       latestItems,
       historyItems,
-      summary: { completedCount, totalCount: allPhases.length, status },
     };
   }, [phaseRuns, transcriptionRuns, now, allPhases, currentPhase, videoStatus]);
 
@@ -234,22 +219,9 @@ export function PhaseRunsPanel({
       {video && (
         <div className={styles.panelStepper}>
           <PhaseStepper video={video} />
-        </div>
-      )}
-
-      {summary.totalCount > 0 && (
-        <div className={styles.phaseRunsSummary}>
-          <div className={styles.summaryMain}>
-            <span className={styles.summaryCount}>
-              {summary.completedCount} / {summary.totalCount}
-            </span>
-            <span className={styles.summaryLabel}>阶段完成</span>
-          </div>
-          <div className={styles.summaryMeta}>
-            <md-text-button onClick={() => setViewMode((v) => (v === "latest" ? "history" : "latest"))}>
-              {viewMode === "latest" ? "历史" : "当前"}
-            </md-text-button>
-          </div>
+          <md-text-button onClick={() => setViewMode((v) => (v === "latest" ? "history" : "latest"))}>
+            {viewMode === "latest" ? "历史" : "当前"}
+          </md-text-button>
         </div>
       )}
 
