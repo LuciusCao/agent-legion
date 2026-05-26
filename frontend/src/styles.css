@@ -196,8 +196,11 @@ h1 {
 /* Detail view */
 .detail-view {
   display: grid;
-  grid-template-rows: auto auto 1fr;
-  gap: 16px;
+  grid-template-rows: minmax(0, 1fr);
+  gap: 0;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .detail-upper {
@@ -209,7 +212,9 @@ h1 {
     "primary sidebar";
   align-items: stretch;
   gap: 16px;
-  min-height: calc(100vh - 40px);
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
 }
 
 .detail-primary {
@@ -293,8 +298,9 @@ h1 {
   padding: 16px;
   display: flex;
   flex-direction: column;
-  overflow: auto;
+  overflow: hidden;
   min-height: 0;
+  max-height: 100%;
 }
 
 .detail-bottom {
@@ -436,12 +442,15 @@ pre {
       "topbar"
       "primary"
       "sidebar";
+    height: auto;
+    max-height: none;
     min-height: 0;
   }
 
   .phase-runs-sidebar {
     align-self: start;
     max-height: none;
+    overflow: visible;
   }
 }
 
