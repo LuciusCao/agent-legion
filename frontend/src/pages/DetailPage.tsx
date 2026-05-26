@@ -15,7 +15,7 @@ import { NodePanel } from "../components/NodePanel";
 import { MetadataPanel } from "../components/MetadataPanel";
 import { RerunDialog } from "../components/RerunDialog";
 import { DeleteDialog } from "../components/DeleteDialog";
-import { TYPE_LABELS, PHASE_LABELS, STATUS_LABELS } from "../labels";
+import { TYPE_LABELS, STATUS_LABELS } from "../labels";
 import { statusGroup, triggerDownload } from "../helpers";
 import { api } from "../api";
 
@@ -204,25 +204,18 @@ export function DetailPage() {
           <div className="detail-title-block" data-tooltip={detailTitle}>
             <h1>{detailTitle}</h1>
             {currentVideo && (
-              <p>
-                {TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}
+              <p className="detail-meta-line">
+                <span>{TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}</span>
+                <span className={`status-badge ${statusGroup(currentVideo)}`}>
+                  {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
+                </span>
+                {!!currentVideo.packed && <span className="packed-badge">已打包</span>}
               </p>
             )}
             {currentVideo?.error_message && (
               <p className="error-text" style={{ marginTop: 4 }}>{currentVideo.error_message}</p>
             )}
           </div>
-          {currentVideo && (
-            <div className="detail-progress">
-              <span className={`phase-name ${currentVideo.status === "running" ? "running-text" : ""}`}>
-                {PHASE_LABELS[currentVideo.current_phase]}
-              </span>
-              <span className={`status-badge ${statusGroup(currentVideo)}`}>
-                {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
-              </span>
-              {!!currentVideo.packed && <span className="packed-badge">已打包</span>}
-            </div>
-          )}
           <div className="detail-actions">
             <md-icon-button onClick={openRerunDialog} title="重跑">
               <md-icon>restart_alt</md-icon>

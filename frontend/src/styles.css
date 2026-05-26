@@ -161,11 +161,6 @@ h1 {
   white-space: nowrap;
 }
 
-.phase-name.running-text {
-  color: var(--status-running-border);
-  font-weight: 600;
-}
-
 .interaction-stats {
   font-size: 12px;
   color: var(--md-sys-color-on-surface-variant);
@@ -228,16 +223,9 @@ h1 {
 .detail-topbar {
   grid-area: topbar;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
   gap: 12px;
-  min-width: 0;
-}
-
-.detail-progress {
-  display: flex;
-  align-items: center;
-  gap: 8px;
   min-width: 0;
 }
 
@@ -251,6 +239,19 @@ h1 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.detail-meta-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.detail-meta-line > span:first-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .detail-title-block::after {
@@ -422,10 +423,6 @@ pre {
 
   .detail-topbar {
     grid-template-columns: auto minmax(0, 1fr) auto;
-  }
-
-  .detail-progress {
-    grid-column: 1 / -1;
   }
 
   .detail-actions {

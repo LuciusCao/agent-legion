@@ -75,6 +75,7 @@ describe("DetailPage", () => {
           error_message: "",
           storage_dir: "/tmp/v1",
           duration: 120,
+          packed: true,
         },
         phase_runs: [],
         transcription_runs: [],
@@ -104,11 +105,16 @@ describe("DetailPage", () => {
     const upper = document.querySelector(".detail-upper");
     const primary = document.querySelector(".detail-primary");
     const topbar = document.querySelector(".detail-topbar");
+    const titleBlock = document.querySelector(".detail-title-block");
     const sidebar = document.querySelector(".phase-runs-sidebar") as HTMLElement;
 
     expect(upper).toContainElement(primary);
     expect(upper).toContainElement(sidebar);
     expect(upper).toContainElement(topbar);
+    expect(titleBlock).toContainElement(screen.getByText("已完成"));
+    expect(titleBlock).toContainElement(screen.getByText("已打包"));
+    expect(topbar?.querySelector(".phase-name")).not.toBeInTheDocument();
+    expect(topbar?.querySelector(".detail-progress")).not.toBeInTheDocument();
     expect(primary).not.toContainElement(topbar);
     expect(upper?.firstElementChild).toBe(topbar);
     expect(topbar?.nextElementSibling).toBe(primary);
