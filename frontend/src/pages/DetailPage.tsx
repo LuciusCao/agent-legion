@@ -265,7 +265,13 @@ export function DetailPage() {
           />
         </div>
         <aside className="phase-runs-sidebar" ref={phaseSidebarRef}>
-          <PhaseRunsPanel phaseRuns={phaseRuns} transcriptionRuns={transcriptionRuns} contentType={currentVideo?.content_type} />
+          <PhaseRunsPanel
+            phaseRuns={phaseRuns}
+            transcriptionRuns={transcriptionRuns}
+            contentType={currentVideo?.content_type}
+            currentPhase={currentVideo?.current_phase}
+            videoStatus={currentVideo?.status}
+          />
         </aside>
       </section>
 
