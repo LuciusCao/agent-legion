@@ -59,14 +59,15 @@ function buildItem(
   run: PhaseRun,
   prevRun: PhaseRun | null,
   now: number,
-  transcriptionRuns: TranscriptionRun[]
+  transcriptionRuns: TranscriptionRun[],
+  resetQueueTime = false
 ): TimelineItem {
   const started = new Date(run.started_at).getTime();
   const finished = run.finished_at ? new Date(run.finished_at).getTime() : null;
   const prevFinished = prevRun?.finished_at ? new Date(prevRun.finished_at).getTime() : null;
 
   let queueTime = 0;
-  if (prevFinished) {
+  if (!resetQueueTime && prevFinished) {
     queueTime = Math.max(0, started - prevFinished);
   }
 
@@ -150,6 +151,9 @@ export function PhaseRunsPanel({
     const latestItems: TimelineItem[] = [];
     for (const phase of currentPhases) {
       let run = latestByPhase.get(phase);
+      const phaseWasRerun = run ? sorted.some((candidate) => (
+        candidate.phase_key === phase && candidate.id < run.id
+      )) : false;
       if (
         currentPhase === phase &&
         videoStatus &&
@@ -171,7 +175,7 @@ export function PhaseRunsPanel({
       }
       if (run) {
         const prev = latestItems.length > 0 ? latestItems[latestItems.length - 1].run : null;
-        latestItems.push(buildItem(run, prev, now, transcriptionRuns));
+        latestItems.push(buildItem(run, prev, now, transcriptionRuns, phaseWasRerun || run.id < 0));
       }
     }
 
