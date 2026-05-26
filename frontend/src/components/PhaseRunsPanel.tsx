@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
-import type { PhaseRun, TranscriptionRun, ContentType } from "../types";
+import type { PhaseRun, TranscriptionRun, ContentType, VideoItem } from "../types";
 import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES, STATUS_LABELS, STATUS_ICONS } from "../labels";
 import { formatDuration } from "../lib/formatters";
+import { PhaseStepper } from "./PhaseStepper";
 import { TranscriptionDetails } from "./TranscriptionDetails";
 import styles from "./PhaseRunsPanel.module.css";
 
@@ -9,6 +10,7 @@ import styles from "./PhaseRunsPanel.module.css";
 interface PhaseRunsPanelProps {
   phaseRuns: PhaseRun[];
   transcriptionRuns: TranscriptionRun[];
+  video?: VideoItem | null;
   contentType?: ContentType;
   currentPhase?: string;
   videoStatus?: string;
@@ -112,6 +114,7 @@ const BADGE_STATUS_CLASS: Record<string, string> = {
 export function PhaseRunsPanel({
   phaseRuns,
   transcriptionRuns,
+  video,
   contentType,
   currentPhase,
   videoStatus,
@@ -228,6 +231,12 @@ export function PhaseRunsPanel({
 
   return (
     <div className={styles.phaseRunsPanel}>
+      {video && (
+        <div className={styles.panelStepper}>
+          <PhaseStepper video={video} />
+        </div>
+      )}
+
       {summary.totalCount > 0 && (
         <div className={styles.phaseRunsSummary}>
           <div className={styles.summaryMain}>

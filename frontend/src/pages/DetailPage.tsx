@@ -17,7 +17,6 @@ import { RerunDialog } from "../components/RerunDialog";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { TYPE_LABELS, PHASE_LABELS, STATUS_LABELS } from "../labels";
 import { statusGroup, triggerDownload } from "../helpers";
-import { PhaseStepper } from "../components/PhaseStepper";
 import { api } from "../api";
 
 type MoreDialogType = "subtitles" | "nodes" | "metadata" | null;
@@ -26,8 +25,6 @@ export function DetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const playerRef = useRef<HTMLVideoElement>(null);
-  const detailPrimaryRef = useRef<HTMLDivElement>(null);
-  const phaseSidebarRef = useRef<HTMLElement>(null);
   const previousPlaybackTimeRef = useRef<number | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
   const [moreDialogOpen, setMoreDialogOpen] = useState(false);
@@ -77,37 +74,6 @@ export function DetailPage() {
     loadArtifacts(id);
     loadLog(id);
   }, [id, loadVideo, loadArtifacts, loadLog]);
-
-  const syncPhaseSidebarMaxHeight = useCallback(() => {
-    const primary = detailPrimaryRef.current;
-    const sidebar = phaseSidebarRef.current;
-    if (!primary || !sidebar) return;
-
-    sidebar.style.setProperty(
-      "--detail-primary-height",
-      `${primary.getBoundingClientRect().height}px`
-    );
-  }, []);
-
-  useEffect(() => {
-    const primary = detailPrimaryRef.current;
-    if (!primary) return;
-
-    const resizeObserver = new ResizeObserver(syncPhaseSidebarMaxHeight);
-    resizeObserver.observe(primary);
-    syncPhaseSidebarMaxHeight();
-
-    const raf = requestAnimationFrame(syncPhaseSidebarMaxHeight);
-
-    return () => {
-      resizeObserver.disconnect();
-      cancelAnimationFrame(raf);
-    };
-  }, [syncPhaseSidebarMaxHeight]);
-
-  useEffect(() => {
-    syncPhaseSidebarMaxHeight();
-  }, [currentVideo, artifacts.chapters.length, syncPhaseSidebarMaxHeight]);
 
   const prevPhaseRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);
@@ -231,54 +197,53 @@ export function DetailPage() {
   return (
     <section className="view detail-view">
       <section className="detail-upper">
-        <div className="detail-primary" ref={detailPrimaryRef}>
-          <header className="detail-topbar">
-            <md-icon-button onClick={() => navigate("/")}>
-              <md-icon>arrow_back</md-icon>
-            </md-icon-button>
-            <div className="detail-title-block" data-tooltip={detailTitle}>
-              <h1>{detailTitle}</h1>
-              {currentVideo && (
-                <p>
-                  {TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}
-                </p>
-              )}
-              {currentVideo?.error_message && (
-                <p className="error-text" style={{ marginTop: 4 }}>{currentVideo.error_message}</p>
-              )}
-            </div>
+        <header className="detail-topbar">
+          <md-icon-button onClick={() => navigate("/")}>
+            <md-icon>arrow_back</md-icon>
+          </md-icon-button>
+          <div className="detail-title-block" data-tooltip={detailTitle}>
+            <h1>{detailTitle}</h1>
             {currentVideo && (
-              <div className="detail-progress">
-                <span className={`phase-name ${currentVideo.status === "running" ? "running-text" : ""}`}>
-                  {PHASE_LABELS[currentVideo.current_phase]}
-                </span>
-                <PhaseStepper video={currentVideo} />
-                <span className={`status-badge ${statusGroup(currentVideo)}`}>
-                  {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
-                </span>
-                {!!currentVideo.packed && <span className="packed-badge">已打包</span>}
-              </div>
+              <p>
+                {TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}
+              </p>
             )}
-            <div className="detail-actions">
-              <md-icon-button onClick={openRerunDialog} title="重跑">
-                <md-icon>restart_alt</md-icon>
-              </md-icon-button>
-              <md-icon-button
-                disabled={(!currentVideo || currentVideo.status !== "completed") || undefined}
-                onClick={handlePackage}
-                title="打包"
-              >
-                <md-icon>inventory_2</md-icon>
-              </md-icon-button>
-              <md-icon-button id="more-menu-btn" onClick={() => setMoreDialogOpen(true)} title="更多">
-                <md-icon>more_vert</md-icon>
-              </md-icon-button>
-              <md-icon-button style={{ color: "var(--md-sys-color-error)" }} onClick={openDeleteDialog} title="删除">
-                <md-icon>delete</md-icon>
-              </md-icon-button>
+            {currentVideo?.error_message && (
+              <p className="error-text" style={{ marginTop: 4 }}>{currentVideo.error_message}</p>
+            )}
+          </div>
+          {currentVideo && (
+            <div className="detail-progress">
+              <span className={`phase-name ${currentVideo.status === "running" ? "running-text" : ""}`}>
+                {PHASE_LABELS[currentVideo.current_phase]}
+              </span>
+              <span className={`status-badge ${statusGroup(currentVideo)}`}>
+                {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
+              </span>
+              {!!currentVideo.packed && <span className="packed-badge">已打包</span>}
             </div>
-          </header>
+          )}
+          <div className="detail-actions">
+            <md-icon-button onClick={openRerunDialog} title="重跑">
+              <md-icon>restart_alt</md-icon>
+            </md-icon-button>
+            <md-icon-button
+              disabled={(!currentVideo || currentVideo.status !== "completed") || undefined}
+              onClick={handlePackage}
+              title="打包"
+            >
+              <md-icon>inventory_2</md-icon>
+            </md-icon-button>
+            <md-icon-button style={{ color: "var(--md-sys-color-error)" }} onClick={openDeleteDialog} title="删除">
+              <md-icon>delete</md-icon>
+            </md-icon-button>
+            <md-icon-button id="more-menu-btn" onClick={() => setMoreDialogOpen(true)} title="更多">
+              <md-icon>more_vert</md-icon>
+            </md-icon-button>
+          </div>
+        </header>
 
+        <div className="detail-primary">
           {currentVideo && (
             <VideoPlayer
               video={currentVideo}
@@ -292,17 +257,17 @@ export function DetailPage() {
             <TimelineStrip
               chapters={artifacts.chapters}
               interactions={artifacts.interactions}
-              duration={currentVideo.duration}
               currentTime={currentTime}
               onSeek={handleSeek}
               onReplayInteraction={replayInteraction}
             />
           )}
         </div>
-        <aside className="phase-runs-sidebar" ref={phaseSidebarRef}>
+        <aside className="phase-runs-sidebar">
           <PhaseRunsPanel
             phaseRuns={phaseRuns}
             transcriptionRuns={transcriptionRuns}
+            video={currentVideo}
             contentType={currentVideo?.content_type}
             currentPhase={currentVideo?.current_phase}
             videoStatus={currentVideo?.status}
@@ -321,7 +286,6 @@ export function DetailPage() {
       <RerunDialog video={currentVideo} onConfirm={handleRerun} />
       <DeleteDialog onConfirm={handleDeleteConfirm} />
 
-      {/* More menu dialog */}
       {moreDialogOpen && (
         <md-dialog
           open
@@ -360,7 +324,6 @@ export function DetailPage() {
         </md-dialog>
       )}
 
-      {/* Interaction nodes dialog */}
       {moreDialogType === "nodes" && (
         <md-dialog
           open
@@ -383,7 +346,6 @@ export function DetailPage() {
         </md-dialog>
       )}
 
-      {/* Subtitle dialog */}
       {moreDialogType === "subtitles" && (
         <md-dialog
           open
@@ -403,7 +365,6 @@ export function DetailPage() {
         </md-dialog>
       )}
 
-      {/* Metadata dialog */}
       {moreDialogType === "metadata" && (
         <md-dialog
           open

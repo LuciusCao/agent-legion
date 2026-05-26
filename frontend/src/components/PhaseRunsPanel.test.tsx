@@ -1,7 +1,7 @@
 import { describe, it, expect } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { PhaseRunsPanel } from "./PhaseRunsPanel";
-import type { TranscriptionRun } from "../types";
+import type { TranscriptionRun, VideoItem } from "../types";
 
 function makeRun(
   id: number,
@@ -42,7 +42,48 @@ function makeTranscriptionRun(provider: string, status = "completed"): Transcrip
   };
 }
 
+function makeVideo(overrides: Partial<VideoItem> = {}): VideoItem {
+  return {
+    id: "v1",
+    title: "Video 1",
+    source_url: "https://example.com/video.mp4",
+    content_type: "knowledge",
+    external_id: "K001",
+    knowledge_code: "K001",
+    question_id: "",
+    source_uuid: "",
+    status: "running",
+    current_phase: "transcribe",
+    error_message: "",
+    storage_dir: "/tmp/v1",
+    duration: 120,
+    packed: false,
+    ...overrides,
+  };
+}
+
 describe("PhaseRunsPanel", () => {
+  it("renders the phase stepper above the summary when video context is provided", () => {
+    const runs = [
+      makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
+      makeRun(2, "transcribe", "running", { started_at: "2024-01-01T00:00:35Z" }),
+    ];
+
+    render(
+      <PhaseRunsPanel
+        phaseRuns={runs}
+        transcriptionRuns={[]}
+        video={makeVideo()}
+        contentType="knowledge"
+      />
+    );
+
+    const stepper = document.querySelector('[class*="phaseStepper"]');
+    const summary = screen.getByText(/1\s*\/\s*7/).closest("div");
+    expect(stepper).toBeInTheDocument();
+    expect(stepper?.compareDocumentPosition(summary!)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+  });
+
   it("renders latest view by default", () => {
     const runs = [
       makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),

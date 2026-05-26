@@ -2,29 +2,42 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  padding: 8px 0;
+  padding: 8px 0 2px;
 }
 
-.chipRow {
+.chipLine {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.rowLabel {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.chipScroller {
   display: flex;
   gap: 8px;
+  min-width: 0;
   overflow-x: auto;
-  padding: 4px 0;
-  flex-wrap: wrap;
-  align-items: center;
+  padding: 2px 0;
+  scrollbar-width: thin;
 }
 
-.chipDivider {
-  width: 1px;
-  height: 20px;
-  background: var(--md-sys-color-outline-variant);
-  margin: 0 4px;
-  flex-shrink: 0;
+.emptyHint {
+  align-self: center;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 12px;
 }
 
-.activeChip {
-  --md-suggestion-chip-container-color: var(--md-sys-color-primary);
-  --md-suggestion-chip-label-text-color: var(--md-sys-color-on-primary);
+.activeChapterChip {
+  --md-suggestion-chip-container-color: var(--md-sys-color-primary-container);
+  --md-suggestion-chip-label-text-color: var(--md-sys-color-on-primary-container);
+  --md-suggestion-chip-outline-color: var(--md-sys-color-primary);
 }
 
 .interactionChip {
@@ -33,80 +46,7 @@
 }
 
 .activeInteractionChip {
-  --md-suggestion-chip-container-color: var(--md-sys-color-secondary);
-  --md-suggestion-chip-label-text-color: var(--md-sys-color-on-secondary);
-}
-
-.trackWrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 0 4px;
-}
-
-.track {
-  position: relative;
-  height: 24px;
-  background: var(--md-sys-color-surface-container-low);
-  border-radius: 12px;
-  border: 1px solid var(--md-sys-color-outline-variant);
-  cursor: pointer;
-  overflow: hidden;
-}
-
-.chapterSegment {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  background: var(--md-sys-color-primary-container);
-  opacity: 0.4;
-  cursor: pointer;
-  transition: opacity 0.15s;
-}
-
-.chapterSegment:hover {
-  opacity: 0.7;
-}
-
-.activeSegment {
-  opacity: 0.7;
-  background: var(--md-sys-color-primary-container);
-}
-
-.nodeMarker {
-  position: absolute;
-  top: 50%;
-  transform: translate(-50%, -50%);
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--md-sys-color-secondary);
-  border: 2px solid var(--md-sys-color-surface);
-  cursor: pointer;
-  z-index: 2;
-  transition: transform 0.15s;
-}
-
-.nodeMarker:hover {
-  transform: translate(-50%, -50%) scale(1.4);
-}
-
-.currentTimeIndicator {
-  position: absolute;
-  top: 0;
-  bottom: 0;
-  width: 2px;
-  background: var(--md-sys-color-primary);
-  transform: translateX(-50%);
-  z-index: 3;
-  pointer-events: none;
-}
-
-.timeLabels {
-  display: flex;
-  justify-content: space-between;
-  font-size: 11px;
-  color: var(--md-sys-color-on-surface-variant);
-  font-variant-numeric: tabular-nums;
-  padding: 0 4px;
+  --md-suggestion-chip-container-color: var(--md-sys-color-secondary-container);
+  --md-suggestion-chip-label-text-color: var(--md-sys-color-on-secondary-container);
+  --md-suggestion-chip-outline-color: var(--md-sys-color-secondary);
 }

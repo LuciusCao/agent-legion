@@ -12,6 +12,14 @@
   margin: 0;
 }
 
+.panel-stepper {
+  padding: 2px 4px 0;
+}
+
+.panel-stepper > div {
+  width: 100%;
+}
+
 .phase-runs-summary {
   display: flex;
   align-items: center;
