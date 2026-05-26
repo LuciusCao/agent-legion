@@ -59,7 +59,7 @@ describe("DetailPage", () => {
     mockApi.mockReset();
   });
 
-  it("caps the phase panel to the measured upper-left column height", async () => {
+  it("lets the top bar span above the full-height phase panel", async () => {
     mockApi
       .mockResolvedValueOnce({
         video: {
@@ -89,25 +89,6 @@ describe("DetailPage", () => {
       })
       .mockResolvedValueOnce({ log: "ok" });
 
-    const spy = vi
-      .spyOn(Element.prototype, "getBoundingClientRect")
-      .mockImplementation(function (this: Element) {
-        if (this.classList.contains("detail-primary")) {
-          return { height: 420 } as DOMRect;
-        }
-        return {
-          height: 0,
-          width: 0,
-          top: 0,
-          left: 0,
-          bottom: 0,
-          right: 0,
-          x: 0,
-          y: 0,
-          toJSON: () => {},
-        } as unknown as DOMRect;
-      });
-
     render(
       <MemoryRouter initialEntries={["/videos/v1"]}>
         <Routes>
@@ -125,18 +106,18 @@ describe("DetailPage", () => {
     const topbar = document.querySelector(".detail-topbar");
     const sidebar = document.querySelector(".phase-runs-sidebar") as HTMLElement;
 
-    try {
-      expect(upper).toContainElement(primary);
-      expect(upper).toContainElement(sidebar);
-      expect(primary).toContainElement(topbar);
-      expect(sidebar.style.getPropertyValue("--detail-primary-height")).toBe("420px");
-      expect(sidebar.style.height).toBe("");
-    } finally {
-      spy.mockRestore();
-    }
+    expect(upper).toContainElement(primary);
+    expect(upper).toContainElement(sidebar);
+    expect(upper).toContainElement(topbar);
+    expect(primary).not.toContainElement(topbar);
+    expect(upper?.firstElementChild).toBe(topbar);
+    expect(topbar?.nextElementSibling).toBe(primary);
+    expect(primary?.nextElementSibling).toBe(sidebar);
+    expect(sidebar.style.getPropertyValue("--detail-primary-height")).toBe("");
+    expect(sidebar.style.height).toBe("");
   });
 
-  it("renders timeline with chapters and interactions", async () => {
+  it("renders chapter and interaction chip rows below the player", async () => {
     mockApi
       .mockResolvedValueOnce({
         video: {
@@ -159,7 +140,7 @@ describe("DetailPage", () => {
       .mockResolvedValueOnce({
         subtitles: [{ index: 1, start: 1, end: 3, text: "字幕内容" }],
         chapters: [{ id: "c1", start: 12, end: 30, title: "第一章" }],
-        interactions: [{ trigger_time: 5, instruction: "节点内容" }],
+        interactions: [{ trigger_time: 5, instruction: "节点内容", type: "example_practice" }],
         metadata: null,
         review: null,
         checklist: null,
@@ -178,16 +159,17 @@ describe("DetailPage", () => {
       expect(screen.getByText("Video 1")).toBeInTheDocument();
     });
 
-    // Timeline should show both chapters and interactions as chips
-    // ChapterStrip + TimelineStrip both render md-suggestion-chip elements
-    const chips = document.querySelectorAll("md-suggestion-chip");
-    expect(chips.length).toBeGreaterThanOrEqual(2);
+    expect(screen.getByText("章节")).toBeInTheDocument();
+    expect(screen.getByText("互动")).toBeInTheDocument();
 
-    // Subtitles should not be visible by default (in dialog only)
-    expect(document.querySelector("md-dialog")).not.toBeInTheDocument();
+    const chips = Array.from(document.querySelectorAll("md-suggestion-chip"));
+    expect(chips.some((chip) => chip.getAttribute("label") === "0:12 第一章")).toBe(true);
+    expect(chips.some((chip) => chip.getAttribute("label") === "0:05 例题试做")).toBe(true);
+    expect(chips.some((chip) => chip.getAttribute("label")?.includes("节点内容"))).toBe(false);
+    expect(document.querySelector("[data-testid='timeline-track']")).not.toBeInTheDocument();
   });
 
-  it("opens interaction details from the more menu and replays a node", async () => {
+  it("keeps the more menu after delete and replays a node from interaction details", async () => {
     mockApi
       .mockResolvedValueOnce({
         video: {
@@ -229,7 +211,13 @@ describe("DetailPage", () => {
       expect(screen.getByText("Video 1")).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTitle("更多"));
+    const actions = document.querySelector(".detail-actions");
+    const deleteButton = screen.getByTitle("删除");
+    const moreButton = screen.getByTitle("更多");
+    expect(actions?.lastElementChild).toBe(moreButton);
+    expect(deleteButton.nextElementSibling).toBe(moreButton);
+
+    fireEvent.click(moreButton);
     fireEvent.click(screen.getByText("交互节点"));
 
     const nodeEntry = await screen.findByText("节点内容");
