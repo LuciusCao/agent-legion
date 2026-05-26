@@ -10,6 +10,8 @@ interface PhaseRunsPanelProps {
   phaseRuns: PhaseRun[];
   transcriptionRuns: TranscriptionRun[];
   contentType?: ContentType;
+  currentPhase?: string;
+  videoStatus?: string;
 }
 
 interface TimelineItem {
@@ -106,7 +108,13 @@ const BADGE_STATUS_CLASS: Record<string, string> = {
   queued: styles.queued,
 };
 
-export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: PhaseRunsPanelProps) {
+export function PhaseRunsPanel({
+  phaseRuns,
+  transcriptionRuns,
+  contentType,
+  currentPhase,
+  videoStatus,
+}: PhaseRunsPanelProps) {
   const [now, setNow] = useState(Date.now());
   const [viewMode, setViewMode] = useState<"latest" | "history">("latest");
   const [expandedDetails, setExpandedDetails] = useState<Set<number>>(new Set());
@@ -131,12 +139,36 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
     }
 
     const latestRun = sorted[sorted.length - 1];
-    const latestPhaseIndex = latestRun ? allPhases.indexOf(latestRun.phase_key) : -1;
+    const currentPhaseIndex = currentPhase ? allPhases.indexOf(currentPhase) : -1;
+    const latestPhaseIndex = currentPhaseIndex >= 0
+      ? currentPhaseIndex
+      : latestRun
+        ? allPhases.indexOf(latestRun.phase_key)
+        : -1;
     const currentPhases = latestPhaseIndex >= 0 ? allPhases.slice(0, latestPhaseIndex + 1) : [];
 
     const latestItems: TimelineItem[] = [];
     for (const phase of currentPhases) {
-      const run = latestByPhase.get(phase);
+      let run = latestByPhase.get(phase);
+      if (
+        currentPhase === phase &&
+        videoStatus &&
+        ["queued", "running"].includes(videoStatus) &&
+        run?.status !== videoStatus
+      ) {
+        run = {
+          id: -1,
+          video_id: run?.video_id ?? "",
+          phase_key: phase,
+          status: videoStatus,
+          started_at: new Date(now).toISOString(),
+          finished_at: null,
+          command_json: run?.command_json ?? "[]",
+          exit_code: null,
+          log_path: "",
+          error_message: "",
+        };
+      }
       if (run) {
         const prev = latestItems.length > 0 ? latestItems[latestItems.length - 1].run : null;
         latestItems.push(buildItem(run, prev, now, transcriptionRuns));
@@ -173,7 +205,7 @@ export function PhaseRunsPanel({ phaseRuns, transcriptionRuns, contentType }: Ph
       historyItems,
       summary: { completedCount, totalCount: allPhases.length, status },
     };
-  }, [phaseRuns, transcriptionRuns, now, allPhases]);
+  }, [phaseRuns, transcriptionRuns, now, allPhases, currentPhase, videoStatus]);
 
   function toggleDetail(runId: number) {
     setExpandedDetails((prev) => {

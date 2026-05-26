@@ -112,6 +112,34 @@ describe("PhaseRunsPanel", () => {
     expect(screen.queryByText("字幕审核")).not.toBeInTheDocument();
   });
 
+  it("shows the rerun phase as queued before the worker creates a new run", () => {
+    const runs = [
+      makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
+      makeRun(2, "transcribe", "completed", { finished_at: "2024-01-01T00:01:30Z" }),
+      makeRun(3, "subtitle_review", "completed", { finished_at: "2024-01-01T00:02:30Z" }),
+      makeRun(4, "chapter_generate", "completed", { finished_at: "2024-01-01T00:03:30Z" }),
+      makeRun(5, "interaction_generate", "completed", { finished_at: "2024-01-01T00:04:30Z" }),
+      makeRun(6, "content_review", "completed", { finished_at: "2024-01-01T00:05:30Z" }),
+      makeRun(7, "assemble", "completed", { finished_at: "2024-01-01T00:06:30Z" }),
+    ];
+
+    render(
+      <PhaseRunsPanel
+        phaseRuns={runs}
+        transcriptionRuns={[]}
+        contentType="knowledge"
+        currentPhase="transcribe"
+        videoStatus="queued"
+      />
+    );
+
+    expect(screen.getByText(/1\s*\/\s*7/)).toBeInTheDocument();
+    expect(screen.getByText("下载")).toBeInTheDocument();
+    expect(screen.getByText("转录")).toBeInTheDocument();
+    expect(screen.getByText("排队中")).toBeInTheDocument();
+    expect(screen.queryByText("字幕审核")).not.toBeInTheDocument();
+  });
+
   it("shows empty state when no phase runs exist", () => {
     render(<PhaseRunsPanel phaseRuns={[]} transcriptionRuns={[]} contentType="knowledge" />);
     expect(screen.getByText("暂无处理记录")).toBeInTheDocument();
