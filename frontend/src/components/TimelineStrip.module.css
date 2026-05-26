@@ -21,11 +21,10 @@
 
 .chipScroller {
   display: flex;
+  flex-wrap: wrap;
   gap: 8px;
   min-width: 0;
-  overflow-x: auto;
   padding: 2px 0;
-  scrollbar-width: thin;
 }
 
 .emptyHint {
