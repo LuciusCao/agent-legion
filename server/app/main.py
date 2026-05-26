@@ -44,12 +44,12 @@ def create_app(
             runner_pool = RunnerPool.from_settings(
                 settings, [a.id for a in agent_manager.agents]
             )
-            for i, runner in enumerate(runner_pool.all_runners()):
-                runner.agent_id = (
-                    agent_manager.agents[i].id
-                    if i < len(agent_manager.agents)
-                    else f"runner-{i}"
-                )
+            runner_counts: dict[str, int] = {}
+            for runner in runner_pool.all_runners():
+                aid = runner.agent_id
+                if aid:
+                    runner_counts[aid] = runner_counts.get(aid, 0) + 1
+            agent_manager.set_runner_counts(runner_counts)
             worker_thread = WorkerThread(db, settings, runner_pool, agent_manager, max_workers)
             worker_thread.start()
         yield

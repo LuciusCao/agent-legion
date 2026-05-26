@@ -12,6 +12,8 @@ class AgentStatus:
     id: str
     name: str
     busy: bool
+    task_count: int = 0
+    max_tasks: int = 1
     current_video_id: str | None = None
     current_title: str = ""
     current_content_type: str = ""
@@ -42,6 +44,10 @@ class AgentStatusManager:
             self.agents = []
         return list(self.agents)
 
+    def set_runner_counts(self, runner_counts: dict[str, int]) -> None:
+        for agent in self.agents:
+            agent.max_tasks = runner_counts.get(agent.id, 1)
+
     def get_all(self) -> list[AgentStatus]:
         return list(self.agents)
 
@@ -52,6 +58,7 @@ class AgentStatusManager:
             self._agent_video_ids[agent_id] = video_id
         for agent in self.agents:
             if agent.id == agent_id:
+                agent.task_count += 1
                 agent.busy = True
                 agent.current_video_id = video_id
                 if isinstance(video, dict):
@@ -68,12 +75,14 @@ class AgentStatusManager:
             self._busy_video_ids.discard(video_id)
         for agent in self.agents:
             if agent.id == agent_id:
-                agent.busy = False
-                agent.current_video_id = None
-                agent.current_title = ""
-                agent.current_content_type = ""
-                agent.current_external_id = ""
-                agent.current_phase = ""
+                agent.task_count = max(0, agent.task_count - 1)
+                agent.busy = agent.task_count > 0
+                if agent.task_count == 0:
+                    agent.current_video_id = None
+                    agent.current_title = ""
+                    agent.current_content_type = ""
+                    agent.current_external_id = ""
+                    agent.current_phase = ""
                 break
         self._broadcast()
 
@@ -86,6 +95,8 @@ class AgentStatusManager:
                 "id": a.id,
                 "name": a.name,
                 "busy": a.busy,
+                "task_count": a.task_count,
+                "max_tasks": a.max_tasks,
                 "current_video_id": a.current_video_id,
                 "current_title": a.current_title,
                 "current_content_type": a.current_content_type,

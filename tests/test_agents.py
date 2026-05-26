@@ -1,7 +1,24 @@
 import json
 import subprocess
+from pathlib import Path
 
 from server.app.agents import AgentStatus, AgentStatusManager
+from server.app.pipeline.openclaw import OpenClawRunner
+
+
+def _agent_dict(**kwargs):
+    defaults = {
+        "busy": False,
+        "task_count": 0,
+        "max_tasks": 1,
+        "current_video_id": None,
+        "current_title": "",
+        "current_content_type": "",
+        "current_external_id": "",
+        "current_phase": "",
+    }
+    defaults.update(kwargs)
+    return defaults
 
 
 def test_discover_parses_openclaw_agents(monkeypatch):
@@ -34,26 +51,8 @@ def test_discover_parses_openclaw_agents(monkeypatch):
         AgentStatus(id="fallback", name="fallback", busy=False),
     ]
     assert manager.to_dicts() == [
-        {
-            "id": "main",
-            "name": "Main Agent",
-            "busy": False,
-            "current_video_id": None,
-            "current_title": "",
-            "current_content_type": "",
-            "current_external_id": "",
-            "current_phase": "",
-        },
-        {
-            "id": "fallback",
-            "name": "fallback",
-            "busy": False,
-            "current_video_id": None,
-            "current_title": "",
-            "current_content_type": "",
-            "current_external_id": "",
-            "current_phase": "",
-        },
+        _agent_dict(id="main", name="Main Agent"),
+        _agent_dict(id="fallback", name="fallback"),
     ]
 
 
@@ -81,6 +80,19 @@ def test_discover_clears_stale_agents_when_json_is_invalid(monkeypatch):
     assert manager.get_all() == []
 
 
+def test_set_runner_counts_updates_max_tasks():
+    manager = AgentStatusManager()
+    manager.agents = [
+        AgentStatus(id="main", name="Main", busy=False),
+        AgentStatus(id="fallback", name="Fallback", busy=False),
+    ]
+
+    manager.set_runner_counts({"main": 3, "fallback": 1})
+
+    assert manager.agents[0].max_tasks == 3
+    assert manager.agents[1].max_tasks == 1
+
+
 def test_set_busy_and_idle_updates_current_video_details():
     manager = AgentStatusManager()
     manager.agents = [AgentStatus(id="main", name="Main", busy=False)]
@@ -96,29 +108,21 @@ def test_set_busy_and_idle_updates_current_video_details():
         },
     )
 
-    assert manager.to_dicts()[0] == {
-        "id": "main",
-        "name": "Main",
-        "busy": True,
-        "current_video_id": "knowledge_K001",
-        "current_title": "奇函数",
-        "current_content_type": "knowledge",
-        "current_external_id": "K001",
-        "current_phase": "transcribe",
-    }
+    assert manager.to_dicts()[0] == _agent_dict(
+        id="main",
+        name="Main",
+        busy=True,
+        task_count=1,
+        current_video_id="knowledge_K001",
+        current_title="奇函数",
+        current_content_type="knowledge",
+        current_external_id="K001",
+        current_phase="transcribe",
+    )
 
     manager.set_idle("main")
 
-    assert manager.to_dicts()[0] == {
-        "id": "main",
-        "name": "Main",
-        "busy": False,
-        "current_video_id": None,
-        "current_title": "",
-        "current_content_type": "",
-        "current_external_id": "",
-        "current_phase": "",
-    }
+    assert manager.to_dicts()[0] == _agent_dict(id="main", name="Main")
 
 
 def test_set_busy_accepts_string_video_id():
@@ -128,16 +132,7 @@ def test_set_busy_accepts_string_video_id():
     manager.set_busy("main", "abc")
 
     assert manager.to_dicts() == [
-        {
-            "id": "main",
-            "name": "Main",
-            "busy": True,
-            "current_video_id": "abc",
-            "current_title": "",
-            "current_content_type": "",
-            "current_external_id": "",
-            "current_phase": "",
-        }
+        _agent_dict(id="main", name="Main", busy=True, task_count=1, current_video_id="abc")
     ]
 
 
@@ -150,3 +145,69 @@ def test_set_idle_clears_busy_video_for_synthetic_runner_id():
     manager.set_idle("runner-0")
 
     assert manager.is_video_busy("knowledge_K001") is False
+
+
+def test_concurrent_set_busy_increments_task_count():
+    manager = AgentStatusManager()
+    manager.agents = [AgentStatus(id="main", name="Main", busy=False, max_tasks=3)]
+
+    manager.set_busy("main", "video_1")
+    manager.set_busy("main", "video_2")
+    manager.set_busy("main", "video_3")
+
+    agent = manager.to_dicts()[0]
+    assert agent["task_count"] == 3
+    assert agent["busy"] is True
+    assert agent["current_video_id"] == "video_3"
+
+
+def test_concurrent_set_idle_decrements_task_count():
+    manager = AgentStatusManager()
+    manager.agents = [AgentStatus(id="main", name="Main", busy=False, max_tasks=3)]
+
+    manager.set_busy("main", "video_1")
+    manager.set_busy("main", "video_2")
+    manager.set_busy("main", "video_3")
+
+    manager.set_idle("main")
+    agent = manager.to_dicts()[0]
+    assert agent["task_count"] == 2
+    assert agent["busy"] is True
+
+    manager.set_idle("main")
+    agent = manager.to_dicts()[0]
+    assert agent["task_count"] == 1
+    assert agent["busy"] is True
+
+    manager.set_idle("main")
+    agent = manager.to_dicts()[0]
+    assert agent["task_count"] == 0
+    assert agent["busy"] is False
+    assert agent["current_video_id"] is None
+
+
+def test_openclaw_runner_extracts_agent_id_from_command_template():
+    runner = OpenClawRunner(
+        command_template=["openclaw", "agent", "--local", "--agent", "main", "--message", "{prompt_text}", "--json"],
+        cwd=Path("."),
+        timeout_seconds=600,
+    )
+    assert runner.agent_id == "main"
+
+
+def test_openclaw_runner_extracts_agent_id_returns_empty_when_missing():
+    runner = OpenClawRunner(
+        command_template=["openclaw", "agent", "--local", "--message", "{prompt_text}", "--json"],
+        cwd=Path("."),
+        timeout_seconds=600,
+    )
+    assert runner.agent_id == ""
+
+
+def test_openclaw_runner_extracts_agent_id_at_end_of_list():
+    runner = OpenClawRunner(
+        command_template=["openclaw", "--agent", "ops"],
+        cwd=Path("."),
+        timeout_seconds=600,
+    )
+    assert runner.agent_id == "ops"

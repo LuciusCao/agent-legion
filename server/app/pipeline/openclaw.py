@@ -25,6 +25,14 @@ class OpenClawRunner:
         self.command_template = command_template
         self.cwd = cwd
         self.timeout_seconds = timeout_seconds
+        self.agent_id = self._extract_agent_id(command_template)
+
+    @staticmethod
+    def _extract_agent_id(command_template: list[str]) -> str:
+        for i, part in enumerate(command_template):
+            if part == "--agent" and i + 1 < len(command_template):
+                return command_template[i + 1]
+        return ""
 
     @staticmethod
     def _sanitize_replacement(value: str) -> str:

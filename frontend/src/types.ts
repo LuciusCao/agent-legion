@@ -29,6 +29,8 @@ export type AgentStatus = {
   id: string;
   name: string;
   busy: boolean;
+  task_count: number;
+  max_tasks: number;
   current_video_id: string | null;
   current_title?: string;
   current_content_type?: ContentType | "";
