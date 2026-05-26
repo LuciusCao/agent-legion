@@ -27,6 +27,7 @@ export function DetailPage() {
   const playerRef = useRef<HTMLVideoElement>(null);
   const detailPrimaryRef = useRef<HTMLDivElement>(null);
   const phaseSidebarRef = useRef<HTMLElement>(null);
+  const previousPlaybackTimeRef = useRef<number | null>(null);
   const [currentTime, setCurrentTime] = useState(0);
 
   const {
@@ -129,16 +130,28 @@ export function DetailPage() {
       setCurrentTime(time);
       const player = playerRef.current;
       if (!player) return;
+      const previousTime = previousPlaybackTimeRef.current;
 
       artifacts.interactions.forEach((node, index) => {
         const trigger = Number(node.trigger_time ?? 0);
-        if (!triggeredNodeIndexes.has(index) && !dismissedNodeIndexes.has(index) && !player.paused && time >= trigger && time < trigger + 1.5) {
+        if (!Number.isFinite(trigger)) return;
+
+        const crossedTrigger =
+          previousTime !== null && previousTime < trigger && time >= trigger;
+        const reachedTriggerWindow = time >= trigger && time < trigger + 1.5;
+        if (
+          !triggeredNodeIndexes.has(index) &&
+          !dismissedNodeIndexes.has(index) &&
+          !player.paused &&
+          (crossedTrigger || reachedTriggerWindow)
+        ) {
           player.pause();
           triggerInteraction(index);
         }
       });
+      previousPlaybackTimeRef.current = time;
     },
-    [artifacts, triggeredNodeIndexes, dismissedNodeIndexes, triggerInteraction]
+    [artifacts.interactions, triggeredNodeIndexes, dismissedNodeIndexes, triggerInteraction]
   );
 
   const handleSeek = useCallback((time: number) => {
@@ -147,6 +160,7 @@ export function DetailPage() {
 
   const activeNodeIndex = Array.from(triggeredNodeIndexes).pop();
   const activeNode = activeNodeIndex !== undefined ? artifacts.interactions[activeNodeIndex] : null;
+  const detailTitle = currentVideo?.title || "未选择资源";
 
   const handleContinue = useCallback(() => {
     clearSentence();
@@ -210,8 +224,8 @@ export function DetailPage() {
             <md-icon-button onClick={() => navigate("/")}>
               <md-icon>arrow_back</md-icon>
             </md-icon-button>
-            <div className="detail-title-block">
-              <h1>{currentVideo?.title || "未选择资源"}</h1>
+            <div className="detail-title-block" data-tooltip={detailTitle}>
+              <h1>{detailTitle}</h1>
               {currentVideo && (
                 <p>
                   {TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}

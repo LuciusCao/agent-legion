@@ -112,6 +112,27 @@ describe("PhaseRunsPanel", () => {
     expect(screen.queryByText("字幕审核")).not.toBeInTheDocument();
   });
 
+  it("does not count time since the old upstream phase as queue time after rerun starts", () => {
+    const runs = [
+      makeRun(1, "download", "completed", {
+        started_at: "2024-01-01T00:00:00Z",
+        finished_at: "2024-01-01T00:00:30Z",
+      }),
+      makeRun(2, "transcribe", "completed", { finished_at: "2024-01-01T00:01:30Z" }),
+      makeRun(3, "subtitle_review", "completed", { finished_at: "2024-01-01T00:02:30Z" }),
+      makeRun(4, "chapter_generate", "completed", { finished_at: "2024-01-01T00:03:30Z" }),
+      makeRun(5, "interaction_generate", "completed", { finished_at: "2024-01-01T00:04:30Z" }),
+      makeRun(6, "content_review", "completed", { finished_at: "2024-01-01T00:05:30Z" }),
+      makeRun(7, "assemble", "completed", { finished_at: "2024-01-01T00:06:30Z" }),
+      makeRun(8, "transcribe", "running", { started_at: "2024-01-02T00:00:00Z" }),
+    ];
+
+    render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
+
+    expect(screen.queryByText(/排队 23时/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("排队 —").length).toBeGreaterThanOrEqual(2);
+  });
+
   it("shows the rerun phase as queued before the worker creates a new run", () => {
     const runs = [
       makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
@@ -137,6 +158,8 @@ describe("PhaseRunsPanel", () => {
     expect(screen.getByText("下载")).toBeInTheDocument();
     expect(screen.getByText("转录")).toBeInTheDocument();
     expect(screen.getByText("排队中")).toBeInTheDocument();
+    expect(screen.queryByText(/排队 \d+时/)).not.toBeInTheDocument();
+    expect(screen.getAllByText("排队 —").length).toBeGreaterThanOrEqual(2);
     expect(screen.queryByText("字幕审核")).not.toBeInTheDocument();
   });
 

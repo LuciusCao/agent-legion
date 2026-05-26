@@ -188,6 +188,113 @@ describe("DetailPage", () => {
     expect(screen.queryByText("字幕内容")).not.toBeInTheDocument();
   });
 
+  it("exposes the full detail title through a custom hover tooltip", async () => {
+    const longTitle = "x09050501 这是一个特别长的知识点名称，用来确认详情页标题悬停时显示全称";
+    mockApi
+      .mockResolvedValueOnce({
+        video: {
+          id: "v1",
+          title: longTitle,
+          source_url: "https://example.com/v1.mp4",
+          content_type: "knowledge",
+          external_id: "x09050501",
+          knowledge_code: "x09050501",
+          question_id: "",
+          status: "completed",
+          current_phase: "assemble",
+          error_message: "",
+          storage_dir: "/tmp/v1",
+          duration: 120,
+        },
+        phase_runs: [],
+        transcription_runs: [],
+      })
+      .mockResolvedValueOnce({
+        subtitles: [],
+        chapters: [],
+        interactions: [],
+        metadata: null,
+        review: null,
+        checklist: null,
+      })
+      .mockResolvedValueOnce({ log: "ok" });
+
+    render(
+      <MemoryRouter initialEntries={["/videos/v1"]}>
+        <Routes>
+          <Route path="/videos/:id" element={<DetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      const heading = screen.getByRole("heading", { name: longTitle });
+      expect(heading).not.toHaveAttribute("title");
+      expect(heading.parentElement).toHaveAttribute("data-tooltip", longTitle);
+    });
+  });
+
+  it("pauses and shows an interaction when playback crosses a trigger time", async () => {
+    mockApi
+      .mockResolvedValueOnce({
+        video: {
+          id: "v1",
+          title: "Video 1",
+          source_url: "https://example.com/v1.mp4",
+          content_type: "knowledge",
+          external_id: "K001",
+          knowledge_code: "K001",
+          question_id: "",
+          status: "completed",
+          current_phase: "assemble",
+          error_message: "",
+          storage_dir: "/tmp/v1",
+          duration: 120,
+        },
+        phase_runs: [],
+        transcription_runs: [],
+      })
+      .mockResolvedValueOnce({
+        subtitles: [],
+        chapters: [],
+        interactions: [
+          { id: "n1", trigger_time: 5, type: "example_practice", instruction: "暂停做题" },
+        ],
+        metadata: null,
+        review: null,
+        checklist: null,
+      })
+      .mockResolvedValueOnce({ log: "ok" });
+
+    render(
+      <MemoryRouter initialEntries={["/videos/v1"]}>
+        <Routes>
+          <Route path="/videos/:id" element={<DetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(document.querySelector("video")).toBeInTheDocument();
+    });
+    const video = document.querySelector("video") as HTMLVideoElement;
+    const pause = vi.fn();
+    Object.defineProperty(video, "paused", { value: false, configurable: true });
+    Object.defineProperty(video, "pause", { value: pause, configurable: true });
+    Object.defineProperty(video, "currentTime", { value: 4.8, configurable: true });
+    act(() => {
+      video.dispatchEvent(new Event("timeupdate", { bubbles: true }));
+    });
+
+    Object.defineProperty(video, "currentTime", { value: 6.7, configurable: true });
+    act(() => {
+      video.dispatchEvent(new Event("timeupdate", { bubbles: true }));
+    });
+
+    expect(pause).toHaveBeenCalledTimes(1);
+    expect(screen.getByText("暂停做题")).toBeInTheDocument();
+  });
+
   it("keeps delete dialog open and shows an error when deleting fails", async () => {
     mockApi
       .mockResolvedValueOnce({
