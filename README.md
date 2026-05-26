@@ -66,7 +66,7 @@ Question explanation videos do not produce interactive nodes. Their assembled `m
 Backend with automatic worker:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --port 8000
+UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8000
 ```
 
 Frontend during development:

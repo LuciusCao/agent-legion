@@ -113,7 +113,7 @@ npm install
 ### Run Backend (with auto-reload and background worker)
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --port 8000
+UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8000
 ```
 
 ### Run Frontend (development)
