@@ -20,6 +20,16 @@ class AgentRunResult:
     error_message: str = ""
 
 
+def extract_openclaw_arg(command: list[str], name: str) -> str:
+    for i, part in enumerate(command):
+        if part == name and i + 1 < len(command):
+            return command[i + 1]
+        prefix = f"{name}="
+        if part.startswith(prefix):
+            return part[len(prefix) :]
+    return ""
+
+
 class OpenClawRunner:
     def __init__(self, command_template: list[str], cwd: Path, timeout_seconds: int):
         self.command_template = command_template

@@ -7,6 +7,7 @@ from typing import Any
 from server.app.db.notifications import NotificationHub
 from server.app.db.schema import init_db
 from server.app.pipeline.common import make_record_id
+from server.app.pipeline.openclaw import extract_openclaw_arg
 from server.app.records import PhaseRunRecord, VideoRecord
 
 
@@ -16,6 +17,21 @@ def _iso(dt_str: str | None) -> str | None:
         return None
     dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
     return dt.isoformat()
+
+
+def _phase_run_with_agent_session(row: dict[str, Any]) -> PhaseRunRecord:
+    try:
+        command = json.loads(row.get("command_json") or "[]")
+    except json.JSONDecodeError:
+        command = []
+    if isinstance(command, list):
+        command_parts = [str(part) for part in command]
+        row["agent_id"] = extract_openclaw_arg(command_parts, "--agent")
+        row["agent_session_id"] = extract_openclaw_arg(command_parts, "--session-id")
+    else:
+        row["agent_id"] = ""
+        row["agent_session_id"] = ""
+    return row
 
 
 VIDEO_UPDATE_FIELDS = {
@@ -165,7 +181,7 @@ class VideoQueries:
             )
             row = conn.execute("select * from phase_runs where id=?", (cur.lastrowid,)).fetchone()
         self._notify(video_id)
-        return dict(row)
+        return _phase_run_with_agent_session(dict(row))
 
     def recover_running_videos(self) -> int:
         video_ids = []
@@ -233,6 +249,19 @@ class VideoQueries:
         if video_id:
             self._notify(video_id)
 
+    def get_phase_run(self, video_id: str, run_id: int) -> PhaseRunRecord | None:
+        with self.connect() as conn:
+            row = conn.execute(
+                "select * from phase_runs where video_id=? and id=?",
+                (video_id, run_id),
+            ).fetchone()
+            if not row:
+                return None
+            phase_run = _phase_run_with_agent_session(dict(row))
+            phase_run["started_at"] = _iso(phase_run["started_at"]) or ""
+            phase_run["finished_at"] = _iso(phase_run["finished_at"])
+            return phase_run
+
     def record_transcription_run(
         self,
         video_id: str,
@@ -278,6 +307,7 @@ class VideoQueries:
             for row in rows:
                 row["started_at"] = _iso(row["started_at"]) or ""
                 row["finished_at"] = _iso(row["finished_at"])
+                _phase_run_with_agent_session(row)
             return rows
 
     def list_transcription_runs(self, video_id: str) -> list[dict[str, Any]]:

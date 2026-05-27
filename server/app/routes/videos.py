@@ -9,6 +9,7 @@ from ..agents import AgentStatusManager
 from ..db import Database
 from ..events import VideoEventManager
 from ..pipeline.common import resolve_video_dir
+from ..pipeline.openclaw_sessions import render_openclaw_session, resolve_openclaw_session_path
 from ..services.intake import add_video_items
 from ..services.interaction_stats import compute_interaction_stats
 from ..services.video_actions import (
@@ -139,6 +140,17 @@ def create_videos_router(
         if not log_path.exists():
             return {"log": ""}
         return {"log": log_path.read_text(encoding="utf-8")[-8000:]}
+
+    @router.get("/{video_id}/phase-runs/{run_id}/session")
+    def phase_run_session(video_id: str, run_id: int) -> dict[str, str]:
+        run = db.get_phase_run(video_id, run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Phase run not found")
+        session_id = run.get("agent_session_id") or ""
+        path = resolve_openclaw_session_path(run.get("agent_id") or "", session_id)
+        if not path:
+            raise HTTPException(status_code=404, detail="OpenClaw session not found")
+        return {"session_id": session_id, "log": render_openclaw_session(path)}
 
     @router.get("/{video_id}/video")
     def video_file(video_id: str):

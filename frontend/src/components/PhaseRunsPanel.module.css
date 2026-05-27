@@ -234,6 +234,24 @@
 .timeline-tool {
   font-size: 12px;
   color: var(--md-sys-color-on-surface-variant);
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.inline-action {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: none;
+  background: transparent;
+  color: var(--md-sys-color-primary);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 2px;
+}
+
+.inline-action:hover {
+  text-decoration: underline;
 }
 
 .timeline-times {
@@ -270,4 +288,30 @@
   font-size: 14px;
   width: 14px;
   height: 14px;
+}
+
+.session-preview {
+  max-height: 280px;
+  overflow: auto;
+  margin: 4px 0 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: var(--md-sys-color-surface-container);
+  color: var(--md-sys-color-on-surface);
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.dialog-content {
+  display: grid;
+  gap: 10px;
+  min-width: min(640px, 80vw);
+}
+
+.session-key {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  overflow-wrap: anywhere;
 }

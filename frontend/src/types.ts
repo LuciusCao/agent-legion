@@ -98,6 +98,8 @@ export type PhaseRun = {
   exit_code: number | null;
   log_path: string;
   error_message: string;
+  agent_id?: string;
+  agent_session_id?: string;
 };
 
 export type TranscriptionRun = {
