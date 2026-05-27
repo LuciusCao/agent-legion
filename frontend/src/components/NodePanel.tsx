@@ -1,6 +1,7 @@
 import { useArtifactStore } from "../stores/artifactStore";
 import { useInteractionStore } from "../stores/interactionStore";
 import { INTERACTION_TYPE_LABELS } from "../labels";
+import { parseTimeSeconds } from "../helpers";
 import styles from "./NodePanel.module.css";
 
 interface ReviewEntry {
@@ -60,7 +61,7 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
     <div className="tab-panel">
       {nodes.map((node, i) => {
         const answered = triggeredNodeIndexes.has(i);
-        const triggerTime = Number(node.trigger_time ?? 0);
+        const triggerTime = parseTimeSeconds(node.trigger_time ?? 0);
         const typeLabel = INTERACTION_TYPE_LABELS[String(node.type ?? "")] || String(node.type ?? "");
         const nodeId = String(node.id ?? "");
         const nodeReview = nodeId ? reviewMap.get(nodeId) : undefined;

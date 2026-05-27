@@ -7,6 +7,36 @@ export function seconds(value: number): string {
   return `${minutes}:${secs.toString().padStart(2, "0")}`;
 }
 
+export function parseTimeSeconds(value: unknown): number {
+  if (typeof value === "number") return value;
+  if (typeof value !== "string") return Number.NaN;
+
+  const trimmed = value.trim();
+  if (!trimmed) return Number.NaN;
+
+  const numeric = Number(trimmed);
+  if (Number.isFinite(numeric)) return numeric;
+
+  const parts = trimmed.replace(",", ".").split(":");
+  if (parts.length === 2) {
+    const minutes = Number(parts[0]);
+    const seconds = Number(parts[1]);
+    if (Number.isFinite(minutes) && Number.isFinite(seconds)) {
+      return minutes * 60 + seconds;
+    }
+  }
+  if (parts.length === 3) {
+    const hours = Number(parts[0]);
+    const minutes = Number(parts[1]);
+    const seconds = Number(parts[2]);
+    if (Number.isFinite(hours) && Number.isFinite(minutes) && Number.isFinite(seconds)) {
+      return hours * 3600 + minutes * 60 + seconds;
+    }
+  }
+
+  return Number.NaN;
+}
+
 export function escapeHtml(value: string): string {
   return value.replace(/[&<>"']/g, (char) => {
     const map: Record<string, string> = {

@@ -24,6 +24,7 @@ interface VideoState {
   setSearchQuery: (query: string) => void;
   setPackedFilter: (filter: "all" | "packed" | "unpacked") => void;
   toggleSelectMode: () => void;
+  exitSelectMode: () => void;
   togglePackageSelectMode: () => void;
   toggleVideoSelection: (id: string) => void;
   selectAllVisible: () => void;
@@ -106,6 +107,12 @@ export const useVideoStore = create<VideoState>((set, get) => ({
   toggleSelectMode: () => {
     set((state) => ({ selectMode: !state.selectMode, packageSelectMode: false, selectedIds: new Set() }));
   },
+
+  exitSelectMode: () => set({
+    selectMode: false,
+    packageSelectMode: false,
+    selectedIds: new Set(),
+  }),
 
   togglePackageSelectMode: () => set((state) => ({
     packageSelectMode: !state.packageSelectMode,

@@ -16,7 +16,7 @@ import { MetadataPanel } from "../components/MetadataPanel";
 import { RerunDialog } from "../components/RerunDialog";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { TYPE_LABELS, STATUS_LABELS } from "../labels";
-import { statusGroup, triggerDownload } from "../helpers";
+import { parseTimeSeconds, statusGroup, triggerDownload } from "../helpers";
 import { api } from "../api";
 
 type MoreDialogType = "subtitles" | "nodes" | "metadata" | null;
@@ -101,7 +101,7 @@ export function DetailPage() {
       const previousTime = previousPlaybackTimeRef.current;
 
       artifacts.interactions.forEach((node, index) => {
-        const trigger = Number(node.trigger_time ?? 0);
+        const trigger = parseTimeSeconds(node.trigger_time ?? 0);
         if (!Number.isFinite(trigger)) return;
 
         const crossedTrigger =

@@ -3,6 +3,7 @@ import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
 import { getPhases, canRerunFrom } from "../helpers";
 import type { VideoItem } from "../types";
+import styles from "./BatchRerunDialog.module.css";
 
 const PHASE_LABELS: Record<string, string> = {
   download: "下载",
@@ -22,7 +23,7 @@ type BatchRerunDialogProps = {
 };
 
 export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogProps) {
-  const { videos, batchRerun, clearSelection, fetchVideos } = useVideoStore();
+  const { videos, batchRerun, exitSelectMode, fetchVideos } = useVideoStore();
   const { showToast } = useUiStore();
   const [selectedPhase, setSelectedPhase] = useState("download");
 
@@ -42,7 +43,7 @@ export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogPr
   const handleConfirm = async () => {
     await batchRerun(videoIds, selectedPhase);
     onClose();
-    clearSelection();
+    exitSelectMode();
     await fetchVideos();
     const err = useVideoStore.getState().error;
     if (err) {
@@ -58,14 +59,16 @@ export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogPr
       style={
         {
           minWidth: "520px",
+          maxWidth: "760px",
+          width: "min(760px, 92vw)",
           "--md-dialog-container-color": "#ffffff",
         } as React.CSSProperties
       }
     >
       <div slot="headline">选择重跑阶段</div>
       <div slot="content">
-        <div style={{ display: "grid", gap: "16px", minWidth: "460px" }}>
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        <div className={styles.content}>
+          <div className={styles.phaseGrid}>
             {phases.map((phase) => (
               <md-filter-chip
                 key={phase}
@@ -75,32 +78,17 @@ export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogPr
               />
             ))}
           </div>
-          <div
-            style={{
-              display: "grid",
-              gap: "8px",
-              maxHeight: "240px",
-              overflowY: "auto",
-            }}
-          >
+          <div className={styles.videoGrid}>
             {selectedVideos.map((video) => {
               const runnable = canRerunFrom(video, selectedPhase);
               return (
                 <div
                   key={video.id}
-                  style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    alignItems: "center",
-                    padding: "8px 12px",
-                    borderRadius: "8px",
-                    background: "var(--md-sys-color-surface-container-low)",
-                    opacity: runnable ? 1 : 0.5,
-                  }}
+                  className={`${styles.videoTile} ${runnable ? "" : styles.videoTileDisabled}`}
                 >
-                  <span>{displayName(video)}</span>
+                  <span className={styles.videoName}>{displayName(video)}</span>
                   {!runnable && (
-                    <span style={{ color: "var(--md-sys-color-error)", fontSize: "12px" }}>
+                    <span className={styles.videoHint}>
                       当前处于 {PHASE_LABELS[video.current_phase] ?? video.current_phase}
                       ，无法重跑
                     </span>
@@ -109,7 +97,7 @@ export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogPr
               );
             })}
           </div>
-          <div style={{ fontSize: "14px", color: "var(--md-sys-color-on-surface-variant)" }}>
+          <div className={styles.summary}>
             已选择 {selectedVideos.length} 个视频，可重跑 {runnableCount} 个
           </div>
         </div>

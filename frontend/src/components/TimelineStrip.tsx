@@ -1,5 +1,6 @@
 import type { Chapter, InteractionNode } from "../types";
 import { INTERACTION_TYPE_LABELS } from "../labels";
+import { parseTimeSeconds } from "../helpers";
 import styles from "./TimelineStrip.module.css";
 
 interface TimelineStripProps {
@@ -60,7 +61,7 @@ export function TimelineStrip({
         <div className={styles.chipScroller}>
           {interactions.length === 0 && <span className={styles.emptyHint}>暂无互动</span>}
           {interactions.map((node, index) => {
-            const time = Number(node.trigger_time ?? 0);
+            const time = parseTimeSeconds(node.trigger_time ?? 0);
             const isActive = currentTime >= time && currentTime < time + 1.5;
             return (
               <md-suggestion-chip

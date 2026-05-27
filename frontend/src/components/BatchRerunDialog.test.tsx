@@ -44,6 +44,7 @@ describe("BatchRerunDialog", () => {
       statusFilter: "all",
       searchQuery: "",
       selectMode: true,
+      packageSelectMode: false,
       selectedIds: new Set(["v1", "v2"]),
       isLoading: false,
     });
@@ -100,5 +101,6 @@ describe("BatchRerunDialog", () => {
     );
     expect(onClose).toHaveBeenCalled();
     expect(useVideoStore.getState().selectedIds.size).toBe(0);
+    expect(useVideoStore.getState().selectMode).toBe(false);
   });
 });
