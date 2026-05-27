@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import { api } from "../api";
 import type { AgentStatus, ContentType } from "../types";
 
 interface Toast {
@@ -12,8 +13,11 @@ interface UiState {
   addContentType: ContentType;
   rerunDialogOpen: boolean;
   deleteDialogOpen: boolean;
+  workerPaused: boolean;
   toast: Toast | null;
   connectAgentsWs: () => void;
+  fetchWorkerStatus: () => Promise<void>;
+  setWorkerPaused: (paused: boolean) => Promise<void>;
   openAddDialog: () => void;
   closeAddDialog: () => void;
   setAddContentType: (type: ContentType) => void;
@@ -33,6 +37,7 @@ export const useUiStore = create<UiState>((set) => ({
   addContentType: "knowledge",
   rerunDialogOpen: false,
   deleteDialogOpen: false,
+  workerPaused: false,
   toast: null,
 
   connectAgentsWs: () => {
@@ -56,6 +61,19 @@ export const useUiStore = create<UiState>((set) => ({
         connectAgentsWs();
       }, 3000);
     };
+  },
+
+  fetchWorkerStatus: async () => {
+    const data = await api<{ paused: boolean }>("/api/worker/status");
+    set({ workerPaused: data.paused });
+  },
+
+  setWorkerPaused: async (paused) => {
+    const data = await api<{ paused: boolean }>(
+      paused ? "/api/worker/pause" : "/api/worker/resume",
+      { method: "POST" },
+    );
+    set({ workerPaused: data.paused });
   },
 
   openAddDialog: () => set({ addDialogOpen: true, addContentType: "knowledge" }),

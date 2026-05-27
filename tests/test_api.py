@@ -22,6 +22,25 @@ def test_core_api_routes_declare_response_models(client):
     assert paths["/api/package"]["post"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/PackageResponse"}
+    assert paths["/api/worker/status"]["get"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/WorkerStatusResponse"}
+
+
+def test_worker_pause_resume_api(client):
+    status = client.get("/api/worker/status")
+    assert status.status_code == 200
+    assert status.json() == {"paused": False}
+
+    paused = client.post("/api/worker/pause")
+    assert paused.status_code == 200
+    assert paused.json() == {"paused": True}
+    assert client.app.state.worker_control.is_paused() is True
+
+    resumed = client.post("/api/worker/resume")
+    assert resumed.status_code == 200
+    assert resumed.json() == {"paused": False}
+    assert client.app.state.worker_control.is_paused() is False
 
 
 def test_agents_websocket_sends_initial_list(client, monkeypatch):

@@ -40,6 +40,30 @@ def test_batch_rerun_uses_same_normalization_as_single_rerun(db, settings):
     assert db.get_video("question_Q001")["current_phase"] == "assemble"
 
 
+def test_rerun_rejects_running_video(db, settings):
+    db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
+    db.update_video("knowledge_K001", status="running", current_phase="chapter_generate")
+
+    result = rerun_video_record(db, settings, "knowledge_K001", "subtitle_review")
+
+    assert result["status"] == "busy"
+    assert db.get_video("knowledge_K001")["current_phase"] == "chapter_generate"
+    assert db.get_video("knowledge_K001")["status"] == "running"
+
+
+def test_rerun_rejects_video_with_running_phase_run_even_if_video_is_queued(db, settings):
+    db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
+    run = db.start_phase("knowledge_K001", "chapter_generate", [])
+    assert run is not None
+    db.update_video("knowledge_K001", status="queued", current_phase="subtitle_review")
+
+    result = rerun_video_record(db, settings, "knowledge_K001", "subtitle_review")
+
+    assert result["status"] == "busy"
+    assert db.get_video("knowledge_K001")["current_phase"] == "subtitle_review"
+    assert db.get_video("knowledge_K001")["status"] == "queued"
+
+
 def test_delete_video_record_removes_storage_and_package_selection_defaults(db, settings):
     completed = db.create_video(
         "https://example.com/k1.mp4",

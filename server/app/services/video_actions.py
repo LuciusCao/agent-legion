@@ -24,6 +24,8 @@ def normalize_rerun_phase(video: VideoRecord, phase: str) -> str:
 
 
 def can_rerun_from(video: VideoRecord, phase: str) -> bool:
+    if video["status"] == "running":
+        return False
     if video["status"] == "completed":
         return True
     phases = phase_sequence(video["content_type"])
@@ -31,6 +33,10 @@ def can_rerun_from(video: VideoRecord, phase: str) -> bool:
     if current not in phases or phase not in phases:
         return False
     return phases.index(phase) <= phases.index(current)
+
+
+def has_running_phase_run(db: Database, video_id: str) -> bool:
+    return any(run["status"] == "running" for run in db.list_phase_runs(video_id))
 
 
 def delete_video_record(db: Database, settings: Settings, video_id: str) -> bool:
@@ -61,6 +67,13 @@ def rerun_video_record(
         }
 
     if agent_manager is not None and agent_manager.is_video_busy(video_id):
+        return {
+            "video_id": video_id,
+            "status": "busy",
+            "phase": phase,
+            "message": "Video is currently being processed",
+        }
+    if video["status"] == "running" or has_running_phase_run(db, video_id):
         return {
             "video_id": video_id,
             "status": "busy",

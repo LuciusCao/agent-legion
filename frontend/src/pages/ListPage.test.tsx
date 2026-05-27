@@ -28,7 +28,10 @@ describe("ListPage", () => {
   });
 
   it("renders list page", () => {
-    mockApi.mockResolvedValueOnce({ videos: [] });
+    mockApi.mockImplementation((path: string) => {
+      if (path === "/api/worker/status") return Promise.resolve({ paused: false });
+      return Promise.resolve({ videos: [] });
+    });
     render(
       <MemoryRouter>
         <ListPage />
@@ -38,11 +41,14 @@ describe("ListPage", () => {
   });
 
   it("filters list by content type when tab changes", async () => {
-    mockApi.mockResolvedValueOnce({
-      videos: [
-        { id: "v1", title: "知识视频A", content_type: "knowledge", external_id: "k1", status: "completed", current_phase: "package", error_message: "" },
-        { id: "v2", title: "题目视频B", content_type: "question", external_id: "q1", status: "completed", current_phase: "package", error_message: "" },
-      ],
+    mockApi.mockImplementation((path: string) => {
+      if (path === "/api/worker/status") return Promise.resolve({ paused: false });
+      return Promise.resolve({
+        videos: [
+          { id: "v1", title: "知识视频A", content_type: "knowledge", external_id: "k1", status: "completed", current_phase: "package", error_message: "" },
+          { id: "v2", title: "题目视频B", content_type: "question", external_id: "q1", status: "completed", current_phase: "package", error_message: "" },
+        ],
+      });
     });
     render(
       <MemoryRouter>
@@ -69,11 +75,14 @@ describe("ListPage", () => {
 
   it("shows the persisted search query when returning to the list", async () => {
     useVideoStore.setState({ searchQuery: "K001" });
-    mockApi.mockResolvedValueOnce({
-      videos: [
-        { id: "v1", title: "知识视频A", content_type: "knowledge", external_id: "K001", status: "completed", current_phase: "package", error_message: "" },
-        { id: "v2", title: "知识视频B", content_type: "knowledge", external_id: "K002", status: "completed", current_phase: "package", error_message: "" },
-      ],
+    mockApi.mockImplementation((path: string) => {
+      if (path === "/api/worker/status") return Promise.resolve({ paused: false });
+      return Promise.resolve({
+        videos: [
+          { id: "v1", title: "知识视频A", content_type: "knowledge", external_id: "K001", status: "completed", current_phase: "package", error_message: "" },
+          { id: "v2", title: "知识视频B", content_type: "knowledge", external_id: "K002", status: "completed", current_phase: "package", error_message: "" },
+        ],
+      });
     });
 
     render(

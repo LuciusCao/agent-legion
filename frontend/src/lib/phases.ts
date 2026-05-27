@@ -21,6 +21,7 @@ export function getPhases(contentType: ContentType): string[] {
 }
 
 export function canRerunFrom(video: VideoItem, phase: string): boolean {
+  if (video.status === "running") return false;
   if (video.status === "completed") return true;
   const phases = getPhases(video.content_type);
   const currentIdx = phases.indexOf(video.current_phase);

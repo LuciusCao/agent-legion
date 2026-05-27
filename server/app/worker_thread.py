@@ -5,6 +5,7 @@ from typing import Any
 from server.app.db import Database
 from server.app.pipeline.runners import RunnerPool
 from server.app.settings import Settings
+from server.app.worker_control import WorkerControl
 
 
 class WorkerThread:
@@ -14,12 +15,14 @@ class WorkerThread:
         settings: Settings,
         runner_pool: RunnerPool,
         agent_manager: Any,
+        worker_control: WorkerControl | None = None,
         max_workers: int | None = None,
     ):
         self.db = db
         self.settings = settings
         self.runner_pool = runner_pool
         self.agent_manager = agent_manager
+        self.worker_control = worker_control or WorkerControl()
         self.max_workers = max_workers
         self.stop_event = threading.Event()
         self.executor: ThreadPoolExecutor | None = None
@@ -64,6 +67,9 @@ class WorkerThread:
         def _worker_loop() -> None:
             while not self.stop_event.is_set():
                 submitted = False
+                if self.worker_control.is_paused():
+                    self.stop_event.wait(1)
+                    continue
                 runner_slot = None
                 try:
                     runner_slot = self.runner_pool.acquire()
