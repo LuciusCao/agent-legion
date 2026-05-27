@@ -23,6 +23,7 @@ export type VideoItem = {
   duration: number;
   packed: boolean;
   interaction_stats?: Record<string, InteractionStats>;
+  interaction_review_status?: "all_passed" | "partial" | "all_failed";
 };
 
 export type AgentStatus = {

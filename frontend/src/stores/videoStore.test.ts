@@ -86,6 +86,7 @@ describe("videoStore", () => {
             example_practice: { passed: 2, total: 2 },
             interaction_summary: { passed: 1, total: 1 },
           },
+          interaction_review_status: "all_passed",
         },
         {
           id: "summary-video-type",
@@ -103,6 +104,7 @@ describe("videoStore", () => {
             example_practice: { passed: 1, total: 1 },
             video_summary: { passed: 1, total: 1 },
           },
+          interaction_review_status: "all_passed",
         },
         {
           id: "rejected",
@@ -136,6 +138,7 @@ describe("videoStore", () => {
           interaction_stats: {
             interaction_summary: { passed: 1, total: 1 },
           },
+          interaction_review_status: "all_passed",
         },
         {
           id: "hidden-by-search",

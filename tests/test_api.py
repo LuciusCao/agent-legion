@@ -736,3 +736,63 @@ def test_database_broadcast_on_create_and_delete(client):
         assert data["video_id"] == video_id
 
     asyncio.run(_test())
+
+
+def test_list_and_detail_return_interaction_review_status(tmp_path, client):
+    import json
+
+    created = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/course/v1.mp4",
+                    "title": "V1",
+                    "content_type": "knowledge",
+                    "external_id": "V001",
+                }
+            ]
+        },
+    )
+    assert created.status_code == 200
+    video_id = created.json()["videos"][0]["id"]
+
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {"id": "n1", "type": "example_practice"},
+                    {"id": "n2", "type": "interaction_summary"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps(
+            {
+                "status": "pending_review",
+                "reviews": [
+                    {"item_id": "n1", "status": "published"},
+                    {"item_id": "n2", "status": "rejected"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    listed = client.get("/api/videos").json()
+    assert listed["videos"][0]["interaction_review_status"] == "partial"
+    assert listed["videos"][0]["interaction_stats"] == {
+        "example_practice": {"passed": 1, "total": 1},
+        "interaction_summary": {"passed": 0, "total": 1},
+    }
+
+    detail = client.get(f"/api/videos/{video_id}").json()
+    assert detail["video"]["interaction_review_status"] == "partial"
+    assert detail["video"]["interaction_stats"] == {
+        "example_practice": {"passed": 1, "total": 1},
+        "interaction_summary": {"passed": 0, "total": 1},
+    }
