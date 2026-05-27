@@ -97,7 +97,13 @@ class WhisperCppProvider(TranscriptionProvider):
         if self.vad_model:
             if not self.vad_model.exists():
                 raise FileNotFoundError(f"VAD model not found: {self.vad_model}")
-            cmd.extend(["--vad", "--vad-model", str(self.vad_model)])
+            cmd.extend([
+                "--vad",
+                "--vad-model",
+                str(self.vad_model),
+                "--vad-max-speech-duration-s",
+                "8",
+            ])
         subprocess.run(cmd, check=True)
         raw_srt = out_stem.with_suffix(".srt")
         if raw_srt != output_path and raw_srt.exists():
