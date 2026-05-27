@@ -12,6 +12,7 @@ import { AddDialog } from "../components/AddDialog";
 export function ListPage() {
   const {
     selectedType,
+    searchQuery,
     setSelectedType,
     setSearchQuery,
     toggleSelectMode,
@@ -64,6 +65,7 @@ export function ListPage() {
         <md-outlined-text-field
           type="search"
           placeholder="搜索 ID、标题或内部记录"
+          value={searchQuery}
           onInput={(e: React.FormEvent<HTMLElement>) => setSearchQuery((e.target as HTMLInputElement).value)}
         />
       </section>
