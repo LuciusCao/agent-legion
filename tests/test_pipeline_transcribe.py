@@ -141,6 +141,27 @@ def test_validate_srt_valid():
     assert result.entry_count == 2
 
 
+def test_validate_srt_large_gap_fails():
+    text = (
+        "1\n00:00:00,000 --> 00:00:04,000\nHello\n\n"
+        "2\n00:00:30,000 --> 00:00:35,000\nWorld\n"
+    )
+    result = validate_srt(text, duration=40)
+    assert result.ok is False
+    assert "gap too large" in result.summary
+    assert "26.0s" in result.summary
+
+
+def test_validate_srt_small_gap_passes():
+    text = (
+        "1\n00:00:00,000 --> 00:00:04,000\nHello\n\n"
+        "2\n00:00:14,000 --> 00:00:18,000\nWorld\n"
+    )
+    result = validate_srt(text, duration=20)
+    assert result.ok is True
+    assert result.entry_count == 2
+
+
 def test_transcribe_provider_exception_becomes_validation_failure(tmp_path):
     class ExplodingProvider(TranscriptionProvider):
         name = "boom"
