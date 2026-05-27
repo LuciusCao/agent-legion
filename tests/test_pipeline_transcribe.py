@@ -1,7 +1,10 @@
+from unittest.mock import patch
+
 import pytest
 
 from server.app.pipeline.transcribe import (
     TranscriptionProvider,
+    WhisperCppProvider,
     run_transcription_with_providers,
     validate_srt,
 )
@@ -160,3 +163,58 @@ def test_transcribe_provider_exception_becomes_validation_failure(tmp_path):
 
     # transcription.json should NOT be written when all fail
     assert not (tmp_path / "transcription.json").exists()
+
+
+def _make_fake_whisper_provider(tmp_path, vad_model=None):
+    binary = tmp_path / "whisper-cli"
+    binary.write_bytes(b"fake")
+    model = tmp_path / "model.bin"
+    model.write_bytes(b"fake")
+    return WhisperCppProvider(binary=str(binary), model=str(model), vad_model=vad_model)
+
+
+def test_whisper_provider_without_vad_omits_vad_flags(tmp_path):
+    provider = _make_fake_whisper_provider(tmp_path)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+
+    with patch("server.app.pipeline.transcribe.subprocess.run") as mock_run:
+        provider.transcribe(video_path, output_path, "Test")
+
+    # Second call is whisper-cli
+    whisper_call = mock_run.call_args_list[1]
+    cmd = whisper_call.args[0]
+    assert "--vad" not in cmd
+    assert "--vad-model" not in cmd
+
+
+def test_whisper_provider_with_vad_includes_vad_flags(tmp_path):
+    vad_model = tmp_path / "vad.bin"
+    vad_model.write_bytes(b"fake")
+    provider = _make_fake_whisper_provider(tmp_path, vad_model=str(vad_model))
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+
+    with patch("server.app.pipeline.transcribe.subprocess.run") as mock_run:
+        provider.transcribe(video_path, output_path, "Test")
+
+    whisper_call = mock_run.call_args_list[1]
+    cmd = whisper_call.args[0]
+    assert "--vad" in cmd
+    assert "--vad-model" in cmd
+    assert str(vad_model) in cmd
+
+
+def test_whisper_provider_with_missing_vad_model_raises(tmp_path):
+    provider = _make_fake_whisper_provider(tmp_path, vad_model=str(tmp_path / "missing.bin"))
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+
+    with (
+        patch("server.app.pipeline.transcribe.subprocess.run"),
+        pytest.raises(FileNotFoundError, match="VAD model not found"),
+    ):
+        provider.transcribe(video_path, output_path, "Test")
