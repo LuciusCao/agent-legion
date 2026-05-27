@@ -161,11 +161,17 @@ def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
     asr = settings.config.get("asr", {})
     whisper = asr.get("whisper", {})
     sensevoice = asr.get("sensevoice", {})
+    vad_model = whisper.get("vad_model")
+    if vad_model:
+        from pathlib import Path
+
+        if not Path(vad_model).expanduser().exists():
+            raise FileNotFoundError(f"Configured VAD model not found: {vad_model}")
     providers: list[TranscriptionProvider] = [
         WhisperCppProvider(
             binary=str(whisper.get("binary", "")),
             model=str(whisper.get("model", "")),
-            vad_model=whisper.get("vad_model"),
+            vad_model=vad_model,
         ),
         SenseVoiceProvider(
             script=str(
