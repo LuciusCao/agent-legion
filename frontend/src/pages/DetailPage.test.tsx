@@ -302,7 +302,7 @@ describe("DetailPage", () => {
         subtitles: [],
         chapters: [],
         interactions: [
-          { id: "n1", trigger_time: 5, type: "example_practice", instruction: "暂停做题" },
+          { id: "n1", trigger_time: "0:05", type: "example_practice", instruction: "暂停做题" },
         ],
         metadata: null,
         review: null,

@@ -54,7 +54,7 @@ export type InteractionOption = {
 export type InteractionNode = {
   id?: string;
   type?: string;
-  trigger_time?: number;
+  trigger_time?: number | string;
   instruction?: string;
   hint?: string;
   reference_sentence?: string;
