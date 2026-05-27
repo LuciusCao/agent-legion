@@ -41,6 +41,14 @@ input {
   padding: 20px;
 }
 
+.workbench-view {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  min-height: 0;
+  overflow: hidden;
+}
+
 .topbar,
 .topbar-actions,
 .detail-actions {
@@ -75,6 +83,12 @@ h1 {
 }
 
 /* Filters */
+.list-fixed-header {
+  flex: 0 0 auto;
+  background: var(--md-sys-color-surface);
+  z-index: 2;
+}
+
 .filters-row {
   display: flex;
   align-items: center;
@@ -106,6 +120,13 @@ h1 {
 /* Video list */
 .video-list {
   margin-top: 12px;
+}
+
+.list-scroll-region {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding-bottom: 24px;
 }
 
 /* Resource rows */
@@ -172,7 +193,7 @@ h1 {
 .status-badge {
   font-size: 12px;
   padding: 4px 8px;
-  border-radius: 12px;
+  border-radius: 999px;
   white-space: nowrap;
   background: var(--md-sys-color-surface-variant);
   color: var(--md-sys-color-on-surface-variant);
@@ -413,7 +434,7 @@ pre {
 .packed-badge {
   font-size: 11px;
   padding: 4px 8px;
-  border-radius: 12px;
+  border-radius: 999px;
   white-space: nowrap;
   background: var(--status-completed-bg);
   color: var(--status-completed-text);

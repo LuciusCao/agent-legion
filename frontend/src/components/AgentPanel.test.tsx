@@ -27,6 +27,17 @@ describe("AgentPanel", () => {
     expect(screen.getByText(/暂无运行中的 Agent/)).toBeInTheDocument();
   });
 
+  it("omits the summary title to keep the panel compact", () => {
+    useUiStore.setState({
+      agents: [{ id: "agent-1", name: "Agent A", busy: false, task_count: 0, max_tasks: 1, current_video_id: null }],
+    });
+
+    render(<AgentPanel />);
+
+    expect(screen.getByText("Agent A")).toBeInTheDocument();
+    expect(screen.queryByText(/Agent 状态/)).not.toBeInTheDocument();
+  });
+
   it("loads worker status and toggles queue scheduling", async () => {
     mockApi.mockResolvedValueOnce({ paused: false }).mockResolvedValueOnce({ paused: true });
 
