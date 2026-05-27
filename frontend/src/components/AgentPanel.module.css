@@ -1,18 +1,13 @@
 .agent-panel {
-  margin-top: 12px;
-  padding: 12px;
+  padding: 8px 12px;
 }
 
-.agent-header {
+.agent-content {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 8px;
-}
-
-.agent-summary {
-  font-weight: 700;
+  min-height: 40px;
 }
 
 .assignment-switch {
@@ -28,13 +23,14 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  min-width: 0;
 }
 
 .agent-card {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 8px;
+  padding: 6px 8px;
   border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 8px;
 }
@@ -63,7 +59,7 @@
 .agent-pill {
   font-size: 12px;
   padding: 4px 8px;
-  border-radius: 8px;
+  border-radius: 999px;
   background: var(--md-sys-color-surface-variant);
   color: var(--md-sys-color-on-surface-variant);
   white-space: nowrap;
