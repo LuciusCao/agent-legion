@@ -195,6 +195,44 @@ describe("InteractionOverlay", () => {
     ]);
   });
 
+  it("drops dragged summary options at the end of the preview", () => {
+    render(
+      <InteractionOverlay
+        {...baseProps}
+        node={{
+          type: "video_summary",
+          instruction: "拖拽排序",
+          options: [
+            { id: "a", text: "第一步", is_distractor: false },
+            { id: "b", text: "第二步", is_distractor: false },
+            { id: "c", text: "第三步", is_distractor: false },
+          ],
+        }}
+      />,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "第一步" }));
+    fireEvent.click(screen.getByRole("button", { name: "第二步" }));
+    fireEvent.click(screen.getByRole("button", { name: "第三步" }));
+
+    const preview = screen.getByLabelText("已选排序预览");
+    const before = within(preview).getAllByTestId("summary-order-item");
+    const endDropZone = screen.getByLabelText("拖到末尾");
+
+    fireEvent.dragStart(before[0]);
+    fireEvent.dragEnter(endDropZone);
+    fireEvent.dragOver(endDropZone);
+    fireEvent.drop(endDropZone);
+    fireEvent.dragEnd(before[0]);
+
+    const after = within(preview).getAllByTestId("summary-order-item");
+    expect(after.map((item) => item.textContent)).toEqual([
+      expect.stringContaining("第二步"),
+      expect.stringContaining("第三步"),
+      expect.stringContaining("第一步"),
+    ]);
+  });
+
   it("confirms summary interactions and continues playback", () => {
     const onContinue = vi.fn();
 

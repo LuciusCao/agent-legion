@@ -52,6 +52,7 @@ export function DetailPage() {
     pushWord,
     resetSentence,
     clearSentence,
+    clearInteractions,
   } = useInteractionStore();
 
   const { openRerunDialog, openDeleteDialog, showToast } = useUiStore();
@@ -69,10 +70,12 @@ export function DetailPage() {
 
   useEffect(() => {
     if (!id) return;
+    clearInteractions();
+    previousPlaybackTimeRef.current = null;
     loadVideo(id);
     loadArtifacts(id);
     loadLog(id);
-  }, [id, loadVideo, loadArtifacts, loadLog]);
+  }, [id, clearInteractions, loadVideo, loadArtifacts, loadLog]);
 
   const prevPhaseRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);

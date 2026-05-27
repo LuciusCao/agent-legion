@@ -161,6 +161,16 @@
   font-size: 0.75rem;
 }
 
+.summary-end-drop-zone {
+  min-height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px dashed var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+  color: var(--md-sys-color-outline);
+  font-size: 0.75rem;
+}
+
 .sentence-box {
   min-height: 44px;
   padding: 12px;
