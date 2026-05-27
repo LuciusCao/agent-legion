@@ -75,6 +75,21 @@ export function InteractionOverlay({
     });
   };
 
+  const reorderSummaryOptionToEnd = () => {
+    const activeOptionId = draggedOptionIdRef.current ?? draggedOptionId;
+    if (!activeOptionId) return;
+
+    setSelectedOptions((current) => {
+      const fromIndex = current.findIndex((item) => item.id === activeOptionId);
+      if (fromIndex < 0 || fromIndex === current.length - 1) return current;
+
+      const next = [...current];
+      const [moved] = next.splice(fromIndex, 1);
+      next.push(moved);
+      return next;
+    });
+  };
+
   if (type === "example_practice") {
     return (
       <div className={styles.practiceToast}>
@@ -161,6 +176,20 @@ export function InteractionOverlay({
                 </span>
               </div>
             ))}
+            {selectedOptions.length > 1 && (
+              <div
+                className={styles.summaryEndDropZone}
+                aria-label="拖到末尾"
+                onDragEnter={(event) => event.preventDefault()}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  reorderSummaryOptionToEnd();
+                }}
+              >
+                拖到这里放到末尾
+              </div>
+            )}
           </div>
           <div className={styles.actionRow}>
             <button

@@ -45,4 +45,18 @@ describe("interactionStore", () => {
     useInteractionStore.getState().clearSentence();
     expect(useInteractionStore.getState().currentSentence).toEqual([]);
   });
+
+  it("clearInteractions resets trigger, dismiss, and sentence state", () => {
+    useInteractionStore.setState({
+      triggeredNodeIndexes: new Set([0]),
+      dismissedNodeIndexes: new Set([1]),
+      currentSentence: ["hello"],
+    });
+
+    useInteractionStore.getState().clearInteractions();
+
+    expect(useInteractionStore.getState().triggeredNodeIndexes.size).toBe(0);
+    expect(useInteractionStore.getState().dismissedNodeIndexes.size).toBe(0);
+    expect(useInteractionStore.getState().currentSentence).toEqual([]);
+  });
 });
