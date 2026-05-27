@@ -185,6 +185,7 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 
 - `server.app.main:create_app(data_dir, start_worker)` is the application factory.
 - When `start_worker=True`, a daemon thread starts on app lifespan and polls the database every 1–3 seconds for videos in `queued` or `running` status.
+- The worker starts in a **paused** state by default; call `POST /api/worker/resume` to begin processing.
 - Each video has a `content_type` (`knowledge` or `question`) and progresses through a **type-specific pipeline**:
 
   **Knowledge videos** (`knowledge`):

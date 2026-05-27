@@ -3,7 +3,7 @@ import threading
 
 class WorkerControl:
     def __init__(self) -> None:
-        self._paused = False
+        self._paused = True
         self._lock = threading.Lock()
 
     def pause(self) -> None:

@@ -30,7 +30,8 @@ def test_core_api_routes_declare_response_models(client):
 def test_worker_pause_resume_api(client):
     status = client.get("/api/worker/status")
     assert status.status_code == 200
-    assert status.json() == {"paused": False}
+    assert status.json() == {"paused": True}
+    assert client.app.state.worker_control.is_paused() is True
 
     paused = client.post("/api/worker/pause")
     assert paused.status_code == 200
