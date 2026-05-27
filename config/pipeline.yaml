@@ -16,6 +16,8 @@ asr:
   whisper:
     binary: /opt/homebrew/Cellar/whisper-cpp/1.8.4/bin/whisper-cli
     model: ~/.cache/whisper.cpp/ggml-medium.bin
+    # VAD model path for voice activity detection (silero-v6.2.0)
+    vad_model: ~/.cache/whisper.cpp/ggml-silero-v6.2.0.bin
   sensevoice:
     script: /Users/user/CatPuru/projects/cms-extensions/engineering/pipeline/scripts/transcribe_sensevoice.py
     model_dir: /Users/user/CatPuru/projects/cms-extensions/models/SenseVoiceSmall

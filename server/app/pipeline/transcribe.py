@@ -50,9 +50,10 @@ def validate_srt(text: str, duration: float = 0) -> ValidationResult:
 class WhisperCppProvider(TranscriptionProvider):
     name = "whisper"
 
-    def __init__(self, binary: str, model: str):
+    def __init__(self, binary: str, model: str, vad_model: str | None = None):
         self.binary = Path(binary).expanduser()
         self.model = Path(model).expanduser()
+        self.vad_model = Path(vad_model).expanduser() if vad_model else None
 
     def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
         if not self.binary.exists():
@@ -70,26 +71,28 @@ class WhisperCppProvider(TranscriptionProvider):
         if title:
             prompt += f"该视频是《{title}》的教学视频，请用简体中文生成字幕文件。"
         out_stem = output_path.with_suffix("")
-        subprocess.run(
-            [
-                str(self.binary),
-                "-m",
-                str(self.model),
-                "-f",
-                str(wav_path),
-                "--language",
-                "zh",
-                "--prompt",
-                prompt,
-                "--output-srt",
-                "-of",
-                str(out_stem),
-                "--max-len",
-                "8",  # Limit segment length to ~8 chars
-                "--split-on-word",  # Split at word boundaries
-            ],
-            check=True,
-        )
+        cmd = [
+            str(self.binary),
+            "-m",
+            str(self.model),
+            "-f",
+            str(wav_path),
+            "--language",
+            "zh",
+            "--prompt",
+            prompt,
+            "--output-srt",
+            "-of",
+            str(out_stem),
+            "--max-len",
+            "8",  # Limit segment length to ~8 chars
+            "--split-on-word",  # Split at word boundaries
+        ]
+        if self.vad_model:
+            if not self.vad_model.exists():
+                raise FileNotFoundError(f"VAD model not found: {self.vad_model}")
+            cmd.extend(["--vad", "--vad-model", str(self.vad_model)])
+        subprocess.run(cmd, check=True)
         raw_srt = out_stem.with_suffix(".srt")
         if raw_srt != output_path and raw_srt.exists():
             shutil.move(raw_srt, output_path)

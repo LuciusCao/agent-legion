@@ -11,7 +11,10 @@ from ..events import VideoEventManager
 from ..pipeline.common import resolve_video_dir
 from ..pipeline.openclaw_sessions import render_openclaw_session, resolve_openclaw_session_path
 from ..services.intake import add_video_items
-from ..services.interaction_stats import compute_interaction_stats
+from ..services.interaction_stats import (
+    compute_interaction_review_status,
+    compute_interaction_stats,
+)
 from ..services.video_actions import (
     batch_delete_video_records,
     batch_rerun_video_records,
@@ -93,6 +96,7 @@ def create_videos_router(
                 stats = compute_interaction_stats(video_dir)
                 if stats:
                     video["interaction_stats"] = stats
+                video["interaction_review_status"] = compute_interaction_review_status(video_dir)
         return {"videos": videos}
 
     @router.get("/{video_id}")
@@ -100,6 +104,12 @@ def create_videos_router(
         video = db.get_video(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
+        if video.get("content_type") == "knowledge":
+            video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else settings.videos_dir / video_id
+            stats = compute_interaction_stats(video_dir)
+            if stats:
+                video["interaction_stats"] = stats
+            video["interaction_review_status"] = compute_interaction_review_status(video_dir)
         return {
             "video": {**video, "packed": bool(video.get("packed", 0))},
             "phase_runs": db.list_phase_runs(video_id),
