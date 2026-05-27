@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from server.app.services.interaction_stats import (
+    compute_interaction_review_status,
     compute_interaction_stats,
 )
 
@@ -161,3 +162,156 @@ def test_compute_interaction_stats_mixed_types(tmp_path: Path) -> None:
         "video_summary": {"passed": 1, "total": 1},
         "unknown_type": {"passed": 1, "total": 1},
     }
+
+
+# ----- compute_interaction_review_status tests -----
+
+
+def test_review_status_no_interactions(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    assert compute_interaction_review_status(video_dir) is None
+
+
+def test_review_status_empty_interactions(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"interactions": []}), encoding="utf-8"
+    )
+    assert compute_interaction_review_status(video_dir) is None
+
+
+def test_review_status_no_review_file(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"interactions": [{"id": "n1", "type": "example_practice"}]}),
+        encoding="utf-8",
+    )
+    assert compute_interaction_review_status(video_dir) is None
+
+
+def test_review_status_all_passed_global(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {"id": "n1", "type": "example_practice"},
+                    {"id": "n2", "type": "interaction_summary"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps({"status": "published"}), encoding="utf-8"
+    )
+    assert compute_interaction_review_status(video_dir) == "all_passed"
+
+
+def test_review_status_all_failed_global(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {"id": "n1", "type": "example_practice"},
+                    {"id": "n2", "type": "interaction_summary"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps({"status": "rejected"}), encoding="utf-8"
+    )
+    assert compute_interaction_review_status(video_dir) == "all_failed"
+
+
+def test_review_status_partial(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {"id": "n1", "type": "example_practice"},
+                    {"id": "n2", "type": "example_practice"},
+                    {"id": "n3", "type": "interaction_summary"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps(
+            {
+                "status": "pending_review",
+                "reviews": [
+                    {"item_id": "n1", "status": "published"},
+                    {"item_id": "n2", "status": "rejected"},
+                    {"item_id": "n3", "status": "published"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert compute_interaction_review_status(video_dir) == "partial"
+
+
+def test_review_status_all_passed_individual(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {"id": "n1", "type": "interaction_summary"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps(
+            {
+                "reviews": [
+                    {"item_id": "n1", "status": "published"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert compute_interaction_review_status(video_dir) == "all_passed"
+
+
+def test_review_status_all_failed_individual(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {"id": "n1", "type": "example_practice"},
+                    {"id": "n2", "type": "example_practice"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps(
+            {
+                "reviews": [
+                    {"item_id": "n1", "status": "rejected"},
+                    {"item_id": "n2", "status": "rejected"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    assert compute_interaction_review_status(video_dir) == "all_failed"

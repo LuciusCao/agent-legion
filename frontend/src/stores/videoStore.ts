@@ -39,13 +39,7 @@ interface VideoState {
 }
 
 function hasAllApprovedInteractions(video: VideoItem): boolean {
-  const stats = video.interaction_stats;
-  const reviewStats = [
-    stats?.example_practice,
-    stats?.interaction_summary,
-    stats?.video_summary,
-  ].filter((item) => !!item);
-  return reviewStats.length > 0 && reviewStats.every((item) => item.total > 0 && item.passed === item.total);
+  return video.interaction_review_status === "all_passed";
 }
 
 export const useVideoStore = create<VideoState>((set, get) => ({

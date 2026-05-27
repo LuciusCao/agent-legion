@@ -19,6 +19,8 @@ body {
   --status-failed-bg: #fee2e2;
   --status-failed-text: #b91c1c;
   --status-failed-border: #ef4444;
+  --status-partial-bg: #fef3c7;
+  --status-partial-text: #92400e;
 }
 
 button,
@@ -438,6 +440,28 @@ pre {
   white-space: nowrap;
   background: var(--status-completed-bg);
   color: var(--status-completed-text);
+}
+
+.review-badge {
+  font-size: 11px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.review-badge.all-passed {
+  background: var(--status-completed-bg);
+  color: var(--status-completed-text);
+}
+
+.review-badge.partial {
+  background: var(--status-partial-bg);
+  color: var(--status-partial-text);
+}
+
+.review-badge.all-failed {
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
 }
 
 /* Responsive */

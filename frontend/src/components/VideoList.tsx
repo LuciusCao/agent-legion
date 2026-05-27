@@ -4,6 +4,7 @@ import { useVideoStore } from "../stores/videoStore";
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from "../labels";
 import { statusGroup, filterVideos, formatInteractionStats } from "../helpers";
 import { PhaseStepper } from "./PhaseStepper";
+import { InteractionReviewBadge } from "./InteractionReviewBadge";
 import styles from "./VideoList.module.css";
 
 export function VideoList() {
@@ -110,6 +111,9 @@ export function VideoList() {
                 <span className={`status-badge ${statusGroup(video)}`}>
                   {STATUS_LABELS[statusGroup(video)] || video.status}
                 </span>
+                {video.content_type === "knowledge" && video.status === "completed" && (
+                  <InteractionReviewBadge status={video.interaction_review_status} />
+                )}
                 {!!video.packed && <span className="packed-badge">已打包</span>}
               </div>
             </md-list-item>

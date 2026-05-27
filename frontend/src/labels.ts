@@ -48,3 +48,9 @@ export const INTERACTION_TYPE_LABELS: Record<string, string> = {
   interaction_summary: "互动小结",
   video_summary: "互动小结",
 };
+
+export const INTERACTION_REVIEW_STATUS_LABELS: Record<string, string> = {
+  all_passed: "全通过",
+  partial: "部分通过",
+  all_failed: "失败",
+};

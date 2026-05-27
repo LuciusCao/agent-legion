@@ -14,6 +14,7 @@ import { SubtitlePanel } from "../components/SubtitlePanel";
 import { NodePanel } from "../components/NodePanel";
 import { MetadataPanel } from "../components/MetadataPanel";
 import { RerunDialog } from "../components/RerunDialog";
+import { InteractionReviewBadge } from "../components/InteractionReviewBadge";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { TYPE_LABELS, STATUS_LABELS } from "../labels";
 import { parseTimeSeconds, statusGroup, triggerDownload } from "../helpers";
@@ -209,6 +210,9 @@ export function DetailPage() {
                 <span className={`status-badge ${statusGroup(currentVideo)}`}>
                   {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
                 </span>
+                {currentVideo.content_type === "knowledge" && currentVideo.status === "completed" && (
+                  <InteractionReviewBadge status={currentVideo.interaction_review_status} />
+                )}
                 {!!currentVideo.packed && <span className="packed-badge">已打包</span>}
               </p>
             )}
