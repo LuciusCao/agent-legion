@@ -85,7 +85,7 @@ class WhisperCppProvider(TranscriptionProvider):
                 "-of",
                 str(out_stem),
                 "--max-len",
-                "30",  # Limit segment length to ~30 chars
+                "10",  # Limit segment length to ~10 chars
                 "--vad-min-silence-duration-ms",
                 "50",  # More sensitive splitting
                 "--split-on-word",  # Split at word boundaries
