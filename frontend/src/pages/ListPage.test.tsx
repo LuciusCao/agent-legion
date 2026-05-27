@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, act, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { ListPage } from "./ListPage";
+import { useVideoStore } from "../stores/videoStore";
 
 const mockApi = vi.fn();
 vi.mock("../api", () => ({
@@ -11,6 +12,19 @@ vi.mock("../api", () => ({
 describe("ListPage", () => {
   beforeEach(() => {
     mockApi.mockReset();
+    useVideoStore.setState({
+      videos: [],
+      selectedType: "knowledge",
+      statusFilter: "all",
+      searchQuery: "",
+      packedFilter: "all",
+      selectMode: false,
+      packageSelectMode: false,
+      selectedIds: new Set(),
+      isLoading: false,
+      sseConnected: true,
+      error: null,
+    });
   });
 
   it("renders list page", () => {
@@ -51,5 +65,29 @@ describe("ListPage", () => {
       expect(screen.queryByText("知识视频A")).not.toBeInTheDocument();
     });
     expect(screen.getByText("题目视频B")).toBeInTheDocument();
+  });
+
+  it("shows the persisted search query when returning to the list", async () => {
+    useVideoStore.setState({ searchQuery: "K001" });
+    mockApi.mockResolvedValueOnce({
+      videos: [
+        { id: "v1", title: "知识视频A", content_type: "knowledge", external_id: "K001", status: "completed", current_phase: "package", error_message: "" },
+        { id: "v2", title: "知识视频B", content_type: "knowledge", external_id: "K002", status: "completed", current_phase: "package", error_message: "" },
+      ],
+    });
+
+    render(
+      <MemoryRouter>
+        <ListPage />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText("知识视频A")).toBeInTheDocument();
+    });
+
+    const search = document.querySelector("md-outlined-text-field");
+    expect(search).toHaveAttribute("value", "K001");
+    expect(screen.queryByText("知识视频B")).not.toBeInTheDocument();
   });
 });
