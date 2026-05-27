@@ -7,6 +7,7 @@ export function PackageToolbar() {
     selectedIds,
     togglePackageSelectMode,
     selectPackageAll,
+    selectPackageApproved,
     selectPackageUnpacked,
     clearSelection,
     batchPackage,
@@ -27,6 +28,7 @@ export function PackageToolbar() {
       <span>已选择 {count} 项</span>
       <div className={styles.batchActions}>
         <md-text-button onClick={selectPackageAll}>全选</md-text-button>
+        <md-text-button onClick={selectPackageApproved}>仅选审核通过</md-text-button>
         <md-text-button onClick={selectPackageUnpacked}>仅选未打包</md-text-button>
         <md-text-button onClick={clearSelection}>取消选择</md-text-button>
         <md-icon-button disabled={(!hasSelection) || undefined} onClick={handlePackage} title="打包">

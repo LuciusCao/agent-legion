@@ -67,6 +67,124 @@ describe("videoStore", () => {
     expect(useVideoStore.getState().selectedIds).toEqual(new Set(["v2"]));
   });
 
+  it("selects only approved completed videos in the current view", () => {
+    useVideoStore.setState({
+      videos: [
+        {
+          id: "approved-visible",
+          title: "Visible Approved",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "K001",
+          knowledge_code: "K001",
+          question_id: "",
+          source_uuid: "",
+          status: "completed",
+          current_phase: "package",
+          error_message: "",
+          interaction_stats: {
+            example_practice: { passed: 2, total: 2 },
+            interaction_summary: { passed: 1, total: 1 },
+          },
+        },
+        {
+          id: "summary-video-type",
+          title: "Visible Video Summary",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "K002",
+          knowledge_code: "K002",
+          question_id: "",
+          source_uuid: "",
+          status: "completed",
+          current_phase: "package",
+          error_message: "",
+          interaction_stats: {
+            example_practice: { passed: 1, total: 1 },
+            video_summary: { passed: 1, total: 1 },
+          },
+        },
+        {
+          id: "rejected",
+          title: "Visible Rejected",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "K003",
+          knowledge_code: "K003",
+          question_id: "",
+          source_uuid: "",
+          status: "completed",
+          current_phase: "package",
+          error_message: "",
+          interaction_stats: {
+            example_practice: { passed: 1, total: 2 },
+            interaction_summary: { passed: 1, total: 1 },
+          },
+        },
+        {
+          id: "summary-only",
+          title: "Visible Summary Only",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "K004",
+          knowledge_code: "K004",
+          question_id: "",
+          source_uuid: "",
+          status: "completed",
+          current_phase: "package",
+          error_message: "",
+          interaction_stats: {
+            interaction_summary: { passed: 1, total: 1 },
+          },
+        },
+        {
+          id: "hidden-by-search",
+          title: "Hidden Approved",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "H001",
+          knowledge_code: "H001",
+          question_id: "",
+          source_uuid: "",
+          status: "completed",
+          current_phase: "package",
+          error_message: "",
+          interaction_stats: {
+            example_practice: { passed: 1, total: 1 },
+            interaction_summary: { passed: 1, total: 1 },
+          },
+        },
+        {
+          id: "question-approved",
+          title: "Visible Approved",
+          source_url: "",
+          content_type: "question",
+          external_id: "Q001",
+          knowledge_code: "",
+          question_id: "Q001",
+          source_uuid: "",
+          status: "completed",
+          current_phase: "package",
+          error_message: "",
+          interaction_stats: {
+            example_practice: { passed: 1, total: 1 },
+            interaction_summary: { passed: 1, total: 1 },
+          },
+        },
+      ],
+      selectedType: "knowledge",
+      statusFilter: "completed",
+      searchQuery: "Visible",
+      packedFilter: "all",
+    });
+
+    useVideoStore.getState().selectPackageApproved();
+
+    expect(useVideoStore.getState().selectedIds).toEqual(
+      new Set(["approved-visible", "summary-video-type", "summary-only"]),
+    );
+  });
+
   it("toggles video selection", () => {
     useVideoStore.getState().toggleVideoSelection("v1");
     expect(useVideoStore.getState().selectedIds.has("v1")).toBe(true);
