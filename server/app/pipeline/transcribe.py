@@ -47,6 +47,11 @@ def validate_srt(text: str, duration: float = 0) -> ValidationResult:
         )
         if max_gap > 10:
             return ValidationResult(False, len(subtitles), f"subtitle gap too large: {max_gap:.1f}s")
+    max_entry_duration = max(s["end"] - s["start"] for s in subtitles)
+    if max_entry_duration > 15:
+        return ValidationResult(
+            False, len(subtitles), f"subtitle entry too long: {max_entry_duration:.1f}s"
+        )
     texts = [s["text"].strip() for s in subtitles]
     if len(set(texts)) <= 1 and len(texts) >= 3:
         return ValidationResult(False, len(subtitles), "subtitle text is overly repetitive")
