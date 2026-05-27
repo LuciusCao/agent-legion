@@ -29,12 +29,23 @@ interface VideoState {
   toggleVideoSelection: (id: string) => void;
   selectAllVisible: () => void;
   selectPackageAll: () => void;
+  selectPackageApproved: () => void;
   selectPackageUnpacked: () => void;
   clearSelection: () => void;
   setSseConnected: (connected: boolean) => void;
   batchDelete: (ids: string[]) => Promise<{ results: Array<{ video_id: string; status: string; message?: string }> }>;
   batchRerun: (ids: string[], phase: string) => Promise<{ results: Array<{ video_id: string; status: string; message?: string }> }>;
   batchPackage: (ids: string[]) => Promise<{ path: string; download_url: string }>;
+}
+
+function hasAllApprovedInteractions(video: VideoItem): boolean {
+  const stats = video.interaction_stats;
+  const reviewStats = [
+    stats?.example_practice,
+    stats?.interaction_summary,
+    stats?.video_summary,
+  ].filter((item) => !!item);
+  return reviewStats.length > 0 && reviewStats.every((item) => item.total > 0 && item.passed === item.total);
 }
 
 export const useVideoStore = create<VideoState>((set, get) => ({
@@ -128,6 +139,17 @@ export const useVideoStore = create<VideoState>((set, get) => ({
   selectPackageUnpacked: () => set((state) => {
     const unpacked = state.videos.filter((v) => v.status === "completed" && !v.packed);
     return { selectedIds: new Set(unpacked.map((v) => v.id)) };
+  }),
+
+  selectPackageApproved: () => set((state) => {
+    const visible = filterVideos(state.videos, {
+      selectedType: state.selectedType,
+      statusFilter: state.statusFilter,
+      searchQuery: state.searchQuery,
+      packedFilter: state.packedFilter,
+    });
+    const approved = visible.filter((v) => v.status === "completed" && hasAllApprovedInteractions(v));
+    return { selectedIds: new Set(approved.map((v) => v.id)) };
   }),
 
   toggleVideoSelection: (id) => {
