@@ -88,7 +88,6 @@ h1 {
 .list-fixed-header {
   flex: 0 0 auto;
   background: var(--md-sys-color-surface);
-  z-index: 2;
 }
 
 .filters-row {
