@@ -41,6 +41,12 @@ def validate_srt(text: str, duration: float = 0) -> ValidationResult:
         return ValidationResult(False, len(subtitles), "too many empty subtitle entries")
     if duration and subtitles[-1]["end"] < min(duration * 0.25, max(duration - 10, 1)):
         return ValidationResult(False, len(subtitles), "subtitle coverage too low")
+    if len(subtitles) >= 2:
+        max_gap = max(
+            s2["start"] - s1["end"] for s1, s2 in zip(subtitles, subtitles[1:], strict=False)
+        )
+        if max_gap > 10:
+            return ValidationResult(False, len(subtitles), f"subtitle gap too large: {max_gap:.1f}s")
     texts = [s["text"].strip() for s in subtitles]
     if len(set(texts)) <= 1 and len(texts) >= 3:
         return ValidationResult(False, len(subtitles), "subtitle text is overly repetitive")
