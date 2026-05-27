@@ -28,6 +28,22 @@ def test_database_rows_match_declared_record_fields(db):
     assert set(db.list_phase_runs(video["id"])[0]) == PHASE_RUN_FIELDS
 
 
+def test_phase_runs_include_openclaw_agent_session_from_command(db):
+    video = db.create_video("https://example.com/path/a.mp4", "Title A")
+    run = db.start_phase(
+        video["id"],
+        "subtitle_review",
+        ["openclaw", "agent", "--agent", "main", "--session-id", "a-123"],
+    )
+
+    listed = db.list_phase_runs(video["id"])[0]
+    fetched = db.get_phase_run(video["id"], run["id"])
+
+    assert listed["agent_id"] == "main"
+    assert listed["agent_session_id"] == "a-123"
+    assert fetched["agent_session_id"] == "a-123"
+
+
 def test_database_update_video_rejects_unknown_fields(db):
     video = db.create_video("https://example.com/path/a.mp4", "Title A")
 

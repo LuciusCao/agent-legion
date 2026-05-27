@@ -1,5 +1,5 @@
-import { describe, it, expect } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { describe, it, expect, vi, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { PhaseRunsPanel } from "./PhaseRunsPanel";
 import type { TranscriptionRun, VideoItem } from "../types";
 
@@ -12,6 +12,8 @@ function makeRun(
     finished_at: string | null;
     command_json: string;
     error_message: string;
+    agent_id: string;
+    agent_session_id: string;
   }> = {}
 ) {
   return {
@@ -25,6 +27,8 @@ function makeRun(
     exit_code: status === "completed" ? 0 : null,
     log_path: "",
     error_message: opts.error_message ?? "",
+    agent_id: opts.agent_id ?? "",
+    agent_session_id: opts.agent_session_id ?? "",
   };
 }
 
@@ -63,6 +67,10 @@ function makeVideo(overrides: Partial<VideoItem> = {}): VideoItem {
 }
 
 describe("PhaseRunsPanel", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it("renders the phase stepper and history toggle in the header when video context is provided", () => {
     const runs = [
       makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
@@ -267,5 +275,62 @@ describe("PhaseRunsPanel", () => {
 
     expect(screen.getByText("openclaw-agent_1")).toBeInTheDocument();
     expect(screen.queryByText("openclaw")).not.toBeInTheDocument();
+  });
+
+  it("opens transcription details in a dialog", () => {
+    const runs = [
+      makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
+      makeRun(2, "transcribe", "completed", { finished_at: "2024-01-01T00:01:00Z" }),
+    ];
+
+    render(
+      <PhaseRunsPanel
+        phaseRuns={runs}
+        transcriptionRuns={[makeTranscriptionRun("whisper")]}
+        contentType="knowledge"
+      />
+    );
+
+    fireEvent.click(screen.getByText("转录详情"));
+
+    expect(screen.getByText("Provider").closest("md-dialog")).toBeInTheDocument();
+  });
+
+  it("opens the openclaw session in a dialog without showing the key in the panel", async () => {
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ log: "[SESSION] v1-123\n\n[ASSISTANT]\nDone" }),
+    }));
+    const runs = [
+      makeRun(1, "download", "completed", { finished_at: "2024-01-01T00:00:30Z" }),
+      makeRun(2, "transcribe", "completed", { finished_at: "2024-01-01T00:01:00Z" }),
+      makeRun(3, "subtitle_review", "completed", {
+        finished_at: "2024-01-01T00:02:00Z",
+        command_json: JSON.stringify([
+          "openclaw",
+          "agent",
+          "--agent",
+          "agent_1",
+          "--session-id",
+          "v1-123",
+        ]),
+        agent_id: "agent_1",
+        agent_session_id: "v1-123",
+      }),
+    ];
+
+    render(<PhaseRunsPanel phaseRuns={runs} transcriptionRuns={[]} contentType="knowledge" />);
+
+    expect(screen.getByText("查看会话")).toBeInTheDocument();
+    expect(screen.queryByText("会话 v1-123")).not.toBeInTheDocument();
+    fireEvent.click(screen.getByText("查看会话"));
+
+    await waitFor(() => expect(screen.getByText("会话 v1-123")).toBeInTheDocument());
+    await waitFor(() => expect(screen.getByText(/\[ASSISTANT\]/)).toBeInTheDocument());
+    expect(screen.getByText("会话 v1-123").closest("md-dialog")).toBeInTheDocument();
+    expect(fetch).toHaveBeenCalledWith(
+      "/api/videos/v1/phase-runs/3/session",
+      expect.objectContaining({ cache: "no-store" })
+    );
   });
 });

@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
+import type { CSSProperties } from "react";
 import type { PhaseRun, TranscriptionRun, ContentType, VideoItem } from "../types";
 import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES, STATUS_LABELS, STATUS_ICONS } from "../labels";
 import { formatDuration } from "../lib/formatters";
+import { api } from "../api";
 import { PhaseStepper } from "./PhaseStepper";
 import { TranscriptionDetails } from "./TranscriptionDetails";
 import styles from "./PhaseRunsPanel.module.css";
@@ -44,6 +46,25 @@ function extractOpenClawAgentName(commandJson: string): string {
       }
       if (parts[i].startsWith("--agent=")) {
         return parts[i].slice("--agent=".length);
+      }
+    }
+  } catch {
+    return "";
+  }
+  return "";
+}
+
+function extractOpenClawArg(commandJson: string, name: string): string {
+  try {
+    const command = JSON.parse(commandJson) as unknown;
+    if (!Array.isArray(command)) return "";
+    const parts = command.map((part) => String(part));
+    for (let i = 0; i < parts.length; i++) {
+      if (parts[i] === name && parts[i + 1]) {
+        return parts[i + 1];
+      }
+      if (parts[i].startsWith(`${name}=`)) {
+        return parts[i].slice(name.length + 1);
       }
     }
   } catch {
@@ -122,6 +143,13 @@ export function PhaseRunsPanel({
   const [now, setNow] = useState(Date.now());
   const [viewMode, setViewMode] = useState<"latest" | "history">("latest");
   const [expandedDetails, setExpandedDetails] = useState<Set<number>>(new Set());
+  const [sessionLogs, setSessionLogs] = useState<Record<number, string>>({});
+  const [transcriptionDialogOpen, setTranscriptionDialogOpen] = useState(false);
+  const [sessionDialog, setSessionDialog] = useState<{
+    runId: number;
+    sessionId: string;
+    videoId: string;
+  } | null>(null);
 
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 1000);
@@ -209,10 +237,28 @@ export function PhaseRunsPanel({
     });
   }
 
+  async function openSession(run: PhaseRun, sessionId: string) {
+    const runId = run.id;
+    setSessionDialog({ runId, sessionId, videoId: run.video_id });
+    if (sessionLogs[runId] || runId < 0) return;
+    setSessionLogs((prev) => ({ ...prev, [runId]: "加载中..." }));
+    try {
+      const data = await api<{ log: string }>(`/api/videos/${run.video_id}/phase-runs/${runId}/session`);
+      setSessionLogs((prev) => ({ ...prev, [runId]: data.log || "会话为空" }));
+    } catch {
+      setSessionLogs((prev) => ({ ...prev, [runId]: "会话文件暂不可用" }));
+    }
+  }
+
   const transPrimary = transcriptionRuns.find((t) => t.status !== "fallback") || transcriptionRuns[0];
   const transFallback = transcriptionRuns.find((t) => t.status === "fallback");
 
   const items = viewMode === "latest" ? latestItems : historyItems;
+  const dialogStyle = {
+    "--md-dialog-container-color": "#ffffff",
+    maxWidth: "760px",
+    width: "90vw",
+  } as CSSProperties;
 
   return (
     <div className={styles.phaseRunsPanel}>
@@ -236,7 +282,8 @@ export function PhaseRunsPanel({
             const isTranscribe = item.run.phase_key === "transcribe";
             const hasTransDetails = isTranscribe && transcriptionRuns.length > 0;
             const isDetailExpanded = expandedDetails.has(item.run.id);
-            const canExpand = hasError || hasTransDetails;
+            const sessionId = item.run.agent_session_id || extractOpenClawArg(item.run.command_json, "--session-id");
+            const hasAgentSession = !!sessionId && item.run.id > 0;
 
             return (
               <div key={item.run.id} className={styles.phaseTimelineItem}>
@@ -280,22 +327,29 @@ export function PhaseRunsPanel({
                     </span>
                   </div>
 
-                  {canExpand && (
+                  {hasAgentSession && (
+                    <div className={styles.timelineMeta}>
+                      <button className={styles.inlineAction} onClick={() => void openSession(item.run, sessionId)}>
+                        <md-icon className={styles.toggleIcon}>forum</md-icon>
+                        查看会话
+                      </button>
+                    </div>
+                  )}
+
+                  {hasError && (
                     <button className={styles.timelineDetailToggle} onClick={() => toggleDetail(item.run.id)}>
-                      {hasError ? (
-                        <>
-                          <md-icon className={styles.toggleIcon}>error</md-icon>
-                          错误详情
-                        </>
-                      ) : (
-                        <>
-                          <md-icon className={styles.toggleIcon}>text_fields</md-icon>
-                          转录详情
-                        </>
-                      )}
+                      <md-icon className={styles.toggleIcon}>error</md-icon>
+                      错误详情
                       <md-icon className={styles.toggleIcon}>
                         {isDetailExpanded ? "expand_less" : "expand_more"}
                       </md-icon>
+                    </button>
+                  )}
+
+                  {hasTransDetails && (
+                    <button className={styles.timelineDetailToggle} onClick={() => setTranscriptionDialogOpen(true)}>
+                      <md-icon className={styles.toggleIcon}>text_fields</md-icon>
+                      转录详情
                     </button>
                   )}
 
@@ -303,19 +357,41 @@ export function PhaseRunsPanel({
                     <div className="timeline-detail-content error">{item.run.error_message}</div>
                   )}
 
-                  {isDetailExpanded && hasTransDetails && (
-                    <TranscriptionDetails
-                      primary={transPrimary}
-                      fallback={transFallback}
-                      totalCount={transcriptionRuns.length}
-                    />
-                  )}
                 </div>
               </div>
             );
           })}
         </div>
       </div>
+
+      {transcriptionDialogOpen && (
+        <md-dialog open onClosed={() => setTranscriptionDialogOpen(false)} style={dialogStyle}>
+          <div slot="headline">转录详情</div>
+          <div slot="content">
+            <TranscriptionDetails
+              primary={transPrimary}
+              fallback={transFallback}
+              totalCount={transcriptionRuns.length}
+            />
+          </div>
+          <div slot="actions">
+            <md-text-button onClick={() => setTranscriptionDialogOpen(false)}>关闭</md-text-button>
+          </div>
+        </md-dialog>
+      )}
+
+      {sessionDialog && (
+        <md-dialog open onClosed={() => setSessionDialog(null)} style={dialogStyle}>
+          <div slot="headline">Agent 会话</div>
+          <div slot="content" className={styles.dialogContent}>
+            <div className={styles.sessionKey}>会话 {sessionDialog.sessionId}</div>
+            <pre className={styles.sessionPreview}>{sessionLogs[sessionDialog.runId] || "加载中..."}</pre>
+          </div>
+          <div slot="actions">
+            <md-text-button onClick={() => setSessionDialog(null)}>关闭</md-text-button>
+          </div>
+        </md-dialog>
+      )}
     </div>
   );
 }

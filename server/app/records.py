@@ -31,6 +31,8 @@ class PhaseRunRecord(TypedDict):
     exit_code: int | None
     log_path: str
     error_message: str
+    agent_id: str
+    agent_session_id: str
 
 
 VIDEO_RECORD_FIELDS = set(VideoRecord.__annotations__)
