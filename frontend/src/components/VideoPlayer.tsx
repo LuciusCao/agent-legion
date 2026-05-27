@@ -1,5 +1,6 @@
 import { useRef, useCallback } from "react";
-import type { VideoItem, VideoArtifacts } from "../types";
+import type { InteractionNode, VideoItem, VideoArtifacts } from "../types";
+import { InteractionOverlay } from "./InteractionOverlay";
 import styles from "./VideoPlayer.module.css";
 
 interface VideoPlayerProps {
@@ -7,9 +8,24 @@ interface VideoPlayerProps {
   artifacts: VideoArtifacts;
   onTimeUpdate: (time: number) => void;
   videoRef?: React.Ref<HTMLVideoElement>;
+  interactionNode?: InteractionNode | null;
+  interactionSentence?: string[];
+  onInteractionWordClick?: (word: string) => void;
+  onInteractionReset?: () => void;
+  onInteractionContinue?: () => void;
 }
 
-export function VideoPlayer({ video, artifacts, onTimeUpdate, videoRef }: VideoPlayerProps) {
+export function VideoPlayer({
+  video,
+  artifacts,
+  onTimeUpdate,
+  videoRef,
+  interactionNode = null,
+  interactionSentence = [],
+  onInteractionWordClick = () => {},
+  onInteractionReset = () => {},
+  onInteractionContinue = () => {},
+}: VideoPlayerProps) {
   const internalRef = useRef<HTMLVideoElement | null>(null);
   const subtitleRef = useRef<HTMLSpanElement | null>(null);
 
@@ -43,7 +59,7 @@ export function VideoPlayer({ video, artifacts, onTimeUpdate, videoRef }: VideoP
     : "";
 
   return (
-    <div className={styles.playerWrap}>
+    <div className={styles.playerWrap} data-testid="video-player-wrap">
       {videoUrl ? (
         <video
           ref={setRefs}
@@ -55,6 +71,13 @@ export function VideoPlayer({ video, artifacts, onTimeUpdate, videoRef }: VideoP
       ) : (
         <div className="empty-state">视频文件未下载</div>
       )}
+      <InteractionOverlay
+        node={interactionNode}
+        currentSentence={interactionSentence}
+        onWordClick={onInteractionWordClick}
+        onReset={onInteractionReset}
+        onContinue={onInteractionContinue}
+      />
       <div className={styles.subtitleOverlay}>
         <span ref={subtitleRef} className={styles.subtitleText} />
       </div>
