@@ -165,6 +165,7 @@ def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
         WhisperCppProvider(
             binary=str(whisper.get("binary", "")),
             model=str(whisper.get("model", "")),
+            vad_model=whisper.get("vad_model"),
         ),
         SenseVoiceProvider(
             script=str(

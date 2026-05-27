@@ -1,7 +1,9 @@
 import json
 from pathlib import Path
 
-from server.app.services.interaction_stats import compute_interaction_stats
+from server.app.services.interaction_stats import (
+    compute_interaction_stats,
+)
 
 
 def test_compute_interaction_stats_no_interactions(tmp_path: Path) -> None:

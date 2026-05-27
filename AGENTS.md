@@ -247,6 +247,7 @@ Edit `config/pipeline.yaml`:
 - `asr.provider`: `auto`, `whisper`, or `sensevoice`.
 - `asr.whisper.binary`: path to local `whisper-cli`.
 - `asr.whisper.model`: path to local whisper model (e.g., `ggml-medium.bin`).
+- `asr.whisper.vad_model`: optional path to VAD model for voice activity detection (e.g., `ggml-silero-v6.2.0.bin`). When set, whisper-cli runs with `--vad --vad-model`.
 - `asr.sensevoice.script`: path to SenseVoice transcription script.
 - `asr.sensevoice.model_dir`: path to `SenseVoiceSmall` model directory.
 - `openclaw.command_template`: argument list with placeholders `{prompt_file}`, `{video_id}`, `{video_dir}`.
