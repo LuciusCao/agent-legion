@@ -3,9 +3,25 @@
   padding: 12px;
 }
 
+.agent-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+}
+
 .agent-summary {
   font-weight: 700;
-  margin-bottom: 8px;
+}
+
+.assignment-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+  white-space: nowrap;
 }
 
 .agent-list {

@@ -186,6 +186,23 @@ def test_concurrent_set_idle_decrements_task_count():
     assert agent["current_video_id"] is None
 
 
+def test_concurrent_set_idle_clears_all_busy_video_ids():
+    manager = AgentStatusManager()
+    manager.agents = [AgentStatus(id="main", name="Main", busy=False, max_tasks=3)]
+
+    manager.set_busy("main", "video_1")
+    manager.set_busy("main", "video_2")
+    manager.set_busy("main", "video_3")
+
+    manager.set_idle("main")
+    manager.set_idle("main")
+    manager.set_idle("main")
+
+    assert manager.is_video_busy("video_1") is False
+    assert manager.is_video_busy("video_2") is False
+    assert manager.is_video_busy("video_3") is False
+
+
 def test_openclaw_runner_extracts_agent_id_from_command_template():
     runner = OpenClawRunner(
         command_template=["openclaw", "agent", "--local", "--agent", "main", "--message", "{prompt_text}", "--json"],

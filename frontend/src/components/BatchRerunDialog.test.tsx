@@ -35,7 +35,7 @@ describe("BatchRerunDialog", () => {
           knowledge_code: "K002",
           question_id: "",
           source_uuid: "",
-          status: "running",
+          status: "failed",
           current_phase: "subtitle_review",
           error_message: "",
         },

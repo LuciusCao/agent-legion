@@ -234,10 +234,16 @@ describe("canRerunFrom", () => {
   });
 
   it("returns true when selected phase is at or before current phase", () => {
-    const v = makeVideo({ status: "running", current_phase: "chapter_generate" });
+    const v = makeVideo({ status: "failed", current_phase: "chapter_generate" });
     expect(canRerunFrom(v, "download")).toBe(true);
     expect(canRerunFrom(v, "chapter_generate")).toBe(true);
     expect(canRerunFrom(v, "assemble")).toBe(false);
+  });
+
+  it("returns false while the video is running", () => {
+    const v = makeVideo({ status: "running", current_phase: "chapter_generate" });
+    expect(canRerunFrom(v, "download")).toBe(false);
+    expect(canRerunFrom(v, "chapter_generate")).toBe(false);
   });
 
   it("returns false for unknown current_phase", () => {

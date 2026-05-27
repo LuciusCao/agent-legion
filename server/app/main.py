@@ -14,6 +14,7 @@ from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool
 from server.app.routes import create_router
 from server.app.settings import load_settings
+from server.app.worker_control import WorkerControl
 from server.app.worker_thread import WorkerThread
 
 
@@ -25,6 +26,7 @@ def create_app(
     settings = load_settings(data_dir=data_dir)
 
     agent_manager = AgentStatusManager()
+    worker_control = WorkerControl()
     video_event_manager = VideoEventManager()
     hub = NotificationHub()
     hub.on_change = video_event_manager.broadcast
@@ -50,7 +52,9 @@ def create_app(
                 if aid:
                     runner_counts[aid] = runner_counts.get(aid, 0) + 1
             agent_manager.set_runner_counts(runner_counts)
-            worker_thread = WorkerThread(db, settings, runner_pool, agent_manager, max_workers)
+            worker_thread = WorkerThread(
+                db, settings, runner_pool, agent_manager, worker_control, max_workers
+            )
             worker_thread.start()
         yield
         if worker_thread is not None:
@@ -60,9 +64,12 @@ def create_app(
     app.state.settings = settings
     app.state.db = db
     app.state.agent_manager = agent_manager
+    app.state.worker_control = worker_control
     app.state.video_event_manager = video_event_manager
 
-    app.include_router(create_router(db, settings, agent_manager, video_event_manager))
+    app.include_router(
+        create_router(db, settings, agent_manager, video_event_manager, worker_control)
+    )
 
     frontend_dist = settings.root_dir / "frontend" / "dist"
     if frontend_dist.exists():
