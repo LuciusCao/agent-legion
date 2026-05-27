@@ -8,7 +8,6 @@ import { useVideoStore } from "../stores/videoStore";
 import { VideoPlayer } from "../components/VideoPlayer";
 import { TimelineStrip } from "../components/TimelineStrip";
 import { PhaseRunsPanel } from "../components/PhaseRunsPanel";
-import { InteractionOverlay } from "../components/InteractionOverlay";
 import { useVideoPhaseEvents } from "../hooks/useVideoPhaseEvents";
 import { SubtitlePanel } from "../components/SubtitlePanel";
 import { NodePanel } from "../components/NodePanel";
@@ -54,6 +53,7 @@ export function DetailPage() {
     pushWord,
     resetSentence,
     clearSentence,
+    clearInteractions,
   } = useInteractionStore();
 
   const { openRerunDialog, openDeleteDialog, showToast } = useUiStore();
@@ -71,10 +71,12 @@ export function DetailPage() {
 
   useEffect(() => {
     if (!id) return;
+    clearInteractions();
+    previousPlaybackTimeRef.current = null;
     loadVideo(id);
     loadArtifacts(id);
     loadLog(id);
-  }, [id, loadVideo, loadArtifacts, loadLog]);
+  }, [id, clearInteractions, loadVideo, loadArtifacts, loadLog]);
 
   const prevPhaseRef = useRef<string | null>(null);
   const prevStatusRef = useRef<string | null>(null);
@@ -247,6 +249,11 @@ export function DetailPage() {
               artifacts={artifacts}
               onTimeUpdate={handleTimeUpdate}
               videoRef={playerRef}
+              interactionNode={activeNode}
+              interactionSentence={currentSentence}
+              onInteractionWordClick={pushWord}
+              onInteractionReset={resetSentence}
+              onInteractionContinue={handleContinue}
             />
           )}
 
@@ -271,14 +278,6 @@ export function DetailPage() {
           />
         </aside>
       </section>
-
-      <InteractionOverlay
-        node={activeNode}
-        currentSentence={currentSentence}
-        onWordClick={pushWord}
-        onReset={resetSentence}
-        onContinue={handleContinue}
-      />
 
       <RerunDialog video={currentVideo} onConfirm={handleRerun} />
       <DeleteDialog onConfirm={handleDeleteConfirm} />

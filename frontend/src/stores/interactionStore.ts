@@ -10,6 +10,7 @@ interface InteractionState {
   resetSentence: () => void;
   pushWord: (word: string) => void;
   clearSentence: () => void;
+  clearInteractions: () => void;
 }
 
 export const useInteractionStore = create<InteractionState>((set) => ({
@@ -51,4 +52,10 @@ export const useInteractionStore = create<InteractionState>((set) => ({
     set((state) => ({ currentSentence: [...state.currentSentence, word] }));
   },
   clearSentence: () => set({ currentSentence: [] }),
+  clearInteractions: () =>
+    set({
+      triggeredNodeIndexes: new Set(),
+      dismissedNodeIndexes: new Set(),
+      currentSentence: [],
+    }),
 }));
