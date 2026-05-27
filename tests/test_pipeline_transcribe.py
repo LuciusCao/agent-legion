@@ -226,6 +226,8 @@ def test_whisper_provider_with_vad_includes_vad_flags(tmp_path):
     assert "--vad" in cmd
     assert "--vad-model" in cmd
     assert str(vad_model) in cmd
+    assert "--vad-max-speech-duration-s" in cmd
+    assert "8" in cmd
 
 
 def test_whisper_provider_with_missing_vad_model_raises(tmp_path):
