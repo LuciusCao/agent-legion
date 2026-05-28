@@ -65,6 +65,9 @@ def _prepare_rerun(
     if normalized_start == "transcribe" and not (video_dir / f"{video_id}.mp4").exists():
         normalized_start = "download"
     clear_artifacts_from(video_dir, normalized_start, video_id)
+    phases = phase_sequence(video["content_type"])
+    if phases.index(normalized_start) <= phases.index("transcribe"):
+        db.clear_transcription_runs(video_id)
     db.update_video(
         video_id,
         current_phase=normalized_start,

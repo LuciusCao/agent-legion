@@ -78,9 +78,6 @@ class WhisperCppProvider(TranscriptionProvider):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        prompt = "以下是普通话的句子。"
-        if title:
-            prompt += f"该视频是《{title}》的教学视频，请用简体中文生成字幕文件。"
         out_stem = output_path.with_suffix("")
         cmd = [
             str(self.binary),
@@ -90,8 +87,6 @@ class WhisperCppProvider(TranscriptionProvider):
             str(wav_path),
             "--language",
             "zh",
-            "--prompt",
-            prompt,
             "--output-srt",
             "-of",
             str(out_stem),
