@@ -78,6 +78,7 @@ class WhisperCppProvider(TranscriptionProvider):
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
+        prompt = f"简体中文 {title}" if title else "简体中文"
         out_stem = output_path.with_suffix("")
         cmd = [
             str(self.binary),
@@ -87,6 +88,8 @@ class WhisperCppProvider(TranscriptionProvider):
             str(wav_path),
             "--language",
             "zh",
+            "--prompt",
+            prompt,
             "--output-srt",
             "-of",
             str(out_stem),

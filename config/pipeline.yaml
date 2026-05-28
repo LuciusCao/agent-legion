@@ -19,7 +19,7 @@ asr:
     # VAD model path for voice activity detection (silero-v6.2.0)
     vad_model: ~/.cache/whisper.cpp/ggml-silero-v6.2.0.bin
   sensevoice:
-    script: /Users/user/CatPuru/projects/cms-extensions/engineering/pipeline/scripts/transcribe_sensevoice.py
+    script: server/app/pipeline/transcribe_sensevoice.py
     model_dir: /Users/user/CatPuru/projects/cms-extensions/models/SenseVoiceSmall
 cms:
   env: prod
