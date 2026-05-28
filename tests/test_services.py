@@ -27,7 +27,7 @@ def test_intake_normalizes_unknown_content_type_and_creates_storage(db, settings
 
 def test_batch_rerun_uses_same_normalization_as_single_rerun(db, settings):
     db.create_video("https://example.com/q1.mp4", content_type="question", external_id="Q001")
-    db.update_video("question_Q001", status="completed")
+    db.update_video("question_Q001", status="completed", current_phase="assemble")
 
     results = batch_rerun_video_records(
         db,
@@ -78,7 +78,7 @@ def test_delete_video_record_removes_storage_and_package_selection_defaults(db, 
         content_type="knowledge",
         external_id="K002",
     )
-    db.update_video(completed["id"], status="completed")
+    db.update_video(completed["id"], status="completed", current_phase="assemble")
     storage_dir = settings.data_dir / "videos" / completed["id"]
     storage_dir.mkdir(parents=True)
     db.update_video(completed["id"], storage_dir=str(storage_dir))
@@ -101,7 +101,7 @@ def test_rerun_transcribe_downgrades_to_download_when_mp4_missing(db, settings):
     video_dir = settings.videos_dir / "v1"
     video_dir.mkdir(parents=True)
     (video_dir / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
-    db.update_video("v1", storage_dir=str(video_dir), status="completed", current_phase="package")
+    db.update_video("v1", storage_dir=str(video_dir), status="completed", current_phase="assemble")
 
     result = rerun_video_record(db, settings, "v1", "transcribe")
 
@@ -116,7 +116,7 @@ def test_rerun_transcribe_stays_transcribe_when_mp4_exists(db, settings):
     video_dir.mkdir(parents=True)
     (video_dir / "v1.mp4").write_bytes(b"fake")
     (video_dir / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhi\n", encoding="utf-8")
-    db.update_video("v1", storage_dir=str(video_dir), status="completed", current_phase="package")
+    db.update_video("v1", storage_dir=str(video_dir), status="completed", current_phase="assemble")
 
     result = rerun_video_record(db, settings, "v1", "transcribe")
 
@@ -281,7 +281,7 @@ def test_batch_run_to_phase_processes_only_requested_ids(db, settings):
 def test_batch_run_to_phase_skips_invalid_phase_for_mixed_content_types(db, settings):
     knowledge = db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
     question = db.create_video("https://example.com/q1.mp4", content_type="question", external_id="Q001")
-    db.update_video(knowledge["id"], current_phase="interaction_generate", status="completed")
+    db.update_video(knowledge["id"], current_phase="assemble", status="completed")
 
     results = batch_run_to_phase(
         db,

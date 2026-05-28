@@ -115,7 +115,7 @@ def test_notify_includes_interaction_stats_for_knowledge_videos(tmp_path: Path) 
     )
 
     # Trigger _notify via update_video
-    db.update_video("knowledge_K001", status="completed")
+    db.update_video("knowledge_K001", current_phase="assemble", status="completed")
 
     assert "interaction_stats" in captured
     assert captured["interaction_stats"] == {
@@ -146,7 +146,7 @@ def test_notify_does_not_include_interaction_stats_for_question_videos(tmp_path:
         storage_dir=str(video_dir),
     )
 
-    db.update_video("question_Q001", status="completed")
+    db.update_video("question_Q001", current_phase="assemble", status="completed")
 
     assert "interaction_stats" not in captured
     assert "interaction_review_status" not in captured
@@ -167,7 +167,46 @@ def test_notify_skips_interaction_stats_when_videos_dir_is_none(tmp_path: Path) 
         external_id="K001",
     )
 
-    db.update_video("knowledge_K001", status="completed")
+    db.update_video("knowledge_K001", current_phase="assemble", status="completed")
 
     assert "interaction_stats" not in captured
     assert "interaction_review_status" not in captured
+
+
+def test_update_video_rejects_completed_without_assemble_phase(db):
+    """Regression test for issue 003: status='completed' requires current_phase='assemble'."""
+    video = db.create_video("https://example.com/path/a.mp4", "Title A")
+
+    # Setting status='completed' while current_phase='download' should fail
+    with pytest.raises(ValueError, match="Invalid state: status='completed' requires current_phase='assemble'",
+    ):
+        db.update_video(video["id"], status="completed")
+
+    # Setting both to valid combination should succeed
+    db.update_video(video["id"], current_phase="assemble", status="completed")
+    updated = db.get_video(video["id"])
+    assert updated["status"] == "completed"
+    assert updated["current_phase"] == "assemble"
+
+    # Transitioning from completed back to queued should succeed
+    db.update_video(video["id"], current_phase="download", status="queued")
+    updated = db.get_video(video["id"])
+    assert updated["status"] == "queued"
+    assert updated["current_phase"] == "download"
+
+    # Setting current_phase to download while status is already queued should succeed
+    db.update_video(video["id"], current_phase="download")
+    assert db.get_video(video["id"])["status"] == "queued"
+
+
+def test_update_video_allows_completed_with_assemble_from_any_phase(db):
+    """Valid transition: any phase can become completed+assemble."""
+    video = db.create_video("https://example.com/path/a.mp4", "Title A")
+    db.start_phase(video["id"], "download", ["python3", "download.py"])
+    db.finish_phase(1, "completed", 0, "")
+
+    # Transition to completed+assemble should succeed
+    db.update_video(video["id"], current_phase="assemble", status="completed")
+    updated = db.get_video(video["id"])
+    assert updated["status"] == "completed"
+    assert updated["current_phase"] == "assemble"
