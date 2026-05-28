@@ -398,4 +398,66 @@ describe("DetailPage", () => {
       });
     });
   });
+
+  it("submits a single-video run-to request", async () => {
+    mockApi
+      .mockResolvedValueOnce({
+        video: {
+          id: "v1",
+          title: "Video 1",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "K001",
+          knowledge_code: "K001",
+          question_id: "",
+          source_uuid: "",
+          status: "queued",
+          current_phase: "subtitle_review",
+          error_message: "",
+          storage_dir: "",
+          duration: 0,
+          packed: false,
+        },
+        phase_runs: [],
+        transcription_runs: [],
+      })
+      .mockResolvedValueOnce({
+        subtitles: [],
+        chapters: [],
+        interactions: [],
+        metadata: null,
+        review: null,
+        checklist: null,
+      })
+      .mockResolvedValueOnce({ log: "" })
+      .mockResolvedValueOnce({
+        result: { video_id: "v1", status: "run_to", phase: "chapter_generate", message: "" },
+        video: null,
+      })
+      .mockResolvedValueOnce({ videos: [] });
+
+    render(
+      <MemoryRouter initialEntries={["/videos/v1"]}>
+        <Routes>
+          <Route path="/videos/:id" element={<DetailPage />} />
+        </Routes>
+      </MemoryRouter>
+    );
+
+    const runToButton = await screen.findByTitle("运行到");
+    await act(async () => {
+      runToButton.click();
+    });
+    await act(async () => {
+      screen.getByText("运行到章节生成").click();
+    });
+
+    expect(mockApi).toHaveBeenCalledWith(
+      "/api/videos/v1/run-to",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ target_phase: "chapter_generate", start_phase: null }),
+      })
+    );
+  });
 });
