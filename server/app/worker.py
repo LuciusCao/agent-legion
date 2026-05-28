@@ -1,6 +1,4 @@
 import json
-from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from server.app.cms.client import get_token
@@ -22,139 +20,14 @@ from server.app.pipeline.transcribe import (
 )
 from server.app.settings import Settings
 
-DEFAULT_PHASE_CONCURRENCY = {
-    "download": 10,
-    "transcribe": 2,
-    "assemble": 10,
-    "waiting_for_url": 10,
-}
-
-
-@dataclass(frozen=True)
-class WorkerCapacity:
-    free_runner: Any | None
-    running_local_counts: dict[str, int]
-
-
-@dataclass(frozen=True)
-class WorkItem:
-    kind: str
-    video: dict[str, Any]
-    phase: str
-
-
-def phase_requires_openclaw(phase: str) -> bool:
-    return phase in AGENT_PHASES
-
-
-def get_phase_concurrency_limit(settings: Settings, phase: str) -> int:
-    worker_config = settings.config.get("worker", {})
-    phase_config = worker_config.get("phase_concurrency", {})
-    configured = phase_config.get(phase, DEFAULT_PHASE_CONCURRENCY.get(phase, 1))
-    try:
-        return max(1, int(configured))
-    except (TypeError, ValueError):
-        return DEFAULT_PHASE_CONCURRENCY.get(phase, 1)
-
-
-def pick_next_work(
-    videos: list[dict[str, Any]],
-    running_video_ids: set[str],
-    capacity: WorkerCapacity,
-    settings: Settings,
-) -> WorkItem | None:
-    for video in videos:
-        if video["status"] not in {"queued", "missing_url"}:
-            continue
-        if video["id"] in running_video_ids:
-            continue
-        phase = video["current_phase"]
-        if phase_requires_openclaw(phase):
-            if capacity.free_runner is not None:
-                return WorkItem(kind="agent", video=video, phase=phase)
-            continue
-        limit = get_phase_concurrency_limit(settings, phase)
-        if capacity.running_local_counts.get(phase, 0) < limit:
-            return WorkItem(kind="local", video=video, phase=phase)
-    return None
-
-
-def expected_outputs_exist(video_dir: Path, output_names: list[str]) -> bool:
-    return all((video_dir / name).exists() for name in output_names)
-
-
-def phase_outputs_sufficient(video_dir: Path, phase_key: str, output_names: list[str]) -> bool:
-    if phase_key == "chapter_generate":
-        return (video_dir / "chapters.json").exists()
-    if phase_key == "subtitle_review":
-        return (video_dir / "subtitles_reviewed.srt").exists()
-    return expected_outputs_exist(video_dir, output_names)
-
-
-def validate_phase_outputs(video_dir: Path, phase_key: str) -> None:
-    """Validate agent phase output format. Raise ValueError on invalid data."""
-
-    def _load_json(path: Path) -> Any:
-        if not path.exists():
-            raise ValueError(f"Missing required file: {path.name}")
-        return json.loads(path.read_text(encoding="utf-8"))
-
-    if phase_key == "subtitle_review":
-        report = _load_json(video_dir / "subtitle_review_report.json")
-        if not isinstance(report, dict):
-            raise ValueError("subtitle_review_report.json must be a JSON object")
-        srt_path = video_dir / "subtitles_reviewed.srt"
-        if not srt_path.exists():
-            raise ValueError("subtitles_reviewed.srt is missing after subtitle_review")
-
-    elif phase_key == "chapter_generate":
-        data = _load_json(video_dir / "chapters.json")
-        chapters = data.get("chapters", []) if isinstance(data, dict) else data
-        if not isinstance(chapters, list):
-            raise ValueError("chapters.json must contain a list of chapters")
-        if not chapters:
-            raise ValueError("chapters.json must contain at least one chapter")
-        for idx, ch in enumerate(chapters):
-            if not isinstance(ch, dict):
-                raise ValueError(f"Chapter {idx + 1} must be an object")
-            if "end_time" not in ch and "end" not in ch:
-                raise ValueError(
-                    f"Chapter {idx + 1} ('{ch.get('title', '')}') is missing 'end_time'. "
-                    f"The chapter_generate agent must output 'end_time' for every chapter."
-                )
-            if not ch.get("title"):
-                raise ValueError(f"Chapter {idx + 1} is missing 'title'")
-
-    elif phase_key == "interaction_generate":
-        data = _load_json(video_dir / "interactions.json")
-        interactions = data.get("interactions", []) if isinstance(data, dict) else data
-        if not isinstance(interactions, list):
-            raise ValueError("interactions.json must contain an 'interactions' array")
-        for idx, inter in enumerate(interactions):
-            if not isinstance(inter, dict):
-                raise ValueError(f"Interaction {idx + 1} must be an object")
-            if not inter.get("id"):
-                raise ValueError(f"Interaction {idx + 1} is missing 'id'")
-            itype = inter.get("type", "")
-            if itype not in {"example_practice", "video_summary", "interaction_summary"}:
-                raise ValueError(
-                    f"Interaction {idx + 1} has unknown type '{itype}'. "
-                    f"Expected one of: example_practice, video_summary, interaction_summary"
-                )
-            if "trigger_time" not in inter:
-                raise ValueError(f"Interaction {idx + 1} ('{inter.get('id')}') is missing 'trigger_time'")
-            if not inter.get("instruction"):
-                raise ValueError(f"Interaction {idx + 1} ('{inter.get('id')}') is missing 'instruction'")
-
-    elif phase_key == "content_review":
-        checklist = _load_json(video_dir / "checklist.json")
-        if not isinstance(checklist, dict):
-            raise ValueError("checklist.json must be a JSON object")
-        review = _load_json(video_dir / "review_result.json")
-        if not isinstance(review, dict):
-            raise ValueError("review_result.json must be a JSON object")
-        if "reviews" not in review:
-            raise ValueError("review_result.json is missing 'reviews' array")
+from .pipeline.validators import phase_outputs_sufficient, validate_phase_outputs
+from .worker_scheduler import (
+    WorkerCapacity,  # noqa: F401
+    WorkItem,  # noqa: F401
+    get_phase_concurrency_limit,  # noqa: F401
+    phase_requires_openclaw,
+    pick_next_work,  # noqa: F401
+)
 
 
 def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
