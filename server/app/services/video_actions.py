@@ -67,12 +67,18 @@ def rerun_video_record(
         }
 
     if agent_manager is not None and agent_manager.is_video_busy(video_id):
-        return {
-            "video_id": video_id,
-            "status": "busy",
-            "phase": phase,
-            "message": "Video is currently being processed",
-        }
+        # Double-check against database: _busy_video_ids may hold stale
+        # entries when the worker crashed before calling set_idle().
+        if video["status"] == "running" or has_running_phase_run(db, video_id):
+            return {
+                "video_id": video_id,
+                "status": "busy",
+                "phase": phase,
+                "message": "Video is currently being processed",
+            }
+        # Stale entry – clean it up and proceed with the rerun.
+        agent_manager._busy_video_ids.discard(video_id)
+
     if video["status"] == "running" or has_running_phase_run(db, video_id):
         return {
             "video_id": video_id,
