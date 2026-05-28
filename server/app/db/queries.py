@@ -9,6 +9,10 @@ from server.app.db.schema import init_db
 from server.app.pipeline.common import make_record_id
 from server.app.pipeline.openclaw import extract_openclaw_arg
 from server.app.records import PhaseRunRecord, VideoRecord
+from server.app.services.interaction_stats import (
+    compute_interaction_review_status,
+    compute_interaction_stats,
+)
 
 
 def _iso(dt_str: str | None) -> str | None:
@@ -52,9 +56,10 @@ VIDEO_UPDATE_FIELDS = {
 
 
 class VideoQueries:
-    def __init__(self, path: Path, hub: NotificationHub | None = None):
+    def __init__(self, path: Path, hub: NotificationHub | None = None, videos_dir: Path | None = None):
         self.path = path
         self._hub = hub
+        self._videos_dir = videos_dir
         init_db(path)
 
     def connect(self) -> sqlite3.Connection:
@@ -69,6 +74,12 @@ class VideoQueries:
         if self._hub is None:
             return
         video = self.get_video(video_id)
+        if video and video.get("content_type") == "knowledge" and self._videos_dir is not None:
+            video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else self._videos_dir / video_id
+            stats = compute_interaction_stats(video_dir)
+            if stats:
+                video["interaction_stats"] = stats
+            video["interaction_review_status"] = compute_interaction_review_status(video_dir)
         self._hub.emit_change(video)
         phase_runs = self.list_phase_runs(video_id)
         transcription_runs = self.list_transcription_runs(video_id)
