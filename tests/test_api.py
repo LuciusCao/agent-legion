@@ -27,6 +27,18 @@ def test_core_api_routes_declare_response_models(client):
     ]["schema"] == {"$ref": "#/components/schemas/WorkerStatusResponse"}
 
 
+def test_run_to_routes_declare_response_models(client):
+    schema = client.get("/openapi.json").json()
+    paths = schema["paths"]
+
+    assert paths["/api/videos/{video_id}/run-to"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/RunToSingleResponse"}
+    assert paths["/api/videos/batch/run-to"]["post"]["responses"]["200"]["content"][
+        "application/json"
+    ]["schema"] == {"$ref": "#/components/schemas/BatchRunToResponse"}
+
+
 def test_worker_pause_resume_api(client):
     status = client.get("/api/worker/status")
     assert status.status_code == 200
@@ -435,6 +447,61 @@ def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(cli
         {"video_id": "missing", "status": "not_found", "phase": "interaction_generate", "message": "Video not found"},
     ]
     assert client.get("/api/videos/question_Q001").json()["video"]["current_phase"] == "assemble"
+
+
+def test_single_run_to_rejects_invalid_phase(client):
+    created = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/q1.mp4",
+                    "content_type": "question",
+                    "external_id": "Q001",
+                }
+            ]
+        },
+    )
+    video_id = created.json()["videos"][0]["id"]
+
+    response = client.post(
+        f"/api/videos/{video_id}/run-to",
+        json={"target_phase": "interaction_generate"},
+    )
+
+    assert response.status_code == 400
+    assert "不适用于该视频类型" in response.json()["detail"]
+
+
+def test_batch_run_to_returns_per_video_results(client):
+    created = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
+                {
+                    "url": "https://example.com/q1.mp4",
+                    "content_type": "question",
+                    "external_id": "Q001",
+                },
+            ]
+        },
+    )
+    ids = [video["id"] for video in created.json()["videos"]]
+
+    response = client.post(
+        "/api/videos/batch/run-to",
+        json={"video_ids": ids, "target_phase": "interaction_generate"},
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results[0]["video_id"] == "knowledge_K001"
+    assert results[1]["status"] == "skipped"
 
 
 def test_package_selected_videos_and_download(tmp_path, client):

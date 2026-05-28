@@ -15,6 +15,7 @@ from ..services.interaction_stats import (
     compute_interaction_review_status,
     compute_interaction_stats,
 )
+from ..services.manual_run import batch_run_to_phase, run_to_phase
 from ..services.video_actions import (
     batch_delete_video_records,
     batch_rerun_video_records,
@@ -40,12 +41,22 @@ class RerunRequest(BaseModel):
     phase: str
 
 
+class RunToRequest(BaseModel):
+    target_phase: str
+    start_phase: str | None = None
+
+
 class BatchVideoIdsRequest(BaseModel):
     video_ids: list[str]
 
 
 class BatchRerunRequest(BatchVideoIdsRequest):
     phase: str
+
+
+class BatchRunToRequest(BatchVideoIdsRequest):
+    target_phase: str
+    start_phase: str | None = None
 
 
 class DeleteResult(BaseModel):
@@ -62,8 +73,21 @@ class RerunResult(DeleteResult):
     phase: str
 
 
+class RunToResult(DeleteResult):
+    phase: str
+
+
 class BatchRerunResponse(BaseModel):
     results: list[RerunResult]
+
+
+class RunToSingleResponse(BaseModel):
+    result: RunToResult
+    video: dict[str, Any] | None
+
+
+class BatchRunToResponse(BaseModel):
+    results: list[RunToResult]
 
 
 def create_videos_router(
@@ -123,6 +147,37 @@ def create_videos_router(
     @router.post("/batch/rerun", response_model=BatchRerunResponse)
     def batch_rerun_videos(request: BatchRerunRequest) -> dict[str, Any]:
         return {"results": batch_rerun_video_records(db, settings, request.video_ids, request.phase, agent_manager)}
+
+    @router.post("/batch/run-to", response_model=BatchRunToResponse)
+    def batch_run_to_videos(request: BatchRunToRequest) -> dict[str, Any]:
+        return {
+            "results": batch_run_to_phase(
+                db,
+                settings,
+                request.video_ids,
+                target_phase=request.target_phase,
+                start_phase=request.start_phase,
+                agent_manager=agent_manager,
+            )
+        }
+
+    @router.post("/{video_id}/run-to", response_model=RunToSingleResponse)
+    def run_video_to_phase(video_id: str, request: RunToRequest) -> dict[str, Any]:
+        result = run_to_phase(
+            db,
+            settings,
+            video_id,
+            target_phase=request.target_phase,
+            start_phase=request.start_phase,
+            agent_manager=agent_manager,
+        )
+        if result["status"] == "not_found":
+            raise HTTPException(status_code=404, detail="Video not found")
+        if result["status"] == "busy":
+            raise HTTPException(status_code=409, detail=result["message"])
+        if result["status"] == "invalid_phase":
+            raise HTTPException(status_code=400, detail=result["message"])
+        return {"result": result, "video": db.get_video(video_id)}
 
     @router.post("/{video_id}/rerun")
     def rerun_video(video_id: str, request: RerunRequest) -> dict[str, Any]:
