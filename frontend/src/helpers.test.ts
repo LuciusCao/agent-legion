@@ -1,13 +1,16 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  canContinueTo,
   canRerunFrom,
+  canRerunTo,
   computeProgress,
   escapeHtml,
   filterVideos,
   formatInteractionStats,
   getInteractionQuestion,
   getPhases,
+  getSharedPhases,
   parseResourceInputs,
   parseResourceIds,
   statusGroup,
@@ -254,6 +257,61 @@ describe("canRerunFrom", () => {
   it("returns false for unknown phase argument", () => {
     const v = makeVideo({ status: "running", current_phase: "download" });
     expect(canRerunFrom(v, "unknown_phase")).toBe(false);
+  });
+});
+
+describe("run-to phase helpers", () => {
+  it("returns shared phases for mixed content types", () => {
+    expect(getSharedPhases(["knowledge", "question"])).toEqual([
+      "download",
+      "transcribe",
+      "subtitle_review",
+      "chapter_generate",
+      "assemble",
+    ]);
+  });
+
+  it("checks continue-to and rerun-to eligibility", () => {
+    const item = video({
+      content_type: "knowledge",
+      status: "queued",
+      current_phase: "subtitle_review",
+    });
+
+    expect(canContinueTo(item, "chapter_generate")).toBe(true);
+    expect(canContinueTo(item, "download")).toBe(false);
+    expect(canRerunTo(item, "transcribe", "chapter_generate")).toBe(true);
+    expect(canRerunTo(item, "content_review", "chapter_generate")).toBe(false);
+  });
+
+  it("requires the video to have reached the rerun start phase", () => {
+    const item = video({
+      status: "queued",
+      current_phase: "download",
+    });
+
+    expect(canRerunTo(item, "assemble", "assemble")).toBe(false);
+  });
+
+  it("excludes terminal videos from continue-to eligibility", () => {
+    expect(canContinueTo(video({ status: "failed", current_phase: "transcribe" }), "assemble")).toBe(
+      false,
+    );
+    expect(
+      canContinueTo(video({ status: "completed", current_phase: "chapter_generate" }), "assemble"),
+    ).toBe(false);
+  });
+
+  it("allows continue-to targets from waiting_for_url before download", () => {
+    const item = video({
+      content_type: "question",
+      status: "missing_url",
+      current_phase: "waiting_for_url",
+    });
+
+    expect(canContinueTo(item, "download")).toBe(true);
+    expect(canContinueTo(item, "chapter_generate")).toBe(true);
+    expect(canContinueTo(item, "interaction_generate")).toBe(false);
   });
 });
 

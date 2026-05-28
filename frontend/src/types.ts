@@ -1,6 +1,7 @@
 export type ContentType = "knowledge" | "question";
 export type ViewName = "list" | "detail";
 export type DetailTab = "nodes" | "subtitles" | "logs" | "metadata";
+export type RunToMode = "continue" | "rerun";
 
 export type InteractionStats = {
   passed: number;
@@ -85,6 +86,13 @@ export type BatchResult = {
   video_id: string;
   status: string;
   phase?: string;
+  message: string;
+};
+
+export type RunToResult = {
+  video_id: string;
+  status: string;
+  phase: string;
   message: string;
 };
 
