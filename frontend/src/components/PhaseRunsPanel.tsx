@@ -103,7 +103,9 @@ function buildItem(
 
   let tool = "";
   if (run.phase_key === "transcribe") {
-    const tr = transcriptionRuns.find((t) => t.status !== "fallback");
+    const tr = [...transcriptionRuns]
+      .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
+      .find((t) => t.status !== "fallback");
     tool = formatTranscriptionProvider(tr?.provider);
   } else {
     tool = formatOpenClawAgentName(run.command_json);
@@ -250,8 +252,11 @@ export function PhaseRunsPanel({
     }
   }
 
-  const transPrimary = transcriptionRuns.find((t) => t.status !== "fallback") || transcriptionRuns[0];
-  const transFallback = transcriptionRuns.find((t) => t.status === "fallback");
+  const sortedTrans = [...transcriptionRuns].sort(
+    (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
+  );
+  const transPrimary = sortedTrans[0];
+  const transFallback = sortedTrans.find((t) => t.fallback_reason);
 
   const items = viewMode === "latest" ? latestItems : historyItems;
   const dialogStyle = {
