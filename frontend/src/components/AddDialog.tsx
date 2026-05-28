@@ -38,12 +38,17 @@ export function AddDialog() {
 
   // md-dialog's 'closed' event is a non-bubbling CustomEvent;
   // React's synthetic event system cannot capture it. Bind directly.
+  // Also force-close on unmount in case the user navigates away
+  // before the close animation finishes.
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
     dialog.addEventListener("closed", handleClose);
-    return () => dialog.removeEventListener("closed", handleClose);
-  }, [handleClose]);
+    return () => {
+      dialog.removeEventListener("closed", handleClose);
+      closeAddDialog();
+    };
+  }, [handleClose, closeAddDialog]);
 
   if (!addDialogOpen) return null;
 
