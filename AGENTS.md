@@ -25,15 +25,21 @@ video-hive/
 ├── server/
 │   ├── app/
 │   │   ├── main.py             # FastAPI app factory + lifespan worker thread
-│   │   ├── api.py              # REST API routes
-│   │   ├── db.py               # SQLite database wrapper
-│   │   ├── settings.py         # Settings loader from YAML
-│   │   ├── worker.py           # Background worker loop + per-video phase processing
-│   │   ├── agents.py           # OpenClaw agent discovery and status tracking
-│   │   ├── records.py          # TypedDict type definitions for DB records
+│   │   ├── routes/             # REST API routes (videos, agents, worker, artifacts, packages)
+│   │   ├── db/                 # SQLite database wrapper (schema, queries, notifications)
+│   │   ├── cms/                # CMS API integration (auth, client, knowledge, question)
 │   │   ├── services/           # Business logic services
 │   │   │   ├── intake.py       # Video intake (add, URL resolution)
-│   │   │   └── video_actions.py # Batch rerun, delete, package selection
+│   │   │   ├── video_actions.py # Batch rerun, delete, package selection
+│   │   │   ├── manual_run.py   # Manual phase run orchestration
+│   │   │   └── interaction_stats.py # Interaction statistics aggregation
+│   │   ├── settings.py         # Settings loader from YAML
+│   │   ├── worker.py           # Background worker loop + per-video phase processing
+│   │   ├── worker_control.py   # Worker pause/resume control
+│   │   ├── worker_thread.py    # Background worker thread lifecycle
+│   │   ├── events.py           # SSE event broadcaster
+│   │   ├── agents.py           # OpenClaw agent discovery and status tracking
+│   │   ├── records.py          # TypedDict type definitions for DB records
 │   │   └── pipeline/           # Pipeline stage implementations
 │   │       ├── common.py       # URL-to-id parsing, SRT parse/format helpers
 │   │       ├── phases.py       # Phase list and agent-phase definitions
