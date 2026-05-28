@@ -169,7 +169,7 @@ def test_upload_params_uses_checklist_node_issues_for_interaction_review(tmp_pat
 
 def test_validate_phase_outputs_rejects_chapter_without_end_time(tmp_path):
     """validate_phase_outputs must raise when a chapter lacks end_time."""
-    from server.app.worker import validate_phase_outputs
+    from server.app.pipeline.validators import validate_phase_outputs
 
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
@@ -189,7 +189,7 @@ def test_validate_phase_outputs_rejects_chapter_without_end_time(tmp_path):
 
 def test_validate_phase_outputs_passes_with_complete_chapters(tmp_path):
     """validate_phase_outputs should not raise when all chapters have end_time."""
-    from server.app.worker import validate_phase_outputs
+    from server.app.pipeline.validators import validate_phase_outputs
 
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
