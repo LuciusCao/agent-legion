@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useUiStore } from "../stores/uiStore";
 import { api } from "../api";
 import { parseResourceInputs } from "../helpers";
@@ -10,6 +10,7 @@ export function AddDialog() {
   const [results, setResults] = useState<AddResult[]>([]);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
 
   const handleSubmit = useCallback(async () => {
     const input = textareaRef.current?.value || "";
@@ -35,6 +36,15 @@ export function AddDialog() {
     closeAddDialog();
   }, [closeAddDialog]);
 
+  // md-dialog's 'closed' event is a non-bubbling CustomEvent;
+  // React's synthetic event system cannot capture it. Bind directly.
+  useEffect(() => {
+    const dialog = dialogRef.current;
+    if (!dialog) return;
+    dialog.addEventListener("closed", handleClose);
+    return () => dialog.removeEventListener("closed", handleClose);
+  }, [handleClose]);
+
   if (!addDialogOpen) return null;
 
   const placeholder =
@@ -43,7 +53,7 @@ export function AddDialog() {
       : "一行一个题目ID，例如：q12345678\n或带source_uuid：q12345678,uuid-xxx";
 
   return (
-    <md-dialog open onClosed={handleClose} style={{ minWidth: "520px", "--md-dialog-container-color": "#ffffff" } as React.CSSProperties}>
+    <md-dialog ref={dialogRef} open style={{ minWidth: "520px", "--md-dialog-container-color": "#ffffff" } as React.CSSProperties}>
       <div slot="headline">添加资源</div>
       <div slot="content">
         <div style={{ display: "grid", gap: "16px", minWidth: "460px" }}>
