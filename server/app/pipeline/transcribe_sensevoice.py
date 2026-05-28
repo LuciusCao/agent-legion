@@ -156,20 +156,26 @@ def transcribe_with_sensevoice(wav_path: str, language: str = "auto") -> list:
             print("[WARNING] No timestamp in result")
             continue
 
-        # Calibrate timestamps: SenseVoice often includes intro silence/noise
-        # in the first character's duration, causing a systemic offset.
+        # Calibrate timestamps: SenseVoice sometimes absorbs silence/noise into
+        # a character's duration (especially after long pauses). Detect abnormal
+        # durations using IQR-based outlier detection, with a hard floor of 2s.
         char_durations = [timestamp[i][1] - timestamp[i][0] for i in range(len(timestamp))]
         if char_durations:
-            sorted_durations = sorted(char_durations)
-            median_duration = sorted_durations[len(sorted_durations) // 2]
-            # If first character is abnormally long (>5x median), it's likely
-            # absorbing intro silence. Only adjust the first char's start time,
-            # leaving all other timestamps untouched.
-            if char_durations[0] > max(median_duration * 5, 500):
-                new_start = timestamp[0][1] - median_duration
-                if new_start > 0:
-                    print(f"[Calibrate] First char duration {char_durations[0]}ms is abnormal, adjusting start to {new_start}ms")
-                    timestamp[0][0] = new_start
+            d = sorted(char_durations)
+            q3 = d[len(d) * 3 // 4]
+            iqr = q3 - d[len(d) // 4]
+            threshold = max(q3 + 5 * iqr, 2000)  # At least 2 seconds
+            median_duration = d[len(d) // 2]
+            for i in range(len(timestamp)):
+                dur = char_durations[i]
+                if dur > threshold:
+                    new_start = timestamp[i][1] - median_duration
+                    # Prevent overlap with previous character
+                    if i > 0 and new_start < timestamp[i - 1][1]:
+                        new_start = timestamp[i - 1][1]
+                    if new_start >= 0 and new_start < timestamp[i][1]:
+                        print(f"[Calibrate] Char #{i} duration {dur}ms abnormal, adjusting start {timestamp[i][0]} -> {new_start}ms")
+                        timestamp[i][0] = new_start
 
         # Build segments from character-level timestamps
         segments = split_by_punctuation(words, timestamp)
