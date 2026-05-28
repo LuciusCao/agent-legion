@@ -50,6 +50,9 @@ export interface UseDetailPageReturn {
   setMoreDialogOpen: (v: boolean) => void;
   openRerunDialog: () => void;
   openDeleteDialog: () => void;
+  pushWord: (word: string) => void;
+  resetSentence: () => void;
+  replayInteraction: (index: number) => void;
 }
 
 export function useDetailPage(): UseDetailPageReturn {
@@ -300,5 +303,8 @@ export function useDetailPage(): UseDetailPageReturn {
     setMoreDialogOpen,
     openRerunDialog,
     openDeleteDialog,
+    pushWord,
+    resetSentence,
+    replayInteraction,
   };
 }
