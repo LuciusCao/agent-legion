@@ -46,7 +46,7 @@ describe("AgentPanel", () => {
     await waitFor(() => {
       expect(mockApi).toHaveBeenCalledWith("/api/worker/status");
     });
-    expect(screen.getByText("队列调度中")).toBeInTheDocument();
+    expect(screen.getByText("自动调度开启")).toBeInTheDocument();
 
     const switchEl = container.querySelector("md-switch") as HTMLElement & { selected?: boolean };
     expect(switchEl).toBeInTheDocument();
@@ -58,7 +58,7 @@ describe("AgentPanel", () => {
 
     expect(mockApi).toHaveBeenCalledWith("/api/worker/pause", { method: "POST" });
     expect(useUiStore.getState().workerPaused).toBe(true);
-    expect(screen.getByText("已暂停队列调度")).toBeInTheDocument();
+    expect(screen.getByText("自动调度关闭")).toBeInTheDocument();
     expect(switchEl).not.toHaveAttribute("selected");
   });
 });
