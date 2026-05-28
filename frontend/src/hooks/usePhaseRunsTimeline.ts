@@ -33,14 +33,6 @@ export interface TimelineItem {
   occurrence?: number;
 }
 
-interface UsePhaseRunsTimelineProps {
-  phaseRuns: PhaseRun[];
-  transcriptionRuns: TranscriptionRun[];
-  contentType?: ContentType;
-  currentPhase?: string;
-  videoStatus?: string;
-}
-
 function formatTranscriptionProvider(provider: string | undefined): string {
   if (!provider) return "transcribe";
   const normalized = provider.toLowerCase();
@@ -128,13 +120,13 @@ function buildItem(
   return { run, label: PHASE_LABELS[run.phase_key], tool, queueTime, processTime };
 }
 
-export function usePhaseRunsTimeline({
-  phaseRuns,
-  transcriptionRuns,
-  contentType,
-  currentPhase,
-  videoStatus,
-}: UsePhaseRunsTimelineProps): UsePhaseRunsTimelineReturn {
+export function usePhaseRunsTimeline(
+  phaseRuns: PhaseRun[],
+  transcriptionRuns: TranscriptionRun[],
+  contentType?: ContentType,
+  currentPhase?: string,
+  videoStatus?: string,
+): UsePhaseRunsTimelineReturn {
   const [now, setNow] = useState(Date.now());
   const [viewMode, setViewMode] = useState<"latest" | "history">("latest");
   const [expandedDetails, setExpandedDetails] = useState<Set<number>>(new Set());
