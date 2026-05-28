@@ -24,8 +24,8 @@ export function StatCards() {
     STATUSES.forEach((s) => {
       map[s] = videos.filter((v) => statusGroup(v) === s).length;
     });
-    map.packed = videos.filter((v) => v.packed).length;
-    map.unpacked = videos.filter((v) => !v.packed).length;
+    map.packed = videos.filter((v) => v.status === "completed" && v.packed).length;
+    map.unpacked = videos.filter((v) => v.status === "completed" && !v.packed).length;
     return map;
   }, [videos]);
 
