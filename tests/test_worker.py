@@ -2,6 +2,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool, discover_openclaw_agents
 from server.app.settings import load_settings
@@ -445,3 +447,30 @@ def test_process_video_once_marks_completed_when_target_is_final_phase(db, setti
 
     assert processed is True
     assert db.get_video("a")["status"] == "completed"
+
+
+def test_build_default_providers_vad_missing(tmp_path):
+    from server.app.settings import load_settings
+    from server.app.worker import build_default_providers
+
+    settings = load_settings(data_dir=tmp_path)
+    settings.config["asr"] = {
+        "provider": "auto",
+        "whisper": {
+            "binary": "whisper",
+            "model": "model.bin",
+            "vad_model": "/nonexistent/vad.bin",
+        },
+        "sensevoice": {},
+    }
+    with pytest.raises(FileNotFoundError, match="VAD model not found"):
+        build_default_providers(settings)
+
+
+def test_process_video_once_missing_url_no_external_id(db, settings):
+    from server.app.worker import process_video_once
+
+    video = db.create_video("", "No ID", content_type="knowledge")
+    assert process_video_once(db, settings, video["id"]) is False
+    refreshed = db.get_video(video["id"])
+    assert refreshed["status"] == "missing_url"
