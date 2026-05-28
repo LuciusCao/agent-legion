@@ -2,19 +2,9 @@ import { useState } from "react";
 import { useVideoStore } from "../stores/videoStore";
 import { useUiStore } from "../stores/uiStore";
 import { getPhases, canRerunFrom } from "../helpers";
+import { PHASE_LABELS } from "../labels";
 import type { VideoItem } from "../types";
 import styles from "./BatchRerunDialog.module.css";
-
-const PHASE_LABELS: Record<string, string> = {
-  download: "下载",
-  transcribe: "转录",
-  subtitle_review: "字幕审校",
-  chapter_generate: "章节生成",
-  interaction_generate: "互动生成",
-  content_review: "内容审校",
-  assemble: "组装",
-  package: "打包",
-};
 
 type BatchRerunDialogProps = {
   open: boolean;
