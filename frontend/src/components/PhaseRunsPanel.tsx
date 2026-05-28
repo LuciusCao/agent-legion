@@ -48,7 +48,7 @@ export function PhaseRunsPanel({
     viewMode, setViewMode, expandedDetails, toggleDetail,
     sessionLogs, openSession, sessionDialog, setSessionDialog,
     transcriptionDialogOpen, setTranscriptionDialogOpen,
-    items, sortedTrans, transPrimary, transFallback,
+    items, transPrimary, transFallback,
     formatDuration, extractOpenClawArg,
   } = usePhaseRunsTimeline(phaseRuns, transcriptionRuns, contentType, currentPhase, videoStatus);
 
@@ -63,7 +63,7 @@ export function PhaseRunsPanel({
       {video && (
         <div className={styles.panelStepper}>
           <PhaseStepper video={video} />
-          <md-text-button onClick={() => setViewMode((v) => (v === "latest" ? "history" : "latest"))}>
+          <md-text-button onClick={() => setViewMode(viewMode === "latest" ? "history" : "latest")}>
             {viewMode === "latest" ? "历史" : "当前"}
           </md-text-button>
         </div>

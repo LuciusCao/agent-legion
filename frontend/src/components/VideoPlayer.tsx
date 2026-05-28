@@ -7,7 +7,7 @@ interface VideoPlayerProps {
   video: VideoItem;
   artifacts: VideoArtifacts;
   onTimeUpdate: (time: number) => void;
-  videoRef?: React.Ref<HTMLVideoElement>;
+  videoRef?: React.RefObject<HTMLVideoElement | null>;
   interactionNode?: InteractionNode | null;
   interactionSentence?: string[];
   onInteractionWordClick?: (word: string) => void;
@@ -32,9 +32,7 @@ export function VideoPlayer({
   const setRefs = useCallback(
     (node: HTMLVideoElement | null) => {
       internalRef.current = node;
-      if (typeof videoRef === "function") {
-        videoRef(node);
-      } else if (videoRef) {
+      if (videoRef) {
         (videoRef as React.MutableRefObject<HTMLVideoElement | null>).current = node;
       }
     },
