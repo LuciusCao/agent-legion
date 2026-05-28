@@ -323,6 +323,10 @@ class VideoQueries:
                 row["finished_at"] = _iso(row["finished_at"])
             return rows
 
+    def clear_transcription_runs(self, video_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute("delete from transcription_runs where video_id=?", (video_id,))
+
     def delete_video(self, video_id: str) -> None:
         with self.connect() as conn:
             conn.execute("delete from phase_runs where video_id=?", (video_id,))
