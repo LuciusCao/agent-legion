@@ -252,6 +252,7 @@ def process_video_once(
     video_id: str,
     providers: list[TranscriptionProvider] | None = None,
     openclaw_runner: OpenClawRunner | None = None,
+    stop_after_phase: str | None = None,
 ) -> bool:
     video = db.get_video(video_id)
     if not video or video["status"] not in {"queued", "running", "missing_url"}:
@@ -331,6 +332,8 @@ def process_video_once(
     db.finish_phase(run["id"], "completed", 0, "")
     if following is None:
         db.update_video(video_id, current_phase=phase, status="completed", error_message="")
+    elif stop_after_phase == phase:
+        db.update_video(video_id, current_phase=following, status="queued", error_message="")
     else:
         db.update_video(video_id, current_phase=following, status="queued", error_message="")
 

@@ -233,6 +233,33 @@ describe("InteractionOverlay", () => {
     ]);
   });
 
+  it("keeps summary actions outside the scrollable content area", () => {
+    render(
+      <InteractionOverlay
+        {...baseProps}
+        node={{
+          type: "video_summary",
+          instruction: "拖拽排序",
+          options: Array.from({ length: 12 }, (_, index) => ({
+            id: `opt-${index}`,
+            text: `第 ${index + 1} 步`,
+            is_distractor: false,
+          })),
+        }}
+      />,
+    );
+
+    for (let index = 1; index <= 12; index += 1) {
+      fireEvent.click(screen.getByRole("button", { name: `第 ${index} 步` }));
+    }
+
+    const scrollableContent = screen.getByLabelText("互动小结内容");
+    const actions = screen.getByLabelText("互动操作");
+
+    expect(within(scrollableContent).queryByText("确认并继续")).not.toBeInTheDocument();
+    expect(within(actions).getByText("确认并继续")).toBeInTheDocument();
+  });
+
   it("confirms summary interactions and continues playback", () => {
     const onContinue = vi.fn();
 

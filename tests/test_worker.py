@@ -397,3 +397,51 @@ def test_transcribe_concurrency_limit_is_configurable(settings):
 
     assert get_phase_concurrency_limit(settings, "download") == 10
     assert get_phase_concurrency_limit(settings, "transcribe") == 3
+
+
+def test_process_video_once_stops_after_target_phase(db, settings):
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "a.mp4").write_bytes(b"fake")
+    db.update_video("a", storage_dir=str(video_dir), current_phase="transcribe", status="queued")
+
+    processed = process_video_once(
+        db,
+        settings,
+        video["id"],
+        providers=[TestProvider()],
+        stop_after_phase="transcribe",
+    )
+
+    assert processed is True
+    updated = db.get_video("a")
+    assert updated["current_phase"] == "subtitle_review"
+    assert updated["status"] == "queued"
+    phase_run = db.list_phase_runs("a")[-1]
+    assert phase_run["phase_key"] == "transcribe"
+    assert phase_run["status"] == "completed"
+
+
+def test_process_video_once_marks_completed_when_target_is_final_phase(db, settings):
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n",
+        encoding="utf-8",
+    )
+    (video_dir / "chapters.json").write_text(
+        json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
+        encoding="utf-8",
+    )
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"version": "1.0", "interactions": []}),
+        encoding="utf-8",
+    )
+    db.update_video("a", storage_dir=str(video_dir), current_phase="assemble", status="queued")
+
+    processed = process_video_once(db, settings, video["id"], stop_after_phase="assemble")
+
+    assert processed is True
+    assert db.get_video("a")["status"] == "completed"
