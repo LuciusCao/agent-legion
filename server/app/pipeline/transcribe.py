@@ -45,7 +45,7 @@ def validate_srt(text: str, duration: float = 0) -> ValidationResult:
         max_gap = max(
             s2["start"] - s1["end"] for s1, s2 in zip(subtitles, subtitles[1:], strict=False)
         )
-        if max_gap > 10:
+        if max_gap > 20:
             return ValidationResult(False, len(subtitles), f"subtitle gap too large: {max_gap:.1f}s")
     max_entry_duration = max(s["end"] - s["start"] for s in subtitles)
     if max_entry_duration > 15:
