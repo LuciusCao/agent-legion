@@ -864,3 +864,89 @@ def test_list_and_detail_return_interaction_review_status(tmp_path, client):
         "example_practice": {"passed": 1, "total": 1},
         "interaction_summary": {"passed": 0, "total": 1},
     }
+
+
+def test_sse_connect_returns_event_stream_response():
+    import asyncio
+
+    from server.app.events import VideoEventManager
+
+    async def _test():
+        manager = VideoEventManager()
+        manager._loop = asyncio.get_running_loop()
+
+        class FakeRequest:
+            pass
+
+        response = await manager.connect(FakeRequest())
+        assert response.media_type == "text/event-stream"
+
+    asyncio.run(_test())
+
+
+def test_sse_connect_video_returns_event_stream_response():
+    import asyncio
+
+    from server.app.events import VideoEventManager
+
+    async def _test():
+        manager = VideoEventManager()
+        manager._loop = asyncio.get_running_loop()
+
+        class FakeRequest:
+            pass
+
+        response = await manager.connect_video(FakeRequest(), "v1")
+        assert response.media_type == "text/event-stream"
+
+    asyncio.run(_test())
+
+
+def test_sse_connect_evicts_oldest_at_capacity():
+    import asyncio
+
+    from server.app.events import VideoEventManager
+
+    async def _test():
+        manager = VideoEventManager()
+        manager._loop = asyncio.get_running_loop()
+        original_max = manager.MAX_CLIENTS
+        manager.MAX_CLIENTS = 2
+
+        class FakeRequest:
+            pass
+
+        await manager.connect(FakeRequest())
+        await manager.connect(FakeRequest())
+        assert len(manager._clients) == 2
+
+        await manager.connect(FakeRequest())
+        assert len(manager._clients) == 2  # oldest evicted
+
+        manager.MAX_CLIENTS = original_max
+
+    asyncio.run(_test())
+
+
+def test_sse_broadcast_video_detail_reaches_video_clients():
+    import asyncio
+
+    from server.app.events import VideoEventManager
+
+    async def _test():
+        manager = VideoEventManager()
+        manager._loop = asyncio.get_running_loop()
+
+        class FakeRequest:
+            pass
+
+        await manager.connect_video(FakeRequest(), "v1")
+        assert len(manager._video_clients.get("v1", set())) == 1
+
+        manager.broadcast_video_detail("v1", {"id": "v1", "status": "running"}, [], [])
+        await asyncio.sleep(0.05)
+
+        # Both global and video-specific broadcast should have fired
+        assert len(manager._clients) == 1
+
+    asyncio.run(_test())
