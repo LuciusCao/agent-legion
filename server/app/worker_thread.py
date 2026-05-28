@@ -32,12 +32,12 @@ class WorkerThread:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        from server.app.worker import (
+        from server.app.worker import process_video_once
+        from server.app.worker_scheduler import (
             DEFAULT_PHASE_CONCURRENCY,
             WorkerCapacity,
             get_phase_concurrency_limit,
             pick_next_work,
-            process_video_once,
         )
 
         def _configured_worker_count(runner_count: int) -> int:
