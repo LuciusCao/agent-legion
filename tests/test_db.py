@@ -1,5 +1,10 @@
+import json
+from pathlib import Path
+
 import pytest
 
+from server.app.db import Database
+from server.app.db.notifications import NotificationHub
 from server.app.records import PHASE_RUN_FIELDS, VIDEO_RECORD_FIELDS
 
 
@@ -70,3 +75,99 @@ def test_database_update_video_builds_sql_from_whitelist(db):
     assert updated["title"] == "Updated Title"
     # source_url should remain unchanged
     assert updated["source_url"] == "https://example.com/path/a.mp4"
+
+
+def test_notify_includes_interaction_stats_for_knowledge_videos(tmp_path: Path) -> None:
+    """Regression test for issue 002: SSE push should include interaction_stats."""
+    videos_dir = tmp_path / "videos"
+    videos_dir.mkdir()
+    video_dir = videos_dir / "knowledge_K001"
+    video_dir.mkdir()
+
+    # Create interaction artifacts
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {"id": "n1", "type": "example_practice"},
+                    {"id": "n2", "type": "interaction_summary"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps({"status": "published"}), encoding="utf-8"
+    )
+
+    captured: dict = {}
+    hub = NotificationHub(
+        on_change=lambda video: captured.update(video or {}),
+    )
+
+    db = Database(tmp_path / "video_hive.sqlite", hub=hub, videos_dir=videos_dir)
+    db.create_video(
+        "https://example.com/k001.mp4",
+        title="K001",
+        content_type="knowledge",
+        external_id="K001",
+        storage_dir=str(video_dir),
+    )
+
+    # Trigger _notify via update_video
+    db.update_video("knowledge_K001", status="completed")
+
+    assert "interaction_stats" in captured
+    assert captured["interaction_stats"] == {
+        "example_practice": {"passed": 1, "total": 1},
+        "interaction_summary": {"passed": 1, "total": 1},
+    }
+    assert captured.get("interaction_review_status") == "all_passed"
+
+
+def test_notify_does_not_include_interaction_stats_for_question_videos(tmp_path: Path) -> None:
+    """Question videos should not have interaction fields injected into SSE payload."""
+    videos_dir = tmp_path / "videos"
+    videos_dir.mkdir()
+    video_dir = videos_dir / "question_Q001"
+    video_dir.mkdir()
+
+    captured: dict = {}
+    hub = NotificationHub(
+        on_change=lambda video: captured.update(video or {}),
+    )
+
+    db = Database(tmp_path / "video_hive.sqlite", hub=hub, videos_dir=videos_dir)
+    db.create_video(
+        "https://example.com/q001.mp4",
+        title="Q001",
+        content_type="question",
+        external_id="Q001",
+        storage_dir=str(video_dir),
+    )
+
+    db.update_video("question_Q001", status="completed")
+
+    assert "interaction_stats" not in captured
+    assert "interaction_review_status" not in captured
+
+
+def test_notify_skips_interaction_stats_when_videos_dir_is_none(tmp_path: Path) -> None:
+    """When videos_dir is not provided, _notify should not crash and skip enrichment."""
+    captured: dict = {}
+    hub = NotificationHub(
+        on_change=lambda video: captured.update(video or {}),
+    )
+
+    db = Database(tmp_path / "video_hive.sqlite", hub=hub)
+    db.create_video(
+        "https://example.com/k001.mp4",
+        title="K001",
+        content_type="knowledge",
+        external_id="K001",
+    )
+
+    db.update_video("knowledge_K001", status="completed")
+
+    assert "interaction_stats" not in captured
+    assert "interaction_review_status" not in captured

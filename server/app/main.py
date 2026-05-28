@@ -32,7 +32,7 @@ def create_app(
     hub.on_change = video_event_manager.broadcast
     hub.on_delete = video_event_manager.broadcast_delete
     hub.on_detail_change = video_event_manager.broadcast_video_detail
-    db = Database(settings.data_dir / "video_hive.sqlite", hub=hub)
+    db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
 
     worker_thread: WorkerThread | None = None
 
