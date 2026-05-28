@@ -11,3 +11,5 @@ frontend/dist/
 *.log
 docs/superpowers/plans/
 .worktrees/
+.coverage
+coverage/
