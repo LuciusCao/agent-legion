@@ -39,7 +39,18 @@ def test_create_app_with_worker_start_lifespan(tmp_path):
         mock_thread.stop.assert_called_once()
 
 
-def test_frontend_missing_route(tmp_path):
+def test_frontend_missing_route(tmp_path, monkeypatch):
+    from pathlib import Path
+
+    original_exists = Path.exists
+
+    def mocked_exists(self):
+        if "frontend/dist" in str(self):
+            return False
+        return original_exists(self)
+
+    monkeypatch.setattr(Path, "exists", mocked_exists)
+
     app = create_app(data_dir=tmp_path)
     client = TestClient(app)
     response = client.get("/")
