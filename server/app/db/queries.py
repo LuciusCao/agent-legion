@@ -163,6 +163,22 @@ class VideoQueries:
         unknown_fields = sorted(set(fields) - VIDEO_UPDATE_FIELDS)
         if unknown_fields:
             raise ValueError(f"Unknown video fields: {', '.join(unknown_fields)}")
+
+        # Consistency check: status='completed' must pair with current_phase='assemble'
+        if "status" in fields or "current_phase" in fields:
+            with self.connect() as conn:
+                row = conn.execute(
+                    "select status, current_phase from videos where id=?", (video_id,)
+                ).fetchone()
+                if row:
+                    new_status = fields.get("status", row["status"])
+                    new_phase = fields.get("current_phase", row["current_phase"])
+                    if new_status == "completed" and new_phase != "assemble":
+                        raise ValueError(
+                            f"Invalid state: status='completed' requires "
+                            f"current_phase='assemble', got '{new_phase}'"
+                        )
+
         ordered_keys = [k for k in fields if k in VIDEO_UPDATE_FIELDS]
         assignments = ", ".join(f"{key}=?" for key in ordered_keys)
         values = [fields[key] for key in ordered_keys] + [video_id]

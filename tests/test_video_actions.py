@@ -9,7 +9,7 @@ class TestCanRerunFrom:
             content_type="knowledge",
             external_id="K001",
         )
-        db.update_video(video["id"], status="completed")
+        db.update_video(video["id"], status="completed", current_phase="assemble")
         video = db.get_video(video["id"])
 
         for phase in KNOWLEDGE_PHASES:

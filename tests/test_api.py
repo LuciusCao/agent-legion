@@ -432,8 +432,8 @@ def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(cli
             ]
         },
     )
-    db.update_video("question_Q001", status="completed")
-    db.update_video("knowledge_K001", status="completed")
+    db.update_video("question_Q001", status="completed", current_phase="assemble")
+    db.update_video("knowledge_K001", status="completed", current_phase="assemble")
 
     response = client.post(
         "/api/videos/batch/rerun",
@@ -518,7 +518,7 @@ def test_package_selected_videos_and_download(tmp_path, client):
         video_dir = tmp_path / "videos" / video_id
         video_dir.mkdir(parents=True, exist_ok=True)
         (video_dir / "metadata.json").write_text(f'{{"id":"{video_id}"}}', encoding="utf-8")
-        client.app.state.db.update_video(video_id, status="completed")
+        client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
 
     response = client.post("/api/package", json={"video_ids": ["knowledge_K002"]})
 
@@ -599,7 +599,7 @@ def test_package_sets_packed_true(tmp_path, client):
     video_dir = tmp_path / "videos" / video_id
     video_dir.mkdir(parents=True, exist_ok=True)
     (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed")
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
 
     response = client.post("/api/package", json={"video_ids": [video_id]})
 
@@ -621,7 +621,7 @@ def test_rerun_clears_packed(tmp_path, client):
     video_dir = tmp_path / "videos" / video_id
     video_dir.mkdir(parents=True, exist_ok=True)
     (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed", current_phase="package", packed=1)
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble", packed=1)
 
     response = client.post(f"/api/videos/{video_id}/rerun", json={"phase": "assemble"})
 
