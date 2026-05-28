@@ -233,4 +233,54 @@ describe("videoStore", () => {
 
     expect(useVideoStore.getState().selectedIds).toEqual(new Set(["missing"]));
   });
+
+  it("posts run-to requests", async () => {
+    mockApi.mockResolvedValueOnce({
+      result: {
+        video_id: "v1",
+        status: "queued",
+        phase: "chapter_generate",
+        message: "queued",
+      },
+      video: null,
+    });
+
+    const response = await useVideoStore.getState().runTo("v1", "chapter_generate", "transcribe");
+
+    expect(mockApi).toHaveBeenCalledWith("/api/videos/v1/run-to", {
+      method: "POST",
+      body: JSON.stringify({
+        target_phase: "chapter_generate",
+        start_phase: "transcribe",
+      }),
+    });
+    expect(response.result.video_id).toBe("v1");
+  });
+
+  it("posts batch run-to requests", async () => {
+    mockApi.mockResolvedValueOnce({
+      results: [
+        {
+          video_id: "v1",
+          status: "queued",
+          phase: "assemble",
+          message: "queued",
+        },
+      ],
+    });
+
+    const response = await useVideoStore
+      .getState()
+      .batchRunTo(["v1", "v2"], "assemble");
+
+    expect(mockApi).toHaveBeenCalledWith("/api/videos/batch/run-to", {
+      method: "POST",
+      body: JSON.stringify({
+        video_ids: ["v1", "v2"],
+        target_phase: "assemble",
+        start_phase: null,
+      }),
+    });
+    expect(response.results).toHaveLength(1);
+  });
 });

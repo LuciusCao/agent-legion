@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { VideoItem, ContentType } from "../types";
+import type { VideoItem, ContentType, RunToResult } from "../types";
 import { api } from "../api";
 import { filterVideos } from "../helpers";
 
@@ -35,6 +35,8 @@ interface VideoState {
   setSseConnected: (connected: boolean) => void;
   batchDelete: (ids: string[]) => Promise<{ results: Array<{ video_id: string; status: string; message?: string }> }>;
   batchRerun: (ids: string[], phase: string) => Promise<{ results: Array<{ video_id: string; status: string; message?: string }> }>;
+  runTo: (id: string, targetPhase: string, startPhase?: string | null) => Promise<{ result: RunToResult; video: VideoItem | null }>;
+  batchRunTo: (ids: string[], targetPhase: string, startPhase?: string | null) => Promise<{ results: RunToResult[] }>;
   batchPackage: (ids: string[]) => Promise<{ path: string; download_url: string }>;
 }
 
@@ -181,6 +183,20 @@ export const useVideoStore = create<VideoState>((set, get) => ({
     return api("/api/videos/batch/rerun", {
       method: "POST",
       body: JSON.stringify({ video_ids: ids, phase }),
+    });
+  },
+
+  runTo: async (id, targetPhase, startPhase = null) => {
+    return api(`/api/videos/${id}/run-to`, {
+      method: "POST",
+      body: JSON.stringify({ target_phase: targetPhase, start_phase: startPhase }),
+    });
+  },
+
+  batchRunTo: async (ids, targetPhase, startPhase = null) => {
+    return api("/api/videos/batch/run-to", {
+      method: "POST",
+      body: JSON.stringify({ video_ids: ids, target_phase: targetPhase, start_phase: startPhase }),
     });
   },
 
