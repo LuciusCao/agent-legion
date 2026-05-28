@@ -77,7 +77,7 @@ describe("BatchRerunDialog", () => {
       (assembleChip as HTMLElement).click();
     });
 
-    expect(screen.getByText(/当前处于 字幕审校/)).toBeInTheDocument();
+    expect(screen.getByText(/当前处于 字幕审核/)).toBeInTheDocument();
   });
 
   it("calls batchRerun on confirm", async () => {
