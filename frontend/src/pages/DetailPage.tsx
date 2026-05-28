@@ -13,6 +13,7 @@ import { SubtitlePanel } from "../components/SubtitlePanel";
 import { NodePanel } from "../components/NodePanel";
 import { MetadataPanel } from "../components/MetadataPanel";
 import { RerunDialog } from "../components/RerunDialog";
+import { RunToDialog } from "../components/RunToDialog";
 import { InteractionReviewBadge } from "../components/InteractionReviewBadge";
 import { DeleteDialog } from "../components/DeleteDialog";
 import { TYPE_LABELS, STATUS_LABELS } from "../labels";
@@ -29,6 +30,7 @@ export function DetailPage() {
   const [currentTime, setCurrentTime] = useState(0);
   const [moreDialogOpen, setMoreDialogOpen] = useState(false);
   const [moreDialogType, setMoreDialogType] = useState<MoreDialogType>(null);
+  const [runToDialogOpen, setRunToDialogOpen] = useState(false);
 
   const {
     currentVideo,
@@ -187,6 +189,26 @@ export function DetailPage() {
     [id, fetchVideos, loadVideo, loadLog, showToast]
   );
 
+  const handleRunTo = useCallback(
+    async ({ targetPhase, startPhase }: { targetPhase: string; startPhase: string | null }) => {
+      if (!id) return;
+      try {
+        await api(`/api/videos/${id}/run-to`, {
+          method: "POST",
+          body: JSON.stringify({ target_phase: targetPhase, start_phase: startPhase }),
+        });
+        showToast(startPhase ? "重跑运行已提交" : "运行已提交", "success");
+        setRunToDialogOpen(false);
+        await Promise.all([fetchVideos(), loadVideo(id), loadLog(id)]);
+        checkFetchError();
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        showToast(`运行失败: ${message}`, "error");
+      }
+    },
+    [id, fetchVideos, loadVideo, loadLog, showToast]
+  );
+
   const openMoreDialog = (type: MoreDialogType) => {
     setMoreDialogOpen(false);
     setMoreDialogType(type);
@@ -225,6 +247,9 @@ export function DetailPage() {
           <div className="detail-actions">
             <md-icon-button onClick={openRerunDialog} title="重跑">
               <md-icon>restart_alt</md-icon>
+            </md-icon-button>
+            <md-icon-button onClick={() => setRunToDialogOpen(true)} title="运行到">
+              <md-icon>play_circle</md-icon>
             </md-icon-button>
             <md-icon-button
               disabled={(!currentVideo || currentVideo.status !== "completed") || undefined}
@@ -280,6 +305,12 @@ export function DetailPage() {
       </section>
 
       <RerunDialog video={currentVideo} onConfirm={handleRerun} />
+      <RunToDialog
+        open={runToDialogOpen}
+        videos={currentVideo ? [currentVideo] : []}
+        onClose={() => setRunToDialogOpen(false)}
+        onConfirm={handleRunTo}
+      />
       <DeleteDialog onConfirm={handleDeleteConfirm} />
 
       {moreDialogOpen && (
