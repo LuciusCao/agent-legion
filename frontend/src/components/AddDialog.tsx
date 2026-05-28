@@ -38,17 +38,17 @@ export function AddDialog() {
 
   // md-dialog's 'closed' event is a non-bubbling CustomEvent;
   // React's synthetic event system cannot capture it. Bind directly.
-  // Also force-close on unmount / pagehide in case the user navigates away
-  // before the close animation finishes (or the page is frozen in bfcache).
+  // We also listen to 'close' (fires immediately when the dialog starts
+  // closing) so that the store state is updated right away, before any
+  // navigation can race the animation-end 'closed' event.
   useEffect(() => {
     const dialog = dialogRef.current;
     if (!dialog) return;
+    dialog.addEventListener("close", handleClose);
     dialog.addEventListener("closed", handleClose);
-    const onHide = () => closeAddDialog();
-    window.addEventListener("pagehide", onHide);
     return () => {
+      dialog.removeEventListener("close", handleClose);
       dialog.removeEventListener("closed", handleClose);
-      window.removeEventListener("pagehide", onHide);
       closeAddDialog();
     };
   }, [handleClose, closeAddDialog]);
