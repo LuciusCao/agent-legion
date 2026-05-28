@@ -3,6 +3,7 @@ import { useEffect } from "react";
 import { useUiStore } from "./stores/uiStore";
 import { ListPage } from "./pages/ListPage";
 import { DetailPage } from "./pages/DetailPage";
+import Toast from "./components/Toast";
 
 export default function App() {
   const { connectAgentsWs, closeAddDialog } = useUiStore();
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="/" element={<ListPage />} />
         <Route path="/videos/:id" element={<DetailPage />} />
       </Routes>
+      <Toast />
     </main>
   );
 }
