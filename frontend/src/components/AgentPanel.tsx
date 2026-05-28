@@ -8,7 +8,7 @@ export function AgentPanel() {
   useEffect(() => {
     fetchWorkerStatus().catch((err) => {
       const message = err instanceof Error ? err.message : String(err);
-      showToast(`加载队列调度状态失败: ${message}`, "error");
+      showToast(`加载自动调度状态失败: ${message}`, "error");
     });
   }, [fetchWorkerStatus, showToast]);
 
@@ -16,10 +16,10 @@ export function AgentPanel() {
     const paused = !workerPaused;
     try {
       await setWorkerPaused(paused);
-      showToast(paused ? "已暂停队列调度" : "已恢复队列调度", "success");
+      showToast(paused ? "已关闭自动调度" : "已开启自动调度", "success");
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      showToast(`更新队列调度状态失败: ${message}`, "error");
+      showToast(`更新自动调度状态失败: ${message}`, "error");
     }
   };
 
@@ -42,7 +42,7 @@ export function AgentPanel() {
           </div>
         )}
         <label className={styles.assignmentSwitch}>
-          <span>{workerPaused ? "已暂停队列调度" : "队列调度中"}</span>
+          <span>{workerPaused ? "自动调度关闭" : "自动调度开启"}</span>
           <md-switch selected={!workerPaused || undefined} onClick={handlePausedChange} />
         </label>
       </div>

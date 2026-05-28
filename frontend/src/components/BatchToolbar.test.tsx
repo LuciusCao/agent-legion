@@ -98,4 +98,64 @@ describe("BatchToolbar", () => {
 
     expect(screen.getByText("选择重跑阶段")).toBeInTheDocument();
   });
+
+  it("opens run-to dialog and submits selected videos", async () => {
+    mockApi.mockResolvedValueOnce({ results: [] }).mockResolvedValueOnce({ videos: [] });
+
+    useVideoStore.setState({
+      videos: [
+        {
+          id: "v1",
+          title: "Video 1",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "K001",
+          knowledge_code: "K001",
+          question_id: "",
+          source_uuid: "",
+          status: "queued",
+          current_phase: "subtitle_review",
+          error_message: "",
+        },
+        {
+          id: "v2",
+          title: "Video 2",
+          source_url: "",
+          content_type: "knowledge",
+          external_id: "K002",
+          knowledge_code: "K002",
+          question_id: "",
+          source_uuid: "",
+          status: "queued",
+          current_phase: "subtitle_review",
+          error_message: "",
+        },
+      ],
+    });
+
+    const { container } = render(<BatchToolbar />);
+
+    await act(async () => {
+      screen.getByTitle("运行到").click();
+    });
+    expect(screen.getByText("运行到阶段")).toBeInTheDocument();
+
+    const assembleChip = container.querySelector('md-filter-chip[label="组装"]') as HTMLElement;
+    expect(assembleChip).toBeInTheDocument();
+    await act(async () => {
+      assembleChip.click();
+    });
+
+    await act(async () => {
+      screen.getByText("运行到组装").click();
+    });
+
+    expect(mockApi).toHaveBeenCalledWith(
+      "/api/videos/batch/run-to",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ video_ids: ["v1", "v2"], target_phase: "assemble", start_phase: null }),
+      }),
+    );
+  });
 });
