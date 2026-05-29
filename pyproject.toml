@@ -17,6 +17,7 @@ dependencies = [
 [dependency-groups]
 dev = [
   "httpx",
+  "mypy>=2.1.0",
   "pytest",
   "pytest-cov>=7.1.0",
   "ruff",
@@ -48,3 +49,11 @@ omit = ["*/__pycache__/*"]
 fail_under = 75
 show_missing = true
 skip_covered = false
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = ["tests/"]
