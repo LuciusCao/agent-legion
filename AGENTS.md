@@ -123,6 +123,15 @@ video-hive/
     └── packages/
 ```
 
+## 文档体系
+
+- `README.md` — 项目概览与快速上手指南
+- `docs/review-report.md` — 系统性代码审查报告（含修复状态追踪）
+- `docs/superpowers/README.md` — 设计文档索引（specs / plans / issues）
+- `docs/superpowers/specs/` — 设计规格文档，需用户批准后执行
+- `docs/superpowers/plans/` — 实施计划文档，由 Agent 按任务执行
+- `issues/` — 已知缺陷与修复记录
+
 ## Build and Run Commands
 
 ### Setup
