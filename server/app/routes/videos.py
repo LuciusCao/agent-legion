@@ -18,7 +18,12 @@ from ..services.interaction_stats import (
     compute_interaction_review_status,
     compute_interaction_stats,
 )
-from ..services.manual_run import batch_run_to_phase, run_to_phase
+from ..services.manual_run import (
+    batch_run_to_phase,
+    batch_submit_run_to_phase,
+    run_to_phase,
+    submit_run_to_phase,
+)
 from ..services.video_actions import (
     batch_delete_video_records,
     batch_rerun_video_records,
@@ -162,7 +167,7 @@ def create_videos_router(
     @router.post("/batch/run-to", response_model=BatchRunToResponse)
     def batch_run_to_videos(request: BatchRunToRequest) -> dict[str, Any]:
         return {
-            "results": batch_run_to_phase(
+            "results": batch_submit_run_to_phase(
                 db,
                 settings,
                 request.video_ids,
@@ -174,7 +179,7 @@ def create_videos_router(
 
     @router.post("/{video_id}/run-to", response_model=RunToSingleResponse)
     def run_video_to_phase(video_id: str, request: RunToRequest) -> dict[str, Any]:
-        result = run_to_phase(
+        result = submit_run_to_phase(
             db,
             settings,
             video_id,
