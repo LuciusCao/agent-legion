@@ -203,11 +203,10 @@ class VideoQueries:
         ordered_keys = [k for k in fields if k in VIDEO_UPDATE_FIELDS]
         assignments = ", ".join(f"{key}=?" for key in ordered_keys)
         values = [fields[key] for key in ordered_keys] + [video_id]
+        # Column names come from VIDEO_UPDATE_FIELDS whitelist; safe to join.
+        sql = f"update videos set {assignments}, updated_at=current_timestamp where id=?"  # noqa: S608
         with self.connect() as conn:
-            conn.execute(
-                f"update videos set {assignments}, updated_at=current_timestamp where id=?",
-                values,
-            )
+            conn.execute(sql, values)
         self._notify(video_id)
 
     def start_phase(

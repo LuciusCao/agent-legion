@@ -26,11 +26,9 @@ export function InteractionOverlay({
   const draggedOptionIdRef = useRef<string | null>(null)
 
   useEffect(() => {
-    queueMicrotask(() => {
-      setSelectedOptions([])
-      setDraggedOptionId(null)
-      draggedOptionIdRef.current = null
-    })
+    setSelectedOptions([])
+    setDraggedOptionId(null)
+    draggedOptionIdRef.current = null
   }, [node])
 
   if (!node) return null

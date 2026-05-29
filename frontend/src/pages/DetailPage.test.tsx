@@ -98,7 +98,7 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter initialEntries={['/videos/v1']}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -167,7 +167,7 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter initialEntries={['/videos/v1']}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -234,7 +234,7 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter initialEntries={['/videos/v1']}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -293,7 +293,7 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter initialEntries={['/videos/v1']}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -345,7 +345,7 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter initialEntries={['/videos/v1']}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -411,7 +411,7 @@ describe('DetailPage', () => {
       .mockRejectedValueOnce(new Error('delete failed'))
 
     render(
-      <MemoryRouter initialEntries={['/videos/v1']}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -482,7 +482,7 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ videos: [] })
 
     render(
-      <MemoryRouter initialEntries={['/videos/v1']}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
