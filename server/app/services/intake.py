@@ -1,3 +1,4 @@
+from collections.abc import Sequence
 from typing import Any, Protocol
 
 from server.app.cms.client import get_token
@@ -52,7 +53,7 @@ def resolve_video_input(item: VideoInputLike, settings: Settings) -> tuple[str, 
 def add_video_items(
     db: Database,
     settings: Settings,
-    items: list[VideoInputLike],
+    items: Sequence[VideoInputLike],
 ) -> dict[str, Any]:
     videos: list[VideoRecord | None] = []
     results: list[dict[str, Any]] = []

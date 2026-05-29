@@ -3,7 +3,7 @@ import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from server.app.db.notifications import NotificationHub
 from server.app.db.schema import init_db
@@ -36,7 +36,7 @@ def _phase_run_with_agent_session(row: dict[str, Any]) -> PhaseRunRecord:
     else:
         row["agent_id"] = ""
         row["agent_session_id"] = ""
-    return row
+    return cast(PhaseRunRecord, row)
 
 
 VIDEO_UPDATE_FIELDS = {
@@ -76,13 +76,17 @@ class VideoQueries:
             conn.close()
 
     def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
-        return dict(row) if row else None
+        return cast(VideoRecord, dict(row)) if row else None
 
     def _notify(self, video_id: str) -> None:
         if self._hub is None:
             return
         video = self.get_video(video_id)
-        if video and video.get("content_type") == "knowledge" and self._videos_dir is not None:
+        if video is None:
+            self._hub.emit_change(None)
+            self._hub.emit_detail_change(video_id, cast(VideoRecord, {}), [], [])
+            return
+        if video.get("content_type") == "knowledge" and self._videos_dir is not None:
             video_dir = (
                 Path(video["storage_dir"])
                 if video.get("storage_dir")
@@ -90,12 +94,12 @@ class VideoQueries:
             )
             stats = compute_interaction_stats(video_dir)
             if stats:
-                video["interaction_stats"] = stats
-            video["interaction_review_status"] = compute_interaction_review_status(video_dir)
+                video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
+            video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
         self._hub.emit_change(video)
         phase_runs = self.list_phase_runs(video_id)
         transcription_runs = self.list_transcription_runs(video_id)
-        self._hub.emit_detail_change(video_id, video or {}, phase_runs, transcription_runs)
+        self._hub.emit_detail_change(video_id, video, phase_runs, transcription_runs)
 
     def create_video(
         self,
@@ -150,7 +154,7 @@ class VideoQueries:
             row = conn.execute("select * from videos where id=?", (video_id,)).fetchone()
         video = dict(row)
         self._notify(video_id)
-        return video
+        return cast(VideoRecord, video)
 
     def get_video(self, video_id: str) -> VideoRecord | None:
         with self.connect() as conn:
@@ -170,7 +174,7 @@ class VideoQueries:
     def list_videos(self) -> list[VideoRecord]:
         with self.connect() as conn:
             return [
-                dict(row)
+                cast(VideoRecord, dict(row))
                 for row in conn.execute("select * from videos order by created_at desc, id")
             ]
 
@@ -353,7 +357,7 @@ class VideoQueries:
                 row["started_at"] = _iso(row["started_at"]) or ""
                 row["finished_at"] = _iso(row["finished_at"])
                 _phase_run_with_agent_session(row)
-            return rows
+            return cast(list[PhaseRunRecord], rows)
 
     def list_transcription_runs(self, video_id: str) -> list[dict[str, Any]]:
         with self.connect() as conn:

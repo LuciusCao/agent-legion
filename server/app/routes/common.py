@@ -15,7 +15,7 @@ def create_common_router(db: Database, settings: Settings) -> APIRouter:
 
     @router.get("/health", response_model=HealthResponse)
     def health() -> HealthResponse:
-        return {"ok": True}
+        return HealthResponse(ok=True)
 
     @router.post("/worker/tick")
     def worker_tick() -> dict[str, bool]:
