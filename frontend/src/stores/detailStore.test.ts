@@ -15,6 +15,7 @@ describe('detailStore', () => {
       log: '',
       activeTab: 'nodes',
       isLoading: false,
+      error: null,
     })
     mockApi.mockClear()
   })
@@ -45,5 +46,27 @@ describe('detailStore', () => {
     await useDetailStore.getState().loadVideo('v2')
     expect(useDetailStore.getState().currentVideo?.id).toBe('v2')
     expect(useDetailStore.getState().activeTab).toBe('subtitles')
+  })
+
+  it('sets error when loadVideo fails', async () => {
+    mockApi.mockRejectedValueOnce(new Error('network error'))
+    await useDetailStore.getState().loadVideo('v3')
+    expect(useDetailStore.getState().currentVideo).toBeNull()
+    expect(useDetailStore.getState().activeTab).toBe('nodes')
+    expect(useDetailStore.getState().error).toBe('network error')
+    expect(useDetailStore.getState().isLoading).toBe(false)
+  })
+
+  it('sets error and fallback log when loadLog fails', async () => {
+    mockApi.mockRejectedValueOnce(new Error('log error'))
+    await useDetailStore.getState().loadLog('v4')
+    expect(useDetailStore.getState().log).toBe('加载日志失败')
+    expect(useDetailStore.getState().error).toBe('log error')
+  })
+
+  it('sets error when loadPhaseRuns fails', async () => {
+    mockApi.mockRejectedValueOnce(new Error('phase error'))
+    await useDetailStore.getState().loadPhaseRuns('v5')
+    expect(useDetailStore.getState().error).toBe('phase error')
   })
 })
