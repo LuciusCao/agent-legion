@@ -98,6 +98,8 @@ export function DetailPage() {
               onInteractionWordClick={hook.pushWord}
               onInteractionReset={hook.resetSentence}
               onInteractionContinue={hook.handleContinue}
+              onPlay={() => hook.setIsPlaying(true)}
+              onPause={() => hook.setIsPlaying(false)}
             />
           )}
 

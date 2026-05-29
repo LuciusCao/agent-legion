@@ -6,6 +6,7 @@ import { useInteractionStore } from '../stores/interactionStore'
 import { useUiStore } from '../stores/uiStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useVideoPhaseEvents } from './useVideoPhaseEvents'
+import { binarySearchTriggerIndex } from '../lib/search'
 import { api } from '../api'
 import { parseTimeSeconds, triggerDownload } from '../helpers'
 import type {
@@ -34,6 +35,8 @@ export interface UseDetailPageReturn {
   currentSentence: string[]
   activeNode: InteractionNode | null
   detailTitle: string
+  isPlaying: boolean
+  setIsPlaying: (v: boolean) => void
   handleTimeUpdate: (time: number) => void
   handleSeek: (time: number) => void
   handleContinue: () => void
@@ -64,6 +67,7 @@ export function useDetailPage(): UseDetailPageReturn {
   const [moreDialogOpen, setMoreDialogOpen] = useState(false)
   const [moreDialogType, setMoreDialogType] = useState<MoreDialogType>(null)
   const [runToDialogOpen, setRunToDialogOpen] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
 
   const {
     currentVideo,
@@ -133,33 +137,39 @@ export function useDetailPage(): UseDetailPageReturn {
   const handleTimeUpdate = useCallback(
     (time: number) => {
       setCurrentTime(time)
-      const player = playerRef.current
-      if (!player) return
       const previousTime = previousPlaybackTimeRef.current
 
-      artifacts.interactions.forEach((node, index) => {
-        const trigger = parseTimeSeconds(node.trigger_time ?? 0)
-        if (!Number.isFinite(trigger)) return
+      const idx = binarySearchTriggerIndex(time, artifacts.interactions)
+      if (idx === -1) {
+        previousPlaybackTimeRef.current = time
+        return
+      }
 
-        const crossedTrigger =
-          previousTime !== null && previousTime < trigger && time >= trigger
-        const reachedTriggerWindow = time >= trigger && time < trigger + 1.5
-        if (
-          !triggeredNodeIndexes.has(index) &&
-          !dismissedNodeIndexes.has(index) &&
-          !player.paused &&
-          (crossedTrigger || reachedTriggerWindow)
-        ) {
-          player.pause()
-          triggerInteraction(index)
-        }
-      })
+      const node = artifacts.interactions[idx]
+      const trigger = parseTimeSeconds(node.trigger_time ?? 0)
+      if (!Number.isFinite(trigger)) {
+        previousPlaybackTimeRef.current = time
+        return
+      }
+
+      const crossedTrigger =
+        previousTime !== null && previousTime < trigger && time >= trigger
+      const reachedTriggerWindow = time >= trigger && time < trigger + 1.5
+      if (
+        !triggeredNodeIndexes.has(idx) &&
+        !dismissedNodeIndexes.has(idx) &&
+        isPlaying &&
+        (crossedTrigger || reachedTriggerWindow)
+      ) {
+        triggerInteraction(idx)
+      }
       previousPlaybackTimeRef.current = time
     },
     [
       artifacts.interactions,
       triggeredNodeIndexes,
       dismissedNodeIndexes,
+      isPlaying,
       triggerInteraction,
     ]
   )
@@ -290,6 +300,8 @@ export function useDetailPage(): UseDetailPageReturn {
     currentSentence,
     activeNode,
     detailTitle,
+    isPlaying,
+    setIsPlaying,
     handleTimeUpdate,
     handleSeek,
     handleContinue,

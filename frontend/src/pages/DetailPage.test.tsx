@@ -356,12 +356,12 @@ describe('DetailPage', () => {
       expect(document.querySelector('video')).toBeInTheDocument()
     })
     const video = document.querySelector('video') as HTMLVideoElement
-    const pause = vi.fn()
-    Object.defineProperty(video, 'paused', { value: false, configurable: true })
-    Object.defineProperty(video, 'pause', { value: pause, configurable: true })
     Object.defineProperty(video, 'currentTime', {
       value: 4.8,
       configurable: true,
+    })
+    act(() => {
+      video.dispatchEvent(new Event('play', { bubbles: true }))
     })
     act(() => {
       video.dispatchEvent(new Event('timeupdate', { bubbles: true }))
@@ -375,7 +375,6 @@ describe('DetailPage', () => {
       video.dispatchEvent(new Event('timeupdate', { bubbles: true }))
     })
 
-    expect(pause).toHaveBeenCalledTimes(1)
     expect(screen.getByText('暂停做题')).toBeInTheDocument()
   })
 
