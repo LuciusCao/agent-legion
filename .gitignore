@@ -12,3 +12,5 @@ frontend/dist/
 .worktrees/
 .coverage
 coverage/
+docs/superpowers/plans/*.md
+docs/superpowers/specs/*.md
