@@ -1,4 +1,6 @@
 import json
+import sqlite3
+import threading
 from pathlib import Path
 
 import pytest
@@ -357,3 +359,45 @@ def test_find_videos_by_identities_returns_matches(db):
 def test_find_videos_by_identities_empty_list(db):
     """Regression test for issue 012: batch identity lookup with empty list."""
     assert db.find_videos_by_identities([]) == {}
+
+
+def test_read_conn_reused_within_same_thread(db):
+    """同线程多次调用 _ensure_read_conn 应复用同一连接对象。"""
+    conn1 = db._ensure_read_conn()
+    conn2 = db._ensure_read_conn()
+    assert conn1 is conn2
+    assert isinstance(conn1, sqlite3.Connection)
+
+
+def test_read_conn_isolated_across_threads(db):
+    """不同线程应获得独立连接对象。"""
+    conns = []
+
+    def collect():
+        conns.append(db._ensure_read_conn())
+
+    t1 = threading.Thread(target=collect)
+    t2 = threading.Thread(target=collect)
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert len(conns) == 2
+    assert conns[0] is not conns[1]
+
+
+def test_close_read_conn_clears_and_allows_recreate(db):
+    """关闭后再次获取应创建新连接。"""
+    conn1 = db._ensure_read_conn()
+    db.close_read_conn()
+    conn2 = db._ensure_read_conn()
+    assert conn1 is not conn2
+
+
+def test_connect_read_reuses_pooled_conn_for_same_thread(db):
+    """_connect_read 在同线程中应自动复用已预热连接。"""
+    db._ensure_read_conn()
+    with db._connect_read() as conn:
+        pooled = db._ensure_read_conn()
+        assert conn is pooled
