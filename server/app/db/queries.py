@@ -56,6 +56,16 @@ VIDEO_UPDATE_FIELDS = {
 }
 
 
+def _build_update_assignments(ordered_keys: list[str]) -> str:
+    """Build SQL assignment clause from whitelisted keys.
+
+    Keys are validated against VIDEO_UPDATE_FIELDS before calling this function.
+    SQLite does not support parameterized column names, so we use string
+    interpolation here. The caller must ensure keys come from the whitelist.
+    """
+    return ", ".join(f"{key}=?" for key in ordered_keys)
+
+
 class VideoQueries:
     def __init__(
         self, path: Path, hub: NotificationHub | None = None, videos_dir: Path | None = None
@@ -201,10 +211,9 @@ class VideoQueries:
                         )
 
         ordered_keys = [k for k in fields if k in VIDEO_UPDATE_FIELDS]
-        assignments = ", ".join(f"{key}=?" for key in ordered_keys)
+        assignments = _build_update_assignments(ordered_keys)
         values = [fields[key] for key in ordered_keys] + [video_id]
-        # Column names come from VIDEO_UPDATE_FIELDS whitelist; safe to join.
-        sql = f"update videos set {assignments}, updated_at=current_timestamp where id=?"  # noqa: S608
+        sql = f"update videos set {assignments}, updated_at=current_timestamp where id=?"
         with self.connect() as conn:
             conn.execute(sql, values)
         self._notify(video_id)
