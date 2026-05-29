@@ -58,14 +58,6 @@ export function VideoPlayer({
     setSubtitleText(subtitle?.text ?? '')
   }, [onTimeUpdate, artifacts.subtitles])
 
-  const handlePlay = useCallback(() => {
-    onPlay()
-  }, [onPlay])
-
-  const handlePause = useCallback(() => {
-    onPause()
-  }, [onPause])
-
   const videoUrl = video.storage_dir ? `/api/videos/${video.id}/video` : ''
 
   return (
@@ -77,8 +69,8 @@ export function VideoPlayer({
           src={videoUrl}
           controls
           onTimeUpdate={handleTimeUpdate}
-          onPlay={handlePlay}
-          onPause={handlePause}
+          onPlay={onPlay}
+          onPause={onPause}
         />
       ) : (
         <div className="empty-state">视频文件未下载</div>
