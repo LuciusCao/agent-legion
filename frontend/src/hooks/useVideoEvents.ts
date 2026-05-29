@@ -1,63 +1,63 @@
-import { useEffect, useRef } from "react";
-import { useVideoStore } from "../stores/videoStore";
+import { useEffect, useRef } from 'react'
+import { useVideoStore } from '../stores/videoStore'
 
 export function useVideoEvents() {
-  const { mergeVideo, removeVideo, setSseConnected } = useVideoStore();
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { mergeVideo, removeVideo, setSseConnected } = useVideoStore()
+  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
-    if (typeof EventSource === "undefined") return;
+    if (typeof EventSource === 'undefined') return
 
-    let source: EventSource | null = null;
-    let reconnectDelay = 1000;
-    const maxReconnectDelay = 30000;
+    let source: EventSource | null = null
+    let reconnectDelay = 1000
+    const maxReconnectDelay = 30000
 
     const connect = () => {
-      if (source) return;
-      source = new EventSource("/api/videos/events");
+      if (source) return
+      source = new EventSource('/api/videos/events')
 
       source.onopen = () => {
-        reconnectDelay = 1000;
-        setSseConnected(true);
-      };
+        reconnectDelay = 1000
+        setSseConnected(true)
+      }
 
       source.onmessage = (event) => {
-        if (!event.data || event.data.startsWith(":heartbeat")) return;
+        if (!event.data || event.data.startsWith(':heartbeat')) return
         try {
-          const payload = JSON.parse(event.data);
-          if (payload.type === "video_updated" && payload.video) {
-            mergeVideo(payload.video);
-          } else if (payload.type === "video_deleted" && payload.video_id) {
-            removeVideo(payload.video_id);
+          const payload = JSON.parse(event.data)
+          if (payload.type === 'video_updated' && payload.video) {
+            mergeVideo(payload.video)
+          } else if (payload.type === 'video_deleted' && payload.video_id) {
+            removeVideo(payload.video_id)
           }
         } catch {
           // ignore invalid payloads
         }
-      };
+      }
 
       source.onerror = () => {
-        setSseConnected(false);
+        setSseConnected(false)
         if (source) {
-          source.close();
-          source = null;
+          source.close()
+          source = null
         }
         // Exponential backoff reconnect
         reconnectTimerRef.current = setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay);
-          connect();
-        }, reconnectDelay);
-      };
-    };
+          reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay)
+          connect()
+        }, reconnectDelay)
+      }
+    }
 
-    connect();
+    connect()
 
     return () => {
       if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current);
+        clearTimeout(reconnectTimerRef.current)
       }
       if (source) {
-        source.close();
+        source.close()
       }
-    };
-  }, [mergeVideo, removeVideo, setSseConnected]);
+    }
+  }, [mergeVideo, removeVideo, setSseConnected])
 }
