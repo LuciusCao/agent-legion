@@ -1,130 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
-import type { CSSProperties } from "react";
-import type { PhaseRun, TranscriptionRun, ContentType, VideoItem } from "../types";
-import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES, STATUS_LABELS, STATUS_ICONS } from "../labels";
-import { formatDuration } from "../lib/formatters";
-import { api } from "../api";
-import { PhaseStepper } from "./PhaseStepper";
-import { TranscriptionDetails } from "./TranscriptionDetails";
-import styles from "./PhaseRunsPanel.module.css";
-
+import type { CSSProperties } from 'react'
+import type {
+  PhaseRun,
+  TranscriptionRun,
+  ContentType,
+  VideoItem,
+} from '../types'
+import { STATUS_LABELS, STATUS_ICONS } from '../labels'
+import { usePhaseRunsTimeline } from '../hooks/usePhaseRunsTimeline'
+import { PhaseStepper } from './PhaseStepper'
+import { TranscriptionDetails } from './TranscriptionDetails'
+import styles from './PhaseRunsPanel.module.css'
 
 interface PhaseRunsPanelProps {
-  phaseRuns: PhaseRun[];
-  transcriptionRuns: TranscriptionRun[];
-  video?: VideoItem | null;
-  contentType?: ContentType;
-  currentPhase?: string;
-  videoStatus?: string;
-}
-
-interface TimelineItem {
-  run: PhaseRun;
-  label: string;
-  tool: string;
-  queueTime: number;
-  processTime: number;
-  occurrence?: number;
-}
-
-function formatTranscriptionProvider(provider: string | undefined): string {
-  if (!provider) return "transcribe";
-  const normalized = provider.toLowerCase();
-  if (normalized === "whisper") return "whisper.cpp";
-  if (normalized === "sensevoice") return "SenseVoice";
-  return provider;
-}
-
-function extractOpenClawAgentName(commandJson: string): string {
-  try {
-    const command = JSON.parse(commandJson) as unknown;
-    if (!Array.isArray(command)) return "";
-    const parts = command.map((part) => String(part));
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i] === "--agent" && parts[i + 1]) {
-        return parts[i + 1];
-      }
-      if (parts[i].startsWith("--agent=")) {
-        return parts[i].slice("--agent=".length);
-      }
-    }
-  } catch {
-    return "";
-  }
-  return "";
-}
-
-function extractOpenClawArg(commandJson: string, name: string): string {
-  try {
-    const command = JSON.parse(commandJson) as unknown;
-    if (!Array.isArray(command)) return "";
-    const parts = command.map((part) => String(part));
-    for (let i = 0; i < parts.length; i++) {
-      if (parts[i] === name && parts[i + 1]) {
-        return parts[i + 1];
-      }
-      if (parts[i].startsWith(`${name}=`)) {
-        return parts[i].slice(name.length + 1);
-      }
-    }
-  } catch {
-    return "";
-  }
-  return "";
-}
-
-function formatOpenClawAgentName(commandJson: string): string {
-  const agentName = extractOpenClawAgentName(commandJson);
-  return agentName ? `openclaw-${agentName}` : "";
-}
-
-function buildItem(
-  run: PhaseRun,
-  prevRun: PhaseRun | null,
-  now: number,
-  transcriptionRuns: TranscriptionRun[],
-  resetQueueTime = false
-): TimelineItem {
-  const started = new Date(run.started_at).getTime();
-  const finished = run.finished_at ? new Date(run.finished_at).getTime() : null;
-  const prevFinished = prevRun?.finished_at ? new Date(prevRun.finished_at).getTime() : null;
-
-  let queueTime = 0;
-  if (!resetQueueTime && prevFinished) {
-    queueTime = Math.max(0, started - prevFinished);
-  }
-
-  let processTime = 0;
-  if (finished) {
-    processTime = finished - started;
-  } else if (run.status === "running") {
-    processTime = now - started;
-  }
-
-  let tool = "";
-  if (run.phase_key === "transcribe") {
-    const tr = [...transcriptionRuns]
-      .sort((a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime())
-      .find((t) => t.status !== "fallback");
-    tool = formatTranscriptionProvider(tr?.provider);
-  } else {
-    tool = formatOpenClawAgentName(run.command_json);
-  }
-
-  return { run, label: PHASE_LABELS[run.phase_key], tool, queueTime, processTime };
+  phaseRuns: PhaseRun[]
+  transcriptionRuns: TranscriptionRun[]
+  video?: VideoItem | null
+  contentType?: ContentType
+  currentPhase?: string
+  videoStatus?: string
 }
 
 const NODE_STATUS_CLASS: Record<string, string> = {
   completed: styles.statusCompleted,
   running: styles.statusRunning,
   failed: styles.statusFailed,
-};
+}
 
 const CONTENT_STATUS_CLASS: Record<string, string> = {
   completed: styles.statusCompleted,
   running: styles.statusRunning,
   failed: styles.statusFailed,
-};
+}
 
 const BADGE_STATUS_CLASS: Record<string, string> = {
   completed: styles.completed,
@@ -132,7 +38,7 @@ const BADGE_STATUS_CLASS: Record<string, string> = {
   failed: styles.failed,
   pending: styles.pending,
   queued: styles.queued,
-};
+}
 
 export function PhaseRunsPanel({
   phaseRuns,
@@ -142,136 +48,47 @@ export function PhaseRunsPanel({
   currentPhase,
   videoStatus,
 }: PhaseRunsPanelProps) {
-  const [now, setNow] = useState(Date.now());
-  const [viewMode, setViewMode] = useState<"latest" | "history">("latest");
-  const [expandedDetails, setExpandedDetails] = useState<Set<number>>(new Set());
-  const [sessionLogs, setSessionLogs] = useState<Record<number, string>>({});
-  const [transcriptionDialogOpen, setTranscriptionDialogOpen] = useState(false);
-  const [sessionDialog, setSessionDialog] = useState<{
-    runId: number;
-    sessionId: string;
-    videoId: string;
-  } | null>(null);
+  const {
+    viewMode,
+    setViewMode,
+    expandedDetails,
+    toggleDetail,
+    sessionLogs,
+    openSession,
+    sessionDialog,
+    setSessionDialog,
+    transcriptionDialogOpen,
+    setTranscriptionDialogOpen,
+    items,
+    transPrimary,
+    transFallback,
+    formatDuration,
+    extractOpenClawArg,
+  } = usePhaseRunsTimeline(
+    phaseRuns,
+    transcriptionRuns,
+    contentType,
+    currentPhase,
+    videoStatus
+  )
 
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
-
-  const allPhases = contentType === "question" ? QUESTION_PHASES : KNOWLEDGE_PHASES;
-
-  const { latestItems, historyItems } = useMemo(() => {
-    const sorted = [...phaseRuns].sort((a, b) => a.id - b.id);
-
-    // --- latestItems: each phase's latest record, in pipeline order ---
-    const latestByPhase = new Map<string, PhaseRun>();
-    for (const run of sorted) {
-      const existing = latestByPhase.get(run.phase_key);
-      if (!existing || run.id > existing.id) {
-        latestByPhase.set(run.phase_key, run);
-      }
-    }
-
-    const latestRun = sorted[sorted.length - 1];
-    const currentPhaseIndex = currentPhase ? allPhases.indexOf(currentPhase) : -1;
-    const latestPhaseIndex = currentPhaseIndex >= 0
-      ? currentPhaseIndex
-      : latestRun
-        ? allPhases.indexOf(latestRun.phase_key)
-        : -1;
-    const currentPhases = latestPhaseIndex >= 0 ? allPhases.slice(0, latestPhaseIndex + 1) : [];
-
-    const latestItems: TimelineItem[] = [];
-    for (const phase of currentPhases) {
-      let run = latestByPhase.get(phase);
-      const runId = run?.id;
-      const phaseWasRerun = runId !== undefined ? sorted.some((candidate) => (
-        candidate.phase_key === phase && candidate.id < runId
-      )) : false;
-      if (
-        currentPhase === phase &&
-        videoStatus &&
-        ["queued", "running"].includes(videoStatus) &&
-        run?.status !== videoStatus
-      ) {
-        run = {
-          id: -1,
-          video_id: run?.video_id ?? "",
-          phase_key: phase,
-          status: videoStatus,
-          started_at: new Date(now).toISOString(),
-          finished_at: null,
-          command_json: run?.command_json ?? "[]",
-          exit_code: null,
-          log_path: "",
-          error_message: "",
-        };
-      }
-      if (run) {
-        const prev = latestItems.length > 0 ? latestItems[latestItems.length - 1].run : null;
-        latestItems.push(buildItem(run, prev, now, transcriptionRuns, phaseWasRerun || run.id < 0));
-      }
-    }
-
-    // --- historyItems: all records flat, with occurrence count ---
-    const phaseOccurrence = new Map<string, number>();
-    const historyItems: TimelineItem[] = [];
-    for (let i = 0; i < sorted.length; i++) {
-      const run = sorted[i];
-      const count = (phaseOccurrence.get(run.phase_key) || 0) + 1;
-      phaseOccurrence.set(run.phase_key, count);
-      const prev = i > 0 ? sorted[i - 1] : null;
-      historyItems.push({ ...buildItem(run, prev, now, transcriptionRuns), occurrence: count });
-    }
-
-    return {
-      latestItems,
-      historyItems,
-    };
-  }, [phaseRuns, transcriptionRuns, now, allPhases, currentPhase, videoStatus]);
-
-  function toggleDetail(runId: number) {
-    setExpandedDetails((prev) => {
-      const next = new Set(prev);
-      if (next.has(runId)) next.delete(runId);
-      else next.add(runId);
-      return next;
-    });
-  }
-
-  async function openSession(run: PhaseRun, sessionId: string) {
-    const runId = run.id;
-    setSessionDialog({ runId, sessionId, videoId: run.video_id });
-    if (sessionLogs[runId] || runId < 0) return;
-    setSessionLogs((prev) => ({ ...prev, [runId]: "加载中..." }));
-    try {
-      const data = await api<{ log: string }>(`/api/videos/${run.video_id}/phase-runs/${runId}/session`);
-      setSessionLogs((prev) => ({ ...prev, [runId]: data.log || "会话为空" }));
-    } catch {
-      setSessionLogs((prev) => ({ ...prev, [runId]: "会话文件暂不可用" }));
-    }
-  }
-
-  const sortedTrans = [...transcriptionRuns].sort(
-    (a, b) => new Date(b.started_at).getTime() - new Date(a.started_at).getTime()
-  );
-  const transPrimary = sortedTrans[0];
-  const transFallback = sortedTrans.find((t) => t.fallback_reason);
-
-  const items = viewMode === "latest" ? latestItems : historyItems;
   const dialogStyle = {
-    "--md-dialog-container-color": "#ffffff",
-    maxWidth: "760px",
-    width: "90vw",
-  } as CSSProperties;
+    '--md-dialog-container-color': '#ffffff',
+    maxWidth: '760px',
+    width: '90vw',
+  } as CSSProperties
 
   return (
     <div className={styles.phaseRunsPanel}>
       {video && (
         <div className={styles.panelStepper}>
           <PhaseStepper video={video} />
-          <md-text-button onClick={() => setViewMode((v) => (v === "latest" ? "history" : "latest"))}>
-            {viewMode === "latest" ? "历史" : "当前"}
+          <md-text-button
+            onClick={() =>
+              setViewMode(viewMode === 'latest' ? 'history' : 'latest')
+            }
+          >
+            {viewMode === 'latest' ? '历史' : '当前'}
           </md-text-button>
         </div>
       )}
@@ -281,42 +98,57 @@ export function PhaseRunsPanel({
       <div className={styles.phaseTimeline}>
         <div className={styles.phaseTimelineItems}>
           {items.map((item, idx) => {
-            const icon = STATUS_ICONS[item.run.status] || "help";
-            const statusText = STATUS_LABELS[item.run.status] || item.run.status;
-            const hasError = !!item.run.error_message;
-            const isTranscribe = item.run.phase_key === "transcribe";
-            const hasTransDetails = isTranscribe && transcriptionRuns.length > 0;
-            const isDetailExpanded = expandedDetails.has(item.run.id);
-            const sessionId = item.run.agent_session_id || extractOpenClawArg(item.run.command_json, "--session-id");
-            const hasAgentSession = !!sessionId && item.run.id > 0;
+            const icon = STATUS_ICONS[item.run.status] || 'help'
+            const statusText = STATUS_LABELS[item.run.status] || item.run.status
+            const hasError = !!item.run.error_message
+            const isTranscribe = item.run.phase_key === 'transcribe'
+            const hasTransDetails = isTranscribe && transcriptionRuns.length > 0
+            const isDetailExpanded = expandedDetails.has(item.run.id)
+            const sessionId =
+              item.run.agent_session_id ||
+              extractOpenClawArg(item.run.command_json, '--session-id')
+            const hasAgentSession = !!sessionId && item.run.id > 0
 
             return (
               <div key={item.run.id} className={styles.phaseTimelineItem}>
                 <div className={styles.timelineLeft}>
                   <div
-                    className={`${styles.timelineNode} ${NODE_STATUS_CLASS[item.run.status] || ""} ${
-                      item.run.status === "running" ? styles.spinning : ""
+                    className={`${styles.timelineNode} ${NODE_STATUS_CLASS[item.run.status] || ''} ${
+                      item.run.status === 'running' ? styles.spinning : ''
                     }`}
                   >
                     <md-icon>{icon}</md-icon>
                   </div>
-                  {idx < items.length - 1 && <div className={styles.timelineLine} />}
+                  {idx < items.length - 1 && (
+                    <div className={styles.timelineLine} />
+                  )}
                 </div>
 
-                <div className={`${styles.timelineContent} ${CONTENT_STATUS_CLASS[item.run.status] || ""}`}>
+                <div
+                  className={`${styles.timelineContent} ${CONTENT_STATUS_CLASS[item.run.status] || ''}`}
+                >
                   <div className={styles.timelineHeader}>
                     <span className={styles.timelineName}>
                       {item.label}
                       {item.occurrence && item.occurrence > 1 ? (
-                        <span className={styles.occurrenceBadge}> 第{item.occurrence}次</span>
+                        <span className={styles.occurrenceBadge}>
+                          {' '}
+                          第{item.occurrence}次
+                        </span>
                       ) : null}
                     </span>
-                    <span className={`${styles.timelineStatusBadge} ${BADGE_STATUS_CLASS[item.run.status] || ""}`}>{statusText}</span>
+                    <span
+                      className={`${styles.timelineStatusBadge} ${BADGE_STATUS_CLASS[item.run.status] || ''}`}
+                    >
+                      {statusText}
+                    </span>
                   </div>
 
                   {item.tool && (
                     <div className={styles.timelineMeta}>
-                      <md-icon className={styles.metaIcon}>build_circle</md-icon>
+                      <md-icon className={styles.metaIcon}>
+                        build_circle
+                      </md-icon>
                       <span className={styles.timelineTool}>{item.tool}</span>
                     </div>
                   )}
@@ -334,7 +166,10 @@ export function PhaseRunsPanel({
 
                   {hasAgentSession && (
                     <div className={styles.timelineMeta}>
-                      <button className={styles.inlineAction} onClick={() => void openSession(item.run, sessionId)}>
+                      <button
+                        className={styles.inlineAction}
+                        onClick={() => void openSession(item.run, sessionId)}
+                      >
                         <md-icon className={styles.toggleIcon}>forum</md-icon>
                         查看会话
                       </button>
@@ -342,35 +177,48 @@ export function PhaseRunsPanel({
                   )}
 
                   {hasError && (
-                    <button className={styles.timelineDetailToggle} onClick={() => toggleDetail(item.run.id)}>
+                    <button
+                      className={styles.timelineDetailToggle}
+                      onClick={() => toggleDetail(item.run.id)}
+                    >
                       <md-icon className={styles.toggleIcon}>error</md-icon>
                       错误详情
                       <md-icon className={styles.toggleIcon}>
-                        {isDetailExpanded ? "expand_less" : "expand_more"}
+                        {isDetailExpanded ? 'expand_less' : 'expand_more'}
                       </md-icon>
                     </button>
                   )}
 
                   {hasTransDetails && (
-                    <button className={styles.timelineDetailToggle} onClick={() => setTranscriptionDialogOpen(true)}>
-                      <md-icon className={styles.toggleIcon}>text_fields</md-icon>
+                    <button
+                      className={styles.timelineDetailToggle}
+                      onClick={() => setTranscriptionDialogOpen(true)}
+                    >
+                      <md-icon className={styles.toggleIcon}>
+                        text_fields
+                      </md-icon>
                       转录详情
                     </button>
                   )}
 
                   {isDetailExpanded && hasError && (
-                    <div className="timeline-detail-content error">{item.run.error_message}</div>
+                    <div className="timeline-detail-content error">
+                      {item.run.error_message}
+                    </div>
                   )}
-
                 </div>
               </div>
-            );
+            )
           })}
         </div>
       </div>
 
       {transcriptionDialogOpen && (
-        <md-dialog open onClosed={() => setTranscriptionDialogOpen(false)} style={dialogStyle}>
+        <md-dialog
+          open
+          onClosed={() => setTranscriptionDialogOpen(false)}
+          style={dialogStyle}
+        >
           <div slot="headline">转录详情</div>
           <div slot="content">
             <TranscriptionDetails
@@ -380,23 +228,35 @@ export function PhaseRunsPanel({
             />
           </div>
           <div slot="actions">
-            <md-text-button onClick={() => setTranscriptionDialogOpen(false)}>关闭</md-text-button>
+            <md-text-button onClick={() => setTranscriptionDialogOpen(false)}>
+              关闭
+            </md-text-button>
           </div>
         </md-dialog>
       )}
 
       {sessionDialog && (
-        <md-dialog open onClosed={() => setSessionDialog(null)} style={dialogStyle}>
+        <md-dialog
+          open
+          onClosed={() => setSessionDialog(null)}
+          style={dialogStyle}
+        >
           <div slot="headline">Agent 会话</div>
           <div slot="content" className={styles.dialogContent}>
-            <div className={styles.sessionKey}>会话 {sessionDialog.sessionId}</div>
-            <pre className={styles.sessionPreview}>{sessionLogs[sessionDialog.runId] || "加载中..."}</pre>
+            <div className={styles.sessionKey}>
+              会话 {sessionDialog.sessionId}
+            </div>
+            <pre className={styles.sessionPreview}>
+              {sessionLogs[sessionDialog.runId] || '加载中...'}
+            </pre>
           </div>
           <div slot="actions">
-            <md-text-button onClick={() => setSessionDialog(null)}>关闭</md-text-button>
+            <md-text-button onClick={() => setSessionDialog(null)}>
+              关闭
+            </md-text-button>
           </div>
         </md-dialog>
       )}
     </div>
-  );
+  )
 }

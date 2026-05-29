@@ -22,9 +22,7 @@ def test_upload_params_empty_interactions(tmp_path):
     video = make_video()
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
-    (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
-    )
+    (video_dir / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n")
     (video_dir / "chapters.json").write_text(
         json.dumps({"chapters": [{"id": "c1", "start_time": 0, "end_time": 1000, "title": "C1"}]})
     )
@@ -41,9 +39,7 @@ def test_upload_params_review_with_missing_item_id(tmp_path):
     video = make_video()
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
-    (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
-    )
+    (video_dir / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n")
     (video_dir / "chapters.json").write_text(json.dumps({"chapters": []}))
     (video_dir / "interactions.json").write_text(
         json.dumps(
@@ -75,9 +71,7 @@ def test_upload_params_uses_subtitles_reviewed_when_present(tmp_path):
     video = make_video()
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
-    (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\noriginal\n"
-    )
+    (video_dir / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\noriginal\n")
     (video_dir / "subtitles_reviewed.srt").write_text(
         "1\n00:00:00,000 --> 00:00:01,000\nreviewed\n"
     )
@@ -94,9 +88,7 @@ def test_upload_params_question_type_has_empty_trials(tmp_path):
     video = make_video(content_type="question", external_id="Q001", question_id="Q001")
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
-    (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
-    )
+    (video_dir / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n")
     (video_dir / "chapters.json").write_text(json.dumps({"chapters": []}))
     (video_dir / "interactions.json").write_text(json.dumps({"interactions": []}))
     (video_dir / "checklist.json").write_text(json.dumps({"checklist": {}}))
@@ -111,9 +103,7 @@ def test_write_upload_params_creates_file(tmp_path):
     video = make_video()
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
-    (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
-    )
+    (video_dir / "subtitles.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n")
     (video_dir / "chapters.json").write_text(json.dumps({"chapters": []}))
     (video_dir / "interactions.json").write_text(json.dumps({"interactions": []}))
     (video_dir / "checklist.json").write_text(json.dumps({"checklist": {}}))

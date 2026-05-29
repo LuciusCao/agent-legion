@@ -32,12 +32,12 @@ class WorkerThread:
         self._thread: threading.Thread | None = None
 
     def start(self) -> None:
-        from server.app.worker import (
+        from server.app.worker import process_video_once
+        from server.app.worker_scheduler import (
             DEFAULT_PHASE_CONCURRENCY,
             WorkerCapacity,
             get_phase_concurrency_limit,
             pick_next_work,
-            process_video_once,
         )
 
         def _configured_worker_count(runner_count: int) -> int:
@@ -65,6 +65,9 @@ class WorkerThread:
                     self.running_local_counts.pop(phase, None)
 
         def _worker_loop() -> None:
+            assert self.executor is not None
+            # Preheat persistent read connection for the polling loop
+            self.db._ensure_read_conn()
             while not self.stop_event.is_set():
                 submitted = False
                 if self.worker_control.is_paused():
@@ -79,7 +82,7 @@ class WorkerThread:
                     running_video_ids = set(self.running_futures)
                     local_counts = dict(self.running_local_counts)
                 work = pick_next_work(
-                    self.db.list_videos(),
+                    self.db.list_videos(status_filter=["queued", "missing_url", "running"]),
                     running_video_ids=running_video_ids,
                     capacity=WorkerCapacity(
                         free_runner=runner_slot,
@@ -111,11 +114,16 @@ class WorkerThread:
                     )
                     with self.running_lock:
                         self.running_futures[video["id"]] = future
-                    future.add_done_callback(
-                        lambda _f, vid=video["id"], idx=runner_index, aid=agent_id: _finish_agent_work(
-                            vid, idx, aid
-                        )
-                    )
+
+                    def _on_agent_done(
+                        _f: Any,
+                        vid: str = video["id"],
+                        idx: int = runner_index,
+                        aid: str = agent_id,
+                    ) -> None:
+                        _finish_agent_work(vid, idx, aid)
+
+                    future.add_done_callback(_on_agent_done)
                     submitted = True
                 else:
                     if runner_slot is not None:
@@ -125,19 +133,23 @@ class WorkerThread:
                     )
                     with self.running_lock:
                         self.running_futures[video["id"]] = future
-                        self.running_local_counts[work.phase] = self.running_local_counts.get(work.phase, 0) + 1
-                    future.add_done_callback(
-                        lambda _f, vid=video["id"], phase=work.phase: _finish_local_work(vid, phase)
-                    )
+                        self.running_local_counts[work.phase] = (
+                            self.running_local_counts.get(work.phase, 0) + 1
+                        )
+
+                    def _on_local_done(
+                        _f: Any, vid: str = video["id"], phase: str = work.phase
+                    ) -> None:
+                        _finish_local_work(vid, phase)
+
+                    future.add_done_callback(_on_local_done)
                     submitted = True
                 self.stop_event.wait(1 if submitted else 3)
 
         runner_count = self.runner_pool.size()
         workers = _configured_worker_count(runner_count)
         self.executor = ThreadPoolExecutor(max_workers=workers)
-        self._thread = threading.Thread(
-            target=_worker_loop, name="video-hive-worker", daemon=True
-        )
+        self._thread = threading.Thread(target=_worker_loop, name="video-hive-worker", daemon=True)
         self._thread.start()
 
     def stop(self, timeout: float = 3) -> None:
@@ -146,3 +158,4 @@ class WorkerThread:
             self._thread.join(timeout=timeout)
         if self.executor:
             self.executor.shutdown(wait=False)
+        self.db.close_read_conn()

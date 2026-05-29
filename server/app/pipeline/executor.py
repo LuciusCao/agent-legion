@@ -11,19 +11,18 @@ from server.app.settings import Settings
 
 @dataclass
 class PhaseContext:
-    video: dict[str, Any]
+    video: Any
     video_dir: Path
     settings: Settings
     db: Database
     log_path: Path
     providers: list[Any] | None
     openclaw_runner: OpenClawRunner | None
-    run: dict[str, Any]
+    run: Any
 
 
 class PhaseHandler(Protocol):
-    def __call__(self, ctx: PhaseContext) -> None:
-        ...
+    def __call__(self, ctx: PhaseContext) -> None: ...
 
 
 class PhaseExecutorRegistry:

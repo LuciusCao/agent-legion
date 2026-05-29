@@ -82,4 +82,6 @@ def lookup_knowledge_video(
         return CmsVideoLookup("not_found", payload=payload)
     video_url, source_uuid = _extract_knowledge_url(code, payload)
     status = "found" if video_url else "missing_url"
-    return CmsVideoLookup(status, video_url or "", _extract_knowledge_title(item, code), source_uuid or "", payload)
+    return CmsVideoLookup(
+        status, video_url or "", _extract_knowledge_title(item, code), source_uuid or "", payload
+    )

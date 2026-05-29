@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any
 
@@ -116,11 +117,11 @@ def create_videos_router(
         for video in videos:
             video["packed"] = bool(video.get("packed", 0))
             if video.get("content_type") == "knowledge":
-                video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else settings.videos_dir / video["id"]
+                video_dir = resolve_video_dir(video, settings.videos_dir)
                 stats = compute_interaction_stats(video_dir)
                 if stats:
-                    video["interaction_stats"] = stats
-                video["interaction_review_status"] = compute_interaction_review_status(video_dir)
+                    video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
+                video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
         return {"videos": videos}
 
     @router.get("/{video_id}")
@@ -129,11 +130,11 @@ def create_videos_router(
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         if video.get("content_type") == "knowledge":
-            video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else settings.videos_dir / video_id
+            video_dir = resolve_video_dir(video, settings.videos_dir)
             stats = compute_interaction_stats(video_dir)
             if stats:
-                video["interaction_stats"] = stats
-            video["interaction_review_status"] = compute_interaction_review_status(video_dir)
+                video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
+            video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
         return {
             "video": {**video, "packed": bool(video.get("packed", 0))},
             "phase_runs": db.list_phase_runs(video_id),
@@ -146,7 +147,11 @@ def create_videos_router(
 
     @router.post("/batch/rerun", response_model=BatchRerunResponse)
     def batch_rerun_videos(request: BatchRerunRequest) -> dict[str, Any]:
-        return {"results": batch_rerun_video_records(db, settings, request.video_ids, request.phase, agent_manager)}
+        return {
+            "results": batch_rerun_video_records(
+                db, settings, request.video_ids, request.phase, agent_manager
+            )
+        }
 
     @router.post("/batch/run-to", response_model=BatchRunToResponse)
     def batch_run_to_videos(request: BatchRunToRequest) -> dict[str, Any]:
@@ -196,6 +201,15 @@ def create_videos_router(
             raise HTTPException(status_code=404, detail="Video not found")
         return {"deleted": True, "video_id": video_id}
 
+    def _sanitize_log(text: str) -> str:
+        """Filter potentially sensitive paths and URLs from log output."""
+        # Remove absolute file paths (Unix and Windows)
+        text = re.sub(r"/[\w./-]+/\.[\w./-]+", "[FILTERED]", text)
+        text = re.sub(r"[A-Za-z]:\\[\\\w\s.-]+", "[FILTERED]", text)
+        # Remove URLs with potential credentials or sensitive paths
+        text = re.sub(r"https?://[^\s]+", "[FILTERED]", text)
+        return text
+
     @router.get("/{video_id}/logs")
     def logs(video_id: str) -> dict[str, str]:
         runs = db.list_phase_runs(video_id)
@@ -204,7 +218,7 @@ def create_videos_router(
         log_path = Path(runs[-1]["log_path"])
         if not log_path.exists():
             return {"log": ""}
-        return {"log": log_path.read_text(encoding="utf-8")[-8000:]}
+        return {"log": _sanitize_log(log_path.read_text(encoding="utf-8")[-8000:])}
 
     @router.get("/{video_id}/phase-runs/{run_id}/session")
     def phase_run_session(video_id: str, run_id: int) -> dict[str, str]:

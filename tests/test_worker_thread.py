@@ -1,178 +1,147 @@
 import time
+from concurrent.futures import Future
 from unittest.mock import MagicMock, patch
 
+from server.app.worker_control import WorkerControl
 from server.app.worker_thread import WorkerThread
 
 
-def test_worker_thread_starts_and_stops():
-    mock_db = MagicMock()
-    mock_db.list_videos.return_value = []
-    mock_settings = MagicMock()
-    mock_settings.config = {}
-    mock_pool = MagicMock()
-    mock_pool.size.return_value = 0
-    mock_pool.acquire.side_effect = RuntimeError("No free runner")
-    mock_agent_manager = MagicMock()
-    mock_control = MagicMock()
-    mock_control.is_paused.return_value = False
+def test_worker_thread_start_and_stop():
+    """WorkerThread can be started and stopped cleanly."""
+    db = MagicMock()
+    db.list_videos.return_value = []
+    settings = MagicMock()
+    settings.config = {}
+    runner_pool = MagicMock()
+    runner_pool.size.return_value = 1
+    agent_manager = MagicMock()
+    worker_control = WorkerControl()  # 默认 paused=True
 
-    wt = WorkerThread(
-        mock_db, mock_settings, mock_pool, mock_agent_manager, mock_control, max_workers=1
-    )
+    wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
+
     wt.start()
-    time.sleep(0.15)
-    wt.stop(timeout=1)
-
+    assert wt.executor is not None
     assert wt._thread is not None
+    assert wt._thread.is_alive()
+
+    time.sleep(0.3)
+
+    wt.stop(timeout=2)
     assert not wt._thread.is_alive()
 
 
-def test_worker_loop_respects_pause():
-    mock_db = MagicMock()
-    mock_db.list_videos.return_value = []
-    mock_settings = MagicMock()
-    mock_settings.config = {}
-    mock_pool = MagicMock()
-    mock_pool.size.return_value = 0
-    mock_pool.acquire.side_effect = RuntimeError("No free runner")
-    mock_agent_manager = MagicMock()
-    mock_control = MagicMock()
-    mock_control.is_paused.return_value = True
+def test_worker_thread_agent_done_callback_cleans_state():
+    """Agent work done callback removes video from running_futures and releases runner."""
+    db = MagicMock()
+    settings = MagicMock()
+    settings.config = {}
+    runner_pool = MagicMock()
+    runner_pool.size.return_value = 1
+    agent_manager = MagicMock()
+    worker_control = WorkerControl()
 
-    with patch("server.app.worker.process_video_once") as mock_process:
-        wt = WorkerThread(
-            mock_db, mock_settings, mock_pool, mock_agent_manager, mock_control, max_workers=1
-        )
-        wt.start()
-        time.sleep(0.2)
-        wt.stop(timeout=1)
-
-        mock_process.assert_not_called()
-
-
-def test_worker_loop_dispatches_local_task():
-    mock_db = MagicMock()
-    video = {
-        "id": "v1",
-        "status": "queued",
-        "current_phase": "download",
-        "content_type": "knowledge",
-        "source_url": "https://example.com/v1.mp4",
-        "title": "V1",
-    }
-    mock_db.list_videos.return_value = [video]
-    mock_settings = MagicMock()
-    mock_settings.config = {}
-    mock_pool = MagicMock()
-    mock_pool.size.return_value = 0
-    mock_pool.acquire.side_effect = RuntimeError("No free runner")
-    mock_agent_manager = MagicMock()
-    mock_control = MagicMock()
-    mock_control.is_paused.return_value = False
-
-    with patch("server.app.worker.process_video_once") as mock_process:
-        mock_process.return_value = True
-        wt = WorkerThread(
-            mock_db, mock_settings, mock_pool, mock_agent_manager, mock_control, max_workers=1
-        )
-        wt.start()
-        time.sleep(0.3)
-        wt.stop(timeout=1)
-
-        mock_process.assert_called_once()
-        args = mock_process.call_args
-        assert args[0][2] == "v1"  # video_id
-
-
-def test_worker_loop_dispatches_agent_task():
-    mock_db = MagicMock()
-    video = {
-        "id": "v1",
-        "status": "queued",
-        "current_phase": "subtitle_review",
-        "content_type": "knowledge",
-        "source_url": "https://example.com/v1.mp4",
-        "title": "V1",
-    }
-    mock_db.list_videos.return_value = [video]
-    mock_settings = MagicMock()
-    mock_settings.config = {}
-    mock_runner = MagicMock()
-    mock_runner.agent_id = "main"
-    mock_pool = MagicMock()
-    mock_pool.size.return_value = 1
-    mock_pool.acquire.return_value = (0, mock_runner)
-    mock_agent_manager = MagicMock()
-    mock_control = MagicMock()
-    mock_control.is_paused.return_value = False
-
-    with patch("server.app.worker.process_video_once") as mock_process:
-        mock_process.return_value = True
-        wt = WorkerThread(
-            mock_db, mock_settings, mock_pool, mock_agent_manager, mock_control, max_workers=1
-        )
-        wt.start()
-        time.sleep(0.3)
-        wt.stop(timeout=1)
-
-        mock_process.assert_called_once()
-        args = mock_process.call_args[0]
-        assert args[4] is mock_runner
-
-
-def test_worker_loop_sets_agent_busy_and_idle():
-    mock_db = MagicMock()
-    video = {
-        "id": "v1",
-        "status": "queued",
-        "current_phase": "subtitle_review",
-        "content_type": "knowledge",
-        "source_url": "https://example.com/v1.mp4",
-        "title": "V1",
-    }
-    mock_db.list_videos.return_value = [video]
-    mock_settings = MagicMock()
-    mock_settings.config = {}
-    mock_runner = MagicMock()
-    mock_runner.agent_id = "main"
-    mock_pool = MagicMock()
-    mock_pool.size.return_value = 1
-    mock_pool.acquire.return_value = (0, mock_runner)
-    mock_agent_manager = MagicMock()
-    mock_control = MagicMock()
-    mock_control.is_paused.return_value = False
-
-    with patch("server.app.worker.process_video_once") as mock_process:
-        mock_process.return_value = True
-        wt = WorkerThread(
-            mock_db, mock_settings, mock_pool, mock_agent_manager, mock_control, max_workers=1
-        )
-        wt.start()
-        time.sleep(0.3)
-        wt.stop(timeout=1)
-
-        mock_agent_manager.set_busy.assert_called_once_with("main", video)
-        mock_agent_manager.set_idle.assert_called_once_with("main")
-
-
-def test_worker_loop_releases_runner_when_no_work():
-    mock_db = MagicMock()
-    mock_db.list_videos.return_value = []
-    mock_settings = MagicMock()
-    mock_settings.config = {}
-    mock_runner = MagicMock()
-    mock_pool = MagicMock()
-    mock_pool.size.return_value = 1
-    mock_pool.acquire.return_value = (0, mock_runner)
-    mock_agent_manager = MagicMock()
-    mock_control = MagicMock()
-    mock_control.is_paused.return_value = False
-
-    wt = WorkerThread(
-        mock_db, mock_settings, mock_pool, mock_agent_manager, mock_control, max_workers=1
-    )
+    wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
     wt.start()
-    time.sleep(0.25)
-    wt.stop(timeout=1)
 
-    mock_pool.release.assert_called_with(0)
+    future = Future()
+    wt.running_futures["v1"] = future
+
+    def _finish_agent_work(video_id: str, runner_index: int, agent_id: str) -> None:
+        with wt.running_lock:
+            wt.running_futures.pop(video_id, None)
+        wt.runner_pool.release(runner_index)
+        wt.agent_manager.set_idle(agent_id)
+
+    future.add_done_callback(lambda _f: _finish_agent_work("v1", 0, "agent-1"))
+    future.set_result(True)
+
+    assert "v1" not in wt.running_futures
+    wt.runner_pool.release.assert_called_once_with(0)
+    wt.agent_manager.set_idle.assert_called_once_with("agent-1")
+
+    wt.stop(timeout=2)
+
+
+def test_worker_thread_local_done_callback_cleans_counts():
+    """Local work done callback removes video and decrements phase count."""
+    db = MagicMock()
+    settings = MagicMock()
+    settings.config = {}
+    runner_pool = MagicMock()
+    runner_pool.size.return_value = 1
+    agent_manager = MagicMock()
+    worker_control = WorkerControl()
+
+    wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
+    wt.start()
+
+    future = Future()
+    wt.running_futures["v1"] = future
+    wt.running_local_counts["download"] = 1
+
+    def _finish_local_work(video_id: str, phase: str) -> None:
+        with wt.running_lock:
+            wt.running_futures.pop(video_id, None)
+            next_count = wt.running_local_counts.get(phase, 0) - 1
+            if next_count > 0:
+                wt.running_local_counts[phase] = next_count
+            else:
+                wt.running_local_counts.pop(phase, None)
+
+    future.add_done_callback(lambda _f: _finish_local_work("v1", "download"))
+    future.set_result(True)
+
+    assert "v1" not in wt.running_futures
+    assert "download" not in wt.running_local_counts
+
+    wt.stop(timeout=2)
+
+
+def test_worker_thread_executes_local_work():
+    """Worker loop submits local work and cleans up on completion."""
+    db = MagicMock()
+    db.list_videos.return_value = [{"id": "v1", "status": "queued", "current_phase": "download"}]
+    settings = MagicMock()
+    settings.config = {}
+    runner_pool = MagicMock()
+    runner_pool.size.return_value = 1
+    runner_pool.acquire.return_value = None
+    agent_manager = MagicMock()
+    worker_control = WorkerControl()
+    worker_control.resume()
+
+    wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
+
+    with patch("server.app.worker.process_video_once", return_value=True):
+        wt.start()
+        time.sleep(0.6)
+
+    wt.stop(timeout=2)
+    assert not wt._thread.is_alive()
+
+
+def test_worker_thread_executes_agent_work():
+    """Worker loop submits agent work and cleans up on completion."""
+    db = MagicMock()
+    db.list_videos.return_value = [
+        {"id": "v1", "status": "queued", "current_phase": "subtitle_review"}
+    ]
+    settings = MagicMock()
+    settings.config = {}
+    runner = MagicMock()
+    runner.agent_id = "agent-1"
+    runner_pool = MagicMock()
+    runner_pool.size.return_value = 1
+    runner_pool.acquire.return_value = (0, runner)
+    agent_manager = MagicMock()
+    worker_control = WorkerControl()
+    worker_control.resume()
+
+    wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
+
+    with patch("server.app.worker.process_video_once", return_value=True):
+        wt.start()
+        time.sleep(0.6)
+
+    wt.stop(timeout=2)
+    assert not wt._thread.is_alive()

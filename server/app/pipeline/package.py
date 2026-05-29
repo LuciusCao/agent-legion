@@ -2,6 +2,7 @@ import json
 import zipfile
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 PACKAGE_FILES = [
     "metadata.json",
@@ -13,7 +14,9 @@ PACKAGE_FILES = [
 ]
 
 
-def create_package(videos: list[dict], packages_dir: Path, videos_base_dir: Path | None = None) -> Path:
+def create_package(
+    videos: list[Any], packages_dir: Path, videos_base_dir: Path | None = None
+) -> Path:
     packages_dir.mkdir(parents=True, exist_ok=True)
     package_path = packages_dir / f"video-hive-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}.zip"
     manifest = {

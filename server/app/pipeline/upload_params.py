@@ -9,6 +9,7 @@ import json
 import re
 import uuid
 from pathlib import Path
+from typing import Any
 
 from server.app.pipeline.common import parse_srt
 
@@ -62,8 +63,10 @@ def build_subtitles(srt_text: str) -> list[dict]:
 def build_clips(chapters: list[dict]) -> list[dict]:
     out = []
     for c in chapters:
-        start = c.get("start_time") if "start_time" in c else c.get("start", 0)
-        end = c.get("end_time") if "end_time" in c else c.get("end", 0)
+        start_raw = c.get("start_time") if "start_time" in c else c.get("start", 0)
+        end_raw = c.get("end_time") if "end_time" in c else c.get("end", 0)
+        start = start_raw if start_raw is not None else 0
+        end = end_raw if end_raw is not None else 0
         out.append(
             {
                 "clips_uuid": _new_uuid32(),
@@ -204,7 +207,7 @@ def build_upload_params(video: dict, video_dir: Path) -> dict:
         elif isinstance(chapters_raw, dict):
             clips = build_clips(chapters_raw.get("chapters", []))
 
-    interactions = []
+    interactions: list[Any] = []
     if interactions_path.exists():
         inter_data = json.loads(interactions_path.read_text(encoding="utf-8"))
         if isinstance(inter_data, dict):

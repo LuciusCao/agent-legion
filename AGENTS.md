@@ -11,8 +11,9 @@ The project is a monorepo with a Python FastAPI backend and a React + TypeScript
 - **Backend**: Python 3.11+, FastAPI, Uvicorn, SQLite, PyYAML, Requests
 - **Frontend**: React 18, TypeScript 5.8, Vite, React Router v6, Zustand, `@material/web` (Material 3 Web Components)
 - **Package Management**: `uv` for Python; `npm` for the frontend
-- **Linting / Formatting**: Ruff (Python)
-- **Testing**: pytest
+- **Linting / Formatting**: Ruff (Python), ESLint + Prettier (TypeScript)
+- **Static Type Check**: mypy (Python)
+- **Testing**: pytest (with pytest-cov), Vitest (frontend)
 
 ## Project Structure
 
@@ -25,15 +26,21 @@ video-hive/
 ├── server/
 │   ├── app/
 │   │   ├── main.py             # FastAPI app factory + lifespan worker thread
-│   │   ├── api.py              # REST API routes
-│   │   ├── db.py               # SQLite database wrapper
-│   │   ├── settings.py         # Settings loader from YAML
-│   │   ├── worker.py           # Background worker loop + per-video phase processing
-│   │   ├── agents.py           # OpenClaw agent discovery and status tracking
-│   │   ├── records.py          # TypedDict type definitions for DB records
+│   │   ├── routes/             # REST API routes (videos, agents, worker, artifacts, packages)
+│   │   ├── db/                 # SQLite database wrapper (schema, queries, notifications)
+│   │   ├── cms/                # CMS API integration (auth, client, knowledge, question)
 │   │   ├── services/           # Business logic services
 │   │   │   ├── intake.py       # Video intake (add, URL resolution)
-│   │   │   └── video_actions.py # Batch rerun, delete, package selection
+│   │   │   ├── video_actions.py # Batch rerun, delete, package selection
+│   │   │   ├── manual_run.py   # Manual phase run orchestration
+│   │   │   └── interaction_stats.py # Interaction statistics aggregation
+│   │   ├── settings.py         # Settings loader from YAML
+│   │   ├── worker.py           # Background worker loop + per-video phase processing
+│   │   ├── worker_control.py   # Worker pause/resume control
+│   │   ├── worker_thread.py    # Background worker thread lifecycle
+│   │   ├── events.py           # SSE event broadcaster
+│   │   ├── agents.py           # OpenClaw agent discovery and status tracking
+│   │   ├── records.py          # TypedDict type definitions for DB records
 │   │   └── pipeline/           # Pipeline stage implementations
 │   │       ├── common.py       # URL-to-id parsing, SRT parse/format helpers
 │   │       ├── phases.py       # Phase list and agent-phase definitions
@@ -71,17 +78,33 @@ video-hive/
 │       ├── components/         # Reusable UI components
 │       │   ├── AddDialog.tsx
 │       │   ├── AgentPanel.tsx
+│       │   ├── BatchDeleteDialog.tsx
+│       │   ├── BatchRerunDialog.tsx
 │       │   ├── BatchToolbar.tsx
+│       │   ├── ChapterPanel.tsx
 │       │   ├── ChapterStrip.tsx
-│       │   ├── DetailTabs.tsx
+│       │   ├── DeleteDialog.tsx
 │       │   ├── InteractionOverlay.tsx
+│       │   ├── InteractionReviewBadge.tsx
 │       │   ├── MetadataPanel.tsx
 │       │   ├── NodePanel.tsx
+│       │   ├── PackageToolbar.tsx
+│       │   ├── PhaseRunsPanel.tsx
+│       │   ├── PhaseStepper.tsx
 │       │   ├── RerunDialog.tsx
+│       │   ├── RunToDialog.tsx
 │       │   ├── StatCards.tsx
 │       │   ├── SubtitlePanel.tsx
+│       │   ├── TimelineStrip.tsx
+│       │   ├── Toast.tsx
+│       │   ├── TranscriptionDetails.tsx
 │       │   ├── VideoList.tsx
 │       │   └── VideoPlayer.tsx
+│       ├── hooks/              # React custom hooks
+│       │   ├── useDetailPage.ts
+│       │   ├── usePhaseRunsTimeline.ts
+│       │   ├── useVideoEvents.ts
+│       │   └── useVideoPhaseEvents.ts
 │       └── stores/             # Zustand state stores
 │           ├── videoStore.ts
 │           ├── uiStore.ts
@@ -99,6 +122,15 @@ video-hive/
     ├── logs/
     └── packages/
 ```
+
+## 文档体系
+
+- `README.md` — 项目概览与快速上手指南
+- `issues/` — 已知问题与修复记录（代码审查发现的全部问题）
+- `docs/superpowers/README.md` — 设计文档索引（specs / plans / issues）
+- `docs/superpowers/specs/` — 设计规格文档，需用户批准后执行
+- `docs/superpowers/plans/` — 实施计划文档，由 Agent 按任务执行
+- `issues/` — 已知缺陷与修复记录
 
 ## Build and Run Commands
 
@@ -134,16 +166,31 @@ npm run build
 
 After `frontend/dist` exists, the FastAPI backend serves it automatically from the same origin at `http://127.0.0.1:8000`. Use 8000 for integration testing or when verifying the production build; use 5173 for daily development iteration.
 
-### Lint
+### Python Lint / Format
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run ruff check .
+UV_CACHE_DIR=.uv-cache uv run ruff format --check .
 ```
 
-### Test
+### Python Type Check
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run mypy server/app
+```
+
+### Python Test
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run pytest -q
+```
+
+### Frontend Lint / Format
+
+```bash
+cd frontend
+npm run lint
+npm run format:check
 ```
 
 ### Quality Gates
@@ -160,7 +207,13 @@ Before committing, handing work off, or claiming a cross-stack change is complet
 ./scripts/check.sh
 ```
 
-The quick gate runs Ruff, pytest, and frontend Vitest. The full gate runs the quick gate plus the frontend production build.
+The quick gate runs:
+- Ruff lint + format check
+- Python tests with coverage (fail_under = 75)
+- mypy type check
+- Frontend Vitest
+
+The full gate runs the quick gate plus the frontend production build.
 
 To install the optional local pre-commit hook that runs the quick gate before each commit:
 
@@ -170,14 +223,25 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 
 ## Code Style Guidelines
 
+### Python
+
 - **Formatter / Linter**: Ruff
+- **Static Type Checker**: mypy (run `uv run mypy server/app`)
 - **Line length**: 100 characters
 - **Target Python version**: 3.11
 - **Enabled lint rules**: `E`, `F`, `I`, `UP`, `B`, `SIM`
 - **Ignored rule**: `E501` (line too long)
 - Use Python 3.11+ syntax: union types with `|`, builtin generics like `dict[str, Any]`.
 - Keep imports sorted; Ruff handles import sorting automatically.
-- The frontend uses React 18 with functional components and hooks. Keep components small and focused; extract reusable logic into helpers or stores.
+- Avoid `print()` in production code; use `logging.getLogger(__name__)`.
+
+### Frontend
+
+- **Linter**: ESLint 10 with `typescript-eslint` and `eslint-plugin-react-hooks`
+- **Formatter**: Prettier (`semi: false`, `singleQuote: true`, `tabWidth: 2`)
+- The frontend uses React 18 with functional components and hooks.
+- Keep components small and focused; extract reusable logic into helpers or stores.
+- Prefer `useState(() => initialValue)` over `useState(initialValue)` for non-pure initializers.
 
 ## Runtime Architecture
 
@@ -228,8 +292,16 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 - Video player supports clicking subtitle/chapter/interaction timestamps to seek.
 - The add-video form includes a type selector (知识点 / 题目解析), an `external_id` field, and an optional `source_uuid`. Batch input supports `external_id,source_uuid` per line (source_uuid is optional).
 - The video list and detail header display the content type label and `external_id`.
-- The phase panel and rerun dropdown adapt to the video's `content_type`; knowledge-only phases are hidden/disabled for `question` videos.
-- A **删除** button in the toolbar prompts for confirmation before calling `DELETE /api/videos/{video_id}` and clearing the selection.
+- The phase panel (`PhaseRunsPanel`) and rerun dropdown (`RerunDialog` / `RunToDialog`) adapt to the video's `content_type`; knowledge-only phases are hidden/disabled for `question` videos.
+- A global `Toast` component displays feedback messages (e.g., "该资源正在被处理中").
+- A **删除** button in the toolbar prompts for confirmation (`DeleteDialog` / `BatchDeleteDialog`) before calling `DELETE /api/videos/{video_id}` and clearing the selection.
+- **Batch operations**: select multiple videos in the list to batch rerun, batch delete, or batch package.
+
+### Frontend Tooling
+
+- **ESLint**: Configured in `frontend/eslint.config.js` with `@eslint/js`, `typescript-eslint`, and `eslint-plugin-react-hooks`.
+- **Prettier**: Configured in `frontend/.prettierrc` (`semi: false`, `singleQuote: true`).
+- **Lint scripts**: `npm run lint`, `npm run lint:fix`, `npm run format`, `npm run format:check`.
 
 ### Database
 
@@ -239,6 +311,7 @@ To install the optional local pre-commit hook that runs the quick gate before ea
   - `transcription_runs` — transcription attempt history (whisper / SenseVoice)
   - `packages` — created package paths
 - The DB initializer runs lightweight migrations (`alter table add column`) so existing `videos` tables gain `content_type`, `external_id`, `knowledge_code`, `question_id`, and `source_uuid` without data loss.
+- `VideoQueries.connect()` is a context manager (`@contextmanager`) that yields a `sqlite3.Connection` and ensures `conn.close()` is called after use.
 - `delete_video()` performs cascading deletes: it removes matching rows from `phase_runs` and `transcription_runs` before deleting the `videos` row.
 
 ## Configuration
@@ -273,7 +346,8 @@ Question explanation videos do not produce interaction nodes. Their `metadata.js
 
 - Tests live in `tests/` and use pytest.
 - `pythonpath = ["."]` is configured in `pyproject.toml` so imports like `server.app.db` resolve.
-- API tests use `fastapi.testclient.TestClient` with a temporary `data_dir`.
+- Coverage is enforced in `check-quick.sh` with `fail_under = 75` (configured in `pyproject.toml`).
+- API tests use `fastapi.testclient.TestClient` with a temporary `data_dir`. The `client` fixture must use `with TestClient(app) as c:` to ensure lifespan resources are properly closed.
 - Worker tests inject mock `TranscriptionProvider` implementations to avoid requiring real ASR binaries.
 - Core tests validate SRT parsing, artifact cleanup, openclaw runner behavior, ZIP packaging, and type-specific pipeline routing.
 
@@ -281,6 +355,12 @@ Run the full suite with:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run pytest -q
+```
+
+Run with coverage report:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ```
 
 ## Security Considerations

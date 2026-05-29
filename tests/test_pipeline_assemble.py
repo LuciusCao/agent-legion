@@ -10,8 +10,7 @@ def test_assemble_video_creates_metadata_and_report(tmp_path):
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
     (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:02,000\nHello\n\n"
-        "2\n00:00:02,000 --> 00:00:05,000\nWorld\n",
+        "1\n00:00:00,000 --> 00:00:02,000\nHello\n\n2\n00:00:02,000 --> 00:00:05,000\nWorld\n",
         encoding="utf-8",
     )
     (video_dir / "chapters.json").write_text(
@@ -19,12 +18,12 @@ def test_assemble_video_creates_metadata_and_report(tmp_path):
         encoding="utf-8",
     )
     (video_dir / "interactions.json").write_text(
-        json.dumps({
-            "version": "1.0",
-            "interactions": [
-                {"id": "I1", "trigger_time": 1, "type": "quiz", "question": "Q1"}
-            ],
-        }),
+        json.dumps(
+            {
+                "version": "1.0",
+                "interactions": [{"id": "I1", "trigger_time": 1, "type": "quiz", "question": "Q1"}],
+            }
+        ),
         encoding="utf-8",
     )
     (video_dir / "review_result.json").write_text(
@@ -89,7 +88,12 @@ def test_assemble_video_creates_empty_interactions_stub_for_question(tmp_path):
     (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
     # interactions.json does NOT exist
 
-    video = {"id": "question_Q001", "title": "Q1", "content_type": "question", "external_id": "Q001"}
+    video = {
+        "id": "question_Q001",
+        "title": "Q1",
+        "content_type": "question",
+        "external_id": "Q001",
+    }
     metadata = assemble_video(video, video_dir)
 
     assert metadata["interactions"] == []
@@ -169,7 +173,7 @@ def test_upload_params_uses_checklist_node_issues_for_interaction_review(tmp_pat
 
 def test_validate_phase_outputs_rejects_chapter_without_end_time(tmp_path):
     """validate_phase_outputs must raise when a chapter lacks end_time."""
-    from server.app.worker import validate_phase_outputs
+    from server.app.pipeline.validators import validate_phase_outputs
 
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
@@ -189,7 +193,7 @@ def test_validate_phase_outputs_rejects_chapter_without_end_time(tmp_path):
 
 def test_validate_phase_outputs_passes_with_complete_chapters(tmp_path):
     """validate_phase_outputs should not raise when all chapters have end_time."""
-    from server.app.worker import validate_phase_outputs
+    from server.app.pipeline.validators import validate_phase_outputs
 
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
@@ -204,3 +208,157 @@ def test_validate_phase_outputs_passes_with_complete_chapters(tmp_path):
     )
 
     validate_phase_outputs(video_dir, "chapter_generate")
+
+
+def test_upload_params_builds_video_summary_interaction(tmp_path):
+    from server.app.pipeline.upload_params import build_upload_params
+
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {
+                        "id": "n1",
+                        "type": "video_summary",
+                        "trigger_time": 1,
+                        "instruction": "summary",
+                        "reference_sentence": "ref",
+                        "options": [
+                            {"id": "opt1", "text": "A\nB", "is_distractor": False},
+                            {"id": "opt2", "text": "C", "is_distractor": True},
+                        ],
+                        "answer": ["opt1"],
+                        "grading_mode": "strict_sequence",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    params = build_upload_params({"id": "v1"}, video_dir)
+    summary = params["interaction_summary_json"][0]
+    assert summary["type"] == "video_summary"
+    assert summary["options"][0]["content"] == "A。B"
+    assert summary["options"][0]["key"] == "A"
+    assert summary["answer"] == ["A"]
+
+
+def test_upload_params_chapters_as_dict(tmp_path):
+    from server.app.pipeline.upload_params import build_upload_params
+
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text(
+        json.dumps({"chapters": [{"start_time": 0, "end_time": 1, "title": "Ch1"}]}),
+        encoding="utf-8",
+    )
+    (video_dir / "interactions.json").write_text(json.dumps({"interactions": []}), encoding="utf-8")
+
+    params = build_upload_params({"id": "v1"}, video_dir)
+    assert len(params["clips_json"]) == 1
+    assert params["clips_json"][0]["title"] == "Ch1"
+
+
+def test_upload_params_interactions_as_list(tmp_path):
+    from server.app.pipeline.upload_params import build_upload_params
+
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            [{"id": "n1", "type": "example_practice", "trigger_time": 0, "instruction": "do it"}]
+        ),
+        encoding="utf-8",
+    )
+
+    params = build_upload_params({"id": "v1"}, video_dir)
+    assert len(params["example_problem_trial_json"]) == 1
+
+
+def test_upload_params_skips_empty_subtitle_text(tmp_path):
+    from server.app.pipeline.upload_params import build_upload_params
+
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\n```\n\n2\n00:00:01,000 --> 00:00:02,000\nReal\n",
+        encoding="utf-8",
+    )
+    (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
+    (video_dir / "interactions.json").write_text(json.dumps({"interactions": []}), encoding="utf-8")
+
+    params = build_upload_params({"id": "v1"}, video_dir)
+    assert len(params["subtitles_json"]) == 1
+    assert params["subtitles_json"][0]["text"] == "Real"
+
+
+def test_upload_params_with_checklist_reviews(tmp_path):
+    from server.app.pipeline.upload_params import build_upload_params
+
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {
+                        "id": "n1",
+                        "type": "example_practice",
+                        "trigger_time": 0,
+                        "instruction": "do it",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps({"status": "published"}), encoding="utf-8"
+    )
+    (video_dir / "checklist.json").write_text(
+        json.dumps(
+            {
+                "checklist": {
+                    "content": {
+                        "issues": [
+                            {"node_id": "n1", "title": "T", "details": "D"},
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    params = build_upload_params({"id": "v1"}, video_dir)
+    trial = params["example_problem_trial_json"][0]
+    assert trial["review_status"] == 2
+    assert trial["review_msg"] == "T：D"
+
+
+def test_build_review_msg_branches():
+    from server.app.pipeline.upload_params import _build_review_msg
+
+    assert _build_review_msg([{"title": "T", "details": "D"}]) == "T：D"
+    assert _build_review_msg([{"details": "D"}]) == "D"
+    assert _build_review_msg([{"title": "T"}]) == "T"
+    assert _build_review_msg([]) == ""
+    assert _build_review_msg([{"title": "", "details": ""}]) == ""

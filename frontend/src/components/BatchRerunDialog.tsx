@@ -1,56 +1,50 @@
-import { useState } from "react";
-import { useVideoStore } from "../stores/videoStore";
-import { useUiStore } from "../stores/uiStore";
-import { getPhases, canRerunFrom } from "../helpers";
-import type { VideoItem } from "../types";
-import styles from "./BatchRerunDialog.module.css";
-
-const PHASE_LABELS: Record<string, string> = {
-  download: "下载",
-  transcribe: "转录",
-  subtitle_review: "字幕审校",
-  chapter_generate: "章节生成",
-  interaction_generate: "互动生成",
-  content_review: "内容审校",
-  assemble: "组装",
-  package: "打包",
-};
+import { useState } from 'react'
+import { useVideoStore } from '../stores/videoStore'
+import { useUiStore } from '../stores/uiStore'
+import { getPhases, canRerunFrom } from '../helpers'
+import { PHASE_LABELS } from '../labels'
+import type { VideoItem } from '../types'
+import styles from './BatchRerunDialog.module.css'
 
 type BatchRerunDialogProps = {
-  open: boolean;
-  videoIds: string[];
-  onClose: () => void;
-};
+  open: boolean
+  videoIds: string[]
+  onClose: () => void
+}
 
-export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogProps) {
-  const { videos, batchRerun, exitSelectMode, fetchVideos } = useVideoStore();
-  const { showToast } = useUiStore();
-  const [selectedPhase, setSelectedPhase] = useState("download");
+export function BatchRerunDialog({
+  open,
+  videoIds,
+  onClose,
+}: BatchRerunDialogProps) {
+  const { videos, batchRerun, exitSelectMode, fetchVideos } = useVideoStore()
+  const { showToast } = useUiStore()
+  const [selectedPhase, setSelectedPhase] = useState('download')
 
-  if (!open) return null;
+  if (!open) return null
 
-  const selectedVideos = videos.filter((v) => videoIds.includes(v.id));
-  const contentType = selectedVideos[0]?.content_type ?? "knowledge";
-  const phases = getPhases(contentType);
+  const selectedVideos = videos.filter((v) => videoIds.includes(v.id))
+  const contentType = selectedVideos[0]?.content_type ?? 'knowledge'
+  const phases = getPhases(contentType)
 
   const runnableCount = selectedVideos.filter((v) =>
-    canRerunFrom(v, selectedPhase),
-  ).length;
+    canRerunFrom(v, selectedPhase)
+  ).length
 
   const displayName = (video: VideoItem) =>
-    video.external_id || video.title || video.id;
+    video.external_id || video.title || video.id
 
   const handleConfirm = async () => {
-    await batchRerun(videoIds, selectedPhase);
-    onClose();
-    exitSelectMode();
-    await fetchVideos();
-    const err = useVideoStore.getState().error;
+    await batchRerun(videoIds, selectedPhase)
+    onClose()
+    exitSelectMode()
+    await fetchVideos()
+    const err = useVideoStore.getState().error
     if (err) {
-      showToast(`加载失败: ${err}`, "error");
-      useVideoStore.getState().clearError();
+      showToast(`加载失败: ${err}`, 'error')
+      useVideoStore.getState().clearError()
     }
-  };
+  }
 
   return (
     <md-dialog
@@ -58,10 +52,10 @@ export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogPr
       onClosed={onClose}
       style={
         {
-          minWidth: "520px",
-          maxWidth: "760px",
-          width: "min(760px, 92vw)",
-          "--md-dialog-container-color": "#ffffff",
+          minWidth: '520px',
+          maxWidth: '760px',
+          width: 'min(760px, 92vw)',
+          '--md-dialog-container-color': '#ffffff',
         } as React.CSSProperties
       }
     >
@@ -80,21 +74,22 @@ export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogPr
           </div>
           <div className={styles.videoGrid}>
             {selectedVideos.map((video) => {
-              const runnable = canRerunFrom(video, selectedPhase);
+              const runnable = canRerunFrom(video, selectedPhase)
               return (
                 <div
                   key={video.id}
-                  className={`${styles.videoTile} ${runnable ? "" : styles.videoTileDisabled}`}
+                  className={`${styles.videoTile} ${runnable ? '' : styles.videoTileDisabled}`}
                 >
                   <span className={styles.videoName}>{displayName(video)}</span>
                   {!runnable && (
                     <span className={styles.videoHint}>
-                      当前处于 {PHASE_LABELS[video.current_phase] ?? video.current_phase}
+                      当前处于{' '}
+                      {PHASE_LABELS[video.current_phase] ?? video.current_phase}
                       ，无法重跑
                     </span>
                   )}
                 </div>
-              );
+              )
             })}
           </div>
           <div className={styles.summary}>
@@ -114,5 +109,5 @@ export function BatchRerunDialog({ open, videoIds, onClose }: BatchRerunDialogPr
         </md-filled-button>
       </div>
     </md-dialog>
-  );
+  )
 }

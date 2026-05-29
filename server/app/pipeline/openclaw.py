@@ -1,4 +1,6 @@
 import json
+import re
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,13 +46,23 @@ class OpenClawRunner:
                 return command_template[i + 1]
         return ""
 
+    _SHELL_METACHARACTERS = re.compile(r"[;|&$`\\(){}<>'\"?\[\]*\n]")
+
     @staticmethod
     def _sanitize_replacement(value: str) -> str:
-        """Remove null bytes from replacement strings to prevent argument injection via embedded NUL terminators."""
-        return value.replace("\x00", "")
+        """Remove null bytes and escape shell metacharacters from replacement strings.
+
+        Only values containing actual shell metacharacters are quoted, so normal
+        prompt text remains unchanged.
+        """
+        value = value.replace("\x00", "")
+        if OpenClawRunner._SHELL_METACHARACTERS.search(value):
+            return shlex.quote(value)
+        return value
 
     def render_command(self, video_id: str, video_dir: Path, prompt_file: Path) -> list[str]:
         import time
+
         prompt_text = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else ""
         replacements = {
             "{video_id}": video_id,
@@ -77,7 +89,11 @@ class OpenClawRunner:
         video_dir.mkdir(parents=True, exist_ok=True)
         prompt_dir.mkdir(parents=True, exist_ok=True)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        reference = phase.reference_path.read_text(encoding="utf-8") if phase.reference_path.exists() else ""
+        reference = (
+            phase.reference_path.read_text(encoding="utf-8")
+            if phase.reference_path.exists()
+            else ""
+        )
         prompt_file = prompt_dir / f"{video_id}-{phase.key}.md"
         prompt_file.write_text(
             f"{reference}\n\nVideo ID: {video_id}\nVideo directory: {video_dir}\n",
@@ -100,16 +116,22 @@ class OpenClawRunner:
                 return AgentRunResult("failed", -1, command, "openclaw command timed out")
 
         if completed.returncode != 0:
-            return AgentRunResult("failed", completed.returncode, command, "openclaw command failed")
+            return AgentRunResult(
+                "failed", completed.returncode, command, "openclaw command failed"
+            )
 
         missing = [name for name in phase.expected_outputs if not (video_dir / name).exists()]
         if missing:
-            return AgentRunResult("failed", completed.returncode, command, f"missing outputs: {', '.join(missing)}")
+            return AgentRunResult(
+                "failed", completed.returncode, command, f"missing outputs: {', '.join(missing)}"
+            )
 
         for name in phase.json_outputs:
             try:
                 json.loads((video_dir / name).read_text(encoding="utf-8"))
             except Exception as exc:
-                return AgentRunResult("failed", completed.returncode, command, f"invalid json {name}: {exc}")
+                return AgentRunResult(
+                    "failed", completed.returncode, command, f"invalid json {name}: {exc}"
+                )
 
         return AgentRunResult("completed", completed.returncode, command)

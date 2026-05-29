@@ -76,9 +76,7 @@ def build_openclaw_runners(
 
     if "--agent" in base_template:
         agents = (
-            discovered_agent_ids
-            if discovered_agent_ids is not None
-            else discover_openclaw_agents()
+            discovered_agent_ids if discovered_agent_ids is not None else discover_openclaw_agents()
         )
         if agents:
             return [

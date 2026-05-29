@@ -5,8 +5,8 @@ Local processing console for educational videos. It queues knowledge videos and 
 ## Current Shape
 
 - Backend: FastAPI, SQLite, background worker.
-- Python tooling: `uv` for dependency/runtime management, `ruff` for lint.
-- Frontend: Vite + TypeScript.
+- Python tooling: `uv` for dependency/runtime management, `ruff` for lint/format, `mypy` for type checking.
+- Frontend: Vite + TypeScript, ESLint + Prettier.
 - Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`.
 - Queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
 
@@ -24,6 +24,8 @@ When running inside a restricted sandbox, keep the uv cache in the project:
 UV_CACHE_DIR=.uv-cache uv sync
 ```
 
+> For full build commands, quality gates, and development workflow, see [AGENTS.md](AGENTS.md).
+
 ## Configuration
 
 Edit `config/pipeline.yaml`.
@@ -31,12 +33,14 @@ Edit `config/pipeline.yaml`.
 - `asr.provider`: `auto`, `whisper`, or `sensevoice`.
 - `asr.whisper.binary`: local `whisper-cli`.
 - `asr.whisper.model`: local whisper medium model.
-- `asr.sensevoice.script`: SenseVoice SRT script. The default points at the existing `cms-extensions/engineering/pipeline/scripts/transcribe_sensevoice.py` implementation.
+- `asr.sensevoice.script`: SenseVoice SRT script.
 - `asr.sensevoice.model_dir`: local `SenseVoiceSmall` model.
 - `openclaw.command_template`: command argument list. Supported placeholders: `{prompt_file}`, `{video_id}`, `{video_dir}`.
 - `openclaw.cwd`: working directory for openclaw.
 
 In `auto` ASR mode, Video Hive tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
+
+> See [AGENTS.md](AGENTS.md) for full configuration reference.
 
 ## Video Types
 
@@ -87,37 +91,7 @@ npm run build
 
 After `frontend/dist` exists, the FastAPI backend serves it from `http://127.0.0.1:8000`.
 
-## Quality Gates
-
-Quick local check for normal development:
-
-```bash
-./scripts/check-quick.sh
-```
-
-Full check before committing or handing work off:
-
-```bash
-./scripts/check.sh
-```
-
-The quick gate runs Ruff, backend tests, and frontend tests. The full gate runs the quick gate plus the production-style frontend build.
-
-Install the optional local Git pre-commit hook to run the quick gate before each commit:
-
-```bash
-./scripts/install-git-hooks.sh
-```
-
-Equivalent commands:
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run ruff check .
-UV_CACHE_DIR=.uv-cache uv run pytest -q
-cd frontend
-npm run test
-npm run build
-```
+> See [AGENTS.md](AGENTS.md) for full quality gates, test commands, and pre-commit hooks.
 
 ## Pipeline
 

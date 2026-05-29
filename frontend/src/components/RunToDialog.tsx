@@ -1,79 +1,89 @@
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
-import { PHASE_LABELS } from "../labels";
-import { canContinueTo, canRerunTo, getSharedPhases } from "../helpers";
-import type { RunToMode, VideoItem } from "../types";
-import styles from "./RunToDialog.module.css";
+import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { PHASE_LABELS } from '../labels'
+import { canContinueTo, canRerunTo, getSharedPhases } from '../helpers'
+import type { RunToMode, VideoItem } from '../types'
+import styles from './RunToDialog.module.css'
 
 type RunToDialogProps = {
-  open: boolean;
-  videos: VideoItem[];
-  onClose: () => void;
-  onConfirm: (payload: { targetPhase: string; startPhase: string | null }) => void | Promise<void>;
-};
+  open: boolean
+  videos: VideoItem[]
+  onClose: () => void
+  onConfirm: (payload: {
+    targetPhase: string
+    startPhase: string | null
+  }) => void | Promise<void>
+}
 
 const MODE_LABELS: Record<RunToMode, string> = {
-  continue: "继续运行到",
-  rerun: "重跑并运行到",
-};
+  continue: '继续运行到',
+  rerun: '重跑并运行到',
+}
 
 function getDefaultTarget(phases: string[]) {
-  return phases.includes("chapter_generate") ? "chapter_generate" : phases[0];
+  return phases.includes('chapter_generate') ? 'chapter_generate' : phases[0]
 }
 
 function displayName(video: VideoItem) {
-  return video.external_id || video.title || video.id;
+  return video.external_id || video.title || video.id
 }
 
 function ineligibleReason(video: VideoItem) {
-  if (video.status === "running") return "正在处理中";
-  return `当前处于 ${PHASE_LABELS[video.current_phase] ?? video.current_phase}，无法运行`;
+  if (video.status === 'running') return '正在处理中'
+  return `当前处于 ${PHASE_LABELS[video.current_phase] ?? video.current_phase}，无法运行`
 }
 
-export function RunToDialog({ open, videos, onClose, onConfirm }: RunToDialogProps) {
+export function RunToDialog({
+  open,
+  videos,
+  onClose,
+  onConfirm,
+}: RunToDialogProps) {
   const phases = useMemo(
     () => getSharedPhases(videos.map((video) => video.content_type)),
-    [videos],
-  );
-  const defaultTargetPhase = getDefaultTarget(phases);
-  const [mode, setMode] = useState<RunToMode>("continue");
-  const [targetPhase, setTargetPhase] = useState(defaultTargetPhase);
-  const [startPhase, setStartPhase] = useState(phases[0]);
+    [videos]
+  )
+  const defaultTargetPhase = getDefaultTarget(phases)
+  const [mode, setMode] = useState<RunToMode>('continue')
+  const [targetPhase, setTargetPhase] = useState(defaultTargetPhase)
+  const [startPhase, setStartPhase] = useState(phases[0])
 
   useEffect(() => {
-    if (!phases.includes(targetPhase)) {
-      setTargetPhase(defaultTargetPhase);
-    }
-    if (!phases.includes(startPhase)) {
-      setStartPhase(phases[0]);
-    }
-  }, [defaultTargetPhase, phases, startPhase, targetPhase]);
+    queueMicrotask(() => {
+      if (!phases.includes(targetPhase)) {
+        setTargetPhase(defaultTargetPhase)
+      }
+      if (!phases.includes(startPhase)) {
+        setStartPhase(phases[0])
+      }
+    })
+  }, [defaultTargetPhase, phases, startPhase, targetPhase])
 
-  if (!open) return null;
+  if (!open) return null
 
-  const isRerun = mode === "rerun";
-  const selectedStartPhase = startPhase ?? phases[0];
-  const selectedTargetPhase = targetPhase ?? defaultTargetPhase;
+  const isRerun = mode === 'rerun'
+  const selectedStartPhase = startPhase ?? phases[0]
+  const selectedTargetPhase = targetPhase ?? defaultTargetPhase
   const runnableVideos = videos.filter((video) =>
     isRerun
       ? canRerunTo(video, selectedStartPhase, selectedTargetPhase)
-      : canContinueTo(video, selectedTargetPhase),
-  );
-  const runnableCount = runnableVideos.length;
+      : canContinueTo(video, selectedTargetPhase)
+  )
+  const runnableCount = runnableVideos.length
   const confirmLabel = isRerun
     ? `从${PHASE_LABELS[selectedStartPhase] ?? selectedStartPhase}重跑到${
         PHASE_LABELS[selectedTargetPhase] ?? selectedTargetPhase
       }`
-    : `运行到${PHASE_LABELS[selectedTargetPhase] ?? selectedTargetPhase}`;
+    : `运行到${PHASE_LABELS[selectedTargetPhase] ?? selectedTargetPhase}`
 
   const handleConfirm = async () => {
-    if (runnableCount === 0) return;
+    if (runnableCount === 0) return
 
     await onConfirm({
       targetPhase: selectedTargetPhase,
       startPhase: isRerun ? selectedStartPhase : null,
-    });
-    onClose();
-  };
+    })
+    onClose()
+  }
 
   return (
     <md-dialog
@@ -81,10 +91,10 @@ export function RunToDialog({ open, videos, onClose, onConfirm }: RunToDialogPro
       onClosed={onClose}
       style={
         {
-          minWidth: "520px",
-          maxWidth: "760px",
-          width: "min(760px, 92vw)",
-          "--md-dialog-container-color": "#ffffff",
+          minWidth: '520px',
+          maxWidth: '760px',
+          width: 'min(760px, 92vw)',
+          '--md-dialog-container-color': '#ffffff',
         } as CSSProperties
       }
     >
@@ -138,18 +148,20 @@ export function RunToDialog({ open, videos, onClose, onConfirm }: RunToDialogPro
             {videos.map((video) => {
               const runnable = isRerun
                 ? canRerunTo(video, selectedStartPhase, selectedTargetPhase)
-                : canContinueTo(video, selectedTargetPhase);
+                : canContinueTo(video, selectedTargetPhase)
               return (
                 <div
                   key={video.id}
-                  className={`${styles.videoTile} ${runnable ? "" : styles.videoTileDisabled}`}
+                  className={`${styles.videoTile} ${runnable ? '' : styles.videoTileDisabled}`}
                 >
                   <span className={styles.videoName}>{displayName(video)}</span>
                   {!runnable && (
-                    <span className={styles.videoHint}>{ineligibleReason(video)}</span>
+                    <span className={styles.videoHint}>
+                      {ineligibleReason(video)}
+                    </span>
                   )}
                 </div>
-              );
+              )
             })}
           </div>
 
@@ -170,5 +182,5 @@ export function RunToDialog({ open, videos, onClose, onConfirm }: RunToDialogPro
         </md-filled-button>
       </div>
     </md-dialog>
-  );
+  )
 }

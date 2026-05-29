@@ -25,7 +25,7 @@ def _build_headers(token: str | None) -> dict[str, str]:
 def _fetch_json(url: str, params: dict[str, Any], token: str | None, timeout: int = 15) -> dict:
     resp = requests.get(url, params=params, headers=_build_headers(token), timeout=timeout)
     resp.raise_for_status()
-    return resp.json()
+    return resp.json()  # type: ignore[no-any-return]
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,8 @@ def get_token(env: str, config: dict[str, Any] | None = None) -> str | None:
     config = config or {}
     token = config.get("token")
     if token:
-        return token
+        result: str = str(token)
+        return result
     token = os.environ.get("BASECMS_TOKEN")
     if token:
         return token

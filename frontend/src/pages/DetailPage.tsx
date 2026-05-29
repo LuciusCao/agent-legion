@@ -1,412 +1,268 @@
-import { useEffect, useRef, useState, useCallback } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { useDetailStore } from "../stores/detailStore";
-import { useArtifactStore } from "../stores/artifactStore";
-import { useInteractionStore } from "../stores/interactionStore";
-import { useUiStore } from "../stores/uiStore";
-import { useVideoStore } from "../stores/videoStore";
-import { VideoPlayer } from "../components/VideoPlayer";
-import { TimelineStrip } from "../components/TimelineStrip";
-import { PhaseRunsPanel } from "../components/PhaseRunsPanel";
-import { useVideoPhaseEvents } from "../hooks/useVideoPhaseEvents";
-import { SubtitlePanel } from "../components/SubtitlePanel";
-import { NodePanel } from "../components/NodePanel";
-import { MetadataPanel } from "../components/MetadataPanel";
-import { RerunDialog } from "../components/RerunDialog";
-import { RunToDialog } from "../components/RunToDialog";
-import { InteractionReviewBadge } from "../components/InteractionReviewBadge";
-import { DeleteDialog } from "../components/DeleteDialog";
-import { TYPE_LABELS, STATUS_LABELS } from "../labels";
-import { parseTimeSeconds, statusGroup, triggerDownload } from "../helpers";
-import { api } from "../api";
-
-type MoreDialogType = "subtitles" | "nodes" | "metadata" | null;
+import { VideoPlayer } from '../components/VideoPlayer'
+import { TimelineStrip } from '../components/TimelineStrip'
+import { PhaseRunsPanel } from '../components/PhaseRunsPanel'
+import { SubtitlePanel } from '../components/SubtitlePanel'
+import { NodePanel } from '../components/NodePanel'
+import { MetadataPanel } from '../components/MetadataPanel'
+import { RerunDialog } from '../components/RerunDialog'
+import { RunToDialog } from '../components/RunToDialog'
+import { InteractionReviewBadge } from '../components/InteractionReviewBadge'
+import { DeleteDialog } from '../components/DeleteDialog'
+import { TYPE_LABELS, STATUS_LABELS } from '../labels'
+import { statusGroup } from '../helpers'
+import { useDetailPage } from '../hooks/useDetailPage'
 
 export function DetailPage() {
-  const { id } = useParams<{ id: string }>();
-  const navigate = useNavigate();
-  const playerRef = useRef<HTMLVideoElement>(null);
-  const previousPlaybackTimeRef = useRef<number | null>(null);
-  const [currentTime, setCurrentTime] = useState(0);
-  const [moreDialogOpen, setMoreDialogOpen] = useState(false);
-  const [moreDialogType, setMoreDialogType] = useState<MoreDialogType>(null);
-  const [runToDialogOpen, setRunToDialogOpen] = useState(false);
-
-  const {
-    currentVideo,
-    phaseRuns,
-    transcriptionRuns,
-    loadVideo,
-    loadLog,
-  } = useDetailStore();
-
-  const {
-    artifacts,
-    loadArtifacts,
-  } = useArtifactStore();
-
-  const {
-    triggeredNodeIndexes,
-    dismissedNodeIndexes,
-    currentSentence,
-    triggerInteraction,
-    dismissInteraction,
-    replayInteraction,
-    pushWord,
-    resetSentence,
-    clearSentence,
-    clearInteractions,
-  } = useInteractionStore();
-
-  const { openRerunDialog, openDeleteDialog, showToast } = useUiStore();
-  const { fetchVideos } = useVideoStore();
-
-  const checkFetchError = () => {
-    const err = useVideoStore.getState().error;
-    if (err) {
-      showToast(`加载失败: ${err}`, "error");
-      useVideoStore.getState().clearError();
-    }
-  };
-
-  useVideoPhaseEvents(id);
-
-  useEffect(() => {
-    if (!id) return;
-    clearInteractions();
-    previousPlaybackTimeRef.current = null;
-    loadVideo(id);
-    loadArtifacts(id);
-    loadLog(id);
-  }, [id, clearInteractions, loadVideo, loadArtifacts, loadLog]);
-
-  const prevPhaseRef = useRef<string | null>(null);
-  const prevStatusRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!id || !currentVideo) return;
-    const currentPhase = currentVideo.current_phase;
-    const currentStatus = currentVideo.status;
-    if (
-      prevPhaseRef.current !== null &&
-      (prevPhaseRef.current !== currentPhase || prevStatusRef.current !== currentStatus)
-    ) {
-      loadArtifacts(id);
-      loadLog(id);
-    }
-    prevPhaseRef.current = currentPhase;
-    prevStatusRef.current = currentStatus;
-  }, [id, currentVideo, loadArtifacts, loadLog]);
-
-  const handleTimeUpdate = useCallback(
-    (time: number) => {
-      setCurrentTime(time);
-      const player = playerRef.current;
-      if (!player) return;
-      const previousTime = previousPlaybackTimeRef.current;
-
-      artifacts.interactions.forEach((node, index) => {
-        const trigger = parseTimeSeconds(node.trigger_time ?? 0);
-        if (!Number.isFinite(trigger)) return;
-
-        const crossedTrigger =
-          previousTime !== null && previousTime < trigger && time >= trigger;
-        const reachedTriggerWindow = time >= trigger && time < trigger + 1.5;
-        if (
-          !triggeredNodeIndexes.has(index) &&
-          !dismissedNodeIndexes.has(index) &&
-          !player.paused &&
-          (crossedTrigger || reachedTriggerWindow)
-        ) {
-          player.pause();
-          triggerInteraction(index);
-        }
-      });
-      previousPlaybackTimeRef.current = time;
-    },
-    [artifacts.interactions, triggeredNodeIndexes, dismissedNodeIndexes, triggerInteraction]
-  );
-
-  const handleSeek = useCallback((time: number) => {
-    if (playerRef.current) playerRef.current.currentTime = time;
-  }, []);
-
-  const activeNodeIndex = Array.from(triggeredNodeIndexes).pop();
-  const activeNode = activeNodeIndex !== undefined ? artifacts.interactions[activeNodeIndex] : null;
-  const detailTitle = currentVideo?.title || "未选择资源";
-
-  const handleContinue = useCallback(() => {
-    clearSentence();
-    if (activeNodeIndex !== undefined) {
-      dismissInteraction(activeNodeIndex);
-    }
-    playerRef.current?.play();
-  }, [clearSentence, activeNodeIndex, dismissInteraction]);
-
-  const handleDeleteConfirm = useCallback(async () => {
-    if (!id) return false;
-    try {
-      await api(`/api/videos/${id}`, { method: "DELETE" });
-      showToast("删除成功", "success");
-      await fetchVideos();
-      checkFetchError();
-      navigate("/");
-      return true;
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      showToast(`删除失败: ${message}`, "error");
-      return false;
-    }
-  }, [id, navigate, fetchVideos, showToast]);
-
-  const handlePackage = useCallback(async () => {
-    if (!id) return;
-    const result = await api<{ download_url: string }>("/api/package", {
-      method: "POST",
-      body: JSON.stringify({ video_ids: [id] }),
-    });
-    await Promise.all([fetchVideos(), loadVideo(id)]);
-    checkFetchError();
-    await triggerDownload(result.download_url);
-  }, [id, fetchVideos, loadVideo]);
-
-  const handleRerun = useCallback(
-    async (phase: string) => {
-      if (!id) return;
-      try {
-        await api(`/api/videos/${id}/rerun`, { method: "POST", body: JSON.stringify({ phase }) });
-        showToast("重跑已提交", "success");
-        await Promise.all([fetchVideos(), loadVideo(id), loadLog(id)]);
-        checkFetchError();
-      } catch (err) {
-        if (err instanceof Error && err.message.includes("currently being processed")) {
-          showToast("该资源正在被处理中，请等待当前阶段完成后再重跑。", "error");
-        } else {
-          throw err;
-        }
-      }
-    },
-    [id, fetchVideos, loadVideo, loadLog, showToast]
-  );
-
-  const handleRunTo = useCallback(
-    async ({ targetPhase, startPhase }: { targetPhase: string; startPhase: string | null }) => {
-      if (!id) return;
-      try {
-        await api(`/api/videos/${id}/run-to`, {
-          method: "POST",
-          body: JSON.stringify({ target_phase: targetPhase, start_phase: startPhase }),
-        });
-        showToast(startPhase ? "重跑运行已提交" : "运行已提交", "success");
-        setRunToDialogOpen(false);
-        await Promise.all([fetchVideos(), loadVideo(id), loadLog(id)]);
-        checkFetchError();
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        showToast(`运行失败: ${message}`, "error");
-      }
-    },
-    [id, fetchVideos, loadVideo, loadLog, showToast]
-  );
-
-  const openMoreDialog = (type: MoreDialogType) => {
-    setMoreDialogOpen(false);
-    setMoreDialogType(type);
-  };
-
-  const closeMoreDialog = () => {
-    setMoreDialogOpen(false);
-    setMoreDialogType(null);
-  };
+  const hook = useDetailPage()
 
   return (
     <section className="view detail-view">
       <section className="detail-upper">
         <header className="detail-topbar">
-          <md-icon-button onClick={() => navigate("/")}>
+          <md-icon-button onClick={() => window.history.back()}>
             <md-icon>arrow_back</md-icon>
           </md-icon-button>
-          <div className="detail-title-block" data-tooltip={detailTitle}>
-            <h1>{detailTitle}</h1>
-            {currentVideo && (
+          <div className="detail-title-block" data-tooltip={hook.detailTitle}>
+            <h1>{hook.detailTitle}</h1>
+            {hook.video && (
               <p className="detail-meta-line">
-                <span>{TYPE_LABELS[currentVideo.content_type]} · {currentVideo.external_id || "未填 ID"}</span>
-                <span className={`status-badge ${statusGroup(currentVideo)}`}>
-                  {STATUS_LABELS[statusGroup(currentVideo)] || currentVideo.status}
+                <span>
+                  {TYPE_LABELS[hook.video.content_type]} ·{' '}
+                  {hook.video.external_id || '未填 ID'}
                 </span>
-                {currentVideo.content_type === "knowledge" && currentVideo.status === "completed" && (
-                  <InteractionReviewBadge status={currentVideo.interaction_review_status} />
+                <span className={`status-badge ${statusGroup(hook.video)}`}>
+                  {STATUS_LABELS[statusGroup(hook.video)] || hook.video.status}
+                </span>
+                {hook.video.content_type === 'knowledge' &&
+                  hook.video.status === 'completed' && (
+                    <InteractionReviewBadge
+                      status={hook.video.interaction_review_status}
+                    />
+                  )}
+                {!!hook.video.packed && (
+                  <span className="packed-badge">已打包</span>
                 )}
-                {!!currentVideo.packed && <span className="packed-badge">已打包</span>}
               </p>
             )}
-            {currentVideo?.error_message && (
-              <p className="error-text" style={{ marginTop: 4 }}>{currentVideo.error_message}</p>
+            {hook.video?.error_message && (
+              <p className="error-text" style={{ marginTop: 4 }}>
+                {hook.video.error_message}
+              </p>
             )}
           </div>
           <div className="detail-actions">
-            <md-icon-button onClick={openRerunDialog} title="重跑">
+            <md-icon-button onClick={hook.openRerunDialog} title="重跑">
               <md-icon>restart_alt</md-icon>
             </md-icon-button>
-            <md-icon-button onClick={() => setRunToDialogOpen(true)} title="运行到">
+            <md-icon-button
+              onClick={() => hook.setRunToDialogOpen(true)}
+              title="运行到"
+            >
               <md-icon>play_circle</md-icon>
             </md-icon-button>
             <md-icon-button
-              disabled={(!currentVideo || currentVideo.status !== "completed") || undefined}
-              onClick={handlePackage}
+              disabled={
+                !hook.video || hook.video.status !== 'completed' || undefined
+              }
+              onClick={hook.handlePackage}
               title="打包"
             >
               <md-icon>inventory_2</md-icon>
             </md-icon-button>
-            <md-icon-button style={{ color: "var(--md-sys-color-error)" }} onClick={openDeleteDialog} title="删除">
+            <md-icon-button
+              style={{ color: 'var(--md-sys-color-error)' }}
+              onClick={hook.openDeleteDialog}
+              title="删除"
+            >
               <md-icon>delete</md-icon>
             </md-icon-button>
-            <md-icon-button id="more-menu-btn" onClick={() => setMoreDialogOpen(true)} title="更多">
+            <md-icon-button
+              id="more-menu-btn"
+              onClick={() => hook.setMoreDialogOpen(true)}
+              title="更多"
+            >
               <md-icon>more_vert</md-icon>
             </md-icon-button>
           </div>
         </header>
 
         <div className="detail-primary">
-          {currentVideo && (
+          {hook.video && (
             <VideoPlayer
-              video={currentVideo}
-              artifacts={artifacts}
-              onTimeUpdate={handleTimeUpdate}
-              videoRef={playerRef}
-              interactionNode={activeNode}
-              interactionSentence={currentSentence}
-              onInteractionWordClick={pushWord}
-              onInteractionReset={resetSentence}
-              onInteractionContinue={handleContinue}
+              video={hook.video}
+              artifacts={hook.artifacts}
+              onTimeUpdate={hook.handleTimeUpdate}
+              videoRef={hook.playerRef}
+              interactionNode={hook.activeNode}
+              interactionSentence={hook.currentSentence}
+              onInteractionWordClick={hook.pushWord}
+              onInteractionReset={hook.resetSentence}
+              onInteractionContinue={hook.handleContinue}
             />
           )}
 
-          {currentVideo && (
+          {hook.video && (
             <TimelineStrip
-              chapters={artifacts.chapters}
-              interactions={artifacts.interactions}
-              currentTime={currentTime}
-              onSeek={handleSeek}
-              onReplayInteraction={replayInteraction}
+              chapters={hook.artifacts.chapters}
+              interactions={hook.artifacts.interactions}
+              currentTime={hook.currentTime}
+              onSeek={hook.handleSeek}
+              onReplayInteraction={hook.replayInteraction}
             />
           )}
         </div>
         <aside className="phase-runs-sidebar">
           <PhaseRunsPanel
-            phaseRuns={phaseRuns}
-            transcriptionRuns={transcriptionRuns}
-            video={currentVideo}
-            contentType={currentVideo?.content_type}
-            currentPhase={currentVideo?.current_phase}
-            videoStatus={currentVideo?.status}
+            phaseRuns={hook.phaseRuns}
+            transcriptionRuns={hook.transcriptionRuns}
+            video={hook.video}
+            contentType={hook.video?.content_type}
+            currentPhase={hook.video?.current_phase}
+            videoStatus={hook.video?.status}
           />
         </aside>
       </section>
 
-      <RerunDialog video={currentVideo} onConfirm={handleRerun} />
+      <RerunDialog video={hook.video} onConfirm={hook.handleRerun} />
       <RunToDialog
-        open={runToDialogOpen}
-        videos={currentVideo ? [currentVideo] : []}
-        onClose={() => setRunToDialogOpen(false)}
-        onConfirm={handleRunTo}
+        open={hook.runToDialogOpen}
+        videos={hook.video ? [hook.video] : []}
+        onClose={() => hook.setRunToDialogOpen(false)}
+        onConfirm={hook.handleRunTo}
       />
-      <DeleteDialog onConfirm={handleDeleteConfirm} />
+      <DeleteDialog onConfirm={hook.handleDeleteConfirm} />
 
-      {moreDialogOpen && (
+      {hook.moreDialogOpen && (
         <md-dialog
           open
-          onClosed={closeMoreDialog}
-          style={{ "--md-dialog-container-color": "#ffffff" } as React.CSSProperties}
+          onClosed={hook.closeMoreDialog}
+          style={
+            { '--md-dialog-container-color': '#ffffff' } as React.CSSProperties
+          }
         >
           <div slot="headline">更多信息</div>
-          <div slot="content" style={{ display: "flex", flexDirection: "column", gap: "8px", minWidth: "200px" }}>
+          <div
+            slot="content"
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '8px',
+              minWidth: '200px',
+            }}
+          >
             <md-text-button
-              style={{ justifyContent: "flex-start" }}
-              onClick={() => openMoreDialog("subtitles")}
+              style={{ justifyContent: 'flex-start' }}
+              onClick={() => hook.openMoreDialog('subtitles')}
             >
               <md-icon slot="icon">subtitles</md-icon>
               字幕
             </md-text-button>
-            {currentVideo?.content_type === "knowledge" && (
+            {hook.video?.content_type === 'knowledge' && (
               <md-text-button
-                style={{ justifyContent: "flex-start" }}
-                onClick={() => openMoreDialog("nodes")}
+                style={{ justifyContent: 'flex-start' }}
+                onClick={() => hook.openMoreDialog('nodes')}
               >
                 <md-icon slot="icon">account_tree</md-icon>
                 交互节点
               </md-text-button>
             )}
             <md-text-button
-              style={{ justifyContent: "flex-start" }}
-              onClick={() => openMoreDialog("metadata")}
+              style={{ justifyContent: 'flex-start' }}
+              onClick={() => hook.openMoreDialog('metadata')}
             >
               <md-icon slot="icon">data_object</md-icon>
               元数据
             </md-text-button>
           </div>
           <div slot="actions">
-            <md-text-button onClick={closeMoreDialog}>关闭</md-text-button>
+            <md-text-button onClick={hook.closeMoreDialog}>关闭</md-text-button>
           </div>
         </md-dialog>
       )}
 
-      {moreDialogType === "nodes" && (
+      {hook.moreDialogType === 'nodes' && (
         <md-dialog
           open
-          onClosed={closeMoreDialog}
-          style={{ "--md-dialog-container-color": "#ffffff", maxWidth: "760px", width: "90vw" } as React.CSSProperties}
+          onClosed={hook.closeMoreDialog}
+          style={
+            {
+              '--md-dialog-container-color': '#ffffff',
+              maxWidth: '760px',
+              width: '90vw',
+            } as React.CSSProperties
+          }
         >
           <div slot="headline">交互节点</div>
-          <div slot="content" style={{ maxHeight: "60vh", overflow: "auto", padding: "8px 0" }}>
+          <div
+            slot="content"
+            style={{ maxHeight: '60vh', overflow: 'auto', padding: '8px 0' }}
+          >
             <NodePanel
               onSeek={(time) => {
-                handleSeek(time);
-                closeMoreDialog();
+                hook.handleSeek(time)
+                hook.closeMoreDialog()
               }}
-              replayInteraction={replayInteraction}
+              replayInteraction={hook.replayInteraction}
             />
           </div>
           <div slot="actions">
-            <md-text-button onClick={closeMoreDialog}>关闭</md-text-button>
+            <md-text-button onClick={hook.closeMoreDialog}>关闭</md-text-button>
           </div>
         </md-dialog>
       )}
 
-      {moreDialogType === "subtitles" && (
+      {hook.moreDialogType === 'subtitles' && (
         <md-dialog
           open
-          onClosed={closeMoreDialog}
-          style={{ "--md-dialog-container-color": "#ffffff", maxWidth: "720px", width: "90vw" } as React.CSSProperties}
+          onClosed={hook.closeMoreDialog}
+          style={
+            {
+              '--md-dialog-container-color': '#ffffff',
+              maxWidth: '720px',
+              width: '90vw',
+            } as React.CSSProperties
+          }
         >
           <div slot="headline">字幕</div>
-          <div slot="content" style={{ maxHeight: "60vh", overflow: "auto", padding: "8px 0" }}>
-            <SubtitlePanel currentTime={currentTime} onSeek={(time) => {
-              handleSeek(time);
-              closeMoreDialog();
-            }} />
+          <div
+            slot="content"
+            style={{ maxHeight: '60vh', overflow: 'auto', padding: '8px 0' }}
+          >
+            <SubtitlePanel
+              currentTime={hook.currentTime}
+              onSeek={(time) => {
+                hook.handleSeek(time)
+                hook.closeMoreDialog()
+              }}
+            />
           </div>
           <div slot="actions">
-            <md-text-button onClick={closeMoreDialog}>关闭</md-text-button>
+            <md-text-button onClick={hook.closeMoreDialog}>关闭</md-text-button>
           </div>
         </md-dialog>
       )}
 
-      {moreDialogType === "metadata" && (
+      {hook.moreDialogType === 'metadata' && (
         <md-dialog
           open
-          onClosed={closeMoreDialog}
-          style={{ "--md-dialog-container-color": "#ffffff", maxWidth: "640px", width: "90vw" } as React.CSSProperties}
+          onClosed={hook.closeMoreDialog}
+          style={
+            {
+              '--md-dialog-container-color': '#ffffff',
+              maxWidth: '640px',
+              width: '90vw',
+            } as React.CSSProperties
+          }
         >
           <div slot="headline">元数据</div>
-          <div slot="content" style={{ maxHeight: "60vh", overflow: "auto" }}>
+          <div slot="content" style={{ maxHeight: '60vh', overflow: 'auto' }}>
             <MetadataPanel />
           </div>
           <div slot="actions">
-            <md-text-button onClick={closeMoreDialog}>关闭</md-text-button>
+            <md-text-button onClick={hook.closeMoreDialog}>关闭</md-text-button>
           </div>
         </md-dialog>
       )}
     </section>
-  );
+  )
 }
