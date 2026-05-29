@@ -735,6 +735,19 @@ def test_package_download_rejects_empty_and_directory(client):
     assert response.status_code == 404
 
 
+def test_package_download_rejects_backslash_traversal(client):
+    response = client.get("/api/packages/foo\\..\\..\\etc\\passwd")
+    assert response.status_code == 404
+
+
+def test_package_download_rejects_subdirectory(client, settings):
+    nested = settings.packages_dir / "foo" / "bar.zip"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text("fake", encoding="utf-8")
+    response = client.get("/api/packages/foo/bar.zip")
+    assert response.status_code == 404
+
+
 # SSE tests
 
 
