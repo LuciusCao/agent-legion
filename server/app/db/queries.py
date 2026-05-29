@@ -272,6 +272,16 @@ class VideoQueries:
         with self._connect_read() as conn:
             return [cast(VideoRecord, dict(row)) for row in conn.execute(sql, params)]
 
+    def list_running_video_summaries(self) -> list[dict[str, Any]]:
+        """Return minimal fields for running videos (used by recovery)."""
+        with self._connect_read() as conn:
+            return [
+                dict(row)
+                for row in conn.execute(
+                    "select id, current_phase, storage_dir from videos where status='running'"
+                )
+            ]
+
     def update_video(self, video_id: str, **fields: Any) -> None:
         if not fields:
             return
