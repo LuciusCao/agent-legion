@@ -7,6 +7,7 @@ from server.app.cms.question import lookup_question_video
 from server.app.db import Database
 from server.app.pipeline.common import make_record_id
 from server.app.records import VideoRecord
+from server.app.security import validate_download_url
 from server.app.settings import Settings
 
 CONTENT_TYPES = {"knowledge", "question"}
@@ -29,7 +30,12 @@ def resolve_video_input(item: VideoInputLike, settings: Settings) -> tuple[str, 
     content_type = normalized_content_type(item.content_type)
     external_id = item.external_id.strip()
     if item.url:
-        return "created", item.url.strip(), item.title.strip(), "", ""
+        url = item.url.strip()
+        try:
+            validate_download_url(url)
+        except ValueError as exc:
+            return "invalid", "", item.title.strip(), f"URL 校验失败: {exc}", ""
+        return "created", url, item.title.strip(), "", ""
     if not external_id:
         return "invalid", "", "", "缺少资源 ID", ""
 

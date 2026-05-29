@@ -1090,3 +1090,41 @@ def test_package_download_runtime_error(client, monkeypatch):
     monkeypatch.setattr(Path, "resolve", boom)
     response = client.get("/api/packages/test.zip")
     assert response.status_code == 404
+
+
+def test_add_video_rejects_ssrf_url(client):
+    response = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "http://169.254.169.254/latest/meta-data/",
+                    "title": "SSRF",
+                    "content_type": "knowledge",
+                    "external_id": "SSRF001",
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "invalid"
+    assert "URL" in response.json()["results"][0]["message"]
+
+
+def test_add_video_rejects_file_protocol(client):
+    response = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "file:///etc/passwd",
+                    "title": "File",
+                    "content_type": "knowledge",
+                    "external_id": "FILE001",
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "invalid"
+    assert "URL" in response.json()["results"][0]["message"]
