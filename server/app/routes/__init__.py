@@ -22,7 +22,7 @@ def create_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
-    router.include_router(create_common_router(db, settings))
+    router.include_router(create_common_router(db, settings, worker_control))
     router.include_router(create_agents_router(agent_manager))
     router.include_router(create_videos_router(db, settings, agent_manager, video_event_manager))
     router.include_router(create_artifacts_router(db, settings))
