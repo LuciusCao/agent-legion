@@ -187,7 +187,10 @@ def transcribe_with_sensevoice(wav_path: str, language: str = "auto") -> list:
                     if new_start >= 0 and new_start < timestamp[i][1]:
                         logger.info(
                             "Calibrate char #%s duration %sms abnormal, adjusting start %s -> %sms",
-                            i, dur, timestamp[i][0], new_start,
+                            i,
+                            dur,
+                            timestamp[i][0],
+                            new_start,
                         )
                         timestamp[i][0] = new_start
 
