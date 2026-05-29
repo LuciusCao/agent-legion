@@ -18,6 +18,7 @@ from server.app.pipeline.transcribe import (
     WhisperCppProvider,
     run_transcription_with_providers,
 )
+from server.app.services.interaction_stats import cache_interaction_stats
 from server.app.settings import Settings
 
 from .pipeline.validators import phase_outputs_sufficient, validate_phase_outputs
@@ -105,10 +106,14 @@ def _handle_agent_phase(ctx: PhaseContext) -> None:
         if result.status != "completed":
             raise RuntimeError(result.error_message)
     validate_phase_outputs(ctx.video_dir, phase)
+    if phase == "content_review" and ctx.video.get("content_type") == "knowledge":
+        cache_interaction_stats(ctx.db, ctx.video["id"], ctx.video_dir)
 
 
 def _handle_assemble(ctx: PhaseContext) -> None:
     assemble_video(ctx.video, ctx.video_dir)
+    if ctx.video.get("content_type") == "knowledge":
+        cache_interaction_stats(ctx.db, ctx.video["id"], ctx.video_dir)
 
 
 _default_registry = PhaseExecutorRegistry()
@@ -222,8 +227,8 @@ def process_video_once(
                 mp4_path.unlink()
             except OSError as exc:
                 if log_path.exists():
-                    existing = log_path.read_text(encoding="utf-8")
-                    log_path.write_text(f"{existing}\nCleanup warning: {exc}", encoding="utf-8")
+                    with log_path.open("a", encoding="utf-8") as f:
+                        f.write(f"\nCleanup warning: {exc}")
 
     return True
 

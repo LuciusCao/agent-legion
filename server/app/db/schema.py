@@ -68,6 +68,8 @@ def init_db(path: Path) -> None:
                 "question_id": "alter table videos add column question_id text not null default ''",
                 "source_uuid": "alter table videos add column source_uuid text not null default ''",
                 "packed": "alter table videos add column packed integer not null default 0",
+                "interaction_stats_json": "alter table videos add column interaction_stats_json text not null default ''",
+                "interaction_review_status": "alter table videos add column interaction_review_status text not null default ''",
             }
             for column, statement in migrations.items():
                 if column not in existing_columns:

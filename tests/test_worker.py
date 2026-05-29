@@ -144,6 +144,43 @@ def test_worker_assemble_succeeds_even_when_cleanup_fails(db, settings, monkeypa
     assert (video_dir / "metadata.json").exists()
 
 
+def test_worker_appends_cleanup_warning_to_log(db, settings, monkeypatch):
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "a.mp4").write_bytes(b"fake mp4")
+    (video_dir / "subtitles.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8"
+    )
+    (video_dir / "chapters.json").write_text(
+        json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始", "concepts": []}]),
+        encoding="utf-8",
+    )
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
+    )
+    db.update_video("a", storage_dir=str(video_dir), current_phase="assemble", status="queued")
+
+    settings.config["cleanup_video_after_assemble"] = True
+
+    def raise_permission_error(self):
+        raise PermissionError("simulated cleanup failure")
+
+    monkeypatch.setattr(Path, "unlink", raise_permission_error)
+
+    # Pre-create log file so append has something to append to
+    log_path = settings.logs_dir / "a-assemble.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("existing content", encoding="utf-8")
+
+    processed = process_video_once(db, settings, video["id"])
+
+    assert processed is True
+    log_text = log_path.read_text(encoding="utf-8")
+    assert "existing content" in log_text
+    assert "Cleanup warning" in log_text
+
+
 def test_worker_resumes_running_video_after_restart(db, settings):
     video = db.create_video("https://example.com/a.mp4", "A")
     video_dir = settings.videos_dir / "a"

@@ -44,27 +44,54 @@ def parse_time(value: str) -> float:
     raise ValueError(f"Unknown timestamp: {value}")
 
 
+def _parse_srt_block(lines: list[str], subtitles: list[dict]) -> None:
+    if len(lines) < 3:
+        return
+    match = re.match(
+        r"(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{3})\s+-->\s+"
+        r"(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{3})",
+        lines[1],
+    )
+    if not match:
+        return
+    subtitles.append(
+        {
+            "index": int(lines[0]) if lines[0].isdigit() else len(subtitles) + 1,
+            "start": parse_time(match.group(1)),
+            "end": parse_time(match.group(2)),
+            "text": "\n".join(lines[2:]),
+        }
+    )
+
+
 def parse_srt(text: str) -> list[dict]:
     subtitles: list[dict] = []
     for block in re.split(r"\n\s*\n", text.strip()):
         lines = [line.strip() for line in block.splitlines() if line.strip()]
-        if len(lines) < 3:
-            continue
-        match = re.match(
-            r"(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{3})\s+-->\s+"
-            r"(\d{1,2}:\d{2}(?::\d{2})?[,.]\d{3})",
-            lines[1],
-        )
-        if not match:
-            continue
-        subtitles.append(
-            {
-                "index": int(lines[0]) if lines[0].isdigit() else len(subtitles) + 1,
-                "start": parse_time(match.group(1)),
-                "end": parse_time(match.group(2)),
-                "text": "\n".join(lines[2:]),
-            }
-        )
+        _parse_srt_block(lines, subtitles)
+    return subtitles
+
+
+def parse_srt_file(path: Path) -> list[dict]:
+    """Parse an SRT file line-by-line without loading the entire text into memory."""
+    if not path.exists():
+        return []
+    subtitles: list[dict] = []
+    current_block: list[str] = []
+
+    def _flush() -> None:
+        if current_block:
+            _parse_srt_block([line.strip() for line in current_block if line.strip()], subtitles)
+            current_block.clear()
+
+    with path.open("r", encoding="utf-8") as f:
+        for line in f:
+            if line.strip() == "":
+                _flush()
+            else:
+                current_block.append(line)
+        _flush()
+
     return subtitles
 
 

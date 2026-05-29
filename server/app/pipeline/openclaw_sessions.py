@@ -1,4 +1,5 @@
 import json
+from collections import deque
 from pathlib import Path
 from typing import Any
 
@@ -46,7 +47,7 @@ def _message_text(message: dict[str, Any]) -> str:
 
 
 def render_openclaw_session(path: Path, limit: int = 20000) -> str:
-    lines: list[str] = [f"Session file: {path}", ""]
+    lines: deque[str] = deque(maxlen=500)
     with path.open("r", encoding="utf-8") as file:
         for raw_line in file:
             raw_line = raw_line.strip()
@@ -73,7 +74,7 @@ def render_openclaw_session(path: Path, limit: int = 20000) -> str:
             if text:
                 lines.append(f"[{role}]\n{text}")
 
-    rendered = "\n\n".join(lines).strip()
+    rendered = "\n\n".join([f"Session file: {path}", ""] + list(lines)).strip()
     if len(rendered) > limit:
         return rendered[-limit:]
     return rendered

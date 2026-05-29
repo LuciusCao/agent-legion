@@ -1,6 +1,34 @@
 import contextlib
 import json
 from pathlib import Path
+from typing import Any
+
+
+def _enrich_video(video: Any) -> None:
+    """Enrich video dict with interaction_stats from DB cache fields.
+
+    Strips the raw DB columns so they are never exposed in API responses.
+    """
+    stats_json = video.pop("interaction_stats_json", None)
+    review_status = video.pop("interaction_review_status", None)
+    if video.get("content_type") != "knowledge":
+        return
+    if stats_json:
+        with contextlib.suppress(json.JSONDecodeError):
+            video["interaction_stats"] = json.loads(stats_json)
+    if review_status:
+        video["interaction_review_status"] = review_status
+
+
+def cache_interaction_stats(db: Any, video_id: str, video_dir: Path) -> None:
+    """Compute interaction stats from disk and write them to the DB cache."""
+    stats = compute_interaction_stats(video_dir)
+    review_status = compute_interaction_review_status(video_dir)
+    db.update_video(
+        video_id,
+        interaction_stats_json=json.dumps(stats, ensure_ascii=False) if stats else "",
+        interaction_review_status=review_status or "",
+    )
 
 
 def _load_interactions(video_dir: Path) -> list[dict] | None:

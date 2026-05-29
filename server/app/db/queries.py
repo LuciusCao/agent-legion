@@ -12,6 +12,7 @@ from server.app.pipeline.common import make_record_id, resolve_video_dir
 from server.app.pipeline.openclaw import extract_openclaw_arg
 from server.app.records import PhaseRunRecord, VideoRecord
 from server.app.services.interaction_stats import (
+    _enrich_video,
     compute_interaction_review_status,
     compute_interaction_stats,
 )
@@ -54,6 +55,8 @@ VIDEO_UPDATE_FIELDS = {
     "duration",
     "error_message",
     "packed",
+    "interaction_stats_json",
+    "interaction_review_status",
 }
 
 
@@ -132,12 +135,21 @@ class VideoQueries:
             self._hub.emit_change(None)
             self._hub.emit_detail_change(video_id, cast(VideoRecord, {}), [], [])
             return
-        if video.get("content_type") == "knowledge" and self._videos_dir is not None:
+        _enrich_video(video)
+        # Fallback to disk for legacy videos without DB cache (no backfill to
+        # avoid recursive update inside _notify).
+        if (
+            video.get("content_type") == "knowledge"
+            and "interaction_stats" not in video
+            and self._videos_dir is not None
+        ):
             video_dir = resolve_video_dir(video, self._videos_dir)
             stats = compute_interaction_stats(video_dir)
             if stats:
                 video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
-            video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
+            review_status = compute_interaction_review_status(video_dir)
+            if review_status:
+                video["interaction_review_status"] = review_status  # type: ignore[typeddict-unknown-key]
         self._hub.emit_change(video)
         phase_runs = self.list_phase_runs(video_id)
         transcription_runs = self.list_transcription_runs(video_id)

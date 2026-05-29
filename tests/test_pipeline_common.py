@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from server.app.cms.knowledge import _extract_knowledge_url
-from server.app.pipeline.common import get_video_id, parse_srt, resolve_video_dir
+from server.app.pipeline.common import get_video_id, parse_srt, parse_srt_file, resolve_video_dir
 
 
 def test_parse_srt_and_video_id():
@@ -74,3 +74,27 @@ def test_parse_srt_skips_invalid_time_line():
     result = parse_srt("1\ninvalid line\nhello\n\n2\n00:00:00,000 --> 00:00:01,000\nworld\n")
     assert len(result) == 1
     assert result[0]["text"] == "world"
+
+
+def test_parse_srt_file_matches_parse_srt(tmp_path: Path) -> None:
+    from server.app.pipeline.common import parse_srt
+
+    text = (
+        "1\n00:00:00,000 --> 00:00:01,500\nhello\n\n"
+        "2\n00:00:01,500 --> 00:00:03,000\nworld\n\n"
+        "3\n00:00:03,000 --> 00:00:04,000\nfoo\n\n"
+        "\n\n\n"  # extra blank lines
+        "4\n00:00:04,000 --> 00:00:05,000\nbar\n"
+    )
+    srt_path = tmp_path / "test.srt"
+    srt_path.write_text(text, encoding="utf-8")
+
+    expected = parse_srt(text)
+    actual = parse_srt_file(srt_path)
+    assert actual == expected
+    assert len(actual) == 4
+
+
+def test_parse_srt_file_missing_path() -> None:
+    result = parse_srt_file(Path("/nonexistent/path.srt"))
+    assert result == []
