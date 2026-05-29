@@ -30,9 +30,11 @@ export function VideoPlayer({
   const subtitleRef = useRef<HTMLSpanElement | null>(null)
 
   const setRefs = useCallback(
+    // eslint-disable-next-line react-hooks/immutability
     (node: HTMLVideoElement | null) => {
       internalRef.current = node
       if (videoRef) {
+        // eslint-disable-next-line react-hooks/immutability
         ;(videoRef as React.MutableRefObject<HTMLVideoElement | null>).current =
           node
       }

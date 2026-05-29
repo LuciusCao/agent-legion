@@ -111,7 +111,7 @@ function buildItem(
     processTime = now - started
   }
 
-  let tool = ''
+  let tool: string
   if (run.phase_key === 'transcribe') {
     const tr = [...transcriptionRuns]
       .sort(
@@ -140,7 +140,7 @@ export function usePhaseRunsTimeline(
   currentPhase?: string,
   videoStatus?: string
 ): UsePhaseRunsTimelineReturn {
-  const [now, setNow] = useState(Date.now())
+  const [now, setNow] = useState(() => Date.now())
   const [viewMode, setViewMode] = useState<'latest' | 'history'>('latest')
   const [expandedDetails, setExpandedDetails] = useState<Set<number>>(new Set())
   const [sessionLogs, setSessionLogs] = useState<Record<number, string>>({})
