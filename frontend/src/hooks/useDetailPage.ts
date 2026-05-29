@@ -92,13 +92,13 @@ export function useDetailPage(): UseDetailPageReturn {
   const { openRerunDialog, openDeleteDialog, showToast } = useUiStore()
   const { fetchVideos } = useVideoStore()
 
-  const checkFetchError = () => {
+  const checkFetchError = useCallback(() => {
     const err = useVideoStore.getState().error
     if (err) {
       showToast(`加载失败: ${err}`, 'error')
       useVideoStore.getState().clearError()
     }
-  }
+  }, [showToast])
 
   useVideoPhaseEvents(id)
 
@@ -197,7 +197,7 @@ export function useDetailPage(): UseDetailPageReturn {
       showToast(`删除失败: ${message}`, 'error')
       return false
     }
-  }, [id, navigate, fetchVideos, showToast])
+  }, [id, navigate, fetchVideos, showToast, checkFetchError])
 
   const handlePackage = useCallback(async () => {
     if (!id) return
@@ -208,7 +208,7 @@ export function useDetailPage(): UseDetailPageReturn {
     await Promise.all([fetchVideos(), loadVideo(id)])
     checkFetchError()
     await triggerDownload(result.download_url)
-  }, [id, fetchVideos, loadVideo])
+  }, [id, fetchVideos, loadVideo, checkFetchError])
 
   const handleRerun = useCallback(
     async (phase: string) => {
@@ -232,7 +232,7 @@ export function useDetailPage(): UseDetailPageReturn {
         }
       }
     },
-    [id, fetchVideos, loadVideo, loadLog, showToast]
+    [id, fetchVideos, loadVideo, loadLog, showToast, checkFetchError]
   )
 
   const handleRunTo = useCallback(
@@ -261,7 +261,7 @@ export function useDetailPage(): UseDetailPageReturn {
         showToast(`运行失败: ${message}`, 'error')
       }
     },
-    [id, fetchVideos, loadVideo, loadLog, showToast]
+    [id, fetchVideos, loadVideo, loadLog, showToast, checkFetchError]
   )
 
   const openMoreDialog = (type: MoreDialogType) => {

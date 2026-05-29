@@ -35,7 +35,7 @@ export function VideoList() {
     filtered.forEach((v) => {
       const el = checkboxRefs.current.get(v.id)
       if (el) {
-        ;(el as any).checked = selectedIds.has(v.id)
+        ;(el as HTMLInputElement).checked = selectedIds.has(v.id)
       }
     })
   }, [selectedIds, filtered])

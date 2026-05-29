@@ -43,7 +43,7 @@ export function RerunDialog({ video, onConfirm }: RerunDialogProps) {
     availablePhases.forEach((phase) => {
       const el = radioRefs.current.get(phase)
       if (el) {
-        ;(el as any).checked = phase === selectedPhase
+        ;(el as HTMLInputElement).checked = phase === selectedPhase
       }
     })
   }, [rerunDialogOpen, selectedPhase, availablePhases])
