@@ -1,6 +1,8 @@
 import json
 import subprocess
+import time
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -15,6 +17,7 @@ from server.app.worker import (
     process_next,
     process_video_once,
 )
+from server.app.worker_thread import WorkerThread
 from tests.conftest import ChapterRunner, TestProvider
 
 
@@ -485,3 +488,23 @@ def test_build_default_providers_without_vad_model(tmp_path, settings):
     providers = build_default_providers(settings)
     assert len(providers) == 2
     assert providers[0].vad_model is None
+
+
+def test_worker_thread_stop_calls_close_read_conn(db, settings):
+    """WorkerThread.stop() 必须调用 db.close_read_conn()。"""
+    pool = MagicMock()
+    pool.size.return_value = 1
+    pool.acquire.side_effect = RuntimeError("no runner")
+
+    control = MagicMock()
+    control.is_paused.return_value = True
+
+    agent_manager = MagicMock()
+
+    wt = WorkerThread(db, settings, pool, agent_manager, worker_control=control, max_workers=1)
+    wt.start()
+    time.sleep(0.05)
+
+    with patch.object(db, "close_read_conn") as mock_close:
+        wt.stop()
+        mock_close.assert_called_once()
