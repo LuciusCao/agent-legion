@@ -13,7 +13,6 @@ from server.app.services.video_actions import has_running_phase_run
 from server.app.settings import Settings
 from server.app.worker import process_video_once
 
-
 _background_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="manual-run-")
 atexit.register(_background_executor.shutdown, wait=False)
 
@@ -141,19 +140,19 @@ def _validate_run_to(
     target_phase: str,
     start_phase: str | None,
     agent_manager: AgentStatusManager | None,
-) -> tuple[bool, dict[str, str] | None]:
-    """Synchronous validation for run-to. Returns (is_valid, error_result)."""
+) -> dict[str, str] | None:
+    """Synchronous validation for run-to. Returns error dict or None if valid."""
     video = db.get_video(video_id)
     if not video:
-        return False, _result(video_id, "not_found", target_phase, "Video not found")
+        return _result(video_id, "not_found", target_phase, "Video not found")
 
     if _is_busy(db, video, agent_manager):
-        return False, _result(video_id, "busy", target_phase, "Video is currently being processed")
+        return _result(video_id, "busy", target_phase, "Video is currently being processed")
 
     phases = phase_sequence(video["content_type"])
     target_error = _validate_phase(video, target_phase, "目标阶段")
     if target_error:
-        return False, _invalid_phase(video_id, target_phase, target_error)
+        return _invalid_phase(video_id, target_phase, target_error)
 
     target_index = _phase_index(phases, target_phase)
     if start_phase is None:
@@ -161,25 +160,23 @@ def _validate_run_to(
         if not _is_waiting_for_url(video):
             current_error = _validate_phase(video, current_phase, "当前阶段")
             if current_error:
-                return False, _invalid_phase(video_id, target_phase, current_error)
+                return _invalid_phase(video_id, target_phase, current_error)
             if target_index < _phase_index(phases, current_phase):
-                return False, _invalid_phase(
-                    video_id, target_phase, "目标阶段早于当前阶段，无法继续执行"
-                )
+                return _invalid_phase(video_id, target_phase, "目标阶段早于当前阶段，无法继续执行")
     else:
         start_error = _validate_phase(video, start_phase, "起始阶段")
         if start_error:
-            return False, _invalid_phase(video_id, target_phase, start_error)
+            return _invalid_phase(video_id, target_phase, start_error)
         if _phase_index(phases, start_phase) > target_index:
-            return False, _invalid_phase(video_id, target_phase, "起始阶段晚于目标阶段，无法重跑")
+            return _invalid_phase(video_id, target_phase, "起始阶段晚于目标阶段，无法重跑")
         try:
             normalized_start, _ = _prepare_rerun(db, settings, video, start_phase)
         except ValueError as exc:
-            return False, _invalid_phase(video_id, target_phase, str(exc))
+            return _invalid_phase(video_id, target_phase, str(exc))
         if _phase_index(phases, normalized_start) > target_index:
-            return False, _invalid_phase(video_id, target_phase, "起始阶段晚于目标阶段，无法重跑")
+            return _invalid_phase(video_id, target_phase, "起始阶段晚于目标阶段，无法重跑")
 
-    return True, None
+    return None
 
 
 def run_to_phase(
@@ -193,10 +190,8 @@ def run_to_phase(
     openclaw_runner: OpenClawRunner | None = None,
     agent_manager: AgentStatusManager | None = None,
 ) -> dict[str, str]:
-    is_valid, error = _validate_run_to(
-        db, settings, video_id, target_phase, start_phase, agent_manager
-    )
-    if not is_valid:
+    error = _validate_run_to(db, settings, video_id, target_phase, start_phase, agent_manager)
+    if error is not None:
         return error
 
     mode_status = "rerun_to" if start_phase is not None else "run_to"
@@ -260,10 +255,8 @@ def submit_run_to_phase(
     agent_manager: AgentStatusManager | None = None,
 ) -> dict[str, str]:
     """Validate synchronously, then execute run-to in a background thread."""
-    is_valid, error = _validate_run_to(
-        db, settings, video_id, target_phase, start_phase, agent_manager
-    )
-    if not is_valid:
+    error = _validate_run_to(db, settings, video_id, target_phase, start_phase, agent_manager)
+    if error is not None:
         return error
 
     _background_executor.submit(
@@ -303,10 +296,8 @@ def batch_submit_run_to_phase(
                     _result(video_id, "skipped", target_phase, target_error or start_error or "")
                 )
                 continue
-        is_valid, error = _validate_run_to(
-            db, settings, video_id, target_phase, start_phase, agent_manager
-        )
-        if not is_valid:
+        error = _validate_run_to(db, settings, video_id, target_phase, start_phase, agent_manager)
+        if error is not None:
             results.append(error)
             continue
 
