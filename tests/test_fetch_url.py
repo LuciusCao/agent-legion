@@ -90,7 +90,9 @@ def test_lookup_knowledge_video_found_without_url(monkeypatch):
 
 
 def test_lookup_knowledge_video_not_found(monkeypatch):
-    monkeypatch.setattr("server.app.cms.knowledge._fetch_json", lambda *args, **kwargs: {"data": None})
+    monkeypatch.setattr(
+        "server.app.cms.knowledge._fetch_json", lambda *args, **kwargs: {"data": None}
+    )
 
     result = lookup_knowledge_video("K404", "https://cms.example/knowledge", "token")
 

@@ -24,4 +24,3 @@ def clear_artifacts_from(video_dir: Path, phase: str, video_id: str) -> None:
             path = video_dir / pattern.format(video_id=video_id)
             if path.exists():
                 path.unlink()
-

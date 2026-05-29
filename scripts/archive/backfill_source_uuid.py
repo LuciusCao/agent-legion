@@ -23,11 +23,17 @@ from server.app.settings import load_settings
 def main():
     parser = argparse.ArgumentParser(description="Backfill source_uuid from CMS")
     parser.add_argument("--env", default="prod", help="CMS environment")
-    parser.add_argument("--dry-run", action="store_true", help="Print what would be updated without writing")
+    parser.add_argument(
+        "--dry-run", action="store_true", help="Print what would be updated without writing"
+    )
     args = parser.parse_args()
 
     settings = load_settings()
-    db = Database(settings.db_path if hasattr(settings, "db_path") else settings.data_dir / "video_hive.sqlite")
+    db = Database(
+        settings.db_path
+        if hasattr(settings, "db_path")
+        else settings.data_dir / "video_hive.sqlite"
+    )
     cms = settings.config.get("cms", {})
 
     if not cms:
@@ -75,7 +81,9 @@ def main():
 
         source_uuid = lookup.source_uuid or ""
         if not source_uuid:
-            print(f"{vid:<30} {ctype:<10} {ext:<20} {status:<12} SKIP: CMS returned empty source_uuid")
+            print(
+                f"{vid:<30} {ctype:<10} {ext:<20} {status:<12} SKIP: CMS returned empty source_uuid"
+            )
             skipped += 1
             continue
 

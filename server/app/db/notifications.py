@@ -11,7 +11,10 @@ class NotificationHub:
         self,
         on_change: Callable[[VideoRecord], None] | None = None,
         on_delete: Callable[[str], None] | None = None,
-        on_detail_change: Callable[[str, VideoRecord, list[PhaseRunRecord], list[dict[str, Any]]], None] | None = None,
+        on_detail_change: Callable[
+            [str, VideoRecord, list[PhaseRunRecord], list[dict[str, Any]]], None
+        ]
+        | None = None,
     ):
         self.on_change = on_change
         self.on_delete = on_delete

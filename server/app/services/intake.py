@@ -90,7 +90,9 @@ def add_video_items(
                 continue
 
         try:
-            result_status, url, title, message, cms_source_uuid = resolve_video_input(item, settings)
+            result_status, url, title, message, cms_source_uuid = resolve_video_input(
+                item, settings
+            )
         except Exception as exc:
             results.append(
                 {

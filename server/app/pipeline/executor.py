@@ -22,8 +22,7 @@ class PhaseContext:
 
 
 class PhaseHandler(Protocol):
-    def __call__(self, ctx: PhaseContext) -> None:
-        ...
+    def __call__(self, ctx: PhaseContext) -> None: ...
 
 
 class PhaseExecutorRegistry:

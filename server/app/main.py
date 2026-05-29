@@ -43,9 +43,7 @@ def create_app(
         if start_worker:
             agent_manager.discover()
             recover_interrupted_videos(db, settings)
-            runner_pool = RunnerPool.from_settings(
-                settings, [a.id for a in agent_manager.agents]
-            )
+            runner_pool = RunnerPool.from_settings(settings, [a.id for a in agent_manager.agents])
             runner_counts: dict[str, int] = {}
             for runner in runner_pool.all_runners():
                 aid = runner.agent_id

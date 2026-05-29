@@ -54,9 +54,13 @@ def validate_phase_outputs(video_dir: Path, phase_key: str) -> None:
                     f"Expected one of: example_practice, video_summary, interaction_summary"
                 )
             if "trigger_time" not in inter:
-                raise ValueError(f"Interaction {idx + 1} ('{inter.get('id')}') is missing 'trigger_time'")
+                raise ValueError(
+                    f"Interaction {idx + 1} ('{inter.get('id')}') is missing 'trigger_time'"
+                )
             if not inter.get("instruction"):
-                raise ValueError(f"Interaction {idx + 1} ('{inter.get('id')}') is missing 'instruction'")
+                raise ValueError(
+                    f"Interaction {idx + 1} ('{inter.get('id')}') is missing 'instruction'"
+                )
 
     elif phase_key == "content_review":
         checklist = _load_json(video_dir / "checklist.json")

@@ -101,8 +101,12 @@ def _run_loop(
         phases = phase_sequence(video["content_type"])
         current_phase = video["current_phase"]
         if not _is_waiting_for_url(video) and current_phase not in phases:
-            return _invalid_phase(video_id, target_phase, f"当前阶段 {current_phase} 不适用于该视频类型")
-        if not _is_waiting_for_url(video) and _phase_index(phases, current_phase) > _phase_index(phases, target_phase):
+            return _invalid_phase(
+                video_id, target_phase, f"当前阶段 {current_phase} 不适用于该视频类型"
+            )
+        if not _is_waiting_for_url(video) and _phase_index(phases, current_phase) > _phase_index(
+            phases, target_phase
+        ):
             return _result(video_id, mode_status, target_phase)
 
         processed = process_video_once(
@@ -199,7 +203,9 @@ def batch_run_to_phase(
             target_error = _validate_phase(video, target_phase, "目标阶段")
             start_error = _validate_phase(video, start_phase, "起始阶段") if start_phase else None
             if target_error or start_error:
-                results.append(_result(video_id, "skipped", target_phase, target_error or start_error or ""))
+                results.append(
+                    _result(video_id, "skipped", target_phase, target_error or start_error or "")
+                )
                 continue
         results.append(
             run_to_phase(
