@@ -401,3 +401,27 @@ def test_connect_read_reuses_pooled_conn_for_same_thread(db):
     with db._connect_read() as conn:
         pooled = db._ensure_read_conn()
         assert conn is pooled
+
+
+def test_list_running_video_summaries_returns_limited_fields(db):
+    """只返回 id, current_phase, storage_dir 三个字段。"""
+    db.create_video("https://example.com/a.mp4", "A")
+    db.update_video("a", status="running", current_phase="download")
+
+    summaries = db.list_running_video_summaries()
+    assert len(summaries) == 1
+    assert set(summaries[0].keys()) == {"id", "current_phase", "storage_dir"}
+    assert summaries[0]["id"] == "a"
+    assert summaries[0]["current_phase"] == "download"
+
+
+def test_list_running_video_summaries_filters_by_status(db):
+    """只返回 status='running' 的视频。"""
+    db.create_video("https://example.com/a.mp4", "A")
+    db.create_video("https://example.com/b.mp4", "B")
+    db.update_video("a", status="running", current_phase="download")
+    db.update_video("b", status="queued", current_phase="download")
+
+    summaries = db.list_running_video_summaries()
+    assert len(summaries) == 1
+    assert summaries[0]["id"] == "a"
