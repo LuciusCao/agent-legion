@@ -154,7 +154,13 @@ export const useVideoStore = create<VideoState>((set, get) => ({
 
   selectPackageAll: () =>
     set((state) => {
-      const completed = state.videos.filter((v) => v.status === 'completed')
+      const visible = filterVideos(state.videos, {
+        selectedType: state.selectedType,
+        statusFilter: state.statusFilter,
+        searchQuery: state.searchQuery,
+        packedFilter: state.packedFilter,
+      })
+      const completed = visible.filter((v) => v.status === 'completed')
       return { selectedIds: new Set(completed.map((v) => v.id)) }
     }),
 
