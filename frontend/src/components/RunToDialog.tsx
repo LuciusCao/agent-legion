@@ -48,12 +48,14 @@ export function RunToDialog({
   const [startPhase, setStartPhase] = useState(phases[0])
 
   useEffect(() => {
-    if (!phases.includes(targetPhase)) {
-      setTargetPhase(defaultTargetPhase)
-    }
-    if (!phases.includes(startPhase)) {
-      setStartPhase(phases[0])
-    }
+    queueMicrotask(() => {
+      if (!phases.includes(targetPhase)) {
+        setTargetPhase(defaultTargetPhase)
+      }
+      if (!phases.includes(startPhase)) {
+        setStartPhase(phases[0])
+      }
+    })
   }, [defaultTargetPhase, phases, startPhase, targetPhase])
 
   if (!open) return null
