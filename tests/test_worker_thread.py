@@ -97,6 +97,30 @@ def test_worker_thread_local_done_callback_cleans_counts():
     wt.stop(timeout=2)
 
 
+def test_worker_thread_consumes_tick_signal():
+    """Worker loop consumes tick signal to reduce sleep time."""
+    db = MagicMock()
+    db.list_videos.return_value = []
+    settings = MagicMock()
+    settings.config = {}
+    runner_pool = MagicMock()
+    runner_pool.size.return_value = 1
+    runner_pool.acquire.side_effect = RuntimeError("no slot")
+    agent_manager = MagicMock()
+    worker_control = WorkerControl()
+    worker_control.resume()
+    worker_control.request_tick()
+
+    wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
+    wt.start()
+
+    time.sleep(0.3)
+
+    assert not worker_control.consume_tick()
+
+    wt.stop(timeout=2)
+
+
 def test_worker_thread_executes_local_work():
     """Worker loop submits local work and cleans up on completion."""
     db = MagicMock()

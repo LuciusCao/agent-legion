@@ -93,7 +93,8 @@ class WorkerThread:
                 if work is None:
                     if runner_slot is not None:
                         self.runner_pool.release(runner_slot[0])
-                    self.stop_event.wait(3)
+                    wait_seconds = 0.2 if self.worker_control.consume_tick() else 3
+                    self.stop_event.wait(wait_seconds)
                     continue
 
                 video = work.video
@@ -144,7 +145,8 @@ class WorkerThread:
 
                     future.add_done_callback(_on_local_done)
                     submitted = True
-                self.stop_event.wait(1 if submitted else 3)
+                wait_seconds = 0.2 if self.worker_control.consume_tick() else (1 if submitted else 3)
+                self.stop_event.wait(wait_seconds)
 
         runner_count = self.runner_pool.size()
         workers = _configured_worker_count(runner_count)
