@@ -10,6 +10,7 @@ interface DetailState {
   activeTab: DetailTab
   isLoading: boolean
   error: string | null
+  _loadSeq: number
   loadVideo: (id: string) => Promise<void>
   loadLog: (id: string) => Promise<void>
   loadPhaseRuns: (id: string) => Promise<void>
@@ -21,7 +22,7 @@ interface DetailState {
   setActiveTab: (tab: DetailTab) => void
 }
 
-export const useDetailStore = create<DetailState>((set) => ({
+export const useDetailStore = create<DetailState>((set, get) => ({
   currentVideo: null,
   log: '',
   phaseRuns: [],
@@ -29,15 +30,18 @@ export const useDetailStore = create<DetailState>((set) => ({
   activeTab: 'nodes',
   isLoading: false,
   error: null,
+  _loadSeq: 0,
 
   loadVideo: async (id) => {
-    set({ isLoading: true, error: null })
+    const seq = get()._loadSeq + 1
+    set({ isLoading: true, error: null, _loadSeq: seq })
     try {
       const data = await api<{
         video: VideoItem
         phase_runs: PhaseRun[]
         transcription_runs: TranscriptionRun[]
       }>(`/api/videos/${id}`)
+      if (get()._loadSeq !== seq) return
       const video = data.video || null
       set({
         currentVideo: video,
@@ -49,9 +53,17 @@ export const useDetailStore = create<DetailState>((set) => ({
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
-      set({ error: message })
+      if (get()._loadSeq !== seq) return
+      set({
+        error: message,
+        currentVideo: null,
+        phaseRuns: [],
+        transcriptionRuns: [],
+      })
     } finally {
-      set({ isLoading: false })
+      if (get()._loadSeq === seq) {
+        set({ isLoading: false })
+      }
     }
   },
 

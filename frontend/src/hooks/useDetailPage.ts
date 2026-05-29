@@ -118,7 +118,15 @@ export function useDetailPage(): UseDetailPageReturn {
     if (!id) return
     clearInteractions()
     previousPlaybackTimeRef.current = null
-    Promise.all([loadVideo(id), loadArtifacts(id), loadLog(id)])
+    let stale = false
+    const load = async () => {
+      await Promise.all([loadVideo(id), loadArtifacts(id), loadLog(id)])
+      if (stale) return
+    }
+    load()
+    return () => {
+      stale = true
+    }
   }, [id, clearInteractions, loadVideo, loadArtifacts, loadLog])
 
   const prevPhaseRef = useRef<string | null>(null)
@@ -245,7 +253,8 @@ export function useDetailPage(): UseDetailPageReturn {
         ) {
           showToast('该资源正在被处理中，请等待当前阶段完成后再重跑。', 'error')
         } else {
-          throw err
+          const message = err instanceof Error ? err.message : String(err)
+          showToast(`重跑失败: ${message}`, 'error')
         }
       }
     },
