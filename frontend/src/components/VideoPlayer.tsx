@@ -1,4 +1,4 @@
-import { useRef, useCallback } from 'react'
+import { useRef, useCallback, useState } from 'react'
 import type { InteractionNode, VideoItem, VideoArtifacts } from '../types'
 import { InteractionOverlay } from './InteractionOverlay'
 import styles from './VideoPlayer.module.css'
@@ -13,6 +13,8 @@ interface VideoPlayerProps {
   onInteractionWordClick?: (word: string) => void
   onInteractionReset?: () => void
   onInteractionContinue?: () => void
+  onPlay?: () => void
+  onPause?: () => void
 }
 
 export function VideoPlayer({
@@ -25,9 +27,11 @@ export function VideoPlayer({
   onInteractionWordClick = () => {},
   onInteractionReset = () => {},
   onInteractionContinue = () => {},
+  onPlay = () => {},
+  onPause = () => {},
 }: VideoPlayerProps) {
   const internalRef = useRef<HTMLVideoElement | null>(null)
-  const subtitleRef = useRef<HTMLSpanElement | null>(null)
+  const [subtitleText, setSubtitleText] = useState('')
 
   const setRefs = useCallback(
     // eslint-disable-next-line react-hooks/immutability
@@ -48,14 +52,19 @@ export function VideoPlayer({
     const time = player.currentTime
     onTimeUpdate(time)
 
-    // Update subtitle text directly via ref to avoid React re-render on every frame
-    if (subtitleRef.current) {
-      const subtitle = artifacts.subtitles.find(
-        (s) => time >= s.start && time < s.end
-      )
-      subtitleRef.current.textContent = subtitle?.text ?? ''
-    }
+    const subtitle = artifacts.subtitles.find(
+      (s) => time >= s.start && time < s.end
+    )
+    setSubtitleText(subtitle?.text ?? '')
   }, [onTimeUpdate, artifacts.subtitles])
+
+  const handlePlay = useCallback(() => {
+    onPlay()
+  }, [onPlay])
+
+  const handlePause = useCallback(() => {
+    onPause()
+  }, [onPause])
 
   const videoUrl = video.storage_dir ? `/api/videos/${video.id}/video` : ''
 
@@ -68,6 +77,8 @@ export function VideoPlayer({
           src={videoUrl}
           controls
           onTimeUpdate={handleTimeUpdate}
+          onPlay={handlePlay}
+          onPause={handlePause}
         />
       ) : (
         <div className="empty-state">视频文件未下载</div>
@@ -80,7 +91,7 @@ export function VideoPlayer({
         onContinue={onInteractionContinue}
       />
       <div className={styles.subtitleOverlay}>
-        <span ref={subtitleRef} className={styles.subtitleText} />
+        <span className={styles.subtitleText}>{subtitleText}</span>
       </div>
     </div>
   )
