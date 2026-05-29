@@ -80,7 +80,7 @@ class WorkerThread:
                     running_video_ids = set(self.running_futures)
                     local_counts = dict(self.running_local_counts)
                 work = pick_next_work(
-                    self.db.list_videos(),
+                    self.db.list_videos(status_filter=["queued", "missing_url", "running"]),
                     running_video_ids=running_video_ids,
                     capacity=WorkerCapacity(
                         free_runner=runner_slot,

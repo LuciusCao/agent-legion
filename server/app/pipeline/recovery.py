@@ -5,7 +5,7 @@ from server.app.settings import Settings
 
 
 def recover_interrupted_videos(db: Database, settings: Settings) -> int:
-    running_videos = [video for video in db.list_videos() if video["status"] == "running"]
+    running_videos = db.list_videos(status_filter="running")
     for video in running_videos:
         phase = video["current_phase"]
         if not phase:
