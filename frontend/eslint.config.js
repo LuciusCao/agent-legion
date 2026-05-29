@@ -15,4 +15,10 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
+  {
+    files: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/types/**/*.d.ts'],
+    rules: {
+      '@typescript-eslint/no-explicit-any': 'off',
+    },
+  },
 )
