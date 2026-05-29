@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 from typing import Any
 
@@ -208,6 +209,15 @@ def create_videos_router(
             raise HTTPException(status_code=404, detail="Video not found")
         return {"deleted": True, "video_id": video_id}
 
+    def _sanitize_log(text: str) -> str:
+        """Filter potentially sensitive paths and URLs from log output."""
+        # Remove absolute file paths (Unix and Windows)
+        text = re.sub(r"/[\w./-]+/\.[\w./-]+", "[FILTERED]", text)
+        text = re.sub(r"[A-Za-z]:\\[\\\w\s.-]+", "[FILTERED]", text)
+        # Remove URLs with potential credentials or sensitive paths
+        text = re.sub(r"https?://[^\s]+", "[FILTERED]", text)
+        return text
+
     @router.get("/{video_id}/logs")
     def logs(video_id: str) -> dict[str, str]:
         runs = db.list_phase_runs(video_id)
@@ -216,7 +226,7 @@ def create_videos_router(
         log_path = Path(runs[-1]["log_path"])
         if not log_path.exists():
             return {"log": ""}
-        return {"log": log_path.read_text(encoding="utf-8")[-8000:]}
+        return {"log": _sanitize_log(log_path.read_text(encoding="utf-8")[-8000:])}
 
     @router.get("/{video_id}/phase-runs/{run_id}/session")
     def phase_run_session(video_id: str, run_id: int) -> dict[str, str]:
