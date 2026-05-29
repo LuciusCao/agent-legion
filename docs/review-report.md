@@ -227,18 +227,18 @@ Video Hive 是一个**架构清晰、代码质量良好、测试覆盖充分**�
 
 | 优先级 | # | 建议 | 状态 | 对应 Issue | 对应 Spec / Plan |
 |--------|---|------|------|------------|------------------|
-| P0 | 1 | `api.py:download_package` 加固路径校验 | 待修复 | — | — |
-| P0 | 2 | `openclaw.py` 对 `prompt_text` 做 shell 元字符转义 | 待修复 | — | — |
-| P0 | 3 | `db.py:update_video` 移除 SQL f-string 拼接 | 待修复 | — | [spec: quality-round3](superpowers/specs/2026-05-29-quality-round3-design.md) |
-| P1 | 4 | 提取 `video_dir` 解析为共享工具函数，消除 5+ 处重复 | 待修复 | — | — |
-| P1 | 5 | `process_video_once` 拆分为 PhaseHandler 策略模式 | 待修复 | — | — |
-| P1 | 6 | 前后端共享 phase 序列定义（可通过 JSON 或代码生成） | 待修复 | — | — |
-| P1 | 7 | `DetailPage.tsx` 移除 `document.getElementById` DOM 操作 | 待修复 | — | — |
-| P1 | 8 | 增加前端 API 错误统一处理中间件 | 待修复 | — | — |
-| P2 | 9 | `package.py` 时间戳改为 `%Y%m%d_%H%M%S`（去掉微秒） | 待修复 | — | — |
-| P2 | 10 | `agents.py:_broadcast` 增加异常日志 | 待修复 | — | — |
-| P2 | 11 | 前端增加 `DetailPage` 等核心组件的交互测试 | 待修复 | — | — |
-| P2 | 12 | 考虑引入 `zod` 或 `valibot` 做运行时 API 响应校验 | 待修复 | — | — |
+| P0 | 1 | `api.py:download_package` 加固路径校验 | 待修复 | [005](issues/005-security-path-traversal-and-ssrf.md) | — |
+| P0 | 2 | `openclaw.py` 对 `prompt_text` 做 shell 元字符转义 | 待修复 | [006](issues/006-security-command-injection-and-sql.md) | — |
+| P0 | 3 | `db.py:update_video` 移除 SQL f-string 拼接 | 待修复 | [006](issues/006-security-command-injection-and-sql.md) | [spec: quality-round3](superpowers/specs/2026-05-29-quality-round3-design.md) |
+| P1 | 4 | 提取 `video_dir` 解析为共享工具函数，消除 5+ 处重复 | 待修复 | [007](issues/007-backend-worker-and-pipeline-debt.md) | — |
+| P1 | 5 | `process_video_once` 拆分为 PhaseHandler 策略模式 | 待修复 | [007](issues/007-backend-worker-and-pipeline-debt.md) | — |
+| P1 | 6 | 前后端共享 phase 序列定义（可通过 JSON 或代码生成） | 待修复 | [010](issues/010-frontend-state-management.md) | — |
+| P1 | 7 | `DetailPage.tsx` 移除 `document.getElementById` DOM 操作 | 待修复 | [009](issues/009-frontend-react-anti-patterns.md) | — |
+| P1 | 8 | 增加前端 API 错误统一处理中间件 | 待修复 | [010](issues/010-frontend-state-management.md) | — |
+| P2 | 9 | `package.py` 时间戳改为 `%Y%m%d_%H%M%S`（去掉微秒） | 待修复 | [008](issues/008-backend-data-layer-edge-cases.md) | — |
+| P2 | 10 | `agents.py:_broadcast` 增加异常日志 | 待修复 | [008](issues/008-backend-data-layer-edge-cases.md) | — |
+| P2 | 11 | 前端增加 `DetailPage` 等核心组件的交互测试 | 待修复 | [011](issues/011-testing-and-architecture-debt.md) | — |
+| P2 | 12 | 考虑引入 `zod` 或 `valibot` 做运行时 API 响应校验 | 待修复 | [010](issues/010-frontend-state-management.md) | — |
 
 ---
 
