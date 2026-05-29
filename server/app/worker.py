@@ -151,8 +151,9 @@ def process_video_once(
         except Exception as exc:
             fetched_url = ""
             fetch_error = f"fetch url failed: {exc}"
+        update_fields: dict[str, Any]
         if fetched_url:
-            update_fields: dict[str, Any] = {
+            update_fields = {
                 "source_url": fetched_url,
                 "status": "queued",
                 "current_phase": "download",
@@ -162,11 +163,13 @@ def process_video_once(
                 update_fields["source_uuid"] = fetched_source_uuid
             db.update_video(video_id, **update_fields)
             video = db.get_video(video_id)
+            if video is None:
+                return False
             phase = video["current_phase"]
         else:
             if not fetch_error and cms and video.get("external_id"):
                 fetch_error = "fetch url failed: CMS did not return a video URL"
-            update_fields: dict[str, Any] = {
+            update_fields = {
                 "status": "missing_url",
                 "current_phase": "waiting_for_url",
                 "error_message": fetch_error,

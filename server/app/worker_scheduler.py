@@ -21,7 +21,7 @@ class WorkerCapacity:
 @dataclass(frozen=True)
 class WorkItem:
     kind: str
-    video: dict[str, Any]
+    video: Any
     phase: str
 
 
@@ -40,7 +40,7 @@ def get_phase_concurrency_limit(settings: Settings, phase: str) -> int:
 
 
 def pick_next_work(
-    videos: list[dict[str, Any]],
+    videos: list[Any],
     running_video_ids: set[str],
     capacity: WorkerCapacity,
     settings: Settings,

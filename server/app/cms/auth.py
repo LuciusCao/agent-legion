@@ -38,7 +38,11 @@ def _generate_prod_token(config: dict[str, Any]) -> str | None:
     )
     resp.raise_for_status()
     result = resp.json()
-    token = result.get("token") or result.get("data", {}).get("token")
+    token: str | None = result.get("token")
+    if not token:
+        data = result.get("data")
+        if isinstance(data, dict):
+            token = data.get("token")
     if not token:
         raise Exception(f"生成 token 失败，响应: {json.dumps(result, ensure_ascii=False)}")
     return token

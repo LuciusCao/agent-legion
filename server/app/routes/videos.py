@@ -123,8 +123,8 @@ def create_videos_router(
                 )
                 stats = compute_interaction_stats(video_dir)
                 if stats:
-                    video["interaction_stats"] = stats
-                video["interaction_review_status"] = compute_interaction_review_status(video_dir)
+                    video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
+                video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
         return {"videos": videos}
 
     @router.get("/{video_id}")
@@ -140,8 +140,8 @@ def create_videos_router(
             )
             stats = compute_interaction_stats(video_dir)
             if stats:
-                video["interaction_stats"] = stats
-            video["interaction_review_status"] = compute_interaction_review_status(video_dir)
+                video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
+            video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
         return {
             "video": {**video, "packed": bool(video.get("packed", 0))},
             "phase_runs": db.list_phase_runs(video_id),

@@ -75,8 +75,8 @@ def split_by_punctuation(words: list, timestamp: list, max_duration: float = 6.0
     """
     segments = []
     seg_text = ""
-    seg_start = None
-    seg_end = None
+    seg_start: float | None = None
+    seg_end: float | None = None
 
     for _i, (char, (char_start, char_end)) in enumerate(zip(words, timestamp, strict=True)):
         if seg_start is None:
@@ -85,6 +85,8 @@ def split_by_punctuation(words: list, timestamp: list, max_duration: float = 6.0
         seg_text += char
         seg_end = char_end
 
+        assert seg_start is not None
+        assert seg_end is not None
         duration = (seg_end - seg_start) / 1000.0
         is_punctuation = char in "。，！？；,.!?;"
 
@@ -97,7 +99,7 @@ def split_by_punctuation(words: list, timestamp: list, max_duration: float = 6.0
             seg_start = None
 
     # Append remaining text
-    if seg_text.strip() and seg_start is not None:
+    if seg_text.strip() and seg_start is not None and seg_end is not None:
         segments.append(
             {"start": seg_start / 1000.0, "end": seg_end / 1000.0, "text": seg_text.strip()}
         )

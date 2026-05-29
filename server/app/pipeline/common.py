@@ -4,12 +4,13 @@ from typing import Any
 from urllib.parse import urlparse
 
 
-def resolve_video_dir(video: dict[str, Any], videos_dir: Path) -> Path:
+def resolve_video_dir(video: Any, videos_dir: Path) -> Path:
     """Return the video directory, preferring storage_dir when set."""
-    storage_dir = video.get("storage_dir", "")
+    storage_dir: str = video.get("storage_dir", "")
     if storage_dir:
         return Path(storage_dir)
-    return videos_dir / video["id"]
+    video_id: str = video["id"]
+    return videos_dir / video_id
 
 
 def get_video_id(url: str) -> str:

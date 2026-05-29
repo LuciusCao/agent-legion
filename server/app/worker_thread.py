@@ -65,6 +65,7 @@ class WorkerThread:
                     self.running_local_counts.pop(phase, None)
 
         def _worker_loop() -> None:
+            assert self.executor is not None
             while not self.stop_event.is_set():
                 submitted = False
                 if self.worker_control.is_paused():
@@ -111,11 +112,16 @@ class WorkerThread:
                     )
                     with self.running_lock:
                         self.running_futures[video["id"]] = future
-                    future.add_done_callback(
-                        lambda _f, vid=video["id"], idx=runner_index, aid=agent_id: (
-                            _finish_agent_work(vid, idx, aid)
-                        )
-                    )
+
+                    def _on_agent_done(
+                        _f: Any,
+                        vid: str = video["id"],
+                        idx: int = runner_index,
+                        aid: str = agent_id,
+                    ) -> None:
+                        _finish_agent_work(vid, idx, aid)
+
+                    future.add_done_callback(_on_agent_done)
                     submitted = True
                 else:
                     if runner_slot is not None:
@@ -128,9 +134,13 @@ class WorkerThread:
                         self.running_local_counts[work.phase] = (
                             self.running_local_counts.get(work.phase, 0) + 1
                         )
-                    future.add_done_callback(
-                        lambda _f, vid=video["id"], phase=work.phase: _finish_local_work(vid, phase)
-                    )
+
+                    def _on_local_done(
+                        _f: Any, vid: str = video["id"], phase: str = work.phase
+                    ) -> None:
+                        _finish_local_work(vid, phase)
+
+                    future.add_done_callback(_on_local_done)
                     submitted = True
                 self.stop_event.wait(1 if submitted else 3)
 
