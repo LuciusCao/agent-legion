@@ -126,7 +126,7 @@ video-hive/
 ## 文档体系
 
 - `README.md` — 项目概览与快速上手指南
-- `docs/review-report.md` — 系统性代码审查报告（含修复状态追踪）
+- `issues/` — 已知问题与修复记录（代码审查发现的全部问题）
 - `docs/superpowers/README.md` — 设计文档索引（specs / plans / issues）
 - `docs/superpowers/specs/` — 设计规格文档，需用户批准后执行
 - `docs/superpowers/plans/` — 实施计划文档，由 Agent 按任务执行
