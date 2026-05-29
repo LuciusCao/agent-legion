@@ -453,3 +453,33 @@ def test_run_to_phase_start_transcribe_downgrades_and_runs_with_mock(db, setting
     )
     assert result["status"] == "rerun_to"
     assert db.get_video(video["id"])["current_phase"] == "subtitle_review"
+
+
+def test_submit_run_to_phase_returns_accepted(db, settings, monkeypatch):
+    from unittest.mock import MagicMock
+    from server.app.services.manual_run import submit_run_to_phase
+
+    db.create_video("https://example.com/v1.mp4", "V1")
+    db.update_video("v1", status="queued", current_phase="download")
+
+    mock_submit = MagicMock()
+    monkeypatch.setattr("server.app.services.manual_run._background_executor.submit", mock_submit)
+
+    result = submit_run_to_phase(db, settings, "v1", target_phase="assemble")
+    assert result["status"] == "accepted"
+    mock_submit.assert_called_once()
+
+
+def test_submit_run_to_phase_returns_busy(db, settings, monkeypatch):
+    from unittest.mock import MagicMock
+    from server.app.services.manual_run import submit_run_to_phase
+
+    db.create_video("https://example.com/v1.mp4", "V1")
+    db.update_video("v1", status="running", current_phase="download")
+
+    mock_submit = MagicMock()
+    monkeypatch.setattr("server.app.services.manual_run._background_executor.submit", mock_submit)
+
+    result = submit_run_to_phase(db, settings, "v1", target_phase="assemble")
+    assert result["status"] == "busy"
+    mock_submit.assert_not_called()
