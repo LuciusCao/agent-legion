@@ -1,4 +1,6 @@
 import json
+import re
+import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -44,10 +46,19 @@ class OpenClawRunner:
                 return command_template[i + 1]
         return ""
 
+    _SHELL_METACHARACTERS = re.compile(r"[;|&$`\\(){}<>'\"?\[\]*\n]")
+
     @staticmethod
     def _sanitize_replacement(value: str) -> str:
-        """Remove null bytes from replacement strings to prevent argument injection via embedded NUL terminators."""
-        return value.replace("\x00", "")
+        """Remove null bytes and escape shell metacharacters from replacement strings.
+
+        Only values containing actual shell metacharacters are quoted, so normal
+        prompt text remains unchanged.
+        """
+        value = value.replace("\x00", "")
+        if OpenClawRunner._SHELL_METACHARACTERS.search(value):
+            return shlex.quote(value)
+        return value
 
     def render_command(self, video_id: str, video_dir: Path, prompt_file: Path) -> list[str]:
         import time
