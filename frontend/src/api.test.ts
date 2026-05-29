@@ -7,6 +7,7 @@ function mockFetch(response: { ok: boolean; status: number; text: string }) {
     ok: response.ok,
     status: response.status,
     text: () => Promise.resolve(response.text),
+    json: () => Promise.resolve(JSON.parse(response.text)),
   } as Response)
 }
 

@@ -16,6 +16,7 @@ describe('detailStore', () => {
       activeTab: 'nodes',
       isLoading: false,
       error: null,
+      _loadSeq: 0,
     })
     mockApi.mockClear()
   })
@@ -55,6 +56,43 @@ describe('detailStore', () => {
     expect(useDetailStore.getState().activeTab).toBe('nodes')
     expect(useDetailStore.getState().error).toBe('network error')
     expect(useDetailStore.getState().isLoading).toBe(false)
+  })
+
+  it('clears stale data when loadVideo fails after switching videos', async () => {
+    useDetailStore.setState({
+      currentVideo: { id: 'old', title: 'Old', content_type: 'question', status: 'queued' } as unknown as ReturnType<typeof useDetailStore.getState>['currentVideo'],
+      phaseRuns: [{ id: 1, video_id: 'old', phase: 'download', status: 'completed', created_at: '' }],
+      transcriptionRuns: [{ id: 1, video_id: 'old', provider: 'whisper', created_at: '' }],
+    })
+    mockApi.mockRejectedValueOnce(new Error('not found'))
+    await useDetailStore.getState().loadVideo('new')
+    expect(useDetailStore.getState().currentVideo).toBeNull()
+    expect(useDetailStore.getState().phaseRuns).toEqual([])
+    expect(useDetailStore.getState().transcriptionRuns).toEqual([])
+    expect(useDetailStore.getState().error).toBe('not found')
+  })
+
+  it('ignores stale loadVideo response after switching to another video', async () => {
+    let resolveOld: (value: unknown) => void = () => {}
+    const oldPromise = new Promise((resolve) => {
+      resolveOld = resolve
+    })
+
+    mockApi.mockReturnValueOnce(oldPromise)
+    const loadOld = useDetailStore.getState().loadVideo('old')
+
+    mockApi.mockResolvedValueOnce({
+      video: { id: 'new', title: 'New', content_type: 'question', status: 'queued' },
+    })
+    await useDetailStore.getState().loadVideo('new')
+    expect(useDetailStore.getState().currentVideo?.id).toBe('new')
+
+    resolveOld({
+      video: { id: 'old', title: 'Old', content_type: 'question', status: 'queued' },
+    })
+    await loadOld
+
+    expect(useDetailStore.getState().currentVideo?.id).toBe('new')
   })
 
   it('sets error and fallback log when loadLog fails', async () => {
