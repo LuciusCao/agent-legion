@@ -57,6 +57,13 @@ def test_worker_pause_resume_api(client):
     assert client.app.state.worker_control.is_paused() is False
 
 
+def test_worker_tick_returns_accepted(client):
+    response = client.post("/api/worker/tick")
+    assert response.status_code == 200
+    assert response.json() == {"accepted": True}
+    assert client.app.state.worker_control.consume_tick() is True
+
+
 def test_agents_websocket_sends_initial_list(client, monkeypatch):
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(
