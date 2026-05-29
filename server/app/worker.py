@@ -230,10 +230,7 @@ def process_next(
     settings: Settings,
     openclaw_runner: OpenClawRunner | None = None,
 ) -> bool:
-    for video in db.list_videos(
-        status_filter=["queued", "missing_url", "running"],
-        limit=50,
-    ):
+    for video in db.list_videos(status_filter=["queued", "missing_url", "running"]):
         if (
             openclaw_runner is None
             and video["status"] == "queued"
