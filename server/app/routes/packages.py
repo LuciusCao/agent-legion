@@ -1,11 +1,10 @@
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..db import Database
 from ..pipeline.package import create_package
+from ..security import validate_package_filename
 from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
 
@@ -52,9 +51,10 @@ def create_packages_router(db: Database, settings: Settings) -> APIRouter:
 
     @router.get("/packages/{filename:path}")
     def download_package(filename: str):
-        # Reject empty filenames and path traversal attempts
-        if not filename or filename.startswith("/") or ".." in Path(filename).parts:
-            raise HTTPException(status_code=404, detail="Package not found")
+        try:
+            validate_package_filename(filename)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Package not found") from None
         package_path = settings.packages_dir / filename
         try:
             resolved = package_path.resolve()
