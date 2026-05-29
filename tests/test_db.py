@@ -425,3 +425,16 @@ def test_list_running_video_summaries_filters_by_status(db):
     summaries = db.list_running_video_summaries()
     assert len(summaries) == 1
     assert summaries[0]["id"] == "a"
+
+
+def test_batch_update_packed(db):
+    db.create_video("https://example.com/a.mp4", "A")
+    db.create_video("https://example.com/b.mp4", "B")
+    db.batch_update_packed(["a", "b"], packed=1)
+    assert db.get_video("a")["packed"] == 1
+    assert db.get_video("b")["packed"] == 1
+
+
+def test_batch_update_packed_empty_list(db):
+    db.batch_update_packed([], packed=1)
+
