@@ -905,7 +905,7 @@ def test_database_broadcast_on_create_and_delete(client):
     asyncio.run(_test())
 
 
-def test_list_and_detail_return_interaction_review_status(tmp_path, client):
+def test_list_and_detail_return_interaction_review_status(tmp_path, client, db):
     import json
 
     created = client.post(
@@ -948,6 +948,18 @@ def test_list_and_detail_return_interaction_review_status(tmp_path, client):
             }
         ),
         encoding="utf-8",
+    )
+
+    # Populate DB cache so list view can read from DB without disk I/O
+    db.update_video(
+        video_id,
+        interaction_stats_json=json.dumps(
+            {
+                "example_practice": {"passed": 1, "total": 1},
+                "interaction_summary": {"passed": 0, "total": 1},
+            }
+        ),
+        interaction_review_status="partial",
     )
 
     listed = client.get("/api/videos").json()
@@ -1023,6 +1035,23 @@ def test_logs_from_file(tmp_path, client, db):
     response = client.get("/api/videos/k1/logs")
     assert response.status_code == 200
     assert "download started" in response.json()["log"]
+
+
+def test_logs_tail_seek_large_file(tmp_path, client, db):
+    db.create_video("https://example.com/k1.mp4", "k1")
+    log_path = tmp_path / "logs" / "k1-download.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    # Write ~200KB log; only last 8000 chars should be returned
+    prefix = "A" * 1000 + "\n"
+    suffix = "Z" * 1000 + "\n"
+    log_path.write_text(prefix * 100 + suffix * 100, encoding="utf-8")
+    db.start_phase("k1", "download", ["cmd"], str(log_path))
+
+    response = client.get("/api/videos/k1/logs")
+    assert response.status_code == 200
+    log = response.json()["log"]
+    assert "Z" in log
+    assert "A" not in log
 
 
 def test_video_file_redirects_when_local_missing(client):

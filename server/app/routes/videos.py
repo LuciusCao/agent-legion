@@ -1,3 +1,4 @@
+import json
 import re
 from pathlib import Path
 from typing import Any
@@ -13,6 +14,7 @@ from ..pipeline.common import resolve_video_dir
 from ..pipeline.openclaw_sessions import render_openclaw_session, resolve_openclaw_session_path
 from ..services.intake import add_video_items
 from ..services.interaction_stats import (
+    _enrich_video,
     compute_interaction_review_status,
     compute_interaction_stats,
 )
@@ -116,12 +118,7 @@ def create_videos_router(
         videos = db.list_videos()
         for video in videos:
             video["packed"] = bool(video.get("packed", 0))
-            if video.get("content_type") == "knowledge":
-                video_dir = resolve_video_dir(video, settings.videos_dir)
-                stats = compute_interaction_stats(video_dir)
-                if stats:
-                    video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
-                video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
+            _enrich_video(video)
         return {"videos": videos}
 
     @router.get("/{video_id}")
@@ -129,12 +126,21 @@ def create_videos_router(
         video = db.get_video(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
-        if video.get("content_type") == "knowledge":
+        _enrich_video(video)
+        # Fallback to disk for legacy videos without DB cache, then backfill
+        if video.get("content_type") == "knowledge" and "interaction_stats" not in video:
             video_dir = resolve_video_dir(video, settings.videos_dir)
             stats = compute_interaction_stats(video_dir)
             if stats:
                 video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
-            video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
+            review_status = compute_interaction_review_status(video_dir)
+            if review_status:
+                video["interaction_review_status"] = review_status  # type: ignore[typeddict-unknown-key]
+            db.update_video(
+                video_id,
+                interaction_stats_json=json.dumps(stats, ensure_ascii=False) if stats else "",
+                interaction_review_status=review_status or "",
+            )
         return {
             "video": {**video, "packed": bool(video.get("packed", 0))},
             "phase_runs": db.list_phase_runs(video_id),
@@ -218,7 +224,12 @@ def create_videos_router(
         log_path = Path(runs[-1]["log_path"])
         if not log_path.exists():
             return {"log": ""}
-        return {"log": _sanitize_log(log_path.read_text(encoding="utf-8")[-8000:])}
+        with log_path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 12000), 0)
+            tail = f.read().decode("utf-8", errors="ignore")
+        return {"log": _sanitize_log(tail[-8000:])}
 
     @router.get("/{video_id}/phase-runs/{run_id}/session")
     def phase_run_session(video_id: str, run_id: int) -> dict[str, str]:
