@@ -52,9 +52,7 @@ def test_worker_thread_agent_done_callback_cleans_state():
         wt.runner_pool.release(runner_index)
         wt.agent_manager.set_idle(agent_id)
 
-    future.add_done_callback(
-        lambda _f: _finish_agent_work("v1", 0, "agent-1")
-    )
+    future.add_done_callback(lambda _f: _finish_agent_work("v1", 0, "agent-1"))
     future.set_result(True)
 
     assert "v1" not in wt.running_futures
@@ -90,9 +88,7 @@ def test_worker_thread_local_done_callback_cleans_counts():
             else:
                 wt.running_local_counts.pop(phase, None)
 
-    future.add_done_callback(
-        lambda _f: _finish_local_work("v1", "download")
-    )
+    future.add_done_callback(lambda _f: _finish_local_work("v1", "download"))
     future.set_result(True)
 
     assert "v1" not in wt.running_futures
@@ -104,9 +100,7 @@ def test_worker_thread_local_done_callback_cleans_counts():
 def test_worker_thread_executes_local_work():
     """Worker loop submits local work and cleans up on completion."""
     db = MagicMock()
-    db.list_videos.return_value = [
-        {"id": "v1", "status": "queued", "current_phase": "download"}
-    ]
+    db.list_videos.return_value = [{"id": "v1", "status": "queued", "current_phase": "download"}]
     settings = MagicMock()
     settings.config = {}
     runner_pool = MagicMock()
