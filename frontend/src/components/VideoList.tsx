@@ -102,7 +102,7 @@ export function VideoList() {
                         (packageSelectMode && video.status !== 'completed') ||
                         undefined
                       }
-                      checked={isSelected}
+                      checked={isSelected || undefined}
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation()
                         toggleVideoSelection(video.id)
