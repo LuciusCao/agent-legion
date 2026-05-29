@@ -5,8 +5,8 @@ Local processing console for educational videos. It queues knowledge videos and 
 ## Current Shape
 
 - Backend: FastAPI, SQLite, background worker.
-- Python tooling: `uv` for dependency/runtime management, `ruff` for lint.
-- Frontend: Vite + TypeScript.
+- Python tooling: `uv` for dependency/runtime management, `ruff` for lint/format, `mypy` for type checking.
+- Frontend: Vite + TypeScript, ESLint + Prettier.
 - Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`.
 - Queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
 
@@ -101,7 +101,7 @@ Full check before committing or handing work off:
 ./scripts/check.sh
 ```
 
-The quick gate runs Ruff, backend tests, and frontend tests. The full gate runs the quick gate plus the production-style frontend build.
+The quick gate runs Ruff lint + format check, Python tests with coverage (≥ 75%), mypy type check, and frontend Vitest. The full gate runs the quick gate plus the production-style frontend build.
 
 Install the optional local Git pre-commit hook to run the quick gate before each commit:
 
@@ -112,9 +112,16 @@ Install the optional local Git pre-commit hook to run the quick gate before each
 Equivalent commands:
 
 ```bash
+# Python
 UV_CACHE_DIR=.uv-cache uv run ruff check .
-UV_CACHE_DIR=.uv-cache uv run pytest -q
+UV_CACHE_DIR=.uv-cache uv run ruff format --check .
+UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server
+UV_CACHE_DIR=.uv-cache uv run mypy server/app
+
+# Frontend
 cd frontend
+npm run lint
+npm run format:check
 npm run test
 npm run build
 ```
