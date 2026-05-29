@@ -218,3 +218,28 @@ Video Hive 是一个**架构清晰、代码质量良好、测试覆盖充分**�
 **主要短板集中在安全领域**：路径遍历、命令注入、SQL 拼接等漏洞需要立即修复。此外，`process_video_once` 的 God Function 趋势和前后端 phase 定义重复是主要的架构债务。
 
 **项目成熟度评估**：Beta → Production Ready（修复安全问题后）
+
+---
+
+## 十、修复状态追踪
+
+> 本表格跟踪第八节改进建议的修复状态。状态：`待修复` / 进行中 / 已修复。
+
+| 优先级 | # | 建议 | 状态 | 对应 Issue | 对应 Spec / Plan |
+|--------|---|------|------|------------|------------------|
+| P0 | 1 | `api.py:download_package` 加固路径校验 | 待修复 | — | — |
+| P0 | 2 | `openclaw.py` 对 `prompt_text` 做 shell 元字符转义 | 待修复 | — | — |
+| P0 | 3 | `db.py:update_video` 移除 SQL f-string 拼接 | 待修复 | — | [spec: quality-round3](superpowers/specs/2026-05-29-quality-round3-design.md) |
+| P1 | 4 | 提取 `video_dir` 解析为共享工具函数，消除 5+ 处重复 | 待修复 | — | — |
+| P1 | 5 | `process_video_once` 拆分为 PhaseHandler 策略模式 | 待修复 | — | — |
+| P1 | 6 | 前后端共享 phase 序列定义（可通过 JSON 或代码生成） | 待修复 | — | — |
+| P1 | 7 | `DetailPage.tsx` 移除 `document.getElementById` DOM 操作 | 待修复 | — | — |
+| P1 | 8 | 增加前端 API 错误统一处理中间件 | 待修复 | — | — |
+| P2 | 9 | `package.py` 时间戳改为 `%Y%m%d_%H%M%S`（去掉微秒） | 待修复 | — | — |
+| P2 | 10 | `agents.py:_broadcast` 增加异常日志 | 待修复 | — | — |
+| P2 | 11 | 前端增加 `DetailPage` 等核心组件的交互测试 | 待修复 | — | — |
+| P2 | 12 | 考虑引入 `zod` 或 `valibot` 做运行时 API 响应校验 | 待修复 | — | — |
+
+---
+
+*报告版本: v1.0 | 追踪更新: 2026-05-29*
