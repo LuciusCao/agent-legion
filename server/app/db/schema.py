@@ -72,5 +72,17 @@ def init_db(path: Path) -> None:
             for column, statement in migrations.items():
                 if column not in existing_columns:
                     conn.execute(statement)
+
+            # Performance indexes for issue 012
+            conn.executescript(
+                """
+                create index if not exists idx_videos_status on videos(status);
+                create index if not exists idx_videos_content_type_external_id on videos(content_type, external_id);
+                create index if not exists idx_videos_created_at on videos(created_at);
+                create index if not exists idx_phase_runs_video_id on phase_runs(video_id);
+                create index if not exists idx_phase_runs_video_id_status on phase_runs(video_id, status);
+                create index if not exists idx_transcription_runs_video_id on transcription_runs(video_id);
+                """
+            )
     finally:
         conn.close()

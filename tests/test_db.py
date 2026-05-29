@@ -212,3 +212,148 @@ def test_update_video_allows_completed_with_assemble_from_any_phase(db):
     updated = db.get_video(video["id"])
     assert updated["status"] == "completed"
     assert updated["current_phase"] == "assemble"
+
+
+_EXPECTED_INDEXES = {
+    "idx_videos_status",
+    "idx_videos_content_type_external_id",
+    "idx_videos_created_at",
+    "idx_phase_runs_video_id",
+    "idx_phase_runs_video_id_status",
+    "idx_transcription_runs_video_id",
+}
+
+
+def test_database_creates_performance_indexes(db):
+    """Regression test for issue 012: critical indexes must exist."""
+    with db.connect() as conn:
+        indexes = {
+            row["name"]
+            for row in conn.execute("select name from sqlite_master where type='index'").fetchall()
+        }
+    assert _EXPECTED_INDEXES.issubset(indexes), f"Missing indexes: {_EXPECTED_INDEXES - indexes}"
+
+
+def test_has_running_phase_run_returns_true_when_running(db):
+    """Regression test for issue 012: SQL-level running check."""
+    video = db.create_video("https://example.com/path/a.mp4", "Title A")
+    db.start_phase(video["id"], "download", ["python3", "download.py"])
+    assert db.has_running_phase_run(video["id"]) is True
+
+
+def test_has_running_phase_run_returns_false_when_none_running(db):
+    """Regression test for issue 012: SQL-level running check."""
+    video = db.create_video("https://example.com/path/a.mp4", "Title A")
+    run = db.start_phase(video["id"], "download", ["python3", "download.py"])
+    db.finish_phase(run["id"], "completed", 0, "")
+    assert db.has_running_phase_run(video["id"]) is False
+
+
+def test_list_videos_status_filter_string(db):
+    """Regression test for issue 012: list_videos with status filter."""
+    v1 = db.create_video("https://example.com/a.mp4", "A")
+    v2 = db.create_video("https://example.com/b.mp4", "B")
+    db.update_video(v1["id"], current_phase="assemble", status="completed")
+    db.update_video(v2["id"], status="failed")
+
+    result = db.list_videos(status_filter="completed")
+    assert len(result) == 1
+    assert result[0]["id"] == v1["id"]
+
+
+def test_list_videos_status_filter_list(db):
+    """Regression test for issue 012: list_videos with multiple status filter."""
+    v1 = db.create_video("https://example.com/a.mp4", "A")
+    v2 = db.create_video("https://example.com/b.mp4", "B")
+    v3 = db.create_video("https://example.com/c.mp4", "C")
+    db.update_video(v1["id"], current_phase="assemble", status="completed")
+    db.update_video(v2["id"], status="failed")
+
+    result = db.list_videos(status_filter=["completed", "failed"])
+    ids = {v["id"] for v in result}
+    assert v1["id"] in ids
+    assert v2["id"] in ids
+    assert v3["id"] not in ids
+
+
+def test_list_videos_limit_and_offset(db):
+    """Regression test for issue 012: list_videos with limit and offset."""
+    for i in range(5):
+        db.create_video(f"https://example.com/{i}.mp4", f"Video {i}")
+
+    all_videos = db.list_videos()
+    assert len(all_videos) == 5
+
+    limited = db.list_videos(limit=2)
+    assert len(limited) == 2
+    assert limited[0]["id"] == all_videos[0]["id"]
+    assert limited[1]["id"] == all_videos[1]["id"]
+
+    offset = db.list_videos(limit=2, offset=2)
+    assert len(offset) == 2
+    assert offset[0]["id"] == all_videos[2]["id"]
+    assert offset[1]["id"] == all_videos[3]["id"]
+
+
+def test_batch_get_videos_returns_matching_records(db):
+    """Regression test for issue 012: batch get videos."""
+    v1 = db.create_video("https://example.com/a.mp4", "A")
+    v2 = db.create_video("https://example.com/b.mp4", "B")
+    db.create_video("https://example.com/c.mp4", "C")
+
+    result = db.batch_get_videos([v1["id"], v2["id"]])
+    ids = {v["id"] for v in result}
+    assert v1["id"] in ids
+    assert v2["id"] in ids
+    assert len(result) == 2
+
+
+def test_batch_get_videos_empty_list(db):
+    """Regression test for issue 012: batch get with empty list."""
+    assert db.batch_get_videos([]) == []
+
+
+def test_batch_delete_videos_cascades(db):
+    """Regression test for issue 012: batch delete videos with cascade."""
+    v1 = db.create_video("https://example.com/a.mp4", "A")
+    v2 = db.create_video("https://example.com/b.mp4", "B")
+    db.start_phase(v1["id"], "download", ["python3", "download.py"])
+    db.start_phase(v2["id"], "transcribe", ["python3", "transcribe.py"])
+
+    db.batch_delete_videos([v1["id"], v2["id"]])
+
+    assert db.get_video(v1["id"]) is None
+    assert db.get_video(v2["id"]) is None
+    assert db.list_phase_runs(v1["id"]) == []
+    assert db.list_phase_runs(v2["id"]) == []
+
+
+def test_batch_delete_videos_empty_list(db):
+    """Regression test for issue 012: batch delete with empty list."""
+    db.batch_delete_videos([])  # should not raise
+
+
+def test_find_videos_by_identities_returns_matches(db):
+    """Regression test for issue 012: batch identity lookup."""
+    v1 = db.create_video(
+        "https://example.com/a.mp4", "A", content_type="knowledge", external_id="K001"
+    )
+    v2 = db.create_video(
+        "https://example.com/b.mp4", "B", content_type="question", external_id="Q001"
+    )
+
+    result = db.find_videos_by_identities(
+        [
+            ("knowledge", "K001"),
+            ("question", "Q001"),
+            ("knowledge", "NOTFOUND"),
+        ]
+    )
+    assert result[("knowledge", "K001")]["id"] == v1["id"]
+    assert result[("question", "Q001")]["id"] == v2["id"]
+    assert ("knowledge", "NOTFOUND") not in result
+
+
+def test_find_videos_by_identities_empty_list(db):
+    """Regression test for issue 012: batch identity lookup with empty list."""
+    assert db.find_videos_by_identities([]) == {}

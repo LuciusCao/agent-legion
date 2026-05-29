@@ -36,7 +36,7 @@ def can_rerun_from(video: VideoRecord, phase: str) -> bool:
 
 
 def has_running_phase_run(db: Database, video_id: str) -> bool:
-    return any(run["status"] == "running" for run in db.list_phase_runs(video_id))
+    return db.has_running_phase_run(video_id)
 
 
 def delete_video_record(db: Database, settings: Settings, video_id: str) -> bool:
@@ -125,14 +125,29 @@ def batch_delete_video_records(
     settings: Settings,
     video_ids: list[str],
 ) -> list[dict[str, str]]:
+    videos = db.batch_get_videos(video_ids)
+    found_map = {v["id"]: v for v in videos}
+
+    # Delete file system directories (cannot be batched)
+    for video_id in video_ids:
+        if video_id in found_map:
+            video_dir = resolve_video_dir(found_map[video_id], settings.videos_dir)
+            if video_dir.exists() and video_dir.is_dir():
+                shutil.rmtree(video_dir)
+
+    # Batch delete DB records
+    found_ids = [vid for vid in video_ids if vid in found_map]
+    if found_ids:
+        db.batch_delete_videos(found_ids)
+
     results = []
     for video_id in video_ids:
-        if not delete_video_record(db, settings, video_id):
+        if video_id in found_map:
+            results.append({"video_id": video_id, "status": "deleted", "message": ""})
+        else:
             results.append(
                 {"video_id": video_id, "status": "not_found", "message": "Video not found"}
             )
-            continue
-        results.append({"video_id": video_id, "status": "deleted", "message": ""})
     return results
 
 
@@ -153,20 +168,15 @@ def select_videos_for_package(
     video_ids: list[str] | None = None,
 ) -> PackageSelection:
     if video_ids is not None:
-        videos = []
-        missing_ids = []
-        incomplete_ids = []
-        for video_id in video_ids:
-            video = db.get_video(video_id)
-            if video and video["status"] == "completed":
-                videos.append(video)
-            elif video:
-                incomplete_ids.append(video_id)
-            else:
-                missing_ids.append(video_id)
+        videos = db.batch_get_videos(video_ids)
+        found_ids = {v["id"] for v in videos}
+        completed = [v for v in videos if v["status"] == "completed"]
+        completed_ids = {v["id"] for v in completed}
+        incomplete_ids = [vid for vid in video_ids if vid in found_ids and vid not in completed_ids]
+        missing_ids = [vid for vid in video_ids if vid not in found_ids]
         return PackageSelection(
-            videos=videos, missing_ids=missing_ids, incomplete_ids=incomplete_ids
+            videos=completed, missing_ids=missing_ids, incomplete_ids=incomplete_ids
         )
 
-    completed = [video for video in db.list_videos() if video["status"] == "completed"]
+    completed = db.list_videos(status_filter="completed")
     return PackageSelection(videos=completed, missing_ids=[], incomplete_ids=[])

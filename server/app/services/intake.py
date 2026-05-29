@@ -64,12 +64,28 @@ def add_video_items(
     videos: list[VideoRecord | None] = []
     results: list[dict[str, Any]] = []
 
+    # Batch pre-check duplicates (issue 012)
+    identities: list[tuple[str, str]] = []
+    url_only_video_ids: list[str] = []
+    for item in items:
+        content_type = normalized_content_type(item.content_type)
+        external_id = item.external_id.strip()
+        if external_id:
+            identities.append((content_type, external_id))
+        elif item.url:
+            url_only_video_ids.append(make_record_id(item.url.strip(), content_type, external_id))
+
+    existing_by_identity = db.find_videos_by_identities(identities) if identities else {}
+    existing_by_id = (
+        {v["id"]: v for v in db.batch_get_videos(url_only_video_ids)} if url_only_video_ids else {}
+    )
+
     for item in items:
         content_type = normalized_content_type(item.content_type)
         external_id = item.external_id.strip()
 
         if external_id:
-            existing = db.find_video_by_identity(content_type, external_id)
+            existing = existing_by_identity.get((content_type, external_id))
             if existing:
                 results.append(
                     {
@@ -83,7 +99,7 @@ def add_video_items(
                 continue
         elif item.url:
             video_id = make_record_id(item.url.strip(), content_type, external_id)
-            existing = db.get_video(video_id)
+            existing = existing_by_id.get(video_id)
             if existing:
                 results.append(
                     {

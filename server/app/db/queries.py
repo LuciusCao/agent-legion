@@ -85,6 +85,16 @@ class VideoQueries:
         finally:
             conn.close()
 
+    @contextmanager
+    def _connect_read(self):
+        """Read-only connection context that does not implicitly commit."""
+        conn = sqlite3.connect(self.path)
+        conn.row_factory = sqlite3.Row
+        try:
+            yield conn
+        finally:
+            conn.close()
+
     def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
         return cast(VideoRecord, dict(row)) if row else None
 
@@ -167,13 +177,21 @@ class VideoQueries:
         return cast(VideoRecord, video)
 
     def get_video(self, video_id: str) -> VideoRecord | None:
-        with self.connect() as conn:
+        with self._connect_read() as conn:
             return self._row(
                 conn.execute("select * from videos where id=?", (video_id,)).fetchone()
             )
 
+    def has_running_phase_run(self, video_id: str) -> bool:
+        with self._connect_read() as conn:
+            row = conn.execute(
+                "select 1 from phase_runs where video_id=? and status='running' limit 1",
+                (video_id,),
+            ).fetchone()
+            return row is not None
+
     def find_video_by_identity(self, content_type: str, external_id: str) -> VideoRecord | None:
-        with self.connect() as conn:
+        with self._connect_read() as conn:
             return self._row(
                 conn.execute(
                     "select * from videos where content_type=? and external_id=?",
@@ -181,12 +199,52 @@ class VideoQueries:
                 ).fetchone()
             )
 
-    def list_videos(self) -> list[VideoRecord]:
-        with self.connect() as conn:
-            return [
-                cast(VideoRecord, dict(row))
-                for row in conn.execute("select * from videos order by created_at desc, id")
-            ]
+    def find_videos_by_identities(
+        self, identities: list[tuple[str, str]]
+    ) -> dict[tuple[str, str], VideoRecord]:
+        if not identities:
+            return {}
+        conditions: list[str] = []
+        params: list[Any] = []
+        for content_type, external_id in identities:
+            conditions.append("(content_type=? and external_id=?)")
+            params.extend([content_type, external_id])
+        where = " or ".join(conditions)
+        with self._connect_read() as conn:
+            rows = conn.execute(f"select * from videos where {where}", params).fetchall()
+            return {
+                (row["content_type"], row["external_id"]): cast(VideoRecord, dict(row))
+                for row in rows
+            }
+
+    def list_videos(
+        self,
+        status_filter: str | list[str] | None = None,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> list[VideoRecord]:
+        where_clauses: list[str] = []
+        params: list[Any] = []
+
+        if status_filter is not None:
+            if isinstance(status_filter, str):
+                where_clauses.append("status=?")
+                params.append(status_filter)
+            elif status_filter:
+                placeholders = ",".join("?" * len(status_filter))
+                where_clauses.append(f"status in ({placeholders})")
+                params.extend(status_filter)
+
+        sql = "select * from videos"
+        if where_clauses:
+            sql += " where " + " and ".join(where_clauses)
+        sql += " order by created_at desc, id"
+        if limit is not None:
+            sql += " limit ? offset ?"
+            params.extend([limit, offset])
+
+        with self._connect_read() as conn:
+            return [cast(VideoRecord, dict(row)) for row in conn.execute(sql, params)]
 
     def update_video(self, video_id: str, **fields: Any) -> None:
         if not fields:
@@ -195,9 +253,14 @@ class VideoQueries:
         if unknown_fields:
             raise ValueError(f"Unknown video fields: {', '.join(unknown_fields)}")
 
-        # Consistency check: status='completed' must pair with current_phase='assemble'
-        if "status" in fields or "current_phase" in fields:
-            with self.connect() as conn:
+        ordered_keys = [k for k in fields if k in VIDEO_UPDATE_FIELDS]
+        assignments = _build_update_assignments(ordered_keys)
+        values = [fields[key] for key in ordered_keys] + [video_id]
+        sql = f"update videos set {assignments}, updated_at=current_timestamp where id=?"
+
+        with self.connect() as conn:
+            # Consistency check: status='completed' must pair with current_phase='assemble'
+            if "status" in fields or "current_phase" in fields:
                 row = conn.execute(
                     "select status, current_phase from videos where id=?", (video_id,)
                 ).fetchone()
@@ -209,12 +272,6 @@ class VideoQueries:
                             f"Invalid state: status='completed' requires "
                             f"current_phase='assemble', got '{new_phase}'"
                         )
-
-        ordered_keys = [k for k in fields if k in VIDEO_UPDATE_FIELDS]
-        assignments = _build_update_assignments(ordered_keys)
-        values = [fields[key] for key in ordered_keys] + [video_id]
-        sql = f"update videos set {assignments}, updated_at=current_timestamp where id=?"
-        with self.connect() as conn:
             conn.execute(sql, values)
         self._notify(video_id)
 
@@ -307,7 +364,7 @@ class VideoQueries:
             self._notify(video_id)
 
     def get_phase_run(self, video_id: str, run_id: int) -> PhaseRunRecord | None:
-        with self.connect() as conn:
+        with self._connect_read() as conn:
             row = conn.execute(
                 "select * from phase_runs where video_id=? and id=?",
                 (video_id, run_id),
@@ -354,7 +411,7 @@ class VideoQueries:
         self._notify(video_id)
 
     def list_phase_runs(self, video_id: str) -> list[PhaseRunRecord]:
-        with self.connect() as conn:
+        with self._connect_read() as conn:
             rows = [
                 dict(row)
                 for row in conn.execute(
@@ -368,7 +425,7 @@ class VideoQueries:
             return cast(list[PhaseRunRecord], rows)
 
     def list_transcription_runs(self, video_id: str) -> list[dict[str, Any]]:
-        with self.connect() as conn:
+        with self._connect_read() as conn:
             rows = [
                 dict(row)
                 for row in conn.execute(
@@ -391,3 +448,30 @@ class VideoQueries:
             conn.execute("delete from videos where id=?", (video_id,))
         if self._hub is not None:
             self._hub.emit_delete(video_id)
+
+    def batch_get_videos(self, video_ids: list[str]) -> list[VideoRecord]:
+        if not video_ids:
+            return []
+        placeholders = ",".join("?" * len(video_ids))
+        with self._connect_read() as conn:
+            return [
+                cast(VideoRecord, dict(row))
+                for row in conn.execute(
+                    f"select * from videos where id in ({placeholders})", video_ids
+                )
+            ]
+
+    def batch_delete_videos(self, video_ids: list[str]) -> None:
+        if not video_ids:
+            return
+        placeholders = ",".join("?" * len(video_ids))
+        with self.connect() as conn:
+            conn.execute(f"delete from phase_runs where video_id in ({placeholders})", video_ids)
+            conn.execute(
+                f"delete from transcription_runs where video_id in ({placeholders})",
+                video_ids,
+            )
+            conn.execute(f"delete from videos where id in ({placeholders})", video_ids)
+        if self._hub is not None:
+            for vid in video_ids:
+                self._hub.emit_delete(vid)
