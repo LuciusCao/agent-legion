@@ -93,7 +93,7 @@ describe('DetailPage package button', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter initialEntries={['/videos/v1']}>
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
