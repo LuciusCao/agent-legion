@@ -41,19 +41,6 @@ export function parseTimeSeconds(value: unknown): number {
   return Number.NaN
 }
 
-export function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    const map: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;',
-    }
-    return map[char] ?? char
-  })
-}
-
 export function formatDuration(ms: number): string {
   if (ms <= 0) return '—'
   const sec = Math.floor(ms / 1000)

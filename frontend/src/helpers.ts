@@ -20,7 +20,6 @@ export {
 export {
   seconds,
   parseTimeSeconds,
-  escapeHtml,
   formatInteractionStats,
 } from './lib/formatters'
 export { triggerDownload } from './lib/download'
