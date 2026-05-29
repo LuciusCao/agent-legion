@@ -18,6 +18,7 @@ dependencies = [
 dev = [
   "httpx",
   "pytest",
+  "pytest-cov>=7.1.0",
   "ruff",
 ]
 
@@ -38,3 +39,12 @@ exclude = [
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "SIM"]
 ignore = ["E501"]
+
+[tool.coverage.run]
+source = ["server"]
+omit = ["*/__pycache__/*"]
+
+[tool.coverage.report]
+fail_under = 75
+show_missing = true
+skip_covered = false

@@ -56,7 +56,9 @@ VIDEO_UPDATE_FIELDS = {
 
 
 class VideoQueries:
-    def __init__(self, path: Path, hub: NotificationHub | None = None, videos_dir: Path | None = None):
+    def __init__(
+        self, path: Path, hub: NotificationHub | None = None, videos_dir: Path | None = None
+    ):
         self.path = path
         self._hub = hub
         self._videos_dir = videos_dir
@@ -75,7 +77,11 @@ class VideoQueries:
             return
         video = self.get_video(video_id)
         if video and video.get("content_type") == "knowledge" and self._videos_dir is not None:
-            video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else self._videos_dir / video_id
+            video_dir = (
+                Path(video["storage_dir"])
+                if video.get("storage_dir")
+                else self._videos_dir / video_id
+            )
             stats = compute_interaction_stats(video_dir)
             if stats:
                 video["interaction_stats"] = stats
@@ -142,7 +148,9 @@ class VideoQueries:
 
     def get_video(self, video_id: str) -> VideoRecord | None:
         with self.connect() as conn:
-            return self._row(conn.execute("select * from videos where id=?", (video_id,)).fetchone())
+            return self._row(
+                conn.execute("select * from videos where id=?", (video_id,)).fetchone()
+            )
 
     def find_video_by_identity(self, content_type: str, external_id: str) -> VideoRecord | None:
         with self.connect() as conn:
@@ -155,7 +163,10 @@ class VideoQueries:
 
     def list_videos(self) -> list[VideoRecord]:
         with self.connect() as conn:
-            return [dict(row) for row in conn.execute("select * from videos order by created_at desc, id")]
+            return [
+                dict(row)
+                for row in conn.execute("select * from videos order by created_at desc, id")
+            ]
 
     def update_video(self, video_id: str, **fields: Any) -> None:
         if not fields:
@@ -214,8 +225,7 @@ class VideoQueries:
         video_ids = []
         with self.connect() as conn:
             video_ids = [
-                row["id"]
-                for row in conn.execute("select id from videos where status='running'")
+                row["id"] for row in conn.execute("select id from videos where status='running'")
             ]
             conn.execute(
                 """
@@ -238,7 +248,9 @@ class VideoQueries:
             self._notify(vid)
         return len(video_ids)
 
-    def finish_phase(self, run_id: int, status: str, exit_code: int | None, error_message: str) -> None:
+    def finish_phase(
+        self, run_id: int, status: str, exit_code: int | None, error_message: str
+    ) -> None:
         video_id = None
         with self.connect() as conn:
             run = conn.execute("select * from phase_runs where id=?", (run_id,)).fetchone()

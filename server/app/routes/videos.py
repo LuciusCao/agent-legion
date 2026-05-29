@@ -116,7 +116,11 @@ def create_videos_router(
         for video in videos:
             video["packed"] = bool(video.get("packed", 0))
             if video.get("content_type") == "knowledge":
-                video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else settings.videos_dir / video["id"]
+                video_dir = (
+                    Path(video["storage_dir"])
+                    if video.get("storage_dir")
+                    else settings.videos_dir / video["id"]
+                )
                 stats = compute_interaction_stats(video_dir)
                 if stats:
                     video["interaction_stats"] = stats
@@ -129,7 +133,11 @@ def create_videos_router(
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         if video.get("content_type") == "knowledge":
-            video_dir = Path(video["storage_dir"]) if video.get("storage_dir") else settings.videos_dir / video_id
+            video_dir = (
+                Path(video["storage_dir"])
+                if video.get("storage_dir")
+                else settings.videos_dir / video_id
+            )
             stats = compute_interaction_stats(video_dir)
             if stats:
                 video["interaction_stats"] = stats
@@ -146,7 +154,11 @@ def create_videos_router(
 
     @router.post("/batch/rerun", response_model=BatchRerunResponse)
     def batch_rerun_videos(request: BatchRerunRequest) -> dict[str, Any]:
-        return {"results": batch_rerun_video_records(db, settings, request.video_ids, request.phase, agent_manager)}
+        return {
+            "results": batch_rerun_video_records(
+                db, settings, request.video_ids, request.phase, agent_manager
+            )
+        }
 
     @router.post("/batch/run-to", response_model=BatchRunToResponse)
     def batch_run_to_videos(request: BatchRunToRequest) -> dict[str, Any]:

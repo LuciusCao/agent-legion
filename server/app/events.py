@@ -125,21 +125,25 @@ class VideoEventManager:
         transcription_runs: list[dict[str, Any]],
     ) -> None:
         self._broadcast(
-            json.dumps({
-                "type": "video_detail_updated",
-                "video_id": video_id,
-                "video": video,
-                "phase_runs": phase_runs,
-                "transcription_runs": transcription_runs,
-            })
+            json.dumps(
+                {
+                    "type": "video_detail_updated",
+                    "video_id": video_id,
+                    "video": video,
+                    "phase_runs": phase_runs,
+                    "transcription_runs": transcription_runs,
+                }
+            )
         )
         self._broadcast_to_video(
             video_id,
-            json.dumps({
-                "type": "phase_runs_updated",
-                "video_id": video_id,
-                "video": video,
-                "phase_runs": phase_runs,
-                "transcription_runs": transcription_runs,
-            }),
+            json.dumps(
+                {
+                    "type": "phase_runs_updated",
+                    "video_id": video_id,
+                    "video": video,
+                    "phase_runs": phase_runs,
+                    "transcription_runs": transcription_runs,
+                }
+            ),
         )

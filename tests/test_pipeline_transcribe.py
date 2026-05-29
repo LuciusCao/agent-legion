@@ -122,30 +122,21 @@ def test_validate_srt_coverage_too_low():
 
 
 def test_validate_srt_overly_repetitive():
-    text = "\n\n".join(
-        f"{i}\n00:00:0{i},000 --> 00:00:0{i+1},000\nsame text"
-        for i in range(5)
-    )
+    text = "\n\n".join(f"{i}\n00:00:0{i},000 --> 00:00:0{i + 1},000\nsame text" for i in range(5))
     result = validate_srt(text)
     assert result.ok is False
     assert "overly repetitive" in result.summary
 
 
 def test_validate_srt_valid():
-    text = (
-        "1\n00:00:00,000 --> 00:00:01,000\nHello\n\n"
-        "2\n00:00:01,000 --> 00:00:02,000\nWorld\n"
-    )
+    text = "1\n00:00:00,000 --> 00:00:01,000\nHello\n\n2\n00:00:01,000 --> 00:00:02,000\nWorld\n"
     result = validate_srt(text, duration=10)
     assert result.ok is True
     assert result.entry_count == 2
 
 
 def test_validate_srt_large_gap_fails():
-    text = (
-        "1\n00:00:00,000 --> 00:00:04,000\nHello\n\n"
-        "2\n00:00:30,000 --> 00:00:35,000\nWorld\n"
-    )
+    text = "1\n00:00:00,000 --> 00:00:04,000\nHello\n\n2\n00:00:30,000 --> 00:00:35,000\nWorld\n"
     result = validate_srt(text, duration=40)
     assert result.ok is False
     assert "gap too large" in result.summary
@@ -153,19 +144,14 @@ def test_validate_srt_large_gap_fails():
 
 
 def test_validate_srt_small_gap_passes():
-    text = (
-        "1\n00:00:00,000 --> 00:00:04,000\nHello\n\n"
-        "2\n00:00:14,000 --> 00:00:18,000\nWorld\n"
-    )
+    text = "1\n00:00:00,000 --> 00:00:04,000\nHello\n\n2\n00:00:14,000 --> 00:00:18,000\nWorld\n"
     result = validate_srt(text, duration=20)
     assert result.ok is True
     assert result.entry_count == 2
 
 
 def test_validate_srt_entry_too_long_fails():
-    text = (
-        "1\n00:00:00,000 --> 00:00:20,000\nHello world this is a very long segment\n"
-    )
+    text = "1\n00:00:00,000 --> 00:00:20,000\nHello world this is a very long segment\n"
     result = validate_srt(text, duration=30)
     assert result.ok is False
     assert "entry too long" in result.summary
@@ -174,8 +160,7 @@ def test_validate_srt_entry_too_long_fails():
 
 def test_validate_srt_entry_within_limit_passes():
     text = (
-        "1\n00:00:00,000 --> 00:00:14,000\nHello world\n\n"
-        "2\n00:00:14,000 --> 00:00:18,000\nWorld\n"
+        "1\n00:00:00,000 --> 00:00:14,000\nHello world\n\n2\n00:00:14,000 --> 00:00:18,000\nWorld\n"
     )
     result = validate_srt(text, duration=20)
     assert result.ok is True

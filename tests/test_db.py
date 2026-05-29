@@ -178,7 +178,9 @@ def test_update_video_rejects_completed_without_assemble_phase(db):
     video = db.create_video("https://example.com/path/a.mp4", "Title A")
 
     # Setting status='completed' while current_phase='download' should fail
-    with pytest.raises(ValueError, match="Invalid state: status='completed' requires current_phase='assemble'",
+    with pytest.raises(
+        ValueError,
+        match="Invalid state: status='completed' requires current_phase='assemble'",
     ):
         db.update_video(video["id"], status="completed")
 
