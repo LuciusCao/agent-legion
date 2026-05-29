@@ -319,6 +319,14 @@ class VideoQueries:
             conn.execute(sql, values)
         self._notify(video_id)
 
+    def batch_update_packed(self, video_ids: list[str], packed: int = 1) -> None:
+        if not video_ids:
+            return
+        placeholders = ",".join("?" * len(video_ids))
+        sql = f"update videos set packed=?, updated_at=current_timestamp where id in ({placeholders})"
+        with self.connect() as conn:
+            conn.execute(sql, [packed] + video_ids)
+
     def start_phase(
         self, video_id: str, phase_key: str, command: list[str], log_path: str = ""
     ) -> PhaseRunRecord | None:
