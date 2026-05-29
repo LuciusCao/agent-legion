@@ -217,49 +217,79 @@ export const useVideoStore = create<VideoState>((set, get) => ({
   setSseConnected: (connected) => set({ sseConnected: connected }),
 
   batchDelete: async (ids) => {
-    return api('/api/videos/batch/delete', {
-      method: 'POST',
-      body: JSON.stringify({ video_ids: ids }),
-    })
+    try {
+      return await api('/api/videos/batch/delete', {
+        method: 'POST',
+        body: JSON.stringify({ video_ids: ids }),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ error: message })
+      throw err
+    }
   },
 
   batchRerun: async (ids, phase) => {
-    return api('/api/videos/batch/rerun', {
-      method: 'POST',
-      body: JSON.stringify({ video_ids: ids, phase }),
-    })
+    try {
+      return await api('/api/videos/batch/rerun', {
+        method: 'POST',
+        body: JSON.stringify({ video_ids: ids, phase }),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ error: message })
+      throw err
+    }
   },
 
   runTo: async (id, targetPhase, startPhase = null) => {
-    return api(`/api/videos/${id}/run-to`, {
-      method: 'POST',
-      body: JSON.stringify({
-        target_phase: targetPhase,
-        start_phase: startPhase,
-      }),
-    })
+    try {
+      return await api(`/api/videos/${id}/run-to`, {
+        method: 'POST',
+        body: JSON.stringify({
+          target_phase: targetPhase,
+          start_phase: startPhase,
+        }),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ error: message })
+      throw err
+    }
   },
 
   batchRunTo: async (ids, targetPhase, startPhase = null) => {
-    return api('/api/videos/batch/run-to', {
-      method: 'POST',
-      body: JSON.stringify({
-        video_ids: ids,
-        target_phase: targetPhase,
-        start_phase: startPhase,
-      }),
-    })
+    try {
+      return await api('/api/videos/batch/run-to', {
+        method: 'POST',
+        body: JSON.stringify({
+          video_ids: ids,
+          target_phase: targetPhase,
+          start_phase: startPhase,
+        }),
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ error: message })
+      throw err
+    }
   },
 
   batchPackage: async (ids) => {
-    const result = await api<{ path: string; download_url: string }>(
-      '/api/package',
-      {
-        method: 'POST',
-        body: JSON.stringify({ video_ids: ids }),
-      }
-    )
-    await get().fetchVideos()
-    return result
+    try {
+      const result = await api<{ path: string; download_url: string }>(
+        '/api/package',
+        {
+          method: 'POST',
+          body: JSON.stringify({ video_ids: ids }),
+        }
+      )
+      await get().fetchVideos()
+      return result
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ error: message })
+      throw err
+    }
   },
 }))

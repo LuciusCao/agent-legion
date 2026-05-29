@@ -348,4 +348,36 @@ describe('videoStore', () => {
     })
     expect(response.results).toHaveLength(1)
   })
+
+  it('sets error state when batchDelete fails', async () => {
+    mockApi.mockRejectedValueOnce(new Error('delete failed'))
+    await expect(
+      useVideoStore.getState().batchDelete(['v1'])
+    ).rejects.toThrow('delete failed')
+    expect(useVideoStore.getState().error).toBe('delete failed')
+  })
+
+  it('sets error state when batchRerun fails', async () => {
+    mockApi.mockRejectedValueOnce(new Error('rerun failed'))
+    await expect(
+      useVideoStore.getState().batchRerun(['v1'], 'download')
+    ).rejects.toThrow('rerun failed')
+    expect(useVideoStore.getState().error).toBe('rerun failed')
+  })
+
+  it('sets error state when batchRunTo fails', async () => {
+    mockApi.mockRejectedValueOnce(new Error('run-to failed'))
+    await expect(
+      useVideoStore.getState().batchRunTo(['v1'], 'assemble')
+    ).rejects.toThrow('run-to failed')
+    expect(useVideoStore.getState().error).toBe('run-to failed')
+  })
+
+  it('sets error state when batchPackage fails', async () => {
+    mockApi.mockRejectedValueOnce(new Error('package failed'))
+    await expect(
+      useVideoStore.getState().batchPackage(['v1'])
+    ).rejects.toThrow('package failed')
+    expect(useVideoStore.getState().error).toBe('package failed')
+  })
 })
