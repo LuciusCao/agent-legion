@@ -547,6 +547,16 @@ def test_worker_thread_stop_calls_close_read_conn(db, settings):
         mock_close.assert_called_once()
 
 
+def test_worker_control_tick():
+    from server.app.worker_control import WorkerControl
+
+    wc = WorkerControl()
+    assert not wc.consume_tick()
+    wc.request_tick()
+    assert wc.consume_tick()
+    assert not wc.consume_tick()
+
+
 def test_process_next_does_not_limit_polling_query(db, settings):
     """process_next 不应限制 list_videos 结果集，避免旧视频饥饿。"""
     db.create_video("https://example.com/a.mp4", "A")
