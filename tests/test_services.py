@@ -344,3 +344,112 @@ def test_run_to_phase_question_rejects_knowledge_only_target(db, settings):
 
     assert result["status"] == "invalid_phase"
     assert "不适用于该视频类型" in result["message"]
+
+
+def test_run_to_phase_not_found(db, settings):
+    result = run_to_phase(db, settings, "missing", target_phase="download")
+    assert result["status"] == "not_found"
+
+
+def test_run_to_phase_busy(db, settings):
+    video = db.create_video(
+        "https://example.com/k1.mp4", content_type="knowledge", external_id="K001"
+    )
+    db.start_phase(video["id"], "download", ["cmd"])
+    db.update_video(video["id"], status="running", current_phase="download")
+
+    result = run_to_phase(db, settings, video["id"], target_phase="download")
+    assert result["status"] == "busy"
+
+
+def test_run_to_phase_invalid_start_phase(db, settings):
+    video = db.create_video(
+        "https://example.com/q1.mp4", content_type="question", external_id="Q001"
+    )
+
+    result = run_to_phase(
+        db, settings, video["id"], target_phase="assemble", start_phase="interaction_generate"
+    )
+    assert result["status"] == "invalid_phase"
+    assert "不适用于该视频类型" in result["message"]
+
+
+def test_run_to_phase_start_after_target(db, settings):
+    video = db.create_video(
+        "https://example.com/k1.mp4", content_type="knowledge", external_id="K001"
+    )
+
+    result = run_to_phase(
+        db, settings, video["id"], target_phase="download", start_phase="transcribe"
+    )
+    assert result["status"] == "invalid_phase"
+    assert "起始阶段晚于目标阶段" in result["message"]
+
+
+def test_run_to_phase_completed_video_returns_run_to(db, settings):
+    video = db.create_video(
+        "https://example.com/k1.mp4", content_type="knowledge", external_id="K001"
+    )
+    db.update_video(video["id"], status="completed", current_phase="assemble")
+
+    result = run_to_phase(db, settings, video["id"], target_phase="assemble")
+    assert result["status"] == "run_to"
+
+
+def test_run_to_phase_missing_url_not_waiting(db, settings):
+    video = db.create_video(
+        "https://example.com/k1.mp4", content_type="knowledge", external_id="K001"
+    )
+    db.update_video(
+        video["id"], status="missing_url", current_phase="download", error_message="lost url"
+    )
+
+    result = run_to_phase(db, settings, video["id"], target_phase="download")
+    assert result["status"] in {"failed", "skipped"}
+    assert "lost url" in result["message"]
+
+
+def test_prepare_rerun_downgrades_transcribe_to_download_when_mp4_missing(db, settings):
+    from server.app.services.manual_run import _prepare_rerun
+
+    video = db.create_video(
+        "https://example.com/k1.mp4", content_type="knowledge", external_id="K001"
+    )
+    video_dir = settings.videos_dir / video["id"]
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles.srt").write_text("old", encoding="utf-8")
+    db.update_video(
+        video["id"], storage_dir=str(video_dir), status="completed", current_phase="assemble"
+    )
+
+    normalized_start, _ = _prepare_rerun(db, settings, video, "transcribe")
+    assert normalized_start == "download"
+    assert not (video_dir / "subtitles.srt").exists()
+
+
+def test_run_to_phase_start_transcribe_downgrades_and_runs_with_mock(db, settings, monkeypatch):
+    video = db.create_video(
+        "https://example.com/k1.mp4", content_type="knowledge", external_id="K001"
+    )
+    video_dir = settings.videos_dir / video["id"]
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles.srt").write_text("old", encoding="utf-8")
+    db.update_video(
+        video["id"], storage_dir=str(video_dir), status="completed", current_phase="assemble"
+    )
+
+    monkeypatch.setattr(
+        "server.app.worker.download_video",
+        lambda url, output_path: output_path.write_bytes(b"fake"),
+    )
+
+    result = run_to_phase(
+        db,
+        settings,
+        video["id"],
+        target_phase="transcribe",
+        start_phase="transcribe",
+        providers=[TestProvider()],
+    )
+    assert result["status"] == "rerun_to"
+    assert db.get_video(video["id"])["current_phase"] == "subtitle_review"

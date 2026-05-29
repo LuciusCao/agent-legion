@@ -1,6 +1,7 @@
 import asyncio
 import json
 import subprocess
+from pathlib import Path
 
 
 def test_core_api_routes_declare_response_models(client):
@@ -949,3 +950,130 @@ def test_list_and_detail_return_interaction_review_status(tmp_path, client):
         "example_practice": {"passed": 1, "total": 1},
         "interaction_summary": {"passed": 0, "total": 1},
     }
+
+
+def test_get_video_not_found(client):
+    response = client.get("/api/videos/nonexistent")
+    assert response.status_code == 404
+
+
+def test_rerun_not_found(client):
+    response = client.post("/api/videos/nonexistent/rerun", json={"phase": "download"})
+    assert response.status_code == 404
+
+
+def test_rerun_busy(client, db):
+    db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
+    db.start_phase("knowledge_K001", "download", ["cmd"])
+    db.update_video("knowledge_K001", status="running", current_phase="download")
+
+    response = client.post("/api/videos/knowledge_K001/rerun", json={"phase": "download"})
+    assert response.status_code == 409
+
+
+def test_run_to_not_found(client):
+    response = client.post("/api/videos/nonexistent/run-to", json={"target_phase": "download"})
+    assert response.status_code == 404
+
+
+def test_run_to_busy(client, db):
+    db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
+    db.start_phase("knowledge_K001", "download", ["cmd"])
+    db.update_video("knowledge_K001", status="running", current_phase="download")
+
+    response = client.post("/api/videos/knowledge_K001/run-to", json={"target_phase": "download"})
+    assert response.status_code == 409
+
+
+def test_delete_not_found(client):
+    response = client.delete("/api/videos/nonexistent")
+    assert response.status_code == 404
+
+
+def test_logs_empty(client):
+    client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/k1.mp4", "title": "K1"}]},
+    )
+    response = client.get("/api/videos/k1/logs")
+    assert response.status_code == 200
+    assert response.json()["log"] == ""
+
+
+def test_logs_from_file(tmp_path, client, db):
+    db.create_video("https://example.com/k1.mp4", "k1")
+    log_path = tmp_path / "logs" / "k1-download.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("download started\n" * 1000, encoding="utf-8")
+    db.start_phase("k1", "download", ["cmd"], str(log_path))
+
+    response = client.get("/api/videos/k1/logs")
+    assert response.status_code == 200
+    assert "download started" in response.json()["log"]
+
+
+def test_video_file_redirects_when_local_missing(client):
+    created = client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/k1.mp4", "title": "K1"}]},
+    )
+    video_id = created.json()["videos"][0]["id"]
+    response = client.get(f"/api/videos/{video_id}/video", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://example.com/k1.mp4"
+
+
+def test_video_file_no_source_url(client, db, settings):
+    db.create_video("", "V1")
+    db.update_video("video", source_url="", storage_dir=str(settings.videos_dir / "video"))
+    response = client.get("/api/videos/video/video")
+    assert response.status_code == 404
+    assert response.text == "Video not downloaded yet"
+
+
+def test_rerun_invalid_phase(client):
+    created = client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/k1.mp4", "title": "K1"}]},
+    )
+    video_id = created.json()["videos"][0]["id"]
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+
+    response = client.post(f"/api/videos/{video_id}/rerun", json={"phase": "invalid_phase"})
+    assert response.status_code == 400
+
+
+def test_video_file_video_not_found(client):
+    response = client.get("/api/videos/nonexistent/video")
+    assert response.status_code == 404
+
+
+def test_run_to_success(client, monkeypatch):
+    created = client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/k1.mp4", "title": "K1"}]},
+    )
+    video_id = created.json()["videos"][0]["id"]
+
+    monkeypatch.setattr(
+        "server.app.routes.videos.run_to_phase",
+        lambda db, settings, video_id, **kwargs: {
+            "video_id": video_id,
+            "status": "run_to",
+            "phase": "download",
+            "message": "",
+        },
+    )
+
+    response = client.post(f"/api/videos/{video_id}/run-to", json={"target_phase": "download"})
+    assert response.status_code == 200
+    assert response.json()["result"]["status"] == "run_to"
+
+
+def test_package_download_runtime_error(client, monkeypatch):
+    def boom(self):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(Path, "resolve", boom)
+    response = client.get("/api/packages/test.zip")
+    assert response.status_code == 404

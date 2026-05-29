@@ -311,3 +311,57 @@ def test_review_status_all_failed_individual(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     assert compute_interaction_review_status(video_dir) == "all_failed"
+
+
+def test_compute_interaction_stats_invalid_json(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text("{bad json", encoding="utf-8")
+    assert compute_interaction_stats(video_dir) is None
+
+
+def test_compute_interaction_stats_review_not_dict(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"interactions": [{"id": "n1", "type": "example_practice"}]}),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text("[]", encoding="utf-8")
+    stats = compute_interaction_stats(video_dir)
+    assert stats == {"example_practice": {"passed": 0, "total": 1}}
+
+
+def test_compute_interaction_review_status_review_not_dict(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"interactions": [{"id": "n1", "type": "example_practice"}]}),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text("[]", encoding="utf-8")
+    assert compute_interaction_review_status(video_dir) is None
+
+
+def test_compute_interaction_review_status_all_nodes_missing_id(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"interactions": [{"type": "example_practice"}]}),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps({"status": "published"}), encoding="utf-8"
+    )
+    assert compute_interaction_review_status(video_dir) is None
+
+
+def test_compute_interaction_review_status_invalid_json(tmp_path: Path) -> None:
+    video_dir = tmp_path / "v1"
+    video_dir.mkdir()
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"interactions": [{"id": "n1", "type": "example_practice"}]}),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text("{bad json", encoding="utf-8")
+    assert compute_interaction_review_status(video_dir) is None

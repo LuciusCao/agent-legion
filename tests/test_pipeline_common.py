@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from server.app.cms.knowledge import _extract_knowledge_url
 from server.app.pipeline.common import get_video_id, parse_srt, resolve_video_dir
 
@@ -42,3 +44,33 @@ def test_resolve_video_dir_prefers_storage_dir():
     )
     assert resolve_video_dir({"id": "v1", "storage_dir": ""}, videos_dir) == Path("/data/videos/v1")
     assert resolve_video_dir({"id": "v1"}, videos_dir) == Path("/data/videos/v1")
+
+
+def test_parse_time_unknown_format():
+    from server.app.pipeline.common import parse_time
+
+    with pytest.raises(ValueError, match="Unknown timestamp"):
+        parse_time("invalid")
+
+
+def test_parse_time_with_single_part():
+    from server.app.pipeline.common import parse_time
+
+    with pytest.raises(ValueError, match="Unknown timestamp"):
+        parse_time("1")
+
+
+def test_format_srt_time():
+    from server.app.pipeline.common import format_srt_time
+
+    assert format_srt_time(0) == "00:00:00,000"
+    assert format_srt_time(3661.5) == "01:01:01,500"
+    assert format_srt_time(0.999) == "00:00:00,999"
+
+
+def test_parse_srt_skips_invalid_time_line():
+    from server.app.pipeline.common import parse_srt
+
+    result = parse_srt("1\ninvalid line\nhello\n\n2\n00:00:00,000 --> 00:00:01,000\nworld\n")
+    assert len(result) == 1
+    assert result[0]["text"] == "world"

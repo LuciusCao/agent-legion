@@ -2,11 +2,14 @@ import json
 import subprocess
 from pathlib import Path
 
+import pytest
+
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool, discover_openclaw_agents
 from server.app.settings import load_settings
 from server.app.worker import (
     WorkerCapacity,
+    build_default_providers,
     get_phase_concurrency_limit,
     pick_next_work,
     process_next,
@@ -463,3 +466,22 @@ def test_process_video_once_marks_completed_when_target_is_final_phase(db, setti
 
     assert processed is True
     assert db.get_video("a")["status"] == "completed"
+
+
+def test_build_default_providers_with_missing_vad_model(tmp_path, settings):
+    settings.config["asr"] = {
+        "whisper": {"binary": "whisper", "model": "model.bin", "vad_model": "/nonexistent/vad.bin"},
+        "sensevoice": {},
+    }
+    with pytest.raises(FileNotFoundError, match="VAD model not found"):
+        build_default_providers(settings)
+
+
+def test_build_default_providers_without_vad_model(tmp_path, settings):
+    settings.config["asr"] = {
+        "whisper": {"binary": "whisper", "model": "model.bin"},
+        "sensevoice": {},
+    }
+    providers = build_default_providers(settings)
+    assert len(providers) == 2
+    assert providers[0].vad_model is None
