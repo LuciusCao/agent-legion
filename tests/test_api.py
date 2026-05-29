@@ -564,6 +564,7 @@ def test_batch_run_to_returns_per_video_results(client):
     assert response.status_code == 200
     results = response.json()["results"]
     assert results[0]["video_id"] == "knowledge_K001"
+    assert results[0]["status"] == "accepted"
     assert results[1]["status"] == "skipped"
 
 
@@ -1105,10 +1106,10 @@ def test_run_to_success(client, monkeypatch):
     video_id = created.json()["videos"][0]["id"]
 
     monkeypatch.setattr(
-        "server.app.routes.videos.run_to_phase",
+        "server.app.routes.videos.submit_run_to_phase",
         lambda db, settings, video_id, **kwargs: {
             "video_id": video_id,
-            "status": "run_to",
+            "status": "accepted",
             "phase": "download",
             "message": "",
         },
@@ -1116,7 +1117,7 @@ def test_run_to_success(client, monkeypatch):
 
     response = client.post(f"/api/videos/{video_id}/run-to", json={"target_phase": "download"})
     assert response.status_code == 200
-    assert response.json()["result"]["status"] == "run_to"
+    assert response.json()["result"]["status"] == "accepted"
 
 
 def test_package_download_runtime_error(client, monkeypatch):
