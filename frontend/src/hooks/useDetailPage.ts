@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDetailStore } from '../stores/detailStore'
 import { useArtifactStore } from '../stores/artifactStore'
@@ -6,7 +6,10 @@ import { useInteractionStore } from '../stores/interactionStore'
 import { useUiStore } from '../stores/uiStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useVideoPhaseEvents } from './useVideoPhaseEvents'
-import { binarySearchTriggerIndex } from '../lib/search'
+import {
+  binarySearchTriggerIndex,
+  prepareIndexedTriggers,
+} from '../lib/search'
 import { api } from '../api'
 import { parseTimeSeconds, triggerDownload } from '../helpers'
 import type {
@@ -96,6 +99,11 @@ export function useDetailPage(): UseDetailPageReturn {
   const { openRerunDialog, openDeleteDialog, showToast } = useUiStore()
   const { fetchVideos } = useVideoStore()
 
+  const indexedTriggers = useMemo(
+    () => prepareIndexedTriggers(artifacts.interactions),
+    [artifacts.interactions]
+  )
+
   const checkFetchError = useCallback(() => {
     const err = useVideoStore.getState().error
     if (err) {
@@ -139,7 +147,7 @@ export function useDetailPage(): UseDetailPageReturn {
       setCurrentTime(time)
       const previousTime = previousPlaybackTimeRef.current
 
-      const idx = binarySearchTriggerIndex(time, artifacts.interactions)
+      const idx = binarySearchTriggerIndex(time, indexedTriggers)
       if (idx === -1) {
         previousPlaybackTimeRef.current = time
         return
@@ -166,6 +174,7 @@ export function useDetailPage(): UseDetailPageReturn {
       previousPlaybackTimeRef.current = time
     },
     [
+      indexedTriggers,
       artifacts.interactions,
       triggeredNodeIndexes,
       dismissedNodeIndexes,
