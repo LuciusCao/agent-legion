@@ -1,9 +1,12 @@
 import json
+import logging
 import re
 import shlex
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -22,6 +25,46 @@ class AgentRunResult:
     error_message: str = ""
 
 
+@dataclass
+class SkillSafetyConfig:
+    enabled: bool
+    repos: list[dict[str, str]]
+
+
+def restore_skill_repos(repos: list[dict[str, str]]) -> None:
+    for repo in repos:
+        path = Path(repo["path"]).expanduser().resolve()
+        ref = repo["ref"]
+        if not (path / ".git").is_dir():
+            logger.warning("Skill safety: %s is not a git repo, skipping", path)
+            continue
+        checkout = subprocess.run(
+            ["git", "-C", str(path), "checkout", ref, "-f"],
+            capture_output=True,
+            text=True,
+        )
+        if checkout.returncode != 0:
+            logger.error(
+                "Skill safety: failed to checkout %s in %s: %s",
+                ref,
+                path,
+                checkout.stderr,
+            )
+            continue
+        clean = subprocess.run(
+            ["git", "-C", str(path), "clean", "-fd"],
+            capture_output=True,
+            text=True,
+        )
+        if clean.returncode != 0:
+            logger.warning(
+                "Skill safety: failed to clean %s: %s",
+                path,
+                clean.stderr,
+            )
+        logger.info("Skill safety: restored %s to %s", path, ref)
+
+
 def extract_openclaw_arg(command: list[str], name: str) -> str:
     for i, part in enumerate(command):
         if part == name and i + 1 < len(command):
@@ -33,11 +76,18 @@ def extract_openclaw_arg(command: list[str], name: str) -> str:
 
 
 class OpenClawRunner:
-    def __init__(self, command_template: list[str], cwd: Path, timeout_seconds: int):
+    def __init__(
+        self,
+        command_template: list[str],
+        cwd: Path,
+        timeout_seconds: int,
+        skill_safety: SkillSafetyConfig | None = None,
+    ):
         self.command_template = command_template
         self.cwd = cwd
         self.timeout_seconds = timeout_seconds
         self.agent_id = self._extract_agent_id(command_template)
+        self.skill_safety = skill_safety
 
     @staticmethod
     def _extract_agent_id(command_template: list[str]) -> str:
@@ -86,6 +136,9 @@ class OpenClawRunner:
         prompt_dir: Path,
         log_path: Path,
     ) -> AgentRunResult:
+        if self.skill_safety is not None and self.skill_safety.enabled:
+            restore_skill_repos(self.skill_safety.repos)
+
         video_dir.mkdir(parents=True, exist_ok=True)
         prompt_dir.mkdir(parents=True, exist_ok=True)
         log_path.parent.mkdir(parents=True, exist_ok=True)

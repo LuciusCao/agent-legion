@@ -2,7 +2,7 @@ import json
 import subprocess
 from typing import Any
 
-from server.app.pipeline.openclaw import OpenClawRunner
+from server.app.pipeline.openclaw import OpenClawRunner, SkillSafetyConfig
 from server.app.settings import Settings
 
 
@@ -47,6 +47,14 @@ def build_openclaw_runners(
     base_cwd = (settings.root_dir / str(openclaw.get("cwd", "."))).resolve()
     timeout_seconds = int(openclaw.get("timeout_seconds", 600))
 
+    skill_safety: SkillSafetyConfig | None = None
+    skill_safety_raw = openclaw.get("skill_safety")
+    if skill_safety_raw is not None:
+        skill_safety = SkillSafetyConfig(
+            enabled=bool(skill_safety_raw.get("enabled", True)),
+            repos=list(skill_safety_raw.get("repos", [])),
+        )
+
     runners_config = openclaw.get("runners")
     if runners_config:
         return [
@@ -54,6 +62,7 @@ def build_openclaw_runners(
                 command_template=list(r["command_template"]),
                 cwd=base_cwd,
                 timeout_seconds=timeout_seconds,
+                skill_safety=skill_safety,
             )
             for r in runners_config
         ]
@@ -84,6 +93,7 @@ def build_openclaw_runners(
                     command_template=_build_agent_command(base_template, agent_id),
                     cwd=base_cwd,
                     timeout_seconds=timeout_seconds,
+                    skill_safety=skill_safety,
                 )
                 for agent_id in agents
             ]
@@ -93,6 +103,7 @@ def build_openclaw_runners(
             command_template=base_template,
             cwd=base_cwd,
             timeout_seconds=timeout_seconds,
+            skill_safety=skill_safety,
         )
     ]
 

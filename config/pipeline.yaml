@@ -39,6 +39,19 @@ cleanup_video_after_assemble: false
 openclaw:
   cwd: .
   timeout_seconds: 600
+  # 调用 openclaw agent 前，强制把指定技能目录 checkout 到干净的 ref/tag，
+  # 防止 agent 自我修改技能或在技能里写入脏数据。
+  skill_safety:
+    enabled: true
+    repos:
+      - path: ~/.openclaw/workspace/skills/generate-interactions
+        ref: v1.0.0
+      - path: ~/.openclaw/workspace/skills/review-interactions
+        ref: v1.0.0
+      - path: ~/.openclaw/workspace/skills/review-subtitles
+        ref: v1.0.0
+      - path: ~/.openclaw/workspace/skills/slice-chapters
+        ref: v1.0.0
   # 基础命令模板（如果包含 --agent，程序启动时会自动调用
   # "openclaw agents list --json" 动态发现可用 agent，并为每个 agent
   # 生成一个独立的 runner。如果模板不含 --agent，则只创建单个 runner）
