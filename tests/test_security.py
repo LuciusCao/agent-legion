@@ -66,6 +66,14 @@ class TestValidateDownloadUrl:
         with pytest.raises(ValueError, match="Invalid URL"):
             validate_download_url("")
 
+    def test_rejects_octal_ip(self):
+        with pytest.raises(ValueError, match="Invalid URL"):
+            validate_download_url("http://0177.0.0.1/secrets")
+
+    def test_rejects_hex_ip(self):
+        with pytest.raises(ValueError, match="Invalid URL"):
+            validate_download_url("http://0x7f.0.0.1/secrets")
+
 
 class TestValidatePackageFilename:
     def test_allows_simple_filename(self):
