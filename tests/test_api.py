@@ -1128,3 +1128,28 @@ def test_add_video_rejects_file_protocol(client):
     assert response.status_code == 200
     assert response.json()["results"][0]["status"] == "invalid"
     assert "URL" in response.json()["results"][0]["message"]
+
+
+def test_logs_filters_sensitive_paths(tmp_path, client, db, settings):
+    client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/v1.mp4", "title": "V1"}]},
+    )
+    video_id = "v1"
+    video_dir = settings.videos_dir / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    log_file = video_dir / "phase.log"
+    log_file.write_text(
+        "Downloading from https://example.com/secret.mp4\n"
+        "Saved to /Users/admin/.ssh/id_rsa\n"
+        "Success\n",
+        encoding="utf-8",
+    )
+    db.start_phase(video_id, "download", ["cmd"], str(log_file))
+
+    response = client.get(f"/api/videos/{video_id}/logs")
+    assert response.status_code == 200
+    log = response.json()["log"]
+    assert "secret.mp4" not in log
+    assert "/Users/admin/.ssh/id_rsa" not in log
+    assert "Success" in log
