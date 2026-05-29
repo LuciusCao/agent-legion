@@ -117,11 +117,7 @@ def create_videos_router(
         for video in videos:
             video["packed"] = bool(video.get("packed", 0))
             if video.get("content_type") == "knowledge":
-                video_dir = (
-                    Path(video["storage_dir"])
-                    if video.get("storage_dir")
-                    else settings.videos_dir / video["id"]
-                )
+                video_dir = resolve_video_dir(video, settings.videos_dir)
                 stats = compute_interaction_stats(video_dir)
                 if stats:
                     video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
@@ -134,11 +130,7 @@ def create_videos_router(
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         if video.get("content_type") == "knowledge":
-            video_dir = (
-                Path(video["storage_dir"])
-                if video.get("storage_dir")
-                else settings.videos_dir / video_id
-            )
+            video_dir = resolve_video_dir(video, settings.videos_dir)
             stats = compute_interaction_stats(video_dir)
             if stats:
                 video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]

@@ -8,7 +8,7 @@ from typing import Any, cast
 
 from server.app.db.notifications import NotificationHub
 from server.app.db.schema import init_db
-from server.app.pipeline.common import make_record_id
+from server.app.pipeline.common import make_record_id, resolve_video_dir
 from server.app.pipeline.openclaw import extract_openclaw_arg
 from server.app.records import PhaseRunRecord, VideoRecord
 from server.app.services.interaction_stats import (
@@ -133,11 +133,7 @@ class VideoQueries:
             self._hub.emit_detail_change(video_id, cast(VideoRecord, {}), [], [])
             return
         if video.get("content_type") == "knowledge" and self._videos_dir is not None:
-            video_dir = (
-                Path(video["storage_dir"])
-                if video.get("storage_dir")
-                else self._videos_dir / video_id
-            )
+            video_dir = resolve_video_dir(video, self._videos_dir)
             stats = compute_interaction_stats(video_dir)
             if stats:
                 video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
