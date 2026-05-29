@@ -26,4 +26,10 @@ describe('uiStore', () => {
       type: 'success',
     })
   })
+
+  it('connectAgentsWs returns a cleanup function', () => {
+    const cleanup = useUiStore.getState().connectAgentsWs()
+    expect(typeof cleanup).toBe('function')
+    expect(() => cleanup()).not.toThrow()
+  })
 })

@@ -15,7 +15,8 @@ export default function App() {
   const location = useLocation()
 
   useEffect(() => {
-    connectAgentsWs()
+    const cleanup = connectAgentsWs()
+    return cleanup
   }, [connectAgentsWs])
 
   // Close any open dialogs on route change so that navigating away
