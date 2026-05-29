@@ -568,7 +568,9 @@ def test_batch_run_to_returns_per_video_results(client):
     assert results[1]["status"] == "skipped"
 
 
-def test_package_selected_videos_and_download(tmp_path, client):
+def test_package_selected_videos_and_download(tmp_path, client, monkeypatch):
+    import time
+    from unittest.mock import MagicMock
     client.post(
         "/api/videos",
         json={
@@ -592,12 +594,21 @@ def test_package_selected_videos_and_download(tmp_path, client):
         (video_dir / "metadata.json").write_text(f'{{"id":"{video_id}"}}', encoding="utf-8")
         client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
 
+    # Execute package synchronously in test by mocking executor.submit to run immediately
+    def _sync_submit(fn):
+        fn()
+    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
+
     response = client.post("/api/package", json={"video_ids": ["knowledge_K002"]})
 
     assert response.status_code == 200
-    body = response.json()
-    assert body["download_url"].startswith("/api/packages/")
-    download = client.get(body["download_url"])
+    assert response.json()["accepted"] is True
+
+    # After synchronous execution, the package file should exist
+    import zipfile
+    packages = list(client.app.state.settings.packages_dir.glob("*.zip"))
+    assert len(packages) == 1
+    download = client.get(f"/api/packages/{packages[0].name}")
     assert download.status_code == 200
     assert download.headers["content-type"] in {"application/zip", "application/x-zip-compressed"}
 
@@ -670,7 +681,7 @@ def test_package_without_completed_videos_returns_400(client):
     assert response.json()["detail"] == "No completed videos available for packaging"
 
 
-def test_package_sets_packed_true(tmp_path, client):
+def test_package_sets_packed_true(tmp_path, client, monkeypatch):
     client.post(
         "/api/videos",
         json={
@@ -689,9 +700,15 @@ def test_package_sets_packed_true(tmp_path, client):
     (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
     client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
 
+    # Execute package synchronously in test by mocking executor.submit to run immediately
+    def _sync_submit(fn):
+        fn()
+    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
+
     response = client.post("/api/package", json={"video_ids": [video_id]})
 
     assert response.status_code == 200
+    assert response.json()["accepted"] is True
     video = client.app.state.db.get_video(video_id)
     assert video["packed"] == 1
 
