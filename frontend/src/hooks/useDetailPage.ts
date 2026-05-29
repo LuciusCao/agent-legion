@@ -118,9 +118,7 @@ export function useDetailPage(): UseDetailPageReturn {
     if (!id) return
     clearInteractions()
     previousPlaybackTimeRef.current = null
-    loadVideo(id)
-    loadArtifacts(id)
-    loadLog(id)
+    Promise.all([loadVideo(id), loadArtifacts(id), loadLog(id)])
   }, [id, clearInteractions, loadVideo, loadArtifacts, loadLog])
 
   const prevPhaseRef = useRef<string | null>(null)
