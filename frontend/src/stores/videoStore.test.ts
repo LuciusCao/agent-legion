@@ -54,7 +54,7 @@ describe('videoStore', () => {
     expect(useVideoStore.getState().packageSelectMode).toBe(false)
   })
 
-  it('selects all completed videos in package mode', () => {
+  it('selects only completed videos visible under current filters in package mode', () => {
     useVideoStore.setState({
       videos: [
         {
@@ -84,9 +84,11 @@ describe('videoStore', () => {
           error_message: '',
         },
       ],
+      statusFilter: 'failed',
     })
     useVideoStore.getState().selectPackageAll()
-    expect(useVideoStore.getState().selectedIds).toEqual(new Set(['v1']))
+    // failed filter shows no completed videos, so nothing should be selected
+    expect(useVideoStore.getState().selectedIds).toEqual(new Set())
   })
 
   it('selects only unpacked completed videos', () => {
