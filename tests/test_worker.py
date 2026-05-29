@@ -510,8 +510,8 @@ def test_worker_thread_stop_calls_close_read_conn(db, settings):
         mock_close.assert_called_once()
 
 
-def test_process_next_passes_limit_to_list_videos(db, settings):
-    """process_next 必须向 list_videos 传入 limit=50。"""
+def test_process_next_does_not_limit_polling_query(db, settings):
+    """process_next 不应限制 list_videos 结果集，避免旧视频饥饿。"""
     db.create_video("https://example.com/a.mp4", "A")
     db.update_video("a", status="queued", current_phase="download")
 
@@ -520,5 +520,5 @@ def test_process_next_passes_limit_to_list_videos(db, settings):
         process_next(db, settings)
         mock_list.assert_called_once()
         call_kwargs = mock_list.call_args.kwargs
-        assert call_kwargs.get("limit") == 50
+        assert "limit" not in call_kwargs
         assert call_kwargs.get("status_filter") == ["queued", "missing_url", "running"]
