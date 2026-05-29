@@ -1,6 +1,8 @@
 import json
 import subprocess
+import time
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -9,11 +11,13 @@ from server.app.pipeline.runners import RunnerPool, discover_openclaw_agents
 from server.app.settings import load_settings
 from server.app.worker import (
     WorkerCapacity,
+    build_default_providers,
     get_phase_concurrency_limit,
     pick_next_work,
     process_next,
     process_video_once,
 )
+from server.app.worker_thread import WorkerThread
 from tests.conftest import ChapterRunner, TestProvider
 
 
@@ -154,7 +158,9 @@ def test_worker_resumes_running_video_after_restart(db, settings):
     (video_dir / "interactions.json").write_text(
         json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
     )
-    db.update_video(video["id"], storage_dir=str(video_dir), current_phase="assemble", status="running")
+    db.update_video(
+        video["id"], storage_dir=str(video_dir), current_phase="assemble", status="running"
+    )
 
     assert db.recover_running_videos() == 1
     processed = process_video_once(db, settings, video["id"])
@@ -273,7 +279,12 @@ def test_question_video_skips_interaction_and_content_review(db, settings):
         json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "解析", "concepts": []}]),
         encoding="utf-8",
     )
-    db.update_video("question_Q001", storage_dir=str(video_dir), current_phase="chapter_generate", status="queued")
+    db.update_video(
+        "question_Q001",
+        storage_dir=str(video_dir),
+        current_phase="chapter_generate",
+        status="queued",
+    )
 
     processed = process_video_once(db, settings, video["id"])
 
@@ -314,7 +325,14 @@ def test_worker_retries_missing_url_video_from_cms(db, settings, monkeypatch):
     monkeypatch.setattr(
         "server.app.worker.lookup_question_video",
         lambda uuid, api_url, token: type(
-            "Lookup", (), {"status": "found", "url": "https://example.com/q001.mp4", "title": "Question 1", "source_uuid": "uuid-q001"}
+            "Lookup",
+            (),
+            {
+                "status": "found",
+                "url": "https://example.com/q001.mp4",
+                "title": "Question 1",
+                "source_uuid": "uuid-q001",
+            },
         )(),
     )
     monkeypatch.setattr(
@@ -336,7 +354,9 @@ def test_process_next_continues_after_unresolved_missing_url(db, settings):
     video = db.create_video("https://example.com/a.mp4", "A")
     db.create_video("", "Question 1", content_type="question", external_id="Q001")
     with db.connect() as conn:
-        conn.execute("update videos set created_at='2000-01-01 00:00:00' where id=?", (video["id"],))
+        conn.execute(
+            "update videos set created_at='2000-01-01 00:00:00' where id=?", (video["id"],)
+        )
         conn.execute(
             "update videos set created_at='2999-01-01 00:00:00' where id=?",
             ("question_Q001",),
@@ -353,7 +373,9 @@ def test_process_next_continues_after_unresolved_missing_url(db, settings):
     (video_dir / "interactions.json").write_text(
         json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
     )
-    db.update_video(video["id"], storage_dir=str(video_dir), current_phase="assemble", status="queued")
+    db.update_video(
+        video["id"], storage_dir=str(video_dir), current_phase="assemble", status="queued"
+    )
 
     assert process_next(db, settings) is True
     assert db.get_video(video["id"])["status"] == "completed"
@@ -449,28 +471,54 @@ def test_process_video_once_marks_completed_when_target_is_final_phase(db, setti
     assert db.get_video("a")["status"] == "completed"
 
 
-def test_build_default_providers_vad_missing(tmp_path):
-    from server.app.settings import load_settings
-    from server.app.worker import build_default_providers
-
-    settings = load_settings(data_dir=tmp_path)
+def test_build_default_providers_with_missing_vad_model(tmp_path, settings):
     settings.config["asr"] = {
-        "provider": "auto",
-        "whisper": {
-            "binary": "whisper",
-            "model": "model.bin",
-            "vad_model": "/nonexistent/vad.bin",
-        },
+        "whisper": {"binary": "whisper", "model": "model.bin", "vad_model": "/nonexistent/vad.bin"},
         "sensevoice": {},
     }
     with pytest.raises(FileNotFoundError, match="VAD model not found"):
         build_default_providers(settings)
 
 
-def test_process_video_once_missing_url_no_external_id(db, settings):
-    from server.app.worker import process_video_once
+def test_build_default_providers_without_vad_model(tmp_path, settings):
+    settings.config["asr"] = {
+        "whisper": {"binary": "whisper", "model": "model.bin"},
+        "sensevoice": {},
+    }
+    providers = build_default_providers(settings)
+    assert len(providers) == 2
+    assert providers[0].vad_model is None
 
-    video = db.create_video("", "No ID", content_type="knowledge")
-    assert process_video_once(db, settings, video["id"]) is False
-    refreshed = db.get_video(video["id"])
-    assert refreshed["status"] == "missing_url"
+
+def test_worker_thread_stop_calls_close_read_conn(db, settings):
+    """WorkerThread.stop() 必须调用 db.close_read_conn()。"""
+    pool = MagicMock()
+    pool.size.return_value = 1
+    pool.acquire.side_effect = RuntimeError("no runner")
+
+    control = MagicMock()
+    control.is_paused.return_value = True
+
+    agent_manager = MagicMock()
+
+    wt = WorkerThread(db, settings, pool, agent_manager, worker_control=control, max_workers=1)
+    wt.start()
+    time.sleep(0.05)
+
+    with patch.object(db, "close_read_conn") as mock_close:
+        wt.stop()
+        mock_close.assert_called_once()
+
+
+def test_process_next_does_not_limit_polling_query(db, settings):
+    """process_next 不应限制 list_videos 结果集，避免旧视频饥饿。"""
+    db.create_video("https://example.com/a.mp4", "A")
+    db.update_video("a", status="queued", current_phase="download")
+
+    with patch.object(db, "list_videos") as mock_list:
+        mock_list.return_value = []
+        process_next(db, settings)
+        mock_list.assert_called_once()
+        call_kwargs = mock_list.call_args.kwargs
+        assert "limit" not in call_kwargs
+        assert call_kwargs.get("status_filter") == ["queued", "missing_url", "running"]

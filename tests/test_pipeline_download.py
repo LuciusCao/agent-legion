@@ -31,7 +31,9 @@ def test_download_video_writes_chunks(tmp_path):
     output = tmp_path / "video.mp4"
     data = b"abcd" * 300  # > 1 MiB to trigger multiple chunks
 
-    with patch("server.app.pipeline.download.requests.get", return_value=FakeResponse(data)) as mock_get:
+    with patch(
+        "server.app.pipeline.download.requests.get", return_value=FakeResponse(data)
+    ) as mock_get:
         download_video("https://example.com/video.mp4", output)
 
     mock_get.assert_called_once_with("https://example.com/video.mp4", stream=True, timeout=120)
@@ -63,20 +65,26 @@ def test_download_video_re_downloads_when_file_is_empty(tmp_path):
 def test_download_video_raises_on_http_error(tmp_path):
     output = tmp_path / "video.mp4"
 
-    with patch(
-        "server.app.pipeline.download.requests.get",
-        return_value=FakeResponse(b"", status_code=404),
-    ), pytest.raises(requests.HTTPError):
+    with (
+        patch(
+            "server.app.pipeline.download.requests.get",
+            return_value=FakeResponse(b"", status_code=404),
+        ),
+        pytest.raises(requests.HTTPError),
+    ):
         download_video("https://example.com/missing.mp4", output)
 
 
 def test_download_video_rejects_non_video_mime_type(tmp_path):
     output = tmp_path / "video.mp4"
 
-    with patch(
-        "server.app.pipeline.download.requests.get",
-        return_value=FakeResponse(b"<html></html>", headers={"content-type": "text/html"}),
-    ), pytest.raises(ValueError, match="Expected video content"):
+    with (
+        patch(
+            "server.app.pipeline.download.requests.get",
+            return_value=FakeResponse(b"<html></html>", headers={"content-type": "text/html"}),
+        ),
+        pytest.raises(ValueError, match="Expected video content"),
+    ):
         download_video("https://example.com/trap.mp4", output)
 
     assert not output.exists()
@@ -103,10 +111,13 @@ def test_download_video_cleans_up_partial_file_on_error(tmp_path):
         def __exit__(self, *args):
             pass
 
-    with patch(
-        "server.app.pipeline.download.requests.get",
-        return_value=BrokenResponse(),
-    ), pytest.raises(RuntimeError, match="connection reset"):
+    with (
+        patch(
+            "server.app.pipeline.download.requests.get",
+            return_value=BrokenResponse(),
+        ),
+        pytest.raises(RuntimeError, match="connection reset"),
+    ):
         download_video("https://example.com/broken.mp4", output)
 
     assert not output.exists()

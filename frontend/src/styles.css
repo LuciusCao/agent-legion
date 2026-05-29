@@ -4,7 +4,14 @@
 
 body {
   margin: 0;
-  font-family: Roboto, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-family:
+    Roboto,
+    ui-sans-serif,
+    system-ui,
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    sans-serif;
   color: var(--md-sys-color-on-surface);
   background: var(--md-sys-color-surface);
 }
@@ -63,7 +70,9 @@ input {
   justify-content: space-between;
 }
 
-h1, h2, p {
+h1,
+h2,
+p {
   margin: 0;
 }
 
@@ -81,7 +90,9 @@ h1 {
 .card-elevated {
   background: var(--md-sys-color-surface);
   border-radius: 12px;
-  box-shadow: 0 1px 2px 0 rgb(0 0 0 / 0.3), 0 1px 3px 1px rgb(0 0 0 / 0.15);
+  box-shadow:
+    0 1px 2px 0 rgb(0 0 0 / 0.3),
+    0 1px 3px 1px rgb(0 0 0 / 0.15);
 }
 
 /* Filters */
@@ -230,8 +241,8 @@ h1 {
   grid-template-columns: minmax(0, 1fr) 360px;
   grid-template-rows: auto minmax(0, 1fr);
   grid-template-areas:
-    "topbar topbar"
-    "primary sidebar";
+    'topbar topbar'
+    'primary sidebar';
   align-items: stretch;
   gap: 16px;
   height: 100%;
@@ -483,9 +494,9 @@ pre {
     grid-template-columns: 1fr;
     grid-template-rows: auto auto auto;
     grid-template-areas:
-      "topbar"
-      "primary"
-      "sidebar";
+      'topbar'
+      'primary'
+      'sidebar';
     height: auto;
     max-height: none;
     min-height: 0;

@@ -19,6 +19,54 @@ def test_openclaw_runner_sanitizes_null_bytes_in_prompt(tmp_path):
     assert prompt_arg == "helloworld"
 
 
+def test_openclaw_runner_escapes_shell_metacharacters_in_prompt(tmp_path):
+    runner = OpenClawRunner(
+        command_template=["cmd", "--message", "{prompt_text}"],
+        cwd=tmp_path,
+        timeout_seconds=10,
+    )
+    prompt_file = tmp_path / "test.md"
+    prompt_file.write_text("hello; rm -rf /", encoding="utf-8")
+    rendered = runner.render_command(video_id="v1", video_dir=tmp_path, prompt_file=prompt_file)
+    assert rendered == ["cmd", "--message", "'hello; rm -rf /'"]
+
+
+def test_openclaw_runner_escapes_dollar_command_substitution(tmp_path):
+    runner = OpenClawRunner(
+        command_template=["cmd", "--msg", "{prompt_text}"],
+        cwd=tmp_path,
+        timeout_seconds=10,
+    )
+    prompt_file = tmp_path / "test.md"
+    prompt_file.write_text("$(echo pwned)", encoding="utf-8")
+    rendered = runner.render_command(video_id="v1", video_dir=tmp_path, prompt_file=prompt_file)
+    assert rendered == ["cmd", "--msg", "'$(echo pwned)'"]
+
+
+def test_openclaw_runner_escapes_backtick_command_substitution(tmp_path):
+    runner = OpenClawRunner(
+        command_template=["cmd", "--msg", "{prompt_text}"],
+        cwd=tmp_path,
+        timeout_seconds=10,
+    )
+    prompt_file = tmp_path / "test.md"
+    prompt_file.write_text("`echo pwned`", encoding="utf-8")
+    rendered = runner.render_command(video_id="v1", video_dir=tmp_path, prompt_file=prompt_file)
+    assert rendered == ["cmd", "--msg", "'`echo pwned`'"]
+
+
+def test_openclaw_runner_preserves_normal_text(tmp_path):
+    runner = OpenClawRunner(
+        command_template=["cmd", "--message", "{prompt_text}"],
+        cwd=tmp_path,
+        timeout_seconds=10,
+    )
+    prompt_file = tmp_path / "test.md"
+    prompt_file.write_text("Hello world! 你好。", encoding="utf-8")
+    rendered = runner.render_command(video_id="v1", video_dir=tmp_path, prompt_file=prompt_file)
+    assert rendered == ["cmd", "--message", "Hello world! 你好。"]
+
+
 def test_openclaw_runner_executes_template_and_validates_json(tmp_path):
     command = [
         "python3",

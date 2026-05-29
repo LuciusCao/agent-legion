@@ -29,10 +29,10 @@ def create_app(
     worker_control = WorkerControl()
     video_event_manager = VideoEventManager()
     hub = NotificationHub()
-    hub.on_change = video_event_manager.broadcast
+    hub.on_change = video_event_manager.broadcast  # type: ignore[assignment]
     hub.on_delete = video_event_manager.broadcast_delete
-    hub.on_detail_change = video_event_manager.broadcast_video_detail
-    db = Database(settings.data_dir / "video_hive.sqlite", hub=hub)
+    hub.on_detail_change = video_event_manager.broadcast_video_detail  # type: ignore[assignment]
+    db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
 
     worker_thread: WorkerThread | None = None
 
@@ -43,9 +43,7 @@ def create_app(
         if start_worker:
             agent_manager.discover()
             recover_interrupted_videos(db, settings)
-            runner_pool = RunnerPool.from_settings(
-                settings, [a.id for a in agent_manager.agents]
-            )
+            runner_pool = RunnerPool.from_settings(settings, [a.id for a in agent_manager.agents])
             runner_counts: dict[str, int] = {}
             for runner in runner_pool.all_runners():
                 aid = runner.agent_id

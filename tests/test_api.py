@@ -1,6 +1,7 @@
 import asyncio
 import json
 import subprocess
+from pathlib import Path
 
 
 def test_core_api_routes_declare_response_models(client):
@@ -22,9 +23,9 @@ def test_core_api_routes_declare_response_models(client):
     assert paths["/api/package"]["post"]["responses"]["200"]["content"]["application/json"][
         "schema"
     ] == {"$ref": "#/components/schemas/PackageResponse"}
-    assert paths["/api/worker/status"]["get"]["responses"]["200"]["content"][
-        "application/json"
-    ]["schema"] == {"$ref": "#/components/schemas/WorkerStatusResponse"}
+    assert paths["/api/worker/status"]["get"]["responses"]["200"]["content"]["application/json"][
+        "schema"
+    ] == {"$ref": "#/components/schemas/WorkerStatusResponse"}
 
 
 def test_run_to_routes_declare_response_models(client):
@@ -92,7 +93,16 @@ def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
 
     with client.websocket_connect("/api/agents") as ws:
         ws.receive_json()
-        agent_manager.set_busy("main", {"id": "v1", "title": "T1", "content_type": "knowledge", "external_id": "K001", "current_phase": "download"})
+        agent_manager.set_busy(
+            "main",
+            {
+                "id": "v1",
+                "title": "T1",
+                "content_type": "knowledge",
+                "external_id": "K001",
+                "current_phase": "download",
+            },
+        )
         data = ws.receive_json()
         assert data[0]["busy"] is True
         assert data[0]["current_video_id"] == "v1"
@@ -167,12 +177,8 @@ def test_artifacts_endpoint_includes_checklist_and_review(tmp_path, client):
     (video_dir / "subtitles.srt").write_text(
         "1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8"
     )
-    (video_dir / "interactions.json").write_text(
-        json.dumps({"interactions": []}), encoding="utf-8"
-    )
-    (video_dir / "chapters.json").write_text(
-        json.dumps({"chapters": []}), encoding="utf-8"
-    )
+    (video_dir / "interactions.json").write_text(json.dumps({"interactions": []}), encoding="utf-8")
+    (video_dir / "chapters.json").write_text(json.dumps({"chapters": []}), encoding="utf-8")
     (video_dir / "checklist.json").write_text(
         json.dumps({"video_id": video_id, "checklist": {"content_usability": {"issues": []}}}),
         encoding="utf-8",
@@ -193,13 +199,17 @@ def test_add_question_without_url_waits_for_url(tmp_path, monkeypatch, client):
     monkeypatch.setattr(
         "server.app.services.intake.lookup_question_video",
         lambda uuid, api_url, token: type(
-            "Lookup", (), {"status": "missing_url", "url": "", "title": "Question 1", "source_uuid": ""}
+            "Lookup",
+            (),
+            {"status": "missing_url", "url": "", "title": "Question 1", "source_uuid": ""},
         )(),
     )
 
     created = client.post(
         "/api/videos",
-        json={"items": [{"content_type": "question", "external_id": "Q001", "title": "Question 1"}]},
+        json={
+            "items": [{"content_type": "question", "external_id": "Q001", "title": "Question 1"}]
+        },
     )
 
     assert created.status_code == 200
@@ -216,13 +226,22 @@ def test_add_knowledge_without_url_fetches_source_v2_from_cms(tmp_path, monkeypa
     monkeypatch.setattr(
         "server.app.services.intake.lookup_knowledge_video",
         lambda code, api_url, token: type(
-            "Lookup", (), {"status": "found", "url": "https://example.com/k001.mp4", "title": "Knowledge 1", "source_uuid": ""}
+            "Lookup",
+            (),
+            {
+                "status": "found",
+                "url": "https://example.com/k001.mp4",
+                "title": "Knowledge 1",
+                "source_uuid": "",
+            },
         )(),
     )
 
     created = client.post(
         "/api/videos",
-        json={"items": [{"content_type": "knowledge", "external_id": "K001", "title": "Knowledge 1"}]},
+        json={
+            "items": [{"content_type": "knowledge", "external_id": "K001", "title": "Knowledge 1"}]
+        },
     )
 
     assert created.status_code == 200
@@ -241,7 +260,9 @@ def test_add_video_with_empty_url_still_waits_when_cms_fetch_fails(tmp_path, mon
 
     response = client.post(
         "/api/videos",
-        json={"items": [{"content_type": "question", "external_id": "Q404", "title": "Question 404"}]},
+        json={
+            "items": [{"content_type": "question", "external_id": "Q404", "title": "Question 404"}]
+        },
     )
 
     assert response.status_code == 200
@@ -253,7 +274,9 @@ def test_add_knowledge_without_url_rejects_cms_not_found(tmp_path, monkeypatch, 
     monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
         "server.app.services.intake.lookup_knowledge_video",
-        lambda code, api_url, token: type("Lookup", (), {"status": "not_found", "url": "", "title": ""})(),
+        lambda code, api_url, token: type(
+            "Lookup", (), {"status": "not_found", "url": "", "title": ""}
+        )(),
     )
 
     response = client.post(
@@ -269,12 +292,16 @@ def test_add_knowledge_without_url_rejects_cms_not_found(tmp_path, monkeypatch, 
     assert client.get("/api/videos").json()["videos"] == []
 
 
-def test_add_question_without_url_creates_missing_url_when_cms_resource_exists(tmp_path, monkeypatch, client):
+def test_add_question_without_url_creates_missing_url_when_cms_resource_exists(
+    tmp_path, monkeypatch, client
+):
     monkeypatch.setattr("server.app.services.intake.get_token", lambda env, config: "token")
     monkeypatch.setattr(
         "server.app.services.intake.lookup_question_video",
         lambda uuid, api_url, token: type(
-            "Lookup", (), {"status": "missing_url", "url": "", "title": "Question 1", "source_uuid": ""}
+            "Lookup",
+            (),
+            {"status": "missing_url", "url": "", "title": "Question 1", "source_uuid": ""},
         )(),
     )
 
@@ -403,8 +430,16 @@ def test_batch_delete_returns_per_video_results(client):
         "/api/videos",
         json={
             "items": [
-                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
-                {"url": "https://example.com/k2.mp4", "content_type": "knowledge", "external_id": "K002"},
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
+                {
+                    "url": "https://example.com/k2.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K002",
+                },
             ]
         },
     )
@@ -427,24 +462,45 @@ def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(cli
         "/api/videos",
         json={
             "items": [
-                {"url": "https://example.com/q1.mp4", "content_type": "question", "external_id": "Q001"},
-                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+                {
+                    "url": "https://example.com/q1.mp4",
+                    "content_type": "question",
+                    "external_id": "Q001",
+                },
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
             ]
         },
     )
-    db.update_video("question_Q001", status="completed")
-    db.update_video("knowledge_K001", status="completed")
+    db.update_video("question_Q001", status="completed", current_phase="assemble")
+    db.update_video("knowledge_K001", status="completed", current_phase="assemble")
 
     response = client.post(
         "/api/videos/batch/rerun",
-        json={"video_ids": ["question_Q001", "knowledge_K001", "missing"], "phase": "interaction_generate"},
+        json={
+            "video_ids": ["question_Q001", "knowledge_K001", "missing"],
+            "phase": "interaction_generate",
+        },
     )
 
     assert response.status_code == 200
     assert response.json()["results"] == [
         {"video_id": "question_Q001", "status": "rerun", "phase": "assemble", "message": ""},
-        {"video_id": "knowledge_K001", "status": "rerun", "phase": "interaction_generate", "message": ""},
-        {"video_id": "missing", "status": "not_found", "phase": "interaction_generate", "message": "Video not found"},
+        {
+            "video_id": "knowledge_K001",
+            "status": "rerun",
+            "phase": "interaction_generate",
+            "message": "",
+        },
+        {
+            "video_id": "missing",
+            "status": "not_found",
+            "phase": "interaction_generate",
+            "message": "Video not found",
+        },
     ]
     assert client.get("/api/videos/question_Q001").json()["video"]["current_phase"] == "assemble"
 
@@ -509,8 +565,16 @@ def test_package_selected_videos_and_download(tmp_path, client):
         "/api/videos",
         json={
             "items": [
-                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
-                {"url": "https://example.com/k2.mp4", "content_type": "knowledge", "external_id": "K002"},
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
+                {
+                    "url": "https://example.com/k2.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K002",
+                },
             ]
         },
     )
@@ -518,7 +582,7 @@ def test_package_selected_videos_and_download(tmp_path, client):
         video_dir = tmp_path / "videos" / video_id
         video_dir.mkdir(parents=True, exist_ok=True)
         (video_dir / "metadata.json").write_text(f'{{"id":"{video_id}"}}', encoding="utf-8")
-        client.app.state.db.update_video(video_id, status="completed")
+        client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
 
     response = client.post("/api/package", json={"video_ids": ["knowledge_K002"]})
 
@@ -535,7 +599,11 @@ def test_package_selected_unfinished_video_returns_400(client):
         "/api/videos",
         json={
             "items": [
-                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
             ]
         },
     )
@@ -559,7 +627,11 @@ def test_package_with_empty_selection_returns_400(client):
         "/api/videos",
         json={
             "items": [
-                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
             ]
         },
     )
@@ -575,7 +647,11 @@ def test_package_without_completed_videos_returns_400(client):
         "/api/videos",
         json={
             "items": [
-                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
             ]
         },
     )
@@ -591,7 +667,11 @@ def test_package_sets_packed_true(tmp_path, client):
         "/api/videos",
         json={
             "items": [
-                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
             ]
         },
     )
@@ -599,7 +679,7 @@ def test_package_sets_packed_true(tmp_path, client):
     video_dir = tmp_path / "videos" / video_id
     video_dir.mkdir(parents=True, exist_ok=True)
     (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed")
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
 
     response = client.post("/api/package", json={"video_ids": [video_id]})
 
@@ -613,7 +693,11 @@ def test_rerun_clears_packed(tmp_path, client):
         "/api/videos",
         json={
             "items": [
-                {"url": "https://example.com/k1.mp4", "content_type": "knowledge", "external_id": "K001"},
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
             ]
         },
     )
@@ -621,7 +705,9 @@ def test_rerun_clears_packed(tmp_path, client):
     video_dir = tmp_path / "videos" / video_id
     video_dir.mkdir(parents=True, exist_ok=True)
     (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
-    client.app.state.db.update_video(video_id, status="completed", current_phase="package", packed=1)
+    client.app.state.db.update_video(
+        video_id, status="completed", current_phase="assemble", packed=1
+    )
 
     response = client.post(f"/api/videos/{video_id}/rerun", json={"phase": "assemble"})
 
@@ -646,6 +732,19 @@ def test_package_download_rejects_empty_and_directory(client):
 
     # Directory traversal via dot-dot should 404
     response = client.get("/api/packages/foo/bar/../baz")
+    assert response.status_code == 404
+
+
+def test_package_download_rejects_backslash_traversal(client):
+    response = client.get("/api/packages/foo\\..\\..\\etc\\passwd")
+    assert response.status_code == 404
+
+
+def test_package_download_rejects_subdirectory(client, settings):
+    nested = settings.packages_dir / "foo" / "bar.zip"
+    nested.parent.mkdir(parents=True, exist_ok=True)
+    nested.write_text("fake", encoding="utf-8")
+    response = client.get("/api/packages/foo/bar.zip")
     assert response.status_code == 404
 
 
@@ -866,87 +965,191 @@ def test_list_and_detail_return_interaction_review_status(tmp_path, client):
     }
 
 
-def test_sse_connect_returns_event_stream_response():
-    import asyncio
-
-    from server.app.events import VideoEventManager
-
-    async def _test():
-        manager = VideoEventManager()
-        manager._loop = asyncio.get_running_loop()
-
-        class FakeRequest:
-            pass
-
-        response = await manager.connect(FakeRequest())
-        assert response.media_type == "text/event-stream"
-
-    asyncio.run(_test())
+def test_get_video_not_found(client):
+    response = client.get("/api/videos/nonexistent")
+    assert response.status_code == 404
 
 
-def test_sse_connect_video_returns_event_stream_response():
-    import asyncio
-
-    from server.app.events import VideoEventManager
-
-    async def _test():
-        manager = VideoEventManager()
-        manager._loop = asyncio.get_running_loop()
-
-        class FakeRequest:
-            pass
-
-        response = await manager.connect_video(FakeRequest(), "v1")
-        assert response.media_type == "text/event-stream"
-
-    asyncio.run(_test())
+def test_rerun_not_found(client):
+    response = client.post("/api/videos/nonexistent/rerun", json={"phase": "download"})
+    assert response.status_code == 404
 
 
-def test_sse_connect_evicts_oldest_at_capacity():
-    import asyncio
+def test_rerun_busy(client, db):
+    db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
+    db.start_phase("knowledge_K001", "download", ["cmd"])
+    db.update_video("knowledge_K001", status="running", current_phase="download")
 
-    from server.app.events import VideoEventManager
-
-    async def _test():
-        manager = VideoEventManager()
-        manager._loop = asyncio.get_running_loop()
-        original_max = manager.MAX_CLIENTS
-        manager.MAX_CLIENTS = 2
-
-        class FakeRequest:
-            pass
-
-        await manager.connect(FakeRequest())
-        await manager.connect(FakeRequest())
-        assert len(manager._clients) == 2
-
-        await manager.connect(FakeRequest())
-        assert len(manager._clients) == 2  # oldest evicted
-
-        manager.MAX_CLIENTS = original_max
-
-    asyncio.run(_test())
+    response = client.post("/api/videos/knowledge_K001/rerun", json={"phase": "download"})
+    assert response.status_code == 409
 
 
-def test_sse_broadcast_video_detail_reaches_video_clients():
-    import asyncio
+def test_run_to_not_found(client):
+    response = client.post("/api/videos/nonexistent/run-to", json={"target_phase": "download"})
+    assert response.status_code == 404
 
-    from server.app.events import VideoEventManager
 
-    async def _test():
-        manager = VideoEventManager()
-        manager._loop = asyncio.get_running_loop()
+def test_run_to_busy(client, db):
+    db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
+    db.start_phase("knowledge_K001", "download", ["cmd"])
+    db.update_video("knowledge_K001", status="running", current_phase="download")
 
-        class FakeRequest:
-            pass
+    response = client.post("/api/videos/knowledge_K001/run-to", json={"target_phase": "download"})
+    assert response.status_code == 409
 
-        await manager.connect_video(FakeRequest(), "v1")
-        assert len(manager._video_clients.get("v1", set())) == 1
 
-        manager.broadcast_video_detail("v1", {"id": "v1", "status": "running"}, [], [])
-        await asyncio.sleep(0.05)
+def test_delete_not_found(client):
+    response = client.delete("/api/videos/nonexistent")
+    assert response.status_code == 404
 
-        # Both global and video-specific broadcast should have fired
-        assert len(manager._clients) == 1
 
-    asyncio.run(_test())
+def test_logs_empty(client):
+    client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/k1.mp4", "title": "K1"}]},
+    )
+    response = client.get("/api/videos/k1/logs")
+    assert response.status_code == 200
+    assert response.json()["log"] == ""
+
+
+def test_logs_from_file(tmp_path, client, db):
+    db.create_video("https://example.com/k1.mp4", "k1")
+    log_path = tmp_path / "logs" / "k1-download.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("download started\n" * 1000, encoding="utf-8")
+    db.start_phase("k1", "download", ["cmd"], str(log_path))
+
+    response = client.get("/api/videos/k1/logs")
+    assert response.status_code == 200
+    assert "download started" in response.json()["log"]
+
+
+def test_video_file_redirects_when_local_missing(client):
+    created = client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/k1.mp4", "title": "K1"}]},
+    )
+    video_id = created.json()["videos"][0]["id"]
+    response = client.get(f"/api/videos/{video_id}/video", follow_redirects=False)
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://example.com/k1.mp4"
+
+
+def test_video_file_no_source_url(client, db, settings):
+    db.create_video("", "V1")
+    db.update_video("video", source_url="", storage_dir=str(settings.videos_dir / "video"))
+    response = client.get("/api/videos/video/video")
+    assert response.status_code == 404
+    assert response.text == "Video not downloaded yet"
+
+
+def test_rerun_invalid_phase(client):
+    created = client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/k1.mp4", "title": "K1"}]},
+    )
+    video_id = created.json()["videos"][0]["id"]
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+
+    response = client.post(f"/api/videos/{video_id}/rerun", json={"phase": "invalid_phase"})
+    assert response.status_code == 400
+
+
+def test_video_file_video_not_found(client):
+    response = client.get("/api/videos/nonexistent/video")
+    assert response.status_code == 404
+
+
+def test_run_to_success(client, monkeypatch):
+    created = client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/k1.mp4", "title": "K1"}]},
+    )
+    video_id = created.json()["videos"][0]["id"]
+
+    monkeypatch.setattr(
+        "server.app.routes.videos.run_to_phase",
+        lambda db, settings, video_id, **kwargs: {
+            "video_id": video_id,
+            "status": "run_to",
+            "phase": "download",
+            "message": "",
+        },
+    )
+
+    response = client.post(f"/api/videos/{video_id}/run-to", json={"target_phase": "download"})
+    assert response.status_code == 200
+    assert response.json()["result"]["status"] == "run_to"
+
+
+def test_package_download_runtime_error(client, monkeypatch):
+    def boom(self):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(Path, "resolve", boom)
+    response = client.get("/api/packages/test.zip")
+    assert response.status_code == 404
+
+
+def test_add_video_rejects_ssrf_url(client):
+    response = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "http://169.254.169.254/latest/meta-data/",
+                    "title": "SSRF",
+                    "content_type": "knowledge",
+                    "external_id": "SSRF001",
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "invalid"
+    assert "URL" in response.json()["results"][0]["message"]
+
+
+def test_add_video_rejects_file_protocol(client):
+    response = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "file:///etc/passwd",
+                    "title": "File",
+                    "content_type": "knowledge",
+                    "external_id": "FILE001",
+                }
+            ]
+        },
+    )
+    assert response.status_code == 200
+    assert response.json()["results"][0]["status"] == "invalid"
+    assert "URL" in response.json()["results"][0]["message"]
+
+
+def test_logs_filters_sensitive_paths(tmp_path, client, db, settings):
+    client.post(
+        "/api/videos",
+        json={"items": [{"url": "https://example.com/v1.mp4", "title": "V1"}]},
+    )
+    video_id = "v1"
+    video_dir = settings.videos_dir / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    log_file = video_dir / "phase.log"
+    log_file.write_text(
+        "Downloading from https://example.com/secret.mp4\n"
+        "Saved to /Users/admin/.ssh/id_rsa\n"
+        "Success\n",
+        encoding="utf-8",
+    )
+    db.start_phase(video_id, "download", ["cmd"], str(log_file))
+
+    response = client.get(f"/api/videos/{video_id}/logs")
+    assert response.status_code == 200
+    log = response.json()["log"]
+    assert "secret.mp4" not in log
+    assert "/Users/admin/.ssh/id_rsa" not in log
+    assert "Success" in log

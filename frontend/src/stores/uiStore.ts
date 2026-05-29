@@ -1,82 +1,83 @@
-import { create } from "zustand";
-import { api } from "../api";
-import type { AgentStatus, ContentType } from "../types";
+import { create } from 'zustand'
+import { api } from '../api'
+import type { AgentStatus, ContentType } from '../types'
 
 interface Toast {
-  message: string;
-  type: "success" | "error";
+  message: string
+  type: 'success' | 'error'
 }
 
 interface UiState {
-  agents: AgentStatus[];
-  addDialogOpen: boolean;
-  addContentType: ContentType;
-  rerunDialogOpen: boolean;
-  deleteDialogOpen: boolean;
-  workerPaused: boolean;
-  toast: Toast | null;
-  connectAgentsWs: () => void;
-  fetchWorkerStatus: () => Promise<void>;
-  setWorkerPaused: (paused: boolean) => Promise<void>;
-  openAddDialog: () => void;
-  closeAddDialog: () => void;
-  setAddContentType: (type: ContentType) => void;
-  openRerunDialog: () => void;
-  closeRerunDialog: () => void;
-  openDeleteDialog: () => void;
-  closeDeleteDialog: () => void;
-  showToast: (message: string, type: "success" | "error") => void;
-  clearToast: () => void;
+  agents: AgentStatus[]
+  addDialogOpen: boolean
+  addContentType: ContentType
+  rerunDialogOpen: boolean
+  deleteDialogOpen: boolean
+  workerPaused: boolean
+  toast: Toast | null
+  connectAgentsWs: () => void
+  fetchWorkerStatus: () => Promise<void>
+  setWorkerPaused: (paused: boolean) => Promise<void>
+  openAddDialog: () => void
+  closeAddDialog: () => void
+  setAddContentType: (type: ContentType) => void
+  openRerunDialog: () => void
+  closeRerunDialog: () => void
+  openDeleteDialog: () => void
+  closeDeleteDialog: () => void
+  showToast: (message: string, type: 'success' | 'error') => void
+  clearToast: () => void
 }
 
-let wsInstance: WebSocket | null = null;
+let wsInstance: WebSocket | null = null
 
 export const useUiStore = create<UiState>((set) => ({
   agents: [],
   addDialogOpen: false,
-  addContentType: "knowledge",
+  addContentType: 'knowledge',
   rerunDialogOpen: false,
   deleteDialogOpen: false,
   workerPaused: false,
   toast: null,
 
   connectAgentsWs: () => {
-    const protocol = location.protocol === "https:" ? "wss:" : "ws:";
+    const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
     if (wsInstance) {
-      wsInstance.onclose = null;
-      wsInstance.close();
+      wsInstance.onclose = null
+      wsInstance.close()
     }
-    wsInstance = new WebSocket(`${protocol}//${location.host}/api/agents`);
+    wsInstance = new WebSocket(`${protocol}//${location.host}/api/agents`)
     wsInstance.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data) as AgentStatus[];
-        set({ agents: data });
+        const data = JSON.parse(event.data) as AgentStatus[]
+        set({ agents: data })
       } catch {
         // ignore
       }
-    };
+    }
     wsInstance.onclose = () => {
       setTimeout(() => {
-        const { connectAgentsWs } = useUiStore.getState();
-        connectAgentsWs();
-      }, 3000);
-    };
+        const { connectAgentsWs } = useUiStore.getState()
+        connectAgentsWs()
+      }, 3000)
+    }
   },
 
   fetchWorkerStatus: async () => {
-    const data = await api<{ paused: boolean }>("/api/worker/status");
-    set({ workerPaused: data.paused });
+    const data = await api<{ paused: boolean }>('/api/worker/status')
+    set({ workerPaused: data.paused })
   },
 
   setWorkerPaused: async (paused) => {
     const data = await api<{ paused: boolean }>(
-      paused ? "/api/worker/pause" : "/api/worker/resume",
-      { method: "POST" },
-    );
-    set({ workerPaused: data.paused });
+      paused ? '/api/worker/pause' : '/api/worker/resume',
+      { method: 'POST' }
+    )
+    set({ workerPaused: data.paused })
   },
 
-  openAddDialog: () => set({ addDialogOpen: true, addContentType: "knowledge" }),
+  openAddDialog: () =>
+    set({ addDialogOpen: true, addContentType: 'knowledge' }),
   closeAddDialog: () => set({ addDialogOpen: false }),
   setAddContentType: (type) => set({ addContentType: type }),
   openRerunDialog: () => set({ rerunDialogOpen: true }),
@@ -85,4 +86,4 @@ export const useUiStore = create<UiState>((set) => ({
   closeDeleteDialog: () => set({ deleteDialogOpen: false }),
   showToast: (message, type) => set({ toast: { message, type } }),
   clearToast: () => set({ toast: null }),
-}));
+}))

@@ -23,7 +23,8 @@ def db(settings):
 @pytest.fixture
 def client(tmp_path):
     app = create_app(data_dir=tmp_path)
-    return TestClient(app)
+    with TestClient(app) as c:
+        yield c
 
 
 class BadProvider(TranscriptionProvider):

@@ -1,23 +1,24 @@
-import { Routes, Route, useLocation } from "react-router-dom";
-import { useEffect } from "react";
-import { useUiStore } from "./stores/uiStore";
-import { ListPage } from "./pages/ListPage";
-import { DetailPage } from "./pages/DetailPage";
+import { Routes, Route, useLocation } from 'react-router-dom'
+import { useEffect } from 'react'
+import { useUiStore } from './stores/uiStore'
+import { ListPage } from './pages/ListPage'
+import { DetailPage } from './pages/DetailPage'
+import Toast from './components/Toast'
 
 export default function App() {
-  const { connectAgentsWs, closeAddDialog } = useUiStore();
-  const location = useLocation();
+  const { connectAgentsWs, closeAddDialog } = useUiStore()
+  const location = useLocation()
 
   useEffect(() => {
-    connectAgentsWs();
-  }, [connectAgentsWs]);
+    connectAgentsWs()
+  }, [connectAgentsWs])
 
   // Close any open dialogs on route change so that navigating away
   // from the list page (e.g. into a video detail) always resets UI
   // state and prevents dialogs from re-appearing on return.
   useEffect(() => {
-    closeAddDialog();
-  }, [location.pathname, closeAddDialog]);
+    closeAddDialog()
+  }, [location.pathname, closeAddDialog])
 
   return (
     <main className="app-shell">
@@ -25,6 +26,7 @@ export default function App() {
         <Route path="/" element={<ListPage />} />
         <Route path="/videos/:id" element={<DetailPage />} />
       </Routes>
+      <Toast />
     </main>
-  );
+  )
 }

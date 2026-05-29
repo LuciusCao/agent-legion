@@ -1,11 +1,10 @@
-from pathlib import Path
-
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from ..db import Database
 from ..pipeline.package import create_package
+from ..security import validate_package_filename
 from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
 
@@ -39,7 +38,9 @@ def create_packages_router(db: Database, settings: Settings) -> APIRouter:
         if request is not None and requested_ids == []:
             raise HTTPException(status_code=400, detail="No videos selected for packaging")
         if not selection.videos:
-            raise HTTPException(status_code=400, detail="No completed videos available for packaging")
+            raise HTTPException(
+                status_code=400, detail="No completed videos available for packaging"
+            )
         package_path = create_package(selection.videos, settings.packages_dir, settings.videos_dir)
         for video in selection.videos:
             db.update_video(video["id"], packed=1)
@@ -50,9 +51,10 @@ def create_packages_router(db: Database, settings: Settings) -> APIRouter:
 
     @router.get("/packages/{filename:path}")
     def download_package(filename: str):
-        # Reject empty filenames and path traversal attempts
-        if not filename or filename.startswith("/") or ".." in Path(filename).parts:
-            raise HTTPException(status_code=404, detail="Package not found")
+        try:
+            validate_package_filename(filename)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Package not found") from None
         package_path = settings.packages_dir / filename
         try:
             resolved = package_path.resolve()

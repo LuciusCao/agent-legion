@@ -11,7 +11,7 @@ def test_subtitle_review_missing_report_fails(tmp_path):
 
 
 def test_subtitle_review_non_dict_report_fails(tmp_path):
-    (tmp_path / "subtitle_review_report.json").write_text("\"string\"")
+    (tmp_path / "subtitle_review_report.json").write_text('"string"')
     with pytest.raises(ValueError, match="must be a JSON object"):
         validate_phase_outputs(tmp_path, "subtitle_review")
 
@@ -24,9 +24,7 @@ def test_subtitle_review_missing_srt_fails(tmp_path):
 
 def test_subtitle_review_valid_passes(tmp_path):
     (tmp_path / "subtitle_review_report.json").write_text("{}")
-    (tmp_path / "subtitles_reviewed.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nhello\n"
-    )
+    (tmp_path / "subtitles_reviewed.srt").write_text("1\n00:00:00,000 --> 00:00:01,000\nhello\n")
     validate_phase_outputs(tmp_path, "subtitle_review")  # should not raise
 
 
@@ -57,17 +55,13 @@ def test_chapter_generate_missing_title_fails(tmp_path):
 
 
 def test_chapter_generate_valid_passes(tmp_path):
-    (tmp_path / "chapters.json").write_text(
-        '[{"title": "T1", "start_time": 0, "end_time": 1}]'
-    )
+    (tmp_path / "chapters.json").write_text('[{"title": "T1", "start_time": 0, "end_time": 1}]')
     validate_phase_outputs(tmp_path, "chapter_generate")
 
 
 def test_chapter_generate_list_root_form_passes(tmp_path):
     """chapters.json may be a plain list at root."""
-    (tmp_path / "chapters.json").write_text(
-        '[{"title": "T1", "start_time": 0, "end_time": 1}]'
-    )
+    (tmp_path / "chapters.json").write_text('[{"title": "T1", "start_time": 0, "end_time": 1}]')
     validate_phase_outputs(tmp_path, "chapter_generate")
 
 

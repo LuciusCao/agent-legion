@@ -205,7 +205,16 @@ def test_concurrent_set_idle_clears_all_busy_video_ids():
 
 def test_openclaw_runner_extracts_agent_id_from_command_template():
     runner = OpenClawRunner(
-        command_template=["openclaw", "agent", "--local", "--agent", "main", "--message", "{prompt_text}", "--json"],
+        command_template=[
+            "openclaw",
+            "agent",
+            "--local",
+            "--agent",
+            "main",
+            "--message",
+            "{prompt_text}",
+            "--json",
+        ],
         cwd=Path("."),
         timeout_seconds=600,
     )
