@@ -1,3 +1,4 @@
+from subprocess import TimeoutExpired
 from unittest.mock import patch
 
 import pytest
@@ -246,3 +247,27 @@ def test_whisper_provider_with_missing_vad_model_raises(tmp_path):
         pytest.raises(FileNotFoundError, match="VAD model not found"),
     ):
         provider.transcribe(video_path, output_path, "Test")
+
+
+def test_whisper_provider_timeout_cleans_temp_wav(tmp_path):
+    provider = _make_fake_whisper_provider(tmp_path)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+    wav_path = output_path.with_suffix(".wav")
+
+    def _fake_run(cmd, **kwargs):
+        # Simulate ffmpeg creating the wav file
+        if cmd[0] == "ffmpeg":
+            wav_path.write_bytes(b"fake wav")
+            return
+        # Simulate whisper timing out
+        raise TimeoutExpired(cmd, timeout=900)
+
+    with (
+        patch("server.app.pipeline.transcribe.subprocess.run", side_effect=_fake_run),
+        pytest.raises(TimeoutExpired),
+    ):
+        provider.transcribe(video_path, output_path, "Test")
+
+    assert not wav_path.exists(), "temporary wav should be cleaned on timeout"

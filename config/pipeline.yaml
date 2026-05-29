@@ -13,6 +13,7 @@ worker:
     waiting_for_url: 10
 asr:
   provider: auto
+  timeout_seconds: 900
   whisper:
     binary: /opt/homebrew/Cellar/whisper-cpp/1.8.4/bin/whisper-cli
     model: ~/.cache/whisper.cpp/ggml-medium.bin
