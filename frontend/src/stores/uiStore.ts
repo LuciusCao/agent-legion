@@ -15,7 +15,7 @@ interface UiState {
   deleteDialogOpen: boolean
   workerPaused: boolean
   toast: Toast | null
-  connectAgentsWs: () => void
+  connectAgentsWs: () => () => void
   fetchWorkerStatus: () => Promise<void>
   setWorkerPaused: (paused: boolean) => Promise<void>
   openAddDialog: () => void
@@ -30,6 +30,7 @@ interface UiState {
 }
 
 let wsInstance: WebSocket | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
 export const useUiStore = create<UiState>((set) => ({
   agents: [],
@@ -42,6 +43,10 @@ export const useUiStore = create<UiState>((set) => ({
 
   connectAgentsWs: () => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     if (wsInstance) {
       wsInstance.onclose = null
       wsInstance.close()
@@ -56,10 +61,22 @@ export const useUiStore = create<UiState>((set) => ({
       }
     }
     wsInstance.onclose = () => {
-      setTimeout(() => {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
         const { connectAgentsWs } = useUiStore.getState()
         connectAgentsWs()
       }, 3000)
+    }
+    return () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      if (wsInstance) {
+        wsInstance.onclose = null
+        wsInstance.close()
+        wsInstance = null
+      }
     }
   },
 
