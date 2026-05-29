@@ -10,8 +10,7 @@ def test_assemble_video_creates_metadata_and_report(tmp_path):
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
     (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:02,000\nHello\n\n"
-        "2\n00:00:02,000 --> 00:00:05,000\nWorld\n",
+        "1\n00:00:00,000 --> 00:00:02,000\nHello\n\n2\n00:00:02,000 --> 00:00:05,000\nWorld\n",
         encoding="utf-8",
     )
     (video_dir / "chapters.json").write_text(
@@ -19,12 +18,12 @@ def test_assemble_video_creates_metadata_and_report(tmp_path):
         encoding="utf-8",
     )
     (video_dir / "interactions.json").write_text(
-        json.dumps({
-            "version": "1.0",
-            "interactions": [
-                {"id": "I1", "trigger_time": 1, "type": "quiz", "question": "Q1"}
-            ],
-        }),
+        json.dumps(
+            {
+                "version": "1.0",
+                "interactions": [{"id": "I1", "trigger_time": 1, "type": "quiz", "question": "Q1"}],
+            }
+        ),
         encoding="utf-8",
     )
     (video_dir / "review_result.json").write_text(
@@ -89,7 +88,12 @@ def test_assemble_video_creates_empty_interactions_stub_for_question(tmp_path):
     (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
     # interactions.json does NOT exist
 
-    video = {"id": "question_Q001", "title": "Q1", "content_type": "question", "external_id": "Q001"}
+    video = {
+        "id": "question_Q001",
+        "title": "Q1",
+        "content_type": "question",
+        "external_id": "Q001",
+    }
     metadata = assemble_video(video, video_dir)
 
     assert metadata["interactions"] == []

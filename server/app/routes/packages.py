@@ -39,7 +39,9 @@ def create_packages_router(db: Database, settings: Settings) -> APIRouter:
         if request is not None and requested_ids == []:
             raise HTTPException(status_code=400, detail="No videos selected for packaging")
         if not selection.videos:
-            raise HTTPException(status_code=400, detail="No completed videos available for packaging")
+            raise HTTPException(
+                status_code=400, detail="No completed videos available for packaging"
+            )
         package_path = create_package(selection.videos, settings.packages_dir, settings.videos_dir)
         for video in selection.videos:
             db.update_video(video["id"], packed=1)

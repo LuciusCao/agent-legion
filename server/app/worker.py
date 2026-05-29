@@ -51,8 +51,7 @@ def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
                 settings.root_dir / str(sensevoice.get("script", "scripts/sensevoice_srt.py"))
             ),
             model_dir=str(
-                settings.root_dir
-                / str(sensevoice.get("model_dir", "models/SenseVoiceSmall"))
+                settings.root_dir / str(sensevoice.get("model_dir", "models/SenseVoiceSmall"))
             ),
         ),
     ]

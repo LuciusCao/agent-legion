@@ -8,8 +8,7 @@ def test_load_env_file_preserves_quoted_secret_values(tmp_path, monkeypatch):
     monkeypatch.setenv("BASECMS_TOKEN", "already-set")
     env_file = tmp_path / ".env"
     env_file.write_text(
-        'BASECMS_TOKEN="from-file"\n'
-        'BASECMS_SECRET="fake#secret$value"\n',
+        'BASECMS_TOKEN="from-file"\nBASECMS_SECRET="fake#secret$value"\n',
         encoding="utf-8",
     )
 

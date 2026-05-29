@@ -152,7 +152,9 @@ def test_worker_resumes_running_video_after_restart(db, settings):
     (video_dir / "interactions.json").write_text(
         json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
     )
-    db.update_video(video["id"], storage_dir=str(video_dir), current_phase="assemble", status="running")
+    db.update_video(
+        video["id"], storage_dir=str(video_dir), current_phase="assemble", status="running"
+    )
 
     assert db.recover_running_videos() == 1
     processed = process_video_once(db, settings, video["id"])
@@ -271,7 +273,12 @@ def test_question_video_skips_interaction_and_content_review(db, settings):
         json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "解析", "concepts": []}]),
         encoding="utf-8",
     )
-    db.update_video("question_Q001", storage_dir=str(video_dir), current_phase="chapter_generate", status="queued")
+    db.update_video(
+        "question_Q001",
+        storage_dir=str(video_dir),
+        current_phase="chapter_generate",
+        status="queued",
+    )
 
     processed = process_video_once(db, settings, video["id"])
 
@@ -312,7 +319,14 @@ def test_worker_retries_missing_url_video_from_cms(db, settings, monkeypatch):
     monkeypatch.setattr(
         "server.app.worker.lookup_question_video",
         lambda uuid, api_url, token: type(
-            "Lookup", (), {"status": "found", "url": "https://example.com/q001.mp4", "title": "Question 1", "source_uuid": "uuid-q001"}
+            "Lookup",
+            (),
+            {
+                "status": "found",
+                "url": "https://example.com/q001.mp4",
+                "title": "Question 1",
+                "source_uuid": "uuid-q001",
+            },
         )(),
     )
     monkeypatch.setattr(
@@ -334,7 +348,9 @@ def test_process_next_continues_after_unresolved_missing_url(db, settings):
     video = db.create_video("https://example.com/a.mp4", "A")
     db.create_video("", "Question 1", content_type="question", external_id="Q001")
     with db.connect() as conn:
-        conn.execute("update videos set created_at='2000-01-01 00:00:00' where id=?", (video["id"],))
+        conn.execute(
+            "update videos set created_at='2000-01-01 00:00:00' where id=?", (video["id"],)
+        )
         conn.execute(
             "update videos set created_at='2999-01-01 00:00:00' where id=?",
             ("question_Q001",),
@@ -351,7 +367,9 @@ def test_process_next_continues_after_unresolved_missing_url(db, settings):
     (video_dir / "interactions.json").write_text(
         json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
     )
-    db.update_video(video["id"], storage_dir=str(video_dir), current_phase="assemble", status="queued")
+    db.update_video(
+        video["id"], storage_dir=str(video_dir), current_phase="assemble", status="queued"
+    )
 
     assert process_next(db, settings) is True
     assert db.get_video(video["id"])["status"] == "completed"

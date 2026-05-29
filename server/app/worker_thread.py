@@ -112,8 +112,8 @@ class WorkerThread:
                     with self.running_lock:
                         self.running_futures[video["id"]] = future
                     future.add_done_callback(
-                        lambda _f, vid=video["id"], idx=runner_index, aid=agent_id: _finish_agent_work(
-                            vid, idx, aid
+                        lambda _f, vid=video["id"], idx=runner_index, aid=agent_id: (
+                            _finish_agent_work(vid, idx, aid)
                         )
                     )
                     submitted = True
@@ -125,7 +125,9 @@ class WorkerThread:
                     )
                     with self.running_lock:
                         self.running_futures[video["id"]] = future
-                        self.running_local_counts[work.phase] = self.running_local_counts.get(work.phase, 0) + 1
+                        self.running_local_counts[work.phase] = (
+                            self.running_local_counts.get(work.phase, 0) + 1
+                        )
                     future.add_done_callback(
                         lambda _f, vid=video["id"], phase=work.phase: _finish_local_work(vid, phase)
                     )
@@ -135,9 +137,7 @@ class WorkerThread:
         runner_count = self.runner_pool.size()
         workers = _configured_worker_count(runner_count)
         self.executor = ThreadPoolExecutor(max_workers=workers)
-        self._thread = threading.Thread(
-            target=_worker_loop, name="video-hive-worker", daemon=True
-        )
+        self._thread = threading.Thread(target=_worker_loop, name="video-hive-worker", daemon=True)
         self._thread.start()
 
     def stop(self, timeout: float = 3) -> None:

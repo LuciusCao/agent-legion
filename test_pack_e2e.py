@@ -24,7 +24,9 @@ async def main():
 
         # Get first video id before packaging
         first_item = await page.query_selector("md-list-item")
-        title_before = await first_item.evaluate("el => el.querySelector('[slot=headline]').textContent")
+        title_before = await first_item.evaluate(
+            "el => el.querySelector('[slot=headline]').textContent"
+        )
         print(f"First video before: {title_before.strip()}")
 
         # Click package button
@@ -45,5 +47,6 @@ async def main():
         print(f"Packed badges after refresh: {len(badges_after)}")
 
         await browser.close()
+
 
 asyncio.run(main())
