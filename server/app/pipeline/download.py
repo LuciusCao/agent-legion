@@ -2,8 +2,11 @@ from pathlib import Path
 
 import requests
 
+from server.app.security import validate_download_url
+
 
 def download_video(url: str, output_path: Path) -> None:
+    validate_download_url(url)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_path.exists() and output_path.stat().st_size > 0:
         return
