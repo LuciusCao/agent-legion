@@ -508,3 +508,17 @@ def test_worker_thread_stop_calls_close_read_conn(db, settings):
     with patch.object(db, "close_read_conn") as mock_close:
         wt.stop()
         mock_close.assert_called_once()
+
+
+def test_process_next_passes_limit_to_list_videos(db, settings):
+    """process_next 必须向 list_videos 传入 limit=50。"""
+    db.create_video("https://example.com/a.mp4", "A")
+    db.update_video("a", status="queued", current_phase="download")
+
+    with patch.object(db, "list_videos") as mock_list:
+        mock_list.return_value = []
+        process_next(db, settings)
+        mock_list.assert_called_once()
+        call_kwargs = mock_list.call_args.kwargs
+        assert call_kwargs.get("limit") == 50
+        assert call_kwargs.get("status_filter") == ["queued", "missing_url", "running"]
