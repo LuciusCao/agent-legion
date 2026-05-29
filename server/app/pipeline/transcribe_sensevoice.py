@@ -7,15 +7,18 @@
 """
 
 import argparse
+import logging
 import re
 import subprocess
 import sys
 from pathlib import Path
 
+logger = logging.getLogger(__name__)
+
 try:
     from funasr import AutoModel
 except ImportError:
-    print("[Error] funasr not installed. Install with: pip install funasr")
+    logger.error("funasr not installed. Install with: pip install funasr")
     sys.exit(1)
 
 SENSEVOICE_MODEL = "iic/SenseVoiceSmall"
@@ -23,7 +26,7 @@ SENSEVOICE_MODEL = "iic/SenseVoiceSmall"
 
 def convert_to_wav(video_path: str, wav_path: str) -> str:
     """Convert video to 16kHz mono WAV."""
-    print(f"[Convert] {video_path} -> {wav_path}")
+    logger.info("Convert %s -> %s", video_path, wav_path)
     subprocess.run(
         [
             "ffmpeg",
@@ -62,7 +65,7 @@ def write_srt(segments: list, output_path: str):
             start = format_time(seg["start"])
             end = format_time(seg["end"])
             f.write(f"{i}\n{start} --> {end}\n{seg['text']}\n\n")
-    print(f"[SRT] Saved: {output_path} ({len(valid)} subtitles)")
+    logger.info("SRT saved: %s (%s subtitles)", output_path, len(valid))
 
 
 def split_by_punctuation(words: list, timestamp: list, max_duration: float = 6.0) -> list:
@@ -132,14 +135,14 @@ def merge_short_segments(segments: list, min_duration: float = 0.8) -> list:
 
 def transcribe_with_sensevoice(wav_path: str, language: str = "auto") -> list:
     """Transcribe audio using SenseVoice model."""
-    print(f"[ASR] Loading SenseVoice model: {SENSEVOICE_MODEL}")
+    logger.info("Loading SenseVoice model: %s", SENSEVOICE_MODEL)
     model = AutoModel(
         model=SENSEVOICE_MODEL,
         device="cpu",
         disable_update=True,
     )
 
-    print(f"[ASR] Transcribing: {wav_path}")
+    logger.info("Transcribing: %s", wav_path)
     result = model.generate(
         input=wav_path,
         language=language,
@@ -161,7 +164,7 @@ def transcribe_with_sensevoice(wav_path: str, language: str = "auto") -> list:
         text = re.sub(r"<\|[^|]+\|>", "", text).strip()
 
         if not timestamp or not words:
-            print("[WARNING] No timestamp in result")
+            logger.warning("No timestamp in result")
             continue
 
         # Calibrate timestamps: SenseVoice sometimes absorbs silence/noise into
@@ -182,19 +185,20 @@ def transcribe_with_sensevoice(wav_path: str, language: str = "auto") -> list:
                     if i > 0 and new_start < timestamp[i - 1][1]:
                         new_start = timestamp[i - 1][1]
                     if new_start >= 0 and new_start < timestamp[i][1]:
-                        print(
-                            f"[Calibrate] Char #{i} duration {dur}ms abnormal, adjusting start {timestamp[i][0]} -> {new_start}ms"
+                        logger.info(
+                            "Calibrate char #%s duration %sms abnormal, adjusting start %s -> %sms",
+                            i, dur, timestamp[i][0], new_start,
                         )
                         timestamp[i][0] = new_start
 
         # Build segments from character-level timestamps
         segments = split_by_punctuation(words, timestamp)
 
-    print(f"[ASR] Raw segments: {len(segments)}")
+    logger.info("Raw segments: %s", len(segments))
 
     # Merge very short segments
     segments = merge_short_segments(segments)
-    print(f"[ASR] After merge: {len(segments)}")
+    logger.info("After merge: %s", len(segments))
 
     return segments
 
@@ -232,10 +236,10 @@ def main():
 
     shutil.copy2(str(srt_path), str(srt_default))
 
-    print(f"\n[Done] Output: {srt_path}")
-    print(f"       Also saved: {srt_default}")
-    print(f"       WAV kept: {wav_path}")
-    print(f"       Segments: {len(segments)}")
+    logger.info("Done. Output: %s", srt_path)
+    logger.info("Also saved: %s", srt_default)
+    logger.info("WAV kept: %s", wav_path)
+    logger.info("Segments: %s", len(segments))
 
 
 if __name__ == "__main__":
