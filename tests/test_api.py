@@ -1190,3 +1190,23 @@ def test_logs_filters_sensitive_paths(tmp_path, client, db, settings):
     assert "secret.mp4" not in log
     assert "/Users/admin/.ssh/id_rsa" not in log
     assert "Success" in log
+
+
+def test_broadcast_package_ready():
+    import asyncio
+    from server.app.events import VideoEventManager
+
+    async def _test():
+        mgr = VideoEventManager()
+        mgr._loop = asyncio.get_running_loop()
+        queue = asyncio.Queue()
+        mgr._clients.add(queue)
+
+        mgr.broadcast_package_ready("/api/packages/test.zip")
+        await asyncio.sleep(0)
+        payload = await asyncio.wait_for(queue.get(), timeout=1.0)
+        data = json.loads(payload)
+        assert data["type"] == "package_ready"
+        assert data["download_url"] == "/api/packages/test.zip"
+
+    asyncio.run(_test())

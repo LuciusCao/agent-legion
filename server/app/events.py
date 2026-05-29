@@ -147,3 +147,6 @@ class VideoEventManager:
                 }
             ),
         )
+
+    def broadcast_package_ready(self, download_url: str) -> None:
+        self._broadcast(json.dumps({"type": "package_ready", "download_url": download_url}))
