@@ -16,9 +16,7 @@ def test_compute_interaction_stats_no_interactions(tmp_path: Path) -> None:
 def test_compute_interaction_stats_empty_interactions(tmp_path: Path) -> None:
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
-    (video_dir / "interactions.json").write_text(
-        json.dumps({"interactions": []}), encoding="utf-8"
-    )
+    (video_dir / "interactions.json").write_text(json.dumps({"interactions": []}), encoding="utf-8")
     assert compute_interaction_stats(video_dir) is None
 
 
@@ -176,9 +174,7 @@ def test_review_status_no_interactions(tmp_path: Path) -> None:
 def test_review_status_empty_interactions(tmp_path: Path) -> None:
     video_dir = tmp_path / "v1"
     video_dir.mkdir()
-    (video_dir / "interactions.json").write_text(
-        json.dumps({"interactions": []}), encoding="utf-8"
-    )
+    (video_dir / "interactions.json").write_text(json.dumps({"interactions": []}), encoding="utf-8")
     assert compute_interaction_review_status(video_dir) is None
 
 

@@ -30,7 +30,8 @@ def resolve_session_path(session_id: str) -> Path:
         return exact
 
     candidates = [
-        p for p in base.glob("*.jsonl")
+        p
+        for p in base.glob("*.jsonl")
         if session_id in p.name and not p.name.endswith(".trajectory.jsonl")
     ]
     if len(candidates) == 1:
@@ -87,10 +88,7 @@ def red(text: str) -> str:
 
 def list_sessions(args: argparse.Namespace) -> None:
     base = sessions_dir()
-    files = [
-        p for p in base.glob("*.jsonl")
-        if not p.name.endswith(".trajectory.jsonl")
-    ]
+    files = [p for p in base.glob("*.jsonl") if not p.name.endswith(".trajectory.jsonl")]
     files.sort(key=lambda p: p.stat().st_mtime, reverse=True)
 
     print(f"{bold('Recent OpenClaw Sessions')} ({len(files)} total, showing top {args.limit})\n")
@@ -99,7 +97,7 @@ def list_sessions(args: argparse.Namespace) -> None:
 
     import time as time_mod
 
-    for p in files[:args.limit]:
+    for p in files[: args.limit]:
         sid = p.stem
         mtime = p.stat().st_mtime
         age_sec = time_mod.time() - mtime
@@ -201,21 +199,28 @@ def render_event(obj: dict, _args: argparse.Namespace) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser(description="View OpenClaw session conversation")
     parser.add_argument("session_id", nargs="?", help="Session id, partial match, or file path")
-    parser.add_argument("--full", action="store_true", help="Show full tool results without truncation")
+    parser.add_argument(
+        "--full", action="store_true", help="Show full tool results without truncation"
+    )
     parser.add_argument("--no-results", action="store_true", help="Hide tool results")
-    parser.add_argument("--list", action="store_true", help="List recent sessions instead of viewing one")
+    parser.add_argument(
+        "--list", action="store_true", help="List recent sessions instead of viewing one"
+    )
     parser.add_argument("--limit", type=int, default=20, help="Max sessions to list (default: 20)")
     parser.add_argument("--no-color", action="store_true", help="Disable colored output")
     args = parser.parse_args()
 
     if args.no_color:
         global sys
+
         # Force non-tty so color() returns plain text
         class FakeStdout:
             def isatty(self):
                 return False
+
             def __getattr__(self, name):
                 return getattr(sys.stdout, name)
+
         sys.stdout = FakeStdout()  # type: ignore[assignment]
 
     if args.list:

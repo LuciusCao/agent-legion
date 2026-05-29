@@ -25,12 +25,8 @@ def test_read_artifacts_includes_checklist(tmp_path: Path) -> None:
     (video_dir / "subtitles.srt").write_text(
         "1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8"
     )
-    (video_dir / "interactions.json").write_text(
-        json.dumps({"interactions": []}), encoding="utf-8"
-    )
-    (video_dir / "chapters.json").write_text(
-        json.dumps({"chapters": []}), encoding="utf-8"
-    )
+    (video_dir / "interactions.json").write_text(json.dumps({"interactions": []}), encoding="utf-8")
+    (video_dir / "chapters.json").write_text(json.dumps({"chapters": []}), encoding="utf-8")
     (video_dir / "checklist.json").write_text(
         json.dumps({"video_id": "v1", "checklist": {"content_usability": {"issues": []}}}),
         encoding="utf-8",

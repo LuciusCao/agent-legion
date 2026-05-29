@@ -8,7 +8,9 @@ def _extract_question_item(payload: dict) -> dict[str, Any] | None:
     if not isinstance(data, dict) or not data:
         return None
     has_identity = any(data.get(key) for key in ("question_uuid", "uuid", "id", "question_id"))
-    has_content = any(data.get(key) for key in ("title", "question_title", "name", "stem", "content"))
+    has_content = any(
+        data.get(key) for key in ("title", "question_title", "name", "stem", "content")
+    )
     has_video_data = isinstance(data.get("video_data"), list)
     return data if has_identity or has_content or has_video_data else None
 
@@ -43,4 +45,6 @@ def lookup_question_video(
         return CmsVideoLookup("not_found", payload=payload)
     video_url, source_uuid = _extract_question_url(payload)
     status = "found" if video_url else "missing_url"
-    return CmsVideoLookup(status, video_url or "", _extract_question_title(item, uuid), source_uuid or "", payload)
+    return CmsVideoLookup(
+        status, video_url or "", _extract_question_title(item, uuid), source_uuid or "", payload
+    )

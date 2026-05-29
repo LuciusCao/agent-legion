@@ -33,7 +33,9 @@ def _generate_prod_token(config: dict[str, Any]) -> str | None:
         "nonce": cfg["nonce"],
         "secret": cfg["secret"],
     }
-    resp = requests.post(cfg["url"], json=payload, headers={"Content-Type": "application/json"}, timeout=10)
+    resp = requests.post(
+        cfg["url"], json=payload, headers={"Content-Type": "application/json"}, timeout=10
+    )
     resp.raise_for_status()
     result = resp.json()
     token = result.get("token") or result.get("data", {}).get("token")

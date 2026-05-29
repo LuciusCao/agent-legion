@@ -114,7 +114,9 @@ def rerun_video_record(
     if phases.index(normalized_phase) <= phases.index("transcribe"):
         db.clear_transcription_runs(video_id)
 
-    db.update_video(video_id, current_phase=normalized_phase, status="queued", error_message="", packed=0)
+    db.update_video(
+        video_id, current_phase=normalized_phase, status="queued", error_message="", packed=0
+    )
     return {"video_id": video_id, "status": "rerun", "phase": normalized_phase, "message": ""}
 
 
@@ -126,7 +128,9 @@ def batch_delete_video_records(
     results = []
     for video_id in video_ids:
         if not delete_video_record(db, settings, video_id):
-            results.append({"video_id": video_id, "status": "not_found", "message": "Video not found"})
+            results.append(
+                {"video_id": video_id, "status": "not_found", "message": "Video not found"}
+            )
             continue
         results.append({"video_id": video_id, "status": "deleted", "message": ""})
     return results
@@ -139,7 +143,9 @@ def batch_rerun_video_records(
     phase: str,
     agent_manager: AgentStatusManager | None = None,
 ) -> list[dict[str, str]]:
-    return [rerun_video_record(db, settings, video_id, phase, agent_manager) for video_id in video_ids]
+    return [
+        rerun_video_record(db, settings, video_id, phase, agent_manager) for video_id in video_ids
+    ]
 
 
 def select_videos_for_package(
@@ -158,7 +164,9 @@ def select_videos_for_package(
                 incomplete_ids.append(video_id)
             else:
                 missing_ids.append(video_id)
-        return PackageSelection(videos=videos, missing_ids=missing_ids, incomplete_ids=incomplete_ids)
+        return PackageSelection(
+            videos=videos, missing_ids=missing_ids, incomplete_ids=incomplete_ids
+        )
 
     completed = [video for video in db.list_videos() if video["status"] == "completed"]
     return PackageSelection(videos=completed, missing_ids=[], incomplete_ids=[])

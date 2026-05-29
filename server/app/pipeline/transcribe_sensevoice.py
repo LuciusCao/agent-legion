@@ -26,9 +26,17 @@ def convert_to_wav(video_path: str, wav_path: str) -> str:
     print(f"[Convert] {video_path} -> {wav_path}")
     subprocess.run(
         [
-            "ffmpeg", "-y", "-i", video_path,
-            "-vn", "-acodec", "pcm_s16le",
-            "-ar", "16000", "-ac", "1",
+            "ffmpeg",
+            "-y",
+            "-i",
+            video_path,
+            "-vn",
+            "-acodec",
+            "pcm_s16le",
+            "-ar",
+            "16000",
+            "-ac",
+            "1",
             wav_path,
         ],
         check=True,
@@ -174,7 +182,9 @@ def transcribe_with_sensevoice(wav_path: str, language: str = "auto") -> list:
                     if i > 0 and new_start < timestamp[i - 1][1]:
                         new_start = timestamp[i - 1][1]
                     if new_start >= 0 and new_start < timestamp[i][1]:
-                        print(f"[Calibrate] Char #{i} duration {dur}ms abnormal, adjusting start {timestamp[i][0]} -> {new_start}ms")
+                        print(
+                            f"[Calibrate] Char #{i} duration {dur}ms abnormal, adjusting start {timestamp[i][0]} -> {new_start}ms"
+                        )
                         timestamp[i][0] = new_start
 
         # Build segments from character-level timestamps
