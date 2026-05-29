@@ -52,9 +52,7 @@ interface VideoState {
     targetPhase: string,
     startPhase?: string | null
   ) => Promise<{ results: RunToResult[] }>
-  batchPackage: (
-    ids: string[]
-  ) => Promise<{ path: string; download_url: string }>
+  batchPackage: (ids: string[]) => Promise<{ accepted: boolean }>
 }
 
 function hasAllApprovedInteractions(video: VideoItem): boolean {
@@ -277,14 +275,10 @@ export const useVideoStore = create<VideoState>((set, get) => ({
 
   batchPackage: async (ids) => {
     try {
-      const result = await api<{ path: string; download_url: string }>(
-        '/api/package',
-        {
-          method: 'POST',
-          body: JSON.stringify({ video_ids: ids }),
-        }
-      )
-      await get().fetchVideos()
+      const result = await api<{ accepted: boolean }>('/api/package', {
+        method: 'POST',
+        body: JSON.stringify({ video_ids: ids }),
+      })
       return result
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

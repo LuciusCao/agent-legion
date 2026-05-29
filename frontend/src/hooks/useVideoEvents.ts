@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useVideoStore } from '../stores/videoStore'
+import { triggerDownload } from '../lib/download'
 
 export function useVideoEvents() {
   const { mergeVideo, removeVideo, setSseConnected } = useVideoStore()
@@ -29,6 +30,8 @@ export function useVideoEvents() {
             mergeVideo(payload.video)
           } else if (payload.type === 'video_deleted' && payload.video_id) {
             removeVideo(payload.video_id)
+          } else if (payload.type === 'package_ready' && payload.download_url) {
+            triggerDownload(payload.download_url)
           }
         } catch {
           // ignore invalid payloads

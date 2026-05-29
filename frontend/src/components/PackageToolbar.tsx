@@ -1,5 +1,5 @@
 import { useVideoStore } from '../stores/videoStore'
-import { triggerDownload } from '../helpers'
+import { useUiStore } from '../stores/uiStore'
 import styles from './BatchToolbar.module.css'
 
 export function PackageToolbar() {
@@ -12,15 +12,16 @@ export function PackageToolbar() {
     clearSelection,
     batchPackage,
   } = useVideoStore()
+  const { showToast } = useUiStore()
 
   const count = selectedIds.size
   const hasSelection = count > 0
 
   const handlePackage = async () => {
     if (!hasSelection) return
-    const result = await batchPackage(Array.from(selectedIds))
+    await batchPackage(Array.from(selectedIds))
     togglePackageSelectMode()
-    await triggerDownload(result.download_url)
+    showToast('打包已提交，完成后将自动下载', 'success')
   }
 
   return (

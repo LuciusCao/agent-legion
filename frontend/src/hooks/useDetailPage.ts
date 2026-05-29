@@ -226,14 +226,12 @@ export function useDetailPage(): UseDetailPageReturn {
 
   const handlePackage = useCallback(async () => {
     if (!id) return
-    const result = await api<{ download_url: string }>('/api/package', {
+    await api<{ accepted: boolean }>('/api/package', {
       method: 'POST',
       body: JSON.stringify({ video_ids: [id] }),
     })
-    await Promise.all([fetchVideos(), loadVideo(id)])
-    checkFetchError()
-    await triggerDownload(result.download_url)
-  }, [id, fetchVideos, loadVideo, checkFetchError])
+    showToast('打包已提交，完成后将自动下载', 'success')
+  }, [id, showToast])
 
   const handleRerun = useCallback(
     async (phase: string) => {
