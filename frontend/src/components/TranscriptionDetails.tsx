@@ -1,17 +1,21 @@
-import type { TranscriptionRun } from "../types";
+import type { TranscriptionRun } from '../types'
 
 interface TranscriptionDetailsProps {
-  primary: TranscriptionRun | undefined;
-  fallback: TranscriptionRun | undefined;
-  totalCount: number;
+  primary: TranscriptionRun | undefined
+  fallback: TranscriptionRun | undefined
+  totalCount: number
 }
 
-export function TranscriptionDetails({ primary, fallback, totalCount }: TranscriptionDetailsProps) {
+export function TranscriptionDetails({
+  primary,
+  fallback,
+  totalCount,
+}: TranscriptionDetailsProps) {
   return (
     <div className="timeline-detail-content transcription">
       <div className="trans-row">
         <span className="trans-key">Provider</span>
-        <span className="trans-value">{primary?.provider || "—"}</span>
+        <span className="trans-value">{primary?.provider || '—'}</span>
       </div>
       {primary && primary.srt_entry_count > 0 && (
         <div className="trans-row">
@@ -38,5 +42,5 @@ export function TranscriptionDetails({ primary, fallback, totalCount }: Transcri
         </div>
       )}
     </div>
-  );
+  )
 }

@@ -35,17 +35,23 @@
 
 .activeChapterChip {
   --md-suggestion-chip-container-color: var(--md-sys-color-primary-container);
-  --md-suggestion-chip-label-text-color: var(--md-sys-color-on-primary-container);
+  --md-suggestion-chip-label-text-color: var(
+    --md-sys-color-on-primary-container
+  );
   --md-suggestion-chip-outline-color: var(--md-sys-color-primary);
 }
 
 .interactionChip {
   --md-suggestion-chip-container-color: var(--md-sys-color-secondary-container);
-  --md-suggestion-chip-label-text-color: var(--md-sys-color-on-secondary-container);
+  --md-suggestion-chip-label-text-color: var(
+    --md-sys-color-on-secondary-container
+  );
 }
 
 .activeInteractionChip {
   --md-suggestion-chip-container-color: var(--md-sys-color-secondary-container);
-  --md-suggestion-chip-label-text-color: var(--md-sys-color-on-secondary-container);
+  --md-suggestion-chip-label-text-color: var(
+    --md-sys-color-on-secondary-container
+  );
   --md-suggestion-chip-outline-color: var(--md-sys-color-secondary);
 }
