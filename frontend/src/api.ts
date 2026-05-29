@@ -5,6 +5,16 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
     headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
     ...init,
   })
-  if (!response.ok) throw new Error(await response.text())
+  if (!response.ok) {
+    const text = await response.text()
+    let message: string
+    try {
+      const json = JSON.parse(text)
+      message = json.detail || json.message || `HTTP ${response.status}`
+    } catch {
+      message = `HTTP ${response.status}: ${text.slice(0, 200)}`
+    }
+    throw new Error(message)
+  }
   return (await response.json()) as T
 }
