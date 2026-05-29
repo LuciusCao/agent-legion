@@ -40,11 +40,13 @@ def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
 
         if not Path(vad_model).expanduser().exists():
             raise FileNotFoundError(f"Configured VAD model not found: {vad_model}")
+    timeout = int(asr.get("timeout_seconds", 900))
     providers: list[TranscriptionProvider] = [
         WhisperCppProvider(
             binary=str(whisper.get("binary", "")),
             model=str(whisper.get("model", "")),
             vad_model=vad_model,
+            timeout=timeout,
         ),
         SenseVoiceProvider(
             script=str(
@@ -53,6 +55,7 @@ def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
             model_dir=str(
                 settings.root_dir / str(sensevoice.get("model_dir", "models/SenseVoiceSmall"))
             ),
+            timeout=timeout,
         ),
     ]
     return providers
