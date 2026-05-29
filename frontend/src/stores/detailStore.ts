@@ -9,6 +9,7 @@ interface DetailState {
   transcriptionRuns: TranscriptionRun[]
   activeTab: DetailTab
   isLoading: boolean
+  error: string | null
   loadVideo: (id: string) => Promise<void>
   loadLog: (id: string) => Promise<void>
   loadPhaseRuns: (id: string) => Promise<void>
@@ -27,9 +28,10 @@ export const useDetailStore = create<DetailState>((set) => ({
   transcriptionRuns: [],
   activeTab: 'nodes',
   isLoading: false,
+  error: null,
 
   loadVideo: async (id) => {
-    set({ isLoading: true })
+    set({ isLoading: true, error: null })
     try {
       const data = await api<{
         video: VideoItem
@@ -45,6 +47,9 @@ export const useDetailStore = create<DetailState>((set) => ({
       if (video) {
         set({ activeTab: 'subtitles' })
       }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ error: message })
     } finally {
       set({ isLoading: false })
     }
@@ -54,8 +59,9 @@ export const useDetailStore = create<DetailState>((set) => ({
     try {
       const data = await api<{ log: string }>(`/api/videos/${id}/logs`)
       set({ log: data.log || '暂无日志' })
-    } catch {
-      set({ log: '加载日志失败' })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ log: '加载日志失败', error: message })
     }
   },
 
@@ -69,8 +75,9 @@ export const useDetailStore = create<DetailState>((set) => ({
         phaseRuns: data.phase_runs || [],
         transcriptionRuns: data.transcription_runs || [],
       })
-    } catch {
-      // ignore
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ error: message })
     }
   },
 
