@@ -66,6 +66,7 @@ export function useDetailPage(): UseDetailPageReturn {
   const navigate = useNavigate()
   const playerRef = useRef<HTMLVideoElement>(null)
   const previousPlaybackTimeRef = useRef<number | null>(null)
+  const lastTimeRef = useRef(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [moreDialogOpen, setMoreDialogOpen] = useState(false)
   const [moreDialogType, setMoreDialogType] = useState<MoreDialogType>(null)
@@ -148,7 +149,10 @@ export function useDetailPage(): UseDetailPageReturn {
 
   const handleTimeUpdate = useCallback(
     (time: number) => {
-      setCurrentTime(time)
+      if (time - lastTimeRef.current >= 0.1) {
+        lastTimeRef.current = time
+        setCurrentTime(time)
+      }
       const previousTime = previousPlaybackTimeRef.current
 
       const idx = binarySearchTriggerIndex(time, indexedTriggers)
