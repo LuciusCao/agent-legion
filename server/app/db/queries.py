@@ -371,6 +371,7 @@ class VideoQueries:
         sql = f"update videos set packed=?, updated_at=current_timestamp where id in ({placeholders})"
         with self.connect() as conn:
             conn.execute(sql, [packed] + video_ids)
+        self.batch_notify(video_ids)
 
     def start_phase(
         self, video_id: str, phase_key: str, command: list[str], log_path: str = ""

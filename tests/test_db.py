@@ -465,3 +465,21 @@ def test_batch_notify_uses_single_connection(db):
     # that batch_notify itself doesn't open a new connection per video.
     assert len(created_connections) <= 4, f"Expected at most 4 connections, got {len(created_connections)}"
 
+
+
+def test_batch_update_packed_triggers_notification(db):
+    """batch_update_packed should notify all affected videos."""
+    from unittest.mock import MagicMock
+
+    v1 = db.create_video("https://example.com/v1.mp4", "V1")
+    v2 = db.create_video("https://example.com/v2.mp4", "V2")
+
+    emitted = []
+    db._hub = MagicMock()
+    db._hub.emit_change = lambda video: emitted.append(video["id"] if video else None)
+
+    db.batch_update_packed([v1["id"], v2["id"]], packed=1)
+
+    assert len(emitted) == 2
+    assert v1["id"] in emitted
+    assert v2["id"] in emitted
