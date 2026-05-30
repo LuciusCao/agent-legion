@@ -483,3 +483,28 @@ def test_submit_run_to_phase_returns_busy(db, settings, monkeypatch):
     result = submit_run_to_phase(db, settings, "v1", target_phase="assemble")
     assert result["status"] == "busy"
     mock_submit.assert_not_called()
+
+
+def test_batch_delete_uses_thread_pool(db, settings, monkeypatch):
+    """batch_delete should use ThreadPoolExecutor for parallel directory deletion."""
+    from unittest.mock import MagicMock, patch
+    from server.app.services.video_actions import batch_delete_video_records
+    from server.app.pipeline.common import resolve_video_dir
+
+    v1 = db.create_video("https://example.com/v1.mp4", "V1")
+    v2 = db.create_video("https://example.com/v2.mp4", "V2")
+
+    d1 = resolve_video_dir(v1, settings.videos_dir)
+    d2 = resolve_video_dir(v2, settings.videos_dir)
+    d1.mkdir(parents=True, exist_ok=True)
+    d2.mkdir(parents=True, exist_ok=True)
+
+    mock_executor = MagicMock()
+    mock_executor.__enter__ = MagicMock(return_value=mock_executor)
+    mock_executor.__exit__ = MagicMock(return_value=False)
+    mock_executor.map = MagicMock(return_value=[])
+
+    with patch("server.app.services.video_actions.ThreadPoolExecutor", return_value=mock_executor):
+        batch_delete_video_records(db, settings, [v1["id"], v2["id"]])
+
+    mock_executor.map.assert_called_once()
