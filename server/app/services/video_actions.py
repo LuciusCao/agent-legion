@@ -1,4 +1,5 @@
 import shutil
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
 from server.app.agents import AgentStatusManager
@@ -120,6 +121,12 @@ def rerun_video_record(
     return {"video_id": video_id, "status": "rerun", "phase": normalized_phase, "message": ""}
 
 
+def _delete_video_dir(video: VideoRecord, settings: Settings) -> None:
+    video_dir = resolve_video_dir(video, settings.videos_dir)
+    if video_dir.exists() and video_dir.is_dir():
+        shutil.rmtree(video_dir)
+
+
 def batch_delete_video_records(
     db: Database,
     settings: Settings,
@@ -128,12 +135,10 @@ def batch_delete_video_records(
     videos = db.batch_get_videos(video_ids)
     found_map = {v["id"]: v for v in videos}
 
-    # Delete file system directories (cannot be batched)
-    for video_id in video_ids:
-        if video_id in found_map:
-            video_dir = resolve_video_dir(found_map[video_id], settings.videos_dir)
-            if video_dir.exists() and video_dir.is_dir():
-                shutil.rmtree(video_dir)
+    # Parallel deletion of file system directories
+    found_videos = [found_map[vid] for vid in video_ids if vid in found_map]
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        executor.map(lambda v: _delete_video_dir(v, settings), found_videos)
 
     # Batch delete DB records
     found_ids = [vid for vid in video_ids if vid in found_map]
