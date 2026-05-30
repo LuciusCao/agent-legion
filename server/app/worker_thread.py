@@ -145,7 +145,9 @@ class WorkerThread:
 
                     future.add_done_callback(_on_local_done)
                     submitted = True
-                wait_seconds = 0.2 if self.worker_control.consume_tick() else (1 if submitted else 3)
+                wait_seconds = (
+                    0.2 if self.worker_control.consume_tick() else (1 if submitted else 3)
+                )
                 self.stop_event.wait(wait_seconds)
 
         runner_count = self.runner_pool.size()

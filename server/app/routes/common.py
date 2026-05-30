@@ -10,7 +10,9 @@ class HealthResponse(BaseModel):
     ok: bool
 
 
-def create_common_router(db: Database, settings: Settings, worker_control: WorkerControl) -> APIRouter:
+def create_common_router(
+    db: Database, settings: Settings, worker_control: WorkerControl
+) -> APIRouter:
     router = APIRouter(tags=["common"])
 
     @router.get("/health", response_model=HealthResponse)

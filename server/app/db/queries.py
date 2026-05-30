@@ -127,7 +127,9 @@ class VideoQueries:
     def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
         return cast(VideoRecord, dict(row)) if row else None
 
-    def _list_phase_runs_with_conn(self, conn: sqlite3.Connection, video_id: str) -> list[PhaseRunRecord]:
+    def _list_phase_runs_with_conn(
+        self, conn: sqlite3.Connection, video_id: str
+    ) -> list[PhaseRunRecord]:
         rows = [
             dict(row)
             for row in conn.execute(
@@ -140,7 +142,9 @@ class VideoQueries:
             _phase_run_with_agent_session(row)
         return cast(list[PhaseRunRecord], rows)
 
-    def _list_transcription_runs_with_conn(self, conn: sqlite3.Connection, video_id: str) -> list[dict[str, Any]]:
+    def _list_transcription_runs_with_conn(
+        self, conn: sqlite3.Connection, video_id: str
+    ) -> list[dict[str, Any]]:
         rows = [
             dict(row)
             for row in conn.execute(
@@ -196,6 +200,7 @@ class VideoQueries:
                     self._notify_with_conn(vid, conn)
                 except Exception:
                     import logging
+
                     logging.getLogger(__name__).exception("batch_notify failed for %s", vid)
         finally:
             self.close_read_conn()
@@ -368,7 +373,9 @@ class VideoQueries:
         if not video_ids:
             return
         placeholders = ",".join("?" * len(video_ids))
-        sql = f"update videos set packed=?, updated_at=current_timestamp where id in ({placeholders})"
+        sql = (
+            f"update videos set packed=?, updated_at=current_timestamp where id in ({placeholders})"
+        )
         with self.connect() as conn:
             conn.execute(sql, [packed] + video_ids)
         self.batch_notify(video_ids)
