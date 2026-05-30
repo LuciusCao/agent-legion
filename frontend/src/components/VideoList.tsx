@@ -1,35 +1,21 @@
-import { useMemo, useRef } from 'react'
+import { useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useVideoStore } from '../stores/videoStore'
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from '../labels'
-import { statusGroup, filterVideos, formatInteractionStats } from '../helpers'
+import { statusGroup, formatInteractionStats } from '../helpers'
 import { PhaseStepper } from './PhaseStepper'
 import { InteractionReviewBadge } from './InteractionReviewBadge'
 import styles from './VideoList.module.css'
 
 export function VideoList() {
   const navigate = useNavigate()
-  const {
-    videos,
-    selectedType,
-    statusFilter,
-    searchQuery,
-    packedFilter,
-    selectMode,
-    packageSelectMode,
-    selectedIds,
-    toggleVideoSelection,
-  } = useVideoStore()
-
-  const filtered = useMemo(() => {
-    return filterVideos(videos, {
-      selectedType,
-      statusFilter,
-      searchQuery,
-      packedFilter,
-    })
-  }, [videos, selectedType, statusFilter, searchQuery, packedFilter])
+  const filtered = useVideoStore((state) => state._filteredVideos)
+  const selectedType = useVideoStore((state) => state.selectedType)
+  const selectMode = useVideoStore((state) => state.selectMode)
+  const packageSelectMode = useVideoStore((state) => state.packageSelectMode)
+  const selectedIds = useVideoStore((state) => state.selectedIds)
+  const toggleVideoSelection = useVideoStore((state) => state.toggleVideoSelection)
 
   const parentRef = useRef<HTMLDivElement>(null)
   const virtualizer = useVirtualizer({
