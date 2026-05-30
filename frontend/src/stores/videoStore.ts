@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import type { VideoItem, ContentType, RunToResult } from '../types'
 import { api } from '../api'
-import { filterVideos } from '../helpers'
+import { filterVideos, statusGroup } from '../helpers'
 
 interface VideoState {
   videos: VideoItem[]
@@ -15,6 +15,8 @@ interface VideoState {
   isLoading: boolean
   sseConnected: boolean
   error: string | null
+  _filteredVideos: VideoItem[]
+  _counts: Record<string, number>
   fetchVideos: () => Promise<void>
   clearError: () => void
   mergeVideo: (video: VideoItem) => void
@@ -71,6 +73,8 @@ export const useVideoStore = create<VideoState>((set, get) => ({
   isLoading: false,
   sseConnected: true,
   error: null,
+  _filteredVideos: [],
+  _counts: { all: 0, queued: 0, running: 0, failed: 0, completed: 0, packed: 0, unpacked: 0 },
 
   fetchVideos: async () => {
     set({ isLoading: true, error: null })
@@ -287,3 +291,51 @@ export const useVideoStore = create<VideoState>((set, get) => ({
     }
   },
 }))
+
+const STATUSES = ['queued', 'running', 'failed', 'completed']
+
+function shallowEqual(a: Record<string, any>, b: Record<string, any>): boolean {
+  const keysA = Object.keys(a)
+  const keysB = Object.keys(b)
+  if (keysA.length !== keysB.length) return false
+  return keysA.every((k) => a[k] === b[k])
+}
+
+useVideoStore.subscribe((state, prevState) => {
+  const filterChanged =
+    state.videos !== prevState.videos ||
+    state.selectedType !== prevState.selectedType ||
+    state.statusFilter !== prevState.statusFilter ||
+    state.searchQuery !== prevState.searchQuery ||
+    state.packedFilter !== prevState.packedFilter
+
+  if (!filterChanged) return
+
+  const filtered = filterVideos(state.videos, {
+    selectedType: state.selectedType,
+    statusFilter: state.statusFilter,
+    searchQuery: state.searchQuery,
+    packedFilter: state.packedFilter,
+  })
+
+  const counts: Record<string, number> = { all: state.videos.length }
+  STATUSES.forEach((s) => {
+    counts[s] = state.videos.filter((v) => statusGroup(v) === s).length
+  })
+  counts.packed = state.videos.filter(
+    (v) => v.status === 'completed' && v.packed
+  ).length
+  counts.unpacked = state.videos.filter(
+    (v) => v.status === 'completed' && !v.packed
+  ).length
+
+  queueMicrotask(() => {
+    const current = useVideoStore.getState()
+    if (
+      current._filteredVideos !== filtered ||
+      !shallowEqual(current._counts, counts)
+    ) {
+      useVideoStore.setState({ _filteredVideos: filtered, _counts: counts })
+    }
+  })
+})

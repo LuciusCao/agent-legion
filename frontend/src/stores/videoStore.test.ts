@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useVideoStore } from './videoStore'
+import type { VideoItem } from '../types'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
@@ -21,6 +22,8 @@ describe('videoStore', () => {
       selectedIds: new Set(),
       isLoading: false,
       error: null,
+      _filteredVideos: [],
+      _counts: { all: 0, queued: 0, running: 0, failed: 0, completed: 0, packed: 0, unpacked: 0 },
     })
     mockApi.mockClear()
   })
@@ -379,5 +382,40 @@ describe('videoStore', () => {
       useVideoStore.getState().batchPackage(['v1'])
     ).rejects.toThrow('package failed')
     expect(useVideoStore.getState().error).toBe('package failed')
+  })
+
+  it('computes _filteredVideos and _counts after videos change', async () => {
+    useVideoStore.setState({
+      videos: [
+        { id: '1', title: 'Alpha', source_url: '', content_type: 'knowledge', external_id: 'K001', knowledge_code: 'K001', question_id: '', source_uuid: '', status: 'queued', current_phase: 'download', error_message: '', packed: false } as VideoItem,
+        { id: '2', title: 'Beta', source_url: '', content_type: 'knowledge', external_id: 'K002', knowledge_code: 'K002', question_id: '', source_uuid: '', status: 'completed', current_phase: 'assemble', error_message: '', packed: true } as VideoItem,
+      ],
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    const state = useVideoStore.getState()
+    expect(Array.isArray(state._filteredVideos)).toBe(true)
+    expect(state._counts.all).toBe(2)
+    expect(state._counts.completed).toBe(1)
+    expect(state._counts.queued).toBe(1)
+    expect(state._counts.packed).toBe(1)
+    expect(state._counts.unpacked).toBe(0)
+  })
+
+  it('updates _filteredVideos when searchQuery changes', async () => {
+    useVideoStore.setState({
+      videos: [
+        { id: '1', title: 'Alpha', source_url: '', content_type: 'knowledge', external_id: 'K001', knowledge_code: 'K001', question_id: '', source_uuid: '', status: 'queued', current_phase: 'download', error_message: '', packed: false } as VideoItem,
+        { id: '2', title: 'Beta', source_url: '', content_type: 'knowledge', external_id: 'K002', knowledge_code: 'K002', question_id: '', source_uuid: '', status: 'completed', current_phase: 'assemble', error_message: '', packed: false } as VideoItem,
+      ],
+    })
+    await new Promise((r) => setTimeout(r, 10))
+    const state1 = useVideoStore.getState()
+    expect(state1._filteredVideos.length).toBe(2)
+
+    useVideoStore.getState().setSearchQuery('Alpha')
+    await new Promise((r) => setTimeout(r, 10))
+    const state2 = useVideoStore.getState()
+    expect(state2._filteredVideos.length).toBe(1)
+    expect(state2._filteredVideos[0].title).toBe('Alpha')
   })
 })
