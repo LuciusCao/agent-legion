@@ -47,10 +47,9 @@ export const useDetailStore = create<DetailState>((set, get) => ({
         currentVideo: video,
         phaseRuns: data.phase_runs || [],
         transcriptionRuns: data.transcription_runs || [],
+        activeTab: video ? 'subtitles' : get().activeTab,
+        isLoading: false,
       })
-      if (video) {
-        set({ activeTab: 'subtitles' })
-      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
       if (get()._loadSeq !== seq) return
@@ -59,11 +58,8 @@ export const useDetailStore = create<DetailState>((set, get) => ({
         currentVideo: null,
         phaseRuns: [],
         transcriptionRuns: [],
+        isLoading: false,
       })
-    } finally {
-      if (get()._loadSeq === seq) {
-        set({ isLoading: false })
-      }
     }
   },
 
