@@ -1,0 +1,20 @@
+.chapters-strip {
+  display: flex;
+  gap: 8px;
+  overflow-x: auto;
+  padding: 8px 0;
+  flex-shrink: 0;
+}
+
+.chapter-label {
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  align-self: center;
+  white-space: nowrap;
+  padding-right: 4px;
+}
+
+.chapter-chip.active {
+  --md-suggestion-chip-container-color: var(--md-sys-color-primary);
+  --md-suggestion-chip-label-text-color: var(--md-sys-color-on-primary);
+}

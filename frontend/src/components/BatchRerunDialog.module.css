@@ -1,0 +1,71 @@
+.content {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.phaseGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 8px;
+  align-items: center;
+}
+
+.phaseGrid md-filter-chip {
+  width: 100%;
+}
+
+.videoGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 8px;
+  max-height: 260px;
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.videoTile {
+  display: grid;
+  gap: 4px;
+  align-content: center;
+  min-height: 48px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.videoTileDisabled {
+  background: var(--md-sys-color-error-container);
+}
+
+.videoName {
+  overflow: hidden;
+  color: var(--md-sys-color-on-surface);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 20px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.videoHint {
+  overflow: hidden;
+  color: var(--md-sys-color-error);
+  font-size: 12px;
+  line-height: 16px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.summary {
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+  line-height: 20px;
+}
+
+@media (max-width: 560px) {
+  .phaseGrid,
+  .videoGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
