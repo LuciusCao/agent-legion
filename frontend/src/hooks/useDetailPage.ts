@@ -72,14 +72,12 @@ export function useDetailPage(): UseDetailPageReturn {
   const [runToDialogOpen, setRunToDialogOpen] = useState(false)
   const [isPlaying, setIsPlaying] = useState(false)
 
-  const {
-    currentVideo,
-    phaseRuns,
-    transcriptionRuns,
-    loadVideo,
-    loadLog,
-    isLoading,
-  } = useDetailStore()
+  const currentVideo = useDetailStore((state) => state.currentVideo)
+  const phaseRuns = useDetailStore((state) => state.phaseRuns)
+  const transcriptionRuns = useDetailStore((state) => state.transcriptionRuns)
+  const loadVideo = useDetailStore((state) => state.loadVideo)
+  const loadLog = useDetailStore((state) => state.loadLog)
+  const isLoading = useDetailStore((state) => state.isLoading)
 
   const { artifacts, loadArtifacts } = useArtifactStore()
 

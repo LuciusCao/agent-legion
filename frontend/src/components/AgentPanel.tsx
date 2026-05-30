@@ -3,13 +3,11 @@ import { useUiStore } from '../stores/uiStore'
 import styles from './AgentPanel.module.css'
 
 export function AgentPanel() {
-  const {
-    agents,
-    workerPaused,
-    fetchWorkerStatus,
-    setWorkerPaused,
-    showToast,
-  } = useUiStore()
+  const agents = useUiStore((state) => state.agents)
+  const workerPaused = useUiStore((state) => state.workerPaused)
+  const fetchWorkerStatus = useUiStore((state) => state.fetchWorkerStatus)
+  const setWorkerPaused = useUiStore((state) => state.setWorkerPaused)
+  const showToast = useUiStore((state) => state.showToast)
 
   useEffect(() => {
     fetchWorkerStatus().catch((err) => {
