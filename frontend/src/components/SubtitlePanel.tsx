@@ -1,7 +1,7 @@
-import { useMemo } from 'react'
+import React, { useMemo } from 'react'
 import { useArtifactStore } from '../stores/artifactStore'
 
-export function SubtitlePanel({
+export const SubtitlePanel = React.memo(function SubtitlePanel({
   currentTime,
   onSeek,
 }: {
@@ -37,7 +37,7 @@ export function SubtitlePanel({
       ))}
     </md-list>
   )
-}
+})
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60)
