@@ -2,6 +2,7 @@ import { useEffect, useRef, useCallback } from 'react'
 import { useVideoStore } from '../stores/videoStore'
 import { useUiStore } from '../stores/uiStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
+import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 import { AgentPanel } from '../components/AgentPanel'
 import { StatCards } from '../components/StatCards'
 import { VideoList } from '../components/VideoList'
@@ -10,19 +11,21 @@ import { PackageToolbar } from '../components/PackageToolbar'
 import { AddDialog } from '../components/AddDialog'
 
 export function ListPage() {
-  const {
-    selectedType,
-    searchQuery,
-    setSelectedType,
-    setSearchQuery,
-    toggleSelectMode,
-    togglePackageSelectMode,
-    selectMode,
-    packageSelectMode,
-    fetchVideos,
-    sseConnected,
-  } = useVideoStore()
+  const selectedType = useVideoStore((state) => state.selectedType)
+  const searchQuery = useVideoStore((state) => state.searchQuery)
+  const setSearchQuery = useVideoStore((state) => state.setSearchQuery)
+  const setSelectedType = useVideoStore((state) => state.setSelectedType)
+  const selectMode = useVideoStore((state) => state.selectMode)
+  const packageSelectMode = useVideoStore((state) => state.packageSelectMode)
+  const fetchVideos = useVideoStore((state) => state.fetchVideos)
+  const sseConnected = useVideoStore((state) => state.sseConnected)
+  const toggleSelectMode = useVideoStore((state) => state.toggleSelectMode)
+  const togglePackageSelectMode = useVideoStore(
+    (state) => state.togglePackageSelectMode
+  )
   const { openAddDialog, showToast } = useUiStore()
+
+  const debouncedSetSearchQuery = useDebouncedCallback(setSearchQuery, 250)
 
   const handleFetchVideos = useCallback(async () => {
     await fetchVideos()
@@ -70,7 +73,7 @@ export function ListPage() {
             placeholder="搜索 ID、标题或内部记录"
             value={searchQuery}
             onInput={(e: React.FormEvent<HTMLElement>) =>
-              setSearchQuery((e.target as HTMLInputElement).value)
+              debouncedSetSearchQuery((e.target as HTMLInputElement).value)
             }
           />
         </section>
