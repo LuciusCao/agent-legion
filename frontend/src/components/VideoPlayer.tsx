@@ -17,6 +17,22 @@ interface VideoPlayerProps {
   onPause?: () => void
 }
 
+function findSubtitleIndex(
+  subtitles: Array<{ start: number; end: number }>,
+  time: number
+): number {
+  let left = 0
+  let right = subtitles.length - 1
+  while (left <= right) {
+    const mid = Math.floor((left + right) / 2)
+    const s = subtitles[mid]
+    if (time >= s.start && time < s.end) return mid
+    if (time < s.start) right = mid - 1
+    else left = mid + 1
+  }
+  return -1
+}
+
 export function VideoPlayer({
   video,
   artifacts,
@@ -52,10 +68,8 @@ export function VideoPlayer({
     const time = player.currentTime
     onTimeUpdate(time)
 
-    const subtitle = artifacts.subtitles.find(
-      (s) => time >= s.start && time < s.end
-    )
-    setSubtitleText(subtitle?.text ?? '')
+    const idx = findSubtitleIndex(artifacts.subtitles, time)
+    setSubtitleText(artifacts.subtitles[idx]?.text ?? '')
   }, [onTimeUpdate, artifacts.subtitles])
 
   const videoUrl = video.storage_dir ? `/api/videos/${video.id}/video` : ''
