@@ -11,7 +11,7 @@ import {
   prepareIndexedTriggers,
 } from '../lib/search'
 import { api } from '../api'
-import { parseTimeSeconds, triggerDownload } from '../helpers'
+import { parseTimeSeconds } from '../helpers'
 import type {
   VideoItem,
   PhaseRun,
