@@ -127,17 +127,41 @@ class VideoQueries:
     def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
         return cast(VideoRecord, dict(row)) if row else None
 
-    def _notify(self, video_id: str) -> None:
+    def _list_phase_runs_with_conn(self, conn: sqlite3.Connection, video_id: str) -> list[PhaseRunRecord]:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                "select * from phase_runs where video_id=? order by id", (video_id,)
+            )
+        ]
+        for row in rows:
+            row["started_at"] = _iso(row["started_at"]) or ""
+            row["finished_at"] = _iso(row["finished_at"])
+            _phase_run_with_agent_session(row)
+        return cast(list[PhaseRunRecord], rows)
+
+    def _list_transcription_runs_with_conn(self, conn: sqlite3.Connection, video_id: str) -> list[dict[str, Any]]:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                "select * from transcription_runs where video_id=? order by id", (video_id,)
+            )
+        ]
+        for row in rows:
+            row["started_at"] = _iso(row["started_at"]) or ""
+            row["finished_at"] = _iso(row["finished_at"])
+        return rows
+
+    def _notify_with_conn(self, video_id: str, conn: sqlite3.Connection) -> None:
         if self._hub is None:
             return
-        video = self.get_video(video_id)
+        row = conn.execute("select * from videos where id=?", (video_id,)).fetchone()
+        video = self._row(row)
         if video is None:
             self._hub.emit_change(None)
             self._hub.emit_detail_change(video_id, cast(VideoRecord, {}), [], [])
             return
         _enrich_video(video)
-        # Fallback to disk for legacy videos without DB cache (no backfill to
-        # avoid recursive update inside _notify).
         if (
             video.get("content_type") == "knowledge"
             and "interaction_stats" not in video
@@ -151,9 +175,30 @@ class VideoQueries:
             if review_status:
                 video["interaction_review_status"] = review_status  # type: ignore[typeddict-unknown-key]
         self._hub.emit_change(video)
-        phase_runs = self.list_phase_runs(video_id)
-        transcription_runs = self.list_transcription_runs(video_id)
+        phase_runs = self._list_phase_runs_with_conn(conn, video_id)
+        transcription_runs = self._list_transcription_runs_with_conn(conn, video_id)
         self._hub.emit_detail_change(video_id, video, phase_runs, transcription_runs)
+
+    def _notify(self, video_id: str) -> None:
+        conn = self._ensure_read_conn()
+        try:
+            self._notify_with_conn(video_id, conn)
+        finally:
+            self.close_read_conn()
+
+    def batch_notify(self, video_ids: list[str]) -> None:
+        if self._hub is None or not video_ids:
+            return
+        conn = self._ensure_read_conn()
+        try:
+            for vid in video_ids:
+                try:
+                    self._notify_with_conn(vid, conn)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception("batch_notify failed for %s", vid)
+        finally:
+            self.close_read_conn()
 
     def create_video(
         self,
