@@ -1,3 +1,4 @@
+import React from 'react'
 import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES } from '../labels'
 import type { VideoItem } from '../types'
 import styles from './PhaseStepper.module.css'
@@ -21,7 +22,11 @@ function getStepState(
   return 'pending'
 }
 
-export function PhaseStepper({ video }: { video: VideoItem }) {
+export const PhaseStepper = React.memo(function PhaseStepper({
+  video,
+}: {
+  video: VideoItem
+}) {
   const phases =
     video.content_type === 'question' ? QUESTION_PHASES : KNOWLEDGE_PHASES
   const currentIndex = phases.indexOf(video.current_phase)
@@ -38,4 +43,4 @@ export function PhaseStepper({ video }: { video: VideoItem }) {
       })}
     </div>
   )
-}
+})
