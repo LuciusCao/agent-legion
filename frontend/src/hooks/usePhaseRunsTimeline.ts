@@ -152,8 +152,34 @@ export function usePhaseRunsTimeline(
   } | null>(null)
 
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
+    let timer: ReturnType<typeof setInterval> | null = null
+
+    const startTimer = () => {
+      timer = setInterval(() => setNow(Date.now()), 1000)
+    }
+
+    const stopTimer = () => {
+      if (timer) {
+        clearInterval(timer)
+        timer = null
+      }
+    }
+
+    startTimer()
+
+    const handleVisibility = () => {
+      if (document.hidden) {
+        stopTimer()
+      } else {
+        startTimer()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      stopTimer()
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
   }, [])
 
   const allPhases =
