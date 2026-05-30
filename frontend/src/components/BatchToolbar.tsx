@@ -7,18 +7,16 @@ import { RunToDialog } from './RunToDialog'
 import styles from './BatchToolbar.module.css'
 
 export function BatchToolbar() {
-  const {
-    videos,
-    selectedIds,
-    selectMode,
-    toggleSelectMode,
-    clearSelection,
-    selectAllVisible,
-    batchDelete,
-    batchRunTo,
-    fetchVideos,
-    exitSelectMode,
-  } = useVideoStore()
+  const videos = useVideoStore((state) => state.videos)
+  const selectedIds = useVideoStore((state) => state.selectedIds)
+  const selectMode = useVideoStore((state) => state.selectMode)
+  const toggleSelectMode = useVideoStore((state) => state.toggleSelectMode)
+  const clearSelection = useVideoStore((state) => state.clearSelection)
+  const selectAllVisible = useVideoStore((state) => state.selectAllVisible)
+  const batchDelete = useVideoStore((state) => state.batchDelete)
+  const batchRunTo = useVideoStore((state) => state.batchRunTo)
+  const fetchVideos = useVideoStore((state) => state.fetchVideos)
+  const exitSelectMode = useVideoStore((state) => state.exitSelectMode)
   const { showToast } = useUiStore()
 
   const [rerunDialogOpen, setRerunDialogOpen] = useState(false)
