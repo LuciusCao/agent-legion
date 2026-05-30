@@ -569,8 +569,6 @@ def test_batch_run_to_returns_per_video_results(client):
 
 
 def test_package_selected_videos_and_download(tmp_path, client, monkeypatch):
-    import time
-    from unittest.mock import MagicMock
     client.post(
         "/api/videos",
         json={
@@ -597,6 +595,7 @@ def test_package_selected_videos_and_download(tmp_path, client, monkeypatch):
     # Execute package synchronously in test by mocking executor.submit to run immediately
     def _sync_submit(fn):
         fn()
+
     monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
 
     response = client.post("/api/package", json={"video_ids": ["knowledge_K002"]})
@@ -605,7 +604,6 @@ def test_package_selected_videos_and_download(tmp_path, client, monkeypatch):
     assert response.json()["accepted"] is True
 
     # After synchronous execution, the package file should exist
-    import zipfile
     packages = list(client.app.state.settings.packages_dir.glob("*.zip"))
     assert len(packages) == 1
     download = client.get(f"/api/packages/{packages[0].name}")
@@ -703,6 +701,7 @@ def test_package_sets_packed_true(tmp_path, client, monkeypatch):
     # Execute package synchronously in test by mocking executor.submit to run immediately
     def _sync_submit(fn):
         fn()
+
     monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
 
     response = client.post("/api/package", json={"video_ids": [video_id]})
@@ -1211,6 +1210,7 @@ def test_logs_filters_sensitive_paths(tmp_path, client, db, settings):
 
 def test_broadcast_package_ready():
     import asyncio
+
     from server.app.events import VideoEventManager
 
     async def _test():

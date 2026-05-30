@@ -457,6 +457,7 @@ def test_run_to_phase_start_transcribe_downgrades_and_runs_with_mock(db, setting
 
 def test_submit_run_to_phase_returns_accepted(db, settings, monkeypatch):
     from unittest.mock import MagicMock
+
     from server.app.services.manual_run import submit_run_to_phase
 
     db.create_video("https://example.com/v1.mp4", "V1")
@@ -472,6 +473,7 @@ def test_submit_run_to_phase_returns_accepted(db, settings, monkeypatch):
 
 def test_submit_run_to_phase_returns_busy(db, settings, monkeypatch):
     from unittest.mock import MagicMock
+
     from server.app.services.manual_run import submit_run_to_phase
 
     db.create_video("https://example.com/v1.mp4", "V1")
@@ -488,8 +490,9 @@ def test_submit_run_to_phase_returns_busy(db, settings, monkeypatch):
 def test_batch_delete_uses_thread_pool(db, settings, monkeypatch):
     """batch_delete should use ThreadPoolExecutor for parallel directory deletion."""
     from unittest.mock import MagicMock, patch
-    from server.app.services.video_actions import batch_delete_video_records
+
     from server.app.pipeline.common import resolve_video_dir
+    from server.app.services.video_actions import batch_delete_video_records
 
     v1 = db.create_video("https://example.com/v1.mp4", "V1")
     v2 = db.create_video("https://example.com/v2.mp4", "V2")

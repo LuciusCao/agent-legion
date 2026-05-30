@@ -441,8 +441,8 @@ def test_batch_update_packed_empty_list(db):
 
 def test_batch_notify_uses_single_connection(db):
     """batch_notify should reuse a single read connection for all video_ids."""
-    from unittest.mock import MagicMock, patch
     import sqlite3
+    from unittest.mock import patch
 
     v1 = db.create_video("https://example.com/v1.mp4", "V1")
     v2 = db.create_video("https://example.com/v2.mp4", "V2")
@@ -463,8 +463,9 @@ def test_batch_notify_uses_single_connection(db):
     # The write connection from create_video is unrelated.
     # We allow some slack for any internal connections, but the key is
     # that batch_notify itself doesn't open a new connection per video.
-    assert len(created_connections) <= 4, f"Expected at most 4 connections, got {len(created_connections)}"
-
+    assert len(created_connections) <= 4, (
+        f"Expected at most 4 connections, got {len(created_connections)}"
+    )
 
 
 def test_batch_update_packed_triggers_notification(db):

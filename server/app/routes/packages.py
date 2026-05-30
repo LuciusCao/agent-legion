@@ -24,7 +24,9 @@ class PackageResponse(BaseModel):
     accepted: bool
 
 
-def create_packages_router(db: Database, settings: Settings, video_event_manager: VideoEventManager) -> APIRouter:
+def create_packages_router(
+    db: Database, settings: Settings, video_event_manager: VideoEventManager
+) -> APIRouter:
     router = APIRouter(tags=["packages"])
 
     @router.post("/package", response_model=PackageResponse)
@@ -49,7 +51,9 @@ def create_packages_router(db: Database, settings: Settings, video_event_manager
             )
 
         def _do_package() -> None:
-            package_path = create_package(selection.videos, settings.packages_dir, settings.videos_dir)
+            package_path = create_package(
+                selection.videos, settings.packages_dir, settings.videos_dir
+            )
             video_ids = [v["id"] for v in selection.videos]
             db.batch_update_packed(video_ids, packed=1)
             download_url = f"/api/packages/{package_path.name}"
