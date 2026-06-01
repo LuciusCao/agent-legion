@@ -184,17 +184,13 @@ class VideoQueries:
         self._hub.emit_detail_change(video_id, video, phase_runs, transcription_runs)
 
     def _notify(self, video_id: str) -> None:
-        conn = self._ensure_read_conn()
-        try:
+        with self._connect_read() as conn:
             self._notify_with_conn(video_id, conn)
-        finally:
-            self.close_read_conn()
 
     def batch_notify(self, video_ids: list[str]) -> None:
         if self._hub is None or not video_ids:
             return
-        conn = self._ensure_read_conn()
-        try:
+        with self._connect_read() as conn:
             for vid in video_ids:
                 try:
                     self._notify_with_conn(vid, conn)
@@ -202,8 +198,6 @@ class VideoQueries:
                     import logging
 
                     logging.getLogger(__name__).exception("batch_notify failed for %s", vid)
-        finally:
-            self.close_read_conn()
 
     def create_video(
         self,

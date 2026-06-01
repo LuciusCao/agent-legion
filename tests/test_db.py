@@ -484,3 +484,28 @@ def test_batch_update_packed_triggers_notification(db):
     assert len(emitted) == 2
     assert v1["id"] in emitted
     assert v2["id"] in emitted
+
+
+def test_notify_safe_under_concurrent_threads(db):
+    """多个工作线程并发触发 _notify 时不应报 SQLite 线程错误（regression #232）。"""
+    from unittest.mock import MagicMock
+
+    v = db.create_video("https://example.com/v1.mp4", "V1")
+    db._hub = MagicMock()
+
+    errors: list[Exception] = []
+
+    def worker() -> None:
+        try:
+            for _ in range(20):
+                db.update_video(v["id"], title="updated")
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Concurrent _notify raised: {errors}"
