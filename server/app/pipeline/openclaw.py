@@ -2,9 +2,12 @@ import json
 import logging
 import re
 import shlex
+import shutil
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
+
+from server.app.pipeline.agent_workspace import cleanup_agent_workspace_files
 
 logger = logging.getLogger(__name__)
 
@@ -82,12 +85,14 @@ class OpenClawRunner:
         cwd: Path,
         timeout_seconds: int,
         skill_safety: SkillSafetyConfig | None = None,
+        isolated_workspace_root: Path | None = None,
     ):
         self.command_template = command_template
         self.cwd = cwd
         self.timeout_seconds = timeout_seconds
         self.agent_id = self._extract_agent_id(command_template)
         self.skill_safety = skill_safety
+        self.isolated_workspace_root = isolated_workspace_root
 
     @staticmethod
     def _extract_agent_id(command_template: list[str]) -> str:
@@ -153,12 +158,20 @@ class OpenClawRunner:
             encoding="utf-8",
         )
         command = self.render_command(video_id, video_dir, prompt_file)
+        run_cwd = self.cwd
+        isolated_cwd: Path | None = None
+        if self.isolated_workspace_root is not None:
+            safe_video_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", video_id)
+            safe_phase = re.sub(r"[^A-Za-z0-9_.-]+", "_", phase.key)
+            isolated_cwd = self.isolated_workspace_root / f"{safe_video_id}-{safe_phase}"
+            isolated_cwd.mkdir(parents=True, exist_ok=True)
+            run_cwd = isolated_cwd
 
         with log_path.open("w", encoding="utf-8") as log:
             try:
                 completed = subprocess.run(
                     command,
-                    cwd=self.cwd,
+                    cwd=run_cwd,
                     shell=False,
                     text=True,
                     stdout=log,
@@ -166,7 +179,14 @@ class OpenClawRunner:
                     timeout=self.timeout_seconds,
                 )
             except subprocess.TimeoutExpired:
+                cleanup_agent_workspace_files(video_dir)
+                if isolated_cwd is not None:
+                    shutil.rmtree(isolated_cwd, ignore_errors=True)
                 return AgentRunResult("failed", -1, command, "openclaw command timed out")
+            finally:
+                cleanup_agent_workspace_files(video_dir)
+                if isolated_cwd is not None:
+                    shutil.rmtree(isolated_cwd, ignore_errors=True)
 
         if completed.returncode != 0:
             return AgentRunResult(

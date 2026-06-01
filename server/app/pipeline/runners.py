@@ -1,5 +1,6 @@
 import json
 import subprocess
+from pathlib import Path
 from typing import Any
 
 from server.app.pipeline.openclaw import OpenClawRunner, SkillSafetyConfig
@@ -46,6 +47,10 @@ def build_openclaw_runners(
     openclaw = settings.config.get("openclaw", {})
     base_cwd = (settings.root_dir / str(openclaw.get("cwd", "."))).resolve()
     timeout_seconds = int(openclaw.get("timeout_seconds", 600))
+    workspace_root_raw = openclaw.get("workspace_dir", settings.data_dir / "openclaw-workspaces")
+    workspace_root = Path(workspace_root_raw)
+    if not workspace_root.is_absolute():
+        workspace_root = (settings.root_dir / workspace_root).resolve()
 
     skill_safety: SkillSafetyConfig | None = None
     skill_safety_raw = openclaw.get("skill_safety")
@@ -63,6 +68,7 @@ def build_openclaw_runners(
                 cwd=base_cwd,
                 timeout_seconds=timeout_seconds,
                 skill_safety=skill_safety,
+                isolated_workspace_root=workspace_root,
             )
             for r in runners_config
         ]
@@ -94,6 +100,7 @@ def build_openclaw_runners(
                     cwd=base_cwd,
                     timeout_seconds=timeout_seconds,
                     skill_safety=skill_safety,
+                    isolated_workspace_root=workspace_root,
                 )
                 for agent_id in agents
             ]
@@ -104,6 +111,7 @@ def build_openclaw_runners(
             cwd=base_cwd,
             timeout_seconds=timeout_seconds,
             skill_safety=skill_safety,
+            isolated_workspace_root=workspace_root,
         )
     ]
 
