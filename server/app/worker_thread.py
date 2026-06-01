@@ -66,8 +66,6 @@ class WorkerThread:
 
         def _worker_loop() -> None:
             assert self.executor is not None
-            # Preheat persistent read connection for the polling loop
-            self.db._ensure_read_conn()
             while not self.stop_event.is_set():
                 submitted = False
                 if self.worker_control.is_paused():
@@ -162,4 +160,3 @@ class WorkerThread:
             self._thread.join(timeout=timeout)
         if self.executor:
             self.executor.shutdown(wait=False)
-        self.db.close_read_conn()

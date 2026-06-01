@@ -361,48 +361,6 @@ def test_find_videos_by_identities_empty_list(db):
     assert db.find_videos_by_identities([]) == {}
 
 
-def test_read_conn_reused_within_same_thread(db):
-    """同线程多次调用 _ensure_read_conn 应复用同一连接对象。"""
-    conn1 = db._ensure_read_conn()
-    conn2 = db._ensure_read_conn()
-    assert conn1 is conn2
-    assert isinstance(conn1, sqlite3.Connection)
-
-
-def test_read_conn_isolated_across_threads(db):
-    """不同线程应获得独立连接对象。"""
-    conns = []
-
-    def collect():
-        conns.append(db._ensure_read_conn())
-
-    t1 = threading.Thread(target=collect)
-    t2 = threading.Thread(target=collect)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-
-    assert len(conns) == 2
-    assert conns[0] is not conns[1]
-
-
-def test_close_read_conn_clears_and_allows_recreate(db):
-    """关闭后再次获取应创建新连接。"""
-    conn1 = db._ensure_read_conn()
-    db.close_read_conn()
-    conn2 = db._ensure_read_conn()
-    assert conn1 is not conn2
-
-
-def test_connect_read_reuses_pooled_conn_for_same_thread(db):
-    """_connect_read 在同线程中应自动复用已预热连接。"""
-    db._ensure_read_conn()
-    with db._connect_read() as conn:
-        pooled = db._ensure_read_conn()
-        assert conn is pooled
-
-
 def test_list_running_video_summaries_returns_limited_fields(db):
     """只返回 id, current_phase, storage_dir 三个字段。"""
     db.create_video("https://example.com/a.mp4", "A")
@@ -441,7 +399,6 @@ def test_batch_update_packed_empty_list(db):
 
 def test_batch_notify_uses_single_connection(db):
     """batch_notify should reuse a single read connection for all video_ids."""
-    import sqlite3
     from unittest.mock import patch
 
     v1 = db.create_video("https://example.com/v1.mp4", "V1")
@@ -459,8 +416,8 @@ def test_batch_notify_uses_single_connection(db):
     with patch("server.app.db.queries.sqlite3.connect", side_effect=tracking_connect):
         db.batch_notify([v1["id"], v2["id"], v3["id"]])
 
-    # batch_notify should use _ensure_read_conn once and close it once.
-    # The write connection from create_video is unrelated.
+    # batch_notify should use a single read connection for all videos.
+    # The write connections from create_video are unrelated.
     # We allow some slack for any internal connections, but the key is
     # that batch_notify itself doesn't open a new connection per video.
     assert len(created_connections) <= 4, (

@@ -1,6 +1,5 @@
 import json
 import sqlite3
-import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
@@ -77,23 +76,7 @@ class VideoQueries:
         self.path = path
         self._hub = hub
         self._videos_dir = videos_dir
-        self._read_conn: sqlite3.Connection | None = None
-        self._read_conn_thread_id: int | None = None
         init_db(path)
-
-    def _ensure_read_conn(self) -> sqlite3.Connection:
-        current_tid = threading.current_thread().ident
-        if self._read_conn is None or self._read_conn_thread_id != current_tid:
-            self._read_conn = sqlite3.connect(self.path)
-            self._read_conn.row_factory = sqlite3.Row
-            self._read_conn_thread_id = current_tid
-        return self._read_conn
-
-    def close_read_conn(self) -> None:
-        if self._read_conn is not None:
-            self._read_conn.close()
-            self._read_conn = None
-            self._read_conn_thread_id = None
 
     @contextmanager
     def connect(self):
@@ -107,16 +90,7 @@ class VideoQueries:
 
     @contextmanager
     def _connect_read(self):
-        """Read-only connection context that does not implicitly commit.
-
-        If the current thread has already warmed up a persistent read
-        connection via _ensure_read_conn(), it is reused. Otherwise a
-        fresh connection is created and closed on exit.
-        """
-        current_tid = threading.current_thread().ident
-        if self._read_conn is not None and self._read_conn_thread_id == current_tid:
-            yield self._read_conn
-            return
+        """Read-only connection context that does not implicitly commit."""
         conn = sqlite3.connect(self.path)
         conn.row_factory = sqlite3.Row
         try:
