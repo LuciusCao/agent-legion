@@ -36,6 +36,29 @@ def test_package_completed_videos(tmp_path):
     assert manifest["videos"][0]["source_uuid"] == "source-uuid-1"
 
 
+def test_package_excludes_agent_workspace_pollution(tmp_path):
+    video_dir = tmp_path / "videos" / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "metadata.json").write_text(json.dumps({"video_id": "a"}), encoding="utf-8")
+    (video_dir / "AGENTS.md").write_text("agent workspace", encoding="utf-8")
+    (video_dir / "BOOTSTRAP.md").write_text("bootstrap", encoding="utf-8")
+    (video_dir / ".openclaw").mkdir()
+    (video_dir / ".openclaw" / "workspace-state.json").write_text("{}", encoding="utf-8")
+
+    package_path = create_package(
+        videos=[{"id": "a", "title": "A", "source_url": "", "storage_dir": str(video_dir)}],
+        packages_dir=tmp_path / "packages",
+    )
+
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+
+    assert "a/metadata.json" in names
+    assert "a/AGENTS.md" not in names
+    assert "a/BOOTSTRAP.md" not in names
+    assert not any(name.startswith("a/.openclaw/") for name in names)
+
+
 def test_package_includes_reviewed_subtitles_when_available(tmp_path):
     video_dir = tmp_path / "videos" / "a"
     video_dir.mkdir(parents=True)
