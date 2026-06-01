@@ -52,12 +52,11 @@ describe('VideoList', () => {
       searchQuery: '',
       packedFilter: 'all',
       selectMode: false,
-      packageSelectMode: false,
       selectedIds: new Set(),
     })
   })
 
-  it('does not render checkboxes when not in select or package mode', () => {
+  it('does not render checkboxes when not in select mode', () => {
     const { container } = render(
       <MemoryRouter>
         <VideoList />
@@ -96,17 +95,4 @@ describe('VideoList', () => {
     expect(checkboxes[1].hasAttribute('checked')).toBe(false)
   })
 
-  it('renders unchecked checkboxes in package mode when nothing is selected', () => {
-    useVideoStore.setState({ packageSelectMode: true })
-    const { container } = render(
-      <MemoryRouter>
-        <VideoList />
-      </MemoryRouter>
-    )
-    const checkboxes = container.querySelectorAll('md-checkbox')
-    expect(checkboxes.length).toBe(2)
-    checkboxes.forEach((cb) => {
-      expect(cb.hasAttribute('checked')).toBe(false)
-    })
-  })
 })

@@ -91,11 +91,38 @@ describe('BatchToolbar', () => {
   it('opens rerun dialog when rerun button is clicked', async () => {
     render(<BatchToolbar />)
 
+    expect(screen.getByText('未打包')).toBeInTheDocument()
+    expect(screen.getByText('仅已通过')).toBeInTheDocument()
+    expect(screen.getByText('未通过/部分通过')).toBeInTheDocument()
+
     await act(async () => {
       screen.getByTitle('重跑').click()
     })
 
     expect(screen.getByText('选择重跑阶段')).toBeInTheDocument()
+  })
+
+  it('submits selected videos for packaging', async () => {
+    mockApi.mockResolvedValueOnce({ accepted: true })
+
+    render(<BatchToolbar />)
+
+    await act(async () => {
+      screen.getByTitle('打包').click()
+    })
+
+    expect(mockApi).toHaveBeenCalledWith(
+      '/api/package',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ video_ids: ['v1', 'v2'] }),
+      })
+    )
+    expect(useUiStore.getState().toast).toEqual({
+      message: '打包已提交，完成后将自动下载',
+      type: 'success',
+    })
+    expect(useVideoStore.getState().selectMode).toBe(false)
   })
 
   it('opens run-to dialog and submits selected videos', async () => {

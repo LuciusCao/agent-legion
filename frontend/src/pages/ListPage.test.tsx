@@ -19,7 +19,6 @@ describe('ListPage', () => {
       searchQuery: '',
       packedFilter: 'all',
       selectMode: false,
-      packageSelectMode: false,
       selectedIds: new Set(),
       isLoading: false,
       sseConnected: true,
@@ -39,6 +38,9 @@ describe('ListPage', () => {
       </MemoryRouter>
     )
     expect(screen.getByText('知识点')).toBeInTheDocument()
+    expect(screen.queryByTitle('刷新')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('打包')).not.toBeInTheDocument()
+    expect(screen.getByTitle('多选')).toBeInTheDocument()
   })
 
   it('filters list by content type when tab changes', async () => {

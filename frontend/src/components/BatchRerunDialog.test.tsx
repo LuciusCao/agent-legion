@@ -44,7 +44,6 @@ describe('BatchRerunDialog', () => {
       statusFilter: 'all',
       searchQuery: '',
       selectMode: true,
-      packageSelectMode: false,
       selectedIds: new Set(['v1', 'v2']),
       isLoading: false,
     })
