@@ -13,8 +13,16 @@ export function BatchToolbar() {
   const toggleSelectMode = useVideoStore((state) => state.toggleSelectMode)
   const clearSelection = useVideoStore((state) => state.clearSelection)
   const selectAllVisible = useVideoStore((state) => state.selectAllVisible)
+  const selectUnpacked = useVideoStore((state) => state.selectUnpacked)
+  const selectReviewApproved = useVideoStore(
+    (state) => state.selectReviewApproved
+  )
+  const selectReviewNotPassed = useVideoStore(
+    (state) => state.selectReviewNotPassed
+  )
   const batchDelete = useVideoStore((state) => state.batchDelete)
   const batchRunTo = useVideoStore((state) => state.batchRunTo)
+  const batchPackage = useVideoStore((state) => state.batchPackage)
   const fetchVideos = useVideoStore((state) => state.fetchVideos)
   const exitSelectMode = useVideoStore((state) => state.exitSelectMode)
   const { showToast } = useUiStore()
@@ -62,6 +70,13 @@ export function BatchToolbar() {
     setDeleteDialogOpen(true)
   }
 
+  const handlePackage = async () => {
+    if (!hasSelection) return
+    await batchPackage(Array.from(selectedIds))
+    showToast('打包已提交，完成后将自动下载', 'success')
+    exitSelectMode()
+  }
+
   const handleRunToConfirm = async ({
     targetPhase,
     startPhase,
@@ -100,6 +115,13 @@ export function BatchToolbar() {
         <span>已选择 {count} 项</span>
         <div className={styles.batchActions}>
           <md-text-button onClick={selectAllVisible}>全选</md-text-button>
+          <md-text-button onClick={selectUnpacked}>未打包</md-text-button>
+          <md-text-button onClick={selectReviewApproved}>
+            仅已通过
+          </md-text-button>
+          <md-text-button onClick={selectReviewNotPassed}>
+            未通过/部分通过
+          </md-text-button>
           <md-text-button onClick={clearSelection}>取消选择</md-text-button>
           <md-icon-button
             disabled={!hasSelection || undefined}
@@ -114,6 +136,13 @@ export function BatchToolbar() {
             title="运行到"
           >
             <md-icon>play_circle</md-icon>
+          </md-icon-button>
+          <md-icon-button
+            disabled={!hasSelection || undefined}
+            onClick={handlePackage}
+            title="打包"
+          >
+            <md-icon>inventory_2</md-icon>
           </md-icon-button>
           <md-icon-button
             disabled={!hasSelection || undefined}

@@ -13,7 +13,6 @@ export function VideoList() {
   const filtered = useVideoStore((state) => state._filteredVideos)
   const selectedType = useVideoStore((state) => state.selectedType)
   const selectMode = useVideoStore((state) => state.selectMode)
-  const packageSelectMode = useVideoStore((state) => state.packageSelectMode)
   const selectedIds = useVideoStore((state) => state.selectedIds)
   const toggleVideoSelection = useVideoStore((state) => state.toggleVideoSelection)
 
@@ -69,26 +68,18 @@ export function VideoList() {
               >
                 <md-list-item
                   type="button"
-                  className={`${isSelected ? 'active' : ''} ${packageSelectMode && video.status !== 'completed' ? 'dimmed' : ''}`}
+                  className={isSelected ? 'active' : ''}
                   onClick={() => {
                     if (selectMode) {
                       toggleVideoSelection(video.id)
-                    } else if (packageSelectMode) {
-                      if (video.status === 'completed') {
-                        toggleVideoSelection(video.id)
-                      }
                     } else {
                       navigate(`/videos/${video.id}`)
                     }
                   }}
                 >
-                  {(selectMode || packageSelectMode) && (
+                  {selectMode && (
                     <md-checkbox
                       slot="start"
-                      disabled={
-                        (packageSelectMode && video.status !== 'completed') ||
-                        undefined
-                      }
                       checked={isSelected || undefined}
                       onClick={(e: React.MouseEvent) => {
                         e.stopPropagation()
@@ -132,7 +123,7 @@ export function VideoList() {
                     {video.content_type === 'knowledge' &&
                       video.status === 'completed' && (
                         <InteractionReviewBadge
-                          status={video.interaction_review_status}
+                          status={video.interaction_review_status ?? 'all_failed'}
                         />
                       )}
                     {!!video.packed && <span className="packed-badge">已打包</span>}

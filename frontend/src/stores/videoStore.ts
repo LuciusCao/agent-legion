@@ -10,7 +10,6 @@ interface VideoState {
   searchQuery: string
   packedFilter: 'all' | 'packed' | 'unpacked'
   selectMode: boolean
-  packageSelectMode: boolean
   selectedIds: Set<string>
   isLoading: boolean
   sseConnected: boolean
@@ -27,12 +26,11 @@ interface VideoState {
   setPackedFilter: (filter: 'all' | 'packed' | 'unpacked') => void
   toggleSelectMode: () => void
   exitSelectMode: () => void
-  togglePackageSelectMode: () => void
   toggleVideoSelection: (id: string) => void
   selectAllVisible: () => void
-  selectPackageAll: () => void
-  selectPackageApproved: () => void
-  selectPackageUnpacked: () => void
+  selectUnpacked: () => void
+  selectReviewApproved: () => void
+  selectReviewNotPassed: () => void
   clearSelection: () => void
   setSseConnected: (connected: boolean) => void
   batchDelete: (ids: string[]) => Promise<{
@@ -68,7 +66,6 @@ export const useVideoStore = create<VideoState>((set) => ({
   searchQuery: '',
   packedFilter: 'all',
   selectMode: false,
-  packageSelectMode: false,
   selectedIds: new Set(),
   isLoading: false,
   sseConnected: true,
@@ -135,7 +132,6 @@ export const useVideoStore = create<VideoState>((set) => ({
   toggleSelectMode: () => {
     set((state) => ({
       selectMode: !state.selectMode,
-      packageSelectMode: false,
       selectedIds: new Set(),
     }))
   },
@@ -143,30 +139,10 @@ export const useVideoStore = create<VideoState>((set) => ({
   exitSelectMode: () =>
     set({
       selectMode: false,
-      packageSelectMode: false,
       selectedIds: new Set(),
     }),
 
-  togglePackageSelectMode: () =>
-    set((state) => ({
-      packageSelectMode: !state.packageSelectMode,
-      selectMode: false,
-      selectedIds: new Set(),
-    })),
-
-  selectPackageAll: () =>
-    set((state) => {
-      const visible = filterVideos(state.videos, {
-        selectedType: state.selectedType,
-        statusFilter: state.statusFilter,
-        searchQuery: state.searchQuery,
-        packedFilter: state.packedFilter,
-      })
-      const completed = visible.filter((v) => v.status === 'completed')
-      return { selectedIds: new Set(completed.map((v) => v.id)) }
-    }),
-
-  selectPackageUnpacked: () =>
+  selectUnpacked: () =>
     set((state) => {
       const visible = filterVideos(state.videos, {
         selectedType: state.selectedType,
@@ -180,7 +156,7 @@ export const useVideoStore = create<VideoState>((set) => ({
       return { selectedIds: new Set(unpacked.map((v) => v.id)) }
     }),
 
-  selectPackageApproved: () =>
+  selectReviewApproved: () =>
     set((state) => {
       const visible = filterVideos(state.videos, {
         selectedType: state.selectedType,
@@ -189,9 +165,31 @@ export const useVideoStore = create<VideoState>((set) => ({
         packedFilter: state.packedFilter,
       })
       const approved = visible.filter(
-        (v) => v.status === 'completed' && hasAllApprovedInteractions(v)
+        (v) =>
+          v.content_type === 'knowledge' &&
+          v.status === 'completed' &&
+          hasAllApprovedInteractions(v)
       )
       return { selectedIds: new Set(approved.map((v) => v.id)) }
+    }),
+
+  selectReviewNotPassed: () =>
+    set((state) => {
+      const visible = filterVideos(state.videos, {
+        selectedType: state.selectedType,
+        statusFilter: state.statusFilter,
+        searchQuery: state.searchQuery,
+        packedFilter: state.packedFilter,
+      })
+      const notPassed = visible.filter(
+        (v) =>
+          v.content_type === 'knowledge' &&
+          v.status === 'completed' &&
+          (v.interaction_review_status === 'partial' ||
+            v.interaction_review_status === 'all_failed' ||
+            !v.interaction_review_status)
+      )
+      return { selectedIds: new Set(notPassed.map((v) => v.id)) }
     }),
 
   toggleVideoSelection: (id) => {

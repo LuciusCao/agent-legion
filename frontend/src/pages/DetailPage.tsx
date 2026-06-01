@@ -36,7 +36,9 @@ export function DetailPage() {
                 {hook.video.content_type === 'knowledge' &&
                   hook.video.status === 'completed' && (
                     <InteractionReviewBadge
-                      status={hook.video.interaction_review_status}
+                      status={
+                        hook.video.interaction_review_status ?? 'all_failed'
+                      }
                     />
                   )}
                 {!!hook.video.packed && (

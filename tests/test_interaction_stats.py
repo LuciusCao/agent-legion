@@ -185,7 +185,7 @@ def test_review_status_no_review_file(tmp_path: Path) -> None:
         json.dumps({"interactions": [{"id": "n1", "type": "example_practice"}]}),
         encoding="utf-8",
     )
-    assert compute_interaction_review_status(video_dir) is None
+    assert compute_interaction_review_status(video_dir) == "all_failed"
 
 
 def test_review_status_all_passed_global(tmp_path: Path) -> None:
@@ -340,7 +340,7 @@ def test_compute_interaction_review_status_review_not_dict(tmp_path: Path) -> No
         encoding="utf-8",
     )
     (video_dir / "review_result.json").write_text("[]", encoding="utf-8")
-    assert compute_interaction_review_status(video_dir) is None
+    assert compute_interaction_review_status(video_dir) == "all_failed"
 
 
 def test_compute_interaction_review_status_all_nodes_missing_id(tmp_path: Path) -> None:
@@ -353,7 +353,7 @@ def test_compute_interaction_review_status_all_nodes_missing_id(tmp_path: Path) 
     (video_dir / "review_result.json").write_text(
         json.dumps({"status": "published"}), encoding="utf-8"
     )
-    assert compute_interaction_review_status(video_dir) is None
+    assert compute_interaction_review_status(video_dir) == "all_failed"
 
 
 def test_compute_interaction_review_status_invalid_json(tmp_path: Path) -> None:
@@ -364,4 +364,4 @@ def test_compute_interaction_review_status_invalid_json(tmp_path: Path) -> None:
         encoding="utf-8",
     )
     (video_dir / "review_result.json").write_text("{bad json", encoding="utf-8")
-    assert compute_interaction_review_status(video_dir) is None
+    assert compute_interaction_review_status(video_dir) == "all_failed"

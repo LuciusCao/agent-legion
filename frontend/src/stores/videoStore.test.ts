@@ -18,7 +18,6 @@ describe('videoStore', () => {
       statusFilter: 'all',
       searchQuery: '',
       selectMode: false,
-      packageSelectMode: false,
       selectedIds: new Set(),
       isLoading: false,
       error: null,
@@ -47,51 +46,6 @@ describe('videoStore', () => {
   it('toggles select mode', () => {
     useVideoStore.getState().toggleSelectMode()
     expect(useVideoStore.getState().selectMode).toBe(true)
-  })
-
-  it('toggles package select mode', () => {
-    useVideoStore.getState().togglePackageSelectMode()
-    expect(useVideoStore.getState().packageSelectMode).toBe(true)
-    expect(useVideoStore.getState().selectMode).toBe(false)
-    useVideoStore.getState().togglePackageSelectMode()
-    expect(useVideoStore.getState().packageSelectMode).toBe(false)
-  })
-
-  it('selects only completed videos visible under current filters in package mode', () => {
-    useVideoStore.setState({
-      videos: [
-        {
-          id: 'v1',
-          title: 'A',
-          source_url: '',
-          content_type: 'knowledge',
-          external_id: 'K001',
-          knowledge_code: 'K001',
-          question_id: '',
-          source_uuid: '',
-          status: 'completed',
-          current_phase: 'package',
-          error_message: '',
-        },
-        {
-          id: 'v2',
-          title: 'B',
-          source_url: '',
-          content_type: 'knowledge',
-          external_id: 'K002',
-          knowledge_code: 'K002',
-          question_id: '',
-          source_uuid: '',
-          status: 'running',
-          current_phase: 'download',
-          error_message: '',
-        },
-      ],
-      statusFilter: 'failed',
-    })
-    useVideoStore.getState().selectPackageAll()
-    // failed filter shows no completed videos, so nothing should be selected
-    expect(useVideoStore.getState().selectedIds).toEqual(new Set())
   })
 
   it('selects only unpacked completed videos visible under current filters', () => {
@@ -128,7 +82,7 @@ describe('videoStore', () => {
       ],
       statusFilter: 'failed',
     })
-    useVideoStore.getState().selectPackageUnpacked()
+    useVideoStore.getState().selectUnpacked()
     // failed filter shows no completed videos, so nothing should be selected
     expect(useVideoStore.getState().selectedIds).toEqual(new Set())
   })
@@ -247,10 +201,96 @@ describe('videoStore', () => {
       packedFilter: 'all',
     })
 
-    useVideoStore.getState().selectPackageApproved()
+    useVideoStore.getState().selectReviewApproved()
 
     expect(useVideoStore.getState().selectedIds).toEqual(
       new Set(['approved-visible', 'summary-video-type', 'summary-only'])
+    )
+  })
+
+  it('selects review partial or failed completed knowledge videos in the current view', () => {
+    useVideoStore.setState({
+      videos: [
+        {
+          id: 'approved',
+          title: 'Visible Approved',
+          source_url: '',
+          content_type: 'knowledge',
+          external_id: 'K001',
+          knowledge_code: 'K001',
+          question_id: '',
+          source_uuid: '',
+          status: 'completed',
+          current_phase: 'package',
+          error_message: '',
+          interaction_review_status: 'all_passed',
+        },
+        {
+          id: 'partial',
+          title: 'Visible Partial',
+          source_url: '',
+          content_type: 'knowledge',
+          external_id: 'K002',
+          knowledge_code: 'K002',
+          question_id: '',
+          source_uuid: '',
+          status: 'completed',
+          current_phase: 'package',
+          error_message: '',
+          interaction_review_status: 'partial',
+        },
+        {
+          id: 'failed',
+          title: 'Visible Failed',
+          source_url: '',
+          content_type: 'knowledge',
+          external_id: 'K003',
+          knowledge_code: 'K003',
+          question_id: '',
+          source_uuid: '',
+          status: 'completed',
+          current_phase: 'package',
+          error_message: '',
+          interaction_review_status: 'all_failed',
+        },
+        {
+          id: 'missing-review-status',
+          title: 'Visible Missing Review Status',
+          source_url: '',
+          content_type: 'knowledge',
+          external_id: 'K004',
+          knowledge_code: 'K004',
+          question_id: '',
+          source_uuid: '',
+          status: 'completed',
+          current_phase: 'package',
+          error_message: '',
+        },
+        {
+          id: 'question-partial',
+          title: 'Visible Partial',
+          source_url: '',
+          content_type: 'question',
+          external_id: 'Q001',
+          knowledge_code: '',
+          question_id: 'Q001',
+          source_uuid: '',
+          status: 'completed',
+          current_phase: 'package',
+          error_message: '',
+          interaction_review_status: 'partial',
+        },
+      ],
+      selectedType: 'knowledge',
+      statusFilter: 'completed',
+      searchQuery: 'Visible',
+      packedFilter: 'all',
+    })
+
+    useVideoStore.getState().selectReviewNotPassed()
+
+    expect(useVideoStore.getState().selectedIds).toEqual(
+      new Set(['partial', 'failed', 'missing-review-status'])
     )
   })
 

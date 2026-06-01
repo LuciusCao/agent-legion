@@ -7,7 +7,6 @@ import { AgentPanel } from '../components/AgentPanel'
 import { StatCards } from '../components/StatCards'
 import { VideoList } from '../components/VideoList'
 import { BatchToolbar } from '../components/BatchToolbar'
-import { PackageToolbar } from '../components/PackageToolbar'
 import { AddDialog } from '../components/AddDialog'
 
 export function ListPage() {
@@ -16,13 +15,9 @@ export function ListPage() {
   const setSearchQuery = useVideoStore((state) => state.setSearchQuery)
   const setSelectedType = useVideoStore((state) => state.setSelectedType)
   const selectMode = useVideoStore((state) => state.selectMode)
-  const packageSelectMode = useVideoStore((state) => state.packageSelectMode)
   const fetchVideos = useVideoStore((state) => state.fetchVideos)
   const sseConnected = useVideoStore((state) => state.sseConnected)
   const toggleSelectMode = useVideoStore((state) => state.toggleSelectMode)
-  const togglePackageSelectMode = useVideoStore(
-    (state) => state.togglePackageSelectMode
-  )
   const { openAddDialog, showToast } = useUiStore()
 
   const debouncedSetSearchQuery = useDebouncedCallback(setSearchQuery, 250)
@@ -91,9 +86,6 @@ export function ListPage() {
                 </md-icon>
               </span>
             )}
-            <md-icon-button onClick={handleFetchVideos} title="刷新">
-              <md-icon>refresh</md-icon>
-            </md-icon-button>
             <md-icon-button
               onClick={toggleSelectMode}
               title={selectMode ? '完成' : '多选'}
@@ -101,20 +93,13 @@ export function ListPage() {
             >
               <md-icon>{selectMode ? 'close' : 'checklist'}</md-icon>
             </md-icon-button>
-            <md-icon-button
-              onClick={togglePackageSelectMode}
-              title={packageSelectMode ? '完成' : '打包'}
-              className={packageSelectMode ? 'active-icon' : ''}
-            >
-              <md-icon>{packageSelectMode ? 'close' : 'inventory_2'}</md-icon>
-            </md-icon-button>
             <md-icon-button onClick={openAddDialog} title="添加">
               <md-icon>add</md-icon>
             </md-icon-button>
           </div>
         </div>
       </div>
-      {packageSelectMode ? <PackageToolbar /> : <BatchToolbar />}
+      <BatchToolbar />
       <div className="list-scroll-region">
         <VideoList />
       </div>
