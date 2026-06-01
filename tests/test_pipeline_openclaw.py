@@ -207,27 +207,39 @@ def test_cleanup_agent_workspace_files_removes_only_known_pollution(tmp_path):
 
 def test_restore_skill_repos_checkouts_and_cleans(tmp_path):
     """restore_skill_repos should force-checkout to the given ref and clean untracked files."""
+    import os
+
     repo = tmp_path / "repo"
     repo.mkdir()
-    subprocess.run(["git", "init"], cwd=str(repo), check=True, capture_output=True)
+    # 清除 GIT_* 环境变量，防止在 pre-commit hook 等场景中污染外部 git 仓库
+    clean_env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
+    subprocess.run(["git", "init"], cwd=str(repo), env=clean_env, check=True, capture_output=True)
     subprocess.run(
         ["git", "config", "user.email", "test@test.com"],
         cwd=str(repo),
+        env=clean_env,
         check=True,
         capture_output=True,
     )
     subprocess.run(
         ["git", "config", "user.name", "Test"],
         cwd=str(repo),
+        env=clean_env,
         check=True,
         capture_output=True,
     )
 
     tracked = repo / "tracked.txt"
     tracked.write_text("v1", encoding="utf-8")
-    subprocess.run(["git", "add", "."], cwd=str(repo), check=True, capture_output=True)
-    subprocess.run(["git", "commit", "-m", "v1"], cwd=str(repo), check=True, capture_output=True)
-    subprocess.run(["git", "tag", "v1.0.0"], cwd=str(repo), check=True, capture_output=True)
+    subprocess.run(
+        ["git", "add", "."], cwd=str(repo), env=clean_env, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "commit", "-m", "v1"], cwd=str(repo), env=clean_env, check=True, capture_output=True
+    )
+    subprocess.run(
+        ["git", "tag", "v1.0.0"], cwd=str(repo), env=clean_env, check=True, capture_output=True
+    )
 
     # dirty the repo
     tracked.write_text("dirty", encoding="utf-8")
