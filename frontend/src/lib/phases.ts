@@ -39,6 +39,10 @@ export function canRerunFrom(video: VideoItem, phase: string): boolean {
   return phaseIdx <= currentIdx
 }
 
+export function canRerunFromFailedPhase(video: VideoItem): boolean {
+  return video.status === 'failed'
+}
+
 export function canContinueTo(video: VideoItem, targetPhase: string): boolean {
   if (video.status === 'running') return false
   if (video.status === 'failed' || video.status === 'completed') return false
