@@ -10,6 +10,8 @@ from server.app.pipeline.phases import phase_sequence
 from server.app.records import VideoRecord
 from server.app.settings import Settings
 
+FAILED_PHASE_RERUN_MARKER = "__failed__"
+
 
 @dataclass(frozen=True)
 class PackageSelection:
@@ -87,6 +89,9 @@ def rerun_video_record(
             "phase": phase,
             "message": "Video is currently being processed",
         }
+
+    if phase == FAILED_PHASE_RERUN_MARKER:
+        phase = video["current_phase"]
 
     normalized_phase = normalize_rerun_phase(video, phase)
     if not can_rerun_from(video, normalized_phase):
