@@ -106,4 +106,49 @@ describe('BatchRerunDialog', () => {
     expect(useVideoStore.getState().selectedIds.size).toBe(0)
     expect(useVideoStore.getState().selectMode).toBe(false)
   })
+
+  it('renders failed-phase chip and filters runnable videos', () => {
+    const { container } = render(
+      <BatchRerunDialog open videoIds={['v1', 'v2']} onClose={() => {}} />
+    )
+
+    // Click "失败的阶段" chip
+    const failedChip = container.querySelector('md-filter-chip[label="失败的阶段"]')
+    expect(failedChip).toBeInTheDocument()
+    act(() => {
+      ;(failedChip as HTMLElement).click()
+    })
+
+    // v1 is completed, v2 is failed — only v2 should be runnable
+    expect(screen.getByText('未失败，跳过')).toBeInTheDocument()
+    expect(screen.getByText('重跑 1 个视频')).toBeInTheDocument()
+  })
+
+  it('calls batchRerun with __failed__ phase when failed-phase chip selected', async () => {
+    mockApi
+      .mockResolvedValueOnce({ results: [] })
+      .mockResolvedValueOnce({ videos: [] })
+
+    const onClose = vi.fn()
+    const { container } = render(
+      <BatchRerunDialog open videoIds={['v1', 'v2']} onClose={onClose} />
+    )
+
+    const failedChip = container.querySelector('md-filter-chip[label="失败的阶段"]')
+    act(() => {
+      ;(failedChip as HTMLElement).click()
+    })
+
+    await act(async () => {
+      screen.getByText('重跑 1 个视频').click()
+    })
+
+    expect(mockApi).toHaveBeenCalledWith(
+      '/api/videos/batch/rerun',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ video_ids: ['v1', 'v2'], phase: '__failed__' }),
+      })
+    )
+  })
 })
