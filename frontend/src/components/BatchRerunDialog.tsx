@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useVideoStore } from '../stores/videoStore'
 import { useUiStore } from '../stores/uiStore'
-import { getPhases, canRerunFrom } from '../helpers'
+import { getPhases, canRerunFrom, canRerunFromFailedPhase } from '../helpers'
 import { PHASE_LABELS } from '../labels'
 import type { VideoItem } from '../types'
 import styles from './BatchRerunDialog.module.css'
@@ -28,7 +28,9 @@ export function BatchRerunDialog({
   const phases = getPhases(contentType)
 
   const runnableCount = selectedVideos.filter((v) =>
-    canRerunFrom(v, selectedPhase)
+    selectedPhase === '__failed__'
+      ? canRerunFromFailedPhase(v)
+      : canRerunFrom(v, selectedPhase)
   ).length
 
   const displayName = (video: VideoItem) =>
@@ -63,6 +65,11 @@ export function BatchRerunDialog({
       <div slot="content">
         <div className={styles.content}>
           <div className={styles.phaseGrid}>
+            <md-filter-chip
+              label={PHASE_LABELS['__failed__']}
+              selected={selectedPhase === '__failed__' || undefined}
+              onClick={() => setSelectedPhase('__failed__')}
+            />
             {phases.map((phase) => (
               <md-filter-chip
                 key={phase}
@@ -74,7 +81,10 @@ export function BatchRerunDialog({
           </div>
           <div className={styles.videoGrid}>
             {selectedVideos.map((video) => {
-              const runnable = canRerunFrom(video, selectedPhase)
+              const runnable =
+                selectedPhase === '__failed__'
+                  ? canRerunFromFailedPhase(video)
+                  : canRerunFrom(video, selectedPhase)
               return (
                 <div
                   key={video.id}
@@ -83,9 +93,9 @@ export function BatchRerunDialog({
                   <span className={styles.videoName}>{displayName(video)}</span>
                   {!runnable && (
                     <span className={styles.videoHint}>
-                      当前处于{' '}
-                      {PHASE_LABELS[video.current_phase] ?? video.current_phase}
-                      ，无法重跑
+                      {selectedPhase === '__failed__'
+                        ? '未失败，跳过'
+                        : `当前处于 ${PHASE_LABELS[video.current_phase] ?? video.current_phase}，无法重跑`}
                     </span>
                   )}
                 </div>
