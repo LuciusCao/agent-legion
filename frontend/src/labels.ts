@@ -23,6 +23,7 @@ export const STATUS_ICONS: Record<string, string> = {
 }
 
 export const PHASE_LABELS: Record<string, string> = {
+  __failed__: '失败的阶段',
   waiting_for_url: '未获取到视频',
   download: '下载',
   transcribe: '转录',

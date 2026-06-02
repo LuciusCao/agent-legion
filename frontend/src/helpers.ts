@@ -9,6 +9,7 @@ export {
   getPhases,
   getSharedPhases,
   canRerunFrom,
+  canRerunFromFailedPhase,
   canContinueTo,
   canRerunTo,
 } from './lib/phases'
