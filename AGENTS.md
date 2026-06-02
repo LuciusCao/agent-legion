@@ -327,6 +327,9 @@ Edit `config/pipeline.yaml`:
 - `openclaw.command_template`: argument list with placeholders `{prompt_file}`, `{video_id}`, `{video_dir}`.
 - `openclaw.cwd`: working directory for openclaw execution.
 - `openclaw.timeout_seconds`: per-phase timeout (default 600).
+- `openclaw.runners`: explicit list of runner definitions. Each item can include:
+  - `command_template`: the argument list for this runner (same placeholders as above).
+  - `count` (optional, default `1`): how many identical runners to create from this template. Use this to scale concurrency without duplicating the entire configuration block.
 
 In `auto` ASR mode, the pipeline tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
 

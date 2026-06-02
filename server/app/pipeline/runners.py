@@ -62,16 +62,21 @@ def build_openclaw_runners(
 
     runners_config = openclaw.get("runners")
     if runners_config:
-        return [
-            OpenClawRunner(
-                command_template=list(r["command_template"]),
-                cwd=base_cwd,
-                timeout_seconds=timeout_seconds,
-                skill_safety=skill_safety,
-                isolated_workspace_root=workspace_root,
-            )
-            for r in runners_config
-        ]
+        runners: list[OpenClawRunner] = []
+        for r in runners_config:
+            count = int(r.get("count", 1))
+            template = list(r["command_template"])
+            for _ in range(count):
+                runners.append(
+                    OpenClawRunner(
+                        command_template=list(template),
+                        cwd=base_cwd,
+                        timeout_seconds=timeout_seconds,
+                        skill_safety=skill_safety,
+                        isolated_workspace_root=workspace_root,
+                    )
+                )
+        return runners
 
     base_template = list(
         openclaw.get(
