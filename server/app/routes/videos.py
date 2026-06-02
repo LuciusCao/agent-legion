@@ -14,9 +14,8 @@ from ..pipeline.common import resolve_video_dir
 from ..pipeline.openclaw_sessions import render_openclaw_session, resolve_openclaw_session_path
 from ..services.intake import add_video_items
 from ..services.interaction_stats import (
+    _backfill_interaction_stats,
     _enrich_video,
-    compute_interaction_review_status,
-    compute_interaction_stats,
 )
 from ..services.manual_run import (
     batch_submit_run_to_phase,
@@ -122,6 +121,9 @@ def create_videos_router(
         for video in videos:
             video["packed"] = bool(video.get("packed", 0))
             _enrich_video(video)
+            if video.get("content_type") == "knowledge" and "interaction_stats" not in video:
+                video_dir = resolve_video_dir(video, settings.videos_dir)
+                _backfill_interaction_stats(video, video_dir)
         return {"videos": videos}
 
     @router.get("/{video_id}")
@@ -130,19 +132,17 @@ def create_videos_router(
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
         _enrich_video(video)
-        # Fallback to disk for legacy videos without DB cache, then backfill
         if video.get("content_type") == "knowledge" and "interaction_stats" not in video:
             video_dir = resolve_video_dir(video, settings.videos_dir)
-            stats = compute_interaction_stats(video_dir)
-            if stats:
-                video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
-            review_status = compute_interaction_review_status(video_dir)
-            if review_status:
-                video["interaction_review_status"] = review_status  # type: ignore[typeddict-unknown-key]
+            _backfill_interaction_stats(video, video_dir)
             db.update_video(
                 video_id,
-                interaction_stats_json=json.dumps(stats, ensure_ascii=False) if stats else "",
-                interaction_review_status=review_status or "",
+                interaction_stats_json=json.dumps(
+                    video.get("interaction_stats"), ensure_ascii=False
+                )
+                if video.get("interaction_stats")
+                else "",
+                interaction_review_status=video.get("interaction_review_status") or "",
             )
         return {
             "video": {**video, "packed": bool(video.get("packed", 0))},

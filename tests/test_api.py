@@ -1064,6 +1064,56 @@ def test_list_and_detail_return_interaction_review_status(tmp_path, client, db):
     }
 
 
+def test_list_backfills_interaction_stats_when_db_cache_empty(tmp_path, client):
+    import json
+
+    created = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/course/v2.mp4",
+                    "title": "V2",
+                    "content_type": "knowledge",
+                    "external_id": "V002",
+                }
+            ]
+        },
+    )
+    assert created.status_code == 200
+    video_id = created.json()["videos"][0]["id"]
+
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "interactions.json").write_text(
+        json.dumps(
+            {
+                "interactions": [
+                    {"id": "n1", "type": "example_practice"},
+                    {"id": "n2", "type": "example_practice"},
+                    {"id": "n3", "type": "interaction_summary"},
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    # review_result.json is missing — backfill should still produce stats with passed=0
+
+    listed = client.get("/api/videos").json()
+    assert listed["videos"][0]["interaction_stats"] == {
+        "example_practice": {"passed": 0, "total": 2},
+        "interaction_summary": {"passed": 0, "total": 1},
+    }
+    assert listed["videos"][0]["interaction_review_status"] == "all_failed"
+
+    detail = client.get(f"/api/videos/{video_id}").json()
+    assert detail["video"]["interaction_stats"] == {
+        "example_practice": {"passed": 0, "total": 2},
+        "interaction_summary": {"passed": 0, "total": 1},
+    }
+    assert detail["video"]["interaction_review_status"] == "all_failed"
+
+
 def test_get_video_not_found(client):
     response = client.get("/api/videos/nonexistent")
     assert response.status_code == 404
