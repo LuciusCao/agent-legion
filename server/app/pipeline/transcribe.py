@@ -159,6 +159,8 @@ class SenseVoiceProvider(TranscriptionProvider):
             "--output-dir",
             str(script_output_dir),
         ]
+        if self.model_dir and self.model_dir.exists():
+            cmd.extend(["--model-dir", str(self.model_dir)])
         subprocess.run(cmd, check=True, timeout=self.timeout)
         produced = script_output_dir / video_id / "subtitles.srt"
         if not produced.exists():
