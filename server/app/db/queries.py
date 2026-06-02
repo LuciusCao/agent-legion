@@ -11,9 +11,8 @@ from server.app.pipeline.common import make_record_id, resolve_video_dir
 from server.app.pipeline.openclaw import extract_openclaw_arg
 from server.app.records import PhaseRunRecord, VideoRecord
 from server.app.services.interaction_stats import (
+    _backfill_interaction_stats,
     _enrich_video,
-    compute_interaction_review_status,
-    compute_interaction_stats,
 )
 
 
@@ -146,12 +145,7 @@ class VideoQueries:
             and self._videos_dir is not None
         ):
             video_dir = resolve_video_dir(video, self._videos_dir)
-            stats = compute_interaction_stats(video_dir)
-            if stats:
-                video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
-            review_status = compute_interaction_review_status(video_dir)
-            if review_status:
-                video["interaction_review_status"] = review_status  # type: ignore[typeddict-unknown-key]
+            _backfill_interaction_stats(video, video_dir)
         self._hub.emit_change(video)
         phase_runs = self._list_phase_runs_with_conn(conn, video_id)
         transcription_runs = self._list_transcription_runs_with_conn(conn, video_id)

@@ -20,6 +20,25 @@ def _enrich_video(video: Any) -> None:
         video["interaction_review_status"] = review_status
 
 
+def _backfill_interaction_stats(video: Any, video_dir: Path) -> None:
+    """Backfill interaction_stats from disk when DB cache is empty.
+
+    Every code path that returns a video to the client must go through
+    _enrich_video() followed by _backfill_interaction_stats() to ensure
+    the list API, detail API, and SSE push identical data.
+    """
+    if video.get("content_type") != "knowledge":
+        return
+    if "interaction_stats" in video:
+        return
+    stats = compute_interaction_stats(video_dir)
+    if stats:
+        video["interaction_stats"] = stats
+    review_status = compute_interaction_review_status(video_dir)
+    if review_status:
+        video["interaction_review_status"] = review_status
+
+
 def cache_interaction_stats(db: Any, video_id: str, video_dir: Path) -> None:
     """Compute interaction stats from disk and write them to the DB cache."""
     stats = compute_interaction_stats(video_dir)
