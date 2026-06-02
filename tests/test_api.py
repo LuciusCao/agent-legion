@@ -564,8 +564,14 @@ def test_batch_rerun_from_failed_phase(client, db):
     assert results[2]["video_id"] == "question_Q001"
     assert results[2]["status"] == "skipped"
     assert "completed" in results[2]["message"]
-    assert client.get("/api/videos/knowledge_K001").json()["video"]["current_phase"] == "chapter_generate"
-    assert client.get("/api/videos/knowledge_K002").json()["video"]["current_phase"] == "subtitle_review"
+    assert (
+        client.get("/api/videos/knowledge_K001").json()["video"]["current_phase"]
+        == "chapter_generate"
+    )
+    assert (
+        client.get("/api/videos/knowledge_K002").json()["video"]["current_phase"]
+        == "subtitle_review"
+    )
     assert client.get("/api/videos/question_Q001").json()["video"]["current_phase"] == "assemble"
 
 
