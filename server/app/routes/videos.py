@@ -246,6 +246,7 @@ def create_videos_router(
         return {"session_id": session_id, "log": render_openclaw_session(path)}
 
     @router.get("/{video_id}/video")
+    @router.head("/{video_id}/video")
     def video_file(video_id: str):
         video = db.get_video(video_id)
         if not video:
