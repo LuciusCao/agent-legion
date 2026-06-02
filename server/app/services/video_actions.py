@@ -91,6 +91,13 @@ def rerun_video_record(
         }
 
     if phase == FAILED_PHASE_RERUN_MARKER:
+        if video["status"] != "failed":
+            return {
+                "video_id": video_id,
+                "status": "skipped",
+                "phase": video["current_phase"],
+                "message": f"视频状态为 {video['status']}，不从失败阶段重跑",
+            }
         phase = video["current_phase"]
 
     normalized_phase = normalize_rerun_phase(video, phase)

@@ -487,6 +487,56 @@ def test_submit_run_to_phase_returns_busy(db, settings, monkeypatch):
     mock_submit.assert_not_called()
 
 
+def test_rerun_from_failed_phase_uses_current_phase(db, settings):
+    db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
+    db.update_video("knowledge_K001", status="failed", current_phase="chapter_generate")
+
+    result = rerun_video_record(db, settings, "knowledge_K001", "__failed__")
+
+    assert result["status"] == "rerun"
+    assert result["phase"] == "chapter_generate"
+    assert db.get_video("knowledge_K001")["current_phase"] == "chapter_generate"
+    assert db.get_video("knowledge_K001")["status"] == "queued"
+
+
+def test_rerun_from_failed_phase_skips_non_failed_video(db, settings):
+    db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
+    db.update_video("knowledge_K001", status="completed", current_phase="assemble")
+
+    result = rerun_video_record(db, settings, "knowledge_K001", "__failed__")
+
+    assert result["status"] == "skipped"
+    assert "completed" in result["message"]
+    assert db.get_video("knowledge_K001")["current_phase"] == "assemble"
+    assert db.get_video("knowledge_K001")["status"] == "completed"
+
+
+def test_batch_rerun_from_failed_phase_per_video(db, settings):
+    db.create_video("https://example.com/k1.mp4", content_type="knowledge", external_id="K001")
+    db.create_video("https://example.com/k2.mp4", content_type="knowledge", external_id="K002")
+    db.update_video("knowledge_K001", status="failed", current_phase="chapter_generate")
+    db.update_video("knowledge_K002", status="failed", current_phase="subtitle_review")
+
+    results = batch_rerun_video_records(
+        db, settings, ["knowledge_K001", "knowledge_K002"], "__failed__"
+    )
+
+    assert results[0] == {
+        "video_id": "knowledge_K001",
+        "status": "rerun",
+        "phase": "chapter_generate",
+        "message": "",
+    }
+    assert results[1] == {
+        "video_id": "knowledge_K002",
+        "status": "rerun",
+        "phase": "subtitle_review",
+        "message": "",
+    }
+    assert db.get_video("knowledge_K001")["current_phase"] == "chapter_generate"
+    assert db.get_video("knowledge_K002")["current_phase"] == "subtitle_review"
+
+
 def test_batch_delete_uses_thread_pool(db, settings, monkeypatch):
     """batch_delete should use ThreadPoolExecutor for parallel directory deletion."""
     from unittest.mock import MagicMock, patch
