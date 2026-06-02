@@ -512,6 +512,63 @@ def test_batch_rerun_returns_per_video_results_and_normalizes_question_phase(cli
     assert client.get("/api/videos/question_Q001").json()["video"]["current_phase"] == "assemble"
 
 
+def test_batch_rerun_from_failed_phase(client, db):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
+                {
+                    "url": "https://example.com/k2.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K002",
+                },
+                {
+                    "url": "https://example.com/q1.mp4",
+                    "content_type": "question",
+                    "external_id": "Q001",
+                },
+            ]
+        },
+    )
+    db.update_video("knowledge_K001", status="failed", current_phase="chapter_generate")
+    db.update_video("knowledge_K002", status="failed", current_phase="subtitle_review")
+    db.update_video("question_Q001", status="completed", current_phase="assemble")
+
+    response = client.post(
+        "/api/videos/batch/rerun",
+        json={
+            "video_ids": ["knowledge_K001", "knowledge_K002", "question_Q001"],
+            "phase": "__failed__",
+        },
+    )
+
+    assert response.status_code == 200
+    results = response.json()["results"]
+    assert results[0] == {
+        "video_id": "knowledge_K001",
+        "status": "rerun",
+        "phase": "chapter_generate",
+        "message": "",
+    }
+    assert results[1] == {
+        "video_id": "knowledge_K002",
+        "status": "rerun",
+        "phase": "subtitle_review",
+        "message": "",
+    }
+    assert results[2]["video_id"] == "question_Q001"
+    assert results[2]["status"] == "skipped"
+    assert "completed" in results[2]["message"]
+    assert client.get("/api/videos/knowledge_K001").json()["video"]["current_phase"] == "chapter_generate"
+    assert client.get("/api/videos/knowledge_K002").json()["video"]["current_phase"] == "subtitle_review"
+    assert client.get("/api/videos/question_Q001").json()["video"]["current_phase"] == "assemble"
+
+
 def test_single_run_to_rejects_invalid_phase(client):
     created = client.post(
         "/api/videos",
