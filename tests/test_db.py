@@ -484,3 +484,26 @@ def test_insert_and_list_packages(db):
     limited = db.list_packages(limit=1)
     assert len(limited) == 1
     assert limited[0]["path"] == "/tmp/packages/test-b.zip"
+
+
+def test_insert_package_with_metadata(db):
+    db.insert_package("/tmp/p.zip", name="批次 A", video_count=10, size_bytes=1024)
+    packages = db.list_packages(limit=10)
+    assert len(packages) == 1
+    assert packages[0]["name"] == "批次 A"
+    assert packages[0]["video_count"] == 10
+    assert packages[0]["size_bytes"] == 1024
+
+
+def test_delete_package(db):
+    db.insert_package("/tmp/p.zip", name="批次 A", video_count=10, size_bytes=1024)
+    pkg = db.list_packages(limit=1)[0]
+    db.delete_package(pkg["id"])
+    assert db.list_packages(limit=10) == []
+
+
+def test_update_package_name(db):
+    db.insert_package("/tmp/p.zip", name="旧名称", video_count=1, size_bytes=100)
+    pkg = db.list_packages(limit=1)[0]
+    db.update_package_name(pkg["id"], "新名称")
+    assert db.list_packages(limit=1)[0]["name"] == "新名称"

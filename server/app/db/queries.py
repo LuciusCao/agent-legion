@@ -531,13 +531,15 @@ class VideoQueries:
                 )
             ]
 
-    def insert_package(self, path: str) -> None:
+    def insert_package(
+        self, path: str, name: str = "", video_count: int = 0, size_bytes: int = 0
+    ) -> None:
         from datetime import UTC, datetime
 
         with self.connect() as conn:
             conn.execute(
-                "insert into packages(path, created_at) values (?, ?)",
-                (path, datetime.now(UTC).isoformat()),
+                "insert into packages(path, name, video_count, size_bytes, created_at) values (?, ?, ?, ?, ?)",
+                (path, name, video_count, size_bytes, datetime.now(UTC).isoformat()),
             )
 
     def list_packages(self, limit: int = 5) -> list[dict[str, Any]]:
@@ -549,6 +551,14 @@ class VideoQueries:
                     (limit,),
                 )
             ]
+
+    def delete_package(self, package_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("delete from packages where id = ?", (package_id,))
+
+    def update_package_name(self, package_id: int, name: str) -> None:
+        with self.connect() as conn:
+            conn.execute("update packages set name = ? where id = ?", (name, package_id))
 
     def batch_delete_videos(self, video_ids: list[str]) -> None:
         if not video_ids:
