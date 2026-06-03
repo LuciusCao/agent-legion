@@ -1378,3 +1378,143 @@ def test_broadcast_package_ready():
         assert data["download_url"] == "/api/packages/test.zip"
 
     asyncio.run(_test())
+
+
+def test_package_with_custom_name(tmp_path, client, monkeypatch):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
+            ]
+        },
+    )
+    video_id = "knowledge_K001"
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+
+    def _sync_submit(fn):
+        fn()
+
+    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
+
+    response = client.post("/api/package", json={"video_ids": [video_id], "name": "我的批次"})
+    assert response.status_code == 200
+    assert response.json()["accepted"] is True
+
+    packages = client.app.state.db.list_packages()
+    assert len(packages) == 1
+    assert packages[0]["name"] == "我的批次"
+    assert packages[0]["video_count"] == 1
+    assert packages[0]["size_bytes"] > 0
+
+
+def test_delete_package(tmp_path, client, monkeypatch):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
+            ]
+        },
+    )
+    video_id = "knowledge_K001"
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+
+    def _sync_submit(fn):
+        fn()
+
+    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
+
+    client.post("/api/package", json={"video_ids": [video_id]})
+    pkg = client.app.state.db.list_packages(limit=1)[0]
+
+    response = client.delete(f"/api/packages/{pkg['id']}")
+    assert response.status_code == 200
+    assert response.json()["deleted"] is True
+    assert client.app.state.db.list_packages(limit=10) == []
+
+
+def test_delete_package_not_found(client):
+    response = client.delete("/api/packages/99999")
+    assert response.status_code == 404
+
+
+def test_patch_package_name(tmp_path, client, monkeypatch):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
+            ]
+        },
+    )
+    video_id = "knowledge_K001"
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+
+    def _sync_submit(fn):
+        fn()
+
+    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
+
+    client.post("/api/package", json={"video_ids": [video_id]})
+    pkg = client.app.state.db.list_packages(limit=1)[0]
+
+    response = client.patch(f"/api/packages/{pkg['id']}", json={"name": "新名称"})
+    assert response.status_code == 200
+    assert response.json()["name"] == "新名称"
+
+
+def test_list_packages_returns_new_fields(tmp_path, client, monkeypatch):
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
+            ]
+        },
+    )
+    video_id = "knowledge_K001"
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+
+    def _sync_submit(fn):
+        fn()
+
+    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
+
+    client.post("/api/package", json={"video_ids": [video_id], "name": "测试批次"})
+
+    response = client.get("/api/packages")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["packages"]) == 1
+    assert data["packages"][0]["name"] == "测试批次"
+    assert data["packages"][0]["video_count"] == 1
+    assert data["packages"][0]["size_bytes"] > 0
