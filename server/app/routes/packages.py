@@ -1,5 +1,6 @@
 import atexit
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -19,6 +20,11 @@ atexit.register(_package_executor.shutdown, wait=False)
 
 class PackageRequest(BaseModel):
     video_ids: list[str] | None = None
+    name: str | None = None
+
+
+class PackageNameUpdate(BaseModel):
+    name: str
 
 
 class PackageResponse(BaseModel):
@@ -52,10 +58,18 @@ def create_packages_router(
             )
 
         def _do_package() -> None:
-            package_path = create_package(
+            package_path, video_count = create_package(
                 selection.videos, settings.packages_dir, settings.videos_dir
             )
-            db.insert_package(str(package_path))
+            size_bytes = package_path.stat().st_size
+            name = (
+                request.name
+                if request is not None and request.name
+                else f"批次 ({video_count}个视频)"
+            )
+            db.insert_package(
+                str(package_path), name=name, video_count=video_count, size_bytes=size_bytes
+            )
             download_url = f"/api/packages/{package_path.name}"
             video_event_manager.broadcast_package_ready(download_url)
             video_ids = [v["id"] for v in selection.videos]
@@ -67,6 +81,27 @@ def create_packages_router(
     @router.get("/packages")
     def list_packages() -> dict[str, Any]:
         return {"packages": db.list_packages(limit=10)}
+
+    @router.delete("/packages/{package_id:int}")
+    def delete_package(package_id: int) -> dict[str, bool]:
+        packages = db.list_packages(limit=1000)
+        target = next((p for p in packages if p["id"] == package_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="Package not found")
+        package_path = Path(target["path"])
+        if package_path.exists():
+            package_path.unlink()
+        db.delete_package(package_id)
+        return {"deleted": True}
+
+    @router.patch("/packages/{package_id:int}")
+    def update_package_name(package_id: int, body: PackageNameUpdate) -> dict[str, Any]:
+        packages = db.list_packages(limit=1000)
+        target = next((p for p in packages if p["id"] == package_id), None)
+        if target is None:
+            raise HTTPException(status_code=404, detail="Package not found")
+        db.update_package_name(package_id, body.name)
+        return {"id": package_id, "name": body.name}
 
     @router.get("/packages/{filename:path}")
     def download_package(filename: str):

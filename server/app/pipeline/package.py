@@ -16,7 +16,7 @@ PACKAGE_FILES = [
 
 def create_package(
     videos: list[Any], packages_dir: Path, videos_base_dir: Path | None = None
-) -> Path:
+) -> tuple[Path, int]:
     packages_dir.mkdir(parents=True, exist_ok=True)
     package_path = packages_dir / f"video-hive-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}.zip"
     manifest = {
@@ -36,6 +36,7 @@ def create_package(
             for video in videos
         ],
     }
+    video_count = 0
     with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         for video in videos:
@@ -56,4 +57,5 @@ def create_package(
                 zf.write(reviewed_srt, f"{video['id']}/subtitles.srt")
             elif srt.exists():
                 zf.write(srt, f"{video['id']}/subtitles.srt")
-    return package_path
+            video_count += 1
+    return package_path, video_count
