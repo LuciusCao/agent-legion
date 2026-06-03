@@ -85,4 +85,4 @@ openclaw:
         - --message
         - "{prompt_text}"
         - --json
-      count: 10
+      count: 8

@@ -1,5 +1,6 @@
 import atexit
 from concurrent.futures import ThreadPoolExecutor
+from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
@@ -54,6 +55,7 @@ def create_packages_router(
             package_path = create_package(
                 selection.videos, settings.packages_dir, settings.videos_dir
             )
+            db.insert_package(str(package_path))
             video_ids = [v["id"] for v in selection.videos]
             db.batch_update_packed(video_ids, packed=1)
             download_url = f"/api/packages/{package_path.name}"
@@ -61,6 +63,10 @@ def create_packages_router(
 
         _package_executor.submit(_do_package)
         return {"accepted": True}
+
+    @router.get("/packages")
+    def list_packages() -> dict[str, Any]:
+        return {"packages": db.list_packages(limit=10)}
 
     @router.get("/packages/{filename:path}")
     def download_package(filename: str):

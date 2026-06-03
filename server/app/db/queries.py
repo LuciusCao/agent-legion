@@ -528,6 +528,25 @@ class VideoQueries:
                 )
             ]
 
+    def insert_package(self, path: str) -> None:
+        from datetime import UTC, datetime
+
+        with self.connect() as conn:
+            conn.execute(
+                "insert into packages(path, created_at) values (?, ?)",
+                (path, datetime.now(UTC).isoformat()),
+            )
+
+    def list_packages(self, limit: int = 5) -> list[dict[str, Any]]:
+        with self._connect_read() as conn:
+            return [
+                cast(dict[str, Any], dict(row))
+                for row in conn.execute(
+                    "select * from packages order by created_at desc limit ?",
+                    (limit,),
+                )
+            ]
+
     def batch_delete_videos(self, video_ids: list[str]) -> None:
         if not video_ids:
             return
