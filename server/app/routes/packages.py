@@ -1,4 +1,7 @@
 import atexit
+import json
+import logging
+import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -13,6 +16,8 @@ from ..pipeline.package import create_package
 from ..security import validate_package_filename
 from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
+
+logger = logging.getLogger(__name__)
 
 _package_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="package-")
 atexit.register(_package_executor.shutdown, wait=False)
@@ -58,29 +63,49 @@ def create_packages_router(
             )
 
         def _do_package() -> None:
-            package_path, video_count = create_package(
-                selection.videos, settings.packages_dir, settings.videos_dir
-            )
-            size_bytes = package_path.stat().st_size
-            name = (
-                request.name
-                if request is not None and request.name
-                else f"批次 ({video_count}个视频)"
-            )
-            db.insert_package(
-                str(package_path), name=name, video_count=video_count, size_bytes=size_bytes
-            )
-            download_url = f"/api/packages/{package_path.name}"
-            video_event_manager.broadcast_package_ready(download_url)
-            video_ids = [v["id"] for v in selection.videos]
-            db.batch_update_packed(video_ids, packed=1, notify=False)
+            try:
+                package_path, video_count = create_package(
+                    selection.videos, settings.packages_dir, settings.videos_dir
+                )
+                size_bytes = package_path.stat().st_size
+                name = (
+                    request.name
+                    if request is not None and request.name
+                    else f"批次 ({video_count}个视频)"
+                )
+                db.insert_package(
+                    str(package_path), name=name, video_count=video_count, size_bytes=size_bytes
+                )
+                download_url = f"/api/packages/{package_path.name}"
+                video_event_manager.broadcast_package_ready(download_url)
+                video_ids = [v["id"] for v in selection.videos]
+                db.batch_update_packed(video_ids, packed=1, notify=False)
+            except Exception:
+                logger.exception("Package creation failed")
 
         _package_executor.submit(_do_package)
         return {"accepted": True}
 
     @router.get("/packages")
     def list_packages() -> dict[str, Any]:
-        return {"packages": db.list_packages(limit=10)}
+        packages = db.list_packages(limit=10)
+        for pkg in packages:
+            if not pkg.get("name") or pkg.get("video_count", 0) == 0:
+                try:
+                    with zipfile.ZipFile(pkg["path"]) as zf:
+                        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+                        video_count = len(manifest.get("videos", []))
+                        name = pkg.get("name") or f"批次 ({video_count}个视频)"
+                        size_bytes = pkg.get("size_bytes") or Path(pkg["path"]).stat().st_size
+                        db.update_package_stats(
+                            pkg["id"], name=name, video_count=video_count, size_bytes=size_bytes
+                        )
+                        pkg["name"] = name
+                        pkg["video_count"] = video_count
+                        pkg["size_bytes"] = size_bytes
+                except Exception:
+                    pass
+        return {"packages": packages}
 
     @router.delete("/packages/{package_id:int}")
     def delete_package(package_id: int) -> dict[str, bool]:
