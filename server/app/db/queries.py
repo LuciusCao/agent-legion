@@ -560,6 +560,31 @@ class VideoQueries:
         with self.connect() as conn:
             conn.execute("update packages set name = ? where id = ?", (name, package_id))
 
+    def update_package_stats(
+        self,
+        package_id: int,
+        *,
+        name: str | None = None,
+        video_count: int | None = None,
+        size_bytes: int | None = None,
+    ) -> None:
+        fields: list[str] = []
+        values: list[Any] = []
+        if name is not None:
+            fields.append("name = ?")
+            values.append(name)
+        if video_count is not None:
+            fields.append("video_count = ?")
+            values.append(video_count)
+        if size_bytes is not None:
+            fields.append("size_bytes = ?")
+            values.append(size_bytes)
+        if not fields:
+            return
+        sql = f"update packages set {', '.join(fields)} where id = ?"
+        with self.connect() as conn:
+            conn.execute(sql, values + [package_id])
+
     def batch_delete_videos(self, video_ids: list[str]) -> None:
         if not video_ids:
             return
