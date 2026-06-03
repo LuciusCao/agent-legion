@@ -56,10 +56,10 @@ def create_packages_router(
                 selection.videos, settings.packages_dir, settings.videos_dir
             )
             db.insert_package(str(package_path))
-            video_ids = [v["id"] for v in selection.videos]
-            db.batch_update_packed(video_ids, packed=1)
             download_url = f"/api/packages/{package_path.name}"
             video_event_manager.broadcast_package_ready(download_url)
+            video_ids = [v["id"] for v in selection.videos]
+            db.batch_update_packed(video_ids, packed=1, notify=False)
 
         _package_executor.submit(_do_package)
         return {"accepted": True}

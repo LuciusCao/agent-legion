@@ -3,10 +3,11 @@ import { useVideoStore } from '../stores/videoStore'
 import { triggerDownload } from '../lib/download'
 import { fetchPackages } from '../api'
 
+
 const LAST_DOWNLOADED_KEY = 'video-hive:last-downloaded-package-id'
 
 export function useVideoEvents() {
-  const { mergeVideo, removeVideo, setSseConnected } = useVideoStore()
+  const { mergeVideo, removeVideo, setSseConnected, fetchVideos } = useVideoStore()
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
@@ -35,6 +36,7 @@ export function useVideoEvents() {
             removeVideo(payload.video_id)
           } else if (payload.type === 'package_ready' && payload.download_url) {
             triggerDownload(payload.download_url)
+            fetchVideos()
           }
         } catch {
           // ignore invalid payloads
@@ -87,5 +89,5 @@ export function useVideoEvents() {
         source.close()
       }
     }
-  }, [mergeVideo, removeVideo, setSseConnected])
+  }, [mergeVideo, removeVideo, setSseConnected, fetchVideos])
 }
