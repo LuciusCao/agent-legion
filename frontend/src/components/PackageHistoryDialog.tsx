@@ -55,6 +55,8 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
     }
   }, [open, fetchPackagesList])
 
+  if (!open) return null
+
   const handleDownload = (pkg: PackageItem) => {
     const filename = pkg.path.split('/').pop() || ''
     if (filename) {
@@ -92,7 +94,7 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
   }
 
   return (
-    <md-dialog open={open}>
+    <md-dialog open>
       <div slot="headline">包历史</div>
       <div slot="content" className={styles.dialogContent}>
         {loading && <div className={styles.empty}>加载中...</div>}
