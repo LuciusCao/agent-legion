@@ -1,7 +1,30 @@
 export async function fetchPackages(): Promise<
-  { packages: Array<{ id: number; path: string; created_at: string }> }
+  {
+    packages: Array<{
+      id: number
+      name: string
+      path: string
+      video_count: number
+      size_bytes: number
+      created_at: string
+    }>
+  }
 > {
   return api('/api/packages')
+}
+
+export async function deletePackage(id: number): Promise<{ deleted: boolean }> {
+  return api(`/api/packages/${id}`, { method: 'DELETE' })
+}
+
+export async function updatePackageName(
+  id: number,
+  name: string
+): Promise<{ id: number; name: string }> {
+  return api(`/api/packages/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ name }),
+  })
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {

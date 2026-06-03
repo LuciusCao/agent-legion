@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback } from 'react'
+import { useEffect, useRef, useCallback, useState } from 'react'
 import { useVideoStore } from '../stores/videoStore'
 import { useUiStore } from '../stores/uiStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
@@ -8,6 +8,7 @@ import { StatCards } from '../components/StatCards'
 import { VideoList } from '../components/VideoList'
 import { BatchToolbar } from '../components/BatchToolbar'
 import { AddDialog } from '../components/AddDialog'
+import { PackageHistoryDialog } from '../components/PackageHistoryDialog'
 
 export function ListPage() {
   const selectedType = useVideoStore((state) => state.selectedType)
@@ -19,6 +20,7 @@ export function ListPage() {
   const sseConnected = useVideoStore((state) => state.sseConnected)
   const toggleSelectMode = useVideoStore((state) => state.toggleSelectMode)
   const { openAddDialog, showToast } = useUiStore()
+  const [packageDialogOpen, setPackageDialogOpen] = useState(false)
 
   const debouncedSetSearchQuery = useDebouncedCallback(setSearchQuery, 250)
 
@@ -96,6 +98,12 @@ export function ListPage() {
             <md-icon-button onClick={openAddDialog} title="添加">
               <md-icon>add</md-icon>
             </md-icon-button>
+            <md-icon-button
+              onClick={() => setPackageDialogOpen(true)}
+              title="包历史"
+            >
+              <md-icon>inventory_2</md-icon>
+            </md-icon-button>
           </div>
         </div>
       </div>
@@ -104,6 +112,10 @@ export function ListPage() {
         <VideoList />
       </div>
       <AddDialog />
+      <PackageHistoryDialog
+        open={packageDialogOpen}
+        onClose={() => setPackageDialogOpen(false)}
+      />
     </section>
   )
 }
