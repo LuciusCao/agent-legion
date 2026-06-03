@@ -13,7 +13,7 @@ def test_package_completed_videos(tmp_path):
         json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
     )
 
-    package_path = create_package(
+    package_path, _ = create_package(
         videos=[
             {
                 "id": "a",
@@ -45,7 +45,7 @@ def test_package_excludes_agent_workspace_pollution(tmp_path):
     (video_dir / ".openclaw").mkdir()
     (video_dir / ".openclaw" / "workspace-state.json").write_text("{}", encoding="utf-8")
 
-    package_path = create_package(
+    package_path, _ = create_package(
         videos=[{"id": "a", "title": "A", "source_url": "", "storage_dir": str(video_dir)}],
         packages_dir=tmp_path / "packages",
     )
@@ -70,7 +70,7 @@ def test_package_includes_reviewed_subtitles_when_available(tmp_path):
     (video_dir / "subtitles.srt").write_text("original", encoding="utf-8")
     (video_dir / "subtitles_reviewed.srt").write_text("reviewed", encoding="utf-8")
 
-    package_path = create_package(
+    package_path, _ = create_package(
         videos=[{"id": "a", "title": "A", "source_url": "", "storage_dir": str(video_dir)}],
         packages_dir=tmp_path / "packages",
     )
@@ -89,7 +89,7 @@ def test_package_falls_back_to_original_subtitles_when_reviewed_missing(tmp_path
     )
     (video_dir / "subtitles.srt").write_text("original", encoding="utf-8")
 
-    package_path = create_package(
+    package_path, _ = create_package(
         videos=[{"id": "b", "title": "B", "source_url": "", "storage_dir": str(video_dir)}],
         packages_dir=tmp_path / "packages",
     )
@@ -103,7 +103,7 @@ def test_package_fallback_to_videos_base_dir_when_storage_dir_empty(tmp_path):
     video_dir.mkdir(parents=True)
     (video_dir / "metadata.json").write_text(json.dumps({"video_id": "b"}), encoding="utf-8")
 
-    package_path = create_package(
+    package_path, _ = create_package(
         videos=[{"id": "b", "title": "B", "source_url": "", "storage_dir": ""}],
         packages_dir=tmp_path / "packages",
         videos_base_dir=tmp_path / "videos",
@@ -116,7 +116,7 @@ def test_package_fallback_to_videos_base_dir_when_storage_dir_empty(tmp_path):
 
 
 def test_package_skips_video_when_no_storage_dir_and_no_fallback(tmp_path):
-    package_path = create_package(
+    package_path, _ = create_package(
         videos=[{"id": "c", "title": "C", "source_url": "", "storage_dir": ""}],
         packages_dir=tmp_path / "packages",
     )
@@ -129,11 +129,11 @@ def test_package_skips_video_when_no_storage_dir_and_no_fallback(tmp_path):
 
 
 def test_packages_created_in_same_second_do_not_overwrite_each_other(tmp_path):
-    first = create_package(
+    first, _ = create_package(
         videos=[{"id": "a", "title": "A", "source_url": "", "storage_dir": ""}],
         packages_dir=tmp_path / "packages",
     )
-    second = create_package(
+    second, _ = create_package(
         videos=[{"id": "b", "title": "B", "source_url": "", "storage_dir": ""}],
         packages_dir=tmp_path / "packages",
     )
