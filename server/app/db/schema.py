@@ -75,6 +75,18 @@ def init_db(path: Path) -> None:
                 if column not in existing_columns:
                     conn.execute(statement)
 
+            existing_package_columns = {
+                row["name"] for row in conn.execute("pragma table_info(packages)").fetchall()
+            }
+            package_migrations = {
+                "video_count": "alter table packages add column video_count integer not null default 0",
+                "size_bytes": "alter table packages add column size_bytes integer not null default 0",
+                "name": "alter table packages add column name text not null default ''",
+            }
+            for column, statement in package_migrations.items():
+                if column not in existing_package_columns:
+                    conn.execute(statement)
+
             # Performance indexes for issue 012
             conn.executescript(
                 """
