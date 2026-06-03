@@ -1,3 +1,9 @@
+export async function fetchPackages(): Promise<
+  { packages: Array<{ id: number; path: string; created_at: string }> }
+> {
+  return api('/api/packages')
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const isGet = !init || !init.method || init.method === 'GET'
   const response = await fetch(path, {

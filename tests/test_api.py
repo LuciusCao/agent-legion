@@ -774,6 +774,44 @@ def test_package_sets_packed_true(tmp_path, client, monkeypatch):
     video = client.app.state.db.get_video(video_id)
     assert video["packed"] == 1
 
+    # Package record should also be persisted
+    packages = client.app.state.db.list_packages()
+    assert len(packages) == 1
+    assert packages[0]["path"].endswith(".zip")
+
+
+def test_list_packages_returns_recent_packages(tmp_path, client, monkeypatch):
+    video_id = "knowledge_K001"
+    client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/k1.mp4",
+                    "content_type": "knowledge",
+                    "external_id": "K001",
+                },
+            ]
+        },
+    )
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "metadata.json").write_text('{"id":"knowledge_K001"}', encoding="utf-8")
+    client.app.state.db.update_video(video_id, status="completed", current_phase="assemble")
+
+    def _sync_submit(fn):
+        fn()
+
+    monkeypatch.setattr("server.app.routes.packages._package_executor.submit", _sync_submit)
+
+    client.post("/api/package", json={"video_ids": [video_id]})
+
+    response = client.get("/api/packages")
+    assert response.status_code == 200
+    data = response.json()
+    assert len(data["packages"]) == 1
+    assert data["packages"][0]["path"].endswith(".zip")
+
 
 def test_rerun_clears_packed(tmp_path, client):
     client.post(

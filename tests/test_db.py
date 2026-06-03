@@ -466,3 +466,21 @@ def test_notify_safe_under_concurrent_threads(db):
         t.join()
 
     assert not errors, f"Concurrent _notify raised: {errors}"
+
+
+def test_insert_and_list_packages(db):
+    import time
+
+    db.insert_package("/tmp/packages/test-a.zip")
+    time.sleep(0.01)
+    db.insert_package("/tmp/packages/test-b.zip")
+
+    packages = db.list_packages(limit=10)
+    assert len(packages) == 2
+    # Most recent first
+    assert packages[0]["path"] == "/tmp/packages/test-b.zip"
+    assert packages[1]["path"] == "/tmp/packages/test-a.zip"
+
+    limited = db.list_packages(limit=1)
+    assert len(limited) == 1
+    assert limited[0]["path"] == "/tmp/packages/test-b.zip"

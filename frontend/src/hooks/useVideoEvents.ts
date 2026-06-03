@@ -1,6 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { useVideoStore } from '../stores/videoStore'
 import { triggerDownload } from '../lib/download'
+import { fetchPackages } from '../api'
+
+const LAST_DOWNLOADED_KEY = 'video-hive:last-downloaded-package-id'
 
 export function useVideoEvents() {
   const { mergeVideo, removeVideo, setSseConnected } = useVideoStore()
@@ -53,6 +56,28 @@ export function useVideoEvents() {
     }
 
     connect()
+
+    // On page load, check for packages created while the page was away
+    // (e.g. user refreshed during packaging). If the latest package has
+    // not been downloaded yet, trigger the download automatically.
+    const checkPendingPackages = async () => {
+      try {
+        const data = await fetchPackages()
+        const packages = data.packages || []
+        if (packages.length === 0) return
+        const latest = packages[0]
+        const lastDownloaded = localStorage.getItem(LAST_DOWNLOADED_KEY)
+        if (String(latest.id) === lastDownloaded) return
+        const filename = latest.path.split('/').pop() || ''
+        if (!filename) return
+        localStorage.setItem(LAST_DOWNLOADED_KEY, String(latest.id))
+        triggerDownload(`/api/packages/${filename}`)
+      } catch {
+        // ignore: no packages or network error
+      }
+    }
+
+    checkPendingPackages()
 
     return () => {
       if (reconnectTimerRef.current) {
