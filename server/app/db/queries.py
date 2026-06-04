@@ -532,14 +532,19 @@ class VideoQueries:
             ]
 
     def insert_package(
-        self, path: str, name: str = "", video_count: int = 0, size_bytes: int = 0
+        self,
+        path: str,
+        name: str = "",
+        video_count: int = 0,
+        size_bytes: int = 0,
+        locked: int = 0,
     ) -> None:
         from datetime import UTC, datetime
 
         with self.connect() as conn:
             conn.execute(
-                "insert into packages(path, name, video_count, size_bytes, created_at) values (?, ?, ?, ?, ?)",
-                (path, name, video_count, size_bytes, datetime.now(UTC).isoformat()),
+                "insert into packages(path, name, video_count, size_bytes, locked, created_at) values (?, ?, ?, ?, ?, ?)",
+                (path, name, video_count, size_bytes, locked, datetime.now(UTC).isoformat()),
             )
 
     def list_packages(self, limit: int = 5) -> list[dict[str, Any]]:
@@ -567,6 +572,7 @@ class VideoQueries:
         name: str | None = None,
         video_count: int | None = None,
         size_bytes: int | None = None,
+        locked: int | None = None,
     ) -> None:
         fields: list[str] = []
         values: list[Any] = []
@@ -579,6 +585,9 @@ class VideoQueries:
         if size_bytes is not None:
             fields.append("size_bytes = ?")
             values.append(size_bytes)
+        if locked is not None:
+            fields.append("locked = ?")
+            values.append(locked)
         if not fields:
             return
         sql = f"update packages set {', '.join(fields)} where id = ?"

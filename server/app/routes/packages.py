@@ -28,8 +28,9 @@ class PackageRequest(BaseModel):
     name: str | None = None
 
 
-class PackageNameUpdate(BaseModel):
-    name: str
+class PackageUpdate(BaseModel):
+    name: str | None = None
+    locked: bool | None = None
 
 
 class PackageResponse(BaseModel):
@@ -113,6 +114,8 @@ def create_packages_router(
         target = next((p for p in packages if p["id"] == package_id), None)
         if target is None:
             raise HTTPException(status_code=404, detail="Package not found")
+        if target.get("locked"):
+            raise HTTPException(status_code=400, detail="Package is locked")
         package_path = Path(target["path"])
         if package_path.exists():
             package_path.unlink()
@@ -120,13 +123,21 @@ def create_packages_router(
         return {"deleted": True}
 
     @router.patch("/packages/{package_id:int}")
-    def update_package_name(package_id: int, body: PackageNameUpdate) -> dict[str, Any]:
+    def update_package(package_id: int, body: PackageUpdate) -> dict[str, Any]:
         packages = db.list_packages(limit=1000)
         target = next((p for p in packages if p["id"] == package_id), None)
         if target is None:
             raise HTTPException(status_code=404, detail="Package not found")
-        db.update_package_name(package_id, body.name)
-        return {"id": package_id, "name": body.name}
+        if body.name is not None:
+            db.update_package_name(package_id, body.name)
+        if body.locked is not None:
+            db.update_package_stats(package_id, locked=1 if body.locked else 0)
+        result: dict[str, Any] = {"id": package_id}
+        if body.name is not None:
+            result["name"] = body.name
+        if body.locked is not None:
+            result["locked"] = body.locked
+        return result
 
     @router.get("/packages/{filename:path}")
     def download_package(filename: str):

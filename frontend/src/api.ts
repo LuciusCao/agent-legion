@@ -17,13 +17,13 @@ export async function deletePackage(id: number): Promise<{ deleted: boolean }> {
   return api(`/api/packages/${id}`, { method: 'DELETE' })
 }
 
-export async function updatePackageName(
+export async function updatePackage(
   id: number,
-  name: string
-): Promise<{ id: number; name: string }> {
+  fields: { name?: string; locked?: boolean }
+): Promise<{ id: number; name?: string; locked?: boolean }> {
   return api(`/api/packages/${id}`, {
     method: 'PATCH',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify(fields),
   })
 }
 
