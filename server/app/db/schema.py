@@ -82,6 +82,7 @@ def init_db(path: Path) -> None:
                 "video_count": "alter table packages add column video_count integer not null default 0",
                 "size_bytes": "alter table packages add column size_bytes integer not null default 0",
                 "name": "alter table packages add column name text not null default ''",
+                "locked": "alter table packages add column locked integer not null default 0",
             }
             for column, statement in package_migrations.items():
                 if column not in existing_package_columns:

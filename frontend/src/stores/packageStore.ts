@@ -7,6 +7,7 @@ interface PackageItem {
   path: string
   video_count: number
   size_bytes: number
+  locked: number
   created_at: string
 }
 
@@ -16,6 +17,7 @@ interface PackageState {
   fetchPackagesList: () => Promise<void>
   removePackage: (id: number) => void
   renamePackage: (id: number, name: string) => void
+  toggleLock: (id: number, locked: boolean) => void
 }
 
 export const usePackageStore = create<PackageState>((set) => ({
@@ -36,6 +38,13 @@ export const usePackageStore = create<PackageState>((set) => ({
   renamePackage: (id, name) => {
     set((state) => ({
       packages: state.packages.map((p) => (p.id === id ? { ...p, name } : p)),
+    }))
+  },
+  toggleLock: (id, locked) => {
+    set((state) => ({
+      packages: state.packages.map((p) =>
+        p.id === id ? { ...p, locked: locked ? 1 : 0 } : p
+      ),
     }))
   },
 }))

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { deletePackage, updatePackageName } from '../api'
+import { deletePackage, updatePackage } from '../api'
 import { triggerDownload } from '../lib/download'
 import { usePackageStore } from '../stores/packageStore'
 import styles from './PackageHistoryDialog.module.css'
@@ -10,6 +10,7 @@ interface PackageItem {
   path: string
   video_count: number
   size_bytes: number
+  locked: number
   created_at: string
 }
 
@@ -46,6 +47,7 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
   const fetchPackagesList = usePackageStore((state) => state.fetchPackagesList)
   const removePackage = usePackageStore((state) => state.removePackage)
   const renamePackage = usePackageStore((state) => state.renamePackage)
+  const toggleLockStore = usePackageStore((state) => state.toggleLock)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editValue, setEditValue] = useState('')
 
@@ -74,6 +76,16 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
     }
   }
 
+  const handleToggleLock = async (pkg: PackageItem) => {
+    const newLocked = !pkg.locked
+    try {
+      await updatePackage(pkg.id, { locked: newLocked })
+      toggleLockStore(pkg.id, newLocked)
+    } catch (err) {
+      alert('操作失败: ' + (err instanceof Error ? err.message : String(err)))
+    }
+  }
+
   const startEdit = (pkg: PackageItem) => {
     setEditingId(pkg.id)
     setEditValue(pkg.name)
@@ -85,7 +97,7 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
       return
     }
     try {
-      await updatePackageName(id, editValue.trim())
+      await updatePackage(id, { name: editValue.trim() })
       renamePackage(id, editValue.trim())
     } catch (err) {
       alert('重命名失败: ' + (err instanceof Error ? err.message : String(err)))
@@ -126,6 +138,11 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
                         style={{ cursor: 'pointer' }}
                         title="点击重命名"
                       >
+                        {pkg.locked ? (
+                          <md-icon style={{ fontSize: '14px', verticalAlign: 'middle', marginRight: '4px' }}>
+                            lock
+                          </md-icon>
+                        ) : null}
                         {pkg.name || '未命名'}
                       </span>
                       <span className={styles.itemMeta}>
@@ -142,13 +159,24 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
                     </md-icon-button>
                   ) : (
                     <>
+                      <md-icon-button
+                        onClick={() => handleToggleLock(pkg)}
+                        title={pkg.locked ? '解锁' : '锁定'}
+                      >
+                        <md-icon>{pkg.locked ? 'lock' : 'lock_open'}</md-icon>
+                      </md-icon-button>
                       <md-icon-button onClick={() => handleDownload(pkg)} title="下载">
                         <md-icon>download</md-icon>
                       </md-icon-button>
                       <md-icon-button
+                        disabled={pkg.locked || undefined}
                         onClick={() => handleDelete(pkg.id)}
-                        title="删除"
-                        style={{ color: 'var(--md-sys-color-error)' }}
+                        title={pkg.locked ? '已锁定，无法删除' : '删除'}
+                        style={{
+                          color: pkg.locked
+                            ? 'var(--md-sys-color-outline)'
+                            : 'var(--md-sys-color-error)',
+                        }}
                       >
                         <md-icon>delete</md-icon>
                       </md-icon-button>
