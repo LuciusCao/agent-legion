@@ -65,6 +65,7 @@ def test_summarize_job_status():
     assert summarize_job_status([]) == "queued"
     assert summarize_job_status(["pending", "pending"]) == "queued"
     assert summarize_job_status(["completed", "running"]) == "running"
+    assert summarize_job_status(["running", "failed"]) == "running"
     assert summarize_job_status(["completed", "failed"]) == "failed"
     assert summarize_job_status(["completed", "completed"]) == "completed"
     assert summarize_job_status(["completed", "stale"]) == "queued"
