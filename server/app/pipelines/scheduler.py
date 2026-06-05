@@ -52,10 +52,10 @@ def downstream_nodes(definition: PipelineDefinition, node_key: str) -> list[str]
 def summarize_job_status(statuses: list[str]) -> str:
     if not statuses:
         return "queued"
-    if any(status == "failed" for status in statuses):
-        return "failed"
     if any(status == "running" for status in statuses):
         return "running"
+    if any(status == "failed" for status in statuses):
+        return "failed"
     if all(status == "completed" for status in statuses):
         return "completed"
     return "queued"
