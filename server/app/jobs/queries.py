@@ -123,6 +123,17 @@ class JobQueries:
             row = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
         return dict(row) if row else None
 
+    def update_job_status(self, job_id: str, status: str, error_message: str = "") -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                update jobs
+                set status=?, error_message=?, updated_at=current_timestamp
+                where id=?
+                """,
+                (status, error_message, job_id),
+            )
+
     def list_job_nodes(self, job_id: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
             rows = conn.execute("select * from job_nodes where job_id=? order by id", (job_id,))

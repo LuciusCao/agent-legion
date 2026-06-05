@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from server.app.jobs import JobQueries
+from server.app.pipeline_worker_thread import process_ready_pipeline_node
 from server.app.pipelines.definition import load_pipeline_definition
 from server.app.pipelines.executor import execute_node_once
 
@@ -34,3 +35,25 @@ def test_execute_fetch_question_context_writes_artifact(tmp_path):
         "source_type": "question_id",
     }
     assert queries.get_job_node(job["id"], "fetch_question_context")["status"] == "completed"
+
+
+def test_process_ready_pipeline_node_runs_root(tmp_path):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q101",
+        batch_id="",
+        title="Question Q101",
+        node_keys=list(definition.nodes),
+    )
+
+    processed = process_ready_pipeline_node(
+        job_db=queries,
+        definition=definition,
+        logs_dir=tmp_path / "logs",
+    )
+
+    assert processed is True
+    assert (Path(job["storage_dir"]) / "question_context.json").exists()

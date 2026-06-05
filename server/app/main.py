@@ -13,6 +13,7 @@ from server.app.events import VideoEventManager
 from server.app.jobs import JobQueries
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool
+from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.routes import create_router
 from server.app.settings import load_settings
 from server.app.worker_control import WorkerControl
@@ -37,10 +38,11 @@ def create_app(
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
 
     worker_thread: WorkerThread | None = None
+    pipeline_worker_thread: PipelineWorkerThread | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal worker_thread
+        nonlocal pipeline_worker_thread, worker_thread
         video_event_manager._loop = asyncio.get_running_loop()
         if start_worker:
             agent_manager.discover()
@@ -56,7 +58,13 @@ def create_app(
                 db, settings, runner_pool, agent_manager, worker_control, max_workers
             )
             worker_thread.start()
+        pipelines_config = settings.config.get("pipelines", {})
+        if isinstance(pipelines_config, dict) and pipelines_config.get("enabled"):
+            pipeline_worker_thread = PipelineWorkerThread(job_db, settings)
+            pipeline_worker_thread.start()
         yield
+        if pipeline_worker_thread is not None:
+            pipeline_worker_thread.stop()
         if worker_thread is not None:
             worker_thread.stop()
 
