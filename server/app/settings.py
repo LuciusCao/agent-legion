@@ -13,6 +13,7 @@ class Settings:
     videos_dir: Path
     logs_dir: Path
     packages_dir: Path
+    jobs_dir: Path
     config: dict[str, Any]
 
 
@@ -47,7 +48,8 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     videos_dir = resolved_data_dir / "videos"
     logs_dir = resolved_data_dir / "logs"
     packages_dir = resolved_data_dir / "packages"
-    for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir]:
+    jobs_dir = resolved_data_dir / "jobs"
+    for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
     return Settings(
         root_dir=root_dir,
@@ -55,5 +57,6 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         videos_dir=videos_dir,
         logs_dir=logs_dir,
         packages_dir=packages_dir,
+        jobs_dir=jobs_dir,
         config=config,
     )

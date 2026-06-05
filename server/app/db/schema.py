@@ -56,6 +56,52 @@ def init_db(path: Path) -> None:
                   path text not null,
                   created_at text not null default current_timestamp
                 );
+                create table if not exists job_batches (
+                  id text primary key,
+                  pipeline_key text not null,
+                  source_kind text not null,
+                  source_payload_json text not null default '{}',
+                  status text not null default 'created',
+                  created_count integer not null default 0,
+                  error_message text not null default '',
+                  created_at text not null default current_timestamp
+                );
+                create table if not exists jobs (
+                  id text primary key,
+                  pipeline_key text not null,
+                  source_type text not null,
+                  source_id text not null,
+                  batch_id text not null default '',
+                  title text not null default '',
+                  status text not null default 'queued',
+                  storage_dir text not null default '',
+                  error_message text not null default '',
+                  created_at text not null default current_timestamp,
+                  updated_at text not null default current_timestamp
+                );
+                create table if not exists job_nodes (
+                  id integer primary key autoincrement,
+                  job_id text not null,
+                  node_key text not null,
+                  status text not null default 'pending',
+                  stale_reason text not null default '',
+                  error_message text not null default '',
+                  started_at text,
+                  finished_at text,
+                  unique(job_id, node_key)
+                );
+                create table if not exists node_runs (
+                  id integer primary key autoincrement,
+                  job_id text not null,
+                  node_key text not null,
+                  status text not null,
+                  started_at text not null default current_timestamp,
+                  finished_at text,
+                  command_json text not null default '[]',
+                  exit_code integer,
+                  log_path text not null default '',
+                  error_message text not null default ''
+                );
                 """
             )
             existing_columns = {
@@ -97,6 +143,10 @@ def init_db(path: Path) -> None:
                 create index if not exists idx_phase_runs_video_id on phase_runs(video_id);
                 create index if not exists idx_phase_runs_video_id_status on phase_runs(video_id, status);
                 create index if not exists idx_transcription_runs_video_id on transcription_runs(video_id);
+                create index if not exists idx_jobs_pipeline_status on jobs(pipeline_key, status);
+                create index if not exists idx_jobs_source on jobs(pipeline_key, source_type, source_id);
+                create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
+                create index if not exists idx_node_runs_job_id on node_runs(job_id);
                 """
             )
     finally:
