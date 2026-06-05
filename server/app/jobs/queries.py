@@ -163,7 +163,7 @@ class JobQueries:
 
     def mark_node_for_rerun(self, job_id: str, node_key: str, downstream: list[str]) -> None:
         with self.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 update job_nodes
                 set status='pending',
@@ -175,6 +175,8 @@ class JobQueries:
                 """,
                 (job_id, node_key),
             )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Unknown job node: {job_id}.{node_key}")
             for downstream_key in downstream:
                 conn.execute(
                     """
@@ -206,6 +208,7 @@ class JobQueries:
                 """
                 update job_nodes
                 set status='running',
+                    stale_reason='',
                     started_at=current_timestamp,
                     finished_at=null,
                     error_message=''

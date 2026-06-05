@@ -134,3 +134,44 @@ def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
     assert rerun_job is not None
     assert rerun_job["status"] == "queued"
     assert rerun_job["error_message"] == ""
+
+
+def test_mark_node_for_rerun_rejects_missing_persisted_node(tmp_path):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q202",
+        batch_id="",
+        title="Question Q202",
+        node_keys=["fetch_question_context"],
+    )
+
+    with pytest.raises(ValueError, match="Unknown job node"):
+        queries.mark_node_for_rerun(job["id"], "question_understanding", [])
+
+
+def test_start_node_run_clears_stale_reason(tmp_path):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q203",
+        batch_id="",
+        title="Question Q203",
+        node_keys=["fetch_question_context"],
+    )
+    queries.update_job_node(
+        job["id"],
+        "fetch_question_context",
+        status="stale",
+        stale_reason="upstream question_understanding rerun",
+    )
+
+    run = queries.start_node_run(job["id"], "fetch_question_context", ["local"], "log.txt")
+    running = queries.get_job_node(job["id"], "fetch_question_context")
+    queries.finish_node_run(run["id"], "completed", 0, "")
+    completed = queries.get_job_node(job["id"], "fetch_question_context")
+
+    assert running["stale_reason"] == ""
+    assert completed["stale_reason"] == ""

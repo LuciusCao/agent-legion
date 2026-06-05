@@ -147,7 +147,10 @@ def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
         if node_key not in definition.nodes:
             raise HTTPException(status_code=404, detail="Node not found")
         stale_nodes = downstream_nodes(definition, node_key)
-        job_db.mark_node_for_rerun(job_id, node_key, stale_nodes)
+        try:
+            job_db.mark_node_for_rerun(job_id, node_key, stale_nodes)
+        except ValueError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
         return RerunNodeResponse(job_id=job_id, node_key=node_key, stale_nodes=stale_nodes)
 
     @router.get("/jobs/{job_id}/{invalid_path:path}", response_model=ArtifactResponse)
