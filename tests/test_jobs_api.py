@@ -61,3 +61,44 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     assert artifact_response.status_code == 200
     assert artifact_response.json()["content"] == '{"question_id":"Q003"}'
     assert traversal.status_code == 400
+
+
+def test_rerun_node_marks_downstream_stale(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        created = c.post(
+            "/api/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "question_ids",
+                "question_ids": ["Q201"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        job_id = created["jobs"][0]["id"]
+        response = c.post(f"/api/jobs/{job_id}/nodes/question_understanding/rerun")
+        detail = c.get(f"/api/jobs/{job_id}").json()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["job_id"] == job_id
+    assert body["node_key"] == "question_understanding"
+    assert set(body["stale_nodes"]) == {
+        "misconception_analysis",
+        "natural_language_reading",
+        "solution_decomposition",
+        "faq_generation",
+        "content_graph_generation",
+        "interactive_template_generation",
+        "content_review",
+        "assemble_package",
+    }
+    nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
+    assert nodes["question_understanding"] == "pending"
+    assert nodes["misconception_analysis"] == "stale"
+    assert nodes["assemble_package"] == "stale"
