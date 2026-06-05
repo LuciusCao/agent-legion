@@ -1,0 +1,102 @@
+key: question_content
+label: 题目内容生成
+concurrency:
+  local: 8
+  agent: 2
+nodes:
+  fetch_question_context:
+    runner: local
+    outputs:
+      - question_context.json
+  question_understanding:
+    runner: agent
+    after:
+      - fetch_question_context
+    inputs:
+      - question_context.json
+    outputs:
+      - understanding.json
+  misconception_analysis:
+    runner: agent
+    after:
+      - question_understanding
+    inputs:
+      - question_context.json
+      - understanding.json
+    outputs:
+      - misconceptions.json
+  natural_language_reading:
+    runner: agent
+    after:
+      - question_understanding
+    inputs:
+      - question_context.json
+      - understanding.json
+    outputs:
+      - natural_reading.md
+  solution_decomposition:
+    runner: agent
+    after:
+      - question_understanding
+    inputs:
+      - question_context.json
+      - understanding.json
+    outputs:
+      - solution_steps.json
+  faq_generation:
+    runner: agent
+    after:
+      - solution_decomposition
+    inputs:
+      - solution_steps.json
+    outputs:
+      - faq.json
+  content_graph_generation:
+    runner: agent
+    after:
+      - solution_decomposition
+    inputs:
+      - question_context.json
+      - understanding.json
+      - solution_steps.json
+    outputs:
+      - content_graph.json
+  interactive_template_generation:
+    runner: agent
+    after:
+      - misconception_analysis
+      - solution_decomposition
+    inputs:
+      - misconceptions.json
+      - solution_steps.json
+    outputs:
+      - interactive_template.json
+  content_review:
+    runner: agent
+    after:
+      - faq_generation
+      - content_graph_generation
+      - interactive_template_generation
+    inputs:
+      - faq.json
+      - content_graph.json
+      - interactive_template.json
+    outputs:
+      - review_result.json
+  assemble_package:
+    runner: local
+    after:
+      - content_review
+    inputs:
+      - question_context.json
+      - understanding.json
+      - natural_reading.md
+      - misconceptions.json
+      - solution_steps.json
+      - faq.json
+      - content_graph.json
+      - interactive_template.json
+      - review_result.json
+    outputs:
+      - upload_params.json
+      - manifest.json
