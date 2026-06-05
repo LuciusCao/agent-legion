@@ -161,6 +161,42 @@ class JobQueries:
                 params,
             )
 
+    def mark_node_for_rerun(self, job_id: str, node_key: str, downstream: list[str]) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                update job_nodes
+                set status='pending',
+                    stale_reason='',
+                    error_message='',
+                    started_at=null,
+                    finished_at=null
+                where job_id=? and node_key=?
+                """,
+                (job_id, node_key),
+            )
+            for downstream_key in downstream:
+                conn.execute(
+                    """
+                    update job_nodes
+                    set status='stale',
+                        stale_reason=?,
+                        error_message=''
+                    where job_id=? and node_key=?
+                    """,
+                    (f"upstream {node_key} rerun", job_id, downstream_key),
+                )
+            conn.execute(
+                """
+                update jobs
+                set status='queued',
+                    error_message='',
+                    updated_at=current_timestamp
+                where id=?
+                """,
+                (job_id,),
+            )
+
     def start_node_run(
         self, job_id: str, node_key: str, command: Sequence[str], log_path: str
     ) -> dict[str, Any]:

@@ -1,6 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 from server.app.jobs.queries import JobQueries
+from server.app.pipelines.definition import load_pipeline_definition
 
 
 def test_create_batch_and_question_jobs(tmp_path):
@@ -90,3 +93,44 @@ def test_start_node_run_rejects_missing_node(tmp_path):
         queries.start_node_run(job["id"], "missing_node", ["local"], "log.txt")
 
     assert queries.list_node_runs(job["id"]) == []
+
+
+def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q200",
+        batch_id="",
+        title="Question Q200",
+        node_keys=list(definition.nodes),
+    )
+    for node_key in definition.nodes:
+        queries.update_job_node(job["id"], node_key, status="completed", error_message="old error")
+
+    queries.mark_node_for_rerun(
+        job["id"],
+        "question_understanding",
+        ["misconception_analysis", "assemble_package"],
+    )
+
+    selected = queries.get_job_node(job["id"], "question_understanding")
+    downstream = queries.get_job_node(job["id"], "misconception_analysis")
+    terminal = queries.get_job_node(job["id"], "assemble_package")
+    rerun_job = queries.get_job(job["id"])
+
+    assert selected is not None
+    assert selected["status"] == "pending"
+    assert selected["stale_reason"] == ""
+    assert selected["error_message"] == ""
+    assert selected["started_at"] is None
+    assert selected["finished_at"] is None
+    assert downstream is not None
+    assert downstream["status"] == "stale"
+    assert downstream["error_message"] == ""
+    assert terminal is not None
+    assert terminal["stale_reason"] == "upstream question_understanding rerun"
+    assert rerun_job is not None
+    assert rerun_job["status"] == "queued"
+    assert rerun_job["error_message"] == ""
