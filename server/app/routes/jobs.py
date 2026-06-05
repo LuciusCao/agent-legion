@@ -130,7 +130,7 @@ def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
             raise HTTPException(status_code=404, detail="Artifact not found")
         return ArtifactResponse(name=artifact_name, content=path.read_text(encoding="utf-8"))
 
-    @router.get("/jobs/{job_id}/{invalid_path:path}")
+    @router.get("/jobs/{job_id}/{invalid_path:path}", response_model=ArtifactResponse)
     def reject_invalid_job_subpath(job_id: str, invalid_path: str) -> None:
         _require_enabled(settings)
         if job_db.get_job(job_id) is None:
