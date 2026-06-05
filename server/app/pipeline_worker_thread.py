@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 from pathlib import Path
 
@@ -8,6 +9,8 @@ from server.app.pipelines.definition import PipelineDefinition, load_pipeline_de
 from server.app.pipelines.executor import execute_node_once
 from server.app.pipelines.scheduler import find_ready_nodes, summarize_job_status
 from server.app.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 def _node_statuses(job_db: JobQueries, job_id: str) -> dict[str, str]:
@@ -71,11 +74,15 @@ class PipelineWorkerThread:
 
         def _loop() -> None:
             while not self.stop_event.is_set():
-                processed = process_ready_pipeline_node(
-                    self.job_db,
-                    definition,
-                    self.settings.logs_dir,
-                )
+                try:
+                    processed = process_ready_pipeline_node(
+                        self.job_db,
+                        definition,
+                        self.settings.logs_dir,
+                    )
+                except Exception:
+                    logger.exception("pipeline worker poll failed")
+                    processed = False
                 self.stop_event.wait(0.2 if processed else 3)
 
         self._thread = threading.Thread(target=_loop, name="pipeline-worker", daemon=True)
