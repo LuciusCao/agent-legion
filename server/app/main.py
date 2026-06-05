@@ -58,10 +58,10 @@ def create_app(
                 db, settings, runner_pool, agent_manager, worker_control, max_workers
             )
             worker_thread.start()
-        pipelines_config = settings.config.get("pipelines", {})
-        if isinstance(pipelines_config, dict) and pipelines_config.get("enabled"):
-            pipeline_worker_thread = PipelineWorkerThread(job_db, settings)
-            pipeline_worker_thread.start()
+            pipelines_config = settings.config.get("pipelines", {})
+            if isinstance(pipelines_config, dict) and pipelines_config.get("enabled"):
+                pipeline_worker_thread = PipelineWorkerThread(job_db, settings)
+                pipeline_worker_thread.start()
         yield
         if pipeline_worker_thread is not None:
             pipeline_worker_thread.stop()

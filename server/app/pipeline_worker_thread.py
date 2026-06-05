@@ -15,8 +15,15 @@ def _node_statuses(job_db: JobQueries, job_id: str) -> dict[str, str]:
 
 
 def _refresh_job_status(job_db: JobQueries, job_id: str) -> None:
-    statuses = [node["status"] for node in job_db.list_job_nodes(job_id)]
-    job_db.update_job_status(job_id, summarize_job_status(statuses))
+    nodes = job_db.list_job_nodes(job_id)
+    status = summarize_job_status([node["status"] for node in nodes])
+    error_message = ""
+    if status == "failed":
+        error_message = next(
+            (str(node["error_message"]) for node in nodes if node.get("error_message")),
+            "",
+        )
+    job_db.update_job_status(job_id, status, error_message)
 
 
 def process_ready_pipeline_node(
@@ -32,7 +39,19 @@ def process_ready_pipeline_node(
             _refresh_job_status(job_db, job["id"])
             continue
 
-        processed = execute_node_once(job_db, definition, job, local_ready_nodes[0].key, logs_dir)
+        node = local_ready_nodes[0]
+        try:
+            processed = execute_node_once(job_db, definition, job, node.key, logs_dir)
+        except Exception as exc:
+            error_message = str(exc)
+            job_db.update_job_node(
+                job["id"],
+                node.key,
+                status="failed",
+                error_message=error_message,
+            )
+            job_db.update_job_status(job["id"], "failed", error_message)
+            return True
         _refresh_job_status(job_db, job["id"])
         return processed
     return False
