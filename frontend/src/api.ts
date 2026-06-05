@@ -1,3 +1,5 @@
+import type { JobsResponse } from './types'
+
 export async function fetchPackages(): Promise<
   {
     packages: Array<{
@@ -27,6 +29,21 @@ export async function updatePackage(
   })
 }
 
+export async function fetchJobs(): Promise<JobsResponse> {
+  try {
+    return await api('/api/jobs?pipeline_key=question_content')
+  } catch (error) {
+    const status =
+      error && typeof error === 'object' && 'status' in error
+        ? Number((error as { status?: unknown }).status)
+        : undefined
+    throw Object.assign(
+      error instanceof Error ? error : new Error('Failed to fetch jobs'),
+      { status }
+    )
+  }
+}
+
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const isGet = !init || !init.method || init.method === 'GET'
   const response = await fetch(path, {
@@ -37,13 +54,14 @@ export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   if (!response.ok) {
     const text = await response.text()
     let message: string
+    const prefix = `HTTP ${response.status}`
     try {
       const json = JSON.parse(text)
-      message = json.detail || json.message || `HTTP ${response.status}`
+      message = json.detail || json.message || prefix
     } catch {
-      message = `HTTP ${response.status}: ${text.slice(0, 200)}`
+      message = `${prefix}: ${text.slice(0, 200)}`
     }
-    throw new Error(message)
+    throw Object.assign(new Error(message), { status: response.status })
   }
   return (await response.json()) as T
 }
