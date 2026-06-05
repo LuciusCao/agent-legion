@@ -10,6 +10,7 @@ from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.db.notifications import NotificationHub
 from server.app.events import VideoEventManager
+from server.app.jobs import JobQueries
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool
 from server.app.routes import create_router
@@ -33,6 +34,7 @@ def create_app(
     hub.on_delete = video_event_manager.broadcast_delete
     hub.on_detail_change = video_event_manager.broadcast_video_detail  # type: ignore[assignment]
     db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
+    job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
 
     worker_thread: WorkerThread | None = None
 
@@ -61,12 +63,13 @@ def create_app(
     app = FastAPI(title="Video Hive", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
+    app.state.job_db = job_db
     app.state.agent_manager = agent_manager
     app.state.worker_control = worker_control
     app.state.video_event_manager = video_event_manager
 
     app.include_router(
-        create_router(db, settings, agent_manager, video_event_manager, worker_control)
+        create_router(db, job_db, settings, agent_manager, video_event_manager, worker_control)
     )
 
     frontend_dist = settings.root_dir / "frontend" / "dist"

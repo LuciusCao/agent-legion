@@ -1,0 +1,63 @@
+from pathlib import Path
+
+
+def test_job_routes_are_hidden_when_pipelines_disabled(client):
+    response = client.get("/api/jobs")
+
+    assert response.status_code == 404
+
+
+def test_create_question_jobs_when_enabled(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "question_ids",
+                "question_ids": ["Q001", "Q002"],
+                "knowledge_codes": [],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created_count"] == 2
+    assert [job["source_id"] for job in body["jobs"]] == ["Q001", "Q002"]
+
+
+def test_get_job_detail_and_artifact_when_enabled(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        created = c.post(
+            "/api/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "question_ids",
+                "question_ids": ["Q003"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        job_id = created["jobs"][0]["id"]
+        artifact = Path(created["jobs"][0]["storage_dir"]) / "question_context.json"
+        artifact.write_text('{"question_id":"Q003"}', encoding="utf-8")
+
+        detail = c.get(f"/api/jobs/{job_id}")
+        artifact_response = c.get(f"/api/jobs/{job_id}/artifacts/question_context.json")
+        traversal = c.get(f"/api/jobs/{job_id}/artifacts/../video_hive.sqlite")
+
+    assert detail.status_code == 200
+    assert detail.json()["job"]["id"] == job_id
+    assert artifact_response.status_code == 200
+    assert artifact_response.json()["content"] == '{"question_id":"Q003"}'
+    assert traversal.status_code == 400
