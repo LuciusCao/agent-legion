@@ -1,3 +1,5 @@
+import pytest
+
 from server.app.jobs.queries import JobQueries
 
 
@@ -49,3 +51,42 @@ def test_node_run_lifecycle(tmp_path):
     runs = queries.list_node_runs(job["id"])
     assert runs[0]["command_json"] == '["local"]'
     assert runs[0]["status"] == "completed"
+
+
+def test_create_job_rejects_identity_collision(tmp_path):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q003",
+        batch_id="",
+        title="Question Q003",
+        node_keys=["fetch_question_context"],
+    )
+
+    with pytest.raises(ValueError, match="identity collision"):
+        queries.create_job(
+            pipeline_key="question_content",
+            source_type="knowledge_code",
+            source_id="Q003",
+            batch_id="",
+            title="Knowledge Q003",
+            node_keys=["fetch_question_context"],
+        )
+
+
+def test_start_node_run_rejects_missing_node(tmp_path):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q004",
+        batch_id="",
+        title="Question Q004",
+        node_keys=["fetch_question_context"],
+    )
+
+    with pytest.raises(ValueError, match="Unknown job node"):
+        queries.start_node_run(job["id"], "missing_node", ["local"], "log.txt")
+
+    assert queries.list_node_runs(job["id"]) == []

@@ -73,6 +73,13 @@ class JobQueries:
         storage_dir.mkdir(parents=True, exist_ok=True)
 
         with self.connect() as conn:
+            existing = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+            if existing is not None and (
+                existing["pipeline_key"] != pipeline_key
+                or existing["source_type"] != source_type
+                or existing["source_id"] != source_id
+            ):
+                raise ValueError(f"Job identity collision for {job_id}")
             conn.execute(
                 """
                 insert into jobs(id, pipeline_key, source_type, source_id, batch_id, title, storage_dir)
@@ -148,7 +155,7 @@ class JobQueries:
     ) -> dict[str, Any]:
         command_json = json.dumps(list(command))
         with self.connect() as conn:
-            conn.execute(
+            cursor = conn.execute(
                 """
                 update job_nodes
                 set status='running',
@@ -159,6 +166,8 @@ class JobQueries:
                 """,
                 (job_id, node_key),
             )
+            if cursor.rowcount == 0:
+                raise ValueError(f"Unknown job node: {job_id}.{node_key}")
             cursor = conn.execute(
                 """
                 insert into node_runs(job_id, node_key, status, command_json, log_path)
