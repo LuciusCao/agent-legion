@@ -121,3 +121,15 @@ export type TranscriptionRun = {
   validation_summary: string
   fallback_reason: string
 }
+
+export type JobRecord = {
+  id: string
+  pipeline_key: string
+  source_id: string
+  title: string
+  status: string
+}
+
+export type JobsResponse = {
+  jobs: JobRecord[]
+}

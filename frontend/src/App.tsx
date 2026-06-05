@@ -9,6 +9,9 @@ const ListPage = lazy(() =>
 const DetailPage = lazy(() =>
   import('./pages/DetailPage').then((m) => ({ default: m.DetailPage }))
 )
+const JobsPage = lazy(() =>
+  import('./pages/JobsPage').then((m) => ({ default: m.JobsPage }))
+)
 
 export default function App() {
   const { connectAgentsWs, closeAddDialog } = useUiStore()
@@ -31,6 +34,7 @@ export default function App() {
       <Suspense fallback={<div style={{ padding: 24 }}>加载中…</div>}>
         <Routes>
           <Route path="/" element={<ListPage />} />
+          <Route path="/jobs" element={<JobsPage />} />
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
       </Suspense>
