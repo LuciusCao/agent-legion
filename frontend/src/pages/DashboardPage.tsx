@@ -81,7 +81,6 @@ export function DashboardPage() {
         }}
       >
         <WorkspaceCard
-          id="video-hive"
           name="Video Hive"
           pipelineLabel="视频处理流水线"
           isSystem={true}
@@ -93,7 +92,6 @@ export function DashboardPage() {
         {workspaces.map((w) => (
           <WorkspaceCard
             key={w.id}
-            id={w.id}
             name={w.name}
             pipelineLabel={workspaceStats[w.id]?.pipeline_label || w.default_pipeline_key}
             jobStats={workspaceStats[w.id]?.job_stats || {}}

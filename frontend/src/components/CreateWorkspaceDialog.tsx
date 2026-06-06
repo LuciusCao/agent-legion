@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 
 type Props = {
@@ -10,24 +10,35 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
   const { createWorkspace } = useWorkspaceStore()
   const [name, setName] = useState('')
   const [creating, setCreating] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (open) {
+      setName('')
+      setError(null)
+    }
+  }, [open])
 
   if (!open) return null
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
+    setError(null)
     setCreating(true)
     try {
       await createWorkspace(name.trim())
       setName('')
       onClose()
+    } catch (err) {
+      setError(String(err))
     } finally {
       setCreating(false)
     }
   }
 
   return (
-    <md-dialog open onClose={onClose}>
+    <md-dialog open onClosed={onClose}>
       <div slot="headline">新建 Workspace</div>
       <form
         slot="content"
@@ -40,6 +51,9 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
           onInput={(e: Event) => setName((e.target as HTMLInputElement).value)}
           required
         />
+        {error && (
+          <div style={{ color: 'var(--md-sys-color-error)', fontSize: 12 }}>{error}</div>
+        )}
       </form>
       <div slot="actions">
         <md-text-button onClick={onClose}>取消</md-text-button>
