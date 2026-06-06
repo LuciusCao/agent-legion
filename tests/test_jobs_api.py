@@ -105,6 +105,31 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     assert traversal.status_code == 400
 
 
+def test_get_pipeline_definition_when_enabled(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.get("/api/pipelines/question_content")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["pipeline"]["key"] == "question_content"
+    assert body["pipeline"]["label"] == "题目内容生成"
+    assert body["pipeline"]["concurrency"] == {"local": 8, "agent": 2}
+    node_keys = [node["key"] for node in body["pipeline"]["nodes"]]
+    assert node_keys[0] == "fetch_question_context"
+    assert "assemble_package" in node_keys
+    graph_node = next(
+        node for node in body["pipeline"]["nodes"] if node["key"] == "content_graph_generation"
+    )
+    assert graph_node["runner"] == "agent"
+    assert graph_node["after"] == ["solution_decomposition"]
+
+
 def test_rerun_node_marks_downstream_stale(tmp_path):
     from fastapi.testclient import TestClient
 

@@ -29,6 +29,18 @@ class JobsResponse(BaseModel):
     jobs: list[dict[str, Any]]
 
 
+class PipelineNodeResponse(BaseModel):
+    key: str
+    runner: str
+    after: list[str]
+    inputs: list[str]
+    outputs: list[str]
+
+
+class PipelineResponse(BaseModel):
+    pipeline: dict[str, Any]
+
+
 class WorkspaceCreateRequest(BaseModel):
     name: str
     default_pipeline_key: str = "question_content"
@@ -102,6 +114,28 @@ def _artifact_names(job: dict[str, Any]) -> list[str]:
     return sorted(path.name for path in base.iterdir() if path.is_file())
 
 
+def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
+    definition = _definition(settings, pipeline_key)
+    return {
+        "key": definition.key,
+        "label": definition.label,
+        "concurrency": {
+            "local": definition.concurrency.local,
+            "agent": definition.concurrency.agent,
+        },
+        "nodes": [
+            {
+                "key": node.key,
+                "runner": node.runner,
+                "after": node.after,
+                "inputs": node.inputs,
+                "outputs": node.outputs,
+            }
+            for node in definition.nodes.values()
+        ],
+    }
+
+
 def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     router = APIRouter()
 
@@ -136,6 +170,11 @@ def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
 
         batch["created_count"] = len(jobs)
         return JobBatchResponse(batch=batch, created_count=len(jobs), jobs=jobs)
+
+    @router.get("/pipelines/{pipeline_key}", response_model=PipelineResponse)
+    def get_pipeline(pipeline_key: str) -> PipelineResponse:
+        _require_enabled(settings)
+        return PipelineResponse(pipeline=_pipeline_payload(settings, pipeline_key))
 
     @router.get("/workspaces", response_model=WorkspacesResponse)
     def list_workspaces() -> WorkspacesResponse:
