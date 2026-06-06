@@ -148,7 +148,9 @@ def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
         definition = _definition(settings, payload.pipeline_key)
         question_ids = list(dict.fromkeys(q.strip() for q in payload.question_ids if q.strip()))
         if payload.source_kind != "question_ids":
-            raise HTTPException(status_code=400, detail="Only question_ids source_kind is supported")
+            raise HTTPException(
+                status_code=400, detail="Only question_ids source_kind is supported"
+            )
         if not question_ids:
             raise HTTPException(status_code=400, detail="At least one question_id is required")
         source_payload = payload.model_dump()
