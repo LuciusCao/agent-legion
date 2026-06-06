@@ -1,7 +1,8 @@
-import { FormEvent, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 
 import { createWorkspace, fetchJobs, fetchWorkspaces } from '../api'
+import { JOB_STATUS_ICONS, JOB_STATUS_LABELS } from '../labels'
 import type { JobRecord, WorkspaceRecord } from '../types'
 
 function getErrorStatus(error: unknown): number | undefined {
@@ -15,12 +16,17 @@ export function JobsPage() {
   const navigate = useNavigate()
   const params = useParams<{ workspaceId: string }>()
   const selectedWorkspaceId = params.workspaceId ?? 'default'
+
   const [jobs, setJobs] = useState<JobRecord[]>([])
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([])
-  const [workspaceName, setWorkspaceName] = useState('')
   const [disabled, setDisabled] = useState(false)
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
+  const [dialogOpen, setDialogOpen] = useState(false)
+  const [workspaceName, setWorkspaceName] = useState('')
+
+  const selectRef = useRef<HTMLElement>(null)
+  const dialogRef = useRef<HTMLElement>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -50,16 +56,42 @@ export function JobsPage() {
     }
   }, [selectedWorkspaceId])
 
-  const selectedWorkspace = workspaces.find(
-    (workspace) => workspace.id === selectedWorkspaceId
-  )
+  // Sync select value when workspace changes from navigation
+  useEffect(() => {
+    const select = selectRef.current
+    if (select) {
+      ;(select as HTMLSelectElement).value = selectedWorkspaceId
+    }
+  }, [selectedWorkspaceId])
 
-  function handleWorkspaceChange(nextWorkspaceId: string) {
-    navigate(nextWorkspaceId === 'default' ? '/workspaces' : `/workspaces/${nextWorkspaceId}`)
-  }
+  // md-outlined-select change event
+  useEffect(() => {
+    const select = selectRef.current
+    if (!select) return
 
-  async function handleCreateWorkspace(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+    const handleChange = (event: Event) => {
+      const target = event.target as HTMLSelectElement
+      const nextWorkspaceId = target.value
+      navigate(
+        nextWorkspaceId === 'default'
+          ? '/workspaces'
+          : `/workspaces/${nextWorkspaceId}`
+      )
+    }
+
+    select.addEventListener('change', handleChange)
+    return () => {
+      select.removeEventListener('change', handleChange)
+    }
+  }, [navigate])
+
+  // md-dialog close events
+  const handleDialogClose = useCallback(() => {
+    setDialogOpen(false)
+    setWorkspaceName('')
+  }, [])
+
+  const handleCreateWorkspace = useCallback(async () => {
     const name = workspaceName.trim()
     if (!name) {
       return
@@ -70,73 +102,203 @@ export function JobsPage() {
       const workspace = await createWorkspace(name)
       setWorkspaces((current) => [...current, workspace])
       setWorkspaceName('')
+      setDialogOpen(false)
       navigate(`/workspaces/${workspace.id}`)
     } catch {
       setError('创建工作空间失败')
     } finally {
       setCreating(false)
     }
-  }
+  }, [workspaceName, navigate])
+
+  useEffect(() => {
+    const dialog = dialogRef.current
+    if (!dialog) return
+    dialog.addEventListener('close', handleDialogClose)
+    dialog.addEventListener('closed', handleDialogClose)
+    return () => {
+      dialog.removeEventListener('close', handleDialogClose)
+      dialog.removeEventListener('closed', handleDialogClose)
+    }
+  }, [handleDialogClose])
+
+  const selectedWorkspace = workspaces.find(
+    (workspace) => workspace.id === selectedWorkspaceId
+  )
 
   if (disabled) {
-    return <main className="view">题目工厂未启用</main>
+    return (
+      <main className="view">
+        <div
+          className="empty-state"
+          style={{ textAlign: 'center', marginTop: '120px' }}
+        >
+          <md-icon
+            style={{
+              fontSize: '48px',
+              color: 'var(--md-sys-color-outline)',
+            }}
+          >
+            factory
+          </md-icon>
+          <p style={{ marginTop: '16px', fontSize: '16px' }}>
+            题目工厂未启用
+          </p>
+        </div>
+      </main>
+    )
   }
 
   return (
     <main className="view">
       <header className="topbar">
-        <div>
-          <p className="phase-name">Agent Legion</p>
-          <h1>{selectedWorkspace?.name ?? '题目工厂'}</h1>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+          }}
+        >
+          <md-icon
+            style={{
+              fontSize: '28px',
+              color: 'var(--md-sys-color-primary)',
+            }}
+          >
+            workspaces
+          </md-icon>
+          <div>
+            <p className="phase-name">Agent Legion</p>
+            <h1>{selectedWorkspace?.name ?? '题目工厂'}</h1>
+          </div>
         </div>
       </header>
 
-      {error ? <p role="alert">{error}</p> : null}
+      {error ? (
+        <div
+          className="card-outlined"
+          style={{
+            marginTop: '16px',
+            padding: '16px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            borderColor: 'var(--md-sys-color-error)',
+          }}
+        >
+          <md-icon style={{ color: 'var(--md-sys-color-error)' }}>
+            error
+          </md-icon>
+          <span style={{ color: 'var(--md-sys-color-error)' }}>{error}</span>
+        </div>
+      ) : null}
 
-      <section className="card-outlined form-panel">
-        <label className="field">
-          <span>工作空间</span>
-          <select
-            aria-label="工作空间"
-            value={selectedWorkspaceId}
-            onChange={(event) => handleWorkspaceChange(event.target.value)}
-          >
-            {workspaces.map((workspace) => (
-              <option key={workspace.id} value={workspace.id}>
-                {workspace.name}
-              </option>
-            ))}
-          </select>
-        </label>
-        <form className="inline-form" onSubmit={handleCreateWorkspace}>
-          <label className="field">
-            <span>新建工作空间</span>
-            <input
-              aria-label="新建工作空间名称"
-              value={workspaceName}
-              onChange={(event) => setWorkspaceName(event.target.value)}
-              placeholder="例如：初三函数专题"
-            />
-          </label>
-          <button type="submit" disabled={creating || !workspaceName.trim()}>
-            {creating ? '创建中…' : '创建'}
-          </button>
-        </form>
+      <section
+        className="card-outlined form-panel"
+        style={{ alignItems: 'end' }}
+      >
+        <md-outlined-select
+          ref={selectRef}
+          label="工作空间"
+          style={{ minWidth: '220px' }}
+        >
+          {workspaces.map((workspace) => (
+            <md-select-option
+              key={workspace.id}
+              value={workspace.id}
+            >
+              <div slot="headline">{workspace.name}</div>
+            </md-select-option>
+          ))}
+        </md-outlined-select>
+        <md-outlined-button onClick={() => setDialogOpen(true)}>
+          新建工作空间
+        </md-outlined-button>
       </section>
+
+      {dialogOpen && (
+        <md-dialog
+          ref={dialogRef}
+          open
+          style={
+            {
+              '--md-dialog-container-color': '#ffffff',
+            } as React.CSSProperties
+          }
+        >
+          <div slot="headline">新建工作空间</div>
+          <div slot="content">
+            <md-outlined-text-field
+              label="名称"
+              aria-label="名称"
+              placeholder="例如：初三函数专题"
+              value={workspaceName}
+              onInput={(event) =>
+                setWorkspaceName(
+                  (event.target as HTMLInputElement).value
+                )
+              }
+              style={{ width: '100%', minWidth: '320px' }}
+            />
+          </div>
+          <div slot="actions">
+            <md-text-button onClick={handleDialogClose}>取消</md-text-button>
+            <md-outlined-button
+              onClick={handleCreateWorkspace}
+              disabled={creating || !workspaceName.trim() || undefined}
+            >
+              {creating ? '创建中…' : '创建'}
+            </md-outlined-button>
+          </div>
+        </md-dialog>
+      )}
 
       <section className="video-list">
         {jobs.length === 0 ? (
-          <p>暂无题目任务</p>
+          <div
+            className="empty-state"
+            style={{ textAlign: 'center', padding: '48px 16px' }}
+          >
+            <md-icon
+              style={{
+                fontSize: '48px',
+                color: 'var(--md-sys-color-outline)',
+              }}
+            >
+              inbox
+            </md-icon>
+            <p style={{ marginTop: '16px' }}>暂无题目任务</p>
+          </div>
         ) : (
-          jobs.map((job) => (
-            <article className="card-outlined resource-row" key={job.id}>
-              <div className="resource-main">
-                <strong>{job.title}</strong>
-                <small>{job.source_id}</small>
-              </div>
-              <span className="status-badge">{job.status}</span>
-            </article>
-          ))
+          <md-list>
+            {jobs.map((job) => (
+              <md-list-item key={job.id}>
+                <div slot="headline">{job.title}</div>
+                <div slot="supporting-text">{job.source_id}</div>
+                <div
+                  slot="end"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <span className={`status-badge ${job.status}`}>
+                    <md-icon
+                      style={{
+                        fontSize: '14px',
+                        verticalAlign: 'middle',
+                        marginRight: '2px',
+                      }}
+                    >
+                      {JOB_STATUS_ICONS[job.status] || 'help'}
+                    </md-icon>
+                    {JOB_STATUS_LABELS[job.status] || job.status}
+                  </span>
+                </div>
+              </md-list-item>
+            ))}
+          </md-list>
         )}
       </section>
     </main>

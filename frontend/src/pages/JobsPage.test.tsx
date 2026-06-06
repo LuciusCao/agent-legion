@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
@@ -55,7 +55,7 @@ describe('JobsPage', () => {
       expect.any(Object)
     )
     expect(screen.getByText('Q001')).toBeInTheDocument()
-    expect(screen.getByText('queued')).toBeInTheDocument()
+    expect(screen.getByText('排队中')).toBeInTheDocument()
   })
 
   it('shows disabled message when api returns 404', async () => {
@@ -85,7 +85,7 @@ describe('JobsPage', () => {
   })
 
   it('creates a workspace and navigates to it', async () => {
-    vi.spyOn(globalThis, 'fetch')
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -146,10 +146,30 @@ describe('JobsPage', () => {
       </MemoryRouter>
     )
 
-    fireEvent.change(await screen.findByLabelText('新建工作空间名称'), {
-      target: { value: 'Math Sprint' },
+    // Open create workspace dialog
+    fireEvent.click(await screen.findByText('新建工作空间'))
+
+    // Fill in the name field inside the dialog
+    const nameField = await screen.findByLabelText('名称')
+    await act(async () => {
+      ;(nameField as HTMLInputElement).value = 'Math Sprint'
+      nameField.dispatchEvent(new InputEvent('input', { bubbles: true }))
     })
-    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    // Click create button (second md-outlined-button in the dialog)
+    const outlinedButtons = document.querySelectorAll('md-outlined-button')
+    expect(outlinedButtons.length).toBeGreaterThanOrEqual(1)
+    // The create button is inside the dialog; find it by checking which one is in md-dialog
+    const createBtn = Array.from(outlinedButtons).find((btn) =>
+      btn.closest('md-dialog')
+    )
+    expect(createBtn).toBeDefined()
+    fireEvent.click(createBtn!)
+
+    // Verify API was called (handleCreateWorkspace was invoked)
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Math Sprint' })).toBeInTheDocument()
