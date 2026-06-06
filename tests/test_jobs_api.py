@@ -385,6 +385,7 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
         job_id = f"{ws_id}_question_content_Q601"
         run = job_db.start_node_run(job_id, "question_understanding", ["echo", "hi"], "/dev/null")
         job_db.finish_node_run(run["id"], "completed", 0, "")
+        job_ids = [j["id"] for j in job_db.list_jobs(workspace_id=ws_id)]
         response = c.delete(f"/api/workspaces/{ws_id}")
         get_response = c.get(f"/api/workspaces/{ws_id}")
 
@@ -399,20 +400,15 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
         assert (
             conn.execute("select 1 from jobs where workspace_id = ?", (ws_id,)).fetchone() is None
         )
-        assert (
-            conn.execute(
-                "select 1 from job_nodes where job_id in (select id from jobs where workspace_id = ?)",
-                (ws_id,),
-            ).fetchone()
-            is None
-        )
-        assert (
-            conn.execute(
-                "select 1 from node_runs where job_id in (select id from jobs where workspace_id = ?)",
-                (ws_id,),
-            ).fetchone()
-            is None
-        )
+        for job_id in job_ids:
+            assert (
+                conn.execute("select 1 from job_nodes where job_id = ?", (job_id,)).fetchone()
+                is None
+            )
+            assert (
+                conn.execute("select 1 from node_runs where job_id = ?", (job_id,)).fetchone()
+                is None
+            )
 
 
 def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
