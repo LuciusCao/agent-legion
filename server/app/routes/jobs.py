@@ -6,8 +6,9 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
+from server.app.agents import AgentStatusManager
 from server.app.jobs import JobQueries
-from server.app.pipelines.definition import load_pipeline_definition
+from server.app.pipelines.definition import PipelineDefinition, load_pipeline_definition
 from server.app.pipelines.scheduler import downstream_nodes
 from server.app.settings import Settings
 
@@ -64,6 +65,20 @@ class RerunNodeResponse(BaseModel):
     stale_nodes: list[str]
 
 
+class WorkspaceStatsResponse(BaseModel):
+    workspace_id: str
+    name: str
+    pipeline_key: str
+    pipeline_label: str
+    job_stats: dict[str, int]
+    agent_status: dict[str, int]
+    latest_run: dict[str, Any] | None
+
+
+class DeleteWorkspaceResponse(BaseModel):
+    deleted: str
+
+
 def _pipelines_enabled(settings: Settings) -> bool:
     pipelines = settings.config.get("pipelines", {})
     return isinstance(pipelines, dict) and bool(pipelines.get("enabled"))
@@ -74,7 +89,7 @@ def _require_enabled(settings: Settings) -> None:
         raise HTTPException(status_code=404, detail="Pipelines are disabled")
 
 
-def _definition(settings: Settings, pipeline_key: str):
+def _definition(settings: Settings, pipeline_key: str) -> PipelineDefinition:
     if pipeline_key != "question_content":
         raise HTTPException(status_code=404, detail="Unknown pipeline")
     path = settings.root_dir / "config" / "pipelines" / "question_content.yaml"
@@ -106,6 +121,10 @@ def _artifact_names(job: dict[str, Any]) -> list[str]:
     return sorted(path.name for path in base.iterdir() if path.is_file())
 
 
+def _pipeline_label(settings: Settings, pipeline_key: str) -> str:
+    return _definition(settings, pipeline_key).label
+
+
 def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
     definition = _definition(settings, pipeline_key)
     return {
@@ -128,7 +147,9 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
     }
 
 
-def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
+def create_jobs_router(
+    job_db: JobQueries, settings: Settings, agent_manager: AgentStatusManager
+) -> APIRouter:
     router = APIRouter()
 
     def create_batch_for_workspace(
@@ -198,6 +219,38 @@ def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     def get_workspace(workspace_id: str) -> WorkspaceResponse:
         _require_enabled(settings)
         return WorkspaceResponse(workspace=_workspace_or_404(job_db, workspace_id))
+
+    @router.get("/workspaces/{workspace_id}/stats", response_model=WorkspaceStatsResponse)
+    def get_workspace_stats(workspace_id: str) -> WorkspaceStatsResponse:
+        _require_enabled(settings)
+        workspace = _workspace_or_404(job_db, workspace_id)
+        pipeline_key = workspace.get("default_pipeline_key", "question_content")
+        agents = agent_manager.get_all()
+        busy = sum(1 for a in agents if a.busy)
+        latest_run = job_db.get_latest_node_run_for_workspace(workspace_id)
+        return WorkspaceStatsResponse(
+            workspace_id=workspace_id,
+            name=workspace.get("name", ""),
+            pipeline_key=pipeline_key,
+            pipeline_label=_pipeline_label(settings, pipeline_key),
+            job_stats=job_db.count_jobs_by_status(workspace_id),
+            agent_status={
+                "total": len(agents),
+                "busy": busy,
+                "idle": len(agents) - busy,
+            },
+            latest_run=dict(latest_run) if latest_run else None,
+        )
+
+    @router.delete("/workspaces/{workspace_id}", response_model=DeleteWorkspaceResponse)
+    def delete_workspace(workspace_id: str) -> DeleteWorkspaceResponse:
+        _require_enabled(settings)
+        _workspace_or_404(job_db, workspace_id)
+        try:
+            job_db.delete_workspace(workspace_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return DeleteWorkspaceResponse(deleted=workspace_id)
 
     @router.post("/workspaces/{workspace_id}/job-batches", response_model=JobBatchResponse)
     def create_workspace_job_batch(
