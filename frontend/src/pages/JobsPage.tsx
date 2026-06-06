@@ -157,6 +157,7 @@ export function JobsPage() {
             display: 'flex',
             alignItems: 'center',
             gap: '12px',
+            minWidth: 0,
           }}
         >
           <Link to="/" style={{ display: 'flex', color: 'inherit' }}>
@@ -168,14 +169,41 @@ export function JobsPage() {
             style={{
               fontSize: '28px',
               color: 'var(--md-sys-color-primary)',
+              flexShrink: 0,
             }}
           >
             workspaces
           </md-icon>
-          <div>
+          <div style={{ minWidth: 0 }}>
             <p className="phase-name">Agent Legion</p>
             <h1>{selectedWorkspace?.name ?? '题目工厂'}</h1>
           </div>
+        </div>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+          }}
+        >
+          <md-outlined-select
+            ref={selectRef}
+            label="工作空间"
+            style={{ minWidth: '200px' }}
+          >
+            {workspaces.map((workspace) => (
+              <md-select-option
+                key={workspace.id}
+                value={workspace.id}
+              >
+                <div slot="headline">{workspace.name}</div>
+              </md-select-option>
+            ))}
+          </md-outlined-select>
+          <md-outlined-button onClick={() => setDialogOpen(true)}>
+            新建工作空间
+          </md-outlined-button>
         </div>
       </header>
 
@@ -200,29 +228,6 @@ export function JobsPage() {
           </span>
         </div>
       ) : null}
-
-      <section
-        className="card-outlined form-panel"
-        style={{ alignItems: 'center' }}
-      >
-        <md-outlined-select
-          ref={selectRef}
-          label="工作空间"
-          style={{ minWidth: '220px' }}
-        >
-          {workspaces.map((workspace) => (
-            <md-select-option
-              key={workspace.id}
-              value={workspace.id}
-            >
-              <div slot="headline">{workspace.name}</div>
-            </md-select-option>
-          ))}
-        </md-outlined-select>
-        <md-outlined-button onClick={() => setDialogOpen(true)}>
-          新建工作空间
-        </md-outlined-button>
-      </section>
 
       {dialogOpen && (
         <md-dialog
