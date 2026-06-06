@@ -204,6 +204,48 @@ describe('JobsPage', () => {
     expect(screen.getByText('Question Q002')).toBeInTheDocument()
   })
 
+  it('does not submit a batch when question ids are empty', async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          workspaces: [
+            { id: 'default', name: '默认工作空间', default_pipeline_key: 'question_content' },
+          ],
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({ jobs: [] }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        json: async () => ({
+          pipeline: {
+            key: 'question_content',
+            label: '题目内容生成',
+            concurrency: { local: 8, agent: 2 },
+            nodes: [],
+          },
+        }),
+      } as Response)
+
+    render(
+      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <JobsPage />
+      </MemoryRouter>
+    )
+
+    const button = await screen.findByText('创建生产任务')
+    fireEvent.click(button)
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
+    expect(screen.getByText('请先输入题目 ID')).toBeInTheDocument()
+  })
+
   it('creates a workspace and navigates to it', async () => {
     const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce({
