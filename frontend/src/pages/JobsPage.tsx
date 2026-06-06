@@ -1,15 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 
-import { createWorkspace, fetchJobs, fetchWorkspaces } from '../api'
+import {
+  createJobBatch,
+  createWorkspace,
+  fetchJobs,
+  fetchPipelineDefinition,
+  fetchWorkspaces,
+} from '../api'
 import { JOB_STATUS_ICONS, JOB_STATUS_LABELS } from '../labels'
-import type { JobRecord, WorkspaceRecord } from '../types'
+import type { JobRecord, PipelineDefinitionRecord, WorkspaceRecord } from '../types'
 
 function getErrorStatus(error: unknown): number | undefined {
   if (error && typeof error === 'object' && 'status' in error) {
     return Number((error as { status?: unknown }).status)
   }
   return undefined
+}
+
+function parseQuestionIds(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\n,，\s]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  )
 }
 
 export function JobsPage() {
@@ -19,11 +36,15 @@ export function JobsPage() {
 
   const [jobs, setJobs] = useState<JobRecord[]>([])
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([])
+  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(null)
   const [disabled, setDisabled] = useState(false)
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [workspaceName, setWorkspaceName] = useState('')
+  const [questionInput, setQuestionInput] = useState('')
+  const [creatingBatch, setCreatingBatch] = useState(false)
+  const [successMessage, setSuccessMessage] = useState('')
 
   const selectRef = useRef<HTMLElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
@@ -31,11 +52,16 @@ export function JobsPage() {
   useEffect(() => {
     let cancelled = false
 
-    Promise.all([fetchWorkspaces(), fetchJobs(selectedWorkspaceId)])
-      .then(([workspaceResult, jobResult]) => {
+    Promise.all([
+      fetchWorkspaces(),
+      fetchJobs(selectedWorkspaceId),
+      fetchPipelineDefinition('question_content'),
+    ])
+      .then(([workspaceResult, jobResult, pipelineResult]) => {
         if (!cancelled) {
           setWorkspaces(workspaceResult.workspaces)
           setJobs(jobResult.jobs)
+          setPipeline(pipelineResult.pipeline)
           setDisabled(false)
           setError('')
         }
@@ -110,6 +136,32 @@ export function JobsPage() {
       setCreating(false)
     }
   }, [workspaceName, navigate])
+
+  const handleCreateBatch = useCallback(async () => {
+    const questionIds = parseQuestionIds(questionInput)
+    if (questionIds.length === 0) {
+      setError('请先输入题目 ID')
+      return
+    }
+    setCreatingBatch(true)
+    setError('')
+    setSuccessMessage('')
+    try {
+      const result = await createJobBatch(
+        selectedWorkspaceId,
+        questionIds,
+        'question_content'
+      )
+      const refreshed = await fetchJobs(selectedWorkspaceId)
+      setJobs(refreshed.jobs)
+      setQuestionInput('')
+      setSuccessMessage(`已创建 ${result.created_count} 个生产任务`)
+    } catch {
+      setError('创建生产任务失败')
+    } finally {
+      setCreatingBatch(false)
+    }
+  }, [questionInput, selectedWorkspaceId])
 
   useEffect(() => {
     const dialog = dialogRef.current
@@ -228,6 +280,60 @@ export function JobsPage() {
           </span>
         </div>
       ) : null}
+
+      {successMessage ? (
+        <div className="card-outlined" style={{ marginTop: '16px', padding: '16px' }}>
+          {successMessage}
+        </div>
+      ) : null}
+
+      <section className="card-outlined" style={{ marginTop: '16px', padding: '16px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+          <div>
+            <p className="phase-name">DAG 模板</p>
+            <h2 style={{ fontSize: '18px' }}>{pipeline?.label ?? '题目内容生成'}</h2>
+            <p style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: '4px' }}>
+              {pipeline
+                ? `${pipeline.nodes.length} 个节点 · local ${pipeline.concurrency.local} · agent ${pipeline.concurrency.agent}`
+                : '加载中'}
+            </p>
+          </div>
+          <md-assist-chip label="question_content" />
+        </div>
+
+        {pipeline ? (
+          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
+            {pipeline.nodes.map((node) => (
+              <md-assist-chip key={node.key} label={`${node.key} · ${node.runner}`} />
+            ))}
+          </div>
+        ) : null}
+
+        <div style={{ marginTop: '16px', display: 'grid', gap: '12px' }}>
+          <md-outlined-text-field
+            label="题目 ID"
+            aria-label="题目 ID"
+            type="textarea"
+            rows={4}
+            placeholder="每行一个题目 ID，也支持逗号或空格分隔"
+            value={questionInput}
+            onInput={(event: React.FormEvent<HTMLElement>) =>
+              setQuestionInput((event.target as HTMLTextAreaElement).value)
+            }
+          />
+          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+              将在当前工作空间创建 {parseQuestionIds(questionInput).length} 个生产任务
+            </span>
+            <md-filled-button
+              onClick={handleCreateBatch}
+              disabled={creatingBatch || parseQuestionIds(questionInput).length === 0 || undefined}
+            >
+              {creatingBatch ? '创建中…' : '创建生产任务'}
+            </md-filled-button>
+          </div>
+        </div>
+      </section>
 
       {dialogOpen && (
         <md-dialog
