@@ -13,7 +13,7 @@ from server.app.settings import Settings
 
 
 class JobBatchRequest(BaseModel):
-    pipeline_key: str
+    pipeline_key: str = "question_content"
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
     knowledge_codes: list[str] = Field(default_factory=list)
@@ -27,6 +27,19 @@ class JobBatchResponse(BaseModel):
 
 class JobsResponse(BaseModel):
     jobs: list[dict[str, Any]]
+
+
+class WorkspaceCreateRequest(BaseModel):
+    name: str
+    default_pipeline_key: str = "question_content"
+
+
+class WorkspaceResponse(BaseModel):
+    workspace: dict[str, Any]
+
+
+class WorkspacesResponse(BaseModel):
+    workspaces: list[dict[str, Any]]
 
 
 class JobDetailResponse(BaseModel):
@@ -64,6 +77,13 @@ def _definition(settings: Settings, pipeline_key: str):
     return load_pipeline_definition(path)
 
 
+def _workspace_or_404(job_db: JobQueries, workspace_id: str) -> dict[str, Any]:
+    workspace = job_db.get_workspace(workspace_id)
+    if workspace is None:
+        raise HTTPException(status_code=404, detail="Workspace not found")
+    return workspace
+
+
 def _artifact_path(job: dict[str, Any], artifact_name: str) -> Path:
     if "/" in artifact_name or "\\" in artifact_name or artifact_name in {"", ".", ".."}:
         raise HTTPException(status_code=400, detail="Invalid artifact name")
@@ -85,12 +105,20 @@ def _artifact_names(job: dict[str, Any]) -> list[str]:
 def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
     router = APIRouter()
 
-    @router.post("/job-batches", response_model=JobBatchResponse)
-    def create_job_batch(payload: JobBatchRequest) -> JobBatchResponse:
+    def create_batch_for_workspace(
+        workspace_id: str,
+        payload: JobBatchRequest,
+    ) -> JobBatchResponse:
         _require_enabled(settings)
+        _workspace_or_404(job_db, workspace_id)
         definition = _definition(settings, payload.pipeline_key)
         source_payload = payload.model_dump()
-        batch = job_db.create_batch(payload.pipeline_key, payload.source_kind, source_payload)
+        batch = job_db.create_batch(
+            payload.pipeline_key,
+            payload.source_kind,
+            source_payload,
+            workspace_id=workspace_id,
+        )
         question_ids = list(dict.fromkeys(q.strip() for q in payload.question_ids if q.strip()))
         jobs: list[dict[str, Any]] = []
         for question_id in question_ids:
@@ -102,16 +130,73 @@ def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
                     batch_id=batch["id"],
                     title=f"Question {question_id}",
                     node_keys=list(definition.nodes),
+                    workspace_id=workspace_id,
                 )
             )
 
         batch["created_count"] = len(jobs)
         return JobBatchResponse(batch=batch, created_count=len(jobs), jobs=jobs)
 
+    @router.get("/workspaces", response_model=WorkspacesResponse)
+    def list_workspaces() -> WorkspacesResponse:
+        _require_enabled(settings)
+        return WorkspacesResponse(workspaces=job_db.list_workspaces())
+
+    @router.post("/workspaces", response_model=WorkspaceResponse)
+    def create_workspace(payload: WorkspaceCreateRequest) -> WorkspaceResponse:
+        _require_enabled(settings)
+        _definition(settings, payload.default_pipeline_key)
+        try:
+            workspace = job_db.create_workspace(
+                payload.name,
+                default_pipeline_key=payload.default_pipeline_key,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return WorkspaceResponse(workspace=workspace)
+
+    @router.get("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+    def get_workspace(workspace_id: str) -> WorkspaceResponse:
+        _require_enabled(settings)
+        return WorkspaceResponse(workspace=_workspace_or_404(job_db, workspace_id))
+
+    @router.post("/workspaces/{workspace_id}/job-batches", response_model=JobBatchResponse)
+    def create_workspace_job_batch(
+        workspace_id: str,
+        payload: JobBatchRequest,
+    ) -> JobBatchResponse:
+        return create_batch_for_workspace(workspace_id, payload)
+
+    @router.get("/workspaces/{workspace_id}/jobs", response_model=JobsResponse)
+    def list_workspace_jobs(
+        workspace_id: str,
+        pipeline_key: str | None = None,
+        status: str | None = None,
+    ) -> JobsResponse:
+        _require_enabled(settings)
+        _workspace_or_404(job_db, workspace_id)
+        return JobsResponse(
+            jobs=job_db.list_jobs(
+                workspace_id=workspace_id,
+                pipeline_key=pipeline_key,
+                status=status,
+            )
+        )
+
+    @router.post("/job-batches", response_model=JobBatchResponse)
+    def create_job_batch(payload: JobBatchRequest) -> JobBatchResponse:
+        return create_batch_for_workspace("default", payload)
+
     @router.get("/jobs", response_model=JobsResponse)
     def list_jobs(pipeline_key: str | None = None, status: str | None = None) -> JobsResponse:
         _require_enabled(settings)
-        return JobsResponse(jobs=job_db.list_jobs(pipeline_key=pipeline_key, status=status))
+        return JobsResponse(
+            jobs=job_db.list_jobs(
+                workspace_id="default",
+                pipeline_key=pipeline_key,
+                status=status,
+            )
+        )
 
     @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
     def get_job(job_id: str) -> JobDetailResponse:

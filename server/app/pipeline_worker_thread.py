@@ -34,7 +34,7 @@ def process_ready_pipeline_node(
     definition: PipelineDefinition,
     logs_dir: Path,
 ) -> bool:
-    for job in job_db.list_jobs(pipeline_key=definition.key):
+    for job in job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
         statuses = _node_statuses(job_db, job["id"])
         ready_nodes = find_ready_nodes(definition, statuses, Path(str(job["storage_dir"])))
         local_ready_nodes = [node for node in ready_nodes if node.runner == "local"]

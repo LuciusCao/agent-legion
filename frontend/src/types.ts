@@ -124,6 +124,7 @@ export type TranscriptionRun = {
 
 export type JobRecord = {
   id: string
+  workspace_id: string
   pipeline_key: string
   source_id: string
   title: string
@@ -132,4 +133,14 @@ export type JobRecord = {
 
 export type JobsResponse = {
   jobs: JobRecord[]
+}
+
+export type WorkspaceRecord = {
+  id: string
+  name: string
+  default_pipeline_key: string
+}
+
+export type WorkspacesResponse = {
+  workspaces: WorkspaceRecord[]
 }
