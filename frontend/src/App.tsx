@@ -9,9 +9,7 @@ const DetailPage = lazy(() =>
 const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage }))
 )
-const WorkspaceLayout = lazy(() =>
-  import('./layouts/WorkspaceLayout').then((m) => ({ default: m.WorkspaceLayout }))
-)
+const WorkspaceLayout = lazy(() => import('./layouts/WorkspaceLayout'))
 
 export default function App() {
   const { connectAgentsWs, closeAddDialog } = useUiStore()
