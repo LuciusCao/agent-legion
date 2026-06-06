@@ -24,7 +24,7 @@ export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const location = useLocation()
-  const { workspaces, fetchWorkspaces, setCurrentWorkspace } = useWorkspaceStore()
+  const { workspaces, fetchWorkspaces, setCurrentWorkspace, workspaceStats, fetchWorkspaceStats } = useWorkspaceStore()
 
   const isVideoHive = workspaceId === 'video-hive'
   const tabs = isVideoHive ? VIDEO_HIVE_TABS : TABS
@@ -39,6 +39,12 @@ export default function WorkspaceLayout() {
     const ws = workspaces.find((w) => w.id === workspaceId)
     setCurrentWorkspace(ws || null)
   }, [workspaceId, workspaces, setCurrentWorkspace])
+
+  useEffect(() => {
+    if (workspaceId && !isVideoHive && !workspaceStats[workspaceId]) {
+      fetchWorkspaceStats(workspaceId)
+    }
+  }, [workspaceId, isVideoHive, workspaceStats, fetchWorkspaceStats])
 
   // Determine current tab from path
   const pathParts = location.pathname.split('/')

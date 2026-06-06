@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useVideoStore } from '../stores/videoStore'
+import { useVideoEvents } from '../hooks/useVideoEvents'
 
 type Props = {
   isVideoHive: boolean
@@ -11,6 +12,10 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const navigate = useNavigate()
   const { currentWorkspace } = useWorkspaceStore()
   const { videos, fetchVideos } = useVideoStore()
+
+  if (isVideoHive) {
+    useVideoEvents()
+  }
 
   useEffect(() => {
     if (isVideoHive) {
