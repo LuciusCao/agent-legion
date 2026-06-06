@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Navigate, Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, useLocation } from 'react-router-dom'
 import { useUiStore } from './stores/uiStore'
 import Toast from './components/Toast'
 
@@ -34,13 +34,8 @@ export default function App() {
       <Suspense fallback={<div style={{ padding: 24 }}>加载中…</div>}>
         <Routes>
           <Route path="/" element={<ListPage />} />
-          <Route path="/jobs" element={<Navigate to="/workspaces" replace />} />
           <Route path="/workspaces" element={<JobsPage />} />
           <Route path="/workspaces/:workspaceId" element={<JobsPage />} />
-          <Route
-            path="/workspaces/:workspaceId/jobs"
-            element={<Navigate to=".." replace />}
-          />
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
       </Suspense>
