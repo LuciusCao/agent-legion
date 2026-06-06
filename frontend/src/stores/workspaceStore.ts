@@ -21,7 +21,7 @@ type WorkspaceState = {
   setCurrentWorkspace: (w: WorkspaceRecord | null) => void
 }
 
-export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
+export const useWorkspaceStore = create<WorkspaceState>((set) => ({
   workspaces: [],
   currentWorkspace: null,
   workspaceStats: {},
@@ -39,16 +39,27 @@ export const useWorkspaceStore = create<WorkspaceState>((set, get) => ({
   },
 
   async createWorkspace(name: string) {
-    const ws = await apiCreateWorkspace(name)
-    set((s) => ({ workspaces: [...s.workspaces, ws] }))
-    return ws
+    try {
+      const ws = await apiCreateWorkspace(name)
+      set((s) => ({ workspaces: [...s.workspaces, ws], error: null }))
+      return ws
+    } catch (err) {
+      set({ error: String(err) })
+      throw err
+    }
   },
 
   async deleteWorkspace(id: string) {
-    await apiDeleteWorkspace(id)
-    set((s) => ({
-      workspaces: s.workspaces.filter((w) => w.id !== id),
-    }))
+    try {
+      await apiDeleteWorkspace(id)
+      set((s) => ({
+        workspaces: s.workspaces.filter((w) => w.id !== id),
+        error: null,
+      }))
+    } catch (err) {
+      set({ error: String(err) })
+      throw err
+    }
   },
 
   async fetchWorkspaceStats(id: string) {
