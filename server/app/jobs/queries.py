@@ -326,3 +326,51 @@ class JobQueries:
         with self._connect_read() as conn:
             rows = conn.execute("select * from node_runs where job_id=? order by id", (job_id,))
             return [dict(row) for row in rows]
+
+    def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                "select status, count(*) as cnt from jobs where workspace_id = ? group by status",
+                (workspace_id,),
+            )
+            return {row["status"]: row["cnt"] for row in rows}
+
+    def get_latest_node_run_for_workspace(self, workspace_id: str) -> dict[str, Any] | None:
+        with self._connect_read() as conn:
+            row = conn.execute(
+                """
+                select node_runs.*
+                from node_runs
+                join jobs on jobs.id = node_runs.job_id
+                where jobs.workspace_id = ?
+                order by node_runs.started_at desc
+                limit 1
+                """,
+                (workspace_id,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def delete_workspace(self, workspace_id: str) -> None:
+        if workspace_id == "default":
+            raise ValueError("Cannot delete the default workspace")
+        with self.connect() as conn:
+            running = conn.execute(
+                "select 1 from jobs where workspace_id = ? and status = ?",
+                (workspace_id, "running"),
+            ).fetchone()
+            if running is not None:
+                raise ValueError("Cannot delete workspace with running jobs")
+            conn.execute(
+                "delete from job_batches where workspace_id = ?",
+                (workspace_id,),
+            )
+            conn.execute(
+                "delete from jobs where workspace_id = ?",
+                (workspace_id,),
+            )
+            cursor = conn.execute(
+                "delete from workspaces where id = ?",
+                (workspace_id,),
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("Workspace not found")

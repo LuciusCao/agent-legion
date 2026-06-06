@@ -31,6 +31,6 @@ def create_router(
     router.include_router(create_artifacts_router(db, settings))
     router.include_router(create_packages_router(db, settings, video_event_manager))
     router.include_router(create_worker_router(worker_control))
-    router.include_router(create_jobs_router(job_db, settings))
+    router.include_router(create_jobs_router(job_db, settings, agent_manager))
 
     return router
