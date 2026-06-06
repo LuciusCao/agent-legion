@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 
@@ -71,6 +72,32 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     assert body["jobs"][0]["id"] == f"{workspace_id}_question_content_Q001"
     assert [job["id"] for job in workspace_jobs.json()["jobs"]] == [body["jobs"][0]["id"]]
     assert default_jobs.json()["jobs"] == []
+
+
+def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "question_ids",
+                "question_ids": ["Q001", " Q002 ", "Q001", ""],
+                "knowledge_codes": ["K001"],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    payload = json.loads(body["batch"]["source_payload_json"])
+    assert payload["question_ids"] == ["Q001", "Q002"]
+    assert payload["knowledge_codes"] == []
+    assert body["created_count"] == 2
 
 
 def test_get_job_detail_and_artifact_when_enabled(tmp_path):

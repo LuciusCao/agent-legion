@@ -9,8 +9,8 @@ const ListPage = lazy(() =>
 const DetailPage = lazy(() =>
   import('./pages/DetailPage').then((m) => ({ default: m.DetailPage }))
 )
-const JobsPage = lazy(() =>
-  import('./pages/JobsPage').then((m) => ({ default: m.JobsPage }))
+const WorkspacesPage = lazy(() =>
+  import('./pages/WorkspacesPage').then((m) => ({ default: m.WorkspacesPage }))
 )
 
 export default function App() {
@@ -34,8 +34,8 @@ export default function App() {
       <Suspense fallback={<div style={{ padding: 24 }}>加载中…</div>}>
         <Routes>
           <Route path="/" element={<ListPage />} />
-          <Route path="/workspaces" element={<JobsPage />} />
-          <Route path="/workspaces/:workspaceId" element={<JobsPage />} />
+          <Route path="/workspaces" element={<WorkspacesPage />} />
+          <Route path="/workspaces/:workspaceId" element={<WorkspacesPage />} />
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
       </Suspense>
