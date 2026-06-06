@@ -3,6 +3,9 @@ import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { useUiStore } from './stores/uiStore'
 import Toast from './components/Toast'
 
+const ListPage = lazy(() =>
+  import('./pages/ListPage').then((m) => ({ default: m.ListPage }))
+)
 const DetailPage = lazy(() =>
   import('./pages/DetailPage').then((m) => ({ default: m.DetailPage }))
 )
@@ -29,6 +32,7 @@ export default function App() {
       <Suspense fallback={<div style={{ padding: 24 }}>加载中…</div>}>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
+          <Route path="/video-hive" element={<ListPage />} />
           <Route path="/workspaces" element={<Navigate to="/" replace />} />
           <Route path="/workspaces/:workspaceId/*" element={<WorkspaceLayout />} />
           <Route path="/videos/:id" element={<DetailPage />} />
