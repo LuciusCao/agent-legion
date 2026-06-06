@@ -3,6 +3,7 @@ import type {
   JobsResponse,
   PipelineResponse,
   WorkspaceRecord,
+  WorkspaceStats,
   WorkspacesResponse,
 } from './types'
 
@@ -74,6 +75,18 @@ export async function createWorkspace(name: string): Promise<WorkspaceRecord> {
     body: JSON.stringify({ name }),
   })
   return result.workspace
+}
+
+export async function fetchWorkspaceStats(
+  workspaceId: string
+): Promise<WorkspaceStats> {
+  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/stats`)
+}
+
+export async function deleteWorkspace(workspaceId: string): Promise<void> {
+  await api(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+    method: 'DELETE',
+  })
 }
 
 export async function fetchPipelineDefinition(
