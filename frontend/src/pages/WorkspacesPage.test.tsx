@@ -2,9 +2,9 @@ import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
-import { JobsPage } from './JobsPage'
+import { WorkspacesPage } from './WorkspacesPage'
 
-describe('JobsPage', () => {
+describe('WorkspacesPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
@@ -53,7 +53,7 @@ describe('JobsPage', () => {
 
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <JobsPage />
+        <WorkspacesPage />
       </MemoryRouter>
     )
 
@@ -86,7 +86,7 @@ describe('JobsPage', () => {
 
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <JobsPage />
+        <WorkspacesPage />
       </MemoryRouter>
     )
 
@@ -175,7 +175,7 @@ describe('JobsPage', () => {
 
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <JobsPage />
+        <WorkspacesPage />
       </MemoryRouter>
     )
 
@@ -233,7 +233,7 @@ describe('JobsPage', () => {
 
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <JobsPage />
+        <WorkspacesPage />
       </MemoryRouter>
     )
 
@@ -324,8 +324,8 @@ describe('JobsPage', () => {
         initialEntries={['/workspaces']}
       >
         <Routes>
-          <Route path="/workspaces" element={<JobsPage />} />
-          <Route path="/workspaces/:workspaceId" element={<JobsPage />} />
+          <Route path="/workspaces" element={<WorkspacesPage />} />
+          <Route path="/workspaces/:workspaceId" element={<WorkspacesPage />} />
         </Routes>
       </MemoryRouter>
     )

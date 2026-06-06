@@ -29,14 +29,6 @@ class JobsResponse(BaseModel):
     jobs: list[dict[str, Any]]
 
 
-class PipelineNodeResponse(BaseModel):
-    key: str
-    runner: str
-    after: list[str]
-    inputs: list[str]
-    outputs: list[str]
-
-
 class PipelineResponse(BaseModel):
     pipeline: dict[str, Any]
 
@@ -154,6 +146,8 @@ def create_jobs_router(job_db: JobQueries, settings: Settings) -> APIRouter:
         if not question_ids:
             raise HTTPException(status_code=400, detail="At least one question_id is required")
         source_payload = payload.model_dump()
+        source_payload["question_ids"] = question_ids
+        source_payload["knowledge_codes"] = []
         batch = job_db.create_batch(
             payload.pipeline_key,
             payload.source_kind,

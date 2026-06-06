@@ -29,7 +29,7 @@ function parseQuestionIds(value: string): string[] {
   )
 }
 
-export function JobsPage() {
+export function WorkspacesPage() {
   const navigate = useNavigate()
   const params = useParams<{ workspaceId: string }>()
   const selectedWorkspaceId = params.workspaceId ?? 'default'

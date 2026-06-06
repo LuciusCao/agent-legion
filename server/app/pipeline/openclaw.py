@@ -1,5 +1,6 @@
 import json
 import logging
+import os
 import re
 import shlex
 import shutil
@@ -35,6 +36,7 @@ class SkillSafetyConfig:
 
 
 def restore_skill_repos(repos: list[dict[str, str]]) -> None:
+    clean_env = {key: value for key, value in os.environ.items() if not key.startswith("GIT_")}
     for repo in repos:
         path = Path(repo["path"]).expanduser().resolve()
         ref = repo["ref"]
@@ -44,6 +46,7 @@ def restore_skill_repos(repos: list[dict[str, str]]) -> None:
         checkout = subprocess.run(
             ["git", "-C", str(path), "checkout", ref, "-f"],
             capture_output=True,
+            env=clean_env,
             text=True,
         )
         if checkout.returncode != 0:
@@ -57,6 +60,7 @@ def restore_skill_repos(repos: list[dict[str, str]]) -> None:
         clean = subprocess.run(
             ["git", "-C", str(path), "clean", "-fd"],
             capture_output=True,
+            env=clean_env,
             text=True,
         )
         if clean.returncode != 0:
