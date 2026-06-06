@@ -350,6 +350,18 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
     assert "running" in response.json()["detail"].lower()
 
 
+def test_workspace_stats_returns_404_for_unknown_workspace(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        resp = c.get("/api/workspaces/nonexistent/stats")
+    assert resp.status_code == 404
+
+
 def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -369,12 +381,38 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
                 "knowledge_codes": [],
             },
         )
+        job_db = app.state.job_db
+        job_id = f"{ws_id}_question_content_Q601"
+        run = job_db.start_node_run(job_id, "question_understanding", ["echo", "hi"], "/dev/null")
+        job_db.finish_node_run(run["id"], "completed", 0, "")
         response = c.delete(f"/api/workspaces/{ws_id}")
         get_response = c.get(f"/api/workspaces/{ws_id}")
 
     assert response.status_code == 200
     assert response.json()["deleted"] == ws_id
     assert get_response.status_code == 404
+    with job_db._connect_read() as conn:
+        assert (
+            conn.execute("select 1 from job_batches where workspace_id = ?", (ws_id,)).fetchone()
+            is None
+        )
+        assert (
+            conn.execute("select 1 from jobs where workspace_id = ?", (ws_id,)).fetchone() is None
+        )
+        assert (
+            conn.execute(
+                "select 1 from job_nodes where job_id in (select id from jobs where workspace_id = ?)",
+                (ws_id,),
+            ).fetchone()
+            is None
+        )
+        assert (
+            conn.execute(
+                "select 1 from node_runs where job_id in (select id from jobs where workspace_id = ?)",
+                (ws_id,),
+            ).fetchone()
+            is None
+        )
 
 
 def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
