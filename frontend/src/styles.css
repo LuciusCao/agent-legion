@@ -194,6 +194,60 @@ h1 {
   white-space: nowrap;
 }
 
+.form-panel,
+.inline-form,
+.field {
+  display: flex;
+  gap: 12px;
+}
+
+.form-panel {
+  align-items: end;
+  margin-top: 16px;
+  padding: 16px;
+  flex-wrap: wrap;
+}
+
+.inline-form {
+  align-items: end;
+  flex-wrap: wrap;
+}
+
+.field {
+  flex-direction: column;
+  min-width: 220px;
+}
+
+.field span {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.field select,
+.field input {
+  min-height: 40px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+  padding: 0 12px;
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+}
+
+.inline-form button {
+  min-height: 40px;
+  border: 0;
+  border-radius: 8px;
+  padding: 0 16px;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  cursor: pointer;
+}
+
+.inline-form button:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 .interaction-stats {
   font-size: 12px;
   color: var(--md-sys-color-on-surface-variant);

@@ -56,8 +56,16 @@ def init_db(path: Path) -> None:
                   path text not null,
                   created_at text not null default current_timestamp
                 );
+                create table if not exists workspaces (
+                  id text primary key,
+                  name text not null,
+                  default_pipeline_key text not null default 'question_content',
+                  created_at text not null default current_timestamp,
+                  updated_at text not null default current_timestamp
+                );
                 create table if not exists job_batches (
                   id text primary key,
+                  workspace_id text not null default 'default',
                   pipeline_key text not null,
                   source_kind text not null,
                   source_payload_json text not null default '{}',
@@ -68,6 +76,7 @@ def init_db(path: Path) -> None:
                 );
                 create table if not exists jobs (
                   id text primary key,
+                  workspace_id text not null default 'default',
                   pipeline_key text not null,
                   source_type text not null,
                   source_id text not null,
@@ -134,6 +143,36 @@ def init_db(path: Path) -> None:
                 if column not in existing_package_columns:
                     conn.execute(statement)
 
+            conn.execute(
+                """
+                insert into workspaces(id, name, default_pipeline_key)
+                values ('default', '默认工作空间', 'question_content')
+                on conflict(id) do nothing
+                """
+            )
+
+            existing_job_batch_columns = {
+                row["name"] for row in conn.execute("pragma table_info(job_batches)").fetchall()
+            }
+            job_batch_migrations = {
+                "workspace_id": (
+                    "alter table job_batches add column workspace_id text not null default 'default'"
+                ),
+            }
+            for column, statement in job_batch_migrations.items():
+                if column not in existing_job_batch_columns:
+                    conn.execute(statement)
+
+            existing_job_columns = {
+                row["name"] for row in conn.execute("pragma table_info(jobs)").fetchall()
+            }
+            job_migrations = {
+                "workspace_id": "alter table jobs add column workspace_id text not null default 'default'",
+            }
+            for column, statement in job_migrations.items():
+                if column not in existing_job_columns:
+                    conn.execute(statement)
+
             # Performance indexes for issue 012
             conn.executescript(
                 """
@@ -145,6 +184,10 @@ def init_db(path: Path) -> None:
                 create index if not exists idx_transcription_runs_video_id on transcription_runs(video_id);
                 create index if not exists idx_jobs_pipeline_status on jobs(pipeline_key, status);
                 create index if not exists idx_jobs_source on jobs(pipeline_key, source_type, source_id);
+                create index if not exists idx_workspaces_created_at on workspaces(created_at);
+                create index if not exists idx_job_batches_workspace on job_batches(workspace_id, created_at);
+                create index if not exists idx_jobs_workspace_pipeline_status on jobs(workspace_id, pipeline_key, status);
+                create index if not exists idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id);
                 create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
                 create index if not exists idx_node_runs_job_id on node_runs(job_id);
                 """

@@ -3,8 +3,10 @@ from pathlib import Path
 
 def test_job_routes_are_hidden_when_pipelines_disabled(client):
     response = client.get("/api/jobs")
+    workspaces = client.get("/api/workspaces")
 
     assert response.status_code == 404
+    assert workspaces.status_code == 404
 
 
 def test_create_question_jobs_when_enabled(tmp_path):
@@ -28,7 +30,40 @@ def test_create_question_jobs_when_enabled(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["created_count"] == 2
+    assert body["jobs"][0]["workspace_id"] == "default"
     assert [job["source_id"] for job in body["jobs"]] == ["Q001", "Q002"]
+
+
+def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        workspace_response = c.post("/api/workspaces", json={"name": "Math Sprint"})
+        workspace_id = workspace_response.json()["workspace"]["id"]
+        created = c.post(
+            f"/api/workspaces/{workspace_id}/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "question_ids",
+                "question_ids": ["Q001"],
+                "knowledge_codes": [],
+            },
+        )
+        workspace_jobs = c.get(f"/api/workspaces/{workspace_id}/jobs?pipeline_key=question_content")
+        default_jobs = c.get("/api/jobs?pipeline_key=question_content")
+
+    assert workspace_response.status_code == 200
+    assert workspace_id == "math_sprint"
+    assert created.status_code == 200
+    body = created.json()
+    assert body["jobs"][0]["workspace_id"] == workspace_id
+    assert body["jobs"][0]["id"] == f"{workspace_id}_question_content_Q001"
+    assert [job["id"] for job in workspace_jobs.json()["jobs"]] == [body["jobs"][0]["id"]]
+    assert default_jobs.json()["jobs"] == []
 
 
 def test_get_job_detail_and_artifact_when_enabled(tmp_path):

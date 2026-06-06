@@ -35,6 +35,7 @@ export default function App() {
         <Routes>
           <Route path="/" element={<ListPage />} />
           <Route path="/jobs" element={<JobsPage />} />
+          <Route path="/workspaces/:workspaceId/jobs" element={<JobsPage />} />
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
       </Suspense>

@@ -24,14 +24,51 @@ def test_create_batch_and_question_jobs(tmp_path):
     )
 
     assert batch["pipeline_key"] == "question_content"
-    assert job["id"] == "question_content_Q001"
-    assert job["storage_dir"].endswith("jobs/question_content_Q001")
+    assert batch["workspace_id"] == "default"
+    assert job["id"] == "default_question_content_Q001"
+    assert job["workspace_id"] == "default"
+    assert job["storage_dir"].endswith("jobs/default/default_question_content_Q001")
     nodes = queries.list_job_nodes(job["id"])
     assert [node["node_key"] for node in nodes] == [
         "fetch_question_context",
         "assemble_package",
     ]
     assert {node["status"] for node in nodes} == {"pending"}
+
+
+def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace("Math Sprint")
+
+    default_job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q100",
+        batch_id="",
+        title="Question Q100",
+        node_keys=["fetch_question_context"],
+    )
+    workspace_job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q100",
+        batch_id="",
+        title="Question Q100",
+        node_keys=["fetch_question_context"],
+        workspace_id=workspace["id"],
+    )
+
+    assert workspace["id"] == "math_sprint"
+    assert default_job["id"] == "default_question_content_Q100"
+    assert workspace_job["id"] == "math_sprint_question_content_Q100"
+    assert [job["id"] for job in queries.list_jobs(workspace_id="default")] == [default_job["id"]]
+    assert [job["id"] for job in queries.list_jobs(workspace_id=workspace["id"])] == [
+        workspace_job["id"]
+    ]
+    assert {job["id"] for job in queries.list_jobs(workspace_id=None)} == {
+        default_job["id"],
+        workspace_job["id"],
+    }
 
 
 def test_node_run_lifecycle(tmp_path):

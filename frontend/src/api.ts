@@ -1,4 +1,4 @@
-import type { JobsResponse } from './types'
+import type { JobsResponse, WorkspaceRecord, WorkspacesResponse } from './types'
 
 export async function fetchPackages(): Promise<
   {
@@ -8,6 +8,7 @@ export async function fetchPackages(): Promise<
       path: string
       video_count: number
       size_bytes: number
+      locked: number
       created_at: string
     }>
   }
@@ -29,9 +30,11 @@ export async function updatePackage(
   })
 }
 
-export async function fetchJobs(): Promise<JobsResponse> {
+export async function fetchJobs(workspaceId = 'default'): Promise<JobsResponse> {
   try {
-    return await api('/api/jobs?pipeline_key=question_content')
+    return await api(
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs?pipeline_key=question_content`
+    )
   } catch (error) {
     const status =
       error && typeof error === 'object' && 'status' in error
@@ -42,6 +45,29 @@ export async function fetchJobs(): Promise<JobsResponse> {
       { status }
     )
   }
+}
+
+export async function fetchWorkspaces(): Promise<WorkspacesResponse> {
+  try {
+    return await api('/api/workspaces')
+  } catch (error) {
+    const status =
+      error && typeof error === 'object' && 'status' in error
+        ? Number((error as { status?: unknown }).status)
+        : undefined
+    throw Object.assign(
+      error instanceof Error ? error : new Error('Failed to fetch workspaces'),
+      { status }
+    )
+  }
+}
+
+export async function createWorkspace(name: string): Promise<WorkspaceRecord> {
+  const result = await api<{ workspace: WorkspaceRecord }>('/api/workspaces', {
+    method: 'POST',
+    body: JSON.stringify({ name }),
+  })
+  return result.workspace
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {

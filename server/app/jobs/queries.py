@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from collections.abc import Iterator, Sequence
 from contextlib import contextmanager
@@ -11,9 +12,18 @@ from typing import Any
 from server.app.db.schema import init_db
 
 
-def _job_id(pipeline_key: str, source_id: str) -> str:
+def _safe_identifier(value: str, fallback: str) -> str:
+    safe_value = re.sub(r"[^a-zA-Z0-9_-]+", "_", value.strip()).strip("_")
+    return safe_value or fallback
+
+
+def _job_id(workspace_id: str, pipeline_key: str, source_id: str) -> str:
     safe_source_id = source_id.strip().replace("/", "_")
-    return f"{pipeline_key}_{safe_source_id}"
+    return f"{workspace_id}_{pipeline_key}_{safe_source_id}"
+
+
+def _workspace_id(name: str) -> str:
+    return _safe_identifier(name.lower(), "workspace")
 
 
 class JobQueries:
@@ -41,20 +51,59 @@ class JobQueries:
         finally:
             conn.close()
 
+    def create_workspace(
+        self, name: str, default_pipeline_key: str = "question_content"
+    ) -> dict[str, Any]:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Workspace name is required")
+
+        base_id = _workspace_id(clean_name)
+        with self.connect() as conn:
+            workspace_id = base_id
+            suffix = 2
+            while conn.execute("select 1 from workspaces where id=?", (workspace_id,)).fetchone():
+                workspace_id = f"{base_id}_{suffix}"
+                suffix += 1
+
+            conn.execute(
+                """
+                insert into workspaces(id, name, default_pipeline_key)
+                values (?, ?, ?)
+                """,
+                (workspace_id, clean_name, default_pipeline_key),
+            )
+            row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+        return dict(row)
+
+    def list_workspaces(self) -> list[dict[str, Any]]:
+        with self._connect_read() as conn:
+            rows = conn.execute("select * from workspaces order by created_at, id")
+            return [dict(row) for row in rows]
+
+    def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
+        with self._connect_read() as conn:
+            row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+        return dict(row) if row else None
+
     def create_batch(
-        self, pipeline_key: str, source_kind: str, source_payload: dict[str, Any]
+        self,
+        pipeline_key: str,
+        source_kind: str,
+        source_payload: dict[str, Any],
+        workspace_id: str = "default",
     ) -> dict[str, Any]:
         payload_json = json.dumps(source_payload, ensure_ascii=False, sort_keys=True)
         payload_digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]
-        batch_id = f"{pipeline_key}_{source_kind}_{payload_digest}"
+        batch_id = f"{workspace_id}_{pipeline_key}_{source_kind}_{payload_digest}"
         with self.connect() as conn:
             conn.execute(
                 """
-                insert into job_batches(id, pipeline_key, source_kind, source_payload_json)
-                values (?, ?, ?, ?)
+                insert into job_batches(id, workspace_id, pipeline_key, source_kind, source_payload_json)
+                values (?, ?, ?, ?, ?)
                 on conflict(id) do update set source_payload_json=excluded.source_payload_json
                 """,
-                (batch_id, pipeline_key, source_kind, payload_json),
+                (batch_id, workspace_id, pipeline_key, source_kind, payload_json),
             )
             row = conn.execute("select * from job_batches where id=?", (batch_id,)).fetchone()
         return dict(row)
@@ -67,29 +116,42 @@ class JobQueries:
         batch_id: str,
         title: str,
         node_keys: list[str],
+        workspace_id: str = "default",
     ) -> dict[str, Any]:
-        job_id = _job_id(pipeline_key, source_id)
-        storage_dir = self.jobs_dir / job_id
+        job_id = _job_id(workspace_id, pipeline_key, source_id)
+        storage_dir = self.jobs_dir / workspace_id / job_id
         storage_dir.mkdir(parents=True, exist_ok=True)
 
         with self.connect() as conn:
             existing = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
             if existing is not None and (
-                existing["pipeline_key"] != pipeline_key
+                existing["workspace_id"] != workspace_id
+                or existing["pipeline_key"] != pipeline_key
                 or existing["source_type"] != source_type
                 or existing["source_id"] != source_id
             ):
                 raise ValueError(f"Job identity collision for {job_id}")
             conn.execute(
                 """
-                insert into jobs(id, pipeline_key, source_type, source_id, batch_id, title, storage_dir)
-                values (?, ?, ?, ?, ?, ?, ?)
+                insert into jobs(
+                  id, workspace_id, pipeline_key, source_type, source_id, batch_id, title, storage_dir
+                )
+                values (?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                   title=excluded.title,
                   batch_id=excluded.batch_id,
                   updated_at=current_timestamp
                 """,
-                (job_id, pipeline_key, source_type, source_id, batch_id, title, str(storage_dir)),
+                (
+                    job_id,
+                    workspace_id,
+                    pipeline_key,
+                    source_type,
+                    source_id,
+                    batch_id,
+                    title,
+                    str(storage_dir),
+                ),
             )
             for node_key in node_keys:
                 conn.execute(
@@ -103,10 +165,16 @@ class JobQueries:
         return dict(row)
 
     def list_jobs(
-        self, pipeline_key: str | None = None, status: str | None = None
+        self,
+        pipeline_key: str | None = None,
+        status: str | None = None,
+        workspace_id: str | None = "default",
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
+        if workspace_id:
+            clauses.append("workspace_id=?")
+            params.append(workspace_id)
         if pipeline_key:
             clauses.append("pipeline_key=?")
             params.append(pipeline_key)
