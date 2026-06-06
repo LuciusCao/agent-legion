@@ -7,8 +7,9 @@ Local processing console for educational videos. It queues knowledge videos and 
 - Backend: FastAPI, SQLite, background worker.
 - Python tooling: `uv` for dependency/runtime management, `ruff` for lint/format, `mypy` for type checking.
 - Frontend: Vite + TypeScript, ESLint + Prettier.
-- Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`.
-- Queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
+- Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`, `data/jobs/`.
+- Video queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
+- Agent Legion pipeline model: workspace-scoped DAG jobs with configurable pipeline definitions (`config/pipelines/`).
 
 ## Setup
 
@@ -145,7 +146,7 @@ Add a question explanation record before its URL is available:
 }
 ```
 
-Useful endpoints:
+Useful endpoints (video pipeline):
 
 - `POST /api/videos`
 - `GET /api/videos`
@@ -156,3 +157,15 @@ Useful endpoints:
 - `GET /api/videos/{video_id}/logs`
 - `POST /api/worker/tick` processes one local non-agent phase; agent phases are handled by the background worker runner pool.
 - `POST /api/package`
+
+Agent Legion pipeline (workspace / job) endpoints:
+
+- `GET /api/pipelines/{pipeline_key}` — pipeline definition metadata
+- `GET /api/workspaces` — list workspaces
+- `POST /api/workspaces` — create workspace
+- `GET /api/workspaces/{workspace_id}` — get workspace
+- `POST /api/workspaces/{workspace_id}/job-batches` — create a batch of jobs
+- `GET /api/workspaces/{workspace_id}/jobs` — list jobs in workspace
+- `GET /api/jobs/{job_id}` — job detail with nodes, runs, artifacts
+- `GET /api/jobs/{job_id}/artifacts/{artifact_name}` — read job artifact
+- `POST /api/jobs/{job_id}/nodes/{node_key}/rerun` — rerun a node and mark downstream nodes stale

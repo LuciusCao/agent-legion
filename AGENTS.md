@@ -25,10 +25,11 @@ video-hive/
 │   └── pipeline.yaml           # Runtime configuration (ASR providers, openclaw)
 ├── server/
 │   ├── app/
-│   │   ├── main.py             # FastAPI app factory + lifespan worker thread
-│   │   ├── routes/             # REST API routes (videos, agents, worker, artifacts, packages)
+│   │   ├── main.py             # FastAPI app factory + lifespan worker threads
+│   │   ├── routes/             # REST API routes (videos, agents, worker, artifacts, packages, jobs, workspaces)
 │   │   ├── db/                 # SQLite database wrapper (schema, queries, notifications)
 │   │   ├── cms/                # CMS API integration (auth, client, knowledge, question)
+│   │   ├── jobs/               # Job queries for Agent Legion pipeline
 │   │   ├── services/           # Business logic services
 │   │   │   ├── intake.py       # Video intake (add, URL resolution)
 │   │   │   ├── video_actions.py # Batch rerun, delete, package selection
@@ -38,26 +39,36 @@ video-hive/
 │   │   ├── worker.py           # Background worker loop + per-video phase processing
 │   │   ├── worker_control.py   # Worker pause/resume control
 │   │   ├── worker_thread.py    # Background worker thread lifecycle
+│   │   ├── worker_scheduler.py # Worker scheduling logic
+│   │   ├── pipeline_worker_thread.py # Agent Legion pipeline worker thread
 │   │   ├── events.py           # SSE event broadcaster
 │   │   ├── agents.py           # OpenClaw agent discovery and status tracking
 │   │   ├── records.py          # TypedDict type definitions for DB records
-│   │   └── pipeline/           # Pipeline stage implementations
-│   │       ├── common.py       # URL-to-id parsing, SRT parse/format helpers
-│   │       ├── phases.py       # Phase list and agent-phase definitions
-│   │       ├── download.py     # HTTP video downloader
-│   │       ├── transcribe.py   # ASR providers (whisper.cpp / SenseVoice) + fallback logic
-│   │       ├── openclaw.py     # OpenClaw command runner
-│   │       ├── assemble.py     # Final metadata.json assembly
-│   │       ├── artifacts.py    # Artifact cleanup on rerun
-│   │       ├── reader.py       # Artifact reader for the API
-│   │       ├── package.py      # ZIP packaging of completed videos
-│   │       ├── upload_params.py # Assemble upload_params.json in llm_claude format
-│   │       ├── fetch_url.py    # CMS API integration for knowledge/question lookups
-│   │       └── references/     # Markdown prompt references for openclaw phases
-│   │           ├── phase-03-subtitle-review.md
-│   │           ├── phase-04-chapter-generate.md
-│   │           ├── phase-05-interaction-generate.md
-│   │           └── phase-06-content-review.md
+│   │   ├── pipeline/           # Video pipeline stage implementations
+│   │   │   ├── common.py       # URL-to-id parsing, SRT parse/format helpers
+│   │   │   ├── phases.py       # Phase list and agent-phase definitions
+│   │   │   ├── download.py     # HTTP video downloader
+│   │   │   ├── transcribe.py   # ASR providers (whisper.cpp / SenseVoice) + fallback logic
+│   │   │   ├── openclaw.py     # OpenClaw command runner
+│   │   │   ├── assemble.py     # Final metadata.json assembly
+│   │   │   ├── artifacts.py    # Artifact cleanup on rerun
+│   │   │   ├── reader.py       # Artifact reader for the API
+│   │   │   ├── package.py      # ZIP packaging of completed videos
+│   │   │   ├── upload_params.py # Assemble upload_params.json in llm_claude format
+│   │   │   ├── fetch_url.py    # CMS API integration for knowledge/question lookups
+│   │   │   ├── runners.py      # OpenClaw runner pool
+│   │   │   ├── recovery.py     # Interrupted video recovery on startup
+│   │   │   ├── validators.py   # Input validators
+│   │   │   └── references/     # Markdown prompt references for openclaw phases
+│   │   │       ├── phase-03-subtitle-review.md
+│   │   │       ├── phase-04-chapter-generate.md
+│   │   │       ├── phase-05-interaction-generate.md
+│   │   │       └── phase-06-content-review.md
+│   │   └── pipelines/          # Agent Legion DAG pipeline definitions
+│   │       ├── definition.py   # Pipeline definition loader
+│   │       ├── executor.py     # Pipeline node executor
+│   │       ├── scheduler.py    # DAG scheduling and downstream node resolution
+│   │       └── question_content.py # Question content pipeline presets
 ├── frontend/
 │   ├── package.json
 │   ├── tsconfig.json
@@ -74,7 +85,8 @@ video-hive/
 │       ├── styles.css          # Global styles
 │       ├── pages/              # Route-level pages
 │       │   ├── ListPage.tsx
-│       │   └── DetailPage.tsx
+│       │   ├── DetailPage.tsx
+│       │   └── WorkspacesPage.tsx
 │       ├── components/         # Reusable UI components
 │       │   ├── AddDialog.tsx
 │       │   ├── AgentPanel.tsx
@@ -88,6 +100,7 @@ video-hive/
 │       │   ├── InteractionReviewBadge.tsx
 │       │   ├── MetadataPanel.tsx
 │       │   ├── NodePanel.tsx
+│       │   ├── PackageHistoryDialog.tsx
 │       │   ├── PackageToolbar.tsx
 │       │   ├── PhaseRunsPanel.tsx
 │       │   ├── PhaseStepper.tsx
@@ -101,26 +114,43 @@ video-hive/
 │       │   ├── VideoList.tsx
 │       │   └── VideoPlayer.tsx
 │       ├── hooks/              # React custom hooks
+│       │   ├── useDebouncedCallback.ts
 │       │   ├── useDetailPage.ts
 │       │   ├── usePhaseRunsTimeline.ts
 │       │   ├── useVideoEvents.ts
 │       │   └── useVideoPhaseEvents.ts
 │       └── stores/             # Zustand state stores
-│           ├── videoStore.ts
+│           ├── artifactStore.ts
+│           ├── detailStore.ts
+│           ├── interactionStore.ts
+│           ├── packageStore.ts
 │           ├── uiStore.ts
-│           └── detailStore.ts
+│           └── videoStore.ts
 ├── tests/
 │   ├── test_core.py            # Pipeline utility unit tests
 │   ├── test_api.py             # FastAPI endpoint tests with TestClient
-│   ├── test_worker.py          # Worker-phase integration tests
 │   ├── test_agents.py          # AgentStatusManager unit tests
+│   ├── test_db.py              # Database tests
 │   ├── test_fetch_url.py       # CMS token/video lookup tests
-│   └── test_services.py        # Service layer unit tests
+│   ├── test_interaction_stats.py
+│   ├── test_jobs.py            # Job model tests
+│   ├── test_jobs_api.py        # Jobs API endpoint tests
+│   ├── test_openclaw_sessions.py
+│   ├── test_security.py        # Security tests
+│   ├── test_services.py        # Service layer unit tests
+│   ├── test_settings.py
+│   ├── test_video_actions.py
+│   ├── test_worker.py          # Worker-phase integration tests
+│   ├── test_worker_scheduler.py
+│   ├── test_worker_thread.py
+│   ├── test_pipeline_*.py      # Pipeline stage unit tests
+│   └── ...
 └── data/                       # Runtime data (gitignored)
     ├── video_hive.sqlite
     ├── videos/
     ├── logs/
-    └── packages/
+    ├── packages/
+    └── jobs/
 ```
 
 ## 文档体系
@@ -248,8 +278,10 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 ### Backend
 
 - `server.app.main:create_app(data_dir, start_worker)` is the application factory.
-- When `start_worker=True`, a daemon thread starts on app lifespan and polls the database every 1–3 seconds for videos in `queued` or `running` status.
-- The worker starts in a **paused** state by default; call `POST /api/worker/resume` to begin processing.
+- When `start_worker=True`, two daemon threads may start on app lifespan:
+  - `WorkerThread` polls the database every 1–3 seconds for videos in `queued` or `running` status.
+  - `PipelineWorkerThread` polls for Agent Legion DAG jobs when `pipelines.enabled` is true in `config/pipeline.yaml`.
+- The video worker starts in a **paused** state by default; call `POST /api/worker/resume` to begin processing.
 - Each video has a `content_type` (`knowledge` or `question`) and progresses through a **type-specific pipeline**:
 
   **Knowledge videos** (`knowledge`):
@@ -284,8 +316,8 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 
 ### Frontend
 
-- React 18 SPA with two routes (`/` list view, `/videos/:id` detail view) managed by React Router v6.
-- State management via Zustand: `videoStore` (list & filtering), `detailStore` (selected video & artifacts), `uiStore` (dialogs, agent status, WebSocket).
+- React 18 SPA with routes (`/` list view, `/videos/:id` detail view, `/workspaces`, `/workspaces/:workspaceId`) managed by React Router v6.
+- State management via Zustand: `videoStore` (list & filtering), `detailStore` (selected video & artifacts), `uiStore` (dialogs, agent status, WebSocket), `artifactStore`, `interactionStore`, `packageStore`.
 - UI built with `@material/web` Material 3 Web Components plus custom CSS.
 - Fetches data from `/api/*` endpoints.
 - UI labels are in Chinese (e.g., "加入队列", "重跑", "打包完成项").
@@ -296,6 +328,7 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 - A global `Toast` component displays feedback messages (e.g., "该资源正在被处理中").
 - A **删除** button in the toolbar prompts for confirmation (`DeleteDialog` / `BatchDeleteDialog`) before calling `DELETE /api/videos/{video_id}` and clearing the selection.
 - **Batch operations**: select multiple videos in the list to batch rerun, batch delete, or batch package.
+- **Workspaces page** (`WorkspacesPage`): workspace selector, job batch creation, and job list for the Agent Legion pipeline.
 
 ### Frontend Tooling
 
@@ -305,13 +338,18 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 
 ### Database
 
-- SQLite with four tables:
-  - `videos` — queue entries. Columns include `content_type` (`knowledge`|`question`), `external_id`, `knowledge_code`, `question_id`, `source_uuid`, `source_url`, `title`, `current_phase`, `status`, `duration`, `storage_dir`.
-  - `phase_runs` — per-phase execution history
+- SQLite with tables for both the video pipeline and the Agent Legion pipeline:
+  - `videos` — video queue entries. Columns include `content_type` (`knowledge`|`question`), `external_id`, `knowledge_code`, `question_id`, `source_uuid`, `source_url`, `title`, `current_phase`, `status`, `duration`, `storage_dir`.
+  - `phase_runs` — per-phase execution history for video pipeline
   - `transcription_runs` — transcription attempt history (whisper / SenseVoice)
   - `packages` — created package paths
-- The DB initializer runs lightweight migrations (`alter table add column`) so existing `videos` tables gain `content_type`, `external_id`, `knowledge_code`, `question_id`, and `source_uuid` without data loss.
-- `VideoQueries.connect()` is a context manager (`@contextmanager`) that yields a `sqlite3.Connection` and ensures `conn.close()` is called after use.
+  - `workspaces` — Agent Legion workspace definitions
+  - `job_batches` — batches of jobs created within a workspace
+  - `jobs` — Agent Legion job entries with `pipeline_key`, `workspace_id`, `source_type`, `source_id`, `status`, `storage_dir`
+  - `job_nodes` — per-job node execution status (`pending`, `running`, `completed`, `failed`, `stale`)
+  - `node_runs` — per-node execution history for Agent Legion pipeline
+- The DB initializer runs lightweight migrations (`alter table add column`) so existing tables gain new columns without data loss.
+- `VideoQueries.connect()` and `JobQueries.connect()` are context managers (`@contextmanager`) that yield a `sqlite3.Connection` and ensure `conn.close()` is called after use.
 - `delete_video()` performs cascading deletes: it removes matching rows from `phase_runs` and `transcription_runs` before deleting the `videos` row.
 
 ## Configuration
@@ -330,6 +368,12 @@ Edit `config/pipeline.yaml`:
 - `openclaw.runners`: explicit list of runner definitions. Each item can include:
   - `command_template`: the argument list for this runner (same placeholders as above).
   - `count` (optional, default `1`): how many identical runners to create from this template. Use this to scale concurrency without duplicating the entire configuration block.
+- `pipelines.enabled`: set to `true` to enable the Agent Legion DAG pipeline worker.
+
+Pipeline definitions live in `config/pipelines/` (e.g., `question_content.yaml`). Each definition specifies:
+- `key` and `label`
+- `concurrency` (`local`, `agent`) — runner pool limits
+- `nodes` — DAG nodes with `runner` (`local` or `agent`), `after` (dependencies), `inputs`, and `outputs`
 
 In `auto` ASR mode, the pipeline tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
 
@@ -352,7 +396,7 @@ Question explanation videos do not produce interaction nodes. Their `metadata.js
 - Coverage is enforced in `check-quick.sh` with `fail_under = 75` (configured in `pyproject.toml`).
 - API tests use `fastapi.testclient.TestClient` with a temporary `data_dir`. The `client` fixture must use `with TestClient(app) as c:` to ensure lifespan resources are properly closed.
 - Worker tests inject mock `TranscriptionProvider` implementations to avoid requiring real ASR binaries.
-- Core tests validate SRT parsing, artifact cleanup, openclaw runner behavior, ZIP packaging, and type-specific pipeline routing.
+- Core tests validate SRT parsing, artifact cleanup, openclaw runner behavior, ZIP packaging, type-specific pipeline routing, pipeline definition loading, DAG scheduling, and job API endpoints.
 
 Run the full suite with:
 
