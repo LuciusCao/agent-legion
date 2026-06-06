@@ -1,16 +1,16 @@
 import { lazy, Suspense, useEffect } from 'react'
-import { Routes, Route, useLocation } from 'react-router-dom'
+import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { useUiStore } from './stores/uiStore'
 import Toast from './components/Toast'
 
-const ListPage = lazy(() =>
-  import('./pages/ListPage').then((m) => ({ default: m.ListPage }))
-)
 const DetailPage = lazy(() =>
   import('./pages/DetailPage').then((m) => ({ default: m.DetailPage }))
 )
-const WorkspacesPage = lazy(() =>
-  import('./pages/WorkspacesPage').then((m) => ({ default: m.WorkspacesPage }))
+const DashboardPage = lazy(() =>
+  import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage }))
+)
+const WorkspaceLayout = lazy(() =>
+  import('./layouts/WorkspaceLayout').then((m) => ({ default: m.WorkspaceLayout }))
 )
 
 export default function App() {
@@ -22,9 +22,6 @@ export default function App() {
     return cleanup
   }, [connectAgentsWs])
 
-  // Close any open dialogs on route change so that navigating away
-  // from the list page (e.g. into a video detail) always resets UI
-  // state and prevents dialogs from re-appearing on return.
   useEffect(() => {
     closeAddDialog()
   }, [location.pathname, closeAddDialog])
@@ -33,9 +30,9 @@ export default function App() {
     <main className="app-shell">
       <Suspense fallback={<div style={{ padding: 24 }}>加载中…</div>}>
         <Routes>
-          <Route path="/" element={<ListPage />} />
-          <Route path="/workspaces" element={<WorkspacesPage />} />
-          <Route path="/workspaces/:workspaceId" element={<WorkspacesPage />} />
+          <Route path="/" element={<DashboardPage />} />
+          <Route path="/workspaces" element={<Navigate to="/" replace />} />
+          <Route path="/workspaces/:workspaceId/*" element={<WorkspaceLayout />} />
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
       </Suspense>
