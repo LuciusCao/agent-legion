@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 
 import { createWorkspace, fetchJobs, fetchWorkspaces } from '../api'
 import { JOB_STATUS_ICONS, JOB_STATUS_LABELS } from '../labels'
@@ -159,6 +159,11 @@ export function JobsPage() {
             gap: '12px',
           }}
         >
+          <Link to="/" style={{ display: 'flex', color: 'inherit' }}>
+            <md-icon-button>
+              <md-icon>arrow_back</md-icon>
+            </md-icon-button>
+          </Link>
           <md-icon
             style={{
               fontSize: '28px',
@@ -183,19 +188,22 @@ export function JobsPage() {
             display: 'flex',
             alignItems: 'center',
             gap: '12px',
+            background: 'var(--md-sys-color-error-container)',
             borderColor: 'var(--md-sys-color-error)',
           }}
         >
-          <md-icon style={{ color: 'var(--md-sys-color-error)' }}>
+          <md-icon style={{ color: 'var(--md-sys-color-on-error-container)' }}>
             error
           </md-icon>
-          <span style={{ color: 'var(--md-sys-color-error)' }}>{error}</span>
+          <span style={{ color: 'var(--md-sys-color-on-error-container)' }}>
+            {error}
+          </span>
         </div>
       ) : null}
 
       <section
         className="card-outlined form-panel"
-        style={{ alignItems: 'end' }}
+        style={{ alignItems: 'center' }}
       >
         <md-outlined-select
           ref={selectRef}
@@ -272,7 +280,7 @@ export function JobsPage() {
         ) : (
           <md-list>
             {jobs.map((job) => (
-              <md-list-item key={job.id}>
+              <md-list-item key={job.id} type="button">
                 <div slot="headline">{job.title}</div>
                 <div slot="supporting-text">{job.source_id}</div>
                 <div
