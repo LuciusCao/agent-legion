@@ -141,6 +141,34 @@ export type WorkspaceRecord = {
   default_pipeline_key: string
 }
 
+export type PipelineNodeRecord = {
+  key: string
+  runner: 'local' | 'agent'
+  after: string[]
+  inputs: string[]
+  outputs: string[]
+}
+
+export type PipelineDefinitionRecord = {
+  key: string
+  label: string
+  concurrency: {
+    local: number
+    agent: number
+  }
+  nodes: PipelineNodeRecord[]
+}
+
+export type PipelineResponse = {
+  pipeline: PipelineDefinitionRecord
+}
+
+export type JobBatchResponse = {
+  batch: Record<string, unknown>
+  created_count: number
+  jobs: JobRecord[]
+}
+
 export type WorkspacesResponse = {
   workspaces: WorkspaceRecord[]
 }

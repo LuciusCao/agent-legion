@@ -1,4 +1,10 @@
-import type { JobsResponse, WorkspaceRecord, WorkspacesResponse } from './types'
+import type {
+  JobBatchResponse,
+  JobsResponse,
+  PipelineResponse,
+  WorkspaceRecord,
+  WorkspacesResponse,
+} from './types'
 
 export async function fetchPackages(): Promise<
   {
@@ -68,6 +74,28 @@ export async function createWorkspace(name: string): Promise<WorkspaceRecord> {
     body: JSON.stringify({ name }),
   })
   return result.workspace
+}
+
+export async function fetchPipelineDefinition(
+  pipelineKey = 'question_content'
+): Promise<PipelineResponse> {
+  return api(`/api/pipelines/${encodeURIComponent(pipelineKey)}`)
+}
+
+export async function createJobBatch(
+  workspaceId: string,
+  questionIds: string[],
+  pipelineKey = 'question_content'
+): Promise<JobBatchResponse> {
+  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/job-batches`, {
+    method: 'POST',
+    body: JSON.stringify({
+      pipeline_key: pipelineKey,
+      source_kind: 'question_ids',
+      question_ids: questionIds,
+      knowledge_codes: [],
+    }),
+  })
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
