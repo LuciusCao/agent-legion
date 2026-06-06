@@ -86,7 +86,7 @@ export function DashboardPage() {
           isSystem={true}
           jobStats={videoHiveStats}
           agentStatus={videoHiveAgentStatus}
-          onClick={() => navigate('/workspaces/video-hive')}
+          onClick={() => navigate('/video-hive')}
         />
 
         {workspaces.map((w) => (
