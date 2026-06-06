@@ -55,7 +55,7 @@ export function JobsPage() {
   )
 
   function handleWorkspaceChange(nextWorkspaceId: string) {
-    navigate(nextWorkspaceId === 'default' ? '/jobs' : `/workspaces/${nextWorkspaceId}/jobs`)
+    navigate(nextWorkspaceId === 'default' ? '/workspaces' : `/workspaces/${nextWorkspaceId}`)
   }
 
   async function handleCreateWorkspace(event: FormEvent<HTMLFormElement>) {
@@ -70,7 +70,7 @@ export function JobsPage() {
       const workspace = await createWorkspace(name)
       setWorkspaces((current) => [...current, workspace])
       setWorkspaceName('')
-      navigate(`/workspaces/${workspace.id}/jobs`)
+      navigate(`/workspaces/${workspace.id}`)
     } catch {
       setError('创建工作空间失败')
     } finally {

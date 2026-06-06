@@ -1,9 +1,16 @@
 from pathlib import Path
 
 
-def test_job_routes_are_hidden_when_pipelines_disabled(client):
-    response = client.get("/api/jobs")
-    workspaces = client.get("/api/workspaces")
+def test_job_routes_are_hidden_when_pipelines_disabled(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = False
+    with TestClient(app) as c:
+        response = c.get("/api/jobs")
+        workspaces = c.get("/api/workspaces")
 
     assert response.status_code == 404
     assert workspaces.status_code == 404
