@@ -156,14 +156,9 @@ describe('JobsPage', () => {
       nameField.dispatchEvent(new InputEvent('input', { bubbles: true }))
     })
 
-    // Click create button (second md-outlined-button in the dialog)
-    const outlinedButtons = document.querySelectorAll('md-outlined-button')
-    expect(outlinedButtons.length).toBeGreaterThanOrEqual(1)
-    // The create button is inside the dialog; find it by checking which one is in md-dialog
-    const createBtn = Array.from(outlinedButtons).find((btn) =>
-      btn.closest('md-dialog')
-    )
-    expect(createBtn).toBeDefined()
+    // Click create button
+    const createBtn = document.querySelector('md-filled-button')
+    expect(createBtn).not.toBeNull()
     fireEvent.click(createBtn!)
 
     // Verify API was called (handleCreateWorkspace was invoked)

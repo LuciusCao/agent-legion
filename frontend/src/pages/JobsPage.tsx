@@ -243,12 +243,12 @@ export function JobsPage() {
           </div>
           <div slot="actions">
             <md-text-button onClick={handleDialogClose}>取消</md-text-button>
-            <md-outlined-button
+            <md-filled-button
               onClick={handleCreateWorkspace}
               disabled={creating || !workspaceName.trim() || undefined}
             >
               {creating ? '创建中…' : '创建'}
-            </md-outlined-button>
+            </md-filled-button>
           </div>
         </md-dialog>
       )}
