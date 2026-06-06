@@ -130,6 +130,28 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     assert graph_node["after"] == ["solution_decomposition"]
 
 
+def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "question_ids",
+                "question_ids": [" ", ""],
+                "knowledge_codes": [],
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "At least one question_id is required"
+
+
 def test_rerun_node_marks_downstream_stale(tmp_path):
     from fastapi.testclient import TestClient
 
