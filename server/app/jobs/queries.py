@@ -361,6 +361,14 @@ class JobQueries:
             if running is not None:
                 raise ValueError("Cannot delete workspace with running jobs")
             conn.execute(
+                "delete from job_nodes where job_id in (select id from jobs where workspace_id = ?)",
+                (workspace_id,),
+            )
+            conn.execute(
+                "delete from node_runs where job_id in (select id from jobs where workspace_id = ?)",
+                (workspace_id,),
+            )
+            conn.execute(
                 "delete from job_batches where workspace_id = ?",
                 (workspace_id,),
             )
