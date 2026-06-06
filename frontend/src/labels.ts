@@ -64,3 +64,19 @@ export const INTERACTION_REVIEW_STATUS_LABELS: Record<string, string> = {
   partial: '部分通过',
   all_failed: '失败',
 }
+
+export const JOB_STATUS_LABELS: Record<string, string> = {
+  queued: '排队中',
+  running: '处理中',
+  failed: '失败',
+  completed: '已完成',
+  pending: '待处理',
+}
+
+export const JOB_STATUS_ICONS: Record<string, string> = {
+  queued: 'schedule',
+  running: 'sync',
+  failed: 'error',
+  completed: 'check_circle',
+  pending: 'radio_button_unchecked',
+}
