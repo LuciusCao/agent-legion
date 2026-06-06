@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useParams, useNavigate, Routes, Route, useLocation } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { ListPage } from '../pages/ListPage'
 import WorkspaceOverview from '../views/WorkspaceOverview'
 import WorkspaceJobList from '../views/WorkspaceJobList'
 
@@ -113,7 +114,7 @@ export default function WorkspaceLayout() {
         <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
           <Routes>
             <Route path="/" element={<WorkspaceOverview isVideoHive={isVideoHive} />} />
-            <Route path="/jobs" element={<WorkspaceJobList isVideoHive={isVideoHive} />} />
+            <Route path="/jobs" element={isVideoHive ? <ListPage /> : <WorkspaceJobList isVideoHive={isVideoHive} />} />
             <Route
               path="/agents"
               element={
