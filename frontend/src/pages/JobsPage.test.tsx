@@ -137,11 +137,11 @@ describe('JobsPage', () => {
     render(
       <MemoryRouter
         future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
-        initialEntries={['/jobs']}
+        initialEntries={['/workspaces']}
       >
         <Routes>
-          <Route path="/jobs" element={<JobsPage />} />
-          <Route path="/workspaces/:workspaceId/jobs" element={<JobsPage />} />
+          <Route path="/workspaces" element={<JobsPage />} />
+          <Route path="/workspaces/:workspaceId" element={<JobsPage />} />
         </Routes>
       </MemoryRouter>
     )

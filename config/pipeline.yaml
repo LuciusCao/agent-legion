@@ -36,6 +36,11 @@ cms:
 # Playback will fall back to source_url via redirect. Default is false.
 cleanup_video_after_assemble: false
 
+pipelines:
+  # Enables the new workspace/job DAG surface. This is independent from the
+  # existing Video Hive video queue and keeps the old pipeline behavior intact.
+  enabled: true
+
 openclaw:
   cwd: .
   timeout_seconds: 600
