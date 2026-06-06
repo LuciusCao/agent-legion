@@ -1,10 +1,10 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 
-import { JobsPage } from './JobsPage'
+import { WorkspacesPage } from './WorkspacesPage'
 
-describe('JobsPage', () => {
+describe('WorkspacesPage', () => {
   beforeEach(() => {
     vi.restoreAllMocks()
   })
@@ -42,7 +42,7 @@ describe('JobsPage', () => {
 
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <JobsPage />
+        <WorkspacesPage />
       </MemoryRouter>
     )
 
@@ -55,7 +55,7 @@ describe('JobsPage', () => {
       expect.any(Object)
     )
     expect(screen.getByText('Q001')).toBeInTheDocument()
-    expect(screen.getByText('queued')).toBeInTheDocument()
+    expect(screen.getByText('排队中')).toBeInTheDocument()
   })
 
   it('shows disabled message when api returns 404', async () => {
@@ -75,7 +75,7 @@ describe('JobsPage', () => {
 
     render(
       <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-        <JobsPage />
+        <WorkspacesPage />
       </MemoryRouter>
     )
 
@@ -85,7 +85,7 @@ describe('JobsPage', () => {
   })
 
   it('creates a workspace and navigates to it', async () => {
-    vi.spyOn(globalThis, 'fetch')
+    const fetchMock = vi.spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -140,16 +140,31 @@ describe('JobsPage', () => {
         initialEntries={['/workspaces']}
       >
         <Routes>
-          <Route path="/workspaces" element={<JobsPage />} />
-          <Route path="/workspaces/:workspaceId" element={<JobsPage />} />
+          <Route path="/workspaces" element={<WorkspacesPage />} />
+          <Route path="/workspaces/:workspaceId" element={<WorkspacesPage />} />
         </Routes>
       </MemoryRouter>
     )
 
-    fireEvent.change(await screen.findByLabelText('新建工作空间名称'), {
-      target: { value: 'Math Sprint' },
+    // Open create workspace dialog
+    fireEvent.click(await screen.findByText('新建工作空间'))
+
+    // Fill in the name field inside the dialog
+    const nameField = await screen.findByLabelText('名称')
+    await act(async () => {
+      ;(nameField as HTMLInputElement).value = 'Math Sprint'
+      nameField.dispatchEvent(new InputEvent('input', { bubbles: true }))
     })
-    fireEvent.click(screen.getByRole('button', { name: '创建' }))
+
+    // Click create button
+    const createBtn = document.querySelector('md-filled-button')
+    expect(createBtn).not.toBeNull()
+    fireEvent.click(createBtn!)
+
+    // Verify API was called (handleCreateWorkspace was invoked)
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(3)
+    })
 
     await waitFor(() => {
       expect(screen.getByRole('heading', { name: 'Math Sprint' })).toBeInTheDocument()
