@@ -246,7 +246,7 @@ export function JobsPage() {
               aria-label="名称"
               placeholder="例如：初三函数专题"
               value={workspaceName}
-              onInput={(event) =>
+              onInput={(event: React.FormEvent<HTMLElement>) =>
                 setWorkspaceName(
                   (event.target as HTMLInputElement).value
                 )
