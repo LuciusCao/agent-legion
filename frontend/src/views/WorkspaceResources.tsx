@@ -17,7 +17,7 @@ type ResourceForm = {
 }
 
 type ResourcesForm = {
-  questions_by_knowledge: ResourceForm
+  by_knowledge: ResourceForm
   question_detail: ResourceForm
 }
 
@@ -94,14 +94,14 @@ function initialResourceForm(
 
 function resourceFormToConfig(form: ResourcesForm): Record<string, unknown> {
   const resources: Record<string, unknown> = {}
-  if (form.questions_by_knowledge.enabled) {
-    resources.questions_by_knowledge = {
+  if (form.by_knowledge.enabled) {
+    resources.by_knowledge = {
       provider: 'cms.question.list_by_knowledge',
       config: {
-        bank_version: form.questions_by_knowledge.bank_version.trim(),
-        country_id: form.questions_by_knowledge.country_id.trim(),
-        subject_id: form.questions_by_knowledge.subject_id.trim(),
-        page_size: form.questions_by_knowledge.page_size.trim(),
+        bank_version: form.by_knowledge.bank_version.trim(),
+        country_id: form.by_knowledge.country_id.trim(),
+        subject_id: form.by_knowledge.subject_id.trim(),
+        page_size: form.by_knowledge.page_size.trim(),
       },
     }
   }
@@ -148,10 +148,10 @@ function WorkspaceResourcesForm() {
   const resourceConfig = currentWorkspace?.resource_config
   const cmsConfig = currentWorkspace?.cms_config
   const [form, setForm] = useState<ResourcesForm>({
-    questions_by_knowledge: initialResourceForm(
+    by_knowledge: initialResourceForm(
       resourceConfig,
       cmsConfig,
-      'questions_by_knowledge',
+      'by_knowledge',
       'question_list_url',
       { page_size: '50' }
     ),
@@ -255,11 +255,11 @@ function WorkspaceResourcesForm() {
           title="知识点下题目列表"
           provider="cms.question.list_by_knowledge"
           description="从一个知识点 code 展开出待生产的一批题目。"
-          form={form.questions_by_knowledge}
+          form={form.by_knowledge}
           pageSize
-          onToggle={() => toggleResource('questions_by_knowledge')}
+          onToggle={() => toggleResource('by_knowledge')}
           onChange={(field, value) =>
-            updateResourceField('questions_by_knowledge', field, value)
+            updateResourceField('by_knowledge', field, value)
           }
         />
         <ResourceCard
