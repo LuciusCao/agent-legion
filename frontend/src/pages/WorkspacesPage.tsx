@@ -9,7 +9,11 @@ import {
   fetchWorkspaces,
 } from '../api'
 import { JOB_STATUS_ICONS, JOB_STATUS_LABELS } from '../labels'
-import type { JobRecord, PipelineDefinitionRecord, WorkspaceRecord } from '../types'
+import type {
+  JobRecord,
+  PipelineDefinitionRecord,
+  WorkspaceRecord,
+} from '../types'
 
 function getErrorStatus(error: unknown): number | undefined {
   if (error && typeof error === 'object' && 'status' in error) {
@@ -36,7 +40,9 @@ export function WorkspacesPage() {
 
   const [jobs, setJobs] = useState<JobRecord[]>([])
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([])
-  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(null)
+  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(
+    null
+  )
   const [disabled, setDisabled] = useState(false)
   const [error, setError] = useState('')
   const [creating, setCreating] = useState(false)
@@ -147,11 +153,13 @@ export function WorkspacesPage() {
     setError('')
     setSuccessMessage('')
     try {
-      const result = await createJobBatch(
-        selectedWorkspaceId,
-        questionIds,
-        'question_content'
-      )
+      const result = await createJobBatch({
+        workspaceId: selectedWorkspaceId,
+        pipelineKey: 'question_content',
+        sourceKind: 'question_ids',
+        inputField: 'question_ids',
+        values: questionIds,
+      })
       const refreshed = await fetchJobs(selectedWorkspaceId)
       setJobs(refreshed.jobs)
       setQuestionInput('')
@@ -193,9 +201,7 @@ export function WorkspacesPage() {
           >
             factory
           </md-icon>
-          <p style={{ marginTop: '16px', fontSize: '16px' }}>
-            题目工厂未启用
-          </p>
+          <p style={{ marginTop: '16px', fontSize: '16px' }}>题目工厂未启用</p>
         </div>
       </main>
     )
@@ -245,10 +251,7 @@ export function WorkspacesPage() {
             style={{ minWidth: '200px' }}
           >
             {workspaces.map((workspace) => (
-              <md-select-option
-                key={workspace.id}
-                value={workspace.id}
-              >
+              <md-select-option key={workspace.id} value={workspace.id}>
                 <div slot="headline">{workspace.name}</div>
               </md-select-option>
             ))}
@@ -282,17 +285,37 @@ export function WorkspacesPage() {
       ) : null}
 
       {successMessage ? (
-        <div className="card-outlined" style={{ marginTop: '16px', padding: '16px' }}>
+        <div
+          className="card-outlined"
+          style={{ marginTop: '16px', padding: '16px' }}
+        >
           {successMessage}
         </div>
       ) : null}
 
-      <section className="card-outlined" style={{ marginTop: '16px', padding: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', gap: '16px', flexWrap: 'wrap' }}>
+      <section
+        className="card-outlined"
+        style={{ marginTop: '16px', padding: '16px' }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            gap: '16px',
+            flexWrap: 'wrap',
+          }}
+        >
           <div>
             <p className="phase-name">DAG 模板</p>
-            <h2 style={{ fontSize: '18px' }}>{pipeline?.label ?? '题目内容生成'}</h2>
-            <p style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: '4px' }}>
+            <h2 style={{ fontSize: '18px' }}>
+              {pipeline?.label ?? '题目内容生成'}
+            </h2>
+            <p
+              style={{
+                color: 'var(--md-sys-color-on-surface-variant)',
+                marginTop: '4px',
+              }}
+            >
               {pipeline
                 ? `${pipeline.nodes.length} 个节点 · local ${pipeline.concurrency.local} · agent ${pipeline.concurrency.agent}`
                 : '加载中'}
@@ -302,9 +325,19 @@ export function WorkspacesPage() {
         </div>
 
         {pipeline ? (
-          <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginTop: '12px' }}>
+          <div
+            style={{
+              display: 'flex',
+              gap: '8px',
+              flexWrap: 'wrap',
+              marginTop: '12px',
+            }}
+          >
             {pipeline.nodes.map((node) => (
-              <md-assist-chip key={node.key} label={`${node.key} · ${node.runner}`} />
+              <md-assist-chip
+                key={node.key}
+                label={`${node.key} · ${node.runner}`}
+              />
             ))}
           </div>
         ) : null}
@@ -321,13 +354,25 @@ export function WorkspacesPage() {
               setQuestionInput((event.target as HTMLTextAreaElement).value)
             }
           />
-          <div style={{ display: 'flex', justifyContent: 'space-between', gap: '12px', flexWrap: 'wrap' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              gap: '12px',
+              flexWrap: 'wrap',
+            }}
+          >
             <span style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-              将在当前工作空间创建 {parseQuestionIds(questionInput).length} 个生产任务
+              将在当前工作空间创建 {parseQuestionIds(questionInput).length}{' '}
+              个生产任务
             </span>
             <md-filled-button
               onClick={handleCreateBatch}
-              disabled={creatingBatch || parseQuestionIds(questionInput).length === 0 || undefined}
+              disabled={
+                creatingBatch ||
+                parseQuestionIds(questionInput).length === 0 ||
+                undefined
+              }
             >
               {creatingBatch ? '创建中…' : '创建生产任务'}
             </md-filled-button>
@@ -353,9 +398,7 @@ export function WorkspacesPage() {
               placeholder="例如：初三函数专题"
               value={workspaceName}
               onInput={(event: React.FormEvent<HTMLElement>) =>
-                setWorkspaceName(
-                  (event.target as HTMLInputElement).value
-                )
+                setWorkspaceName((event.target as HTMLInputElement).value)
               }
               style={{ width: '100%', minWidth: '320px' }}
             />

@@ -183,6 +183,50 @@ export type JobBatchResponse = {
   jobs: JobRecord[]
 }
 
+export type JobNodeRecord = {
+  id: number
+  job_id: string
+  node_key: string
+  status: string
+  stale_reason?: string
+  error_message?: string
+  started_at?: string | null
+  finished_at?: string | null
+}
+
+export type NodeRunRecord = {
+  id: number
+  job_id: string
+  node_key: string
+  status: string
+  command_json: string
+  exit_code: number | null
+  log_path: string
+  error_message: string
+  started_at: string
+  finished_at: string | null
+}
+
+export type JobDetailResponse = {
+  job: JobRecord
+  nodes: JobNodeRecord[]
+  runs: NodeRunRecord[]
+  artifacts: string[]
+}
+
+export type ArtifactResponse = {
+  name: string
+  content: string
+}
+
+export type CreateJobBatchInput = {
+  workspaceId: string
+  pipelineKey?: string
+  sourceKind: string
+  inputField: 'question_ids' | 'knowledge_codes'
+  values: string[]
+}
+
 export type WorkspacesResponse = {
   workspaces: WorkspaceRecord[]
 }
