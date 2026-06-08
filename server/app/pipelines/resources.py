@@ -8,7 +8,7 @@ RESOURCE_PROVIDERS = {
         "provider": "cms.question.detail",
         "url_key": "question_detail_url",
     },
-    "questions_by_knowledge": {
+    "by_knowledge": {
         "provider": "cms.question.list_by_knowledge",
         "url_key": "question_list_url",
     },
@@ -32,7 +32,7 @@ def _resource_config_from_legacy_cms(cms_config: dict[str, Any]) -> dict[str, An
             },
         }
     if cms_config.get("question_list_url"):
-        resources["questions_by_knowledge"] = {
+        resources["by_knowledge"] = {
             "provider": "cms.question.list_by_knowledge",
             "config": {
                 "api_url": cms_config["question_list_url"],

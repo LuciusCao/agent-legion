@@ -305,7 +305,7 @@ def test_update_workspace_resource_config(tmp_path):
                                 "subject_id": "5",
                             },
                         },
-                        "questions_by_knowledge": {
+                        "by_knowledge": {
                             "provider": "cms.question.list_by_knowledge",
                             "config": {
                                 "api_url": "https://cms.example/question/list",
@@ -321,7 +321,7 @@ def test_update_workspace_resource_config(tmp_path):
     resources = response.json()["workspace"]["resource_config"]["resources"]
     assert resources["question_detail"]["provider"] == "cms.question.detail"
     assert resources["question_detail"]["config"]["subject_id"] == "5"
-    assert resources["questions_by_knowledge"]["config"]["page_size"] == 50
+    assert resources["by_knowledge"]["config"]["page_size"] == 50
 
 
 def test_get_job_detail_and_artifact_when_enabled(tmp_path):
@@ -705,3 +705,181 @@ def test_update_workspace_persists_default_entity_and_intake_config(tmp_path):
     assert workspace["intake_config"] == {"max_batch_size": 50}
     assert fetched["default_entity"] == "knowledge"
     assert fetched["intake_config"] == {"max_batch_size": 50}
+
+
+def test_create_workspace_with_intake_config(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/workspaces",
+            json={
+                "name": "Intake WS",
+                "default_entity": "knowledge",
+                "intake_config": {"allowed_entities": ["question", "knowledge"]},
+            },
+        )
+
+    assert response.status_code == 200
+    workspace = response.json()["workspace"]
+    assert workspace["default_entity"] == "knowledge"
+    assert workspace["intake_config"] == {"allowed_entities": ["question", "knowledge"]}
+
+
+def test_update_workspace_intake_config(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        created = c.post("/api/workspaces", json={"name": "Update Intake"}).json()
+        workspace_id = created["workspace"]["id"]
+        response = c.patch(
+            f"/api/workspaces/{workspace_id}",
+            json={
+                "default_entity": "knowledge",
+                "intake_config": {"max_batch_size": 50},
+            },
+        )
+        fetched = c.get(f"/api/workspaces/{workspace_id}")
+
+    assert response.status_code == 200
+    workspace = response.json()["workspace"]
+    assert workspace["default_entity"] == "knowledge"
+    assert workspace["intake_config"] == {"max_batch_size": 50}
+    assert fetched.json()["workspace"]["default_entity"] == "knowledge"
+    assert fetched.json()["workspace"]["intake_config"] == {"max_batch_size": 50}
+
+
+def test_batch_with_entity_question(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "entity": "question",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q001", "Q002"],
+                "knowledge_codes": [],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created_count"] == 2
+    assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
+    assert [job["source_id"] for job in body["jobs"]] == ["Q001", "Q002"]
+    payload = json.loads(body["batch"]["source_payload_json"])
+    assert payload["entity"] == "question"
+    assert payload["question_ids"] == ["Q001", "Q002"]
+
+
+def test_batch_unsupported_entity_mode(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "entity": "knowledge",
+                "source_kind": "direct_ids",
+                "question_ids": ["K001"],
+                "knowledge_codes": [],
+            },
+        )
+
+    assert response.status_code == 400
+    assert "Unsupported entity and intake mode combination" in response.json()["detail"]
+
+
+def test_batch_video_resolver_not_implemented(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "entity": "video",
+                "source_kind": "by_knowledge",
+                "question_ids": [],
+                "knowledge_codes": ["K001"],
+            },
+        )
+
+    assert response.status_code == 501
+    assert "video resolver not yet implemented" in response.json()["detail"]
+
+
+def test_batch_with_entity_video_direct_ids(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "entity": "video",
+                "source_kind": "direct_ids",
+                "question_ids": ["v1", "v2"],
+                "knowledge_codes": [],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created_count"] == 2
+    assert [job["source_type"] for job in body["jobs"]] == ["video", "video"]
+    assert [job["source_id"] for job in body["jobs"]] == ["v1", "v2"]
+    assert [job["title"] for job in body["jobs"]] == ["Video v1", "Video v2"]
+    payload = json.loads(body["batch"]["source_payload_json"])
+    assert payload["entity"] == "video"
+    assert payload["question_ids"] == ["v1", "v2"]
+    assert [c["entity_id"] for c in payload["task_candidates"]] == ["v1", "v2"]
+    assert [c["entity_type"] for c in payload["task_candidates"]] == ["video", "video"]
+
+
+def test_pipeline_response_no_task_entity(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.get("/api/pipelines/question_content")
+
+    assert response.status_code == 200
+    body = response.json()
+    for mode in body["pipeline"]["intake"]["modes"]:
+        assert "task_entity" not in mode
+        assert "resolver" not in mode
+        assert "key" in mode
+        assert "label" in mode
+        assert "input_field" in mode
+        assert "resource" in mode
