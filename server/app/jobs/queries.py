@@ -87,7 +87,7 @@ class JobQueries:
             ensure_ascii=False,
             sort_keys=True,
         )
-        default_entity = (default_entity or "question").strip() or "question"
+        clean_entity = (default_entity or "question").strip() or "question"
         intake_config_json = json.dumps(intake_config or {}, ensure_ascii=False, sort_keys=True)
 
         base_id = _workspace_id(clean_name)
@@ -112,7 +112,7 @@ class JobQueries:
                     default_pipeline_key,
                     cms_config_json,
                     resource_config_json,
-                    default_entity,
+                    clean_entity,
                     intake_config_json,
                 ),
             )

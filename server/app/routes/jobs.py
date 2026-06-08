@@ -15,6 +15,13 @@ from server.app.pipelines.resources import resolve_cms_resource
 from server.app.pipelines.scheduler import downstream_nodes
 from server.app.settings import Settings
 
+RESOLVER_MAP: dict[tuple[str, str], str] = {
+    ("question", "direct_ids"): "direct.question_ids",
+    ("question", "by_knowledge"): "cms.questions_by_knowledge",
+    ("video", "direct_ids"): "direct.video_ids",
+    ("video", "by_knowledge"): "cms.videos_by_knowledge",
+}
+
 
 def _candidate(
     entity_type: str,
@@ -33,6 +40,7 @@ def _candidate(
 
 class JobBatchRequest(BaseModel):
     pipeline_key: str = "question_content"
+    entity: str = "question"
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
     knowledge_codes: list[str] = Field(default_factory=list)
@@ -55,15 +63,19 @@ class PipelineResponse(BaseModel):
 class WorkspaceCreateRequest(BaseModel):
     name: str
     default_pipeline_key: str = "question_content"
+    default_entity: str = "question"
     cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)
+    intake_config: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkspaceUpdateRequest(BaseModel):
     name: str | None = None
     default_pipeline_key: str | None = None
+    default_entity: str | None = None
     cms_config: dict[str, Any] | None = None
     resource_config: dict[str, Any] | None = None
+    intake_config: dict[str, Any] | None = None
 
 
 class WorkspaceResponse(BaseModel):
@@ -238,20 +250,32 @@ def create_jobs_router(
                 detail=f"At least one {_singular_field_name(mode.input_field)} is required",
             )
 
+        entity = (payload.entity or "question").strip() or "question"
+        resolver = RESOLVER_MAP.get((entity, mode.key))
+        if resolver is None:
+            raise HTTPException(
+                status_code=400,
+                detail="Unsupported entity and intake mode combination",
+            )
+
         candidates: list[dict[str, Any]] = []
-        entity_type = "question"
-        if not mode.resource:
+        if resolver.startswith("direct."):
             candidates = [
                 _candidate(
-                    entity_type,
+                    entity,
                     value,
-                    f"Question {value}",
+                    f"{entity.title()} {value}",
                     payload.source_kind,
                     value,
                 )
                 for value in input_values
             ]
-        else:
+        elif resolver.startswith("cms."):
+            if entity != "question":
+                raise HTTPException(
+                    status_code=501,
+                    detail=f"{entity} resolver not yet implemented",
+                )
             list_resource = resolve_cms_resource(
                 settings.config,
                 workspace,
@@ -272,28 +296,34 @@ def create_jobs_router(
                     seen_question_ids.add(summary.question_id)
                     candidates.append(
                         _candidate(
-                            entity_type,
+                            entity,
                             summary.question_id,
                             summary.title or f"Question {summary.question_id}",
                             "knowledge_code",
                             knowledge_code,
                         )
                     )
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported resolver: {resolver}")
 
         if not candidates:
             raise HTTPException(status_code=400, detail="No tasks were resolved from input")
 
-        question_ids = [
-            candidate["entity_id"]
-            for candidate in candidates
-            if candidate["entity_type"] == "question"
-        ]
+        if mode.input_field == "question_ids":
+            resolved_ids = input_values
+        elif mode.input_field == "knowledge_codes":
+            resolved_ids = [
+                candidate["entity_id"]
+                for candidate in candidates
+                if candidate["entity_type"] == entity
+            ]
+        else:
+            resolved_ids = []
+
         knowledge_codes = input_values if mode.input_field == "knowledge_codes" else []
         source_payload = payload.model_dump()
-        source_payload["question_ids"] = question_ids
-        source_payload["knowledge_codes"] = (
-            knowledge_codes if mode.input_field == "knowledge_codes" else []
-        )
+        source_payload["question_ids"] = resolved_ids
+        source_payload["knowledge_codes"] = knowledge_codes
         source_payload["cms_config"] = cms_config
         source_payload["resource_config"] = resource_config
         source_payload["intake_mode"] = {
@@ -344,8 +374,10 @@ def create_jobs_router(
             workspace = job_db.create_workspace(
                 payload.name,
                 default_pipeline_key=payload.default_pipeline_key,
+                default_entity=payload.default_entity,
                 cms_config=payload.cms_config,
                 resource_config=payload.resource_config,
+                intake_config=payload.intake_config,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -370,8 +402,10 @@ def create_jobs_router(
                 workspace_id,
                 name=payload.name,
                 default_pipeline_key=payload.default_pipeline_key,
+                default_entity=payload.default_entity,
                 cms_config=payload.cms_config,
                 resource_config=payload.resource_config,
+                intake_config=payload.intake_config,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
