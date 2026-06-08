@@ -39,11 +39,15 @@ export async function updatePackage(
 }
 
 export async function fetchJobs(
-  workspaceId = 'default'
+  workspaceId: string,
+  pipelineKey?: string
 ): Promise<JobsResponse> {
+  const params = new URLSearchParams()
+  if (pipelineKey) params.set('pipeline_key', pipelineKey)
+  const query = params.toString()
   try {
     return await api(
-      `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs?pipeline_key=question_content`
+      `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs${query ? `?${query}` : ''}`
     )
   } catch (error) {
     const status =
@@ -137,12 +141,14 @@ export async function createJobBatch(
   const {
     workspaceId,
     pipelineKey = 'question_content',
+    entity = 'question',
     sourceKind,
     inputField,
     values,
   } = input
   const body: Record<string, unknown> = {
     pipeline_key: pipelineKey,
+    entity,
     source_kind: sourceKind,
   }
   body[inputField] = values

@@ -148,7 +148,9 @@ describe('workspace api', () => {
     )
 
     expect(workspace.default_entity).toBe('knowledge')
-    expect(workspace.intake_config).toEqual({ enabled_modes: ['manual', 'cms'] })
+    expect(workspace.intake_config).toEqual({
+      enabled_modes: ['manual', 'cms'],
+    })
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces',
       expect.objectContaining({
@@ -192,6 +194,7 @@ describe('createJobBatch', () => {
         method: 'POST',
         body: JSON.stringify({
           pipeline_key: 'question_content',
+          entity: 'question',
           source_kind: 'question_ids',
           question_ids: ['q1', 'q2'],
           knowledge_codes: [],
@@ -225,6 +228,7 @@ describe('createJobBatch', () => {
         method: 'POST',
         body: JSON.stringify({
           pipeline_key: 'question_content',
+          entity: 'question',
           source_kind: 'knowledge_codes',
           knowledge_codes: ['k1'],
           question_ids: [],

@@ -1,10 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
 import { createJobBatch, fetchJobs, fetchPipelineDefinition } from '../api'
-import type { JobRecord, PipelineDefinitionRecord } from '../types'
+import type {
+  JobRecord,
+  PipelineDefinitionRecord,
+  PipelineIntakeModeRecord,
+} from '../types'
 
 function parseBatchInput(value: string): string[] {
   return Array.from(
@@ -26,7 +30,9 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const { currentWorkspace } = useWorkspaceStore()
   const { videos, fetchVideos } = useVideoStore()
 
-  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(null)
+  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(
+    null
+  )
   const [jobs, setJobs] = useState<JobRecord[]>([])
   const [selectedModeKey, setSelectedModeKey] = useState('')
   const [inputValue, setInputValue] = useState('')
@@ -35,7 +41,27 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const [submitting, setSubmitting] = useState(false)
 
   const workspaceId = currentWorkspace?.id
-  const pipelineKey = currentWorkspace?.default_pipeline_key || 'question_content'
+  const pipelineKey =
+    currentWorkspace?.default_pipeline_key || 'question_content'
+
+  const intakeConfig = currentWorkspace?.intake_config
+  const enabledModeKeys = useMemo(
+    () => new Set(intakeConfig?.enabled_modes || []),
+    [intakeConfig?.enabled_modes]
+  )
+
+  const effectiveModes = useMemo(() => {
+    const modes = pipeline?.intake?.modes || []
+    if (enabledModeKeys.size === 0) {
+      return modes
+    }
+    return modes.filter((mode) => enabledModeKeys.has(mode.key))
+  }, [pipeline?.intake?.modes, enabledModeKeys])
+
+  function effectiveLabel(mode: PipelineIntakeModeRecord): string {
+    const override = intakeConfig?.label_overrides?.[mode.key]
+    return override || mode.label
+  }
 
   useVideoEvents(isVideoHive)
 
@@ -55,31 +81,41 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
         .then((result) => {
           if (cancelled) return
           setPipeline(result.pipeline)
-          setSelectedModeKey(result.pipeline.intake?.modes[0]?.key || '')
+          const modes = result.pipeline.intake?.modes || []
+          const enabledKeys = new Set(intakeConfig?.enabled_modes || [])
+          const availableModes =
+            enabledKeys.size === 0
+              ? modes
+              : modes.filter((mode) => enabledKeys.has(mode.key))
+          setSelectedModeKey(availableModes[0]?.key || '')
         })
         .catch((err) => {
           if (cancelled) return
           setError(err instanceof Error ? err.message : String(err))
         })
 
-      fetchJobs(workspaceId)
+      fetchJobs(workspaceId, pipelineKey)
         .then((result) => {
           if (cancelled) return
           setJobs(result.jobs)
         })
         .catch((err) => {
           if (cancelled) return
-          setError((prev) => prev || (err instanceof Error ? err.message : String(err)))
+          setError(
+            (prev) => prev || (err instanceof Error ? err.message : String(err))
+          )
         })
 
       return () => {
         cancelled = true
       }
     }
-  }, [isVideoHive, workspaceId, pipelineKey])
+  }, [isVideoHive, workspaceId, pipelineKey, intakeConfig])
 
   async function handleCreateBatch() {
-    const selectedMode = pipeline?.intake?.modes.find((mode) => mode.key === selectedModeKey)
+    const selectedMode = effectiveModes.find(
+      (mode) => mode.key === selectedModeKey
+    )
     const values = parseBatchInput(inputValue)
     if (!selectedMode || values.length === 0 || !workspaceId) {
       setMessage('')
@@ -93,6 +129,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       const result = await createJobBatch({
         workspaceId,
         pipelineKey,
+        entity: currentWorkspace?.default_entity || 'question',
         sourceKind: selectedMode.key,
         inputField: selectedMode.input_field,
         values,
@@ -101,7 +138,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       setMessage(`已创建 ${result.created_count} 个题目任务`)
       setInputValue('')
       try {
-        const refreshed = await fetchJobs(workspaceId)
+        const refreshed = await fetchJobs(workspaceId, pipelineKey)
         setJobs(refreshed.jobs)
       } catch (refreshErr) {
         // refresh failure should not erase success message
@@ -120,7 +157,9 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       <div>
         <h3>视频队列</h3>
         {videos.length === 0 ? (
-          <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>暂无视频</p>
+          <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+            暂无视频
+          </p>
         ) : (
           <md-list>
             {videos.map((video) => (
@@ -141,27 +180,39 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
     )
   }
 
+  const selectedMode = effectiveModes.find(
+    (mode) => mode.key === selectedModeKey
+  )
+  const selectedLabel = selectedMode ? effectiveLabel(selectedMode) : '输入'
+
   return (
     <div>
       <section className="card-outlined workspace-job-create">
-        <h3>{pipeline?.label || currentWorkspace?.name || '题目生产'}</h3>
+        <h3>
+          {pipeline?.label || currentWorkspace?.name || '题目生产'}
+          {currentWorkspace?.default_entity
+            ? ` · ${currentWorkspace.default_entity}`
+            : ''}
+        </h3>
         <div className="intake-chip-row">
-          {pipeline?.intake?.modes.map((mode) => (
+          {effectiveModes.map((mode) => (
             <md-filter-chip
               key={mode.key}
-              label={mode.label}
+              label={effectiveLabel(mode)}
               selected={selectedModeKey === mode.key}
               onClick={() => setSelectedModeKey(mode.key)}
             />
           ))}
         </div>
         <md-outlined-text-field
-          label={pipeline?.intake?.modes.find((mode) => mode.key === selectedModeKey)?.label || '输入'}
-          aria-label={pipeline?.intake?.modes.find((mode) => mode.key === selectedModeKey)?.label || '输入'}
+          label={selectedLabel}
+          aria-label={selectedLabel}
           type="textarea"
           rows={5}
           value={inputValue}
-          onInput={(event: Event) => setInputValue((event.target as HTMLInputElement).value)}
+          onInput={(event: Event) =>
+            setInputValue((event.target as HTMLInputElement).value)
+          }
         />
         <md-filled-button disabled={submitting} onClick={handleCreateBatch}>
           创建任务
@@ -177,11 +228,15 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
             <md-list-item
               key={job.id}
               type="button"
-              onClick={() => navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)}
+              onClick={() =>
+                navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)
+              }
             >
               <div slot="headline">{job.title}</div>
               <div slot="supporting-text">{job.source_id}</div>
-              <span slot="end" className={`status-badge ${job.status}`}>{job.status}</span>
+              <span slot="end" className={`status-badge ${job.status}`}>
+                {job.status}
+              </span>
             </md-list-item>
           ))}
         </md-list>

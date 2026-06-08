@@ -52,7 +52,9 @@ describe('WorkspacesPage', () => {
       } as Response)
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <WorkspacesPage />
       </MemoryRouter>
     )
@@ -60,7 +62,10 @@ describe('WorkspacesPage', () => {
     await waitFor(() => {
       expect(screen.getByText('Question Q001')).toBeInTheDocument()
     })
-    expect(fetchMock).toHaveBeenCalledWith('/api/workspaces', expect.any(Object))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces',
+      expect.any(Object)
+    )
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces/default/jobs?pipeline_key=question_content',
       expect.any(Object)
@@ -85,7 +90,9 @@ describe('WorkspacesPage', () => {
       } as Response)
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <WorkspacesPage />
       </MemoryRouter>
     )
@@ -102,7 +109,11 @@ describe('WorkspacesPage', () => {
         ok: true,
         json: async () => ({
           workspaces: [
-            { id: 'default', name: '默认工作空间', default_pipeline_key: 'question_content' },
+            {
+              id: 'default',
+              name: '默认工作空间',
+              default_pipeline_key: 'question_content',
+            },
           ],
         }),
       } as Response)
@@ -118,8 +129,20 @@ describe('WorkspacesPage', () => {
             label: '题目内容生成',
             concurrency: { local: 8, agent: 2 },
             nodes: [
-              { key: 'fetch_question_context', runner: 'local', after: [], inputs: [], outputs: ['question_context.json'] },
-              { key: 'assemble_package', runner: 'local', after: ['fetch_question_context'], inputs: ['question_context.json'], outputs: ['upload_params.json'] },
+              {
+                key: 'fetch_question_context',
+                runner: 'local',
+                after: [],
+                inputs: [],
+                outputs: ['question_context.json'],
+              },
+              {
+                key: 'assemble_package',
+                runner: 'local',
+                after: ['fetch_question_context'],
+                inputs: ['question_context.json'],
+                outputs: ['upload_params.json'],
+              },
             ],
           },
         }),
@@ -174,7 +197,9 @@ describe('WorkspacesPage', () => {
       } as Response)
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <WorkspacesPage />
       </MemoryRouter>
     )
@@ -193,6 +218,7 @@ describe('WorkspacesPage', () => {
           method: 'POST',
           body: JSON.stringify({
             pipeline_key: 'question_content',
+            entity: 'question',
             source_kind: 'question_ids',
             question_ids: ['Q001', 'Q002'],
             knowledge_codes: [],
@@ -211,7 +237,11 @@ describe('WorkspacesPage', () => {
         ok: true,
         json: async () => ({
           workspaces: [
-            { id: 'default', name: '默认工作空间', default_pipeline_key: 'question_content' },
+            {
+              id: 'default',
+              name: '默认工作空间',
+              default_pipeline_key: 'question_content',
+            },
           ],
         }),
       } as Response)
@@ -232,7 +262,9 @@ describe('WorkspacesPage', () => {
       } as Response)
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <WorkspacesPage />
       </MemoryRouter>
     )
@@ -247,7 +279,8 @@ describe('WorkspacesPage', () => {
   })
 
   it('creates a workspace and navigates to it', async () => {
-    const fetchMock = vi.spyOn(globalThis, 'fetch')
+    const fetchMock = vi
+      .spyOn(globalThis, 'fetch')
       .mockResolvedValueOnce({
         ok: true,
         json: async () => ({
@@ -350,7 +383,9 @@ describe('WorkspacesPage', () => {
     })
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Math Sprint' })).toBeInTheDocument()
+      expect(
+        screen.getByRole('heading', { name: 'Math Sprint' })
+      ).toBeInTheDocument()
     })
   })
 })
