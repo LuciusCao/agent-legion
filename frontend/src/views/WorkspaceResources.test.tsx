@@ -88,7 +88,7 @@ describe('WorkspaceResources', () => {
       },
       resource_config: {
         resources: {
-          questions_by_knowledge: {
+          by_knowledge: {
             provider: 'cms.question.list_by_knowledge',
             config: {
               bank_version: 'v5',
@@ -101,7 +101,7 @@ describe('WorkspaceResources', () => {
       ...workspace,
       resource_config: {
         resources: {
-          questions_by_knowledge: {
+          by_knowledge: {
             provider: 'cms.question.list_by_knowledge',
             config: { bank_version: 'v5' },
           },
@@ -132,7 +132,7 @@ describe('WorkspaceResources', () => {
       expect(updateWorkspace).toHaveBeenCalledWith('math', {
         resource_config: {
           resources: {
-            questions_by_knowledge: {
+            by_knowledge: {
               provider: 'cms.question.list_by_knowledge',
               config: {
                 bank_version: 'v5',
