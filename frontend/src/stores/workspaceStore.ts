@@ -22,8 +22,10 @@ type WorkspaceState = {
     fields: {
       name?: string
       default_pipeline_key?: string
+      default_entity?: string
       cms_config?: Record<string, unknown>
       resource_config?: Record<string, unknown>
+      intake_config?: Record<string, unknown>
     }
   ) => Promise<WorkspaceRecord>
   deleteWorkspace: (id: string) => Promise<void>
@@ -64,7 +66,8 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
       const ws = await apiUpdateWorkspace(id, fields)
       set((s) => ({
         workspaces: s.workspaces.map((item) => (item.id === id ? ws : item)),
-        currentWorkspace: s.currentWorkspace?.id === id ? ws : s.currentWorkspace,
+        currentWorkspace:
+          s.currentWorkspace?.id === id ? ws : s.currentWorkspace,
         error: null,
       }))
       return ws
