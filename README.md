@@ -160,11 +160,12 @@ Useful endpoints (video pipeline):
 
 Agent Legion pipeline (workspace / job) endpoints:
 
-- `GET /api/pipelines/{pipeline_key}` — pipeline definition metadata
+- `GET /api/pipelines/{pipeline_key}` — pipeline definition metadata (includes `intake.modes` without `task_entity` / `resolver`)
 - `GET /api/workspaces` — list workspaces
-- `POST /api/workspaces` — create workspace
-- `GET /api/workspaces/{workspace_id}` — get workspace
-- `POST /api/workspaces/{workspace_id}/job-batches` — create a batch of jobs
+- `POST /api/workspaces` — create workspace (supports `default_entity` and `intake_config`)
+- `GET /api/workspaces/{workspace_id}` — get workspace (returns `default_entity` and `intake_config`)
+- `PATCH /api/workspaces/{workspace_id}` — update workspace (supports `default_entity` and `intake_config`)
+- `POST /api/workspaces/{workspace_id}/job-batches` — create a batch of jobs (supports `entity`; defaults to workspace `default_entity`)
 - `GET /api/workspaces/{workspace_id}/jobs` — list jobs in workspace
 - `GET /api/jobs/{job_id}` — job detail with nodes, runs, artifacts
 - `GET /api/jobs/{job_id}/artifacts/{artifact_name}` — read job artifact

@@ -328,7 +328,7 @@ To install the optional local pre-commit hook that runs the quick gate before ea
 - A global `Toast` component displays feedback messages (e.g., "该资源正在被处理中").
 - A **删除** button in the toolbar prompts for confirmation (`DeleteDialog` / `BatchDeleteDialog`) before calling `DELETE /api/videos/{video_id}` and clearing the selection.
 - **Batch operations**: select multiple videos in the list to batch rerun, batch delete, or batch package.
-- **Workspaces page** (`WorkspacesPage`): workspace selector, job batch creation, and job list for the Agent Legion pipeline.
+- **Workspaces page** (`WorkspacesPage`): workspace selector, job batch creation, and job list for the Agent Legion pipeline. The workspace resources page (`WorkspaceResources`) allows configuring resource bindings, selecting the default entity (`question` / `video`), enabling/disabling intake modes, and overriding mode labels.
 
 ### Frontend Tooling
 
@@ -343,7 +343,7 @@ To install the optional local pre-commit hook that runs the quick gate before ea
   - `phase_runs` — per-phase execution history for video pipeline
   - `transcription_runs` — transcription attempt history (whisper / SenseVoice)
   - `packages` — created package paths
-  - `workspaces` — Agent Legion workspace definitions
+  - `workspaces` — Agent Legion workspace definitions. Columns include `default_pipeline_key`, `cms_config_json`, `resource_config_json`, `default_entity` (default `'question'`), `intake_config_json`.
   - `job_batches` — batches of jobs created within a workspace
   - `jobs` — Agent Legion job entries with `pipeline_key`, `workspace_id`, `source_type`, `source_id`, `status`, `storage_dir`
   - `job_nodes` — per-job node execution status (`pending`, `running`, `completed`, `failed`, `stale`)
@@ -374,6 +374,7 @@ Pipeline definitions live in `config/pipelines/` (e.g., `question_content.yaml`)
 - `key` and `label`
 - `concurrency` (`local`, `agent`) — runner pool limits
 - `nodes` — DAG nodes with `runner` (`local` or `agent`), `after` (dependencies), `inputs`, and `outputs`
+- `intake` — optional intake configuration with `modes` mapping. Each mode has `label`, `input_field`, and optional `resource` (for CMS resolver lookups). The backend resolves `(entity, mode_key)` to a resolver at runtime via `RESOLVER_MAP`.
 
 In `auto` ASR mode, the pipeline tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
 
