@@ -19,6 +19,7 @@ export default function WorkspaceJobDetail() {
   const [artifactContent, setArtifactContent] = useState('')
   const [error, setError] = useState('')
   const mounted = useRef(true)
+  const artifactRequestId = useRef(0)
 
   useEffect(() => {
     return () => {
@@ -46,20 +47,26 @@ export default function WorkspaceJobDetail() {
 
   async function openArtifact(name: string) {
     if (!jobId) return
+    const requestId = ++artifactRequestId.current
     setArtifactName(name)
     setArtifactContent('')
     setError('')
     try {
       const artifact = await fetchJobArtifact(jobId, name)
-      if (!mounted.current) return
+      if (requestId !== artifactRequestId.current) return
       setArtifactContent(artifact.content)
     } catch (err) {
-      if (!mounted.current) return
+      if (requestId !== artifactRequestId.current) return
       setError(err instanceof Error ? err.message : String(err))
     }
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setDetail(null)
+    setArtifactName('')
+    setArtifactContent('')
+    setError('')
     if (!jobId) return
     let stale = false
     fetchJobDetail(jobId)
