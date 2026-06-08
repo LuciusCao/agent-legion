@@ -139,8 +139,13 @@ export type WorkspaceRecord = {
   id: string
   name: string
   default_pipeline_key: string
+  default_entity: string
   cms_config?: Record<string, unknown>
   resource_config?: Record<string, unknown>
+  intake_config?: {
+    enabled_modes?: string[]
+    label_overrides?: Record<string, string>
+  }
 }
 
 export type PipelineNodeRecord = {
@@ -154,8 +159,6 @@ export type PipelineNodeRecord = {
 export type PipelineIntakeModeRecord = {
   key: string
   label: string
-  resolver: string
-  task_entity: string
   input_field: string
   resource: string
 }
