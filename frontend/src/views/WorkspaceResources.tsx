@@ -1,6 +1,8 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { fetchPipelineDefinition } from '../api'
+import type { PipelineDefinitionRecord } from '../types'
 
 type Props = {
   isVideoHive: boolean
@@ -19,7 +21,16 @@ type ResourcesForm = {
   question_detail: ResourceForm
 }
 
-function valueFromConfig(config: Record<string, unknown> | undefined, key: string) {
+type IntakeConfigForm = {
+  defaultEntity: string
+  enabledModes: string[]
+  labelOverrides: Record<string, string>
+}
+
+function valueFromConfig(
+  config: Record<string, unknown> | undefined,
+  key: string
+) {
   const value = config?.[key]
   return typeof value === 'string' ? value : ''
 }
@@ -38,12 +49,15 @@ function resourceBindingConfig(
     : {}
 }
 
-function hasResourceBinding(config: Record<string, unknown> | undefined, key: string) {
+function hasResourceBinding(
+  config: Record<string, unknown> | undefined,
+  key: string
+) {
   const resources = config?.resources
   return Boolean(
     resources &&
-      typeof resources === 'object' &&
-      (resources as Record<string, unknown>)[key]
+    typeof resources === 'object' &&
+    (resources as Record<string, unknown>)[key]
   )
 }
 
@@ -56,12 +70,52 @@ function initialResourceForm(
 ): ResourceForm {
   const config = resourceBindingConfig(resourceConfig, resourceKey)
   return {
-    enabled: hasResourceBinding(resourceConfig, resourceKey) || Boolean(valueFromConfig(cmsConfig, legacyUrlKey)),
-    bank_version: valueFromConfig(config, 'bank_version') || valueFromConfig(cmsConfig, 'bank_version') || defaults.bank_version || '',
-    country_id: valueFromConfig(config, 'country_id') || valueFromConfig(cmsConfig, 'country_id') || defaults.country_id || '',
-    subject_id: valueFromConfig(config, 'subject_id') || valueFromConfig(cmsConfig, 'subject_id') || defaults.subject_id || '',
+    enabled:
+      hasResourceBinding(resourceConfig, resourceKey) ||
+      Boolean(valueFromConfig(cmsConfig, legacyUrlKey)),
+    bank_version:
+      valueFromConfig(config, 'bank_version') ||
+      valueFromConfig(cmsConfig, 'bank_version') ||
+      defaults.bank_version ||
+      '',
+    country_id:
+      valueFromConfig(config, 'country_id') ||
+      valueFromConfig(cmsConfig, 'country_id') ||
+      defaults.country_id ||
+      '',
+    subject_id:
+      valueFromConfig(config, 'subject_id') ||
+      valueFromConfig(cmsConfig, 'subject_id') ||
+      defaults.subject_id ||
+      '',
     page_size: valueFromConfig(config, 'page_size') || defaults.page_size || '',
   }
+}
+
+function resourceFormToConfig(form: ResourcesForm): Record<string, unknown> {
+  const resources: Record<string, unknown> = {}
+  if (form.questions_by_knowledge.enabled) {
+    resources.questions_by_knowledge = {
+      provider: 'cms.question.list_by_knowledge',
+      config: {
+        bank_version: form.questions_by_knowledge.bank_version.trim(),
+        country_id: form.questions_by_knowledge.country_id.trim(),
+        subject_id: form.questions_by_knowledge.subject_id.trim(),
+        page_size: form.questions_by_knowledge.page_size.trim(),
+      },
+    }
+  }
+  if (form.question_detail.enabled) {
+    resources.question_detail = {
+      provider: 'cms.question.detail',
+      config: {
+        bank_version: form.question_detail.bank_version.trim(),
+        country_id: form.question_detail.country_id.trim(),
+        subject_id: form.question_detail.subject_id.trim(),
+      },
+    }
+  }
+  return { resources }
 }
 
 export default function WorkspaceResources({ isVideoHive }: Props) {
@@ -108,9 +162,30 @@ function WorkspaceResourcesForm() {
       'question_detail_url'
     ),
   })
+  const initialIntakeConfig: IntakeConfigForm = (() => {
+    const config = currentWorkspace?.intake_config || {}
+    return {
+      defaultEntity: currentWorkspace?.default_entity || 'question',
+      enabledModes: config.enabled_modes || [],
+      labelOverrides: config.label_overrides || {},
+    }
+  })()
+
+  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(
+    null
+  )
+  const [intakeForm, setIntakeForm] =
+    useState<IntakeConfigForm>(initialIntakeConfig)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!currentWorkspace?.default_pipeline_key) return
+    fetchPipelineDefinition(currentWorkspace.default_pipeline_key)
+      .then((response) => setPipeline(response.pipeline))
+      .catch(() => setPipeline(null))
+  }, [currentWorkspace])
 
   function updateResourceField(
     resourceKey: keyof ResourcesForm,
@@ -138,35 +213,20 @@ function WorkspaceResourcesForm() {
 
   async function handleSave() {
     if (!currentWorkspace) return
+    if (intakeForm.enabledModes.length === 0) {
+      setError('至少启用一种 intake mode')
+      return
+    }
     setSaving(true)
     setMessage('')
     setError('')
     try {
-      const resources: Record<string, unknown> = {}
-      if (form.questions_by_knowledge.enabled) {
-        resources.questions_by_knowledge = {
-          provider: 'cms.question.list_by_knowledge',
-          config: {
-            bank_version: form.questions_by_knowledge.bank_version.trim(),
-            country_id: form.questions_by_knowledge.country_id.trim(),
-            subject_id: form.questions_by_knowledge.subject_id.trim(),
-            page_size: form.questions_by_knowledge.page_size.trim(),
-          },
-        }
-      }
-      if (form.question_detail.enabled) {
-        resources.question_detail = {
-          provider: 'cms.question.detail',
-          config: {
-            bank_version: form.question_detail.bank_version.trim(),
-            country_id: form.question_detail.country_id.trim(),
-            subject_id: form.question_detail.subject_id.trim(),
-          },
-        }
-      }
       await updateWorkspace(currentWorkspace.id, {
-        resource_config: {
-          resources,
+        resource_config: resourceFormToConfig(form),
+        default_entity: intakeForm.defaultEntity,
+        intake_config: {
+          enabled_modes: intakeForm.enabledModes,
+          label_overrides: intakeForm.labelOverrides,
         },
       })
       setMessage('配置已保存')
@@ -180,8 +240,14 @@ function WorkspaceResourcesForm() {
   return (
     <div style={{ maxWidth: 960 }}>
       <h3>题库接口配置</h3>
-      <p style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>
-        当前 workspace 会优先使用这里的配置；未填写的认证信息仍沿用全局 CMS 配置。
+      <p
+        style={{
+          color: 'var(--md-sys-color-on-surface-variant)',
+          marginTop: 4,
+        }}
+      >
+        当前 workspace 会优先使用这里的配置；未填写的认证信息仍沿用全局 CMS
+        配置。
       </p>
 
       <div style={{ display: 'grid', gap: 16, marginTop: 20 }}>
@@ -202,16 +268,115 @@ function WorkspaceResourcesForm() {
           description="为每个题目生产任务拉取题干、选项、答案和解析上下文。"
           form={form.question_detail}
           onToggle={() => toggleResource('question_detail')}
-          onChange={(field, value) => updateResourceField('question_detail', field, value)}
+          onChange={(field, value) =>
+            updateResourceField('question_detail', field, value)
+          }
         />
       </div>
 
-      <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 20 }}>
+      <section className="card-outlined" style={{ marginTop: 24, padding: 16 }}>
+        <h3>Intake 配置</h3>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', marginBottom: 8 }}>
+            处理对象 (Entity)
+          </label>
+          <md-outlined-select
+            aria-label="处理对象 (Entity)"
+            value={intakeForm.defaultEntity}
+            onInput={(e: Event) =>
+              setIntakeForm({
+                ...intakeForm,
+                defaultEntity: (e.target as HTMLSelectElement).value,
+              })
+            }
+          >
+            <md-select-option value="question">
+              <div slot="headline">题目</div>
+            </md-select-option>
+            <md-select-option value="video">
+              <div slot="headline">视频</div>
+            </md-select-option>
+          </md-outlined-select>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <label style={{ display: 'block', marginBottom: 8 }}>
+            启用的 Intake Modes
+          </label>
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 8,
+              marginTop: 8,
+            }}
+          >
+            {pipeline?.intake?.modes.map((mode) => (
+              <md-checkbox
+                key={mode.key}
+                aria-label={mode.label}
+                checked={
+                  intakeForm.enabledModes.includes(mode.key) || undefined
+                }
+                onClick={() => {
+                  const next = intakeForm.enabledModes.includes(mode.key)
+                    ? intakeForm.enabledModes.filter((k) => k !== mode.key)
+                    : [...intakeForm.enabledModes, mode.key]
+                  setIntakeForm({ ...intakeForm, enabledModes: next })
+                }}
+              >
+                {mode.label}
+              </md-checkbox>
+            ))}
+          </div>
+        </div>
+
+        {intakeForm.enabledModes.map((modeKey) => {
+          const mode = pipeline?.intake?.modes.find((m) => m.key === modeKey)
+          if (!mode) return null
+          return (
+            <md-outlined-text-field
+              key={modeKey}
+              aria-label={`${mode.label} 显示名称`}
+              label={`${mode.label} 显示名称`}
+              value={intakeForm.labelOverrides[modeKey] || ''}
+              placeholder={mode.label}
+              style={{ marginBottom: 12, display: 'block' }}
+              onInput={(e: Event) => {
+                const value = (e.target as HTMLInputElement).value
+                setIntakeForm({
+                  ...intakeForm,
+                  labelOverrides: {
+                    ...intakeForm.labelOverrides,
+                    [modeKey]: value,
+                  },
+                })
+              }}
+            />
+          )
+        })}
+      </section>
+
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          marginTop: 20,
+        }}
+      >
         <md-filled-button onClick={handleSave} disabled={saving || undefined}>
           {saving ? '保存中…' : '保存配置'}
         </md-filled-button>
-        {message ? <span style={{ color: 'var(--md-sys-color-primary)' }}>{message}</span> : null}
-        {error ? <span style={{ color: 'var(--md-sys-color-error)' }}>{error}</span> : null}
+        {message ? (
+          <span style={{ color: 'var(--md-sys-color-primary)' }}>
+            {message}
+          </span>
+        ) : null}
+        {error ? (
+          <span style={{ color: 'var(--md-sys-color-error)' }}>{error}</span>
+        ) : null}
       </div>
     </div>
   )
@@ -249,7 +414,12 @@ function ResourceCard({
       >
         <div style={{ minWidth: 0 }}>
           <h4 style={{ margin: 0, fontSize: 16 }}>{title}</h4>
-          <p style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: 4 }}>
+          <p
+            style={{
+              color: 'var(--md-sys-color-on-surface-variant)',
+              marginTop: 4,
+            }}
+          >
             {description}
           </p>
           <div style={{ marginTop: 8 }}>
