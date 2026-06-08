@@ -223,7 +223,7 @@ export type CreateJobBatchInput = {
   workspaceId: string
   pipelineKey?: string
   sourceKind: string
-  inputField: 'question_ids' | 'knowledge_codes'
+  inputField: string
   values: string[]
 }
 

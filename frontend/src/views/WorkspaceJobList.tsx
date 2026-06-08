@@ -144,7 +144,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
           type="textarea"
           rows={5}
           value={inputValue}
-          onInput={(event) => setInputValue((event.target as HTMLInputElement).value)}
+          onInput={(event: Event) => setInputValue((event.target as HTMLInputElement).value)}
         />
         <md-filled-button disabled={submitting} onClick={handleCreateBatch}>
           创建任务
