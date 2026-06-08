@@ -122,7 +122,7 @@ export default function WorkspaceJobDetail() {
               {detail.runs.map((run) => (
                 <md-list-item key={run.id}>
                   <div slot="headline">{run.node_key}</div>
-                  <div slot="supporting-text">{run.started_at} - {run.finished_at || 'running'}</div>
+                  <div slot="supporting-text">{run.started_at} - {run.finished_at || 'running'}{run.exit_code !== null ? ` · exit: ${run.exit_code}` : ''}</div>
                   <span slot="end" className={`status-badge ${run.status}`}>{run.status}</span>
                 </md-list-item>
               ))}
