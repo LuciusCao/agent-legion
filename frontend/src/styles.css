@@ -608,6 +608,11 @@ pre {
   margin-bottom: 16px;
 }
 
+.workspace-job-create .error-text,
+.workspace-job-detail .error-text {
+  white-space: pre-wrap;
+}
+
 .artifact-preview {
   max-height: 420px;
   overflow: auto;
