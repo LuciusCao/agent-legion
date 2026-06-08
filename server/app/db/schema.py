@@ -142,6 +142,12 @@ def init_db(path: Path) -> None:
                 "resource_config_json": (
                     "alter table workspaces add column resource_config_json text not null default '{}'"
                 ),
+                "default_entity": (
+                    "alter table workspaces add column default_entity text not null default 'question'"
+                ),
+                "intake_config_json": (
+                    "alter table workspaces add column intake_config_json text not null default '{}'"
+                ),
             }
             for column, statement in workspace_migrations.items():
                 if column not in existing_workspace_columns:

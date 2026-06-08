@@ -663,3 +663,49 @@ def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
     with TestClient(app) as c:
         response = c.delete("/api/workspaces/nonexistent")
     assert response.status_code == 404
+
+
+def test_create_workspace_stores_default_entity_and_intake_config(tmp_path):
+    from server.app.jobs import JobQueries
+
+    db_path = tmp_path / "jobs.sqlite"
+    queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "Intake WS",
+        default_entity="knowledge",
+        intake_config={"allowed_entities": ["question", "knowledge"]},
+    )
+
+    assert workspace["default_entity"] == "knowledge"
+    assert workspace["intake_config"] == {"allowed_entities": ["question", "knowledge"]}
+
+
+def test_create_workspace_uses_default_entity_and_intake_config_defaults(tmp_path):
+    from server.app.jobs import JobQueries
+
+    db_path = tmp_path / "jobs.sqlite"
+    queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("Default WS")
+
+    assert workspace["default_entity"] == "question"
+    assert workspace["intake_config"] == {}
+
+
+def test_update_workspace_persists_default_entity_and_intake_config(tmp_path):
+    from server.app.jobs import JobQueries
+
+    db_path = tmp_path / "jobs.sqlite"
+    queries = JobQueries(db_path, tmp_path / "jobs")
+    created = queries.create_workspace("Update WS")
+    workspace_id = created["id"]
+    workspace = queries.update_workspace(
+        workspace_id,
+        default_entity="knowledge",
+        intake_config={"max_batch_size": 50},
+    )
+    fetched = queries.get_workspace(workspace_id)
+
+    assert workspace["default_entity"] == "knowledge"
+    assert workspace["intake_config"] == {"max_batch_size": 50}
+    assert fetched["default_entity"] == "knowledge"
+    assert fetched["intake_config"] == {"max_batch_size": 50}
