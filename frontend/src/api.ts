@@ -1,5 +1,8 @@
 import type {
+  ArtifactResponse,
+  CreateJobBatchInput,
   JobBatchResponse,
+  JobDetailResponse,
   JobsResponse,
   PipelineResponse,
   WorkspaceRecord,
@@ -7,19 +10,17 @@ import type {
   WorkspacesResponse,
 } from './types'
 
-export async function fetchPackages(): Promise<
-  {
-    packages: Array<{
-      id: number
-      name: string
-      path: string
-      video_count: number
-      size_bytes: number
-      locked: number
-      created_at: string
-    }>
-  }
-> {
+export async function fetchPackages(): Promise<{
+  packages: Array<{
+    id: number
+    name: string
+    path: string
+    video_count: number
+    size_bytes: number
+    locked: number
+    created_at: string
+  }>
+}> {
   return api('/api/packages')
 }
 
@@ -37,7 +38,9 @@ export async function updatePackage(
   })
 }
 
-export async function fetchJobs(workspaceId = 'default'): Promise<JobsResponse> {
+export async function fetchJobs(
+  workspaceId = 'default'
+): Promise<JobsResponse> {
   try {
     return await api(
       `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs?pipeline_key=question_content`
@@ -118,19 +121,44 @@ export async function fetchPipelineDefinition(
 }
 
 export async function createJobBatch(
-  workspaceId: string,
-  questionIds: string[],
-  pipelineKey = 'question_content'
+  input: CreateJobBatchInput
 ): Promise<JobBatchResponse> {
+  const {
+    workspaceId,
+    pipelineKey = 'question_content',
+    sourceKind,
+    inputField,
+    values,
+  } = input
+  const body: Record<string, unknown> = {
+    pipeline_key: pipelineKey,
+    source_kind: sourceKind,
+  }
+  body[inputField] = values
+  if (inputField === 'question_ids') {
+    body.knowledge_codes = []
+  } else if (inputField === 'knowledge_codes') {
+    body.question_ids = []
+  }
   return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/job-batches`, {
     method: 'POST',
-    body: JSON.stringify({
-      pipeline_key: pipelineKey,
-      source_kind: 'question_ids',
-      question_ids: questionIds,
-      knowledge_codes: [],
-    }),
+    body: JSON.stringify(body),
   })
+}
+
+export async function fetchJobDetail(
+  jobId: string
+): Promise<JobDetailResponse> {
+  return api(`/api/jobs/${encodeURIComponent(jobId)}`)
+}
+
+export async function fetchJobArtifact(
+  jobId: string,
+  artifactName: string
+): Promise<ArtifactResponse> {
+  return api(
+    `/api/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactName)}`
+  )
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
