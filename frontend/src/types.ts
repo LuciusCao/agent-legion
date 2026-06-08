@@ -225,6 +225,7 @@ export type ArtifactResponse = {
 export type CreateJobBatchInput = {
   workspaceId: string
   pipelineKey?: string
+  entity?: string
   sourceKind: string
   inputField: string
   values: string[]

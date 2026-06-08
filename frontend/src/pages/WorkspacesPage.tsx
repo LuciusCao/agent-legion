@@ -60,7 +60,7 @@ export function WorkspacesPage() {
 
     Promise.all([
       fetchWorkspaces(),
-      fetchJobs(selectedWorkspaceId),
+      fetchJobs(selectedWorkspaceId, 'question_content'),
       fetchPipelineDefinition('question_content'),
     ])
       .then(([workspaceResult, jobResult, pipelineResult]) => {
@@ -160,7 +160,7 @@ export function WorkspacesPage() {
         inputField: 'question_ids',
         values: questionIds,
       })
-      const refreshed = await fetchJobs(selectedWorkspaceId)
+      const refreshed = await fetchJobs(selectedWorkspaceId, 'question_content')
       setJobs(refreshed.jobs)
       setQuestionInput('')
       setSuccessMessage(`已创建 ${result.created_count} 个生产任务`)
