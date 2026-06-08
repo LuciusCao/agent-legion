@@ -1,8 +1,21 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
+import { createJobBatch, fetchJobs, fetchPipelineDefinition } from '../api'
+import type { JobRecord, PipelineDefinitionRecord } from '../types'
+
+function parseBatchInput(value: string): string[] {
+  return Array.from(
+    new Set(
+      value
+        .split(/[\s,，]+/)
+        .map((item) => item.trim())
+        .filter(Boolean)
+    )
+  )
+}
 
 type Props = {
   isVideoHive: boolean
@@ -13,6 +26,17 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const { currentWorkspace } = useWorkspaceStore()
   const { videos, fetchVideos } = useVideoStore()
 
+  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(null)
+  const [jobs, setJobs] = useState<JobRecord[]>([])
+  const [selectedModeKey, setSelectedModeKey] = useState('')
+  const [inputValue, setInputValue] = useState('')
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+
+  const workspaceId = currentWorkspace?.id
+  const pipelineKey = currentWorkspace?.default_pipeline_key || 'question_content'
+
   useVideoEvents(isVideoHive)
 
   useEffect(() => {
@@ -20,6 +44,59 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       fetchVideos()
     }
   }, [isVideoHive, fetchVideos])
+
+  useEffect(() => {
+    if (!isVideoHive && workspaceId) {
+      let cancelled = false
+      Promise.all([fetchPipelineDefinition(pipelineKey), fetchJobs(workspaceId)])
+        .then(([pipelineResult, jobsResult]) => {
+          if (cancelled) return
+          setPipeline(pipelineResult.pipeline)
+          setJobs(jobsResult.jobs)
+          setSelectedModeKey(pipelineResult.pipeline.intake?.modes[0]?.key || '')
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setMessage('')
+          setError(err instanceof Error ? err.message : String(err))
+        })
+      return () => {
+        cancelled = true
+      }
+    }
+  }, [isVideoHive, workspaceId, pipelineKey])
+
+  async function handleCreateBatch() {
+    const selectedMode = pipeline?.intake?.modes.find((mode) => mode.key === selectedModeKey)
+    const values = parseBatchInput(inputValue)
+    if (!selectedMode || values.length === 0 || !workspaceId) {
+      setMessage('')
+      setError('请输入至少一个值')
+      return
+    }
+    setSubmitting(true)
+    setMessage('')
+    setError('')
+    try {
+      const result = await createJobBatch({
+        workspaceId,
+        pipelineKey,
+        sourceKind: selectedMode.key,
+        inputField: selectedMode.input_field,
+        values,
+      })
+      setError('')
+      setMessage(`已创建 ${result.created_count} 个题目任务`)
+      setInputValue('')
+      const refreshed = await fetchJobs(workspaceId)
+      setJobs(refreshed.jobs)
+    } catch (err) {
+      setMessage('')
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setSubmitting(false)
+    }
+  }
 
   if (isVideoHive) {
     return (
@@ -49,10 +126,49 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
 
   return (
     <div>
-      <h3>{currentWorkspace?.name || 'Workspace'} Jobs</h3>
-      <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-        Agent Legion job 列表将在此展示。
-      </p>
+      <section className="card-outlined workspace-job-create">
+        <h3>{pipeline?.label || currentWorkspace?.name || '题目生产'}</h3>
+        <div className="intake-chip-row">
+          {pipeline?.intake?.modes.map((mode) => (
+            <md-filter-chip
+              key={mode.key}
+              label={mode.label}
+              selected={selectedModeKey === mode.key}
+              onClick={() => setSelectedModeKey(mode.key)}
+            />
+          ))}
+        </div>
+        <md-outlined-text-field
+          label={pipeline?.intake?.modes.find((mode) => mode.key === selectedModeKey)?.label || '输入'}
+          aria-label={pipeline?.intake?.modes.find((mode) => mode.key === selectedModeKey)?.label || '输入'}
+          type="textarea"
+          rows={5}
+          value={inputValue}
+          onInput={(event) => setInputValue((event.target as HTMLInputElement).value)}
+        />
+        <md-filled-button disabled={submitting} onClick={handleCreateBatch}>
+          创建任务
+        </md-filled-button>
+        {message ? <p className="success-text">{message}</p> : null}
+        {error ? <p className="error-text">{error}</p> : null}
+      </section>
+
+      <section className="card-outlined workspace-job-list">
+        <h3>任务列表</h3>
+        <md-list>
+          {jobs.map((job) => (
+            <md-list-item
+              key={job.id}
+              type="button"
+              onClick={() => navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)}
+            >
+              <div slot="headline">{job.title}</div>
+              <div slot="supporting-text">{job.source_id}</div>
+              <span slot="end" className={`status-badge ${job.status}`}>{job.status}</span>
+            </md-list-item>
+          ))}
+        </md-list>
+      </section>
     </div>
   )
 }
