@@ -203,7 +203,10 @@ function WorkspaceResourcesForm() {
           const allSupportedModes =
             response.pipeline.intake?.modes
               .filter((mode) =>
-                isIntakeModeSupported(initialIntakeConfig.defaultEntity, mode.key)
+                isIntakeModeSupported(
+                  initialIntakeConfig.defaultEntity,
+                  mode.key
+                )
               )
               .map((mode) => mode.key) || []
           setIntakeForm((current) => ({
@@ -358,7 +361,7 @@ function WorkspaceResourcesForm() {
               marginTop: 8,
             }}
           >
-            {pipeline?.intake?.modes.map((mode) => (
+            {pipeline?.intake?.modes.map((mode) =>
               (() => {
                 const supported = isIntakeModeSupported(
                   intakeForm.defaultEntity,
@@ -384,7 +387,7 @@ function WorkspaceResourcesForm() {
                   </md-checkbox>
                 )
               })()
-            ))}
+            )}
           </div>
         </div>
 

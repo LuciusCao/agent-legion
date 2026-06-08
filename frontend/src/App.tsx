@@ -34,7 +34,10 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/video-hive" element={<ListPage />} />
           <Route path="/workspaces" element={<Navigate to="/" replace />} />
-          <Route path="/workspaces/:workspaceId/*" element={<WorkspaceLayout />} />
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
       </Suspense>

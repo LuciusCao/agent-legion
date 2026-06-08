@@ -48,7 +48,13 @@ export default function WorkspaceCard({
         e.currentTarget.style.boxShadow = 'none'
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'flex-start',
+        }}
+      >
         <div>
           <h3 style={{ margin: '0 0 4px', fontSize: 20 }}>{name}</h3>
           <span
@@ -77,15 +83,26 @@ export default function WorkspaceCard({
 
       <div style={{ marginTop: 16, display: 'flex', gap: 16, fontSize: 13 }}>
         <div>
-          <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>Jobs</div>
+          <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+            Jobs
+          </div>
           <div style={{ fontWeight: 600 }}>
-            {total} | <span style={{ color: 'var(--md-sys-color-primary)' }}>{running}</span> |{' '}
-            <span style={{ color: 'var(--md-sys-color-tertiary)' }}>{completed}</span> |{' '}
+            {total} |{' '}
+            <span style={{ color: 'var(--md-sys-color-primary)' }}>
+              {running}
+            </span>{' '}
+            |{' '}
+            <span style={{ color: 'var(--md-sys-color-tertiary)' }}>
+              {completed}
+            </span>{' '}
+            |{' '}
             <span style={{ color: 'var(--md-sys-color-error)' }}>{failed}</span>
           </div>
         </div>
         <div>
-          <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>Agents</div>
+          <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+            Agents
+          </div>
           <div style={{ fontWeight: 600 }}>
             {agentStatus.busy}/{agentStatus.total}
           </div>
@@ -93,7 +110,9 @@ export default function WorkspaceCard({
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <md-filled-button style={{ width: '100%' }} onClick={onClick}>进入</md-filled-button>
+        <md-filled-button style={{ width: '100%' }} onClick={onClick}>
+          进入
+        </md-filled-button>
       </div>
     </div>
   )

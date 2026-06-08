@@ -94,5 +94,4 @@ describe('VideoList', () => {
     expect(checkboxes[0].hasAttribute('checked')).toBe(true)
     expect(checkboxes[1].hasAttribute('checked')).toBe(false)
   })
-
 })

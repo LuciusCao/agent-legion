@@ -49,7 +49,11 @@ describe('workspaceStore', () => {
 
   it('fetchWorkspaces sets workspaces on success', async () => {
     const workspaces: WorkspaceRecord[] = [
-      { id: 'ws1', name: 'Test Workspace', default_pipeline_key: 'question_content' },
+      {
+        id: 'ws1',
+        name: 'Test Workspace',
+        default_pipeline_key: 'question_content',
+      },
     ]
     mockFetchWorkspaces.mockResolvedValueOnce({ workspaces })
 
@@ -77,7 +81,9 @@ describe('workspaceStore', () => {
     }
     mockCreateWorkspace.mockResolvedValueOnce(ws)
 
-    const result = await useWorkspaceStore.getState().createWorkspace('New Workspace')
+    const result = await useWorkspaceStore
+      .getState()
+      .createWorkspace('New Workspace')
 
     expect(result).toEqual(ws)
     expect(useWorkspaceStore.getState().workspaces).toContainEqual(ws)
@@ -105,7 +111,10 @@ describe('workspaceStore', () => {
       default_pipeline_key: 'question_content',
       cms_config: { subject_id: '5' },
     }
-    useWorkspaceStore.setState({ workspaces: [existing], currentWorkspace: existing })
+    useWorkspaceStore.setState({
+      workspaces: [existing],
+      currentWorkspace: existing,
+    })
     mockUpdateWorkspace.mockResolvedValueOnce(updated)
 
     const result = await useWorkspaceStore

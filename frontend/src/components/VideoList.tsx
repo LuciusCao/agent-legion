@@ -14,7 +14,9 @@ export function VideoList() {
   const selectedType = useVideoStore((state) => state.selectedType)
   const selectMode = useVideoStore((state) => state.selectMode)
   const selectedIds = useVideoStore((state) => state.selectedIds)
-  const toggleVideoSelection = useVideoStore((state) => state.toggleVideoSelection)
+  const toggleVideoSelection = useVideoStore(
+    (state) => state.toggleVideoSelection
+  )
 
   const parentRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is known to be safe here
@@ -51,7 +53,9 @@ export function VideoList() {
   return (
     <div className={styles.videoList}>
       <div ref={parentRef} className={styles.scrollContainer}>
-        <div style={{ height: virtualizer.getTotalSize(), position: 'relative' }}>
+        <div
+          style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+        >
           {virtualizer.getVirtualItems().map((virtualItem) => {
             const video = filtered[virtualItem.index]
             const isSelected = selectedIds.has(video.id)
@@ -123,10 +127,14 @@ export function VideoList() {
                     {video.content_type === 'knowledge' &&
                       video.status === 'completed' && (
                         <InteractionReviewBadge
-                          status={video.interaction_review_status ?? 'all_failed'}
+                          status={
+                            video.interaction_review_status ?? 'all_failed'
+                          }
                         />
                       )}
-                    {!!video.packed && <span className="packed-badge">已打包</span>}
+                    {!!video.packed && (
+                      <span className="packed-badge">已打包</span>
+                    )}
                   </div>
                 </md-list-item>
               </div>

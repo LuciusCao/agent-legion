@@ -41,7 +41,12 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
       <form
         slot="content"
         onSubmit={handleSubmit}
-        style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 320 }}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          minWidth: 320,
+        }}
       >
         <md-outlined-text-field
           label="Workspace 名称"
@@ -50,12 +55,17 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
           required
         />
         {error && (
-          <div style={{ color: 'var(--md-sys-color-error)', fontSize: 12 }}>{error}</div>
+          <div style={{ color: 'var(--md-sys-color-error)', fontSize: 12 }}>
+            {error}
+          </div>
         )}
       </form>
       <div slot="actions">
         <md-text-button onClick={handleClose}>取消</md-text-button>
-        <md-filled-button onClick={handleSubmit} disabled={creating || undefined}>
+        <md-filled-button
+          onClick={handleSubmit}
+          disabled={creating || undefined}
+        >
           {creating ? '创建中…' : '创建'}
         </md-filled-button>
       </div>

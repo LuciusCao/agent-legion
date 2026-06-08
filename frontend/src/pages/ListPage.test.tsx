@@ -33,7 +33,9 @@ describe('ListPage', () => {
       return Promise.resolve({ videos: [] })
     })
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ListPage />
       </MemoryRouter>
     )
@@ -71,7 +73,9 @@ describe('ListPage', () => {
       })
     })
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ListPage />
       </MemoryRouter>
     )
@@ -125,7 +129,9 @@ describe('ListPage', () => {
     })
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ListPage />
       </MemoryRouter>
     )

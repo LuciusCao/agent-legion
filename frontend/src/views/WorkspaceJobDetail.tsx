@@ -12,7 +12,10 @@ function formatArtifact(content: string): string {
 }
 
 export default function WorkspaceJobDetail() {
-  const { workspaceId, jobId } = useParams<{ workspaceId: string; jobId: string }>()
+  const { workspaceId, jobId } = useParams<{
+    workspaceId: string
+    jobId: string
+  }>()
   const navigate = useNavigate()
   const [detail, setDetail] = useState<JobDetailResponse | null>(null)
   const [artifactName, setArtifactName] = useState('')
@@ -89,13 +92,19 @@ export default function WorkspaceJobDetail() {
   }
 
   if (!detail && !error) {
-    return <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>加载中...</p>
+    return (
+      <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
+        加载中...
+      </p>
+    )
   }
 
   return (
     <div className="workspace-job-detail">
       <div className="workspace-detail-header">
-        <md-text-button onClick={() => navigate(`/workspaces/${workspaceId}/jobs`)}>
+        <md-text-button
+          onClick={() => navigate(`/workspaces/${workspaceId}/jobs`)}
+        >
           返回任务列表
         </md-text-button>
         <md-outlined-button onClick={loadDetail}>刷新</md-outlined-button>
@@ -107,7 +116,10 @@ export default function WorkspaceJobDetail() {
         <>
           <section className="card-outlined">
             <h3>{detail.job.title}</h3>
-            <p>{detail.job.source_id} · {detail.job.status} · {detail.job.pipeline_key}</p>
+            <p>
+              {detail.job.source_id} · {detail.job.status} ·{' '}
+              {detail.job.pipeline_key}
+            </p>
           </section>
 
           <section className="card-outlined">
@@ -116,8 +128,12 @@ export default function WorkspaceJobDetail() {
               {detail.nodes.map((node) => (
                 <md-list-item key={node.node_key}>
                   <div slot="headline">{node.node_key}</div>
-                  <div slot="supporting-text">{node.error_message || node.stale_reason || ''}</div>
-                  <span slot="end" className={`status-badge ${node.status}`}>{node.status}</span>
+                  <div slot="supporting-text">
+                    {node.error_message || node.stale_reason || ''}
+                  </div>
+                  <span slot="end" className={`status-badge ${node.status}`}>
+                    {node.status}
+                  </span>
                 </md-list-item>
               ))}
             </md-list>
@@ -129,8 +145,13 @@ export default function WorkspaceJobDetail() {
               {detail.runs.map((run) => (
                 <md-list-item key={run.id}>
                   <div slot="headline">{run.node_key}</div>
-                  <div slot="supporting-text">{run.started_at} - {run.finished_at || 'running'}{run.exit_code !== null ? ` · exit: ${run.exit_code}` : ''}</div>
-                  <span slot="end" className={`status-badge ${run.status}`}>{run.status}</span>
+                  <div slot="supporting-text">
+                    {run.started_at} - {run.finished_at || 'running'}
+                    {run.exit_code !== null ? ` · exit: ${run.exit_code}` : ''}
+                  </div>
+                  <span slot="end" className={`status-badge ${run.status}`}>
+                    {run.status}
+                  </span>
                 </md-list-item>
               ))}
             </md-list>
@@ -140,13 +161,19 @@ export default function WorkspaceJobDetail() {
             <h3>Artifacts</h3>
             <md-list>
               {detail.artifacts.map((name) => (
-                <md-list-item key={name} type="button" onClick={() => openArtifact(name)}>
+                <md-list-item
+                  key={name}
+                  type="button"
+                  onClick={() => openArtifact(name)}
+                >
                   <div slot="headline">{name}</div>
                 </md-list-item>
               ))}
             </md-list>
             {artifactName ? <h4>{artifactName}</h4> : null}
-            {formattedArtifact ? <pre className="artifact-preview">{formattedArtifact}</pre> : null}
+            {formattedArtifact ? (
+              <pre className="artifact-preview">{formattedArtifact}</pre>
+            ) : null}
           </section>
         </>
       ) : null}

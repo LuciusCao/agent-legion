@@ -3,11 +3,11 @@ import { useVideoStore } from '../stores/videoStore'
 import { triggerDownload } from '../lib/download'
 import { fetchPackages } from '../api'
 
-
 const LAST_DOWNLOADED_KEY = 'video-hive:last-downloaded-package-id'
 
 export function useVideoEvents(enabled = true) {
-  const { mergeVideo, removeVideo, setSseConnected, fetchVideos } = useVideoStore()
+  const { mergeVideo, removeVideo, setSseConnected, fetchVideos } =
+    useVideoStore()
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {

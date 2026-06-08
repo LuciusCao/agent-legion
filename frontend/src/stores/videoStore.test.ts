@@ -22,7 +22,15 @@ describe('videoStore', () => {
       isLoading: false,
       error: null,
       _filteredVideos: [],
-      _counts: { all: 0, queued: 0, running: 0, failed: 0, completed: 0, packed: 0, unpacked: 0 },
+      _counts: {
+        all: 0,
+        queued: 0,
+        running: 0,
+        failed: 0,
+        completed: 0,
+        packed: 0,
+        unpacked: 0,
+      },
     })
     mockApi.mockClear()
   })
@@ -394,9 +402,9 @@ describe('videoStore', () => {
 
   it('sets error state when batchDelete fails', async () => {
     mockApi.mockRejectedValueOnce(new Error('delete failed'))
-    await expect(
-      useVideoStore.getState().batchDelete(['v1'])
-    ).rejects.toThrow('delete failed')
+    await expect(useVideoStore.getState().batchDelete(['v1'])).rejects.toThrow(
+      'delete failed'
+    )
     expect(useVideoStore.getState().error).toBe('delete failed')
   })
 
@@ -418,17 +426,43 @@ describe('videoStore', () => {
 
   it('sets error state when batchPackage fails', async () => {
     mockApi.mockRejectedValueOnce(new Error('package failed'))
-    await expect(
-      useVideoStore.getState().batchPackage(['v1'])
-    ).rejects.toThrow('package failed')
+    await expect(useVideoStore.getState().batchPackage(['v1'])).rejects.toThrow(
+      'package failed'
+    )
     expect(useVideoStore.getState().error).toBe('package failed')
   })
 
   it('computes _filteredVideos and _counts after videos change', async () => {
     useVideoStore.setState({
       videos: [
-        { id: '1', title: 'Alpha', source_url: '', content_type: 'knowledge', external_id: 'K001', knowledge_code: 'K001', question_id: '', source_uuid: '', status: 'queued', current_phase: 'download', error_message: '', packed: false } as VideoItem,
-        { id: '2', title: 'Beta', source_url: '', content_type: 'knowledge', external_id: 'K002', knowledge_code: 'K002', question_id: '', source_uuid: '', status: 'completed', current_phase: 'assemble', error_message: '', packed: true } as VideoItem,
+        {
+          id: '1',
+          title: 'Alpha',
+          source_url: '',
+          content_type: 'knowledge',
+          external_id: 'K001',
+          knowledge_code: 'K001',
+          question_id: '',
+          source_uuid: '',
+          status: 'queued',
+          current_phase: 'download',
+          error_message: '',
+          packed: false,
+        } as VideoItem,
+        {
+          id: '2',
+          title: 'Beta',
+          source_url: '',
+          content_type: 'knowledge',
+          external_id: 'K002',
+          knowledge_code: 'K002',
+          question_id: '',
+          source_uuid: '',
+          status: 'completed',
+          current_phase: 'assemble',
+          error_message: '',
+          packed: true,
+        } as VideoItem,
       ],
     })
     await new Promise((r) => setTimeout(r, 10))
@@ -444,8 +478,34 @@ describe('videoStore', () => {
   it('updates _filteredVideos when searchQuery changes', async () => {
     useVideoStore.setState({
       videos: [
-        { id: '1', title: 'Alpha', source_url: '', content_type: 'knowledge', external_id: 'K001', knowledge_code: 'K001', question_id: '', source_uuid: '', status: 'queued', current_phase: 'download', error_message: '', packed: false } as VideoItem,
-        { id: '2', title: 'Beta', source_url: '', content_type: 'knowledge', external_id: 'K002', knowledge_code: 'K002', question_id: '', source_uuid: '', status: 'completed', current_phase: 'assemble', error_message: '', packed: false } as VideoItem,
+        {
+          id: '1',
+          title: 'Alpha',
+          source_url: '',
+          content_type: 'knowledge',
+          external_id: 'K001',
+          knowledge_code: 'K001',
+          question_id: '',
+          source_uuid: '',
+          status: 'queued',
+          current_phase: 'download',
+          error_message: '',
+          packed: false,
+        } as VideoItem,
+        {
+          id: '2',
+          title: 'Beta',
+          source_url: '',
+          content_type: 'knowledge',
+          external_id: 'K002',
+          knowledge_code: 'K002',
+          question_id: '',
+          source_uuid: '',
+          status: 'completed',
+          current_phase: 'assemble',
+          error_message: '',
+          packed: false,
+        } as VideoItem,
       ],
     })
     await new Promise((r) => setTimeout(r, 10))

@@ -56,7 +56,12 @@ export default function DeleteWorkspaceDialog({
       <div slot="headline">删除 Workspace</div>
       <div
         slot="content"
-        style={{ display: 'flex', flexDirection: 'column', gap: 16, minWidth: 320 }}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 16,
+          minWidth: 320,
+        }}
       >
         <div
           style={{
@@ -73,7 +78,13 @@ export default function DeleteWorkspaceDialog({
           删除后，Workspace「{workspaceName}」及其所有任务记录将被永久移除，
           但磁盘上的产物文件不会自动清理。
         </div>
-        <p style={{ margin: 0, fontSize: 14, color: 'var(--md-sys-color-on-surface-variant)' }}>
+        <p
+          style={{
+            margin: 0,
+            fontSize: 14,
+            color: 'var(--md-sys-color-on-surface-variant)',
+          }}
+        >
           请输入 Workspace 名称「<strong>{workspaceName}</strong>」以确认删除。
         </p>
         <md-outlined-text-field
