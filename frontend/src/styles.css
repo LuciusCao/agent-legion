@@ -578,3 +578,43 @@ pre {
     transform: translateX(0);
   }
 }
+
+.workspace-job-create,
+.workspace-job-list,
+.workspace-job-detail .card-outlined {
+  margin-bottom: 16px;
+}
+
+.intake-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0;
+}
+
+.workspace-job-create md-outlined-text-field {
+  width: 100%;
+  margin-bottom: 12px;
+}
+
+.success-text {
+  color: var(--md-sys-color-primary);
+}
+
+.workspace-detail-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.artifact-preview {
+  max-height: 420px;
+  overflow: auto;
+  padding: 12px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 8px;
+  background: var(--md-sys-color-surface-container-low);
+  color: var(--md-sys-color-on-surface);
+  white-space: pre-wrap;
+}
