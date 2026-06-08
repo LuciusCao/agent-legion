@@ -194,7 +194,9 @@ describe('WorkspaceResources', () => {
         })
       )
     })
-    expect(screen.queryByText(/至少启用一种 intake mode/i)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/至少启用一种 intake mode/i)
+    ).not.toBeInTheDocument()
   })
 
   it('does not show cms config for Video Hive system workspace', () => {

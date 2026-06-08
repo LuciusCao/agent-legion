@@ -6,10 +6,7 @@ import { useInteractionStore } from '../stores/interactionStore'
 import { useUiStore } from '../stores/uiStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useVideoPhaseEvents } from './useVideoPhaseEvents'
-import {
-  binarySearchTriggerIndex,
-  prepareIndexedTriggers,
-} from '../lib/search'
+import { binarySearchTriggerIndex, prepareIndexedTriggers } from '../lib/search'
 import { api } from '../api'
 import { parseTimeSeconds } from '../helpers'
 import type {

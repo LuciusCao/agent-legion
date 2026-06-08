@@ -139,7 +139,13 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
                         title="点击重命名"
                       >
                         {pkg.locked ? (
-                          <md-icon style={{ fontSize: '14px', verticalAlign: 'middle', marginRight: '4px' }}>
+                          <md-icon
+                            style={{
+                              fontSize: '14px',
+                              verticalAlign: 'middle',
+                              marginRight: '4px',
+                            }}
+                          >
                             lock
                           </md-icon>
                         ) : null}
@@ -154,7 +160,10 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
                 </div>
                 <div className={styles.itemActions}>
                   {editingId === pkg.id ? (
-                    <md-icon-button onClick={() => handleRename(pkg.id)} title="确认">
+                    <md-icon-button
+                      onClick={() => handleRename(pkg.id)}
+                      title="确认"
+                    >
                       <md-icon>check</md-icon>
                     </md-icon-button>
                   ) : (
@@ -165,7 +174,10 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
                       >
                         <md-icon>{pkg.locked ? 'lock' : 'lock_open'}</md-icon>
                       </md-icon-button>
-                      <md-icon-button onClick={() => handleDownload(pkg)} title="下载">
+                      <md-icon-button
+                        onClick={() => handleDownload(pkg)}
+                        title="下载"
+                      >
                         <md-icon>download</md-icon>
                       </md-icon-button>
                       <md-icon-button

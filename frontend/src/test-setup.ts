@@ -13,13 +13,22 @@ class ResizeObserverMock {
       [
         {
           target,
-          contentRect: { height: 500, width: 800, top: 0, left: 0, bottom: 500, right: 800, x: 0, y: 0 },
+          contentRect: {
+            height: 500,
+            width: 800,
+            top: 0,
+            left: 0,
+            bottom: 500,
+            right: 800,
+            x: 0,
+            y: 0,
+          },
           borderBoxSize: [{ blockSize: 500, inlineSize: 800 }],
           contentBoxSize: [{ blockSize: 500, inlineSize: 800 }],
           devicePixelContentBoxSize: [{ blockSize: 500, inlineSize: 800 }],
         } as unknown as ResizeObserverEntry,
       ],
-      this as unknown as ResizeObserver,
+      this as unknown as ResizeObserver
     )
   })
 
@@ -27,5 +36,6 @@ class ResizeObserverMock {
   unobserve = vi.fn()
 }
 
-;(globalThis as unknown as { ResizeObserver: typeof ResizeObserver }).ResizeObserver =
-  ResizeObserverMock as unknown as typeof ResizeObserver
+;(
+  globalThis as unknown as { ResizeObserver: typeof ResizeObserver }
+).ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver

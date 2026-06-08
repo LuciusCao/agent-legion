@@ -22,7 +22,9 @@ describe('DeleteWorkspaceDialog', () => {
   })
 
   it('does not render when closed', () => {
-    const { container } = render(<DeleteWorkspaceDialog {...createProps({ open: false })} />)
+    const { container } = render(
+      <DeleteWorkspaceDialog {...createProps({ open: false })} />
+    )
     expect(container.childNodes.length).toBe(0)
   })
 
@@ -67,7 +69,11 @@ describe('DeleteWorkspaceDialog', () => {
 
   it('shows error message when onConfirm throws', async () => {
     const props = createProps({
-      onConfirm: vi.fn().mockRejectedValue(new Error('Cannot delete workspace with running jobs')),
+      onConfirm: vi
+        .fn()
+        .mockRejectedValue(
+          new Error('Cannot delete workspace with running jobs')
+        ),
     })
     render(<DeleteWorkspaceDialog {...props} />)
 
@@ -81,7 +87,9 @@ describe('DeleteWorkspaceDialog', () => {
     fireEvent.click(confirmBtn)
 
     await waitFor(() => {
-      expect(screen.getByText('Cannot delete workspace with running jobs')).toBeInTheDocument()
+      expect(
+        screen.getByText('Cannot delete workspace with running jobs')
+      ).toBeInTheDocument()
     })
     expect(props.onClose).not.toHaveBeenCalled()
   })

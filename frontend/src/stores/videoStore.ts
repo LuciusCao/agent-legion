@@ -71,7 +71,15 @@ export const useVideoStore = create<VideoState>((set) => ({
   sseConnected: true,
   error: null,
   _filteredVideos: [],
-  _counts: { all: 0, queued: 0, running: 0, failed: 0, completed: 0, packed: 0, unpacked: 0 },
+  _counts: {
+    all: 0,
+    queued: 0,
+    running: 0,
+    failed: 0,
+    completed: 0,
+    packed: 0,
+    unpacked: 0,
+  },
 
   fetchVideos: async () => {
     set({ isLoading: true, error: null })
@@ -292,7 +300,10 @@ export const useVideoStore = create<VideoState>((set) => ({
 
 const STATUSES = ['queued', 'running', 'failed', 'completed']
 
-function shallowEqual(a: Record<string, unknown>, b: Record<string, unknown>): boolean {
+function shallowEqual(
+  a: Record<string, unknown>,
+  b: Record<string, unknown>
+): boolean {
   const keysA = Object.keys(a)
   const keysB = Object.keys(b)
   if (keysA.length !== keysB.length) return false

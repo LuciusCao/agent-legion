@@ -60,9 +60,26 @@ describe('detailStore', () => {
 
   it('clears stale data when loadVideo fails after switching videos', async () => {
     useDetailStore.setState({
-      currentVideo: { id: 'old', title: 'Old', content_type: 'question', status: 'queued' } as unknown as ReturnType<typeof useDetailStore.getState>['currentVideo'],
-      phaseRuns: [{ id: 1, video_id: 'old', phase: 'download', status: 'completed', created_at: '' }],
-      transcriptionRuns: [{ id: 1, video_id: 'old', provider: 'whisper', created_at: '' }],
+      currentVideo: {
+        id: 'old',
+        title: 'Old',
+        content_type: 'question',
+        status: 'queued',
+      } as unknown as ReturnType<
+        typeof useDetailStore.getState
+      >['currentVideo'],
+      phaseRuns: [
+        {
+          id: 1,
+          video_id: 'old',
+          phase: 'download',
+          status: 'completed',
+          created_at: '',
+        },
+      ],
+      transcriptionRuns: [
+        { id: 1, video_id: 'old', provider: 'whisper', created_at: '' },
+      ],
     })
     mockApi.mockRejectedValueOnce(new Error('not found'))
     await useDetailStore.getState().loadVideo('new')
@@ -82,13 +99,23 @@ describe('detailStore', () => {
     const loadOld = useDetailStore.getState().loadVideo('old')
 
     mockApi.mockResolvedValueOnce({
-      video: { id: 'new', title: 'New', content_type: 'question', status: 'queued' },
+      video: {
+        id: 'new',
+        title: 'New',
+        content_type: 'question',
+        status: 'queued',
+      },
     })
     await useDetailStore.getState().loadVideo('new')
     expect(useDetailStore.getState().currentVideo?.id).toBe('new')
 
     resolveOld({
-      video: { id: 'old', title: 'Old', content_type: 'question', status: 'queued' },
+      video: {
+        id: 'old',
+        title: 'Old',
+        content_type: 'question',
+        status: 'queued',
+      },
     })
     await loadOld
 

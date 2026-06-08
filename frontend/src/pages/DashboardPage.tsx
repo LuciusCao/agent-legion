@@ -20,7 +20,10 @@ export function DashboardPage() {
   const { agents } = useUiStore()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [deletingWorkspace, setDeletingWorkspace] = useState<{ id: string; name: string } | null>(null)
+  const [deletingWorkspace, setDeletingWorkspace] = useState<{
+    id: string
+    name: string
+  } | null>(null)
 
   useEffect(() => {
     fetchWorkspaces()
@@ -98,16 +101,31 @@ export function DashboardPage() {
           <WorkspaceCard
             key={w.id}
             name={w.name}
-            pipelineLabel={workspaceStats[w.id]?.pipeline_label || w.default_pipeline_key}
+            pipelineLabel={
+              workspaceStats[w.id]?.pipeline_label || w.default_pipeline_key
+            }
             jobStats={workspaceStats[w.id]?.job_stats || {}}
-            agentStatus={workspaceStats[w.id]?.agent_status || { total: 0, busy: 0, idle: 0 }}
+            agentStatus={
+              workspaceStats[w.id]?.agent_status || {
+                total: 0,
+                busy: 0,
+                idle: 0,
+              }
+            }
             onClick={() => navigate(`/workspaces/${w.id}`)}
-            onDelete={w.id === 'default' ? undefined : () => openDeleteDialog(w.id, w.name)}
+            onDelete={
+              w.id === 'default'
+                ? undefined
+                : () => openDeleteDialog(w.id, w.name)
+            }
           />
         ))}
       </div>
 
-      <CreateWorkspaceDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+      <CreateWorkspaceDialog
+        open={dialogOpen}
+        onClose={() => setDialogOpen(false)}
+      />
 
       {deletingWorkspace && (
         <DeleteWorkspaceDialog

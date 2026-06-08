@@ -113,7 +113,9 @@ describe('BatchRerunDialog', () => {
     )
 
     // Click "失败的阶段" chip
-    const failedChip = container.querySelector('md-filter-chip[label="失败的阶段"]')
+    const failedChip = container.querySelector(
+      'md-filter-chip[label="失败的阶段"]'
+    )
     expect(failedChip).toBeInTheDocument()
     act(() => {
       ;(failedChip as HTMLElement).click()
@@ -134,7 +136,9 @@ describe('BatchRerunDialog', () => {
       <BatchRerunDialog open videoIds={['v1', 'v2']} onClose={onClose} />
     )
 
-    const failedChip = container.querySelector('md-filter-chip[label="失败的阶段"]')
+    const failedChip = container.querySelector(
+      'md-filter-chip[label="失败的阶段"]'
+    )
     act(() => {
       ;(failedChip as HTMLElement).click()
     })

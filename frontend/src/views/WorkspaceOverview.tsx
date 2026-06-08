@@ -41,7 +41,12 @@ export default function WorkspaceOverview({ isVideoHive }: Props) {
                 background: 'var(--md-sys-color-surface-container)',
               }}
             >
-              <div style={{ fontSize: 12, color: 'var(--md-sys-color-on-surface-variant)' }}>
+              <div
+                style={{
+                  fontSize: 12,
+                  color: 'var(--md-sys-color-on-surface-variant)',
+                }}
+              >
                 {status}
               </div>
               <div style={{ fontSize: 24, fontWeight: 600 }}>{count}</div>
@@ -49,7 +54,12 @@ export default function WorkspaceOverview({ isVideoHive }: Props) {
           ))}
         </div>
       ) : (
-        <p style={{ color: 'var(--md-sys-color-on-surface-variant)', marginTop: 16 }}>
+        <p
+          style={{
+            color: 'var(--md-sys-color-on-surface-variant)',
+            marginTop: 16,
+          }}
+        >
           暂无统计信息
         </p>
       )}

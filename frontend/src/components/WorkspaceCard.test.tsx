@@ -84,7 +84,9 @@ describe('WorkspaceCard', () => {
 
   it('hides delete button when onDelete is not provided', () => {
     const { container } = render(
-      <WorkspaceCard {...createProps({ isSystem: false, onDelete: undefined })} />
+      <WorkspaceCard
+        {...createProps({ isSystem: false, onDelete: undefined })}
+      />
     )
     const deleteBtn = container.querySelector('md-icon-button')
     expect(deleteBtn).not.toBeInTheDocument()

@@ -232,7 +232,10 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
             setInputValue((event.target as HTMLInputElement).value)
           }
         />
-        <md-filled-button disabled={submitting || undefined} onClick={handleCreateBatch}>
+        <md-filled-button
+          disabled={submitting || undefined}
+          onClick={handleCreateBatch}
+        >
           创建任务
         </md-filled-button>
         {message ? <p className="success-text">{message}</p> : null}
