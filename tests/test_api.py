@@ -3,6 +3,10 @@ import json
 import subprocess
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
+from server.app.settings import Settings
+
 
 def test_core_api_routes_declare_response_models(client):
     schema = client.get("/openapi.json").json()
@@ -62,6 +66,40 @@ def test_worker_tick_returns_accepted(client):
     assert response.status_code == 200
     assert response.json() == {"accepted": True}
     assert client.app.state.worker_control.consume_tick() is True
+
+
+def test_app_ignores_partial_frontend_dist(tmp_path, monkeypatch):
+    from server.app import main
+
+    root_dir = tmp_path / "project"
+    frontend_dist = root_dir / "frontend" / "dist"
+    frontend_dist.mkdir(parents=True)
+    (frontend_dist / "index.html").write_text("<div>partial build</div>", encoding="utf-8")
+
+    data_dir = tmp_path / "data"
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (data_dir / path_name).mkdir(parents=True)
+
+    def fake_load_settings(data_dir=None):
+        resolved_data_dir = data_dir or tmp_path / "data"
+        return Settings(
+            root_dir=root_dir,
+            data_dir=resolved_data_dir,
+            videos_dir=resolved_data_dir / "videos",
+            logs_dir=resolved_data_dir / "logs",
+            packages_dir=resolved_data_dir / "packages",
+            jobs_dir=resolved_data_dir / "jobs",
+            config={},
+        )
+
+    monkeypatch.setattr(main, "load_settings", fake_load_settings)
+
+    app = main.create_app(data_dir=data_dir)
+    with TestClient(app) as c:
+        response = c.get("/")
+
+    assert response.status_code == 200
+    assert "Video Hive API" in response.text
 
 
 def test_agents_websocket_sends_initial_list(client, monkeypatch):

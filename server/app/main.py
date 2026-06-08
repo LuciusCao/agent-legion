@@ -81,8 +81,10 @@ def create_app(
     )
 
     frontend_dist = settings.root_dir / "frontend" / "dist"
-    if frontend_dist.exists():
-        app.mount("/assets", StaticFiles(directory=frontend_dist / "assets"), name="assets")
+    frontend_assets = frontend_dist / "assets"
+    frontend_index = frontend_dist / "index.html"
+    if frontend_index.exists() and frontend_assets.is_dir():
+        app.mount("/assets", StaticFiles(directory=frontend_assets), name="assets")
 
         @app.get("/{path:path}")
         def spa(path: str):
