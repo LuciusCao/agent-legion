@@ -5,17 +5,13 @@ concurrency:
   agent: 2
 intake:
   modes:
-    question_ids:
-      label: 题目 ID
-      resolver: direct.question_ids
-      task_entity: question
+    direct_ids:
+      label: 直接输入 ID
       input_field: question_ids
-    knowledge_codes:
-      label: 知识点 Code
-      resolver: cms.questions_by_knowledge
-      task_entity: question
+    by_knowledge:
+      label: 按知识点查询
       input_field: knowledge_codes
-      resource: questions_by_knowledge
+      resource: by_knowledge
 nodes:
   fetch_question_context:
     runner: local
