@@ -74,11 +74,20 @@ export async function fetchWorkspaces(): Promise<WorkspacesResponse> {
 
 export async function createWorkspace(
   name: string,
-  cmsConfig: Record<string, unknown> = {}
+  cmsConfig: Record<string, unknown> = {},
+  resourceConfig: Record<string, unknown> = {},
+  defaultEntity: string = 'question',
+  intakeConfig: Record<string, unknown> = {}
 ): Promise<WorkspaceRecord> {
   const result = await api<{ workspace: WorkspaceRecord }>('/api/workspaces', {
     method: 'POST',
-    body: JSON.stringify({ name, cms_config: cmsConfig }),
+    body: JSON.stringify({
+      name,
+      cms_config: cmsConfig,
+      resource_config: resourceConfig,
+      default_entity: defaultEntity,
+      intake_config: intakeConfig,
+    }),
   })
   return result.workspace
 }
@@ -88,8 +97,10 @@ export async function updateWorkspace(
   fields: {
     name?: string
     default_pipeline_key?: string
+    default_entity?: string
     cms_config?: Record<string, unknown>
     resource_config?: Record<string, unknown>
+    intake_config?: Record<string, unknown>
   }
 ): Promise<WorkspaceRecord> {
   const result = await api<{ workspace: WorkspaceRecord }>(

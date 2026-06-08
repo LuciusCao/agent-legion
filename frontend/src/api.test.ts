@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import {
   api,
   createJobBatch,
+  createWorkspace,
   fetchJobArtifact,
   fetchJobDetail,
   updateWorkspace,
@@ -64,6 +65,7 @@ describe('workspace api', () => {
             id: 'math',
             name: 'Math',
             default_pipeline_key: 'question_content',
+            default_entity: 'question',
             cms_config: { subject_id: '5' },
           },
         }),
@@ -80,6 +82,84 @@ describe('workspace api', () => {
       expect.objectContaining({
         method: 'PATCH',
         body: JSON.stringify({ cms_config: { subject_id: '5' } }),
+      })
+    )
+  })
+
+  it('patches workspace default_entity and intake_config', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          workspace: {
+            id: 'math',
+            name: 'Math',
+            default_pipeline_key: 'question_content',
+            default_entity: 'knowledge',
+            intake_config: { enabled_modes: ['manual'] },
+          },
+        }),
+    } as Response)
+    global.fetch = fetchMock
+
+    const workspace = await updateWorkspace('math', {
+      default_entity: 'knowledge',
+      intake_config: { enabled_modes: ['manual'] },
+    })
+
+    expect(workspace.default_entity).toBe('knowledge')
+    expect(workspace.intake_config).toEqual({ enabled_modes: ['manual'] })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/math',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({
+          default_entity: 'knowledge',
+          intake_config: { enabled_modes: ['manual'] },
+        }),
+      })
+    )
+  })
+
+  it('creates workspace with new entity and intake config fields', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          workspace: {
+            id: 'physics',
+            name: 'Physics',
+            default_pipeline_key: 'question_content',
+            default_entity: 'knowledge',
+            cms_config: { subject_id: '3' },
+            resource_config: { storage: 's3' },
+            intake_config: { enabled_modes: ['manual', 'cms'] },
+          },
+        }),
+    } as Response)
+    global.fetch = fetchMock
+
+    const workspace = await createWorkspace(
+      'Physics',
+      { subject_id: '3' },
+      { storage: 's3' },
+      'knowledge',
+      { enabled_modes: ['manual', 'cms'] }
+    )
+
+    expect(workspace.default_entity).toBe('knowledge')
+    expect(workspace.intake_config).toEqual({ enabled_modes: ['manual', 'cms'] })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          name: 'Physics',
+          cms_config: { subject_id: '3' },
+          resource_config: { storage: 's3' },
+          default_entity: 'knowledge',
+          intake_config: { enabled_modes: ['manual', 'cms'] },
+        }),
       })
     )
   })
