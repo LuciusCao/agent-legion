@@ -757,6 +757,77 @@ def test_update_workspace_intake_config(tmp_path):
     assert fetched.json()["workspace"]["intake_config"] == {"max_batch_size": 50}
 
 
+def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        workspace_response = c.post(
+            "/api/workspaces",
+            json={
+                "name": "intake-filtered",
+                "default_pipeline_key": "question_content",
+                "intake_config": {"enabled_modes": ["direct_ids"]},
+            },
+        )
+        workspace_id = workspace_response.json()["workspace"]["id"]
+
+        response = c.post(
+            f"/api/workspaces/{workspace_id}/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "by_knowledge",
+                "question_ids": [],
+                "knowledge_codes": ["K001"],
+            },
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "Intake mode is disabled for this workspace"
+
+
+def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
+    import json
+
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        workspace_response = c.post(
+            "/api/workspaces",
+            json={
+                "name": "video-default",
+                "default_pipeline_key": "question_content",
+                "default_entity": "video",
+                "intake_config": {"enabled_modes": ["direct_ids"]},
+            },
+        )
+        workspace_id = workspace_response.json()["workspace"]["id"]
+
+        response = c.post(
+            f"/api/workspaces/{workspace_id}/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["v001"],
+                "knowledge_codes": [],
+            },
+        )
+        body = response.json()
+        batch = app.state.job_db.get_batch(body["batch"]["id"])
+
+    assert response.status_code == 200
+    assert body["jobs"][0]["source_type"] == "video"
+    payload = json.loads(batch["source_payload_json"])
+    assert payload["entity"] == "video"
+
+
 def test_batch_with_entity_question(tmp_path):
     from fastapi.testclient import TestClient
 

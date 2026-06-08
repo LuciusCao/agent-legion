@@ -218,8 +218,7 @@ describe('WorkspacesPage', () => {
           method: 'POST',
           body: JSON.stringify({
             pipeline_key: 'question_content',
-            entity: 'question',
-            source_kind: 'question_ids',
+            source_kind: 'direct_ids',
             question_ids: ['Q001', 'Q002'],
             knowledge_codes: [],
           }),

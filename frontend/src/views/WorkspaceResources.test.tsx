@@ -162,6 +162,41 @@ describe('WorkspaceResources', () => {
     expect(screen.queryByLabelText('题目列表接口')).not.toBeInTheDocument()
   })
 
+  it('defaults missing intake config to all pipeline modes before saving', async () => {
+    const workspace: WorkspaceRecord = {
+      id: 'math',
+      name: 'Math',
+      default_pipeline_key: 'question_content',
+      default_entity: 'question',
+    }
+    const updateWorkspace = vi.fn().mockResolvedValue(workspace)
+    useWorkspaceStore.setState({
+      currentWorkspace: workspace,
+      updateWorkspace,
+    })
+
+    render(<WorkspaceResources isVideoHive={false} />)
+    await waitFor(() =>
+      expect(fetchPipelineDefinition).toHaveBeenCalledWith('question_content')
+    )
+
+    fireEvent.click(screen.getByText('保存配置'))
+
+    await waitFor(() => {
+      expect(updateWorkspace).toHaveBeenCalledWith(
+        'math',
+        expect.objectContaining({
+          default_entity: 'question',
+          intake_config: {
+            enabled_modes: ['direct_ids', 'by_knowledge'],
+            label_overrides: {},
+          },
+        })
+      )
+    })
+    expect(screen.queryByText(/至少启用一种 intake mode/i)).not.toBeInTheDocument()
+  })
+
   it('does not show cms config for Video Hive system workspace', () => {
     render(<WorkspaceResources isVideoHive={true} />)
 
@@ -222,7 +257,6 @@ describe('WorkspaceResources', () => {
       expect(fetchPipelineDefinition).toHaveBeenCalledWith('question_content')
     )
 
-    await selectOption('处理对象 (Entity)', 'video')
     await clickCheckbox('By Knowledge')
     await inputValue('By Knowledge 显示名称', '按知识点')
 
@@ -232,7 +266,7 @@ describe('WorkspaceResources', () => {
       expect(updateWorkspace).toHaveBeenCalledWith(
         'math',
         expect.objectContaining({
-          default_entity: 'video',
+          default_entity: 'question',
           intake_config: {
             enabled_modes: expect.arrayContaining([
               'direct_ids',
@@ -241,6 +275,47 @@ describe('WorkspaceResources', () => {
             label_overrides: expect.objectContaining({
               by_knowledge: '按知识点',
             }),
+          },
+        })
+      )
+    })
+  })
+
+  it('prevents enabling knowledge intake for video entity until implemented', async () => {
+    const workspace: WorkspaceRecord = {
+      id: 'math',
+      name: 'Math',
+      default_pipeline_key: 'question_content',
+      default_entity: 'question',
+      intake_config: {
+        enabled_modes: ['direct_ids'],
+        label_overrides: {},
+      },
+    }
+    const updateWorkspace = vi.fn().mockResolvedValue(workspace)
+    useWorkspaceStore.setState({
+      currentWorkspace: workspace,
+      updateWorkspace,
+    })
+
+    render(<WorkspaceResources isVideoHive={false} />)
+    await waitFor(() =>
+      expect(fetchPipelineDefinition).toHaveBeenCalledWith('question_content')
+    )
+
+    await selectOption('处理对象 (Entity)', 'video')
+
+    expect(screen.getByLabelText('By Knowledge')).toBeDisabled()
+    fireEvent.click(screen.getByText('保存配置'))
+
+    await waitFor(() => {
+      expect(updateWorkspace).toHaveBeenCalledWith(
+        'math',
+        expect.objectContaining({
+          default_entity: 'video',
+          intake_config: {
+            enabled_modes: ['direct_ids'],
+            label_overrides: {},
           },
         })
       )

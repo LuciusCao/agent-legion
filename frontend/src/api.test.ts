@@ -194,7 +194,6 @@ describe('createJobBatch', () => {
         method: 'POST',
         body: JSON.stringify({
           pipeline_key: 'question_content',
-          entity: 'question',
           source_kind: 'question_ids',
           question_ids: ['q1', 'q2'],
           knowledge_codes: [],
@@ -228,7 +227,6 @@ describe('createJobBatch', () => {
         method: 'POST',
         body: JSON.stringify({
           pipeline_key: 'question_content',
-          entity: 'question',
           source_kind: 'knowledge_codes',
           knowledge_codes: ['k1'],
           question_ids: [],
