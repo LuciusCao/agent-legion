@@ -48,18 +48,30 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   useEffect(() => {
     if (!isVideoHive && workspaceId) {
       let cancelled = false
-      Promise.all([fetchPipelineDefinition(pipelineKey), fetchJobs(workspaceId)])
-        .then(([pipelineResult, jobsResult]) => {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setError('')
+
+      fetchPipelineDefinition(pipelineKey)
+        .then((result) => {
           if (cancelled) return
-          setPipeline(pipelineResult.pipeline)
-          setJobs(jobsResult.jobs)
-          setSelectedModeKey(pipelineResult.pipeline.intake?.modes[0]?.key || '')
+          setPipeline(result.pipeline)
+          setSelectedModeKey(result.pipeline.intake?.modes[0]?.key || '')
         })
         .catch((err) => {
           if (cancelled) return
-          setMessage('')
           setError(err instanceof Error ? err.message : String(err))
         })
+
+      fetchJobs(workspaceId)
+        .then((result) => {
+          if (cancelled) return
+          setJobs(result.jobs)
+        })
+        .catch((err) => {
+          if (cancelled) return
+          setError((prev) => prev || (err instanceof Error ? err.message : String(err)))
+        })
+
       return () => {
         cancelled = true
       }
@@ -88,8 +100,13 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       setError('')
       setMessage(`已创建 ${result.created_count} 个题目任务`)
       setInputValue('')
-      const refreshed = await fetchJobs(workspaceId)
-      setJobs(refreshed.jobs)
+      try {
+        const refreshed = await fetchJobs(workspaceId)
+        setJobs(refreshed.jobs)
+      } catch (refreshErr) {
+        // refresh failure should not erase success message
+        console.error('Failed to refresh jobs:', refreshErr)
+      }
     } catch (err) {
       setMessage('')
       setError(err instanceof Error ? err.message : String(err))

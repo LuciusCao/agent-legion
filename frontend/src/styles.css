@@ -583,6 +583,7 @@ pre {
 .workspace-job-list,
 .workspace-job-detail .card-outlined {
   margin-bottom: 16px;
+  padding: 16px;
 }
 
 .intake-chip-row {
