@@ -3,6 +3,7 @@ import { useParams, useNavigate, Routes, Route, useLocation } from 'react-router
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import WorkspaceOverview from '../views/WorkspaceOverview'
 import WorkspaceJobList from '../views/WorkspaceJobList'
+import WorkspaceJobDetail from '../views/WorkspaceJobDetail'
 import WorkspaceResources from '../views/WorkspaceResources'
 
 const TABS = [
@@ -114,6 +115,7 @@ export default function WorkspaceLayout() {
         <div style={{ flex: 1, overflow: 'auto', padding: 24 }}>
           <Routes>
             <Route path="/" element={<WorkspaceOverview isVideoHive={isVideoHive} />} />
+            <Route path="/jobs/:jobId" element={<WorkspaceJobDetail />} />
             <Route path="/jobs" element={<WorkspaceJobList isVideoHive={isVideoHive} />} />
             <Route
               path="/agents"
