@@ -187,8 +187,6 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
                 {
                     "key": mode.key,
                     "label": mode.label,
-                    "resolver": mode.resolver,
-                    "task_entity": mode.task_entity,
                     "input_field": mode.input_field,
                     "resource": mode.resource,
                 }
@@ -241,22 +239,19 @@ def create_jobs_router(
             )
 
         candidates: list[dict[str, Any]] = []
-        if mode.resolver == "direct.question_ids":
+        entity_type = "question"
+        if not mode.resource:
             candidates = [
                 _candidate(
-                    mode.task_entity,
+                    entity_type,
                     value,
-                    f"Question {value}" if mode.task_entity == "question" else value,
+                    f"Question {value}",
                     payload.source_kind,
                     value,
                 )
                 for value in input_values
             ]
-        elif mode.resolver == "cms.questions_by_knowledge":
-            if not mode.resource:
-                raise HTTPException(
-                    status_code=400, detail=f"Intake mode {mode.key} is missing a resource"
-                )
+        else:
             list_resource = resolve_cms_resource(
                 settings.config,
                 workspace,
@@ -277,17 +272,13 @@ def create_jobs_router(
                     seen_question_ids.add(summary.question_id)
                     candidates.append(
                         _candidate(
-                            mode.task_entity,
+                            entity_type,
                             summary.question_id,
                             summary.title or f"Question {summary.question_id}",
                             "knowledge_code",
                             knowledge_code,
                         )
                     )
-        else:
-            raise HTTPException(
-                status_code=400, detail=f"Unsupported intake resolver: {mode.resolver}"
-            )
 
         if not candidates:
             raise HTTPException(status_code=400, detail="No tasks were resolved from input")
@@ -297,19 +288,17 @@ def create_jobs_router(
             for candidate in candidates
             if candidate["entity_type"] == "question"
         ]
-        knowledge_codes = input_values if payload.source_kind == "knowledge_codes" else []
+        knowledge_codes = input_values if mode.input_field == "knowledge_codes" else []
         source_payload = payload.model_dump()
         source_payload["question_ids"] = question_ids
         source_payload["knowledge_codes"] = (
-            knowledge_codes if payload.source_kind == "knowledge_codes" else []
+            knowledge_codes if mode.input_field == "knowledge_codes" else []
         )
         source_payload["cms_config"] = cms_config
         source_payload["resource_config"] = resource_config
         source_payload["intake_mode"] = {
             "key": mode.key,
             "label": mode.label,
-            "resolver": mode.resolver,
-            "task_entity": mode.task_entity,
             "input_field": mode.input_field,
             "resource": mode.resource,
         }

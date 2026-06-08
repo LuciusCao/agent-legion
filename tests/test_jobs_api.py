@@ -29,7 +29,7 @@ def test_create_question_jobs_when_enabled(tmp_path):
             "/api/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": ["Q001", "Q002"],
                 "knowledge_codes": [],
             },
@@ -57,7 +57,7 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": ["Q001"],
                 "knowledge_codes": [],
             },
@@ -88,7 +88,7 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
             "/api/workspaces/default/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": ["Q001", " Q002 ", "Q001", ""],
                 "knowledge_codes": ["K001"],
             },
@@ -134,7 +134,7 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
             "/api/workspaces/default/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "knowledge_codes",
+                "source_kind": "by_knowledge",
                 "question_ids": [],
                 "knowledge_codes": ["K001", "K001", " K002 "],
             },
@@ -186,7 +186,7 @@ def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch)
                 "name": "Resource Math",
                 "resource_config": {
                     "resources": {
-                        "questions_by_knowledge": {
+                        "by_knowledge": {
                             "provider": "cms.question.list_by_knowledge",
                             "config": {
                                 "bank_version": "v5",
@@ -201,7 +201,7 @@ def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch)
             f"/api/workspaces/{workspace['id']}/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "knowledge_codes",
+                "source_kind": "by_knowledge",
                 "question_ids": [],
                 "knowledge_codes": ["K101"],
             },
@@ -216,7 +216,7 @@ def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch)
         }
     ]
     payload = json.loads(response.json()["batch"]["source_payload_json"])
-    assert payload["resource_config"]["resources"]["questions_by_knowledge"]["provider"] == (
+    assert payload["resource_config"]["resources"]["by_knowledge"]["provider"] == (
         "cms.question.list_by_knowledge"
     )
     assert response.json()["jobs"][0]["source_type"] == "question"
@@ -336,7 +336,7 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
             "/api/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": ["Q003"],
                 "knowledge_codes": [],
             },
@@ -373,20 +373,16 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     assert body["pipeline"]["concurrency"] == {"local": 8, "agent": 2}
     assert body["pipeline"]["intake"]["modes"] == [
         {
-            "key": "question_ids",
-            "label": "题目 ID",
-            "resolver": "direct.question_ids",
-            "task_entity": "question",
+            "key": "direct_ids",
+            "label": "直接输入 ID",
             "input_field": "question_ids",
             "resource": "",
         },
         {
-            "key": "knowledge_codes",
-            "label": "知识点 Code",
-            "resolver": "cms.questions_by_knowledge",
-            "task_entity": "question",
+            "key": "by_knowledge",
+            "label": "按知识点查询",
             "input_field": "knowledge_codes",
-            "resource": "questions_by_knowledge",
+            "resource": "by_knowledge",
         },
     ]
     node_keys = [node["key"] for node in body["pipeline"]["nodes"]]
@@ -411,7 +407,7 @@ def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
             "/api/workspaces/default/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": [" ", ""],
                 "knowledge_codes": [],
             },
@@ -433,7 +429,7 @@ def test_rerun_node_marks_downstream_stale(tmp_path):
             "/api/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": ["Q201"],
                 "knowledge_codes": [],
             },
@@ -488,7 +484,7 @@ def test_workspace_stats_returns_counts_and_agent_status(tmp_path):
             f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": ["Q301", "Q302"],
                 "knowledge_codes": [],
             },
@@ -520,7 +516,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(tmp_path):
             "/api/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": ["Q401"],
                 "knowledge_codes": [],
             },
@@ -578,7 +574,7 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
             f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": ["Q501"],
                 "knowledge_codes": [],
             },
@@ -618,7 +614,7 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
             f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "pipeline_key": "question_content",
-                "source_kind": "question_ids",
+                "source_kind": "direct_ids",
                 "question_ids": ["Q601"],
                 "knowledge_codes": [],
             },
