@@ -3,6 +3,7 @@ import { useParams, useNavigate, Routes, Route, useLocation } from 'react-router
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import WorkspaceOverview from '../views/WorkspaceOverview'
 import WorkspaceJobList from '../views/WorkspaceJobList'
+import WorkspaceResources from '../views/WorkspaceResources'
 
 const TABS = [
   { key: '', label: 'Overview' },
@@ -136,11 +137,7 @@ export default function WorkspaceLayout() {
             />
             <Route
               path="/resources"
-              element={
-                <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-                  Resources view — 待实现
-                </div>
-              }
+              element={<WorkspaceResources isVideoHive={isVideoHive} />}
             />
             <Route
               path="/packages"

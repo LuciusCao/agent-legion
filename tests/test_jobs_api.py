@@ -39,6 +39,7 @@ def test_create_question_jobs_when_enabled(tmp_path):
     body = response.json()
     assert body["created_count"] == 2
     assert body["jobs"][0]["workspace_id"] == "default"
+    assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["source_id"] for job in body["jobs"]] == ["Q001", "Q002"]
 
 
@@ -70,6 +71,7 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     body = created.json()
     assert body["jobs"][0]["workspace_id"] == workspace_id
     assert body["jobs"][0]["id"] == f"{workspace_id}_question_content_Q001"
+    assert body["jobs"][0]["source_type"] == "question"
     assert [job["id"] for job in workspace_jobs.json()["jobs"]] == [body["jobs"][0]["id"]]
     assert default_jobs.json()["jobs"] == []
 
@@ -98,6 +100,228 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
     assert payload["question_ids"] == ["Q001", "Q002"]
     assert payload["knowledge_codes"] == []
     assert body["created_count"] == 2
+
+
+def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.cms.question import CmsQuestionSummary
+    from server.app.main import create_app
+
+    calls = []
+
+    def fake_list_questions_by_knowledge(code, api_url=None, token=None):
+        calls.append({"code": code, "api_url": api_url, "token": token})
+        return [
+            CmsQuestionSummary("Q001", "题目一", {"uuid": "Q001"}),
+            CmsQuestionSummary("Q002", "题目二", {"uuid": "Q002"}),
+        ]
+
+    monkeypatch.setattr(
+        "server.app.routes.jobs.list_questions_by_knowledge",
+        fake_list_questions_by_knowledge,
+    )
+    monkeypatch.setattr("server.app.routes.jobs.get_token", lambda env, config: "token")
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config["cms"] = {
+        "env": "prod",
+        "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
+    }
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "knowledge_codes",
+                "question_ids": [],
+                "knowledge_codes": ["K001", "K001", " K002 "],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    payload = json.loads(body["batch"]["source_payload_json"])
+    assert [call["code"] for call in calls] == ["K001", "K002"]
+    assert calls[0]["api_url"] == "https://cms.example/question/list?bank_version=v5&page_size=50"
+    assert calls[0]["token"] == "token"
+    assert payload["knowledge_codes"] == ["K001", "K002"]
+    assert payload["question_ids"] == ["Q001", "Q002"]
+    assert body["created_count"] == 2
+    assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
+    assert [job["title"] for job in body["jobs"]] == ["题目一", "题目二"]
+
+
+def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.cms.question import CmsQuestionSummary
+    from server.app.main import create_app
+
+    calls = []
+
+    def fake_list_questions_by_knowledge(code, api_url=None, token=None):
+        calls.append({"code": code, "api_url": api_url, "token": token})
+        return [CmsQuestionSummary("Q101", "资源绑定题目", {"uuid": "Q101"})]
+
+    monkeypatch.setattr(
+        "server.app.routes.jobs.list_questions_by_knowledge",
+        fake_list_questions_by_knowledge,
+    )
+    monkeypatch.setattr("server.app.routes.jobs.get_token", lambda env, config: "token")
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config["cms"] = {"env": "prod"}
+    app.state.settings.config["resource_providers"] = {
+        "cms.question.list_by_knowledge": {
+            "api_url": "https://cms.example/question/list",
+        }
+    }
+    with TestClient(app) as c:
+        workspace = c.post(
+            "/api/workspaces",
+            json={
+                "name": "Resource Math",
+                "resource_config": {
+                    "resources": {
+                        "questions_by_knowledge": {
+                            "provider": "cms.question.list_by_knowledge",
+                            "config": {
+                                "bank_version": "v5",
+                                "subject_id": "5",
+                            },
+                        }
+                    }
+                },
+            },
+        ).json()["workspace"]
+        response = c.post(
+            f"/api/workspaces/{workspace['id']}/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "knowledge_codes",
+                "question_ids": [],
+                "knowledge_codes": ["K101"],
+            },
+        )
+
+    assert response.status_code == 200
+    assert calls == [
+        {
+            "code": "K101",
+            "api_url": "https://cms.example/question/list?bank_version=v5&subject_id=5",
+            "token": "token",
+        }
+    ]
+    payload = json.loads(response.json()["batch"]["source_payload_json"])
+    assert payload["resource_config"]["resources"]["questions_by_knowledge"]["provider"] == (
+        "cms.question.list_by_knowledge"
+    )
+    assert response.json()["jobs"][0]["source_type"] == "question"
+
+
+def test_create_workspace_stores_cms_config_override(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/workspaces",
+            json={
+                "name": "Math V5",
+                "cms_config": {
+                    "subject_id": "5",
+                    "question_detail_url": "https://cms.example/question/detail?bank_version=v5",
+                },
+            },
+        )
+
+    assert response.status_code == 200
+    workspace = response.json()["workspace"]
+    assert workspace["cms_config"]["subject_id"] == "5"
+    assert (
+        workspace["cms_config"]["question_detail_url"]
+        == "https://cms.example/question/detail?bank_version=v5"
+    )
+
+
+def test_update_workspace_cms_config(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        created = c.post("/api/workspaces", json={"name": "Math V5"}).json()
+        workspace_id = created["workspace"]["id"]
+        response = c.patch(
+            f"/api/workspaces/{workspace_id}",
+            json={
+                "cms_config": {
+                    "question_list_url": "https://cms.example/question/list?bank_version=v5",
+                    "question_detail_url": "https://cms.example/question/detail?bank_version=v5",
+                    "subject_id": "5",
+                    "country_id": "1",
+                }
+            },
+        )
+        fetched = c.get(f"/api/workspaces/{workspace_id}")
+
+    assert response.status_code == 200
+    workspace = response.json()["workspace"]
+    assert workspace["cms_config"]["subject_id"] == "5"
+    assert (
+        workspace["cms_config"]["question_list_url"]
+        == "https://cms.example/question/list?bank_version=v5"
+    )
+    assert fetched.json()["workspace"]["cms_config"] == workspace["cms_config"]
+
+
+def test_update_workspace_resource_config(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        created = c.post("/api/workspaces", json={"name": "Math Resources"}).json()
+        workspace_id = created["workspace"]["id"]
+        response = c.patch(
+            f"/api/workspaces/{workspace_id}",
+            json={
+                "resource_config": {
+                    "resources": {
+                        "question_detail": {
+                            "provider": "cms.question.detail",
+                            "config": {
+                                "api_url": "https://cms.example/question/detail",
+                                "subject_id": "5",
+                            },
+                        },
+                        "questions_by_knowledge": {
+                            "provider": "cms.question.list_by_knowledge",
+                            "config": {
+                                "api_url": "https://cms.example/question/list",
+                                "page_size": 50,
+                            },
+                        },
+                    }
+                }
+            },
+        )
+
+    assert response.status_code == 200
+    resources = response.json()["workspace"]["resource_config"]["resources"]
+    assert resources["question_detail"]["provider"] == "cms.question.detail"
+    assert resources["question_detail"]["config"]["subject_id"] == "5"
+    assert resources["questions_by_knowledge"]["config"]["page_size"] == 50
 
 
 def test_get_job_detail_and_artifact_when_enabled(tmp_path):
@@ -147,6 +371,24 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     assert body["pipeline"]["key"] == "question_content"
     assert body["pipeline"]["label"] == "题目内容生成"
     assert body["pipeline"]["concurrency"] == {"local": 8, "agent": 2}
+    assert body["pipeline"]["intake"]["modes"] == [
+        {
+            "key": "question_ids",
+            "label": "题目 ID",
+            "resolver": "direct.question_ids",
+            "task_entity": "question",
+            "input_field": "question_ids",
+            "resource": "",
+        },
+        {
+            "key": "knowledge_codes",
+            "label": "知识点 Code",
+            "resolver": "cms.questions_by_knowledge",
+            "task_entity": "question",
+            "input_field": "knowledge_codes",
+            "resource": "questions_by_knowledge",
+        },
+    ]
     node_keys = [node["key"] for node in body["pipeline"]["nodes"]]
     assert node_keys[0] == "fetch_question_context"
     assert "assemble_package" in node_keys

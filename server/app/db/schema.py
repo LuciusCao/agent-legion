@@ -60,6 +60,8 @@ def init_db(path: Path) -> None:
                   id text primary key,
                   name text not null,
                   default_pipeline_key text not null default 'question_content',
+                  cms_config_json text not null default '{}',
+                  resource_config_json text not null default '{}',
                   created_at text not null default current_timestamp,
                   updated_at text not null default current_timestamp
                 );
@@ -128,6 +130,21 @@ def init_db(path: Path) -> None:
             }
             for column, statement in migrations.items():
                 if column not in existing_columns:
+                    conn.execute(statement)
+
+            existing_workspace_columns = {
+                row["name"] for row in conn.execute("pragma table_info(workspaces)").fetchall()
+            }
+            workspace_migrations = {
+                "cms_config_json": (
+                    "alter table workspaces add column cms_config_json text not null default '{}'"
+                ),
+                "resource_config_json": (
+                    "alter table workspaces add column resource_config_json text not null default '{}'"
+                ),
+            }
+            for column, statement in workspace_migrations.items():
+                if column not in existing_workspace_columns:
                     conn.execute(statement)
 
             existing_package_columns = {

@@ -33,6 +33,7 @@ def process_ready_pipeline_node(
     job_db: JobQueries,
     definition: PipelineDefinition,
     logs_dir: Path,
+    settings_config: dict | None = None,
 ) -> bool:
     for job in job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
         statuses = _node_statuses(job_db, job["id"])
@@ -44,7 +45,14 @@ def process_ready_pipeline_node(
 
         node = local_ready_nodes[0]
         try:
-            processed = execute_node_once(job_db, definition, job, node.key, logs_dir)
+            processed = execute_node_once(
+                job_db,
+                definition,
+                job,
+                node.key,
+                logs_dir,
+                settings_config=settings_config,
+            )
         except Exception as exc:
             error_message = str(exc)
             job_db.update_job_node(
@@ -79,6 +87,7 @@ class PipelineWorkerThread:
                         self.job_db,
                         definition,
                         self.settings.logs_dir,
+                        settings_config=self.settings.config,
                     )
                 except Exception:
                     logger.exception("pipeline worker poll failed")

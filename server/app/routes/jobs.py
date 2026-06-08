@@ -7,10 +7,28 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from server.app.agents import AgentStatusManager
+from server.app.cms.client import get_token
+from server.app.cms.question import list_questions_by_knowledge
 from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition, load_pipeline_definition
+from server.app.pipelines.resources import resolve_cms_resource
 from server.app.pipelines.scheduler import downstream_nodes
 from server.app.settings import Settings
+
+
+def _candidate(
+    entity_type: str,
+    entity_id: str,
+    title: str,
+    source_kind: str,
+    source_value: str,
+) -> dict[str, Any]:
+    return {
+        "entity_type": entity_type,
+        "entity_id": entity_id,
+        "title": title,
+        "source": {"kind": source_kind, "value": source_value},
+    }
 
 
 class JobBatchRequest(BaseModel):
@@ -37,6 +55,15 @@ class PipelineResponse(BaseModel):
 class WorkspaceCreateRequest(BaseModel):
     name: str
     default_pipeline_key: str = "question_content"
+    cms_config: dict[str, Any] = Field(default_factory=dict)
+    resource_config: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkspaceUpdateRequest(BaseModel):
+    name: str | None = None
+    default_pipeline_key: str | None = None
+    cms_config: dict[str, Any] | None = None
+    resource_config: dict[str, Any] | None = None
 
 
 class WorkspaceResponse(BaseModel):
@@ -103,6 +130,27 @@ def _workspace_or_404(job_db: JobQueries, workspace_id: str) -> dict[str, Any]:
     return workspace
 
 
+def _effective_cms_config(settings: Settings, workspace: dict[str, Any]) -> dict[str, Any]:
+    base = settings.config.get("cms", {})
+    config = dict(base) if isinstance(base, dict) else {}
+    workspace_config = workspace.get("cms_config")
+    if isinstance(workspace_config, dict):
+        config.update(workspace_config)
+    return config
+
+
+def _normalize_values(values: list[str]) -> list[str]:
+    return list(dict.fromkeys(value.strip() for value in values if value.strip()))
+
+
+def _singular_field_name(value: str) -> str:
+    if value.endswith("ies"):
+        return f"{value[:-3]}y"
+    if value.endswith("s"):
+        return value[:-1]
+    return value
+
+
 def _artifact_path(job: dict[str, Any], artifact_name: str) -> Path:
     if "/" in artifact_name or "\\" in artifact_name or artifact_name in {"", ".", ".."}:
         raise HTTPException(status_code=400, detail="Invalid artifact name")
@@ -134,6 +182,19 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
             "local": definition.concurrency.local,
             "agent": definition.concurrency.agent,
         },
+        "intake": {
+            "modes": [
+                {
+                    "key": mode.key,
+                    "label": mode.label,
+                    "resolver": mode.resolver,
+                    "task_entity": mode.task_entity,
+                    "input_field": mode.input_field,
+                    "resource": mode.resource,
+                }
+                for mode in definition.intake.modes.values()
+            ]
+        },
         "nodes": [
             {
                 "key": node.key,
@@ -157,18 +218,102 @@ def create_jobs_router(
         payload: JobBatchRequest,
     ) -> JobBatchResponse:
         _require_enabled(settings)
-        _workspace_or_404(job_db, workspace_id)
+        workspace = _workspace_or_404(job_db, workspace_id)
         definition = _definition(settings, payload.pipeline_key)
-        question_ids = list(dict.fromkeys(q.strip() for q in payload.question_ids if q.strip()))
-        if payload.source_kind != "question_ids":
+        cms_config = _effective_cms_config(settings, workspace)
+        resource_config = workspace.get("resource_config")
+        if not isinstance(resource_config, dict):
+            resource_config = {}
+        mode = definition.intake.modes.get(payload.source_kind)
+        if mode is None:
+            raise HTTPException(status_code=400, detail="Unsupported intake mode")
+
+        raw_values = getattr(payload, mode.input_field, None)
+        if not isinstance(raw_values, list):
             raise HTTPException(
-                status_code=400, detail="Only question_ids source_kind is supported"
+                status_code=400, detail=f"Unsupported input field: {mode.input_field}"
             )
-        if not question_ids:
-            raise HTTPException(status_code=400, detail="At least one question_id is required")
+        input_values = _normalize_values(raw_values)
+        if not input_values:
+            raise HTTPException(
+                status_code=400,
+                detail=f"At least one {_singular_field_name(mode.input_field)} is required",
+            )
+
+        candidates: list[dict[str, Any]] = []
+        if mode.resolver == "direct.question_ids":
+            candidates = [
+                _candidate(
+                    mode.task_entity,
+                    value,
+                    f"Question {value}" if mode.task_entity == "question" else value,
+                    payload.source_kind,
+                    value,
+                )
+                for value in input_values
+            ]
+        elif mode.resolver == "cms.questions_by_knowledge":
+            if not mode.resource:
+                raise HTTPException(
+                    status_code=400, detail=f"Intake mode {mode.key} is missing a resource"
+                )
+            list_resource = resolve_cms_resource(
+                settings.config,
+                workspace,
+                None,
+                mode.resource,
+            )
+            token = get_token(str(list_resource.get("env", "")), list_resource)
+            seen_question_ids: set[str] = set()
+            for knowledge_code in input_values:
+                summaries = list_questions_by_knowledge(
+                    knowledge_code,
+                    list_resource.get("api_url") or list_resource.get("question_list_url"),
+                    token,
+                )
+                for summary in summaries:
+                    if summary.question_id in seen_question_ids:
+                        continue
+                    seen_question_ids.add(summary.question_id)
+                    candidates.append(
+                        _candidate(
+                            mode.task_entity,
+                            summary.question_id,
+                            summary.title or f"Question {summary.question_id}",
+                            "knowledge_code",
+                            knowledge_code,
+                        )
+                    )
+        else:
+            raise HTTPException(
+                status_code=400, detail=f"Unsupported intake resolver: {mode.resolver}"
+            )
+
+        if not candidates:
+            raise HTTPException(status_code=400, detail="No tasks were resolved from input")
+
+        question_ids = [
+            candidate["entity_id"]
+            for candidate in candidates
+            if candidate["entity_type"] == "question"
+        ]
+        knowledge_codes = input_values if payload.source_kind == "knowledge_codes" else []
         source_payload = payload.model_dump()
         source_payload["question_ids"] = question_ids
-        source_payload["knowledge_codes"] = []
+        source_payload["knowledge_codes"] = (
+            knowledge_codes if payload.source_kind == "knowledge_codes" else []
+        )
+        source_payload["cms_config"] = cms_config
+        source_payload["resource_config"] = resource_config
+        source_payload["intake_mode"] = {
+            "key": mode.key,
+            "label": mode.label,
+            "resolver": mode.resolver,
+            "task_entity": mode.task_entity,
+            "input_field": mode.input_field,
+            "resource": mode.resource,
+        }
+        source_payload["task_candidates"] = candidates
         batch = job_db.create_batch(
             payload.pipeline_key,
             payload.source_kind,
@@ -176,14 +321,14 @@ def create_jobs_router(
             workspace_id=workspace_id,
         )
         jobs: list[dict[str, Any]] = []
-        for question_id in question_ids:
+        for candidate in candidates:
             jobs.append(
                 job_db.create_job(
                     pipeline_key=payload.pipeline_key,
-                    source_type="question_id",
-                    source_id=question_id,
+                    source_type=str(candidate["entity_type"]),
+                    source_id=str(candidate["entity_id"]),
                     batch_id=batch["id"],
-                    title=f"Question {question_id}",
+                    title=str(candidate["title"]),
                     node_keys=list(definition.nodes),
                     workspace_id=workspace_id,
                 )
@@ -210,6 +355,8 @@ def create_jobs_router(
             workspace = job_db.create_workspace(
                 payload.name,
                 default_pipeline_key=payload.default_pipeline_key,
+                cms_config=payload.cms_config,
+                resource_config=payload.resource_config,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -219,6 +366,27 @@ def create_jobs_router(
     def get_workspace(workspace_id: str) -> WorkspaceResponse:
         _require_enabled(settings)
         return WorkspaceResponse(workspace=_workspace_or_404(job_db, workspace_id))
+
+    @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
+    def update_workspace(
+        workspace_id: str,
+        payload: WorkspaceUpdateRequest,
+    ) -> WorkspaceResponse:
+        _require_enabled(settings)
+        _workspace_or_404(job_db, workspace_id)
+        if payload.default_pipeline_key is not None:
+            _definition(settings, payload.default_pipeline_key)
+        try:
+            workspace = job_db.update_workspace(
+                workspace_id,
+                name=payload.name,
+                default_pipeline_key=payload.default_pipeline_key,
+                cms_config=payload.cms_config,
+                resource_config=payload.resource_config,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return WorkspaceResponse(workspace=workspace)
 
     @router.get("/workspaces/{workspace_id}/stats", response_model=WorkspaceStatsResponse)
     def get_workspace_stats(workspace_id: str) -> WorkspaceStatsResponse:

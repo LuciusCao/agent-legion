@@ -69,11 +69,33 @@ export async function fetchWorkspaces(): Promise<WorkspacesResponse> {
   }
 }
 
-export async function createWorkspace(name: string): Promise<WorkspaceRecord> {
+export async function createWorkspace(
+  name: string,
+  cmsConfig: Record<string, unknown> = {}
+): Promise<WorkspaceRecord> {
   const result = await api<{ workspace: WorkspaceRecord }>('/api/workspaces', {
     method: 'POST',
-    body: JSON.stringify({ name }),
+    body: JSON.stringify({ name, cms_config: cmsConfig }),
   })
+  return result.workspace
+}
+
+export async function updateWorkspace(
+  workspaceId: string,
+  fields: {
+    name?: string
+    default_pipeline_key?: string
+    cms_config?: Record<string, unknown>
+    resource_config?: Record<string, unknown>
+  }
+): Promise<WorkspaceRecord> {
+  const result = await api<{ workspace: WorkspaceRecord }>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(fields),
+    }
+  )
   return result.workspace
 }
 
