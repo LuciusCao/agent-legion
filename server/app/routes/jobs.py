@@ -40,7 +40,7 @@ def _candidate(
 
 class JobBatchRequest(BaseModel):
     pipeline_key: str = "question_content"
-    entity: str = "question"
+    entity: str | None = None
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
     knowledge_codes: list[str] = Field(default_factory=list)
@@ -185,6 +185,16 @@ def _pipeline_label(settings: Settings, pipeline_key: str) -> str:
     return _definition(settings, pipeline_key).label
 
 
+def _enabled_intake_modes(workspace: dict[str, Any]) -> set[str] | None:
+    intake_config = workspace.get("intake_config")
+    if not isinstance(intake_config, dict) or "enabled_modes" not in intake_config:
+        return None
+    enabled_modes = intake_config.get("enabled_modes")
+    if not isinstance(enabled_modes, list):
+        return None
+    return {str(mode) for mode in enabled_modes}
+
+
 def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
     definition = _definition(settings, pipeline_key)
     return {
@@ -237,6 +247,12 @@ def create_jobs_router(
         mode = definition.intake.modes.get(payload.source_kind)
         if mode is None:
             raise HTTPException(status_code=400, detail="Unsupported intake mode")
+        enabled_modes = _enabled_intake_modes(workspace)
+        if enabled_modes is not None and payload.source_kind not in enabled_modes:
+            raise HTTPException(
+                status_code=400,
+                detail="Intake mode is disabled for this workspace",
+            )
 
         raw_values = getattr(payload, mode.input_field, None)
         if not isinstance(raw_values, list):
@@ -250,7 +266,8 @@ def create_jobs_router(
                 detail=f"At least one {_singular_field_name(mode.input_field)} is required",
             )
 
-        entity = (payload.entity or "question").strip() or "question"
+        workspace_entity = str(workspace.get("default_entity") or "question")
+        entity = (payload.entity or workspace_entity).strip() or "question"
         resolver = RESOLVER_MAP.get((entity, mode.key))
         if resolver is None:
             raise HTTPException(
@@ -322,6 +339,7 @@ def create_jobs_router(
 
         knowledge_codes = input_values if mode.input_field == "knowledge_codes" else []
         source_payload = payload.model_dump()
+        source_payload["entity"] = entity
         source_payload["question_ids"] = resolved_ids
         source_payload["knowledge_codes"] = knowledge_codes
         source_payload["cms_config"] = cms_config

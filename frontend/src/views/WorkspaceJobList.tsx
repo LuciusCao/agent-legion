@@ -21,6 +21,16 @@ function parseBatchInput(value: string): string[] {
   )
 }
 
+function isIntakeModeSupported(entity: string, modeKey: string): boolean {
+  if (entity === 'question') {
+    return modeKey === 'direct_ids' || modeKey === 'by_knowledge'
+  }
+  if (entity === 'video') {
+    return modeKey === 'direct_ids'
+  }
+  return false
+}
+
 type Props = {
   isVideoHive: boolean
 }
@@ -43,6 +53,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const workspaceId = currentWorkspace?.id
   const pipelineKey =
     currentWorkspace?.default_pipeline_key || 'question_content'
+  const entity = currentWorkspace?.default_entity || 'question'
 
   const intakeConfig = currentWorkspace?.intake_config
   const enabledModeKeys = useMemo(
@@ -53,10 +64,13 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const effectiveModes = useMemo(() => {
     const modes = pipeline?.intake?.modes || []
     if (enabledModeKeys.size === 0) {
-      return modes
+      return modes.filter((mode) => isIntakeModeSupported(entity, mode.key))
     }
-    return modes.filter((mode) => enabledModeKeys.has(mode.key))
-  }, [pipeline?.intake?.modes, enabledModeKeys])
+    return modes.filter(
+      (mode) =>
+        enabledModeKeys.has(mode.key) && isIntakeModeSupported(entity, mode.key)
+    )
+  }, [pipeline?.intake?.modes, enabledModeKeys, entity])
 
   function effectiveLabel(mode: PipelineIntakeModeRecord): string {
     const override = intakeConfig?.label_overrides?.[mode.key]
@@ -85,8 +99,12 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
           const enabledKeys = new Set(intakeConfig?.enabled_modes || [])
           const availableModes =
             enabledKeys.size === 0
-              ? modes
-              : modes.filter((mode) => enabledKeys.has(mode.key))
+              ? modes.filter((mode) => isIntakeModeSupported(entity, mode.key))
+              : modes.filter(
+                  (mode) =>
+                    enabledKeys.has(mode.key) &&
+                    isIntakeModeSupported(entity, mode.key)
+                )
           setSelectedModeKey(availableModes[0]?.key || '')
         })
         .catch((err) => {
@@ -110,7 +128,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
         cancelled = true
       }
     }
-  }, [isVideoHive, workspaceId, pipelineKey, intakeConfig])
+  }, [isVideoHive, workspaceId, pipelineKey, intakeConfig, entity])
 
   async function handleCreateBatch() {
     const selectedMode = effectiveModes.find(
@@ -129,7 +147,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       const result = await createJobBatch({
         workspaceId,
         pipelineKey,
-        entity: currentWorkspace?.default_entity || 'question',
+        entity,
         sourceKind: selectedMode.key,
         inputField: selectedMode.input_field,
         values,

@@ -27,6 +27,16 @@ type IntakeConfigForm = {
   labelOverrides: Record<string, string>
 }
 
+function isIntakeModeSupported(entity: string, modeKey: string): boolean {
+  if (entity === 'question') {
+    return modeKey === 'direct_ids' || modeKey === 'by_knowledge'
+  }
+  if (entity === 'video') {
+    return modeKey === 'direct_ids'
+  }
+  return false
+}
+
 function valueFromConfig(
   config: Record<string, unknown> | undefined,
   key: string
@@ -164,9 +174,12 @@ function WorkspaceResourcesForm() {
   })
   const initialIntakeConfig: IntakeConfigForm = (() => {
     const config = currentWorkspace?.intake_config || {}
+    const enabledModes = Array.isArray(config.enabled_modes)
+      ? config.enabled_modes
+      : []
     return {
       defaultEntity: currentWorkspace?.default_entity || 'question',
-      enabledModes: config.enabled_modes || [],
+      enabledModes,
       labelOverrides: config.label_overrides || {},
     }
   })()
@@ -183,9 +196,41 @@ function WorkspaceResourcesForm() {
   useEffect(() => {
     if (!currentWorkspace?.default_pipeline_key) return
     fetchPipelineDefinition(currentWorkspace.default_pipeline_key)
-      .then((response) => setPipeline(response.pipeline))
+      .then((response) => {
+        setPipeline(response.pipeline)
+        const storedModes = currentWorkspace.intake_config?.enabled_modes
+        if (!Array.isArray(storedModes)) {
+          const allSupportedModes =
+            response.pipeline.intake?.modes
+              .filter((mode) =>
+                isIntakeModeSupported(initialIntakeConfig.defaultEntity, mode.key)
+              )
+              .map((mode) => mode.key) || []
+          setIntakeForm((current) => ({
+            ...current,
+            enabledModes: allSupportedModes,
+          }))
+        }
+      })
       .catch(() => setPipeline(null))
-  }, [currentWorkspace])
+  }, [currentWorkspace, initialIntakeConfig.defaultEntity])
+
+  function updateDefaultEntity(defaultEntity: string) {
+    setIntakeForm((current) => {
+      const supportedModes =
+        pipeline?.intake?.modes
+          .filter((mode) => isIntakeModeSupported(defaultEntity, mode.key))
+          .map((mode) => mode.key) || []
+      const enabledModes = current.enabledModes.filter((modeKey) =>
+        supportedModes.includes(modeKey)
+      )
+      return {
+        ...current,
+        defaultEntity,
+        enabledModes: enabledModes.length > 0 ? enabledModes : supportedModes,
+      }
+    })
+  }
 
   function updateResourceField(
     resourceKey: keyof ResourcesForm,
@@ -226,7 +271,11 @@ function WorkspaceResourcesForm() {
         default_entity: intakeForm.defaultEntity,
         intake_config: {
           enabled_modes: intakeForm.enabledModes,
-          label_overrides: intakeForm.labelOverrides,
+          label_overrides: Object.fromEntries(
+            Object.entries(intakeForm.labelOverrides).filter(([modeKey]) =>
+              intakeForm.enabledModes.includes(modeKey)
+            )
+          ),
         },
       })
       setMessage('配置已保存')
@@ -285,10 +334,7 @@ function WorkspaceResourcesForm() {
             aria-label="处理对象 (Entity)"
             value={intakeForm.defaultEntity}
             onInput={(e: Event) =>
-              setIntakeForm({
-                ...intakeForm,
-                defaultEntity: (e.target as HTMLSelectElement).value,
-              })
+              updateDefaultEntity((e.target as HTMLSelectElement).value)
             }
           >
             <md-select-option value="question">
@@ -313,21 +359,31 @@ function WorkspaceResourcesForm() {
             }}
           >
             {pipeline?.intake?.modes.map((mode) => (
-              <md-checkbox
-                key={mode.key}
-                aria-label={mode.label}
-                checked={
-                  intakeForm.enabledModes.includes(mode.key) || undefined
-                }
-                onClick={() => {
-                  const next = intakeForm.enabledModes.includes(mode.key)
-                    ? intakeForm.enabledModes.filter((k) => k !== mode.key)
-                    : [...intakeForm.enabledModes, mode.key]
-                  setIntakeForm({ ...intakeForm, enabledModes: next })
-                }}
-              >
-                {mode.label}
-              </md-checkbox>
+              (() => {
+                const supported = isIntakeModeSupported(
+                  intakeForm.defaultEntity,
+                  mode.key
+                )
+                return (
+                  <md-checkbox
+                    key={mode.key}
+                    aria-label={mode.label}
+                    checked={
+                      intakeForm.enabledModes.includes(mode.key) || undefined
+                    }
+                    disabled={!supported || undefined}
+                    onClick={() => {
+                      if (!supported) return
+                      const next = intakeForm.enabledModes.includes(mode.key)
+                        ? intakeForm.enabledModes.filter((k) => k !== mode.key)
+                        : [...intakeForm.enabledModes, mode.key]
+                      setIntakeForm({ ...intakeForm, enabledModes: next })
+                    }}
+                  >
+                    {mode.label}
+                  </md-checkbox>
+                )
+              })()
             ))}
           </div>
         </div>

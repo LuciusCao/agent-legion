@@ -156,7 +156,7 @@ export function WorkspacesPage() {
       const result = await createJobBatch({
         workspaceId: selectedWorkspaceId,
         pipelineKey: 'question_content',
-        sourceKind: 'question_ids',
+        sourceKind: 'direct_ids',
         inputField: 'question_ids',
         values: questionIds,
       })

@@ -141,15 +141,17 @@ export async function createJobBatch(
   const {
     workspaceId,
     pipelineKey = 'question_content',
-    entity = 'question',
+    entity,
     sourceKind,
     inputField,
     values,
   } = input
   const body: Record<string, unknown> = {
     pipeline_key: pipelineKey,
-    entity,
     source_kind: sourceKind,
+  }
+  if (entity) {
+    body.entity = entity
   }
   body[inputField] = values
   if (inputField === 'question_ids') {
