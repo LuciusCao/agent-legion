@@ -5,6 +5,7 @@ import type { WorkspaceRecord } from '../types'
 vi.mock('../api', () => ({
   fetchWorkspaces: vi.fn(),
   createWorkspace: vi.fn(),
+  updateWorkspace: vi.fn(),
   deleteWorkspace: vi.fn(),
   fetchWorkspaceStats: vi.fn(),
 }))
@@ -12,12 +13,14 @@ vi.mock('../api', () => ({
 import {
   fetchWorkspaces,
   createWorkspace,
+  updateWorkspace,
   deleteWorkspace,
   fetchWorkspaceStats,
 } from '../api'
 
 const mockFetchWorkspaces = vi.mocked(fetchWorkspaces)
 const mockCreateWorkspace = vi.mocked(createWorkspace)
+const mockUpdateWorkspace = vi.mocked(updateWorkspace)
 const mockDeleteWorkspace = vi.mocked(deleteWorkspace)
 const mockFetchWorkspaceStats = vi.mocked(fetchWorkspaceStats)
 
@@ -32,6 +35,7 @@ describe('workspaceStore', () => {
     })
     mockFetchWorkspaces.mockClear()
     mockCreateWorkspace.mockClear()
+    mockUpdateWorkspace.mockClear()
     mockDeleteWorkspace.mockClear()
     mockFetchWorkspaceStats.mockClear()
   })
@@ -87,6 +91,30 @@ describe('workspaceStore', () => {
       useWorkspaceStore.getState().createWorkspace('Bad Workspace')
     ).rejects.toThrow('create failed')
     expect(useWorkspaceStore.getState().error).toBe('Error: create failed')
+  })
+
+  it('updateWorkspace replaces workspace in list and current selection', async () => {
+    const existing: WorkspaceRecord = {
+      id: 'ws1',
+      name: 'Old',
+      default_pipeline_key: 'question_content',
+    }
+    const updated: WorkspaceRecord = {
+      id: 'ws1',
+      name: 'Old',
+      default_pipeline_key: 'question_content',
+      cms_config: { subject_id: '5' },
+    }
+    useWorkspaceStore.setState({ workspaces: [existing], currentWorkspace: existing })
+    mockUpdateWorkspace.mockResolvedValueOnce(updated)
+
+    const result = await useWorkspaceStore
+      .getState()
+      .updateWorkspace('ws1', { cms_config: { subject_id: '5' } })
+
+    expect(result).toEqual(updated)
+    expect(useWorkspaceStore.getState().workspaces).toEqual([updated])
+    expect(useWorkspaceStore.getState().currentWorkspace).toEqual(updated)
   })
 
   it('deleteWorkspace removes from list', async () => {

@@ -29,10 +29,26 @@ class PipelineNode:
 
 
 @dataclass(frozen=True)
+class PipelineIntakeMode:
+    key: str
+    label: str
+    resolver: str
+    task_entity: str
+    input_field: str
+    resource: str = ""
+
+
+@dataclass(frozen=True)
+class PipelineIntake:
+    modes: dict[str, PipelineIntakeMode] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
 class PipelineDefinition:
     key: str
     label: str
     concurrency: PipelineConcurrency
+    intake: PipelineIntake
     nodes: dict[str, PipelineNode]
 
     @property
@@ -74,6 +90,50 @@ def _validate_acyclic(nodes: dict[str, PipelineNode]) -> None:
         visit(key)
 
 
+def _load_intake(raw: dict[str, Any]) -> PipelineIntake:
+    raw_intake = raw.get("intake", {})
+    if raw_intake is None:
+        raw_intake = {}
+    if not isinstance(raw_intake, dict):
+        raise PipelineDefinitionError("Pipeline intake must be a mapping")
+    raw_modes = raw_intake.get("modes", {})
+    if raw_modes is None:
+        raw_modes = {}
+    if not isinstance(raw_modes, dict):
+        raise PipelineDefinitionError("Pipeline intake.modes must be a mapping")
+
+    modes: dict[str, PipelineIntakeMode] = {}
+    for mode_key, raw_mode in raw_modes.items():
+        if not isinstance(mode_key, str) or not mode_key:
+            raise PipelineDefinitionError("Intake mode keys must be non-empty strings")
+        if not isinstance(raw_mode, dict):
+            raise PipelineDefinitionError(f"Intake mode {mode_key} must be a mapping")
+        label = raw_mode.get("label", mode_key)
+        resolver = raw_mode.get("resolver")
+        task_entity = raw_mode.get("task_entity")
+        input_field = raw_mode.get("input_field", mode_key)
+        resource = raw_mode.get("resource", "")
+        if not isinstance(label, str) or not label:
+            raise PipelineDefinitionError(f"Intake mode {mode_key}.label must be a string")
+        if not isinstance(resolver, str) or not resolver:
+            raise PipelineDefinitionError(f"Intake mode {mode_key}.resolver must be a string")
+        if not isinstance(task_entity, str) or not task_entity:
+            raise PipelineDefinitionError(f"Intake mode {mode_key}.task_entity must be a string")
+        if not isinstance(input_field, str) or not input_field:
+            raise PipelineDefinitionError(f"Intake mode {mode_key}.input_field must be a string")
+        if not isinstance(resource, str):
+            raise PipelineDefinitionError(f"Intake mode {mode_key}.resource must be a string")
+        modes[mode_key] = PipelineIntakeMode(
+            key=mode_key,
+            label=label,
+            resolver=resolver,
+            task_entity=task_entity,
+            input_field=input_field,
+            resource=resource,
+        )
+    return PipelineIntake(modes=modes)
+
+
 def load_pipeline_definition(path: Path) -> PipelineDefinition:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -100,6 +160,7 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
         local=_positive_int(raw_concurrency.get("local", 1), "local"),
         agent=_positive_int(raw_concurrency.get("agent", 1), "agent"),
     )
+    intake = _load_intake(raw)
 
     nodes: dict[str, PipelineNode] = {}
     for node_key, raw_node in raw_nodes.items():
@@ -126,4 +187,10 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
                 raise PipelineDefinitionError(f"Unknown dependency {dep!r} for node {node.key}")
 
     _validate_acyclic(nodes)
-    return PipelineDefinition(key=key, label=label, concurrency=concurrency, nodes=nodes)
+    return PipelineDefinition(
+        key=key,
+        label=label,
+        concurrency=concurrency,
+        intake=intake,
+        nodes=nodes,
+    )

@@ -12,6 +12,10 @@ def test_load_question_content_definition():
     assert definition.label == "题目内容生成"
     assert definition.concurrency.local == 8
     assert definition.concurrency.agent == 2
+    assert definition.intake.modes["question_ids"].resolver == "direct.question_ids"
+    assert definition.intake.modes["question_ids"].task_entity == "question"
+    assert definition.intake.modes["knowledge_codes"].resolver == "cms.questions_by_knowledge"
+    assert definition.intake.modes["knowledge_codes"].resource == "questions_by_knowledge"
     assert definition.nodes["question_understanding"].after == ["fetch_question_context"]
     assert definition.nodes["assemble_package"].inputs == [
         "question_context.json",

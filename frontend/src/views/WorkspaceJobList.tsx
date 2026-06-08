@@ -13,9 +13,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const { currentWorkspace } = useWorkspaceStore()
   const { videos, fetchVideos } = useVideoStore()
 
-  if (isVideoHive) {
-    useVideoEvents()
-  }
+  useVideoEvents(isVideoHive)
 
   useEffect(() => {
     if (isVideoHive) {

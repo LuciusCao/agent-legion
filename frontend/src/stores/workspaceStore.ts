@@ -3,6 +3,7 @@ import type { WorkspaceRecord, WorkspaceStats } from '../types'
 import {
   fetchWorkspaces,
   createWorkspace as apiCreateWorkspace,
+  updateWorkspace as apiUpdateWorkspace,
   deleteWorkspace as apiDeleteWorkspace,
   fetchWorkspaceStats,
 } from '../api'
@@ -16,6 +17,15 @@ type WorkspaceState = {
 
   fetchWorkspaces: () => Promise<void>
   createWorkspace: (name: string) => Promise<WorkspaceRecord>
+  updateWorkspace: (
+    id: string,
+    fields: {
+      name?: string
+      default_pipeline_key?: string
+      cms_config?: Record<string, unknown>
+      resource_config?: Record<string, unknown>
+    }
+  ) => Promise<WorkspaceRecord>
   deleteWorkspace: (id: string) => Promise<void>
   fetchWorkspaceStats: (id: string) => Promise<void>
   setCurrentWorkspace: (w: WorkspaceRecord | null) => void
@@ -42,6 +52,21 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     try {
       const ws = await apiCreateWorkspace(name)
       set((s) => ({ workspaces: [...s.workspaces, ws], error: null }))
+      return ws
+    } catch (err) {
+      set({ error: String(err) })
+      throw err
+    }
+  },
+
+  async updateWorkspace(id, fields) {
+    try {
+      const ws = await apiUpdateWorkspace(id, fields)
+      set((s) => ({
+        workspaces: s.workspaces.map((item) => (item.id === id ? ws : item)),
+        currentWorkspace: s.currentWorkspace?.id === id ? ws : s.currentWorkspace,
+        error: null,
+      }))
       return ws
     } catch (err) {
       set({ error: String(err) })

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest'
 
-import { api } from './api'
+import { api, updateWorkspace } from './api'
 
 function mockFetch(response: { ok: boolean; status: number; text: string }) {
   return vi.fn().mockResolvedValue({
@@ -31,5 +31,36 @@ describe('api error handling', () => {
     const html = '<html>'.repeat(100)
     global.fetch = mockFetch({ ok: false, status: 502, text: html })
     await expect(api('/test')).rejects.toThrow(`HTTP 502: ${html.slice(0, 200)}`)
+  })
+})
+
+describe('workspace api', () => {
+  it('patches workspace cms config', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          workspace: {
+            id: 'math',
+            name: 'Math',
+            default_pipeline_key: 'question_content',
+            cms_config: { subject_id: '5' },
+          },
+        }),
+    } as Response)
+    global.fetch = fetchMock
+
+    const workspace = await updateWorkspace('math', {
+      cms_config: { subject_id: '5' },
+    })
+
+    expect(workspace.cms_config).toEqual({ subject_id: '5' })
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/math',
+      expect.objectContaining({
+        method: 'PATCH',
+        body: JSON.stringify({ cms_config: { subject_id: '5' } }),
+      })
+    )
   })
 })

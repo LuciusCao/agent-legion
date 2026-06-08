@@ -3,6 +3,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+from server.app.cms.question import CmsQuestionDetail
 from server.app.jobs import JobQueries
 from server.app.pipeline_worker_thread import process_ready_pipeline_node
 from server.app.pipelines.definition import load_pipeline_definition
@@ -35,8 +36,160 @@ def test_execute_fetch_question_context_writes_artifact(tmp_path):
         "question_id": "Q100",
         "title": "Question Q100",
         "source_type": "question_id",
+        "normalized": {},
+        "cms_payload": None,
     }
     assert queries.get_job_node(job["id"], "fetch_question_context")["status"] == "completed"
+
+
+def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monkeypatch):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    workspace = queries.create_workspace(
+        "Math V5",
+        cms_config={"question_detail_url": "https://cms.example/question/detail?subject_id=5"},
+    )
+    batch = queries.create_batch(
+        "question_content",
+        "question_ids",
+        {
+            "question_ids": ["Q100"],
+            "cms_config": {
+                "question_detail_url": "https://cms.example/question/detail?subject_id=9"
+            },
+        },
+        workspace_id=workspace["id"],
+    )
+    job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q100",
+        batch_id=batch["id"],
+        title="Question Q100",
+        node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
+    )
+    calls = []
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        calls.append({"question_id": question_id, "api_url": api_url, "token": token})
+        return CmsQuestionDetail(
+            question_id="Q100",
+            title="CMS 题目一",
+            normalized={"stem": "1 + 1 = ?"},
+            payload={"data": {"uuid": "Q100", "title": "CMS 题目一"}},
+        )
+
+    monkeypatch.setattr(
+        "server.app.pipelines.question_content.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.pipelines.question_content.get_token", lambda env, config: "token"
+    )
+
+    completed = execute_node_once(
+        job_db=queries,
+        definition=definition,
+        job=job,
+        node_key="fetch_question_context",
+        logs_dir=tmp_path / "logs",
+        settings_config={"cms": {"env": "prod"}},
+    )
+
+    assert completed is True
+    assert calls == [
+        {
+            "question_id": "Q100",
+            "api_url": "https://cms.example/question/detail?subject_id=9",
+            "token": "token",
+        }
+    ]
+    artifact = Path(job["storage_dir"]) / "question_context.json"
+    assert json.loads(artifact.read_text(encoding="utf-8")) == {
+        "question_id": "Q100",
+        "title": "CMS 题目一",
+        "source_type": "question_id",
+        "normalized": {"stem": "1 + 1 = ?"},
+        "cms_payload": {"data": {"uuid": "Q100", "title": "CMS 题目一"}},
+    }
+
+
+def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, monkeypatch):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    workspace = queries.create_workspace(
+        "Resource Math",
+        resource_config={
+            "resources": {
+                "question_detail": {
+                    "provider": "cms.question.detail",
+                    "config": {
+                        "bank_version": "v5",
+                        "subject_id": "5",
+                    },
+                }
+            }
+        },
+    )
+    batch = queries.create_batch(
+        "question_content",
+        "question_ids",
+        {"question_ids": ["Q200"]},
+        workspace_id=workspace["id"],
+    )
+    job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q200",
+        batch_id=batch["id"],
+        title="Question Q200",
+        node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
+    )
+    calls = []
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        calls.append({"question_id": question_id, "api_url": api_url, "token": token})
+        return CmsQuestionDetail(
+            question_id="Q200",
+            title="资源绑定题目",
+            normalized={},
+            payload={"data": {"uuid": "Q200"}},
+        )
+
+    monkeypatch.setattr(
+        "server.app.pipelines.question_content.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.pipelines.question_content.get_token", lambda env, config: "token"
+    )
+
+    completed = execute_node_once(
+        job_db=queries,
+        definition=definition,
+        job=job,
+        node_key="fetch_question_context",
+        logs_dir=tmp_path / "logs",
+        settings_config={
+            "cms": {"env": "prod"},
+            "resource_providers": {
+                "cms.question.detail": {
+                    "api_url": "https://cms.example/question/detail",
+                }
+            },
+        },
+    )
+
+    assert completed is True
+    assert calls == [
+        {
+            "question_id": "Q200",
+            "api_url": "https://cms.example/question/detail?bank_version=v5&subject_id=5",
+            "token": "token",
+        }
+    ]
 
 
 def test_process_ready_pipeline_node_runs_root(tmp_path):

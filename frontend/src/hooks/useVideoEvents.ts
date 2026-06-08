@@ -6,11 +6,12 @@ import { fetchPackages } from '../api'
 
 const LAST_DOWNLOADED_KEY = 'video-hive:last-downloaded-package-id'
 
-export function useVideoEvents() {
+export function useVideoEvents(enabled = true) {
   const { mergeVideo, removeVideo, setSseConnected, fetchVideos } = useVideoStore()
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
+    if (!enabled) return
     if (typeof EventSource === 'undefined') return
 
     let source: EventSource | null = null
@@ -89,5 +90,5 @@ export function useVideoEvents() {
         source.close()
       }
     }
-  }, [mergeVideo, removeVideo, setSseConnected, fetchVideos])
+  }, [enabled, mergeVideo, removeVideo, setSseConnected, fetchVideos])
 }

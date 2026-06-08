@@ -8,7 +8,7 @@ from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition
 from server.app.pipelines.question_content import fetch_question_context
 
-LocalHandler = Callable[[dict[str, Any], Path], None]
+LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any]], None]
 
 LOCAL_HANDLERS: dict[str, dict[str, LocalHandler]] = {
     "question_content": {
@@ -23,6 +23,7 @@ def execute_node_once(
     job: dict[str, Any],
     node_key: str,
     logs_dir: Path,
+    settings_config: dict[str, Any] | None = None,
 ) -> bool:
     node = definition.nodes[node_key]
     if node.runner != "local":
@@ -37,7 +38,14 @@ def execute_node_once(
     run = job_db.start_node_run(job["id"], node_key, ["local", node_key], str(log_path))
 
     try:
-        handler(job, Path(str(job["storage_dir"])))
+        handler(
+            job,
+            Path(str(job["storage_dir"])),
+            {
+                "job_db": job_db,
+                "settings_config": settings_config or {},
+            },
+        )
     except Exception as exc:
         error_message = str(exc)
         log_path.write_text(error_message, encoding="utf-8")

@@ -139,6 +139,8 @@ export type WorkspaceRecord = {
   id: string
   name: string
   default_pipeline_key: string
+  cms_config?: Record<string, unknown>
+  resource_config?: Record<string, unknown>
 }
 
 export type PipelineNodeRecord = {
@@ -149,12 +151,24 @@ export type PipelineNodeRecord = {
   outputs: string[]
 }
 
+export type PipelineIntakeModeRecord = {
+  key: string
+  label: string
+  resolver: string
+  task_entity: string
+  input_field: string
+  resource: string
+}
+
 export type PipelineDefinitionRecord = {
   key: string
   label: string
   concurrency: {
     local: number
     agent: number
+  }
+  intake?: {
+    modes: PipelineIntakeModeRecord[]
   }
   nodes: PipelineNodeRecord[]
 }

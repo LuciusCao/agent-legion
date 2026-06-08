@@ -25,6 +25,9 @@ asr:
 cms:
   env: prod
   knowledge_url: "http://cms.internal.example.com/v2/knowledge/detail?bank_version=v5&country_id=1&subject_id=2"
+  question_list_url: "http://cms.internal.example.com/v2/question/list?bank_version=v5&country_id=1&subject_id=5&page_size=50"
+  question_detail_url: "http://cms.internal.example.com/v2/question/detail?bank_version=v5&country_id=1&subject_id=2"
+  # Used by the existing Video Hive question-video URL lookup path.
   question_url: "http://cms.internal.example.com/v2/question/detail?bank_version=v5&country_id=1&subject_id=2"
   token: ""
   token_gen:
@@ -32,6 +35,13 @@ cms:
     nonce: ""
     secret: ""
     url: ""
+
+resource_providers:
+  cms.question.detail:
+    api_url: "http://cms.internal.example.com/v2/question/detail"
+  cms.question.list_by_knowledge:
+    api_url: "http://cms.internal.example.com/v2/question/list"
+
 # Optional: delete the local MP4 after the assemble phase completes to save disk space.
 # Playback will fall back to source_url via redirect. Default is false.
 cleanup_video_after_assemble: false

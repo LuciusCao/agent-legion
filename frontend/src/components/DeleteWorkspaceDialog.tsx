@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 
 type Props = {
   open: boolean
@@ -11,7 +11,6 @@ type Props = {
 export default function DeleteWorkspaceDialog({
   open,
   workspaceName,
-  workspaceId,
   onClose,
   onConfirm,
 }: Props) {
@@ -19,13 +18,12 @@ export default function DeleteWorkspaceDialog({
   const [isDeleting, setIsDeleting] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (open) {
-      setInputValue('')
-      setError(null)
-      setIsDeleting(false)
-    }
-  }, [open])
+  function handleClose() {
+    setInputValue('')
+    setError(null)
+    setIsDeleting(false)
+    onClose()
+  }
 
   if (!open) return null
 
@@ -37,7 +35,7 @@ export default function DeleteWorkspaceDialog({
     setIsDeleting(true)
     try {
       await onConfirm()
-      onClose()
+      handleClose()
     } catch (err: unknown) {
       const message =
         err instanceof Error ? err.message : '删除失败，请稍后重试'
@@ -50,7 +48,7 @@ export default function DeleteWorkspaceDialog({
   return (
     <md-dialog
       open
-      onClosed={onClose}
+      onClosed={handleClose}
       style={
         { '--md-dialog-container-color': '#ffffff' } as React.CSSProperties
       }
@@ -96,7 +94,7 @@ export default function DeleteWorkspaceDialog({
       </div>
       <div slot="actions">
         <md-text-button
-          onClick={onClose}
+          onClick={handleClose}
           disabled={isDeleting || undefined}
         >
           取消

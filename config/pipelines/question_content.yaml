@@ -3,6 +3,19 @@ label: 题目内容生成
 concurrency:
   local: 8
   agent: 2
+intake:
+  modes:
+    question_ids:
+      label: 题目 ID
+      resolver: direct.question_ids
+      task_entity: question
+      input_field: question_ids
+    knowledge_codes:
+      label: 知识点 Code
+      resolver: cms.questions_by_knowledge
+      task_entity: question
+      input_field: knowledge_codes
+      resource: questions_by_knowledge
 nodes:
   fetch_question_context:
     runner: local

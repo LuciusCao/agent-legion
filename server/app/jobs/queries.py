@@ -26,6 +26,23 @@ def _workspace_id(name: str) -> str:
     return _safe_identifier(name.lower(), "workspace")
 
 
+def _decode_json_object(value: Any) -> dict[str, Any]:
+    if not value:
+        return {}
+    try:
+        loaded = json.loads(str(value))
+    except json.JSONDecodeError:
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _workspace_record(row: sqlite3.Row) -> dict[str, Any]:
+    record = dict(row)
+    record["cms_config"] = _decode_json_object(record.get("cms_config_json"))
+    record["resource_config"] = _decode_json_object(record.get("resource_config_json"))
+    return record
+
+
 class JobQueries:
     def __init__(self, path: Path, jobs_dir: Path):
         self.path = path
@@ -52,11 +69,21 @@ class JobQueries:
             conn.close()
 
     def create_workspace(
-        self, name: str, default_pipeline_key: str = "question_content"
+        self,
+        name: str,
+        default_pipeline_key: str = "question_content",
+        cms_config: dict[str, Any] | None = None,
+        resource_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
+        cms_config_json = json.dumps(cms_config or {}, ensure_ascii=False, sort_keys=True)
+        resource_config_json = json.dumps(
+            resource_config or {},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
 
         base_id = _workspace_id(clean_name)
         with self.connect() as conn:
@@ -68,23 +95,82 @@ class JobQueries:
 
             conn.execute(
                 """
-                insert into workspaces(id, name, default_pipeline_key)
-                values (?, ?, ?)
+                insert into workspaces(
+                  id, name, default_pipeline_key, cms_config_json, resource_config_json
+                )
+                values (?, ?, ?, ?, ?)
                 """,
-                (workspace_id, clean_name, default_pipeline_key),
+                (
+                    workspace_id,
+                    clean_name,
+                    default_pipeline_key,
+                    cms_config_json,
+                    resource_config_json,
+                ),
             )
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
-        return dict(row)
+        return _workspace_record(row)
 
     def list_workspaces(self) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
             rows = conn.execute("select * from workspaces order by created_at, id")
-            return [dict(row) for row in rows]
+            return [_workspace_record(row) for row in rows]
 
     def get_workspace(self, workspace_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
-        return dict(row) if row else None
+        return _workspace_record(row) if row else None
+
+    def update_workspace(
+        self,
+        workspace_id: str,
+        *,
+        name: str | None = None,
+        default_pipeline_key: str | None = None,
+        cms_config: dict[str, Any] | None = None,
+        resource_config: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        fields: dict[str, Any] = {}
+        if name is not None:
+            clean_name = name.strip()
+            if not clean_name:
+                raise ValueError("Workspace name is required")
+            fields["name"] = clean_name
+        if default_pipeline_key is not None:
+            fields["default_pipeline_key"] = default_pipeline_key
+        if cms_config is not None:
+            fields["cms_config_json"] = json.dumps(
+                cms_config,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        if resource_config is not None:
+            fields["resource_config_json"] = json.dumps(
+                resource_config,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        if not fields:
+            workspace = self.get_workspace(workspace_id)
+            if workspace is None:
+                raise ValueError("Workspace not found")
+            return workspace
+
+        assignments = ", ".join(f"{key}=?" for key in fields)
+        params = list(fields.values()) + [workspace_id]
+        with self.connect() as conn:
+            cursor = conn.execute(
+                f"""
+                update workspaces
+                set {assignments}, updated_at=current_timestamp
+                where id=?
+                """,
+                params,
+            )
+            if cursor.rowcount == 0:
+                raise ValueError("Workspace not found")
+            row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+        return _workspace_record(row)
 
     def create_batch(
         self,
@@ -107,6 +193,13 @@ class JobQueries:
             )
             row = conn.execute("select * from job_batches where id=?", (batch_id,)).fetchone()
         return dict(row)
+
+    def get_batch(self, batch_id: str) -> dict[str, Any] | None:
+        if not batch_id:
+            return None
+        with self._connect_read() as conn:
+            row = conn.execute("select * from job_batches where id=?", (batch_id,)).fetchone()
+        return dict(row) if row else None
 
     def create_job(
         self,

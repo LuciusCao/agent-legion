@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 
 type Props = {
@@ -12,12 +12,11 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (open) {
-      setName('')
-      setError(null)
-    }
-  }, [open])
+  function handleClose() {
+    setName('')
+    setError(null)
+    onClose()
+  }
 
   if (!open) return null
 
@@ -28,8 +27,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
     setCreating(true)
     try {
       await createWorkspace(name.trim())
-      setName('')
-      onClose()
+      handleClose()
     } catch (err) {
       setError(String(err))
     } finally {
@@ -38,7 +36,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
   }
 
   return (
-    <md-dialog open onClosed={onClose}>
+    <md-dialog open onClosed={handleClose}>
       <div slot="headline">新建 Workspace</div>
       <form
         slot="content"
@@ -56,7 +54,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
         )}
       </form>
       <div slot="actions">
-        <md-text-button onClick={onClose}>取消</md-text-button>
+        <md-text-button onClick={handleClose}>取消</md-text-button>
         <md-filled-button onClick={handleSubmit} disabled={creating}>
           {creating ? '创建中…' : '创建'}
         </md-filled-button>
