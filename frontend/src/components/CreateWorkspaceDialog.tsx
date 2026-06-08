@@ -55,7 +55,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
       </form>
       <div slot="actions">
         <md-text-button onClick={handleClose}>取消</md-text-button>
-        <md-filled-button onClick={handleSubmit} disabled={creating}>
+        <md-filled-button onClick={handleSubmit} disabled={creating || undefined}>
           {creating ? '创建中…' : '创建'}
         </md-filled-button>
       </div>
