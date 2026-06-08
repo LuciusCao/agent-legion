@@ -5,6 +5,7 @@ import { useVideoStore } from '../stores/videoStore'
 import { useUiStore } from '../stores/uiStore'
 import WorkspaceCard from '../components/WorkspaceCard'
 import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
+import DeleteWorkspaceDialog from '../components/DeleteWorkspaceDialog'
 
 export function DashboardPage() {
   const navigate = useNavigate()
@@ -18,7 +19,8 @@ export function DashboardPage() {
   const { videos, fetchVideos } = useVideoStore()
   const { agents } = useUiStore()
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [deletingId, setDeletingId] = useState<string | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [deletingWorkspace, setDeletingWorkspace] = useState<{ id: string; name: string } | null>(null)
 
   useEffect(() => {
     fetchWorkspaces()
@@ -45,16 +47,19 @@ export function DashboardPage() {
     idle: agents.filter((a) => !a.busy).length,
   }
 
-  async function handleDelete(id: string) {
-    if (deletingId) return
-    if (window.confirm('确定要删除此 Workspace 吗？')) {
-      setDeletingId(id)
-      try {
-        await deleteWorkspace(id)
-      } finally {
-        setDeletingId(null)
-      }
-    }
+  function openDeleteDialog(id: string, name: string) {
+    setDeletingWorkspace({ id, name })
+    setDeleteDialogOpen(true)
+  }
+
+  function closeDeleteDialog() {
+    setDeleteDialogOpen(false)
+    setDeletingWorkspace(null)
+  }
+
+  async function handleDelete() {
+    if (!deletingWorkspace) return
+    await deleteWorkspace(deletingWorkspace.id)
   }
 
   return (
@@ -97,12 +102,22 @@ export function DashboardPage() {
             jobStats={workspaceStats[w.id]?.job_stats || {}}
             agentStatus={workspaceStats[w.id]?.agent_status || { total: 0, busy: 0, idle: 0 }}
             onClick={() => navigate(`/workspaces/${w.id}`)}
-            onDelete={() => handleDelete(w.id)}
+            onDelete={w.id === 'default' ? undefined : () => openDeleteDialog(w.id, w.name)}
           />
         ))}
       </div>
 
       <CreateWorkspaceDialog open={dialogOpen} onClose={() => setDialogOpen(false)} />
+
+      {deletingWorkspace && (
+        <DeleteWorkspaceDialog
+          open={deleteDialogOpen}
+          workspaceName={deletingWorkspace.name}
+          workspaceId={deletingWorkspace.id}
+          onClose={closeDeleteDialog}
+          onConfirm={handleDelete}
+        />
+      )}
     </div>
   )
 }
