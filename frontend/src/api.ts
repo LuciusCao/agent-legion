@@ -1,10 +1,12 @@
 import type {
+  AgentStatus,
   ArtifactResponse,
   CreateJobBatchInput,
   JobBatchResponse,
   JobDetailResponse,
   JobsResponse,
   PipelineResponse,
+  WorkspaceAgentAssignment,
   WorkspaceRecord,
   WorkspaceStats,
   WorkspacesResponse,
@@ -181,6 +183,41 @@ export async function fetchJobArtifact(
 ): Promise<ArtifactResponse> {
   return api(
     `/api/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactName)}`
+  )
+}
+
+export async function fetchAgents(): Promise<{ agents: AgentStatus[] }> {
+  return api('/api/agents')
+}
+
+export async function fetchWorkspaceAgents(
+  workspaceId: string
+): Promise<{ agents: WorkspaceAgentAssignment[] }> {
+  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`)
+}
+
+export async function assignAgent(
+  workspaceId: string,
+  agentId: string,
+  concurrencyLimit: number
+): Promise<{
+  agent_id: string
+  workspace_id: string
+  concurrency_limit: number
+}> {
+  return api(
+    `/api/agents/${encodeURIComponent(agentId)}/assign?workspace_id=${encodeURIComponent(workspaceId)}&concurrency_limit=${concurrencyLimit}`,
+    { method: 'POST' }
+  )
+}
+
+export async function unassignAgent(
+  workspaceId: string,
+  agentId: string
+): Promise<{ agent_id: string; workspace_id: string; removed: boolean }> {
+  return api(
+    `/api/agents/${encodeURIComponent(agentId)}/assign?workspace_id=${encodeURIComponent(workspaceId)}`,
+    { method: 'DELETE' }
   )
 }
 

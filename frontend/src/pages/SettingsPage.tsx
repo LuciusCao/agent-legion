@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSettingStore } from '../stores/settingStore'
+import { AgentAllocationList } from '../components/AgentAllocationList'
 import { SettingsCard } from '../components/SettingsCard'
 import { WORKSPACE_LABELS } from '../labels'
 
@@ -81,6 +82,8 @@ export function SettingsPage() {
       : [...settings.intakeModes, key]
     setSettings({ intakeModes: next })
   }
+
+  if (!workspaceId) return null
 
   const handleLabelOverridesInput = (event: Event) => {
     const value = (event.target as HTMLInputElement).value
@@ -312,12 +315,7 @@ export function SettingsPage() {
       </SettingsCard>
 
       <SettingsCard icon="🤖" title={WORKSPACE_LABELS.agents}>
-        <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-          {WORKSPACE_LABELS.agents}配置将在后续步骤实现
-        </p>
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
-          <md-filled-button disabled>保存</md-filled-button>
-        </div>
+        <AgentAllocationList workspaceId={workspaceId} />
       </SettingsCard>
     </div>
   )

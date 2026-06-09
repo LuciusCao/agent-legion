@@ -39,6 +39,11 @@ export type AgentStatus = {
   current_phase?: string
 }
 
+export type WorkspaceAgentAssignment = {
+  agent_id: string
+  concurrency_limit: number
+}
+
 export type Chapter = {
   id?: string
   start: number
