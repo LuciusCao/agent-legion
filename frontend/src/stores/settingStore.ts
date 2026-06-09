@@ -1,0 +1,142 @@
+import { create } from 'zustand'
+import type { WorkspaceSettings } from '../types'
+import { api } from '../api'
+import { useUiStore } from './uiStore'
+
+type TestStatus = {
+  state: 'idle' | 'testing' | 'success' | 'failed'
+  message?: string
+}
+
+type SettingSection = 'connection' | 'intake' | 'pipeline' | 'agents'
+
+type SettingState = {
+  workspaceId: string | null
+  settings: WorkspaceSettings
+  testStatus: TestStatus
+  isSaving: boolean
+  saveError: string | null
+  setWorkspaceId: (id: string) => void
+  setSettings: (s: Partial<WorkspaceSettings>) => void
+  fetchSettings: (workspaceId: string) => Promise<void>
+  saveSection: (
+    section: SettingSection,
+    data: Partial<WorkspaceSettings>
+  ) => Promise<void>
+  testConnection: () => Promise<void>
+  resetTestStatus: () => void
+}
+
+const defaultSettings: WorkspaceSettings = {
+  cmsUrl: '',
+  cmsToken: '',
+  entityType: 'question',
+  intakeModes: [],
+  labelOverrides: {},
+  pipelineKey: '',
+  agentIds: [],
+  concurrencyLimit: 1,
+}
+
+export const useSettingStore = create<SettingState>((set, get) => ({
+  workspaceId: null,
+  settings: defaultSettings,
+  testStatus: { state: 'idle' },
+  isSaving: false,
+  saveError: null,
+
+  setWorkspaceId(id) {
+    set({ workspaceId: id })
+  },
+
+  setSettings(s) {
+    set((state) => ({ settings: { ...state.settings, ...s } }))
+  },
+
+  async fetchSettings(workspaceId) {
+    try {
+      const result = await api<
+        Partial<WorkspaceSettings> | { settings: Partial<WorkspaceSettings> }
+      >(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`)
+      const data =
+        result && typeof result === 'object' && 'settings' in result
+          ? (result.settings as Partial<WorkspaceSettings>)
+          : (result as Partial<WorkspaceSettings>)
+      set((state) => ({
+        settings: { ...defaultSettings, ...state.settings, ...data },
+      }))
+    } catch (err) {
+      const status =
+        err && typeof err === 'object' && 'status' in err
+          ? Number((err as { status?: unknown }).status)
+          : undefined
+      if (status === 404) {
+        // Endpoint not implemented or no settings yet; keep defaults.
+        return
+      }
+      const message = err instanceof Error ? err.message : '加载设置失败'
+      set({ saveError: message })
+    }
+  },
+
+  async saveSection(section, data) {
+    const { workspaceId } = get()
+    if (!workspaceId) return
+    set({ isSaving: true, saveError: null })
+    try {
+      await api(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/settings/${encodeURIComponent(section)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify(data),
+        }
+      )
+    } catch (err) {
+      const status =
+        err && typeof err === 'object' && 'status' in err
+          ? Number((err as { status?: unknown }).status)
+          : undefined
+      const message = err instanceof Error ? err.message : '保存失败'
+      if (status === 404) {
+        console.warn(
+          `Settings endpoint not implemented for section ${section}; treating as no-op.`
+        )
+      } else {
+        set({ saveError: message })
+      }
+    } finally {
+      set({ isSaving: false })
+    }
+  },
+
+  async testConnection() {
+    const { workspaceId } = get()
+    if (!workspaceId) return
+    set({ testStatus: { state: 'testing' } })
+    try {
+      const result = await api<{
+        ok?: boolean
+        message?: string
+      }>(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/settings/test-connection`,
+        {
+          method: 'POST',
+        }
+      )
+      set({
+        testStatus: {
+          state: 'success',
+          message: result.message || '连接成功',
+        },
+      })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '连接测试失败'
+      set({ testStatus: { state: 'failed', message } })
+      useUiStore.getState().showToast(message, 'error')
+    }
+  },
+
+  resetTestStatus() {
+    set({ testStatus: { state: 'idle' } })
+  },
+}))
