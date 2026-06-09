@@ -44,6 +44,29 @@ export type WorkspaceAgentAssignment = {
   concurrency_limit: number
 }
 
+export type GlobalServiceStatus = {
+  cms: {
+    url: string
+    tokenConfigured: boolean
+    env: string
+    healthy: boolean | null
+    lastCheckedAt: string | null
+  }
+}
+
+export type ResourceProviderDefinition = {
+  key: string
+  provider: string
+  apiUrl: string
+  defaultParams: Record<string, string>
+  paramKeys: string[]
+}
+
+export type ResourceBinding = {
+  enabled: boolean
+  config: Record<string, string>
+}
+
 export type Chapter = {
   id?: string
   start: number
@@ -158,14 +181,15 @@ export type WorkspaceRecord = {
 }
 
 export type WorkspaceSettings = {
-  cmsUrl: string
-  cmsToken: string
   entityType: 'question' | 'knowledge' | 'video'
   intakeModes: string[]
   labelOverrides: Record<string, string>
   pipelineKey: string
   agentIds: string[]
   concurrencyLimit: number
+  resources: Record<string, ResourceBinding>
+  cmsUrl?: string
+  cmsToken?: string
 }
 
 export type PipelineNodeRecord = {
