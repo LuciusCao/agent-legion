@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
+import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { JobList } from './JobList'
 import { useJobStore } from '../stores/jobStore'
 import type { JobRecord } from '../types'
@@ -55,7 +56,16 @@ describe('JobList', () => {
   it('renders one JobListItem per job', async () => {
     mockFetchJobs.mockResolvedValueOnce({ jobs: mockJobs })
     await act(async () => {
-      render(<JobList workspaceId="ws1" />)
+      render(
+        <MemoryRouter initialEntries={['/workspaces/ws1']}>
+          <Routes>
+            <Route
+              path="/workspaces/:workspaceId/*"
+              element={<JobList workspaceId="ws1" />}
+            />
+          </Routes>
+        </MemoryRouter>
+      )
     })
 
     expect(screen.getByText('Q100')).toBeInTheDocument()
@@ -67,7 +77,16 @@ describe('JobList', () => {
   it('expanding a job shows ExpandedJobPanel', async () => {
     mockFetchJobs.mockResolvedValueOnce({ jobs: mockJobs })
     await act(async () => {
-      render(<JobList workspaceId="ws1" />)
+      render(
+        <MemoryRouter initialEntries={['/workspaces/ws1']}>
+          <Routes>
+            <Route
+              path="/workspaces/:workspaceId/*"
+              element={<JobList workspaceId="ws1" />}
+            />
+          </Routes>
+        </MemoryRouter>
+      )
     })
 
     expect(screen.queryByText('节点流水线')).not.toBeInTheDocument()
@@ -82,7 +101,16 @@ describe('JobList', () => {
     useJobStore.setState({ jobs: [] })
     mockFetchJobs.mockResolvedValueOnce({ jobs: [] })
     await act(async () => {
-      render(<JobList workspaceId="ws1" />)
+      render(
+        <MemoryRouter initialEntries={['/workspaces/ws1']}>
+          <Routes>
+            <Route
+              path="/workspaces/:workspaceId/*"
+              element={<JobList workspaceId="ws1" />}
+            />
+          </Routes>
+        </MemoryRouter>
+      )
     })
 
     expect(screen.getByText('暂无任务')).toBeInTheDocument()

@@ -100,6 +100,36 @@ describe('DagGraph', () => {
     expect(() => fireEvent.click(screen.getByText('提取'))).not.toThrow()
   })
 
+  it('calls onNodeClick when Enter is pressed on a node', () => {
+    const onClick = vi.fn()
+    render(<DagGraph nodes={nodes} edges={edges} onNodeClick={onClick} />)
+    const nodeA = screen.getByRole('button', { name: '提取' })
+    fireEvent.keyDown(nodeA, { key: 'Enter', code: 'Enter' })
+    expect(onClick).toHaveBeenCalledWith('a')
+  })
+
+  it('calls onNodeClick when Space is pressed on a node', () => {
+    const onClick = vi.fn()
+    render(<DagGraph nodes={nodes} edges={edges} onNodeClick={onClick} />)
+    const nodeA = screen.getByRole('button', { name: '提取' })
+    fireEvent.keyDown(nodeA, { key: ' ', code: 'Space' })
+    expect(onClick).toHaveBeenCalledWith('a')
+  })
+
+  it('does not call onNodeClick for unrelated keys', () => {
+    const onClick = vi.fn()
+    render(<DagGraph nodes={nodes} edges={edges} onNodeClick={onClick} />)
+    const nodeA = screen.getByRole('button', { name: '提取' })
+    fireEvent.keyDown(nodeA, { key: 'ArrowDown', code: 'ArrowDown' })
+    expect(onClick).not.toHaveBeenCalled()
+  })
+
+  it('exposes nodes as buttons with accessible labels', () => {
+    render(<DagGraph nodes={nodes} edges={edges} />)
+    expect(screen.getByRole('button', { name: '提取' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '生成' })).toBeInTheDocument()
+  })
+
   it('skips edges with unknown nodes', () => {
     const badEdges = [{ from: 'a', to: 'unknown' }]
     const { container } = render(<DagGraph nodes={nodes} edges={badEdges} />)

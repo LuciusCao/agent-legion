@@ -7,10 +7,16 @@
 .node-rect {
   cursor: pointer;
   transition: filter 0.15s ease;
+  outline: none;
 }
 
 .node-rect:hover {
   filter: brightness(0.97);
+}
+
+g[role='button']:focus-visible .node-rect {
+  outline: 2px solid #1d4ed8;
+  outline-offset: 2px;
 }
 
 .node-label {

@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { ExpandedJobPanel } from './ExpandedJobPanel'
 import type { JobRecord } from '../types'
 
@@ -14,17 +15,37 @@ const mockJob: JobRecord = {
   total_nodes: 5,
 }
 
+function renderPanel(
+  props: Partial<Parameters<typeof ExpandedJobPanel>[0]> = {}
+) {
+  return render(
+    <MemoryRouter initialEntries={['/workspaces/ws1/jobs']}>
+      <Routes>
+        <Route
+          path="/workspaces/:workspaceId/jobs"
+          element={
+            <ExpandedJobPanel
+              job={mockJob}
+              onViewDetail={props.onViewDetail ?? vi.fn()}
+              onRerun={props.onRerun ?? vi.fn()}
+              onRunTo={props.onRunTo ?? vi.fn()}
+              onDelete={props.onDelete ?? vi.fn()}
+              workspaceId={props.workspaceId}
+            />
+          }
+        />
+        <Route
+          path="/workspaces/:workspaceId/jobs/:jobId"
+          element={<div data-testid="job-detail">Job Detail</div>}
+        />
+      </Routes>
+    </MemoryRouter>
+  )
+}
+
 describe('ExpandedJobPanel', () => {
   it('renders MiniDag with default nodes', () => {
-    const { container } = render(
-      <ExpandedJobPanel
-        job={mockJob}
-        onViewDetail={vi.fn()}
-        onRerun={vi.fn()}
-        onRunTo={vi.fn()}
-        onDelete={vi.fn()}
-      />
-    )
+    const { container } = renderPanel()
 
     const dagNodes = container.querySelectorAll('[data-node]')
     expect(dagNodes).toHaveLength(5)
@@ -37,15 +58,7 @@ describe('ExpandedJobPanel', () => {
   })
 
   it('renders node runs table', () => {
-    render(
-      <ExpandedJobPanel
-        job={mockJob}
-        onViewDetail={vi.fn()}
-        onRerun={vi.fn()}
-        onRunTo={vi.fn()}
-        onDelete={vi.fn()}
-      />
-    )
+    renderPanel()
 
     expect(screen.getByText('节点')).toBeInTheDocument()
     expect(screen.getByText('状态')).toBeInTheDocument()
@@ -54,17 +67,9 @@ describe('ExpandedJobPanel', () => {
   })
 
   it('renders action buttons', () => {
-    render(
-      <ExpandedJobPanel
-        job={mockJob}
-        onViewDetail={vi.fn()}
-        onRerun={vi.fn()}
-        onRunTo={vi.fn()}
-        onDelete={vi.fn()}
-      />
-    )
+    renderPanel()
 
-    expect(screen.getByText('查看产物')).toBeInTheDocument()
+    expect(screen.getByText('查看完整详情')).toBeInTheDocument()
     expect(screen.getByText('重跑')).toBeInTheDocument()
     expect(screen.getByText('运行到...')).toBeInTheDocument()
     expect(screen.getByText('删除')).toBeInTheDocument()
@@ -76,17 +81,9 @@ describe('ExpandedJobPanel', () => {
     const onRunTo = vi.fn()
     const onDelete = vi.fn()
 
-    render(
-      <ExpandedJobPanel
-        job={mockJob}
-        onViewDetail={onViewDetail}
-        onRerun={onRerun}
-        onRunTo={onRunTo}
-        onDelete={onDelete}
-      />
-    )
+    renderPanel({ onViewDetail, onRerun, onRunTo, onDelete })
 
-    fireEvent.click(screen.getByText('查看产物'))
+    fireEvent.click(screen.getByText('查看完整详情'))
     expect(onViewDetail).toHaveBeenCalledTimes(1)
 
     fireEvent.click(screen.getByText('重跑'))
@@ -97,5 +94,12 @@ describe('ExpandedJobPanel', () => {
 
     fireEvent.click(screen.getByText('删除'))
     expect(onDelete).toHaveBeenCalledTimes(1)
+  })
+
+  it('navigates to job detail when workspaceId is provided', () => {
+    renderPanel({ workspaceId: 'ws1' })
+
+    fireEvent.click(screen.getByText('查看完整详情'))
+    expect(screen.getByTestId('job-detail')).toBeInTheDocument()
   })
 })

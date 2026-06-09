@@ -129,7 +129,16 @@ export function DagGraph({
             <g
               key={node.key}
               data-node={node.key}
+              role="button"
+              tabIndex={0}
+              aria-label={node.label}
               onClick={() => onNodeClick?.(node.key)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  onNodeClick?.(node.key)
+                }
+              }}
             >
               <rect
                 x={node.x - NODE_WIDTH / 2}
