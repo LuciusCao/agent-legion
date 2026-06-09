@@ -601,6 +601,8 @@ def test_delete_job_returns_404_for_unknown_job(tmp_path):
 
 
 def test_delete_job_rejects_running_job(tmp_path):
+    from pathlib import Path
+
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -618,10 +620,21 @@ def test_delete_job_rejects_running_job(tmp_path):
             },
         )
         job_id = "default_question_content_Q601"
+        job = app.state.job_db.get_job(job_id)
+        storage_dir = Path(str(job["storage_dir"]))
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        (storage_dir / "artifact.json").write_text("{}")
+        log_dir = app.state.settings.logs_dir / "jobs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"{job_id}-fetch_question_context.log"
+        log_path.write_text("running")
         app.state.job_db.update_job_status(job_id, "running")
         resp = c.delete(f"/api/jobs/{job_id}")
     assert resp.status_code == 400
     assert "running" in resp.json()["detail"].lower()
+    assert storage_dir.exists()
+    assert (storage_dir / "artifact.json").exists()
+    assert log_path.exists()
 
 
 def test_delete_job_cascades_and_returns_deleted_id(tmp_path):

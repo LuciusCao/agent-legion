@@ -55,6 +55,9 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
+  const [pendingDeleteJob, setPendingDeleteJob] = useState<JobRecord | null>(
+    null
+  )
 
   const workspaceId = currentWorkspace?.id
   const pipelineKey =
@@ -176,12 +179,15 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
     }
   }
 
-  async function handleDeleteJob(jobId: string) {
+  async function handleDeleteJob() {
+    if (!pendingDeleteJob) return
+    const jobId = pendingDeleteJob.id
     setDeletingJobId(jobId)
     setError('')
     try {
       await deleteJob(jobId)
       setJobs((prev) => prev.filter((j) => j.id !== jobId))
+      setPendingDeleteJob(null)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
     } finally {
@@ -282,7 +288,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
                 aria-label="删除任务"
                 onClick={(e: Event) => {
                   e.stopPropagation()
-                  handleDeleteJob(job.id)
+                  setPendingDeleteJob(job)
                 }}
                 disabled={deletingJobId === job.id || undefined}
               >
@@ -292,6 +298,43 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
           ))}
         </md-list>
       </section>
+      {pendingDeleteJob ? (
+        <md-dialog
+          open
+          onClosed={() => setPendingDeleteJob(null)}
+          style={
+            {
+              '--md-dialog-container-color': '#ffffff',
+            } as React.CSSProperties
+          }
+        >
+          <div slot="headline">确认删除任务</div>
+          <div slot="content">
+            <p>
+              确定删除任务「{pendingDeleteJob.title}」？该任务记录、本地产物和日志都会被删除。
+            </p>
+          </div>
+          <div slot="actions">
+            <md-text-button
+              onClick={() => setPendingDeleteJob(null)}
+              disabled={deletingJobId === pendingDeleteJob.id || undefined}
+            >
+              取消
+            </md-text-button>
+            <md-filled-button
+              style={
+                {
+                  '--md-sys-color-primary': 'var(--md-sys-color-error)',
+                } as React.CSSProperties
+              }
+              onClick={handleDeleteJob}
+              disabled={deletingJobId === pendingDeleteJob.id || undefined}
+            >
+              {deletingJobId === pendingDeleteJob.id ? '删除中...' : '删除'}
+            </md-filled-button>
+          </div>
+        </md-dialog>
+      ) : null}
     </div>
   )
 }
