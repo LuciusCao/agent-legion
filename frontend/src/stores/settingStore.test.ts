@@ -5,7 +5,16 @@ import { api } from '../api'
 
 vi.mock('../api', () => ({ api: vi.fn() }))
 
+vi.mock('./uiStore', () => ({
+  useUiStore: {
+    getState: vi.fn(),
+    setState: vi.fn(),
+  },
+}))
+
 const mockApi = vi.mocked(api)
+const mockShowToast = vi.fn()
+const mockGetState = vi.mocked(useUiStore.getState)
 
 const defaultState = {
   workspaceId: 'ws1',
@@ -27,8 +36,9 @@ const defaultState = {
 describe('settingStore', () => {
   beforeEach(() => {
     useSettingStore.setState(defaultState)
-    useUiStore.setState({ toast: null })
     mockApi.mockReset()
+    mockShowToast.mockReset()
+    mockGetState.mockReturnValue({ showToast: mockShowToast })
   })
 
   it('updates settings via setSettings', () => {
@@ -54,6 +64,7 @@ describe('settingStore', () => {
     await promise
     expect(useSettingStore.getState().testStatus.state).toBe('success')
     expect(useSettingStore.getState().testStatus.message).toBe('connected')
+    expect(mockShowToast).toHaveBeenCalledWith('连接成功', 'success')
   })
 
   it('sets failed on testConnection error and shows toast', async () => {
@@ -61,13 +72,13 @@ describe('settingStore', () => {
     await useSettingStore.getState().testConnection()
     expect(useSettingStore.getState().testStatus.state).toBe('failed')
     expect(useSettingStore.getState().testStatus.message).toBe('network error')
-    expect(useUiStore.getState().toast).toEqual({
-      message: 'network error',
-      type: 'error',
-    })
+    expect(mockShowToast).toHaveBeenCalledWith(
+      '连接测试失败：network error',
+      'error'
+    )
   })
 
-  it('saveSection calls PATCH endpoint', async () => {
+  it('saveSection calls PATCH endpoint and shows success toast', async () => {
     mockApi.mockResolvedValueOnce(undefined)
     await useSettingStore
       .getState()
@@ -79,6 +90,7 @@ describe('settingStore', () => {
         body: JSON.stringify({ cmsUrl: 'http://x' }),
       })
     )
+    expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
   })
 
   it('saveSection handles 404 gracefully', async () => {
@@ -89,9 +101,10 @@ describe('settingStore', () => {
     ).resolves.toBeUndefined()
     expect(useSettingStore.getState().isSaving).toBe(false)
     expect(useSettingStore.getState().saveError).toBeNull()
+    expect(mockShowToast).not.toHaveBeenCalled()
   })
 
-  it('saveSection sets saveError on failure', async () => {
+  it('saveSection sets saveError and shows error toast on failure', async () => {
     const err = Object.assign(new Error('Server Error'), { status: 500 })
     mockApi.mockRejectedValueOnce(err)
     await useSettingStore
@@ -99,6 +112,7 @@ describe('settingStore', () => {
       .saveSection('connection', { cmsUrl: 'http://x' })
     expect(useSettingStore.getState().saveError).toBe('Server Error')
     expect(useSettingStore.getState().isSaving).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith('Server Error', 'error')
   })
 
   it('fetchSettings hydrates settings from API', async () => {

@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { JobRecord } from '../types'
 import { fetchJobs as apiFetchJobs, api } from '../api'
+import { useUiStore } from './uiStore'
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
 
@@ -134,6 +135,9 @@ export const useJobStore = create<JobState>((set, get) => ({
         }
       )
       set({ selectedIds: new Set() })
+      useUiStore
+        .getState()
+        .showToast(`成功重跑 ${ids.length} 个任务`, 'success')
     } catch (err) {
       const status =
         err && typeof err === 'object' && 'status' in err
@@ -146,6 +150,7 @@ export const useJobStore = create<JobState>((set, get) => ({
       }
       const message = err instanceof Error ? err.message : 'Batch rerun failed'
       set({ error: message })
+      useUiStore.getState().showToast(message, 'error')
       throw err
     }
   },
@@ -165,6 +170,9 @@ export const useJobStore = create<JobState>((set, get) => ({
         jobs: state.jobs.filter((j) => !state.selectedIds.has(j.id)),
         selectedIds: new Set(),
       }))
+      useUiStore
+        .getState()
+        .showToast(`成功删除 ${ids.length} 个任务`, 'success')
     } catch (err) {
       const status =
         err && typeof err === 'object' && 'status' in err
@@ -177,6 +185,7 @@ export const useJobStore = create<JobState>((set, get) => ({
       }
       const message = err instanceof Error ? err.message : 'Batch delete failed'
       set({ error: message })
+      useUiStore.getState().showToast(message, 'error')
       throw err
     }
   },

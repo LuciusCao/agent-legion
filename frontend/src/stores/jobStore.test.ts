@@ -7,10 +7,20 @@ vi.mock('../api', () => ({
   api: vi.fn(),
 }))
 
+vi.mock('./uiStore', () => ({
+  useUiStore: {
+    getState: vi.fn(),
+    setState: vi.fn(),
+  },
+}))
+
 import { fetchJobs, api } from '../api'
+import { useUiStore } from './uiStore'
 
 const mockFetchJobs = vi.mocked(fetchJobs)
 const mockApi = vi.mocked(api)
+const mockShowToast = vi.fn()
+const mockGetState = vi.mocked(useUiStore.getState)
 
 describe('jobStore', () => {
   beforeEach(() => {
@@ -25,6 +35,8 @@ describe('jobStore', () => {
     })
     mockFetchJobs.mockReset()
     mockApi.mockReset()
+    mockShowToast.mockReset()
+    mockGetState.mockReturnValue({ showToast: mockShowToast })
   })
 
   it('toggles selection', () => {
@@ -188,6 +200,7 @@ describe('jobStore', () => {
       })
     )
     expect(useJobStore.getState().selectedIds.size).toBe(0)
+    expect(mockShowToast).toHaveBeenCalledWith('成功重跑 1 个任务', 'success')
   })
 
   it('handles 404 on batch rerun gracefully', async () => {
@@ -204,7 +217,19 @@ describe('jobStore', () => {
       'Batch rerun endpoint is not implemented yet'
     )
     expect(useJobStore.getState().selectedIds.size).toBe(0)
+    expect(mockShowToast).not.toHaveBeenCalled()
     warnSpy.mockRestore()
+  })
+
+  it('shows error toast on batch rerun failure', async () => {
+    useJobStore.setState({ selectedIds: new Set(['j1', 'j2']) })
+    const err = Object.assign(new Error('Server Error'), { status: 500 })
+    mockApi.mockRejectedValueOnce(err)
+
+    await expect(useJobStore.getState().batchRerun('ws1')).rejects.toBe(err)
+
+    expect(useJobStore.getState().error).toBe('Server Error')
+    expect(mockShowToast).toHaveBeenCalledWith('Server Error', 'error')
   })
 
   it('calls batch delete endpoint and removes jobs on success', async () => {
@@ -243,6 +268,7 @@ describe('jobStore', () => {
     expect(useJobStore.getState().jobs).toHaveLength(1)
     expect(useJobStore.getState().jobs[0].id).toBe('j2')
     expect(useJobStore.getState().selectedIds.size).toBe(0)
+    expect(mockShowToast).toHaveBeenCalledWith('成功删除 1 个任务', 'success')
   })
 
   it('handles 404 on batch delete gracefully', async () => {
@@ -259,7 +285,19 @@ describe('jobStore', () => {
       'Batch delete endpoint is not implemented yet'
     )
     expect(useJobStore.getState().selectedIds.size).toBe(0)
+    expect(mockShowToast).not.toHaveBeenCalled()
     warnSpy.mockRestore()
+  })
+
+  it('shows error toast on batch delete failure', async () => {
+    useJobStore.setState({ selectedIds: new Set(['j1', 'j2', 'j3']) })
+    const err = Object.assign(new Error('Server Error'), { status: 500 })
+    mockApi.mockRejectedValueOnce(err)
+
+    await expect(useJobStore.getState().batchDelete('ws1')).rejects.toBe(err)
+
+    expect(useJobStore.getState().error).toBe('Server Error')
+    expect(mockShowToast).toHaveBeenCalledWith('Server Error', 'error')
   })
 
   it('does nothing when batch actions are invoked with empty selection', async () => {
