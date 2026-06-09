@@ -1,3 +1,5 @@
+import { WORKSPACE_LABELS } from '../labels'
+
 type WorkspaceCardProps = {
   name: string
   pipelineLabel: string
@@ -84,7 +86,7 @@ export default function WorkspaceCard({
       <div style={{ marginTop: 16, display: 'flex', gap: 16, fontSize: 13 }}>
         <div>
           <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-            Jobs
+            {WORKSPACE_LABELS.jobs}
           </div>
           <div style={{ fontWeight: 600 }}>
             {total} |{' '}
@@ -101,7 +103,7 @@ export default function WorkspaceCard({
         </div>
         <div>
           <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-            Agents
+            {WORKSPACE_LABELS.agents}
           </div>
           <div style={{ fontWeight: 600 }}>
             {agentStatus.busy}/{agentStatus.total}
@@ -111,7 +113,7 @@ export default function WorkspaceCard({
 
       <div style={{ marginTop: 16 }}>
         <md-filled-button style={{ width: '100%' }} onClick={onClick}>
-          进入
+          {WORKSPACE_LABELS.enter}
         </md-filled-button>
       </div>
     </div>

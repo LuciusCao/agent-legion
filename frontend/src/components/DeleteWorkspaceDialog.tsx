@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { WORKSPACE_LABELS } from '../labels'
 
 type Props = {
   open: boolean
@@ -53,7 +54,7 @@ export default function DeleteWorkspaceDialog({
         { '--md-dialog-container-color': '#ffffff' } as React.CSSProperties
       }
     >
-      <div slot="headline">删除 Workspace</div>
+      <div slot="headline">{WORKSPACE_LABELS.deleteWorkspace}</div>
       <div
         slot="content"
         style={{
@@ -88,8 +89,8 @@ export default function DeleteWorkspaceDialog({
           请输入 Workspace 名称「<strong>{workspaceName}</strong>」以确认删除。
         </p>
         <md-outlined-text-field
-          label="Workspace 名称"
-          aria-label="Workspace 名称"
+          label={WORKSPACE_LABELS.workspaceName}
+          aria-label={WORKSPACE_LABELS.workspaceName}
           value={inputValue}
           onInput={(e: Event) =>
             setInputValue((e.target as HTMLInputElement).value)
@@ -119,7 +120,7 @@ export default function DeleteWorkspaceDialog({
           onClick={handleConfirm}
           disabled={!confirmed || isDeleting || undefined}
         >
-          {isDeleting ? '删除中…' : '确认删除'}
+          {isDeleting ? '删除中…' : WORKSPACE_LABELS.confirmDelete}
         </md-filled-button>
       </div>
     </md-dialog>

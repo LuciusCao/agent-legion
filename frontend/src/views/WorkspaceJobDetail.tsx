@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { fetchJobArtifact, fetchJobDetail } from '../api'
 import type { JobDetailResponse } from '../types'
+import { WORKSPACE_LABELS } from '../labels'
 
 function formatArtifact(content: string): string {
   try {
@@ -105,9 +106,11 @@ export default function WorkspaceJobDetail() {
         <md-text-button
           onClick={() => navigate(`/workspaces/${workspaceId}/jobs`)}
         >
-          返回任务列表
+          {WORKSPACE_LABELS.backToJobList}
         </md-text-button>
-        <md-outlined-button onClick={loadDetail}>刷新</md-outlined-button>
+        <md-outlined-button onClick={loadDetail}>
+          {WORKSPACE_LABELS.refresh}
+        </md-outlined-button>
       </div>
 
       {error ? <p className="error-text">{error}</p> : null}
@@ -123,7 +126,7 @@ export default function WorkspaceJobDetail() {
           </section>
 
           <section className="card-outlined">
-            <h3>节点</h3>
+            <h3>{WORKSPACE_LABELS.nodes}</h3>
             <md-list>
               {detail.nodes.map((node) => (
                 <md-list-item key={node.node_key}>
@@ -140,7 +143,7 @@ export default function WorkspaceJobDetail() {
           </section>
 
           <section className="card-outlined">
-            <h3>运行记录</h3>
+            <h3>{WORKSPACE_LABELS.runs}</h3>
             <md-list>
               {detail.runs.map((run) => (
                 <md-list-item key={run.id}>

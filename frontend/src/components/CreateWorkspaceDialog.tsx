@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { WORKSPACE_LABELS } from '../labels'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 
 type Props = {
@@ -37,7 +38,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
 
   return (
     <md-dialog open onClosed={handleClose}>
-      <div slot="headline">新建 Workspace</div>
+      <div slot="headline">{WORKSPACE_LABELS.createWorkspace}</div>
       <form
         slot="content"
         onSubmit={handleSubmit}
@@ -49,7 +50,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
         }}
       >
         <md-outlined-text-field
-          label="Workspace 名称"
+          label={WORKSPACE_LABELS.workspaceName}
           value={name}
           onInput={(e: Event) => setName((e.target as HTMLInputElement).value)}
           required
@@ -66,7 +67,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
           onClick={handleSubmit}
           disabled={creating || undefined}
         >
-          {creating ? '创建中…' : '创建'}
+          {creating ? '创建中…' : WORKSPACE_LABELS.create}
         </md-filled-button>
       </div>
     </md-dialog>

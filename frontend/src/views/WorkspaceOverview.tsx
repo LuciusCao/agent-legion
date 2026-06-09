@@ -1,4 +1,5 @@
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { WORKSPACE_LABELS } from '../labels'
 
 type Props = {
   isVideoHive: boolean
@@ -10,7 +11,7 @@ export default function WorkspaceOverview({ isVideoHive }: Props) {
   if (isVideoHive) {
     return (
       <div>
-        <h3>Video Hive 概览</h3>
+        <h3>Video Hive {WORKSPACE_LABELS.overview}</h3>
         <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
           视频处理流水线的统计信息将在此展示。
         </p>
@@ -22,7 +23,9 @@ export default function WorkspaceOverview({ isVideoHive }: Props) {
 
   return (
     <div>
-      <h3>{currentWorkspace?.name || 'Workspace'} 概览</h3>
+      <h3>
+        {currentWorkspace?.name || 'Workspace'} {WORKSPACE_LABELS.overview}
+      </h3>
       {stats && Object.keys(stats.job_stats).length > 0 ? (
         <div
           style={{

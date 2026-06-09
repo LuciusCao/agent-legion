@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { WORKSPACE_LABELS } from '../labels'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
@@ -198,7 +199,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   if (isVideoHive) {
     return (
       <div>
-        <h3>视频队列</h3>
+        <h3>{WORKSPACE_LABELS.videoQueue}</h3>
         {videos.length === 0 ? (
           <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
             暂无视频
@@ -261,14 +262,14 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
           disabled={submitting || undefined}
           onClick={handleCreateBatch}
         >
-          创建任务
+          {WORKSPACE_LABELS.createJob}
         </md-filled-button>
         {message ? <p className="success-text">{message}</p> : null}
         {error ? <p className="error-text">{error}</p> : null}
       </section>
 
       <section className="card-outlined workspace-job-list">
-        <h3>任务列表</h3>
+        <h3>{WORKSPACE_LABELS.jobList}</h3>
         <md-list>
           {jobs.map((job) => (
             <md-list-item
@@ -308,7 +309,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
             } as React.CSSProperties
           }
         >
-          <div slot="headline">确认删除任务</div>
+          <div slot="headline">{WORKSPACE_LABELS.confirmDeleteJob}</div>
           <div slot="content">
             <p>
               确定删除任务「{pendingDeleteJob.title}

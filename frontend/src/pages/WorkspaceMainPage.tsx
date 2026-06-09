@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { WORKSPACE_LABELS } from '../labels'
 
 export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
@@ -40,7 +41,7 @@ export default function WorkspaceMainPage() {
           background: 'var(--md-sys-color-surface)',
         }}
       >
-        智能体状态占位
+        {WORKSPACE_LABELS.agents}状态占位
       </section>
       <section
         className="filter-section"

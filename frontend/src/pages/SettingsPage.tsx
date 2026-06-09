@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSettingStore } from '../stores/settingStore'
 import { SettingsCard } from '../components/SettingsCard'
+import { WORKSPACE_LABELS } from '../labels'
 
 const INTAKE_MODE_OPTIONS = [
   { key: 'direct_ids', label: '直接输入 ID' },
@@ -123,7 +124,7 @@ export function SettingsPage() {
 
       <SettingsCard
         icon="📡"
-        title="资源连接"
+        title={WORKSPACE_LABELS.resources}
         status={
           <div aria-live="polite" aria-atomic="true">
             {connectionStatus}
@@ -183,7 +184,7 @@ export function SettingsPage() {
         )}
       </SettingsCard>
 
-      <SettingsCard icon="📥" title="接入模式">
+      <SettingsCard icon="📥" title={WORKSPACE_LABELS.intake}>
         <div className="field">
           <label htmlFor="entity-type">默认实体类型</label>
           <select
@@ -266,7 +267,7 @@ export function SettingsPage() {
         </div>
       </SettingsCard>
 
-      <SettingsCard icon="🔄" title="流水线">
+      <SettingsCard icon="🔄" title={WORKSPACE_LABELS.pipeline}>
         <div className="field">
           <label htmlFor="pipeline-select">流水线</label>
           <select
@@ -310,9 +311,9 @@ export function SettingsPage() {
         </div>
       </SettingsCard>
 
-      <SettingsCard icon="🤖" title="智能体">
+      <SettingsCard icon="🤖" title={WORKSPACE_LABELS.agents}>
         <p style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-          智能体配置将在后续步骤实现
+          {WORKSPACE_LABELS.agents}配置将在后续步骤实现
         </p>
         <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
           <md-filled-button disabled>保存</md-filled-button>

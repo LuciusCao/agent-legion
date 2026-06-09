@@ -80,3 +80,28 @@ export const JOB_STATUS_ICONS: Record<string, string> = {
   completed: 'check_circle',
   pending: 'radio_button_unchecked',
 }
+
+export const WORKSPACE_LABELS = {
+  overview: '概览',
+  jobs: '任务',
+  runs: '运行记录',
+  settings: '设置',
+  agents: '智能体',
+  resources: '资源连接',
+  intake: '接入模式',
+  pipeline: '流水线',
+  packages: '打包',
+  enter: '进入',
+  createWorkspace: '新建 Workspace',
+  workspaceName: 'Workspace 名称',
+  create: '创建',
+  deleteWorkspace: '删除 Workspace',
+  confirmDelete: '确认删除',
+  videoQueue: '视频队列',
+  createJob: '创建任务',
+  jobList: '任务列表',
+  confirmDeleteJob: '确认删除任务',
+  backToJobList: '返回任务列表',
+  refresh: '刷新',
+  nodes: '节点',
+}
