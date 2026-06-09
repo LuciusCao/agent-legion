@@ -5,7 +5,12 @@ import styles from './MiniDag.module.css'
 
 describe('MiniDag', () => {
   const nodes = [
-    { key: 'download', label: '下载', status: 'completed' as const, duration: 12 },
+    {
+      key: 'download',
+      label: '下载',
+      status: 'completed' as const,
+      duration: 12,
+    },
     { key: 'transcribe', label: '转录', status: 'running' as const },
     { key: 'review', label: '审核', status: 'pending' as const },
     { key: 'package', label: '打包', status: 'failed' as const, duration: 5 },

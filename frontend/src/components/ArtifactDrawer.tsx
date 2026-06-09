@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import styles from './ArtifactDrawer.module.css'
 
 export interface Artifact {
@@ -34,10 +34,6 @@ export function ArtifactDrawer({
 }: ArtifactDrawerProps) {
   const [selectedName, setSelectedName] = useState<string | null>(null)
 
-  useEffect(() => {
-    if (open) setSelectedName(null)
-  }, [open])
-
   if (!open) return null
 
   const selectedArtifact = selectedName
@@ -54,11 +50,7 @@ export function ArtifactDrawer({
       <div className={styles.drawer} onClick={(e) => e.stopPropagation()}>
         <div className={styles.header}>
           <h3>产物</h3>
-          <button
-            type="button"
-            className={styles.closeBtn}
-            onClick={onClose}
-          >
+          <button type="button" className={styles.closeBtn} onClick={onClose}>
             关闭
           </button>
         </div>
