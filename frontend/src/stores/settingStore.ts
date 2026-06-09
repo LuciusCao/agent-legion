@@ -1,5 +1,10 @@
 import { create } from 'zustand'
-import type { WorkspaceSettings } from '../types'
+import type {
+  WorkspaceSettings,
+  GlobalServiceStatus,
+  ResourceProviderDefinition,
+  ResourceBinding,
+} from '../types'
 import { api } from '../api'
 import { useUiStore } from './uiStore'
 
@@ -8,39 +13,51 @@ type TestStatus = {
   message?: string
 }
 
-type SettingSection = 'connection' | 'intake' | 'pipeline' | 'agents'
+type SettingSection =
+  | 'connection'
+  | 'intake'
+  | 'pipeline'
+  | 'agents'
+  | 'resources'
 
 type SettingState = {
   workspaceId: string | null
   settings: WorkspaceSettings
+  globalServices: GlobalServiceStatus | null
+  resourceProviders: ResourceProviderDefinition[]
   testStatus: TestStatus
   isSaving: boolean
   saveError: string | null
   setWorkspaceId: (id: string) => void
   setSettings: (s: Partial<WorkspaceSettings>) => void
   fetchSettings: (workspaceId: string) => Promise<void>
+  fetchGlobalServices: () => Promise<void>
+  fetchResourceProviders: () => Promise<void>
   saveSection: (
     section: SettingSection,
-    data: Partial<WorkspaceSettings>
+    data:
+      | Partial<WorkspaceSettings>
+      | { resources: Record<string, ResourceBinding> }
   ) => Promise<void>
   testConnection: () => Promise<void>
   resetTestStatus: () => void
 }
 
 const defaultSettings: WorkspaceSettings = {
-  cmsUrl: '',
-  cmsToken: '',
   entityType: 'question',
   intakeModes: [],
   labelOverrides: {},
   pipelineKey: '',
   agentIds: [],
   concurrencyLimit: 1,
+  resources: {},
 }
 
 export const useSettingStore = create<SettingState>((set, get) => ({
   workspaceId: null,
   settings: defaultSettings,
+  globalServices: null,
+  resourceProviders: [],
   testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
@@ -76,6 +93,36 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       }
       const message = err instanceof Error ? err.message : '加载设置失败'
       set({ saveError: message })
+    }
+  },
+
+  async fetchGlobalServices() {
+    try {
+      const result = await api<{ cms: GlobalServiceStatus['cms'] }>(
+        '/api/global-services'
+      )
+      if (result && typeof result === 'object' && 'cms' in result) {
+        set({ globalServices: result as GlobalServiceStatus })
+      }
+    } catch {
+      // Silently fail; global services are informational
+    }
+  },
+
+  async fetchResourceProviders() {
+    try {
+      const result = await api<{ providers: ResourceProviderDefinition[] }>(
+        '/api/resource-providers'
+      )
+      if (result && typeof result === 'object' && 'providers' in result) {
+        set({
+          resourceProviders: (
+            result as { providers: ResourceProviderDefinition[] }
+          ).providers,
+        })
+      }
+    } catch {
+      // Silently fail
     }
   },
 

@@ -19,15 +19,16 @@ const mockGetState = vi.mocked(useUiStore.getState)
 const defaultState = {
   workspaceId: 'ws1',
   settings: {
-    cmsUrl: '',
-    cmsToken: '',
     entityType: 'question' as const,
     intakeModes: [],
     labelOverrides: {},
     pipelineKey: '',
     agentIds: [],
     concurrencyLimit: 1,
+    resources: {},
   },
+  globalServices: null as null,
+  resourceProviders: [] as [],
   testStatus: { state: 'idle' as const },
   isSaving: false,
   saveError: null as string | null,
@@ -42,11 +43,9 @@ describe('settingStore', () => {
   })
 
   it('updates settings via setSettings', () => {
-    useSettingStore
-      .getState()
-      .setSettings({ cmsUrl: 'https://cms.example.com' })
-    expect(useSettingStore.getState().settings.cmsUrl).toBe(
-      'https://cms.example.com'
+    useSettingStore.getState().setSettings({ pipelineKey: 'knowledge_content' })
+    expect(useSettingStore.getState().settings.pipelineKey).toBe(
+      'knowledge_content'
     )
   })
 
@@ -80,14 +79,16 @@ describe('settingStore', () => {
 
   it('saveSection calls PATCH endpoint and shows success toast', async () => {
     mockApi.mockResolvedValueOnce(undefined)
-    await useSettingStore
-      .getState()
-      .saveSection('connection', { cmsUrl: 'http://x' })
+    await useSettingStore.getState().saveSection('resources', {
+      resources: { question_detail: { enabled: true, config: {} } },
+    })
     expect(mockApi).toHaveBeenCalledWith(
-      '/api/workspaces/ws1/settings/connection',
+      '/api/workspaces/ws1/settings/resources',
       expect.objectContaining({
         method: 'PATCH',
-        body: JSON.stringify({ cmsUrl: 'http://x' }),
+        body: JSON.stringify({
+          resources: { question_detail: { enabled: true, config: {} } },
+        }),
       })
     )
     expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
@@ -107,9 +108,9 @@ describe('settingStore', () => {
   it('saveSection sets saveError and shows error toast on failure', async () => {
     const err = Object.assign(new Error('Server Error'), { status: 500 })
     mockApi.mockRejectedValueOnce(err)
-    await useSettingStore
-      .getState()
-      .saveSection('connection', { cmsUrl: 'http://x' })
+    await useSettingStore.getState().saveSection('resources', {
+      resources: { question_detail: { enabled: true, config: {} } },
+    })
     expect(useSettingStore.getState().saveError).toBe('Server Error')
     expect(useSettingStore.getState().isSaving).toBe(false)
     expect(mockShowToast).toHaveBeenCalledWith('Server Error', 'error')
@@ -117,21 +118,23 @@ describe('settingStore', () => {
 
   it('fetchSettings hydrates settings from API', async () => {
     mockApi.mockResolvedValueOnce({
-      cmsUrl: 'https://cms.example.com',
-      cmsToken: 'token',
       entityType: 'knowledge',
       intakeModes: ['direct_ids'],
       labelOverrides: { direct_ids: '输入 ID' },
       pipelineKey: 'knowledge_content',
+      resources: {
+        question_detail: { enabled: true, config: { bank_version: 'v5' } },
+      },
     })
     await useSettingStore.getState().fetchSettings('ws1')
     const { settings } = useSettingStore.getState()
-    expect(settings.cmsUrl).toBe('https://cms.example.com')
-    expect(settings.cmsToken).toBe('token')
     expect(settings.entityType).toBe('knowledge')
     expect(settings.intakeModes).toEqual(['direct_ids'])
     expect(settings.labelOverrides).toEqual({ direct_ids: '输入 ID' })
     expect(settings.pipelineKey).toBe('knowledge_content')
+    expect(settings.resources).toEqual({
+      question_detail: { enabled: true, config: { bank_version: 'v5' } },
+    })
   })
 
   it('fetchSettings keeps defaults on 404', async () => {
@@ -146,5 +149,51 @@ describe('settingStore', () => {
     mockApi.mockResolvedValueOnce({})
     await useSettingStore.getState().fetchSettings('ws1')
     expect(useSettingStore.getState().settings).toEqual(defaultState.settings)
+  })
+
+  it('fetchGlobalServices hydrates global services from API', async () => {
+    mockApi.mockResolvedValueOnce({
+      cms: {
+        url: 'http://cms.example.com',
+        tokenConfigured: true,
+        env: 'prod',
+        healthy: null,
+        lastCheckedAt: null,
+      },
+    })
+    await useSettingStore.getState().fetchGlobalServices()
+    expect(useSettingStore.getState().globalServices).toEqual({
+      cms: {
+        url: 'http://cms.example.com',
+        tokenConfigured: true,
+        env: 'prod',
+        healthy: null,
+        lastCheckedAt: null,
+      },
+    })
+  })
+
+  it('fetchResourceProviders hydrates providers from API', async () => {
+    mockApi.mockResolvedValueOnce({
+      providers: [
+        {
+          key: 'question_detail',
+          provider: 'cms.question.detail',
+          apiUrl: 'http://api.example.com',
+          defaultParams: { bank_version: 'v5' },
+          paramKeys: ['bank_version', 'country_id'],
+        },
+      ],
+    })
+    await useSettingStore.getState().fetchResourceProviders()
+    expect(useSettingStore.getState().resourceProviders).toEqual([
+      {
+        key: 'question_detail',
+        provider: 'cms.question.detail',
+        apiUrl: 'http://api.example.com',
+        defaultParams: { bank_version: 'v5' },
+        paramKeys: ['bank_version', 'country_id'],
+      },
+    ])
   })
 })
