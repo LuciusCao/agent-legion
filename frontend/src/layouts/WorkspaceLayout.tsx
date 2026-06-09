@@ -11,6 +11,9 @@ import WorkspaceOverview from '../views/WorkspaceOverview'
 import WorkspaceJobList from '../views/WorkspaceJobList'
 import WorkspaceJobDetail from '../views/WorkspaceJobDetail'
 import WorkspaceResources from '../views/WorkspaceResources'
+import WorkspaceRuns from '../views/WorkspaceRuns'
+import WorkspaceDag from '../views/WorkspaceDag'
+import WorkspaceAgents from '../views/WorkspaceAgents'
 
 const TABS = [
   { key: '', label: 'Overview' },
@@ -148,34 +151,10 @@ export default function WorkspaceLayout() {
             />
             <Route
               path="/agents"
-              element={
-                <div
-                  style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                >
-                  Agents view — 待实现
-                </div>
-              }
+              element={<WorkspaceAgents isVideoHive={isVideoHive} />}
             />
-            <Route
-              path="/dag"
-              element={
-                <div
-                  style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                >
-                  DAG view — 待实现
-                </div>
-              }
-            />
-            <Route
-              path="/runs"
-              element={
-                <div
-                  style={{ color: 'var(--md-sys-color-on-surface-variant)' }}
-                >
-                  Runs view — 待实现
-                </div>
-              }
-            />
+            <Route path="/dag" element={<WorkspaceDag />} />
+            <Route path="/runs" element={<WorkspaceRuns />} />
             <Route
               path="/resources"
               element={<WorkspaceResources isVideoHive={isVideoHive} />}
