@@ -93,19 +93,9 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       )
       useUiStore.getState().showToast('设置已保存', 'success')
     } catch (err) {
-      const status =
-        err && typeof err === 'object' && 'status' in err
-          ? Number((err as { status?: unknown }).status)
-          : undefined
       const message = err instanceof Error ? err.message : '保存失败'
-      if (status === 404) {
-        console.warn(
-          `Settings endpoint not implemented for section ${section}; treating as no-op.`
-        )
-      } else {
-        set({ saveError: message })
-        useUiStore.getState().showToast(message, 'error')
-      }
+      set({ saveError: message })
+      useUiStore.getState().showToast(message, 'error')
     } finally {
       set({ isSaving: false })
     }

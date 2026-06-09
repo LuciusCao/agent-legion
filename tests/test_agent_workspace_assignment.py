@@ -37,6 +37,16 @@ def test_runner_pool_acquire_falls_back_when_no_workspace():
     assert runner.agent_id == "agent-1"
 
 
+def test_runner_pool_acquire_allows_all_when_workspace_has_no_assignments():
+    runners = [
+        OpenClawRunner(agent_id="agent-1", command_template=[], cwd=Path("."), timeout_seconds=60)
+    ]
+    manager = FakeAgentManager({})
+    pool = RunnerPool(runners, agent_manager=manager)
+    idx, runner = pool.acquire(workspace_id="video-hive")
+    assert runner.agent_id == "agent-1"
+
+
 def test_runner_pool_acquire_skips_unassigned_agents():
     runners = [
         OpenClawRunner(agent_id="agent-1", command_template=[], cwd=Path("."), timeout_seconds=60),
