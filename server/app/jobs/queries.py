@@ -77,6 +77,7 @@ class JobQueries:
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
         intake_config: dict[str, Any] | None = None,
+        description: str = "",
     ) -> dict[str, Any]:
         clean_name = name.strip()
         if not clean_name:
@@ -89,6 +90,7 @@ class JobQueries:
         )
         clean_entity = (default_entity or "question").strip() or "question"
         intake_config_json = json.dumps(intake_config or {}, ensure_ascii=False, sort_keys=True)
+        clean_description = (description or "").strip()
 
         base_id = _workspace_id(clean_name)
         with self.connect() as conn:
@@ -101,14 +103,15 @@ class JobQueries:
             conn.execute(
                 """
                 insert into workspaces(
-                  id, name, default_pipeline_key, cms_config_json, resource_config_json,
+                  id, name, description, default_pipeline_key, cms_config_json, resource_config_json,
                   default_entity, intake_config_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workspace_id,
                     clean_name,
+                    clean_description,
                     default_pipeline_key,
                     cms_config_json,
                     resource_config_json,
@@ -134,6 +137,7 @@ class JobQueries:
         workspace_id: str,
         *,
         name: str | None = None,
+        description: str | None = None,
         default_pipeline_key: str | None = None,
         cms_config: dict[str, Any] | None = None,
         resource_config: dict[str, Any] | None = None,
@@ -146,6 +150,8 @@ class JobQueries:
             if not clean_name:
                 raise ValueError("Workspace name is required")
             fields["name"] = clean_name
+        if description is not None:
+            fields["description"] = description.strip()
         if default_pipeline_key is not None:
             fields["default_pipeline_key"] = default_pipeline_key
         if cms_config is not None:

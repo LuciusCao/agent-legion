@@ -146,6 +146,7 @@ export type JobsResponse = {
 export type WorkspaceRecord = {
   id: string
   name: string
+  description?: string
   default_pipeline_key: string
   default_entity: string
   cms_config?: Record<string, unknown>
@@ -265,6 +266,7 @@ export type WorkspaceStats = {
     total: number
     busy: number
     idle: number
+    agents?: Array<{ id: string; name: string; busy: boolean }>
   }
   latest_run: {
     node_key: string

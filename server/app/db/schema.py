@@ -59,6 +59,7 @@ def init_db(path: Path) -> None:
                 create table if not exists workspaces (
                   id text primary key,
                   name text not null,
+                  description text not null default '',
                   default_pipeline_key text not null default 'question_content',
                   cms_config_json text not null default '{}',
                   resource_config_json text not null default '{}',
@@ -153,6 +154,9 @@ def init_db(path: Path) -> None:
                 ),
                 "intake_config_json": (
                     "alter table workspaces add column intake_config_json text not null default '{}'"
+                ),
+                "description": (
+                    "alter table workspaces add column description text not null default ''"
                 ),
             }
             for column, statement in workspace_migrations.items():

@@ -4,12 +4,14 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { SettingsPage } from './SettingsPage'
 import { useSettingStore } from '../stores/settingStore'
 import { useUiStore } from '../stores/uiStore'
+import { useWorkspaceStore } from '../stores/workspaceStore'
 import {
   api,
   assignAgent,
   fetchAgents,
   fetchWorkspaceAgents,
   unassignAgent,
+  updateWorkspace,
 } from '../api'
 
 vi.mock('../api', () => ({
@@ -18,11 +20,14 @@ vi.mock('../api', () => ({
   fetchWorkspaceAgents: vi.fn(),
   assignAgent: vi.fn(),
   unassignAgent: vi.fn(),
+  fetchWorkspaces: vi.fn(),
+  updateWorkspace: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)
 const mockFetchAgents = vi.mocked(fetchAgents)
 const mockFetchWorkspaceAgents = vi.mocked(fetchWorkspaceAgents)
+const mockUpdateWorkspace = vi.mocked(updateWorkspace)
 
 const defaultState = {
   workspaceId: 'ws1',
@@ -65,28 +70,87 @@ describe('SettingsPage', () => {
   beforeEach(() => {
     useSettingStore.setState(defaultState)
     useUiStore.setState({ toast: null })
+    useWorkspaceStore.setState({
+      workspaces: [
+        {
+          id: 'ws1',
+          name: '测试空间',
+          description: '测试描述',
+          default_pipeline_key: 'question_content',
+          default_entity: 'question',
+        },
+      ],
+      currentWorkspace: null,
+      workspaceStats: {},
+      loading: false,
+      error: null,
+    })
     mockApi.mockReset()
     mockApi.mockResolvedValue({})
     mockFetchAgents.mockReset()
     mockFetchAgents.mockResolvedValue({ agents: [] })
     mockFetchWorkspaceAgents.mockReset()
     mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
+    mockUpdateWorkspace.mockReset()
+    mockUpdateWorkspace.mockResolvedValue({
+      id: 'ws1',
+      name: '新名称',
+      description: '新描述',
+      default_pipeline_key: 'question_content',
+      default_entity: 'question',
+    })
     vi.mocked(assignAgent).mockReset()
     vi.mocked(unassignAgent).mockReset()
   })
 
-  it('renders all 4 cards', () => {
+  it('renders all 5 cards', () => {
     renderPage()
+    expect(screen.getByText('基本信息')).toBeInTheDocument()
     expect(screen.getByText('资源连接')).toBeInTheDocument()
     expect(screen.getByText('接入模式')).toBeInTheDocument()
     expect(screen.getByText('流水线')).toBeInTheDocument()
     expect(screen.getByText('智能体')).toBeInTheDocument()
   })
 
+  it('renders workspace name in header', () => {
+    renderPage()
+    expect(screen.getByText('测试空间 / 设置')).toBeInTheDocument()
+  })
+
+  it('updates workspace name and description on save', async () => {
+    renderPage()
+    const basicHeader = screen.getByText('基本信息')
+    fireEvent.click(basicHeader)
+    await waitFor(() => {
+      expect(
+        document.querySelector('md-outlined-text-field[label="Workspace 名称"]')
+      ).toBeTruthy()
+    })
+    const nameField = document.querySelector(
+      'md-outlined-text-field[label="Workspace 名称"]'
+    ) as HTMLInputElement
+    const descField = document.querySelector(
+      'md-outlined-text-field[label="描述"]'
+    ) as HTMLInputElement
+    nameField.value = '新名称'
+    descField.value = '新描述'
+    fireEvent.input(nameField)
+    fireEvent.input(descField)
+    const saveBtns = screen.getAllByText('保存')
+    fireEvent.click(saveBtns[0])
+    await waitFor(() => {
+      expect(mockUpdateWorkspace).toHaveBeenCalledWith('ws1', {
+        name: '新名称',
+        description: '新描述',
+      })
+    })
+  })
+
   it('navigates back to workspace main page', () => {
     renderPage()
-    const back = screen.getByText('◀ 返回')
-    fireEvent.click(back)
+    const back = document.querySelector('md-icon-button')
+    expect(back).toBeTruthy()
+    fireEvent.click(back!)
     expect(screen.getByText('Workspace main')).toBeInTheDocument()
   })
 

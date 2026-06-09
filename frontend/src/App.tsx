@@ -59,8 +59,8 @@ export default function App() {
               path="packages"
               element={<div>{WORKSPACE_LABELS.packages}视图 — 待实现</div>}
             />
-            <Route path="settings" element={<SettingsPage />} />
           </Route>
+          <Route path="/workspaces/:workspaceId/settings" element={<SettingsPage />} />
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
       </Suspense>

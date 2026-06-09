@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useSettingStore } from '../stores/settingStore'
+import { useWorkspaceStore } from '../stores/workspaceStore'
 import { AgentAllocationList } from '../components/AgentAllocationList'
 import { SettingsCard } from '../components/SettingsCard'
 import { WORKSPACE_LABELS } from '../labels'
@@ -59,6 +60,13 @@ export function SettingsPage() {
 
   const [labelOverridesText, setLabelOverridesText] = useState('')
 
+  const { workspaces, fetchWorkspaces, updateWorkspace } = useWorkspaceStore()
+
+  const [workspaceEditName, setWorkspaceEditName] = useState('')
+  const [workspaceEditDescription, setWorkspaceEditDescription] = useState('')
+  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false)
+  const [workspaceSaveError, setWorkspaceSaveError] = useState<string | null>(null)
+
   useEffect(() => {
     if (!workspaceId) return
     setWorkspaceId(workspaceId)
@@ -74,6 +82,25 @@ export function SettingsPage() {
     })
   }, [workspaceId, setWorkspaceId, resetTestStatus, fetchSettings])
 
+  useEffect(() => {
+    if (workspaces.length === 0) {
+      fetchWorkspaces()
+    }
+  }, [workspaces.length, fetchWorkspaces])
+
+  const workspace = workspaceId
+    ? workspaces.find((w) => w.id === workspaceId)
+    : undefined
+  const workspaceName = workspace?.name || workspaceId || ''
+
+  // eslint-disable-next-line react-hooks/set-state-in-effect
+  useEffect(() => {
+    if (workspace) {
+      setWorkspaceEditName(workspace.name)
+      setWorkspaceEditDescription(workspace.description || '')
+    }
+  }, [workspace])
+
   const isTesting = testStatus.state === 'testing'
 
   const toggleIntakeMode = (key: string) => {
@@ -84,6 +111,22 @@ export function SettingsPage() {
   }
 
   if (!workspaceId) return null
+
+  const handleSaveWorkspaceInfo = async () => {
+    if (!workspaceId) return
+    setIsSavingWorkspace(true)
+    setWorkspaceSaveError(null)
+    try {
+      await updateWorkspace(workspaceId, {
+        name: workspaceEditName,
+        description: workspaceEditDescription,
+      })
+    } catch (err) {
+      setWorkspaceSaveError(String(err))
+    } finally {
+      setIsSavingWorkspace(false)
+    }
+  }
 
   const handleLabelOverridesInput = (event: Event) => {
     const value = (event.target as HTMLInputElement).value
@@ -106,26 +149,84 @@ export function SettingsPage() {
   )
 
   return (
-    <div style={{ maxWidth: 800, margin: '0 auto', padding: '8px 0 32px' }}>
-      <div
+    <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
+      {/* App bar */}
+      <header
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 12,
-          marginBottom: 24,
+          gap: 16,
+          padding: '12px 24px',
+          borderBottom: '1px solid var(--md-sys-color-outline-variant)',
+          flexShrink: 0,
         }}
       >
-        <md-outlined-button
-          onClick={() => navigate(`/workspaces/${workspaceId}`)}
+        <md-icon-button onClick={() => navigate(`/workspaces/${workspaceId}`)}>
+          <md-icon>arrow_back</md-icon>
+        </md-icon-button>
+        <h1
+          style={{
+            margin: 0,
+            fontSize: 20,
+            fontWeight: 500,
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
         >
-          ◀ 返回
-        </md-outlined-button>
-        <h1 style={{ margin: 0, fontSize: 22, fontWeight: 500 }}>
-          工作空间设置
+          {workspaceName} / 设置
         </h1>
-      </div>
+      </header>
 
-      <SettingsCard
+      {/* Main content */}
+      <main style={{ flex: 1, overflow: 'auto', padding: '24px 24px 32px' }}>
+        <div style={{ maxWidth: 800, margin: '0 auto' }}>
+          <SettingsCard icon="info" title="基本信息">
+            <md-outlined-text-field
+              label="Workspace 名称"
+              value={workspaceEditName}
+              onInput={(event: Event) =>
+                setWorkspaceEditName((event.target as HTMLInputElement).value)
+              }
+              style={{ width: '100%' }}
+            />
+            <md-outlined-text-field
+              label="描述"
+              type="textarea"
+              rows={2}
+              value={workspaceEditDescription}
+              onInput={(event: Event) =>
+                setWorkspaceEditDescription((event.target as HTMLInputElement).value)
+              }
+              style={{ width: '100%' }}
+            />
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-end',
+                gap: 8,
+              }}
+            >
+              <md-filled-button
+                onClick={handleSaveWorkspaceInfo}
+                disabled={isSavingWorkspace || undefined}
+              >
+                保存
+              </md-filled-button>
+              {workspaceSaveError && (
+                <div
+                  className="error-text"
+                  role="alert"
+                  style={{ color: 'var(--md-sys-color-error)' }}
+                >
+                  {workspaceSaveError}
+                </div>
+              )}
+            </div>
+          </SettingsCard>
+
+          <SettingsCard
         icon="settings_remote"
         title={WORKSPACE_LABELS.resources}
         status={
@@ -317,6 +418,8 @@ export function SettingsPage() {
       <SettingsCard icon="smart_toy" title={WORKSPACE_LABELS.agents}>
         <AgentAllocationList workspaceId={workspaceId} />
       </SettingsCard>
+        </div>
+      </main>
     </div>
   )
 }
