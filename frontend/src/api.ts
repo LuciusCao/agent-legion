@@ -188,7 +188,12 @@ export async function fetchJobArtifact(
 
 export async function fetchWorkspaceRuns(
   workspaceId: string,
-  filters: { status?: string; nodeKey?: string; jobId?: string; limit?: number } = {}
+  filters: {
+    status?: string
+    nodeKey?: string
+    jobId?: string
+    limit?: number
+  } = {}
 ): Promise<WorkspaceRunsResponse> {
   const params = new URLSearchParams()
   if (filters.status) params.set('status', filters.status)

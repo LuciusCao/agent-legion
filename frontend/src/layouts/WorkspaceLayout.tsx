@@ -149,7 +149,10 @@ export default function WorkspaceLayout() {
               path="/jobs"
               element={<WorkspaceJobList isVideoHive={isVideoHive} />}
             />
-            <Route path="/agents" element={<WorkspaceAgents isVideoHive={isVideoHive} />} />
+            <Route
+              path="/agents"
+              element={<WorkspaceAgents isVideoHive={isVideoHive} />}
+            />
             <Route path="/dag" element={<WorkspaceDag />} />
             <Route path="/runs" element={<WorkspaceRuns />} />
             <Route
