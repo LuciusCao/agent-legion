@@ -205,10 +205,13 @@ export async function assignAgent(
   workspace_id: string
   concurrency_limit: number
 }> {
-  return api(
-    `/api/agents/${encodeURIComponent(agentId)}/assign?workspace_id=${encodeURIComponent(workspaceId)}&concurrency_limit=${concurrencyLimit}`,
-    { method: 'POST' }
-  )
+  const params = new URLSearchParams({
+    workspace_id: workspaceId,
+    concurrency_limit: String(concurrencyLimit),
+  })
+  return api(`/api/agents/${encodeURIComponent(agentId)}/assign?${params}`, {
+    method: 'POST',
+  })
 }
 
 export async function unassignAgent(

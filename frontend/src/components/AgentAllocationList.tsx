@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { AgentStatus, WorkspaceAgentAssignment } from '../types'
 import {
   assignAgent,
@@ -14,6 +14,11 @@ interface AgentAllocationListProps {
   workspaceId: string
 }
 
+function clampLimit(value: string): number {
+  const parsed = Number.parseInt(value, 10)
+  return Number.isNaN(parsed) || parsed < 1 ? 1 : parsed
+}
+
 export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
   const [agents, setAgents] = useState<AgentStatus[]>([])
   const [assignments, setAssignments] = useState<WorkspaceAgentAssignment[]>([])
@@ -21,44 +26,42 @@ export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editLimit, setEditLimit] = useState(1)
   const [savingId, setSavingId] = useState<string | null>(null)
-  const [limitDrafts, setLimitDrafts] = useState<Record<string, number>>({})
+  const [limitDrafts, setLimitDrafts] = useState<Record<string, string>>({})
 
   const showToast = useUiStore((state) => state.showToast)
+  const cancelledRef = useRef(false)
 
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
+      setLoading(true)
       const [all, assigned] = await Promise.all([
         fetchAgents(),
         fetchWorkspaceAgents(workspaceId),
       ])
+      if (cancelledRef.current) return
       setAgents(all.agents)
       setAssignments(assigned.agents)
     } catch (err) {
+      if (cancelledRef.current) return
       const message = err instanceof Error ? err.message : '加载失败'
       showToast(message, 'error')
-    }
-  }
-
-  useEffect(() => {
-    let cancelled = false
-    Promise.all([fetchAgents(), fetchWorkspaceAgents(workspaceId)])
-      .then(([all, assigned]) => {
-        if (cancelled) return
-        setAgents(all.agents)
-        setAssignments(assigned.agents)
-      })
-      .catch((err) => {
-        if (cancelled) return
-        const message = err instanceof Error ? err.message : '加载失败'
-        showToast(message, 'error')
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
+    } finally {
+      if (!cancelledRef.current) {
+        setLoading(false)
+      }
     }
   }, [workspaceId, showToast])
+
+  useEffect(() => {
+    cancelledRef.current = false
+    const run = async () => {
+      await loadData()
+    }
+    void run()
+    return () => {
+      cancelledRef.current = true
+    }
+  }, [workspaceId, loadData])
 
   const assignedIds = new Set(assignments.map((a) => a.agent_id))
   const availableAgents = agents.filter((a) => !assignedIds.has(a.id))
@@ -77,18 +80,30 @@ export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
     setEditingId(null)
   }
 
+  const removeDraft = (agentId: string) => {
+    setLimitDrafts((prev) => {
+      if (!(agentId in prev)) return prev
+      const next = { ...prev }
+      delete next[agentId]
+      return next
+    })
+  }
+
   const confirmAssign = async (agentId: string, limit: number) => {
     setSavingId(agentId)
     try {
       await assignAgent(workspaceId, agentId, limit)
       showToast('分配成功', 'success')
-      await loadData()
+      setEditingId(null)
+      removeDraft(agentId)
+      if (!cancelledRef.current) {
+        await loadData()
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : '分配失败'
       showToast(message, 'error')
     } finally {
       setSavingId(null)
-      setEditingId(null)
     }
   }
 
@@ -97,7 +112,10 @@ export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
     try {
       await unassignAgent(workspaceId, agentId)
       showToast('已取消分配', 'success')
-      await loadData()
+      removeDraft(agentId)
+      if (!cancelledRef.current) {
+        await loadData()
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : '取消分配失败'
       showToast(message, 'error')
@@ -107,21 +125,33 @@ export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
   }
 
   const handleLimitChange = (agentId: string, value: string) => {
-    const parsed = Number.parseInt(value, 10)
-    const limit = Number.isNaN(parsed) || parsed < 1 ? 1 : parsed
-    setLimitDrafts((prev) => ({ ...prev, [agentId]: limit }))
+    setLimitDrafts((prev) => ({ ...prev, [agentId]: value }))
+  }
+
+  const commitLimitDraft = (agentId: string) => {
+    setLimitDrafts((prev) => {
+      if (!(agentId in prev)) return prev
+      const next = { ...prev }
+      next[agentId] = String(clampLimit(prev[agentId]))
+      return next
+    })
   }
 
   const handleSaveLimit = async (agentId: string) => {
+    const draft = limitDrafts[agentId]
     const current =
-      limitDrafts[agentId] ??
-      assignments.find((a) => a.agent_id === agentId)?.concurrency_limit ??
-      1
+      draft !== undefined
+        ? clampLimit(draft)
+        : (assignments.find((a) => a.agent_id === agentId)?.concurrency_limit ??
+          1)
     setSavingId(agentId)
     try {
       await assignAgent(workspaceId, agentId, current)
       showToast('并发限制已更新', 'success')
-      await loadData()
+      removeDraft(agentId)
+      if (!cancelledRef.current) {
+        await loadData()
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : '更新失败'
       showToast(message, 'error')
@@ -240,6 +270,7 @@ export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
                       (event.target as HTMLInputElement).value
                     )
                   }
+                  onBlur={() => commitLimitDraft(agent_id)}
                   style={{ width: 96 }}
                   aria-label={WORKSPACE_LABELS.concurrencyLimit}
                 />
