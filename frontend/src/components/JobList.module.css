@@ -1,0 +1,22 @@
+.list {
+  display: flex;
+  flex-direction: column;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 12px;
+  overflow: hidden;
+  background: var(--md-sys-color-surface);
+}
+
+.item {
+  display: flex;
+  flex-direction: column;
+}
+
+.empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  padding: 48px 16px;
+  color: var(--md-sys-color-on-surface-variant);
+}
