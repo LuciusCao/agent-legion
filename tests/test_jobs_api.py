@@ -1351,3 +1351,42 @@ def test_get_resource_providers_returns_provider_list(tmp_path):
         "subject_id",
         "page_size",
     ]
+
+
+def test_get_global_services_returns_cms_status(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config["cms"] = {
+        "env": "prod",
+        "question_detail_url": "http://cms.example.com/v2/question/detail",
+        "token": "secret123",
+    }
+    with TestClient(app) as c:
+        response = c.get("/api/global-services")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cms"]["url"] == "http://cms.***.cn/v2/question/detail"
+    assert body["cms"]["tokenConfigured"] is True
+    assert body["cms"]["env"] == "prod"
+    assert body["cms"]["healthy"] is None
+
+
+def test_get_global_services_unconfigured_token(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config["cms"] = {"env": "dev"}
+    with TestClient(app) as c:
+        response = c.get("/api/global-services")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cms"]["tokenConfigured"] is False
