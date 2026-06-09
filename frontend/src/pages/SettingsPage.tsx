@@ -126,7 +126,7 @@ export function SettingsPage() {
       </div>
 
       <SettingsCard
-        icon="📡"
+        icon="settings_remote"
         title={WORKSPACE_LABELS.resources}
         status={
           <div aria-live="polite" aria-atomic="true">
@@ -187,7 +187,7 @@ export function SettingsPage() {
         )}
       </SettingsCard>
 
-      <SettingsCard icon="📥" title={WORKSPACE_LABELS.intake}>
+      <SettingsCard icon="input" title={WORKSPACE_LABELS.intake}>
         <div className="field">
           <label htmlFor="entity-type">默认实体类型</label>
           <select
@@ -270,7 +270,7 @@ export function SettingsPage() {
         </div>
       </SettingsCard>
 
-      <SettingsCard icon="🔄" title={WORKSPACE_LABELS.pipeline}>
+      <SettingsCard icon="route" title={WORKSPACE_LABELS.pipeline}>
         <div className="field">
           <label htmlFor="pipeline-select">流水线</label>
           <select
@@ -314,7 +314,7 @@ export function SettingsPage() {
         </div>
       </SettingsCard>
 
-      <SettingsCard icon="🤖" title={WORKSPACE_LABELS.agents}>
+      <SettingsCard icon="smart_toy" title={WORKSPACE_LABELS.agents}>
         <AgentAllocationList workspaceId={workspaceId} />
       </SettingsCard>
     </div>

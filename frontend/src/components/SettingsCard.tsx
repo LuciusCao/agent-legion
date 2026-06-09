@@ -36,11 +36,13 @@ export function SettingsCard({
         aria-expanded={expanded}
         data-testid="settings-card-header"
       >
-        <span className={styles.icon}>{icon}</span>
+        <span className={styles.icon}>
+          <md-icon>{icon}</md-icon>
+        </span>
         <span className={styles.title}>{title}</span>
         {status && <span className={styles.status}>{status}</span>}
         <span className={styles.chevron} aria-hidden="true">
-          {expanded ? '▲' : '▼'}
+          <md-icon>{expanded ? 'expand_less' : 'expand_more'}</md-icon>
         </span>
       </div>
       {expanded && <div className={styles.body}>{children}</div>}

@@ -47,8 +47,8 @@ describe('DagGraph', () => {
     const { container } = render(<DagGraph nodes={nodes} edges={edges} />)
     const nodeA = container.querySelector('[data-node="a"]')
     const nodeB = container.querySelector('[data-node="b"]')
-    expect(nodeA).toHaveTextContent('✅')
-    expect(nodeB).toHaveTextContent('⏳')
+    expect(nodeA).toHaveTextContent('check_circle')
+    expect(nodeB).toHaveTextContent('hourglass_empty')
   })
 
   it('renders duration when provided', () => {

@@ -5,18 +5,22 @@ import { SettingsCard } from './SettingsCard'
 describe('SettingsCard', () => {
   it('renders title and icon', () => {
     render(
-      <SettingsCard icon="📡" title="资源连接">
+      <SettingsCard icon="settings_remote" title="资源连接">
         content
       </SettingsCard>
     )
     expect(screen.getByText('资源连接')).toBeInTheDocument()
-    expect(screen.getByText('📡')).toBeInTheDocument()
+    expect(screen.getByText('settings_remote')).toBeInTheDocument()
     expect(screen.queryByText('content')).not.toBeInTheDocument()
   })
 
   it('expands and collapses on header click', () => {
     render(
-      <SettingsCard icon="📡" title="资源连接" defaultExpanded={false}>
+      <SettingsCard
+        icon="settings_remote"
+        title="资源连接"
+        defaultExpanded={false}
+      >
         content
       </SettingsCard>
     )
@@ -29,7 +33,11 @@ describe('SettingsCard', () => {
 
   it('toggles expand/collapse on Enter and Space key', () => {
     render(
-      <SettingsCard icon="📡" title="资源连接" defaultExpanded={false}>
+      <SettingsCard
+        icon="settings_remote"
+        title="资源连接"
+        defaultExpanded={false}
+      >
         content
       </SettingsCard>
     )
@@ -42,7 +50,7 @@ describe('SettingsCard', () => {
 
   it('shows status pill when provided', () => {
     render(
-      <SettingsCard icon="📡" title="T" status={<span>ok</span>}>
+      <SettingsCard icon="settings_remote" title="T" status={<span>ok</span>}>
         c
       </SettingsCard>
     )
