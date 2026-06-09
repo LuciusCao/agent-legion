@@ -19,8 +19,7 @@ const TABS = [
 const VIDEO_HIVE_TABS = [
   { key: '', label: '概览' },
   { key: 'jobs', label: '视频队列' },
-  { key: 'agents', label: 'Agents' },
-  { key: 'packages', label: 'Packages' },
+  { key: 'packages', label: '📦 打包' },
 ]
 
 export default function WorkspaceLayout() {
