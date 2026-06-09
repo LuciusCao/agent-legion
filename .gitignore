@@ -11,5 +11,6 @@ frontend/dist/
 *.log
 .worktrees/
 .workspaces/
+.superpowers/
 .coverage
 coverage/
