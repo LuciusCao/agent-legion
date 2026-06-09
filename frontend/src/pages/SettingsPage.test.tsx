@@ -4,11 +4,25 @@ import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { SettingsPage } from './SettingsPage'
 import { useSettingStore } from '../stores/settingStore'
 import { useUiStore } from '../stores/uiStore'
-import { api } from '../api'
+import {
+  api,
+  assignAgent,
+  fetchAgents,
+  fetchWorkspaceAgents,
+  unassignAgent,
+} from '../api'
 
-vi.mock('../api', () => ({ api: vi.fn() }))
+vi.mock('../api', () => ({
+  api: vi.fn(),
+  fetchAgents: vi.fn(),
+  fetchWorkspaceAgents: vi.fn(),
+  assignAgent: vi.fn(),
+  unassignAgent: vi.fn(),
+}))
 
 const mockApi = vi.mocked(api)
+const mockFetchAgents = vi.mocked(fetchAgents)
+const mockFetchWorkspaceAgents = vi.mocked(fetchWorkspaceAgents)
 
 const defaultState = {
   workspaceId: 'ws1',
@@ -53,6 +67,12 @@ describe('SettingsPage', () => {
     useUiStore.setState({ toast: null })
     mockApi.mockReset()
     mockApi.mockResolvedValue({})
+    mockFetchAgents.mockReset()
+    mockFetchAgents.mockResolvedValue({ agents: [] })
+    mockFetchWorkspaceAgents.mockReset()
+    mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
+    vi.mocked(assignAgent).mockReset()
+    vi.mocked(unassignAgent).mockReset()
   })
 
   it('renders all 4 cards', () => {
@@ -170,5 +190,18 @@ describe('SettingsPage', () => {
     expect(useSettingStore.getState().settings.labelOverrides).toEqual({
       direct_ids: '输入 ID',
     })
+  })
+
+  it('renders AgentAllocationList instead of placeholder in agents card', async () => {
+    renderPage()
+    const agentsHeader = screen.getByText('智能体')
+    fireEvent.click(agentsHeader)
+    await waitFor(() => {
+      expect(screen.getByText('可用智能体')).toBeInTheDocument()
+    })
+    expect(
+      screen.queryByText(/智能体配置将在后续步骤实现/)
+    ).not.toBeInTheDocument()
+    expect(screen.getByText('当前工作空间未分配智能体')).toBeInTheDocument()
   })
 })
