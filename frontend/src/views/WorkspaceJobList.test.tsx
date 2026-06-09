@@ -174,6 +174,54 @@ describe('WorkspaceJobList', () => {
     expect(navigate).toHaveBeenCalledWith('/workspaces/math_ws/jobs/j1')
   })
 
+  it('requires confirmation before deleting a job', async () => {
+    const fetchMock = createFetchMock({
+      'GET /api/pipelines/question_content': pipelineResponse,
+      'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+        jobs: [
+          {
+            id: 'j1',
+            workspace_id: 'math_ws',
+            pipeline_key: 'question_content',
+            source_id: 'q1',
+            title: 'Q1',
+            status: 'completed',
+          },
+        ],
+      },
+      'DELETE /api/jobs/j1': { deleted: 'j1' },
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter>
+        <WorkspaceJobList isVideoHive={false} />
+      </MemoryRouter>
+    )
+
+    await screen.findByText('Q1')
+
+    fireEvent.click(screen.getByLabelText('删除任务'))
+
+    expect(screen.getByText('确认删除任务')).toBeInTheDocument()
+    expect(
+      fetchMock.mock.calls.some(
+        (call) => call[0] === '/api/jobs/j1' && call[1]?.method === 'DELETE'
+      )
+    ).toBe(false)
+
+    fireEvent.click(screen.getByText('删除'))
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(
+          (call) => call[0] === '/api/jobs/j1' && call[1]?.method === 'DELETE'
+        )
+      ).toBe(true)
+    )
+    await waitFor(() => expect(screen.queryByText('Q1')).not.toBeInTheDocument())
+  })
+
   it('shows error when batch creation fails', async () => {
     const fetchMock = createFetchMock({
       'GET /api/pipelines/question_content': pipelineResponse,

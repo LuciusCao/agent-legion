@@ -566,15 +566,17 @@ def create_jobs_router(
         job = job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
+        if job["status"] == "running":
+            raise HTTPException(status_code=400, detail="Cannot delete a running job")
         storage_dir = Path(str(job["storage_dir"]))
-        if storage_dir.exists() and storage_dir.is_dir():
-            shutil.rmtree(storage_dir)
-        for log_path in glob.glob(str(settings.logs_dir / "jobs" / f"{job_id}-*.log")):
-            Path(log_path).unlink(missing_ok=True)
         try:
             job_db.delete_job(job_id)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
+        if storage_dir.exists() and storage_dir.is_dir():
+            shutil.rmtree(storage_dir)
+        for log_path in glob.glob(str(settings.logs_dir / "jobs" / f"{job_id}-*.log")):
+            Path(log_path).unlink(missing_ok=True)
         return {"deleted": job_id}
 
     @router.get("/jobs/{job_id}/{invalid_path:path}", response_model=ArtifactResponse)
