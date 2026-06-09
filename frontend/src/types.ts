@@ -252,3 +252,31 @@ export type WorkspaceStats = {
     started_at: string
   } | null
 }
+
+export type WorkspaceRunRecord = NodeRunRecord & {
+  workspace_id: string
+  job_title: string
+  source_id: string
+  source_type: string
+  pipeline_key: string
+}
+
+export type WorkspaceRunsResponse = {
+  runs: WorkspaceRunRecord[]
+}
+
+export type WorkspaceDagNodeRecord = PipelineNodeRecord & {
+  status_counts: Record<string, number>
+}
+
+export type WorkspaceDagResponse = {
+  pipeline: {
+    key: string
+    label: string
+    concurrency: {
+      local: number
+      agent: number
+    }
+  }
+  nodes: WorkspaceDagNodeRecord[]
+}
