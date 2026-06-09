@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import glob
+import logging
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -21,6 +24,8 @@ RESOLVER_MAP: dict[tuple[str, str], str] = {
     ("video", "direct_ids"): "direct.video_ids",
     ("video", "by_knowledge"): "cms.videos_by_knowledge",
 }
+
+logger = logging.getLogger(__name__)
 
 
 def _candidate(
@@ -299,13 +304,26 @@ def create_jobs_router(
                 None,
                 mode.resource,
             )
+            api_url = list_resource.get("api_url") or list_resource.get("question_list_url")
+            logger.info(
+                "CMS lookup for workspace=%s mode=%s: api_url=%s resource=%s",
+                workspace_id,
+                mode.key,
+                api_url,
+                mode.resource,
+            )
             token = get_token(str(list_resource.get("env", "")), list_resource)
             seen_question_ids: set[str] = set()
             for knowledge_code in input_values:
                 summaries = list_questions_by_knowledge(
                     knowledge_code,
-                    list_resource.get("api_url") or list_resource.get("question_list_url"),
+                    api_url,
                     token,
+                )
+                logger.info(
+                    "CMS returned %d questions for knowledge_code=%s",
+                    len(summaries),
+                    knowledge_code,
                 )
                 for summary in summaries:
                     if summary.question_id in seen_question_ids:
@@ -324,7 +342,10 @@ def create_jobs_router(
             raise HTTPException(status_code=400, detail=f"Unsupported resolver: {resolver}")
 
         if not candidates:
-            raise HTTPException(status_code=400, detail="No tasks were resolved from input")
+            detail = "No tasks were resolved from input"
+            if resolver.startswith("cms.") and mode.input_field == "knowledge_codes":
+                detail += f". Checked {len(input_values)} knowledge code(s) via CMS; ensure the codes are correct and the resource API URL is configured."
+            raise HTTPException(status_code=400, detail=detail)
 
         if mode.input_field == "question_ids":
             resolved_ids = input_values
@@ -538,6 +559,23 @@ def create_jobs_router(
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return RerunNodeResponse(job_id=job_id, node_key=node_key, stale_nodes=stale_nodes)
+
+    @router.delete("/jobs/{job_id}")
+    def delete_job(job_id: str) -> dict[str, str]:
+        _require_enabled(settings)
+        job = job_db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        storage_dir = Path(str(job["storage_dir"]))
+        if storage_dir.exists() and storage_dir.is_dir():
+            shutil.rmtree(storage_dir)
+        for log_path in glob.glob(str(settings.logs_dir / "jobs" / f"{job_id}-*.log")):
+            Path(log_path).unlink(missing_ok=True)
+        try:
+            job_db.delete_job(job_id)
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return {"deleted": job_id}
 
     @router.get("/jobs/{job_id}/{invalid_path:path}", response_model=ArtifactResponse)
     def reject_invalid_job_subpath(job_id: str, invalid_path: str) -> None:

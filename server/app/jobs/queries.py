@@ -462,6 +462,17 @@ class JobQueries:
             ).fetchone()
         return dict(row) if row else None
 
+    def delete_job(self, job_id: str) -> None:
+        with self.connect() as conn:
+            job = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+            if job is None:
+                raise ValueError("Job not found")
+            if job["status"] == "running":
+                raise ValueError("Cannot delete a running job")
+            conn.execute("delete from job_nodes where job_id=?", (job_id,))
+            conn.execute("delete from node_runs where job_id=?", (job_id,))
+            conn.execute("delete from jobs where id=?", (job_id,))
+
     def delete_workspace(self, workspace_id: str) -> None:
         if workspace_id == "default":
             raise ValueError("Cannot delete the default workspace")

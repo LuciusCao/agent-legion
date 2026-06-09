@@ -171,6 +171,10 @@ export async function fetchJobDetail(
   return api(`/api/jobs/${encodeURIComponent(jobId)}`)
 }
 
+export async function deleteJob(jobId: string): Promise<{ deleted: string }> {
+  return api(`/api/jobs/${encodeURIComponent(jobId)}`, { method: 'DELETE' })
+}
+
 export async function fetchJobArtifact(
   jobId: string,
   artifactName: string

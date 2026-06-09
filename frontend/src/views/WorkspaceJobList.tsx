@@ -3,7 +3,12 @@ import { useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
-import { createJobBatch, fetchJobs, fetchPipelineDefinition } from '../api'
+import {
+  createJobBatch,
+  deleteJob,
+  fetchJobs,
+  fetchPipelineDefinition,
+} from '../api'
 import type {
   JobRecord,
   PipelineDefinitionRecord,
@@ -49,6 +54,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [deletingJobId, setDeletingJobId] = useState<string | null>(null)
 
   const workspaceId = currentWorkspace?.id
   const pipelineKey =
@@ -170,6 +176,19 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
     }
   }
 
+  async function handleDeleteJob(jobId: string) {
+    setDeletingJobId(jobId)
+    setError('')
+    try {
+      await deleteJob(jobId)
+      setJobs((prev) => prev.filter((j) => j.id !== jobId))
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setDeletingJobId(null)
+    }
+  }
+
   if (isVideoHive) {
     return (
       <div>
@@ -258,6 +277,17 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
               <span slot="end" className={`status-badge ${job.status}`}>
                 {job.status}
               </span>
+              <md-icon-button
+                slot="end"
+                aria-label="删除任务"
+                onClick={(e: Event) => {
+                  e.stopPropagation()
+                  handleDeleteJob(job.id)
+                }}
+                disabled={deletingJobId === job.id || undefined}
+              >
+                <md-icon>delete</md-icon>
+              </md-icon-button>
             </md-list-item>
           ))}
         </md-list>

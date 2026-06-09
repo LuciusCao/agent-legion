@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.cms.knowledge import _extract_knowledge_url
+from server.app.cms.knowledge import _extract_knowledge_video_url, _parse_knowledge_payload
 from server.app.pipeline.common import get_video_id, parse_srt, parse_srt_file, resolve_video_dir
 
 
@@ -34,7 +34,9 @@ def test_extract_knowledge_url_accepts_source_v2():
         }
     }
 
-    assert _extract_knowledge_url("K001", payload) == ("https://example.com/k001.mp4", "")
+    data = _parse_knowledge_payload(payload)
+    assert data is not None
+    assert _extract_knowledge_video_url(data) == ("https://example.com/k001.mp4", "")
 
 
 def test_resolve_video_dir_prefers_storage_dir():
