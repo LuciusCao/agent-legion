@@ -298,7 +298,7 @@ def _mask_url(url: str) -> str:
     hostname = parsed.hostname or ""
     parts = hostname.split(".")
     if len(parts) >= 3:
-        masked = ".".join([parts[0], "***"] + parts[2:])
+        masked = f"{parts[0]}.***.{parts[-1]}"
     elif len(parts) == 2:
         masked = f"***.{parts[1]}"
     else:
