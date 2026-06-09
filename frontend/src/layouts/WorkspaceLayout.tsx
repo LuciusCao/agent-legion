@@ -10,18 +10,10 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import WorkspaceOverview from '../views/WorkspaceOverview'
 import WorkspaceJobList from '../views/WorkspaceJobList'
 import WorkspaceJobDetail from '../views/WorkspaceJobDetail'
-import WorkspaceResources from '../views/WorkspaceResources'
-import WorkspaceRuns from '../views/WorkspaceRuns'
-import WorkspaceDag from '../views/WorkspaceDag'
-import WorkspaceAgents from '../views/WorkspaceAgents'
 
 const TABS = [
   { key: '', label: 'Overview' },
   { key: 'jobs', label: 'Jobs' },
-  { key: 'dag', label: 'DAG' },
-  { key: 'agents', label: 'Agents' },
-  { key: 'runs', label: 'Runs' },
-  { key: 'resources', label: 'Resources' },
 ]
 
 const VIDEO_HIVE_TABS = [
@@ -148,16 +140,6 @@ export default function WorkspaceLayout() {
             <Route
               path="/jobs"
               element={<WorkspaceJobList isVideoHive={isVideoHive} />}
-            />
-            <Route
-              path="/agents"
-              element={<WorkspaceAgents isVideoHive={isVideoHive} />}
-            />
-            <Route path="/dag" element={<WorkspaceDag />} />
-            <Route path="/runs" element={<WorkspaceRuns />} />
-            <Route
-              path="/resources"
-              element={<WorkspaceResources isVideoHive={isVideoHive} />}
             />
             <Route
               path="/packages"
