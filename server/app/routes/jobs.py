@@ -109,6 +109,15 @@ class RerunNodeResponse(BaseModel):
     stale_nodes: list[str]
 
 
+class WorkspaceRunsResponse(BaseModel):
+    runs: list[dict[str, Any]]
+
+
+class WorkspaceDagResponse(BaseModel):
+    pipeline: dict[str, Any]
+    nodes: list[dict[str, Any]]
+
+
 class WorkspaceStatsResponse(BaseModel):
     workspace_id: str
     name: str
@@ -503,6 +512,58 @@ def create_jobs_router(
                 pipeline_key=pipeline_key,
                 status=status,
             )
+        )
+
+    @router.get("/workspaces/{workspace_id}/runs", response_model=WorkspaceRunsResponse)
+    def list_workspace_runs(
+        workspace_id: str,
+        status: str | None = None,
+        node_key: str | None = None,
+        job_id: str | None = None,
+        limit: int = 100,
+    ) -> WorkspaceRunsResponse:
+        _require_enabled(settings)
+        _workspace_or_404(job_db, workspace_id)
+        return WorkspaceRunsResponse(
+            runs=job_db.list_workspace_node_runs(
+                workspace_id,
+                status=status,
+                node_key=node_key,
+                job_id=job_id,
+                limit=limit,
+            )
+        )
+
+    @router.get("/workspaces/{workspace_id}/dag", response_model=WorkspaceDagResponse)
+    def get_workspace_dag(workspace_id: str) -> WorkspaceDagResponse:
+        _require_enabled(settings)
+        workspace = _workspace_or_404(job_db, workspace_id)
+        pipeline_key = str(workspace.get("default_pipeline_key") or "question_content")
+        definition = _definition(settings, pipeline_key)
+        counts = job_db.count_workspace_job_nodes_by_status(workspace_id, pipeline_key)
+        statuses = ["pending", "running", "completed", "failed", "stale"]
+        return WorkspaceDagResponse(
+            pipeline={
+                "key": definition.key,
+                "label": definition.label,
+                "concurrency": {
+                    "local": definition.concurrency.local,
+                    "agent": definition.concurrency.agent,
+                },
+            },
+            nodes=[
+                {
+                    "key": node.key,
+                    "runner": node.runner,
+                    "after": node.after,
+                    "inputs": node.inputs,
+                    "outputs": node.outputs,
+                    "status_counts": {
+                        status: counts.get(node.key, {}).get(status, 0) for status in statuses
+                    },
+                }
+                for node in definition.nodes.values()
+            ],
         )
 
     @router.post("/job-batches", response_model=JobBatchResponse)

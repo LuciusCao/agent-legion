@@ -1037,3 +1037,104 @@ def test_pipeline_response_no_task_entity(tmp_path):
         assert "label" in mode
         assert "input_field" in mode
         assert "resource" in mode
+
+
+def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        batch = c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q001"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        job_id = batch["jobs"][0]["id"]
+        run = app.state.job_db.start_node_run(
+            job_id,
+            "fetch_question_context",
+            ["local", "fetch_question_context"],
+            "data/logs/jobs/run.log",
+        )
+        app.state.job_db.finish_node_run(run["id"], "completed", 0, "")
+
+        response = c.get("/api/workspaces/default/runs")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert len(body["runs"]) == 1
+    assert body["runs"][0]["workspace_id"] == "default"
+    assert body["runs"][0]["job_id"] == job_id
+    assert body["runs"][0]["job_title"] == "Question Q001"
+    assert body["runs"][0]["source_id"] == "Q001"
+    assert body["runs"][0]["source_type"] == "question"
+    assert body["runs"][0]["node_key"] == "fetch_question_context"
+    assert body["runs"][0]["status"] == "completed"
+
+
+def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        batch = c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q001"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        job_id = batch["jobs"][0]["id"]
+        run1 = app.state.job_db.start_node_run(job_id, "fetch_question_context", ["local"], "a.log")
+        app.state.job_db.finish_node_run(run1["id"], "completed", 0, "")
+        run2 = app.state.job_db.start_node_run(job_id, "assemble_package", ["local"], "b.log")
+        app.state.job_db.finish_node_run(run2["id"], "failed", 1, "boom")
+
+        response = c.get("/api/workspaces/default/runs?status=failed&node_key=assemble_package")
+
+    assert response.status_code == 200
+    runs = response.json()["runs"]
+    assert len(runs) == 1
+    assert runs[0]["node_key"] == "assemble_package"
+    assert runs[0]["status"] == "failed"
+    assert runs[0]["error_message"] == "boom"
+
+
+def test_get_workspace_dag_returns_node_status_counts(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q001", "Q002"],
+                "knowledge_codes": [],
+            },
+        )
+        response = c.get("/api/workspaces/default/dag")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["pipeline"]["key"] == "question_content"
+    first = body["nodes"][0]
+    assert first["key"] == "fetch_question_context"
+    assert first["runner"] == "local"
+    assert first["status_counts"]["pending"] == 2

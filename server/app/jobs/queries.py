@@ -447,6 +447,68 @@ class JobQueries:
             )
             return {row["status"]: row["cnt"] for row in rows}
 
+    def count_workspace_job_nodes_by_status(
+        self, workspace_id: str, pipeline_key: str
+    ) -> dict[str, dict[str, int]]:
+        result: dict[str, dict[str, int]] = {}
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                """
+                select job_nodes.node_key, job_nodes.status, count(*) as cnt
+                from job_nodes
+                join jobs on jobs.id = job_nodes.job_id
+                where jobs.workspace_id = ? and jobs.pipeline_key = ?
+                group by job_nodes.node_key, job_nodes.status
+                """,
+                (workspace_id, pipeline_key),
+            )
+            for row in rows:
+                node_counts = result.setdefault(row["node_key"], {})
+                node_counts[row["status"]] = row["cnt"]
+        return result
+
+    def list_workspace_node_runs(
+        self,
+        workspace_id: str,
+        *,
+        status: str | None = None,
+        node_key: str | None = None,
+        job_id: str | None = None,
+        limit: int = 100,
+    ) -> list[dict[str, Any]]:
+        clauses = ["jobs.workspace_id = ?"]
+        params: list[Any] = [workspace_id]
+        if status:
+            clauses.append("node_runs.status = ?")
+            params.append(status)
+        if node_key:
+            clauses.append("node_runs.node_key = ?")
+            params.append(node_key)
+        if job_id:
+            clauses.append("node_runs.job_id = ?")
+            params.append(job_id)
+        params.append(max(1, min(limit, 500)))
+        where = " and ".join(clauses)
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                f"""
+                select
+                  node_runs.*,
+                  jobs.workspace_id,
+                  jobs.title as job_title,
+                  jobs.source_id,
+                  jobs.source_type,
+                  jobs.pipeline_key
+                from node_runs
+                join jobs on jobs.id = node_runs.job_id
+                where {where}
+                order by node_runs.started_at desc, node_runs.id desc
+                limit ?
+                """,
+                params,
+            )
+            return [dict(row) for row in rows]
+
     def get_latest_node_run_for_workspace(self, workspace_id: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
             row = conn.execute(
