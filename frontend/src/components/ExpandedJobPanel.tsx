@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { MiniDag, type MiniDagNode } from './MiniDag'
 import { NodeRunsTable, type NodeRun } from './NodeRunsTable'
 import { JOB_STATUS_LABELS } from '../labels'
@@ -6,6 +7,7 @@ import styles from './ExpandedJobPanel.module.css'
 
 export interface ExpandedJobPanelProps {
   job: JobRecord
+  workspaceId?: string
   onViewDetail: () => void
   onRerun: () => void
   onRunTo: () => void
@@ -56,11 +58,13 @@ function buildNodeRuns(job: JobRecord): NodeRun[] {
 
 export function ExpandedJobPanel({
   job,
+  workspaceId,
   onViewDetail,
   onRerun,
   onRunTo,
   onDelete,
 }: ExpandedJobPanelProps) {
+  const navigate = useNavigate()
   const dagNodes = buildMiniDagNodes(job)
   const runs = buildNodeRuns(job)
   const statusLabel = JOB_STATUS_LABELS[job.status] || job.status
@@ -95,9 +99,14 @@ export function ExpandedJobPanel({
         <button
           type="button"
           className={styles.actionBtn}
-          onClick={onViewDetail}
+          onClick={() => {
+            if (workspaceId) {
+              navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)
+            }
+            onViewDetail()
+          }}
         >
-          <span className={styles.icon}>📄</span> 查看产物
+          <span className={styles.icon}>📄</span> 查看完整详情
         </button>
         <button type="button" className={styles.actionBtn} onClick={onRerun}>
           <span className={styles.icon}>🔄</span> 重跑

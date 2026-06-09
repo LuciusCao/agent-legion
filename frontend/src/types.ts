@@ -205,6 +205,7 @@ export type JobNodeRecord = {
   job_id: string
   node_key: string
   status: string
+  after?: string[]
   stale_reason?: string
   error_message?: string
   started_at?: string | null

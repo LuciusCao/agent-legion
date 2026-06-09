@@ -49,8 +49,9 @@ export function JobList({ workspaceId }: JobListProps) {
             {isExpanded && (
               <ExpandedJobPanel
                 job={job}
+                workspaceId={workspaceId}
                 onViewDetail={() => {
-                  // Placeholder: navigate to detail view in Phase 3
+                  // navigation is handled inside ExpandedJobPanel
                 }}
                 onRerun={() => {
                   // Placeholder: trigger rerun in Phase 3

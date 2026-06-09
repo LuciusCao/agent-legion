@@ -9,10 +9,10 @@ import {
 import { useUiStore } from './stores/uiStore'
 import Toast from './components/Toast'
 import WorkspaceJobList from './views/WorkspaceJobList'
-import WorkspaceJobDetail from './views/WorkspaceJobDetail'
 import { VIDEO_HIVE_ID } from './layouts/WorkspaceLayout'
 import { SettingsPage } from './pages/SettingsPage'
 import WorkspaceMainPage from './pages/WorkspaceMainPage'
+import JobDetailPage from './pages/JobDetailPage'
 import { WORKSPACE_LABELS } from './labels'
 
 const ListPage = lazy(() =>
@@ -54,7 +54,7 @@ export default function App() {
           <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
             <Route index element={<WorkspaceMainPage />} />
             <Route path="jobs" element={<WorkspaceJobListWrapper />} />
-            <Route path="jobs/:jobId" element={<WorkspaceJobDetail />} />
+            <Route path="jobs/:jobId" element={<JobDetailPage />} />
             <Route
               path="packages"
               element={<div>{WORKSPACE_LABELS.packages}视图 — 待实现</div>}
