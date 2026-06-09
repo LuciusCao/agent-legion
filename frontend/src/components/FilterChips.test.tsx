@@ -16,7 +16,9 @@ describe('FilterChips', () => {
   })
 
   it('renders chips with labels and counts', () => {
-    render(<FilterChips filters={filters} activeKey="all" onChange={onChange} />)
+    render(
+      <FilterChips filters={filters} activeKey="all" onChange={onChange} />
+    )
 
     expect(screen.getByText('全部')).toBeInTheDocument()
     expect(screen.getByText('我的')).toBeInTheDocument()
@@ -49,7 +51,9 @@ describe('FilterChips', () => {
   })
 
   it('calls onChange when a chip is clicked', () => {
-    render(<FilterChips filters={filters} activeKey="all" onChange={onChange} />)
+    render(
+      <FilterChips filters={filters} activeKey="all" onChange={onChange} />
+    )
 
     fireEvent.click(screen.getByText('系统'))
     expect(onChange).toHaveBeenCalledTimes(1)

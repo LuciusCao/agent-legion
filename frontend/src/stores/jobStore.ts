@@ -18,6 +18,7 @@ interface JobState {
   setSearchQuery: (query: string) => void
   toggleSelect: (id: string) => void
   selectAll: () => void
+  selectFailed: () => void
   clearSelection: () => void
   toggleExpand: (id: string) => void
   getFilteredJobs: () => JobRecord[]
@@ -97,6 +98,15 @@ export const useJobStore = create<JobState>((set, get) => ({
     set((state) => {
       const visible = getVisibleJobs(state)
       return { selectedIds: new Set(visible.map((j) => j.id)) }
+    })
+  },
+
+  selectFailed() {
+    set((state) => {
+      const failedIds = state.jobs
+        .filter((j) => normalizeJobStatus(j.status) === 'failed')
+        .map((j) => j.id)
+      return { selectedIds: new Set(failedIds) }
     })
   },
 

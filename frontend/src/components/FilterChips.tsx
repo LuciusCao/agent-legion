@@ -6,7 +6,11 @@ export interface FilterChipsProps {
   onChange: (key: string) => void
 }
 
-export function FilterChips({ filters, activeKey, onChange }: FilterChipsProps) {
+export function FilterChips({
+  filters,
+  activeKey,
+  onChange,
+}: FilterChipsProps) {
   return (
     <div className={styles.row} role="list">
       {filters.map((filter) => (
