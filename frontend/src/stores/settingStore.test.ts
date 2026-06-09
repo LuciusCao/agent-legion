@@ -93,15 +93,15 @@ describe('settingStore', () => {
     expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
   })
 
-  it('saveSection handles 404 gracefully', async () => {
+  it('saveSection surfaces 404 errors', async () => {
     const err = Object.assign(new Error('Not Found'), { status: 404 })
     mockApi.mockRejectedValueOnce(err)
     await expect(
       useSettingStore.getState().saveSection('pipeline', { pipelineKey: 'v' })
     ).resolves.toBeUndefined()
     expect(useSettingStore.getState().isSaving).toBe(false)
-    expect(useSettingStore.getState().saveError).toBeNull()
-    expect(mockShowToast).not.toHaveBeenCalled()
+    expect(useSettingStore.getState().saveError).toBe('Not Found')
+    expect(mockShowToast).toHaveBeenCalledWith('Not Found', 'error')
   })
 
   it('saveSection sets saveError and shows error toast on failure', async () => {

@@ -139,15 +139,6 @@ export const useJobStore = create<JobState>((set, get) => ({
         .getState()
         .showToast(`成功重跑 ${ids.length} 个任务`, 'success')
     } catch (err) {
-      const status =
-        err && typeof err === 'object' && 'status' in err
-          ? Number((err as { status?: unknown }).status)
-          : undefined
-      if (status === 404) {
-        console.warn('Batch rerun endpoint is not implemented yet')
-        set({ selectedIds: new Set() })
-        return
-      }
       const message = err instanceof Error ? err.message : 'Batch rerun failed'
       set({ error: message })
       useUiStore.getState().showToast(message, 'error')
@@ -174,15 +165,6 @@ export const useJobStore = create<JobState>((set, get) => ({
         .getState()
         .showToast(`成功删除 ${ids.length} 个任务`, 'success')
     } catch (err) {
-      const status =
-        err && typeof err === 'object' && 'status' in err
-          ? Number((err as { status?: unknown }).status)
-          : undefined
-      if (status === 404) {
-        console.warn('Batch delete endpoint is not implemented yet')
-        set({ selectedIds: new Set() })
-        return
-      }
       const message = err instanceof Error ? err.message : 'Batch delete failed'
       set({ error: message })
       useUiStore.getState().showToast(message, 'error')

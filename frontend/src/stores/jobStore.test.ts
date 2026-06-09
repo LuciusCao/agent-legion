@@ -203,22 +203,18 @@ describe('jobStore', () => {
     expect(mockShowToast).toHaveBeenCalledWith('成功重跑 1 个任务', 'success')
   })
 
-  it('handles 404 on batch rerun gracefully', async () => {
+  it('surfaces 404 on batch rerun', async () => {
     useJobStore.setState({ selectedIds: new Set(['j1']) })
     const err = Object.assign(new Error('Not Found'), { status: 404 })
     mockApi.mockRejectedValueOnce(err)
-    const warnSpy = vi
-      .spyOn(console, 'warn')
-      .mockImplementation(() => undefined)
 
-    await useJobStore.getState().batchRerun('ws1')
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Batch rerun endpoint is not implemented yet'
+    await expect(useJobStore.getState().batchRerun('ws1')).rejects.toThrow(
+      'Not Found'
     )
-    expect(useJobStore.getState().selectedIds.size).toBe(0)
-    expect(mockShowToast).not.toHaveBeenCalled()
-    warnSpy.mockRestore()
+
+    expect(useJobStore.getState().selectedIds.size).toBe(1)
+    expect(useJobStore.getState().error).toBe('Not Found')
+    expect(mockShowToast).toHaveBeenCalledWith('Not Found', 'error')
   })
 
   it('shows error toast on batch rerun failure', async () => {
@@ -271,22 +267,18 @@ describe('jobStore', () => {
     expect(mockShowToast).toHaveBeenCalledWith('成功删除 1 个任务', 'success')
   })
 
-  it('handles 404 on batch delete gracefully', async () => {
+  it('surfaces 404 on batch delete', async () => {
     useJobStore.setState({ selectedIds: new Set(['j1']) })
     const err = Object.assign(new Error('Not Found'), { status: 404 })
     mockApi.mockRejectedValueOnce(err)
-    const warnSpy = vi
-      .spyOn(console, 'warn')
-      .mockImplementation(() => undefined)
 
-    await useJobStore.getState().batchDelete('ws1')
-
-    expect(warnSpy).toHaveBeenCalledWith(
-      'Batch delete endpoint is not implemented yet'
+    await expect(useJobStore.getState().batchDelete('ws1')).rejects.toThrow(
+      'Not Found'
     )
-    expect(useJobStore.getState().selectedIds.size).toBe(0)
-    expect(mockShowToast).not.toHaveBeenCalled()
-    warnSpy.mockRestore()
+
+    expect(useJobStore.getState().selectedIds.size).toBe(1)
+    expect(useJobStore.getState().error).toBe('Not Found')
+    expect(mockShowToast).toHaveBeenCalledWith('Not Found', 'error')
   })
 
   it('shows error toast on batch delete failure', async () => {

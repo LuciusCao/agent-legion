@@ -85,6 +85,24 @@ class WorkspaceUpdateRequest(BaseModel):
     intake_config: dict[str, Any] | None = None
 
 
+class WorkspaceSettingsResponse(BaseModel):
+    settings: dict[str, Any]
+
+
+class WorkspaceSettingsSectionRequest(BaseModel):
+    cmsUrl: str | None = None
+    cmsToken: str | None = None
+    entityType: str | None = None
+    intakeModes: list[str] | None = None
+    labelOverrides: dict[str, str] | None = None
+    pipelineKey: str | None = None
+
+
+class WorkspaceSettingsTestResponse(BaseModel):
+    ok: bool
+    message: str
+
+
 class WorkspaceResponse(BaseModel):
     workspace: dict[str, Any]
 
@@ -113,6 +131,14 @@ class RerunNodeResponse(BaseModel):
     job_id: str
     node_key: str
     stale_nodes: list[str]
+
+
+class BatchJobRequest(BaseModel):
+    job_ids: list[str] = Field(default_factory=list)
+
+
+class BatchJobResponse(BaseModel):
+    results: list[dict[str, Any]]
 
 
 class WorkspaceRunsResponse(BaseModel):
@@ -246,6 +272,43 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
             for node in definition.nodes.values()
         ],
     }
+
+
+def _workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
+    cms_config = workspace.get("cms_config")
+    if not isinstance(cms_config, dict):
+        cms_config = {}
+    intake_config = workspace.get("intake_config")
+    if not isinstance(intake_config, dict):
+        intake_config = {}
+    enabled_modes = intake_config.get("enabled_modes")
+    label_overrides = intake_config.get("label_overrides")
+    return {
+        "cmsUrl": str(cms_config.get("api_url") or cms_config.get("question_list_url") or ""),
+        "cmsToken": str(cms_config.get("token") or ""),
+        "entityType": str(workspace.get("default_entity") or "question"),
+        "intakeModes": enabled_modes if isinstance(enabled_modes, list) else [],
+        "labelOverrides": label_overrides if isinstance(label_overrides, dict) else {},
+        "pipelineKey": str(workspace.get("default_pipeline_key") or "question_content"),
+        "agentIds": [],
+        "concurrencyLimit": 1,
+    }
+
+
+def _job_nodes_with_definition(
+    job_db: JobQueries, settings: Settings, job: dict[str, Any]
+) -> list[dict[str, Any]]:
+    definition = _definition(settings, str(job["pipeline_key"]))
+    nodes = job_db.list_job_nodes(str(job["id"]))
+    return [
+        {
+            **node,
+            "after": definition.nodes[node["node_key"]].after
+            if node["node_key"] in definition.nodes
+            else [],
+        }
+        for node in nodes
+    ]
 
 
 def create_jobs_router(
@@ -451,6 +514,68 @@ def create_jobs_router(
         _workspace_or_404(job_db, workspace_id)
         return WorkspaceAgentsResponse(agents=db.list_workspace_agents(workspace_id))
 
+    @router.get("/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsResponse)
+    def get_workspace_settings(workspace_id: str) -> WorkspaceSettingsResponse:
+        _require_enabled(settings)
+        workspace = _workspace_or_404(job_db, workspace_id)
+        return WorkspaceSettingsResponse(settings=_workspace_settings_payload(workspace))
+
+    @router.patch(
+        "/workspaces/{workspace_id}/settings/{section}",
+        response_model=WorkspaceSettingsResponse,
+    )
+    def update_workspace_settings_section(
+        workspace_id: str,
+        section: str,
+        payload: WorkspaceSettingsSectionRequest,
+    ) -> WorkspaceSettingsResponse:
+        _require_enabled(settings)
+        workspace = _workspace_or_404(job_db, workspace_id)
+        if section == "connection":
+            cms_config = workspace.get("cms_config")
+            next_cms_config = dict(cms_config) if isinstance(cms_config, dict) else {}
+            if payload.cmsUrl is not None:
+                next_cms_config["api_url"] = payload.cmsUrl
+            if payload.cmsToken is not None:
+                next_cms_config["token"] = payload.cmsToken
+            workspace = job_db.update_workspace(workspace_id, cms_config=next_cms_config)
+        elif section == "intake":
+            intake_config = workspace.get("intake_config")
+            next_intake_config = dict(intake_config) if isinstance(intake_config, dict) else {}
+            if payload.intakeModes is not None:
+                next_intake_config["enabled_modes"] = payload.intakeModes
+            if payload.labelOverrides is not None:
+                next_intake_config["label_overrides"] = payload.labelOverrides
+            workspace = job_db.update_workspace(
+                workspace_id,
+                default_entity=payload.entityType,
+                intake_config=next_intake_config,
+            )
+        elif section == "pipeline":
+            if payload.pipelineKey is not None:
+                _definition(settings, payload.pipelineKey)
+            workspace = job_db.update_workspace(
+                workspace_id,
+                default_pipeline_key=payload.pipelineKey,
+            )
+        else:
+            raise HTTPException(status_code=404, detail="Unknown settings section")
+        return WorkspaceSettingsResponse(settings=_workspace_settings_payload(workspace))
+
+    @router.post(
+        "/workspaces/{workspace_id}/settings/test-connection",
+        response_model=WorkspaceSettingsTestResponse,
+    )
+    def test_workspace_connection(workspace_id: str) -> WorkspaceSettingsTestResponse:
+        _require_enabled(settings)
+        workspace = _workspace_or_404(job_db, workspace_id)
+        cms_config = workspace.get("cms_config")
+        if not isinstance(cms_config, dict) or not (
+            cms_config.get("api_url") or cms_config.get("question_list_url")
+        ):
+            raise HTTPException(status_code=400, detail="CMS URL is not configured")
+        return WorkspaceSettingsTestResponse(ok=True, message="配置已保存")
+
     @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
     def update_workspace(
         workspace_id: str,
@@ -529,6 +654,53 @@ def create_jobs_router(
             )
         )
 
+    @router.post("/workspaces/{workspace_id}/jobs/batch-rerun", response_model=BatchJobResponse)
+    def batch_rerun_workspace_jobs(
+        workspace_id: str,
+        payload: BatchJobRequest,
+    ) -> BatchJobResponse:
+        _require_enabled(settings)
+        _workspace_or_404(job_db, workspace_id)
+        results: list[dict[str, Any]] = []
+        for job_id in _normalize_values(payload.job_ids):
+            job = job_db.get_job(job_id)
+            if job is None or job["workspace_id"] != workspace_id:
+                results.append({"job_id": job_id, "status": "not_found"})
+                continue
+            if job["status"] == "running":
+                results.append({"job_id": job_id, "status": "skipped", "reason": "running"})
+                continue
+            definition = _definition(settings, str(job["pipeline_key"]))
+            first_node = next(iter(definition.nodes))
+            job_db.mark_node_for_rerun(job_id, first_node, downstream_nodes(definition, first_node))
+            results.append({"job_id": job_id, "status": "rerun", "node_key": first_node})
+        return BatchJobResponse(results=results)
+
+    @router.delete("/workspaces/{workspace_id}/jobs/batch", response_model=BatchJobResponse)
+    def batch_delete_workspace_jobs(
+        workspace_id: str,
+        payload: BatchJobRequest,
+    ) -> BatchJobResponse:
+        _require_enabled(settings)
+        _workspace_or_404(job_db, workspace_id)
+        results: list[dict[str, Any]] = []
+        for job_id in _normalize_values(payload.job_ids):
+            job = job_db.get_job(job_id)
+            if job is None or job["workspace_id"] != workspace_id:
+                results.append({"job_id": job_id, "status": "not_found"})
+                continue
+            if job["status"] == "running":
+                results.append({"job_id": job_id, "status": "skipped", "reason": "running"})
+                continue
+            storage_dir = Path(str(job["storage_dir"]))
+            job_db.delete_job(job_id)
+            if storage_dir.exists() and storage_dir.is_dir():
+                shutil.rmtree(storage_dir)
+            for log_path in glob.glob(str(settings.logs_dir / "jobs" / f"{job_id}-*.log")):
+                Path(log_path).unlink(missing_ok=True)
+            results.append({"job_id": job_id, "status": "deleted"})
+        return BatchJobResponse(results=results)
+
     @router.get("/workspaces/{workspace_id}/runs", response_model=WorkspaceRunsResponse)
     def list_workspace_runs(
         workspace_id: str,
@@ -604,7 +776,7 @@ def create_jobs_router(
             raise HTTPException(status_code=404, detail="Job not found")
         return JobDetailResponse(
             job=job,
-            nodes=job_db.list_job_nodes(job_id),
+            nodes=_job_nodes_with_definition(job_db, settings, job),
             runs=job_db.list_node_runs(job_id),
             artifacts=_artifact_names(job),
         )
