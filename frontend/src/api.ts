@@ -5,7 +5,9 @@ import type {
   JobDetailResponse,
   JobsResponse,
   PipelineResponse,
+  WorkspaceDagResponse,
   WorkspaceRecord,
+  WorkspaceRunsResponse,
   WorkspaceStats,
   WorkspacesResponse,
 } from './types'
@@ -182,6 +184,27 @@ export async function fetchJobArtifact(
   return api(
     `/api/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactName)}`
   )
+}
+
+export async function fetchWorkspaceRuns(
+  workspaceId: string,
+  filters: { status?: string; nodeKey?: string; jobId?: string; limit?: number } = {}
+): Promise<WorkspaceRunsResponse> {
+  const params = new URLSearchParams()
+  if (filters.status) params.set('status', filters.status)
+  if (filters.nodeKey) params.set('node_key', filters.nodeKey)
+  if (filters.jobId) params.set('job_id', filters.jobId)
+  if (filters.limit) params.set('limit', String(filters.limit))
+  const query = params.toString()
+  return api(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/runs${query ? `?${query}` : ''}`
+  )
+}
+
+export async function fetchWorkspaceDag(
+  workspaceId: string
+): Promise<WorkspaceDagResponse> {
+  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/dag`)
 }
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
