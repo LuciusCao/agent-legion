@@ -10,6 +10,7 @@ type Props = {
 
 type ResourceForm = {
   enabled: boolean
+  api_url: string
   bank_version: string
   country_id: string
   subject_id: string
@@ -83,6 +84,10 @@ function initialResourceForm(
     enabled:
       hasResourceBinding(resourceConfig, resourceKey) ||
       Boolean(valueFromConfig(cmsConfig, legacyUrlKey)),
+    api_url:
+      valueFromConfig(config, 'api_url') ||
+      valueFromConfig(cmsConfig, legacyUrlKey) ||
+      '',
     bank_version:
       valueFromConfig(config, 'bank_version') ||
       valueFromConfig(cmsConfig, 'bank_version') ||
@@ -105,24 +110,32 @@ function initialResourceForm(
 function resourceFormToConfig(form: ResourcesForm): Record<string, unknown> {
   const resources: Record<string, unknown> = {}
   if (form.by_knowledge.enabled) {
+    const cfg: Record<string, string> = {
+      bank_version: form.by_knowledge.bank_version.trim(),
+      country_id: form.by_knowledge.country_id.trim(),
+      subject_id: form.by_knowledge.subject_id.trim(),
+      page_size: form.by_knowledge.page_size.trim(),
+    }
+    if (form.by_knowledge.api_url.trim()) {
+      cfg.api_url = form.by_knowledge.api_url.trim()
+    }
     resources.by_knowledge = {
       provider: 'cms.question.list_by_knowledge',
-      config: {
-        bank_version: form.by_knowledge.bank_version.trim(),
-        country_id: form.by_knowledge.country_id.trim(),
-        subject_id: form.by_knowledge.subject_id.trim(),
-        page_size: form.by_knowledge.page_size.trim(),
-      },
+      config: cfg,
     }
   }
   if (form.question_detail.enabled) {
+    const cfg: Record<string, string> = {
+      bank_version: form.question_detail.bank_version.trim(),
+      country_id: form.question_detail.country_id.trim(),
+      subject_id: form.question_detail.subject_id.trim(),
+    }
+    if (form.question_detail.api_url.trim()) {
+      cfg.api_url = form.question_detail.api_url.trim()
+    }
     resources.question_detail = {
       provider: 'cms.question.detail',
-      config: {
-        bank_version: form.question_detail.bank_version.trim(),
-        country_id: form.question_detail.country_id.trim(),
-        subject_id: form.question_detail.subject_id.trim(),
-      },
+      config: cfg,
     }
   }
   return { resources }
@@ -501,6 +514,15 @@ function ResourceCard({
           opacity: form.enabled ? 1 : 0.6,
         }}
       >
+        <md-outlined-text-field
+          label="API URL"
+          aria-label={`${title} API URL`}
+          value={form.api_url}
+          disabled={!form.enabled || undefined}
+          onInput={(event: Event) =>
+            onChange('api_url', (event.target as HTMLInputElement).value)
+          }
+        />
         <md-outlined-text-field
           label="题库版本"
           aria-label={`${title} 题库版本`}

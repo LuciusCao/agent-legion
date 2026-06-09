@@ -588,6 +588,76 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
     assert "running" in response.json()["detail"].lower()
 
 
+def test_delete_job_returns_404_for_unknown_job(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        resp = c.delete("/api/jobs/nonexistent")
+    assert resp.status_code == 404
+
+
+def test_delete_job_rejects_running_job(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q601"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "default_question_content_Q601"
+        app.state.job_db.update_job_status(job_id, "running")
+        resp = c.delete(f"/api/jobs/{job_id}")
+    assert resp.status_code == 400
+    assert "running" in resp.json()["detail"].lower()
+
+
+def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
+    from pathlib import Path
+
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q602"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "default_question_content_Q602"
+        job = app.state.job_db.get_job(job_id)
+        storage_dir = Path(str(job["storage_dir"]))
+        storage_dir.mkdir(parents=True, exist_ok=True)
+        (storage_dir / "artifact.json").write_text("{}")
+        log_dir = app.state.settings.logs_dir / "jobs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        (log_dir / f"{job_id}-fetch_question_context.log").write_text("ok")
+        resp = c.delete(f"/api/jobs/{job_id}")
+    assert resp.status_code == 200
+    assert resp.json()["deleted"] == job_id
+    assert not storage_dir.exists()
+    assert not (log_dir / f"{job_id}-fetch_question_context.log").exists()
+
+
 def test_workspace_stats_returns_404_for_unknown_workspace(tmp_path):
     from fastapi.testclient import TestClient
 

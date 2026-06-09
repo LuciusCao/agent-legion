@@ -108,7 +108,7 @@ def test_lookup_question_video_found_with_url(monkeypatch):
     payload = {
         "data": {
             "question_uuid": "Q001",
-            "title": "题目一",
+            "body": {"content": "题目一"},
             "video_data": [{"source": "https://example.com/q001.mp4"}],
         }
     }
@@ -122,7 +122,7 @@ def test_lookup_question_video_found_with_url(monkeypatch):
 
 
 def test_lookup_question_video_found_without_url(monkeypatch):
-    payload = {"data": {"question_uuid": "Q001", "title": "题目一", "video_data": []}}
+    payload = {"data": {"question_uuid": "Q001", "body": {"content": "题目一"}, "video_data": []}}
     monkeypatch.setattr("server.app.cms.question._fetch_json", lambda *args, **kwargs: payload)
     result = lookup_question_video("Q001", "https://cms.example/question", "token")
     assert result.status == "missing_url"
@@ -195,7 +195,7 @@ def test_lookup_question_video_extracts_source_uuid_from_video_data(monkeypatch)
     payload = {
         "data": {
             "question_uuid": "Q001",
-            "title": "题目一",
+            "body": {"content": "题目一"},
             "video_data": [
                 {
                     "source": "https://example.com/q001.mp4",
@@ -215,7 +215,7 @@ def test_lookup_question_video_source_uuid_empty_when_not_present(monkeypatch):
     payload = {
         "data": {
             "question_uuid": "Q001",
-            "title": "题目一",
+            "body": {"content": "题目一"},
             "video_data": [{"source": "https://example.com/q001.mp4"}],
         }
     }
@@ -230,17 +230,17 @@ def test_list_questions_by_knowledge_fetches_all_pages(monkeypatch):
     payloads = [
         {
             "data": {
-                "list": [
-                    {"uuid": "Q001", "title": "题目一"},
-                    {"question_uuid": "Q002", "question_title": "题目二"},
+                "question_list": [
+                    {"question_uuid": "Q001", "body": {"content": "题目一"}},
+                    {"question_uuid": "Q002", "body": {"content": "题目二"}},
                 ],
                 "total": 3,
             }
         },
         {
             "data": {
-                "list": [
-                    {"id": "Q003", "name": "题目三"},
+                "question_list": [
+                    {"question_uuid": "Q003", "body": {"content": "题目三"}},
                 ],
                 "total": 3,
             }
@@ -267,7 +267,12 @@ def test_list_questions_by_knowledge_fetches_all_pages(monkeypatch):
 
 def test_list_questions_by_knowledge_strips_dynamic_query_params(monkeypatch):
     calls = []
-    payload = {"data": {"list": [{"uuid": "Q001", "title": "题目一"}], "total": 1}}
+    payload = {
+        "data": {
+            "question_list": [{"question_uuid": "Q001", "body": {"content": "题目一"}}],
+            "total": 1,
+        }
+    }
 
     def fake_fetch(url, params, token):
         calls.append({"url": url, "params": params, "token": token})
@@ -288,11 +293,10 @@ def test_list_questions_by_knowledge_strips_dynamic_query_params(monkeypatch):
 def test_fetch_question_detail_returns_structured_context(monkeypatch):
     payload = {
         "data": {
-            "uuid": "Q001",
-            "title": "题目一",
-            "stem": "1 + 1 = ?",
-            "options": [{"key": "A", "content": "2"}],
-            "analysis": "加法",
+            "question_uuid": "Q001",
+            "body": {"content": "1 + 1 = ?"},
+            "option": [{"key": "A", "content": "2"}],
+            "analyze": "加法",
         }
     }
     monkeypatch.setattr("server.app.cms.question._fetch_json", lambda *args, **kwargs: payload)
@@ -300,7 +304,7 @@ def test_fetch_question_detail_returns_structured_context(monkeypatch):
     result = fetch_question_detail("Q001", "https://cms.example/question/detail", "token")
 
     assert result.question_id == "Q001"
-    assert result.title == "题目一"
+    assert result.title == "1 + 1 = ?"
     assert result.normalized["stem"] == "1 + 1 = ?"
     assert result.normalized["options"] == [{"key": "A", "content": "2"}]
     assert result.payload == payload
