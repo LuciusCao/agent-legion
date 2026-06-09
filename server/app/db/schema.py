@@ -113,6 +113,12 @@ def init_db(path: Path) -> None:
                   log_path text not null default '',
                   error_message text not null default ''
                 );
+                create table if not exists workspace_agent_assignments (
+                  workspace_id text not null,
+                  agent_id text not null,
+                  concurrency_limit integer not null default 1,
+                  primary key (workspace_id, agent_id)
+                );
                 """
             )
             existing_columns = {
@@ -213,6 +219,7 @@ def init_db(path: Path) -> None:
                 create index if not exists idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id);
                 create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
                 create index if not exists idx_node_runs_job_id on node_runs(job_id);
+                create index if not exists idx_workspace_agent_assignments on workspace_agent_assignments(workspace_id, agent_id);
                 """
             )
     finally:
