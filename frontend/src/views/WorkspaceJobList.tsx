@@ -311,7 +311,8 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
           <div slot="headline">确认删除任务</div>
           <div slot="content">
             <p>
-              确定删除任务「{pendingDeleteJob.title}」？该任务记录、本地产物和日志都会被删除。
+              确定删除任务「{pendingDeleteJob.title}
+              」？该任务记录、本地产物和日志都会被删除。
             </p>
           </div>
           <div slot="actions">

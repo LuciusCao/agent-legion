@@ -219,7 +219,9 @@ describe('WorkspaceJobList', () => {
         )
       ).toBe(true)
     )
-    await waitFor(() => expect(screen.queryByText('Q1')).not.toBeInTheDocument())
+    await waitFor(() =>
+      expect(screen.queryByText('Q1')).not.toBeInTheDocument()
+    )
   })
 
   it('shows error when batch creation fails', async () => {

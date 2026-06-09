@@ -288,7 +288,10 @@ describe('workspace observability api', () => {
     } as Response)
     vi.stubGlobal('fetch', fetchMock)
 
-    await fetchWorkspaceRuns('math', { status: 'failed', nodeKey: 'assemble_package' })
+    await fetchWorkspaceRuns('math', {
+      status: 'failed',
+      nodeKey: 'assemble_package',
+    })
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces/math/runs?status=failed&node_key=assemble_package',
