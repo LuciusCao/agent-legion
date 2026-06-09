@@ -241,7 +241,7 @@ The quick gate runs:
 - Ruff lint + format check
 - Python tests with coverage (fail_under = 75)
 - mypy type check
-- Frontend Vitest
+- Frontend Prettier check, ESLint, typecheck, and Vitest
 
 The full gate runs the quick gate plus the frontend production build.
 
