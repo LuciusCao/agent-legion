@@ -569,6 +569,43 @@ def test_workspace_stats_returns_counts_and_agent_status(tmp_path):
     assert body["latest_run"] is None
 
 
+def test_workspace_stats_filters_agents_by_assignment(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.agents import AgentStatus
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+
+    manager = app.state.agent_manager
+    manager.agents = [
+        AgentStatus(id="agent-1", name="Agent One", busy=False, max_tasks=1),
+        AgentStatus(id="agent-2", name="Agent Two", busy=True, max_tasks=1),
+        AgentStatus(id="agent-3", name="Agent Three", busy=False, max_tasks=1),
+    ]
+    with TestClient(app) as c:
+        ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
+        ws_id = ws["workspace"]["id"]
+        manager.set_workspace_assignment(ws_id, "agent-1", 1)
+        manager.set_workspace_assignment(ws_id, "agent-2", 1)
+        stats = c.get(f"/api/workspaces/{ws_id}/stats")
+
+    assert stats.status_code == 200
+    body = stats.json()
+    assert body["agent_status"]["total"] == 2
+    assert body["agent_status"]["busy"] == 1
+    assert body["agent_status"]["idle"] == 1
+    assert len(body["agent_status"]["agents"]) == 2
+    agent_ids = {a["id"] for a in body["agent_status"]["agents"]}
+    assert agent_ids == {"agent-1", "agent-2"}
+    agent_1 = next(a for a in body["agent_status"]["agents"] if a["id"] == "agent-1")
+    assert agent_1["name"] == "Agent One"
+    assert agent_1["busy"] is False
+    agent_2 = next(a for a in body["agent_status"]["agents"] if a["id"] == "agent-2")
+    assert agent_2["busy"] is True
+
+
 def test_workspace_stats_latest_run_reflects_node_runs(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -1272,3 +1309,45 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
     assert first["key"] == "fetch_question_context"
     assert first["runner"] == "local"
     assert first["status_counts"]["pending"] == 2
+
+
+def test_get_resource_providers_returns_provider_list(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config["resource_providers"] = {
+        "cms.question.detail": {"api_url": "http://cms.example/detail"},
+        "cms.question.list_by_knowledge": {"api_url": "http://cms.example/list"},
+    }
+    app.state.settings.config["cms"] = {
+        "env": "prod",
+        "bank_version": "v5",
+        "country_id": "1",
+        "subject_id": "2",
+    }
+    with TestClient(app) as c:
+        response = c.get("/api/resource-providers")
+
+    assert response.status_code == 200
+    body = response.json()
+    providers = {p["key"]: p for p in body["providers"]}
+    assert "question_detail" in providers
+    assert providers["question_detail"]["provider"] == "cms.question.detail"
+    assert providers["question_detail"]["apiUrl"] == "http://cms.example/detail"
+    assert providers["question_detail"]["defaultParams"] == {
+        "bank_version": "v5",
+        "country_id": "1",
+        "subject_id": "2",
+    }
+    assert providers["question_detail"]["paramKeys"] == ["bank_version", "country_id", "subject_id"]
+    assert "by_knowledge" in providers
+    assert providers["by_knowledge"]["provider"] == "cms.question.list_by_knowledge"
+    assert providers["by_knowledge"]["paramKeys"] == [
+        "bank_version",
+        "country_id",
+        "subject_id",
+        "page_size",
+    ]

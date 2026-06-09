@@ -15,7 +15,11 @@ from server.app.cms.question import list_questions_by_knowledge
 from server.app.db import Database
 from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition, load_pipeline_definition
-from server.app.pipelines.resources import resolve_cms_resource
+from server.app.pipelines.resources import (
+    RESOURCE_PARAM_KEYS,
+    RESOURCE_PROVIDERS,
+    resolve_cms_resource,
+)
 from server.app.pipelines.scheduler import downstream_nodes
 from server.app.routes.dependencies import get_db
 from server.app.settings import Settings
@@ -171,6 +175,14 @@ class DeleteWorkspaceResponse(BaseModel):
     deleted: str
 
 
+class ResourceProvidersResponse(BaseModel):
+    providers: list[dict[str, Any]]
+
+
+class GlobalServicesResponse(BaseModel):
+    cms: dict[str, Any]
+
+
 def _pipelines_enabled(settings: Settings) -> bool:
     pipelines = settings.config.get("pipelines", {})
     return isinstance(pipelines, dict) and bool(pipelines.get("enabled"))
@@ -236,6 +248,76 @@ def _artifact_names(job: dict[str, Any]) -> list[str]:
 
 def _pipeline_label(settings: Settings, pipeline_key: str) -> str:
     return _definition(settings, pipeline_key).label
+
+
+def _url_to_params(url: str) -> dict[str, str]:
+    from urllib.parse import parse_qsl, urlparse
+
+    parsed = urlparse(url)
+    return {k: v for k, v in parse_qsl(parsed.query) if v not in (None, "")}
+
+
+def _resource_provider_payload(settings: Settings) -> list[dict[str, Any]]:
+
+    providers_config = settings.config.get("resource_providers")
+    if not isinstance(providers_config, dict):
+        return []
+    cms_config = settings.config.get("cms", {}) or {}
+    default_params = _url_to_params(str(cms_config.get("question_detail_url", "")))
+    default_params.update(_url_to_params(str(cms_config.get("question_list_url", ""))))
+    for key in ("bank_version", "country_id", "subject_id", "page_size"):
+        if key in cms_config and cms_config[key] not in (None, ""):
+            default_params[key] = str(cms_config[key])
+
+    result: list[dict[str, Any]] = []
+    for key, meta in RESOURCE_PROVIDERS.items():
+        provider = str(meta.get("provider") or "")
+        provider_config = providers_config.get(provider) or {}
+        api_url = str(provider_config.get("api_url", ""))
+        param_keys = list(RESOURCE_PARAM_KEYS)
+        if key == "question_detail" and "page_size" in param_keys:
+            param_keys.remove("page_size")
+        result.append(
+            {
+                "key": key,
+                "provider": provider,
+                "apiUrl": api_url,
+                "defaultParams": {
+                    k: default_params.get(k, "") for k in param_keys if default_params.get(k)
+                },
+                "paramKeys": param_keys,
+            }
+        )
+    return result
+
+
+def _mask_url(url: str) -> str:
+    from urllib.parse import urlparse
+
+    parsed = urlparse(url)
+    hostname = parsed.hostname or ""
+    parts = hostname.split(".")
+    if len(parts) >= 3:
+        masked = ".".join([parts[0], "***"] + parts[2:])
+    elif len(parts) == 2:
+        masked = f"***.{parts[1]}"
+    else:
+        masked = hostname
+    return f"{parsed.scheme}://{masked}{parsed.path}"
+
+
+def _global_services_payload(settings: Settings) -> dict[str, Any]:
+    cms_config = settings.config.get("cms", {}) or {}
+    url = str(cms_config.get("question_detail_url", ""))
+    return {
+        "cms": {
+            "url": _mask_url(url),
+            "tokenConfigured": bool(cms_config.get("token")),
+            "env": str(cms_config.get("env", "")),
+            "healthy": None,
+            "lastCheckedAt": None,
+        }
+    }
 
 
 def _enabled_intake_modes(workspace: dict[str, Any]) -> set[str] | None:
@@ -480,6 +562,16 @@ def create_jobs_router(
         batch["created_count"] = len(jobs)
         return JobBatchResponse(batch=batch, created_count=len(jobs), jobs=jobs)
 
+    @router.get("/resource-providers", response_model=ResourceProvidersResponse)
+    def get_resource_providers() -> ResourceProvidersResponse:
+        _require_enabled(settings)
+        return ResourceProvidersResponse(providers=_resource_provider_payload(settings))
+
+    @router.get("/global-services", response_model=GlobalServicesResponse)
+    def get_global_services() -> GlobalServicesResponse:
+        _require_enabled(settings)
+        return GlobalServicesResponse(**_global_services_payload(settings))
+
     @router.get("/pipelines/{pipeline_key}", response_model=PipelineResponse)
     def get_pipeline(pipeline_key: str) -> PipelineResponse:
         _require_enabled(settings)
@@ -627,10 +719,7 @@ def create_jobs_router(
                 "total": len(agents),
                 "busy": busy,
                 "idle": len(agents) - busy,
-                "agents": [
-                    {"id": a.id, "name": a.name or a.id, "busy": a.busy}
-                    for a in agents
-                ],
+                "agents": [{"id": a.id, "name": a.name or a.id, "busy": a.busy} for a in agents],
             },
             latest_run=dict(latest_run) if latest_run else None,
         )
