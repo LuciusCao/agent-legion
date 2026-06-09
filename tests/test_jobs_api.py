@@ -1488,3 +1488,37 @@ def test_test_connection_fails_when_global_url_missing(tmp_path):
 
     assert response.status_code == 400
     assert "Global CMS URL" in response.json()["detail"]
+
+
+def test_job_batch_rejects_disabled_resource_provider(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config["resource_providers"] = {
+        "cms.question.list_by_knowledge": {"api_url": "http://cms.example/list"},
+    }
+    with TestClient(app) as c:
+        workspace = c.post("/api/workspaces", json={"name": "Disabled Resource"}).json()["workspace"]
+        c.patch(
+            f"/api/workspaces/{workspace['id']}",
+            json={
+                "resource_config": {
+                    "resources": {"by_knowledge": {"enabled": False, "config": {}}}
+                }
+            },
+        )
+        response = c.post(
+            f"/api/workspaces/{workspace['id']}/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "by_knowledge",
+                "question_ids": [],
+                "knowledge_codes": ["K001"],
+            },
+        )
+
+    assert response.status_code == 400
+    assert "disabled" in response.json()["detail"].lower()

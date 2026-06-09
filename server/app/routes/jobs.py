@@ -415,11 +415,22 @@ def create_jobs_router(
         _require_enabled(settings)
         workspace = _workspace_or_404(job_db, workspace_id)
         definition = _definition(settings, payload.pipeline_key)
+        intake_mode = definition.intake.modes.get(payload.source_kind) if definition.intake else None
+        resource_key = intake_mode.resource if intake_mode else None
+        if resource_key:
+            ws_resource_config = workspace.get("resource_config") or {}
+            resources = ws_resource_config.get("resources") or {}
+            binding = resources.get(resource_key) or {}
+            if binding.get("enabled") is False:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Resource provider '{resource_key}' is disabled for this workspace",
+                )
         cms_config = _effective_cms_config(settings, workspace)
         resource_config = workspace.get("resource_config")
         if not isinstance(resource_config, dict):
             resource_config = {}
-        mode = definition.intake.modes.get(payload.source_kind)
+        mode = definition.intake.modes.get(payload.source_kind) if definition.intake else None
         if mode is None:
             raise HTTPException(status_code=400, detail="Unsupported intake mode")
         enabled_modes = _enabled_intake_modes(workspace)
