@@ -27,7 +27,7 @@ describe('WorkspaceCard', () => {
 
   it('renders job stats correctly', () => {
     render(<WorkspaceCard {...createProps()} />)
-    const jobsSection = screen.getByText('Jobs').parentElement!
+    const jobsSection = screen.getByText('任务').parentElement!
     expect(jobsSection.textContent).toContain('8')
     expect(jobsSection.textContent).toContain('2')
     expect(jobsSection.textContent).toContain('5')
@@ -36,7 +36,7 @@ describe('WorkspaceCard', () => {
 
   it('renders agent status correctly', () => {
     render(<WorkspaceCard {...createProps()} />)
-    const agentsSection = screen.getByText('Agents').parentElement!
+    const agentsSection = screen.getByText('智能体').parentElement!
     expect(agentsSection.textContent).toContain('2/3')
   })
 

@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useParams, useNavigate, Outlet } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
+import { WORKSPACE_LABELS } from '../labels'
 
 export const VIDEO_HIVE_ID = 'video-hive'
 
@@ -109,7 +110,7 @@ export default function WorkspaceLayout() {
           <md-filled-button
             onClick={() => navigate(`/workspaces/${workspaceId}/settings`)}
           >
-            设置
+            {WORKSPACE_LABELS.settings}
           </md-filled-button>
         </div>
       </header>

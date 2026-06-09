@@ -13,6 +13,7 @@ import WorkspaceJobDetail from './views/WorkspaceJobDetail'
 import { VIDEO_HIVE_ID } from './layouts/WorkspaceLayout'
 import { SettingsPage } from './pages/SettingsPage'
 import WorkspaceMainPage from './pages/WorkspaceMainPage'
+import { WORKSPACE_LABELS } from './labels'
 
 const ListPage = lazy(() =>
   import('./pages/ListPage').then((m) => ({ default: m.ListPage }))
@@ -56,7 +57,7 @@ export default function App() {
             <Route path="jobs/:jobId" element={<WorkspaceJobDetail />} />
             <Route
               path="packages"
-              element={<div>Packages view — 待实现</div>}
+              element={<div>{WORKSPACE_LABELS.packages}视图 — 待实现</div>}
             />
             <Route path="settings" element={<SettingsPage />} />
           </Route>
