@@ -91,6 +91,7 @@ export const useSettingStore = create<SettingState>((set, get) => ({
           body: JSON.stringify(data),
         }
       )
+      useUiStore.getState().showToast('设置已保存', 'success')
     } catch (err) {
       const status =
         err && typeof err === 'object' && 'status' in err
@@ -103,6 +104,7 @@ export const useSettingStore = create<SettingState>((set, get) => ({
         )
       } else {
         set({ saveError: message })
+        useUiStore.getState().showToast(message, 'error')
       }
     } finally {
       set({ isSaving: false })
@@ -129,10 +131,11 @@ export const useSettingStore = create<SettingState>((set, get) => ({
           message: result.message || '连接成功',
         },
       })
+      useUiStore.getState().showToast('连接成功', 'success')
     } catch (err) {
       const message = err instanceof Error ? err.message : '连接测试失败'
       set({ testStatus: { state: 'failed', message } })
-      useUiStore.getState().showToast(message, 'error')
+      useUiStore.getState().showToast('连接测试失败：' + message, 'error')
     }
   },
 

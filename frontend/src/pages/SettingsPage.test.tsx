@@ -110,7 +110,7 @@ describe('SettingsPage', () => {
       expect(failedBadge?.textContent).toContain('连接失败')
     })
     expect(useUiStore.getState().toast).toEqual({
-      message: 'connection refused',
+      message: '连接测试失败：connection refused',
       type: 'error',
     })
   })
