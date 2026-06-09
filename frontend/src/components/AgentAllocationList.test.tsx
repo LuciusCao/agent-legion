@@ -133,6 +133,110 @@ describe('AgentAllocationList', () => {
     })
   })
 
+  it('closes inline form when cancel is clicked', async () => {
+    mockFetchAgents.mockResolvedValue({ agents })
+    mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
+
+    render(<AgentAllocationList workspaceId="ws1" />)
+    await waitFor(() => {
+      expect(screen.getByText('Agent Two')).toBeInTheDocument()
+    })
+
+    const agentTwoRow = screen
+      .getByText('Agent Two')
+      .closest('li') as HTMLElement
+    const assignBtn = within(agentTwoRow).getByText('分配')
+    await act(async () => {
+      assignBtn.click()
+    })
+
+    expect(
+      agentTwoRow.querySelector('md-outlined-text-field[aria-label="并发限制"]')
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('取消').click()
+    })
+
+    expect(
+      agentTwoRow.querySelector('md-outlined-text-field[aria-label="并发限制"]')
+    ).not.toBeInTheDocument()
+    expect(within(agentTwoRow).getByText('分配')).toBeInTheDocument()
+  })
+
+  it('disables assign buttons while an assignment is in flight', async () => {
+    mockFetchAgents.mockResolvedValue({ agents })
+    mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
+
+    let resolveAssign: (value: {
+      agent_id: string
+      workspace_id: string
+      concurrency_limit: number
+    }) => void
+    mockAssignAgent.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          resolveAssign = resolve
+        })
+    )
+
+    render(<AgentAllocationList workspaceId="ws1" />)
+    await waitFor(() => {
+      expect(screen.getByText('Agent Two')).toBeInTheDocument()
+    })
+
+    const agentTwoRow = screen
+      .getByText('Agent Two')
+      .closest('li') as HTMLElement
+    const assignBtn = within(agentTwoRow).getByText('分配')
+    await act(async () => {
+      assignBtn.click()
+    })
+
+    const input = agentTwoRow.querySelector(
+      'md-outlined-text-field[aria-label="并发限制"]'
+    ) as HTMLInputElement
+    input.value = '2'
+    fireEvent.input(input)
+
+    await act(async () => {
+      screen.getByText('确认').click()
+    })
+
+    const confirmBtn = screen
+      .getByText('确认')
+      .closest('md-filled-button') as HTMLElement
+    expect(confirmBtn).toHaveAttribute('disabled')
+
+    await act(async () => {
+      resolveAssign({
+        agent_id: 'a2',
+        workspace_id: 'ws1',
+        concurrency_limit: 2,
+      })
+    })
+
+    await waitFor(() => {
+      expect(mockAssignAgent).toHaveBeenCalledWith('ws1', 'a2', 2)
+    })
+  })
+
+  it('shows toast error when initial fetch fails', async () => {
+    mockFetchAgents.mockRejectedValue(new Error('fetch agents failed'))
+    mockFetchWorkspaceAgents.mockRejectedValue(
+      new Error('fetch workspace agents failed')
+    )
+
+    render(<AgentAllocationList workspaceId="ws1" />)
+
+    await waitFor(() => {
+      expect(useUiStore.getState().toast).toEqual({
+        message: 'fetch agents failed',
+        type: 'error',
+      })
+    })
+  })
+
   it('unassigns agent when cancel button is clicked', async () => {
     let workspaceAgents: { agent_id: string; concurrency_limit: number }[] = [
       { agent_id: 'a1', concurrency_limit: 2 },
@@ -247,5 +351,10 @@ describe('AgentAllocationList', () => {
         type: 'error',
       })
     })
+
+    // Inline form should stay open after a failed assignment
+    expect(
+      agentTwoRow.querySelector('md-outlined-text-field[aria-label="并发限制"]')
+    ).toBeInTheDocument()
   })
 })
