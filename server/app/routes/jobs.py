@@ -101,6 +101,7 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
     pipelineKey: str | None = None
+    resources: dict[str, Any] | None = None
 
 
 class WorkspaceSettingsTestResponse(BaseModel):
@@ -364,23 +365,25 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
 
 
 def _workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
-    cms_config = workspace.get("cms_config")
-    if not isinstance(cms_config, dict):
-        cms_config = {}
     intake_config = workspace.get("intake_config")
     if not isinstance(intake_config, dict):
         intake_config = {}
     enabled_modes = intake_config.get("enabled_modes")
     label_overrides = intake_config.get("label_overrides")
+    resource_config = workspace.get("resource_config")
+    if not isinstance(resource_config, dict):
+        resource_config = {}
+    resources = resource_config.get("resources")
+    if not isinstance(resources, dict):
+        resources = {}
     return {
-        "cmsUrl": str(cms_config.get("api_url") or cms_config.get("question_list_url") or ""),
-        "cmsToken": str(cms_config.get("token") or ""),
         "entityType": str(workspace.get("default_entity") or "question"),
         "intakeModes": enabled_modes if isinstance(enabled_modes, list) else [],
         "labelOverrides": label_overrides if isinstance(label_overrides, dict) else {},
         "pipelineKey": str(workspace.get("default_pipeline_key") or "question_content"),
         "agentIds": [],
         "concurrencyLimit": 1,
+        "resources": resources,
     }
 
 
@@ -630,14 +633,30 @@ def create_jobs_router(
     ) -> WorkspaceSettingsResponse:
         _require_enabled(settings)
         workspace = _workspace_or_404(job_db, workspace_id)
-        if section == "connection":
-            cms_config = workspace.get("cms_config")
-            next_cms_config = dict(cms_config) if isinstance(cms_config, dict) else {}
-            if payload.cmsUrl is not None:
-                next_cms_config["api_url"] = payload.cmsUrl
-            if payload.cmsToken is not None:
-                next_cms_config["token"] = payload.cmsToken
-            workspace = job_db.update_workspace(workspace_id, cms_config=next_cms_config)
+        if section == "connection" or section == "resources":
+            resource_config = workspace.get("resource_config")
+            next_resource_config = (
+                dict(resource_config) if isinstance(resource_config, dict) else {}
+            )
+            if payload.resources is not None:
+                next_resource_config["resources"] = payload.resources
+            # Backward compat: if cmsUrl/cmsToken passed, also save to cms_config
+            if payload.cmsUrl is not None or payload.cmsToken is not None:
+                cms_config = workspace.get("cms_config")
+                next_cms_config = dict(cms_config) if isinstance(cms_config, dict) else {}
+                if payload.cmsUrl is not None:
+                    next_cms_config["api_url"] = payload.cmsUrl
+                if payload.cmsToken is not None:
+                    next_cms_config["token"] = payload.cmsToken
+                workspace = job_db.update_workspace(
+                    workspace_id,
+                    resource_config=next_resource_config,
+                    cms_config=next_cms_config,
+                )
+            else:
+                workspace = job_db.update_workspace(
+                    workspace_id, resource_config=next_resource_config
+                )
         elif section == "intake":
             intake_config = workspace.get("intake_config")
             next_intake_config = dict(intake_config) if isinstance(intake_config, dict) else {}
@@ -667,13 +686,11 @@ def create_jobs_router(
     )
     def test_workspace_connection(workspace_id: str) -> WorkspaceSettingsTestResponse:
         _require_enabled(settings)
-        workspace = _workspace_or_404(job_db, workspace_id)
-        cms_config = workspace.get("cms_config")
-        if not isinstance(cms_config, dict) or not (
-            cms_config.get("api_url") or cms_config.get("question_list_url")
-        ):
-            raise HTTPException(status_code=400, detail="CMS URL is not configured")
-        return WorkspaceSettingsTestResponse(ok=True, message="配置已保存")
+        _workspace_or_404(job_db, workspace_id)
+        cms_config = settings.config.get("cms", {}) or {}
+        if not (cms_config.get("question_detail_url") or cms_config.get("question_list_url")):
+            raise HTTPException(status_code=400, detail="Global CMS URL is not configured")
+        return WorkspaceSettingsTestResponse(ok=True, message="全局配置已就绪")
 
     @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
     def update_workspace(
