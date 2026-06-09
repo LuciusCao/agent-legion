@@ -1,0 +1,56 @@
+.dag-graph {
+  width: 100%;
+  height: auto;
+  display: block;
+}
+
+.node-rect {
+  cursor: pointer;
+  transition: filter 0.15s ease;
+}
+
+.node-rect:hover {
+  filter: brightness(0.97);
+}
+
+.node-label {
+  font-size: 12px;
+  font-weight: 500;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  fill: #1f2937;
+}
+
+.node-icon {
+  font-size: 14px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+}
+
+.node-duration {
+  font-size: 10px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  fill: #6b7280;
+}
+
+.edge-line {
+  fill: none;
+  stroke-width: 1.5;
+}
+
+.edge-line-completed {
+  stroke: #999;
+}
+
+.edge-line-pending {
+  stroke: #ccc;
+  stroke-dasharray: 4 3;
+}
+
+.selected-shadow {
+  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.15));
+}
