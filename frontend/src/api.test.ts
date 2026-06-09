@@ -6,6 +6,8 @@ import {
   createWorkspace,
   fetchJobArtifact,
   fetchJobDetail,
+  fetchWorkspaceDag,
+  fetchWorkspaceRuns,
   updateWorkspace,
 } from './api'
 
@@ -274,6 +276,41 @@ describe('job helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/jobs/j1/artifacts/log.txt',
       expect.any(Object)
+    )
+  })
+})
+
+describe('workspace observability api', () => {
+  it('fetches workspace runs with query filters', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ runs: [] }),
+    } as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchWorkspaceRuns('math', {
+      status: 'failed',
+      nodeKey: 'assemble_package',
+    })
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/math/runs?status=failed&node_key=assemble_package',
+      expect.objectContaining({ cache: 'no-store' })
+    )
+  })
+
+  it('fetches workspace dag', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ pipeline: { key: 'question_content' }, nodes: [] }),
+    } as Response)
+    vi.stubGlobal('fetch', fetchMock)
+
+    await fetchWorkspaceDag('math')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/math/dag',
+      expect.objectContaining({ cache: 'no-store' })
     )
   })
 })
