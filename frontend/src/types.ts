@@ -148,6 +148,17 @@ export type WorkspaceRecord = {
   }
 }
 
+export type WorkspaceSettings = {
+  cmsUrl: string
+  cmsToken: string
+  entityType: 'question' | 'knowledge' | 'video'
+  intakeModes: string[]
+  labelOverrides: Record<string, string>
+  pipelineKey: string
+  agentIds: string[]
+  concurrencyLimit: number
+}
+
 export type PipelineNodeRecord = {
   key: string
   runner: 'local' | 'agent'
