@@ -32,15 +32,24 @@ const mockUpdateWorkspace = vi.mocked(updateWorkspace)
 const defaultState = {
   workspaceId: 'ws1',
   settings: {
-    cmsUrl: '',
-    cmsToken: '',
     entityType: 'question' as const,
     intakeModes: [],
     labelOverrides: {},
     pipelineKey: '',
     agentIds: [],
     concurrencyLimit: 1,
+    resources: {},
   },
+  globalServices: {
+    cms: {
+      url: 'http://cms.example.com',
+      tokenConfigured: true,
+      env: 'prod',
+      healthy: null,
+      lastCheckedAt: null,
+    },
+  },
+  resourceProviders: [] as [],
   testStatus: { state: 'idle' as const },
   isSaving: false,
   saveError: null as string | null,
@@ -106,7 +115,8 @@ describe('SettingsPage', () => {
   it('renders all 5 cards', () => {
     renderPage()
     expect(screen.getByText('基本信息')).toBeInTheDocument()
-    expect(screen.getByText('资源连接')).toBeInTheDocument()
+    expect(screen.getByText('全局服务')).toBeInTheDocument()
+    expect(screen.getByText('资源接口')).toBeInTheDocument()
     expect(screen.getByText('接入模式')).toBeInTheDocument()
     expect(screen.getByText('流水线')).toBeInTheDocument()
     expect(screen.getByText('智能体')).toBeInTheDocument()
@@ -161,6 +171,16 @@ describe('SettingsPage', () => {
     })
   })
 
+  it('calls fetchGlobalServices and fetchResourceProviders on mount', async () => {
+    renderPage()
+    await waitFor(() => {
+      expect(mockApi).toHaveBeenCalledWith('/api/global-services')
+    })
+    await waitFor(() => {
+      expect(mockApi).toHaveBeenCalledWith('/api/resource-providers')
+    })
+  })
+
   it('calls test connection and shows status change', async () => {
     renderPage()
     await waitFor(() => {
@@ -199,24 +219,30 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('calls saveSection when connection save is clicked', async () => {
+  it('calls saveSection when resources save is clicked', async () => {
     useSettingStore.setState({
       settings: {
         ...defaultState.settings,
-        cmsUrl: 'https://cms.example.com',
+        resources: {
+          question_detail: { enabled: true, config: { bank_version: 'v5' } },
+        },
       },
     })
     renderPage()
-    const saveBtn = screen.getAllByText('保存')[0]
-    fireEvent.click(saveBtn)
+    await waitFor(() => {
+      expect(screen.getByText('测试连接')).toBeInTheDocument()
+    })
+    const saveBtns = screen.getAllByText('保存')
+    fireEvent.click(saveBtns[0])
     await waitFor(() => {
       expect(mockApi).toHaveBeenCalledWith(
-        '/api/workspaces/ws1/settings/connection',
+        '/api/workspaces/ws1/settings/resources',
         expect.objectContaining({
           method: 'PATCH',
           body: JSON.stringify({
-            cmsUrl: 'https://cms.example.com',
-            cmsToken: '',
+            resources: {
+              question_detail: { enabled: true, config: { bank_version: 'v5' } },
+            },
           }),
         })
       )
@@ -224,18 +250,23 @@ describe('SettingsPage', () => {
   })
 
   it('displays save error when saveSection fails', async () => {
-    mockApi.mockRejectedValueOnce(
-      Object.assign(new Error('Server Error'), { status: 500 })
-    )
     useSettingStore.setState({
       settings: {
         ...defaultState.settings,
-        cmsUrl: 'https://cms.example.com',
+        resources: {
+          question_detail: { enabled: true, config: {} },
+        },
       },
     })
     renderPage()
-    const saveBtn = screen.getAllByText('保存')[0]
-    fireEvent.click(saveBtn)
+    await waitFor(() => {
+      expect(mockApi).toHaveBeenCalledWith('/api/workspaces/ws1/settings')
+    })
+    mockApi.mockRejectedValueOnce(
+      Object.assign(new Error('Server Error'), { status: 500 })
+    )
+    const saveBtns = screen.getAllByText('保存')
+    fireEvent.click(saveBtns[0])
     await waitFor(() => {
       expect(screen.getByText('Server Error')).toBeInTheDocument()
     })
@@ -267,5 +298,51 @@ describe('SettingsPage', () => {
       screen.queryByText(/智能体配置将在后续步骤实现/)
     ).not.toBeInTheDocument()
     expect(screen.getByText('当前工作空间未分配智能体')).toBeInTheDocument()
+  })
+
+  it('renders global services card when data is available', async () => {
+    useSettingStore.setState({
+      globalServices: {
+        cms: {
+          url: 'http://cms.example.com',
+          tokenConfigured: true,
+          env: 'prod',
+          healthy: null,
+          lastCheckedAt: null,
+        },
+      },
+    })
+    renderPage()
+    const globalHeader = screen.getByText('全局服务')
+    fireEvent.click(globalHeader)
+    await waitFor(() => {
+      expect(screen.getByText('http://cms.example.com')).toBeInTheDocument()
+    })
+    expect(screen.getByText('已配置')).toBeInTheDocument()
+    expect(screen.getByText('prod')).toBeInTheDocument()
+  })
+
+  it('renders resource providers with checkboxes and inputs', async () => {
+    useSettingStore.setState({
+      resourceProviders: [
+        {
+          key: 'question_detail',
+          provider: 'cms.question.detail',
+          apiUrl: 'http://api.example.com',
+          defaultParams: { bank_version: 'v5' },
+          paramKeys: ['bank_version', 'country_id'],
+        },
+      ],
+    })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('cms.question.detail')).toBeInTheDocument()
+    })
+    expect(
+      document.querySelector('md-outlined-text-field[label="bank_version"]')
+    ).toBeTruthy()
+    expect(
+      document.querySelector('md-outlined-text-field[label="country_id"]')
+    ).toBeTruthy()
   })
 })
