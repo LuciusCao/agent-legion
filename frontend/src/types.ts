@@ -129,6 +129,9 @@ export type JobRecord = {
   source_id: string
   title: string
   status: string
+  created_at?: string
+  completed_nodes?: number
+  total_nodes?: number
 }
 
 export type JobsResponse = {

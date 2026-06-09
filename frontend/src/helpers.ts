@@ -22,5 +22,6 @@ export {
   seconds,
   parseTimeSeconds,
   formatInteractionStats,
+  formatRelativeTime,
 } from './lib/formatters'
 export { triggerDownload } from './lib/download'
