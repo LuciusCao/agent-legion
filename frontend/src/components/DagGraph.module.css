@@ -33,6 +33,7 @@ g[role='button']:focus-visible .node-rect {
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
+  font-family: 'Material Symbols Outlined', sans-serif;
 }
 
 .node-duration {

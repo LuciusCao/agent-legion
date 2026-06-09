@@ -187,7 +187,7 @@ export default function JobDetailPage() {
               /* TODO rerun */
             }}
           >
-            🔄 重跑
+            <md-icon>restart_alt</md-icon> 重跑
           </button>
           <button
             type="button"

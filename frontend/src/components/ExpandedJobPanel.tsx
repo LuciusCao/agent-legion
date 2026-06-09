@@ -106,20 +106,20 @@ export function ExpandedJobPanel({
             onViewDetail()
           }}
         >
-          <span className={styles.icon}>📄</span> 查看完整详情
+          <md-icon class={styles.icon}>description</md-icon> 查看完整详情
         </button>
         <button type="button" className={styles.actionBtn} onClick={onRerun}>
-          <span className={styles.icon}>🔄</span> 重跑
+          <md-icon class={styles.icon}>restart_alt</md-icon> 重跑
         </button>
         <button type="button" className={styles.actionBtn} onClick={onRunTo}>
-          <span className={styles.icon}>▶️</span> 运行到...
+          <md-icon class={styles.icon}>play_arrow</md-icon> 运行到...
         </button>
         <button
           type="button"
           className={`${styles.actionBtn} ${styles.danger}`}
           onClick={onDelete}
         >
-          <span className={styles.icon}>🗑️</span> 删除
+          <md-icon class={styles.icon}>delete</md-icon> 删除
         </button>
       </div>
     </div>

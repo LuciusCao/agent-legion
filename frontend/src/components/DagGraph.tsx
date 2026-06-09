@@ -41,9 +41,9 @@ const STATUS_STROKE: Record<DagNode['status'], string> = {
 }
 
 const STATUS_ICON: Record<DagNode['status'], string> = {
-  completed: '✅',
-  running: '⏳',
-  failed: '❌',
+  completed: 'check_circle',
+  running: 'hourglass_empty',
+  failed: 'error',
   pending: '',
 }
 
