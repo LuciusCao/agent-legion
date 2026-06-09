@@ -26,6 +26,7 @@ UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app
 
 echo "=== Frontend Tests ==="
 cd "$ROOT_DIR/frontend"
+npm run format:check
 npm run lint
 npm run typecheck
 npm run test
