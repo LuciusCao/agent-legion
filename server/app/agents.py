@@ -1,10 +1,13 @@
 import asyncio
 from dataclasses import dataclass
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from fastapi import WebSocket
 
 from server.app.pipeline.runners import list_openclaw_agents
+
+if TYPE_CHECKING:
+    from server.app.db import Database
 
 
 @dataclass
@@ -28,6 +31,7 @@ class AgentStatusManager:
         self._loop: asyncio.AbstractEventLoop | None = None
         self._busy_video_ids: set[str] = set()
         self._agent_video_ids: dict[str, list[str]] = {}
+        self._workspace_assignments: dict[str, dict[str, int]] = {}
 
     def discover(self) -> list[AgentStatus]:
         try:
@@ -47,6 +51,27 @@ class AgentStatusManager:
     def set_runner_counts(self, runner_counts: dict[str, int]) -> None:
         for agent in self.agents:
             agent.max_tasks = runner_counts.get(agent.id, 1)
+
+    def load_workspace_assignments(self, db: "Database") -> None:
+        self._workspace_assignments = {}
+        for row in db.list_workspace_agents("video-hive"):
+            self._workspace_assignments.setdefault("video-hive", {})[row["agent_id"]] = row[
+                "concurrency_limit"
+            ]
+
+    def set_workspace_assignment(
+        self, workspace_id: str, agent_id: str, concurrency_limit: int = 1
+    ) -> None:
+        self._workspace_assignments.setdefault(workspace_id, {})[agent_id] = concurrency_limit
+
+    def remove_workspace_assignment(self, workspace_id: str, agent_id: str) -> None:
+        self._workspace_assignments.get(workspace_id, {}).pop(agent_id, None)
+
+    def get_allowed_agents(self, workspace_id: str) -> list[str]:
+        return list(self._workspace_assignments.get(workspace_id, {}).keys())
+
+    def is_agent_allowed(self, workspace_id: str, agent_id: str) -> bool:
+        return agent_id in self._workspace_assignments.get(workspace_id, {})
 
     def get_all(self) -> list[AgentStatus]:
         return list(self.agents)

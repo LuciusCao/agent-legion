@@ -4,18 +4,20 @@ import glob
 import logging
 import shutil
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
 from server.app.agents import AgentStatusManager
 from server.app.cms.client import get_token
 from server.app.cms.question import list_questions_by_knowledge
+from server.app.db import Database
 from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition, load_pipeline_definition
 from server.app.pipelines.resources import resolve_cms_resource
 from server.app.pipelines.scheduler import downstream_nodes
+from server.app.routes.dependencies import get_db
 from server.app.settings import Settings
 
 RESOLVER_MAP: dict[tuple[str, str], str] = {
@@ -89,6 +91,10 @@ class WorkspaceResponse(BaseModel):
 
 class WorkspacesResponse(BaseModel):
     workspaces: list[dict[str, Any]]
+
+
+class WorkspaceAgentsResponse(BaseModel):
+    agents: list[dict[str, Any]]
 
 
 class JobDetailResponse(BaseModel):
@@ -435,6 +441,15 @@ def create_jobs_router(
     def get_workspace(workspace_id: str) -> WorkspaceResponse:
         _require_enabled(settings)
         return WorkspaceResponse(workspace=_workspace_or_404(job_db, workspace_id))
+
+    @router.get("/workspaces/{workspace_id}/agents", response_model=WorkspaceAgentsResponse)
+    def list_workspace_agents(
+        workspace_id: str,
+        db: Annotated[Database, Depends(get_db)],
+    ) -> WorkspaceAgentsResponse:
+        _require_enabled(settings)
+        _workspace_or_404(job_db, workspace_id)
+        return WorkspaceAgentsResponse(agents=db.list_workspace_agents(workspace_id))
 
     @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceResponse)
     def update_workspace(

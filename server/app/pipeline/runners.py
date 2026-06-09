@@ -126,15 +126,25 @@ def build_openclaw_runner(settings: Settings) -> OpenClawRunner:
 
 
 class RunnerPool:
-    def __init__(self, runners: list[OpenClawRunner] | None = None) -> None:
+    def __init__(
+        self,
+        runners: list[OpenClawRunner] | None = None,
+        agent_manager: Any = None,
+    ) -> None:
         self._runners: list[OpenClawRunner] = list(runners) if runners is not None else []
         self._busy_indices: set[int] = set()
+        self._agent_manager = agent_manager
 
     @classmethod
     def from_settings(
-        cls, settings: Settings, discovered_agent_ids: list[str] | None = None
+        cls,
+        settings: Settings,
+        discovered_agent_ids: list[str] | None = None,
+        agent_manager: Any = None,
     ) -> "RunnerPool":
-        return cls(build_openclaw_runners(settings, discovered_agent_ids))
+        return cls(
+            build_openclaw_runners(settings, discovered_agent_ids), agent_manager=agent_manager
+        )
 
     def size(self) -> int:
         return len(self._runners)
@@ -142,13 +152,20 @@ class RunnerPool:
     def all_runners(self) -> list[OpenClawRunner]:
         return list(self._runners)
 
-    def acquire(self) -> tuple[int, OpenClawRunner]:
+    def acquire(self, workspace_id: str | None = None) -> tuple[int, OpenClawRunner]:
         if not self._runners:
             raise RuntimeError("Runners not initialized.")
+        allowed: set[str] | None = None
+        if workspace_id and self._agent_manager is not None:
+            allowed = set(self._agent_manager.get_allowed_agents(workspace_id))
         for i, runner in enumerate(self._runners):
-            if i not in self._busy_indices:
-                self._busy_indices.add(i)
-                return i, runner
+            if i in self._busy_indices:
+                continue
+            agent_id = getattr(runner, "agent_id", None) or f"runner-{i}"
+            if allowed is not None and agent_id not in allowed:
+                continue
+            self._busy_indices.add(i)
+            return i, runner
         raise RuntimeError("No free runner available")
 
     def release(self, index: int) -> None:

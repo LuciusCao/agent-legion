@@ -90,11 +90,12 @@ class OpenClawRunner:
         timeout_seconds: int,
         skill_safety: SkillSafetyConfig | None = None,
         isolated_workspace_root: Path | None = None,
+        agent_id: str | None = None,
     ):
         self.command_template = command_template
         self.cwd = cwd
         self.timeout_seconds = timeout_seconds
-        self.agent_id = self._extract_agent_id(command_template)
+        self.agent_id = agent_id or self._extract_agent_id(command_template)
         self.skill_safety = skill_safety
         self.isolated_workspace_root = isolated_workspace_root
 

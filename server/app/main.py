@@ -46,8 +46,11 @@ def create_app(
         video_event_manager._loop = asyncio.get_running_loop()
         if start_worker:
             agent_manager.discover()
+            agent_manager.load_workspace_assignments(db)
             recover_interrupted_videos(db, settings)
-            runner_pool = RunnerPool.from_settings(settings, [a.id for a in agent_manager.agents])
+            runner_pool = RunnerPool.from_settings(
+                settings, [a.id for a in agent_manager.agents], agent_manager=agent_manager
+            )
             runner_counts: dict[str, int] = {}
             for runner in runner_pool.all_runners():
                 aid = runner.agent_id

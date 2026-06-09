@@ -608,3 +608,32 @@ class VideoQueries:
         if self._hub is not None:
             for vid in video_ids:
                 self._hub.emit_delete(vid)
+
+    def list_workspace_agents(self, workspace_id: str) -> list[dict[str, Any]]:
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                "select agent_id, concurrency_limit from workspace_agent_assignments where workspace_id = ?",
+                (workspace_id,),
+            ).fetchall()
+        return [
+            {"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows
+        ]
+
+    def set_workspace_agent_assignment(
+        self, workspace_id: str, agent_id: str, concurrency_limit: int = 1
+    ) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                """insert into workspace_agent_assignments(workspace_id, agent_id, concurrency_limit)
+                   values (?, ?, ?)
+                   on conflict(workspace_id, agent_id) do update set
+                   concurrency_limit = excluded.concurrency_limit""",
+                (workspace_id, agent_id, concurrency_limit),
+            )
+
+    def remove_workspace_agent_assignment(self, workspace_id: str, agent_id: str) -> None:
+        with self.connect() as conn:
+            conn.execute(
+                "delete from workspace_agent_assignments where workspace_id = ? and agent_id = ?",
+                (workspace_id, agent_id),
+            )

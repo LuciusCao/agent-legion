@@ -73,7 +73,7 @@ class WorkerThread:
                     continue
                 runner_slot = None
                 try:
-                    runner_slot = self.runner_pool.acquire()
+                    runner_slot = self.runner_pool.acquire(workspace_id="video-hive")
                 except RuntimeError:
                     runner_slot = None
                 with self.running_lock:
