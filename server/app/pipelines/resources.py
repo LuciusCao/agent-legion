@@ -128,6 +128,13 @@ def resolve_cms_resource(
     resources = resource_config.get("resources")
     if isinstance(resources, dict) and isinstance(resources.get(resource_key), dict):
         binding = resources[resource_key]
+    # If new format explicitly sets enabled=false, don't use this binding
+    if binding.get("enabled") is False:
+        binding = {}
+        provider = ""
+        result.pop("api_url", None)
+        if url_key:
+            result.pop(url_key, None)
     binding_provider = binding.get("provider")
     if binding_provider:
         provider = str(binding_provider)
