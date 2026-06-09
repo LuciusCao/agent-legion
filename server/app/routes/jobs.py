@@ -78,6 +78,7 @@ class WorkspaceCreateRequest(BaseModel):
 
 class WorkspaceUpdateRequest(BaseModel):
     name: str | None = None
+    description: str | None = None
     default_pipeline_key: str | None = None
     default_entity: str | None = None
     cms_config: dict[str, Any] | None = None
@@ -150,13 +151,19 @@ class WorkspaceDagResponse(BaseModel):
     nodes: list[dict[str, Any]]
 
 
+class WorkspaceAgentStatus(BaseModel):
+    id: str
+    name: str
+    busy: bool
+
+
 class WorkspaceStatsResponse(BaseModel):
     workspace_id: str
     name: str
     pipeline_key: str
     pipeline_label: str
     job_stats: dict[str, int]
-    agent_status: dict[str, int]
+    agent_status: dict[str, Any]
     latest_run: dict[str, Any] | None
 
 
@@ -589,6 +596,7 @@ def create_jobs_router(
             workspace = job_db.update_workspace(
                 workspace_id,
                 name=payload.name,
+                description=payload.description,
                 default_pipeline_key=payload.default_pipeline_key,
                 default_entity=payload.default_entity,
                 cms_config=payload.cms_config,
@@ -604,7 +612,9 @@ def create_jobs_router(
         _require_enabled(settings)
         workspace = _workspace_or_404(job_db, workspace_id)
         pipeline_key = workspace.get("default_pipeline_key", "question_content")
-        agents = agent_manager.get_all()
+        allowed_ids = set(agent_manager.get_allowed_agents(workspace_id))
+        all_agents = agent_manager.get_all()
+        agents = [a for a in all_agents if a.id in allowed_ids]
         busy = sum(1 for a in agents if a.busy)
         latest_run = job_db.get_latest_node_run_for_workspace(workspace_id)
         return WorkspaceStatsResponse(
@@ -617,6 +627,10 @@ def create_jobs_router(
                 "total": len(agents),
                 "busy": busy,
                 "idle": len(agents) - busy,
+                "agents": [
+                    {"id": a.id, "name": a.name or a.id, "busy": a.busy}
+                    for a in agents
+                ],
             },
             latest_run=dict(latest_run) if latest_run else None,
         )

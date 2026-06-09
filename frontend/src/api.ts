@@ -102,6 +102,7 @@ export async function updateWorkspace(
   workspaceId: string,
   fields: {
     name?: string
+    description?: string
     default_pipeline_key?: string
     default_entity?: string
     cms_config?: Record<string, unknown>

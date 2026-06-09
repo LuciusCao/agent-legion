@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams, useNavigate, Outlet } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
@@ -9,6 +9,8 @@ export const VIDEO_HIVE_ID = 'video-hive'
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
+  const mainRef = useRef<HTMLElement>(null)
+  const [scrolled, setScrolled] = useState(false)
   const {
     workspaces,
     currentWorkspace,
@@ -18,7 +20,7 @@ export default function WorkspaceLayout() {
     fetchWorkspaceStats,
   } = useWorkspaceStore()
 
-  const { workerPaused, fetchWorkerStatus, setWorkerPaused } = useUiStore()
+  const { fetchWorkerStatus } = useUiStore()
 
   const isVideoHive = workspaceId === VIDEO_HIVE_ID
 
@@ -43,24 +45,46 @@ export default function WorkspaceLayout() {
     fetchWorkerStatus()
   }, [fetchWorkerStatus])
 
+  useEffect(() => {
+    const main = mainRef.current
+    if (!main) return
+    const handleScroll = () => {
+      setScrolled(main.scrollTop > 0)
+    }
+    main.addEventListener('scroll', handleScroll, { passive: true })
+    return () => main.removeEventListener('scroll', handleScroll)
+  }, [workspaceId])
+
   const workspaceName = isVideoHive
     ? 'Video Hive'
     : currentWorkspace?.name || workspaceId
 
+  const headerStyle: React.CSSProperties = scrolled
+    ? {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 24px',
+        gap: 16,
+        flexShrink: 0,
+        zIndex: 1,
+        boxShadow: '0 1px 3px rgba(0,0,0,0.12), 0 1px 2px rgba(0,0,0,0.24)',
+      }
+    : {
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        padding: '12px 24px',
+        borderBottom: '1px solid transparent',
+        gap: 16,
+        flexShrink: 0,
+        zIndex: 1,
+      }
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100vh' }}>
       {/* App bar */}
-      <header
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          padding: '12px 24px',
-          borderBottom: '1px solid var(--md-sys-color-outline-variant)',
-          gap: 16,
-          flexShrink: 0,
-        }}
-      >
+      <header style={headerStyle}>
         {/* Left */}
         <div
           style={{
@@ -71,7 +95,7 @@ export default function WorkspaceLayout() {
           }}
         >
           <md-icon-button onClick={() => navigate('/')}>
-            <md-icon>arrow_back</md-icon>
+            <md-icon>home</md-icon>
           </md-icon-button>
           <h1
             style={{
@@ -85,38 +109,22 @@ export default function WorkspaceLayout() {
           >
             {workspaceName}
           </h1>
-          {!isVideoHive && currentWorkspace?.default_pipeline_key && (
-            <span
-              style={{
-                padding: '4px 12px',
-                borderRadius: 999,
-                fontSize: 12,
-                fontWeight: 500,
-                background: 'var(--md-sys-color-secondary-container)',
-                color: 'var(--md-sys-color-on-secondary-container)',
-                flexShrink: 0,
-              }}
-            >
-              {currentWorkspace.default_pipeline_key}
-            </span>
-          )}
+
         </div>
 
         {/* Right */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <md-outlined-button onClick={() => setWorkerPaused(!workerPaused)}>
-            {workerPaused ? '▶ 继续' : '⏸ 暂停'}
-          </md-outlined-button>
-          <md-filled-button
+          <md-icon-button
+            aria-label={WORKSPACE_LABELS.settings}
             onClick={() => navigate(`/workspaces/${workspaceId}/settings`)}
           >
-            {WORKSPACE_LABELS.settings}
-          </md-filled-button>
+            <md-icon>settings</md-icon>
+          </md-icon-button>
         </div>
       </header>
 
       {/* Main content */}
-      <main style={{ flex: 1, overflow: 'auto', padding: 24 }}>
+      <main ref={mainRef} style={{ flex: 1, overflow: 'auto', padding: 24 }}>
         <Outlet />
       </main>
     </div>

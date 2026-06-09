@@ -78,7 +78,7 @@ describe('WorkspaceLayout', () => {
       </MemoryRouter>
     )
     expect(screen.getByText('测试空间')).toBeInTheDocument()
-    expect(screen.getByText('question_content')).toBeInTheDocument()
+    expect(screen.queryByText('question_content')).not.toBeInTheDocument()
   })
 
   it('renders settings button', () => {
@@ -92,7 +92,7 @@ describe('WorkspaceLayout', () => {
         </Routes>
       </MemoryRouter>
     )
-    expect(screen.getByText('设置')).toBeInTheDocument()
+    expect(screen.getByLabelText('设置')).toBeInTheDocument()
   })
 
   it('does not render sidebar tabs', () => {
@@ -121,7 +121,7 @@ describe('WorkspaceLayout', () => {
         </Routes>
       </MemoryRouter>
     )
-    fireEvent.click(screen.getByText('设置'))
+    fireEvent.click(screen.getByLabelText('设置'))
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/settings')
   })
 
@@ -136,7 +136,43 @@ describe('WorkspaceLayout', () => {
         </Routes>
       </MemoryRouter>
     )
-    fireEvent.click(screen.getByText('arrow_back'))
+    fireEvent.click(screen.getByText('home'))
     expect(mockNavigate).toHaveBeenCalledWith('/')
+  })
+
+  it('has transparent border when not scrolled', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    const header = container.querySelector('header')
+    expect(header).toBeTruthy()
+    expect(header?.getAttribute('style')).toContain('border-bottom: 1px solid transparent')
+    expect(header?.getAttribute('style')).not.toContain('box-shadow')
+  })
+
+  it('applies elevation shadow when main content is scrolled', () => {
+    const { container } = render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    const main = container.querySelector('main')
+    expect(main).toBeTruthy()
+    fireEvent.scroll(main!, { target: { scrollTop: 10 } })
+    const header = container.querySelector('header')
+    expect(header?.getAttribute('style')).toContain('box-shadow')
+    expect(header?.getAttribute('style')).not.toContain('border-bottom')
   })
 })
