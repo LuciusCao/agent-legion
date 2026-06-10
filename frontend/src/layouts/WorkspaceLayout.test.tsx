@@ -71,7 +71,7 @@ describe('WorkspaceLayout', () => {
     fetchWorkerStatusMock.mockClear()
   })
 
-  it('renders app bar with workspace name and pipeline tag', () => {
+  it('renders app bar with workspace name and no pipeline tag', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
@@ -141,7 +141,7 @@ describe('WorkspaceLayout', () => {
         </Routes>
       </MemoryRouter>
     )
-    fireEvent.click(screen.getByText('home'))
+    fireEvent.click(screen.getByTestId('app-bar-home'))
     expect(mockNavigate).toHaveBeenCalledWith('/')
   })
 
