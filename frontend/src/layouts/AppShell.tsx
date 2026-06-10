@@ -50,9 +50,8 @@ export function AppShell({ appBar, children, mainClassName }: AppShellProps) {
   }, [])
 
   const reportedScrolledRef = useRef(reportedScrolled)
-  useEffect(() => {
-    reportedScrolledRef.current = reportedScrolled
-  })
+  // eslint-disable-next-line react-hooks/refs
+  reportedScrolledRef.current = reportedScrolled
 
   useEffect(() => {
     const main = mainRef.current
