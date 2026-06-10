@@ -5,6 +5,7 @@ import {
   useLocation,
   Navigate,
   useParams,
+  useNavigate,
 } from 'react-router-dom'
 import { useUiStore } from './stores/uiStore'
 import Toast from './components/Toast'
@@ -13,7 +14,7 @@ import { VIDEO_HIVE_ID } from './layouts/WorkspaceLayout'
 import { SettingsPage } from './pages/SettingsPage'
 import WorkspaceMainPage from './pages/WorkspaceMainPage'
 import JobDetailPage from './pages/JobDetailPage'
-import { WORKSPACE_LABELS } from './labels'
+import { PackageHistoryDialog } from './components/PackageHistoryDialog'
 
 const ListPage = lazy(() =>
   import('./pages/ListPage').then((m) => ({ default: m.ListPage }))
@@ -40,6 +41,19 @@ const QuestionDetailPage = lazy(() =>
 function WorkspaceJobListWrapper() {
   const { workspaceId } = useParams()
   return <WorkspaceJobList isVideoHive={workspaceId === VIDEO_HIVE_ID} />
+}
+
+function WorkspacePackagesPage() {
+  const { workspaceId } = useParams()
+  const navigate = useNavigate()
+  return (
+    <PackageHistoryDialog
+      open={true}
+      onClose={() => navigate(`/workspaces/${workspaceId}`)}
+      scope="workspace"
+      workspaceId={workspaceId}
+    />
+  )
 }
 
 export default function App() {
@@ -76,10 +90,7 @@ export default function App() {
               path="questions/:questionId"
               element={<QuestionDetailPage />}
             />
-            <Route
-              path="packages"
-              element={<div>{WORKSPACE_LABELS.packages}视图 — 待实现</div>}
-            />
+            <Route path="packages" element={<WorkspacePackagesPage />} />
           </Route>
           <Route
             path="/workspaces/:workspaceId/settings"
