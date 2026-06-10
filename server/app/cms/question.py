@@ -101,6 +101,19 @@ def _parse_question_detail_payload(payload: dict[str, Any]) -> dict[str, Any] | 
 
 
 def _question_title_from_item(item: dict[str, Any]) -> str:
+    # Prefer knowledge name over body content (stem) for title
+    knowledge_list = item.get("knowledge")
+    if isinstance(knowledge_list, list) and knowledge_list:
+        first = knowledge_list[0]
+        if isinstance(first, dict):
+            name = first.get("knowledge_name") or first.get("name")
+            if name:
+                return str(name)
+
+    title = item.get("question_title")
+    if title:
+        return str(title)
+
     body = item.get("body")
     if isinstance(body, dict):
         content = body.get("content")
