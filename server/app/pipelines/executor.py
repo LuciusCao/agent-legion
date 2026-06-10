@@ -58,7 +58,7 @@ def execute_local_node_once(
         error_message = str(exc)
         log_path.write_text(error_message, encoding="utf-8")
         job_db.finish_node_run(run["id"], "failed", 1, error_message)
-        return True
+        return False
 
     log_path.write_text("completed\n", encoding="utf-8")
     job_db.finish_node_run(run["id"], "completed", 0, "")

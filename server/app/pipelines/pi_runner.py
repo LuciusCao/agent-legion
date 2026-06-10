@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import subprocess
+import sys
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -105,6 +106,7 @@ class PiRunner:
         skill_dir: Path,
         inputs: list[str],
         outputs: list[str],
+        tools: list[str] | None = None,
         job_db: JobQueries | None = None,
     ) -> PiRunResult:
         job_dir = Path(str(job["storage_dir"]))
@@ -133,7 +135,7 @@ class PiRunner:
         command = self.build_command(
             skill_dir=skill_dir,
             session_dir=session_dir,
-            tools=["read", "write", "bash"],
+            tools=tools or ["read", "write", "bash"],
             session_name=session_name,
             prompt_file=prompt_file,
         )
@@ -198,7 +200,7 @@ class PiRunner:
             if validator.is_file():
                 try:
                     val_proc = subprocess.run(
-                        ["python", str(validator), str(job_dir)],
+                        [sys.executable, str(validator), str(job_dir)],
                         capture_output=True,
                         text=True,
                         timeout=30,
@@ -275,6 +277,6 @@ class PiRunner:
         lines.append(
             "Write required outputs directly into the working directory. "
             "Do not modify inputs or create undeclared root-level artifacts. "
-            "Finish only after the skill validator succeeds."
+            "Finish after all required outputs are written and correct."
         )
         return "\n".join(lines) + "\n"
