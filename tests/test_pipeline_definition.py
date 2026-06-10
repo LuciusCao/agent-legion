@@ -20,6 +20,8 @@ def test_load_question_content_definition():
     assert knowledge_mode.label == "按知识点查询"
     assert knowledge_mode.input_field == "knowledge_codes"
     assert knowledge_mode.resource == "by_knowledge"
+    assert definition.nodes["fetch_question_context"].label == "fetch_question_context"
+    assert definition.nodes["question_understanding"].label == "question_understanding"
     assert definition.nodes["question_understanding"].after == ["fetch_question_context"]
     assert definition.nodes["assemble_package"].inputs == [
         "question_context.json",
@@ -247,3 +249,36 @@ nodes:
     definition = load_pipeline_definition(config)
     assert definition.nodes["one"].runner == "agent"
     assert definition.nodes["one"].agent is None
+
+
+def test_node_label_fallback_to_key(tmp_path):
+    config = tmp_path / "no-label.yaml"
+    config.write_text(
+        """
+key: no_label
+label: No Label
+nodes:
+  one:
+    runner: local
+""",
+        encoding="utf-8",
+    )
+    definition = load_pipeline_definition(config)
+    assert definition.nodes["one"].label == "one"
+
+
+def test_node_label_explicit(tmp_path):
+    config = tmp_path / "with-label.yaml"
+    config.write_text(
+        """
+key: with_label
+label: With Label
+nodes:
+  one:
+    label: 步骤一
+    runner: local
+""",
+        encoding="utf-8",
+    )
+    definition = load_pipeline_definition(config)
+    assert definition.nodes["one"].label == "步骤一"
