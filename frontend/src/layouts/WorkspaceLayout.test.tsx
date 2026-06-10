@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import WorkspaceLayout from './WorkspaceLayout'
+import appBarStyles from '../components/AppBar.module.css'
 
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
@@ -70,7 +71,7 @@ describe('WorkspaceLayout', () => {
     fetchWorkerStatusMock.mockClear()
   })
 
-  it('renders app bar with workspace name and pipeline tag', () => {
+  it('renders app bar with workspace name and no pipeline tag', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
@@ -129,7 +130,7 @@ describe('WorkspaceLayout', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/settings')
   })
 
-  it('navigates to home when back button is clicked', () => {
+  it('navigates to home when home button is clicked', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
@@ -140,7 +141,7 @@ describe('WorkspaceLayout', () => {
         </Routes>
       </MemoryRouter>
     )
-    fireEvent.click(screen.getByText('home'))
+    fireEvent.click(screen.getByTestId('app-bar-home'))
     expect(mockNavigate).toHaveBeenCalledWith('/')
   })
 
@@ -155,12 +156,9 @@ describe('WorkspaceLayout', () => {
         </Routes>
       </MemoryRouter>
     )
-    const header = container.querySelector('header')
+    const header = container.querySelector('[data-testid="app-bar"]')
     expect(header).toBeTruthy()
-    expect(header?.getAttribute('style')).toContain(
-      'border-bottom: 1px solid transparent'
-    )
-    expect(header?.getAttribute('style')).not.toContain('box-shadow')
+    expect(header!.classList.contains(appBarStyles.scrolled)).toBe(false)
   })
 
   it('applies elevation shadow when main content is scrolled', () => {
@@ -176,9 +174,11 @@ describe('WorkspaceLayout', () => {
     )
     const main = container.querySelector('main')
     expect(main).toBeTruthy()
-    fireEvent.scroll(main!, { target: { scrollTop: 10 } })
-    const header = container.querySelector('header')
-    expect(header?.getAttribute('style')).toContain('box-shadow')
-    expect(header?.getAttribute('style')).not.toContain('border-bottom')
+    act(() => {
+      main!.scrollTop = 10
+      main!.dispatchEvent(new Event('scroll', { bubbles: false }))
+    })
+    const header = container.querySelector('[data-testid="app-bar"]')
+    expect(header!.classList.contains(appBarStyles.scrolled)).toBe(true)
   })
 })

@@ -25,6 +25,12 @@ const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage }))
 )
 const WorkspaceLayout = lazy(() => import('./layouts/WorkspaceLayout'))
+const VideoHiveLayout = lazy(() => import('./layouts/VideoHiveLayout'))
+const VideoHiveSettingsPage = lazy(() =>
+  import('./pages/VideoHiveSettingsPage').then((m) => ({
+    default: m.VideoHiveSettingsPage,
+  }))
+)
 
 function WorkspaceJobListWrapper() {
   const { workspaceId } = useParams()
@@ -49,7 +55,13 @@ export default function App() {
       <Suspense fallback={<div style={{ padding: 24 }}>加载中…</div>}>
         <Routes>
           <Route path="/" element={<DashboardPage />} />
-          <Route path="/video-hive" element={<ListPage />} />
+          <Route path="/video-hive" element={<VideoHiveLayout />}>
+            <Route index element={<ListPage />} />
+          </Route>
+          <Route
+            path="/video-hive/settings"
+            element={<VideoHiveSettingsPage />}
+          />
           <Route path="/workspaces" element={<Navigate to="/" replace />} />
           <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
             <Route index element={<WorkspaceMainPage />} />
