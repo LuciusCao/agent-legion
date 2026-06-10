@@ -58,15 +58,26 @@ function extractAnswerItems(answer: unknown): string[] | null {
     const obj = answer as Record<string, unknown>
     if (typeof obj.value === 'string') return [obj.value]
     if (typeof obj.answer === 'string') return [obj.answer]
-    if (Array.isArray(obj.value) && obj.value.every((a) => typeof a === 'string')) {
+    if (
+      Array.isArray(obj.value) &&
+      obj.value.every((a) => typeof a === 'string')
+    ) {
       return obj.value
+    }
+    if (
+      Array.isArray(obj.answer) &&
+      obj.answer.every((a) => typeof a === 'string')
+    ) {
+      return obj.answer
     }
   }
   return null
 }
 
 function hasLatex(text: string): boolean {
-  return /(\$\$[\s\S]*?\$\$)|(\$[^$\r\n]*?\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))/.test(text)
+  return /(\$\$[\s\S]*?\$\$)|(\$[^$\r\n]*?\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))/.test(
+    text
+  )
 }
 
 export interface QuestionContentPanelProps {
@@ -114,6 +125,10 @@ export function QuestionContentPanel({
     return renderLatexInHtml(sanitizeHtml(analysis))
   }, [analysis])
 
+  const answerItems = detail?.normalized.answer
+    ? extractAnswerItems(detail.normalized.answer)
+    : null
+
   if (loading) {
     return <p className={styles.loading}>加载题目中...</p>
   }
@@ -142,15 +157,11 @@ export function QuestionContentPanel({
           <ul className={styles.optionList}>
             {detail.normalized.options.map((opt, idx) => {
               const label = String(
-                (opt as Record<string, unknown>).label ||
-                  String.fromCharCode(65 + idx)
+                opt.label || String.fromCharCode(65 + idx)
               )
-              const content = String(
-                (opt as Record<string, unknown>).content || ''
-              )
-              const isCorrect = Array.isArray(detail.normalized.answer)
-                ? detail.normalized.answer.includes(label)
-                : false
+              const content = String(opt.content || '')
+              const isCorrect =
+                answerItems != null && answerItems.includes(label)
               return (
                 <li
                   key={idx}
@@ -159,7 +170,12 @@ export function QuestionContentPanel({
                   }`}
                 >
                   {isCorrect && (
-                    <md-icon className={styles.checkIcon}>check</md-icon>
+                    <md-icon
+                      className={styles.checkIcon}
+                      aria-hidden="true"
+                    >
+                      check
+                    </md-icon>
                   )}
                   <span className={styles.optionLabel}>{label}.</span>
                   <span className={styles.optionContent}>
@@ -172,35 +188,20 @@ export function QuestionContentPanel({
         </section>
       )}
 
-      {detail?.normalized.answer != null && (
+      {answerItems != null && (
         <section className={`${styles.card} ${styles.answerCard}`}>
           <h2 className={styles.sectionTitle}>答案</h2>
-          {(() => {
-            const items = extractAnswerItems(detail.normalized.answer)
-            if (items != null && items.length > 0) {
-              return (
-                <div className={styles.answerBadges}>
-                  {items.map((item, idx) => (
-                    <span key={idx} className={styles.answerBadge}>
-                      {hasLatex(item) ? (
-                        <LaTeXText>{item}</LaTeXText>
-                      ) : (
-                        item
-                      )}
-                    </span>
-                  ))}
-                </div>
-              )
-            }
-            return (
-              <details>
-                <summary>查看原始数据</summary>
-                <pre className={styles.pre}>
-                  {JSON.stringify(detail.normalized.answer, null, 2)}
-                </pre>
-              </details>
-            )
-          })()}
+          {answerItems.length > 0 ? (
+            <div className={styles.answerBadges}>
+              {answerItems.map((item, idx) => (
+                <span key={idx} className={styles.answerBadge}>
+                  {hasLatex(item) ? <LaTeXText>{item}</LaTeXText> : item}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.empty}>无答案</p>
+          )}
         </section>
       )}
 
