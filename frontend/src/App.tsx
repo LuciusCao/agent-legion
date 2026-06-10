@@ -84,10 +84,6 @@ export default function App() {
             <Route index element={<WorkspaceMainPage />} />
             <Route path="jobs" element={<WorkspaceJobListWrapper />} />
             <Route path="jobs/:jobId" element={<JobDetailPage />} />
-            <Route
-              path="questions/:questionId"
-              element={<QuestionDetailPage />}
-            />
             <Route path="packages" element={<WorkspacePackagesPage />} />
           </Route>
           <Route
