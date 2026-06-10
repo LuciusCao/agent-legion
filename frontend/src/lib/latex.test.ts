@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decodeHtmlEntities, extractLatexParts } from './latex'
+import { decodeHtmlEntities, extractLatexParts, sanitizeLatex } from './latex'
 
 describe('decodeHtmlEntities', () => {
   it('decodes basic entities', () => {
@@ -78,5 +78,41 @@ describe('extractLatexParts', () => {
     expect(extractLatexParts('   ')).toEqual([
       { type: 'text', content: '   ', display: false },
     ])
+  })
+})
+
+describe('sanitizeLatex', () => {
+  it('decodes html entities', () => {
+    expect(sanitizeLatex('&lt; $x &lt; 5$')).toBe('< $x < 5$')
+  })
+
+  it('wraps bare latex commands without delimiters', () => {
+    expect(sanitizeLatex('x = \\frac{1}{2}')).toBe('x = $\\frac{1}{2}$')
+  })
+
+  it('does not wrap plain text without latex commands', () => {
+    expect(sanitizeLatex('hello world')).toBe('hello world')
+  })
+
+  it('handles mixed delimited and bare latex', () => {
+    expect(sanitizeLatex('面积 $S=\\pi r^2$ 和 \\sqrt{2}')).toBe(
+      '面积 $S=\\pi r^2$ 和 $\\sqrt{2}$'
+    )
+  })
+
+  it('does not double-wrap already delimited latex', () => {
+    expect(sanitizeLatex('$\\frac{1}{2}$')).toBe('$\\frac{1}{2}$')
+  })
+
+  it('handles html entities in bare latex', () => {
+    expect(sanitizeLatex('x &lt; \\frac{1}{2}')).toBe('x < $\\frac{1}{2}$')
+  })
+
+  it('does not wrap text that looks like urls', () => {
+    expect(sanitizeLatex('visit \\site.com')).toBe('visit \\site.com')
+  })
+
+  it('handles empty string', () => {
+    expect(sanitizeLatex('')).toBe('')
   })
 })
