@@ -7,13 +7,23 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition
 from server.app.pipelines.question_content import fetch_question_context
+from server.app.pipelines.reading_analysis import (
+    clean_and_parse,
+    fetch_questions,
+    mark_question,
+)
 
 LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any]], None]
 
 LOCAL_HANDLERS: dict[str, dict[str, LocalHandler]] = {
     "question_content": {
         "fetch_question_context": fetch_question_context,
-    }
+    },
+    "reading_analysis": {
+        "fetch_questions": fetch_questions,
+        "clean_and_parse": clean_and_parse,
+        "mark_question": mark_question,
+    },
 }
 
 
