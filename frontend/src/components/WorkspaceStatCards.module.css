@@ -15,35 +15,16 @@
   background: var(--md-sys-color-surface);
   cursor: pointer;
   font-size: 14px;
-  color: var(--md-sys-color-on-surface);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.pill:hover {
+  background: var(--md-sys-color-surface-container-high);
 }
 
 .active {
-  border-color: currentColor;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border-color: var(--md-sys-color-primary);
   font-weight: 600;
-}
-
-.default {
-  color: var(--md-sys-color-on-surface);
-  background: var(--md-sys-color-surface);
-}
-
-.pending {
-  color: var(--status-partial-text);
-  background: var(--status-partial-bg);
-}
-
-.running {
-  color: var(--status-running-text);
-  background: var(--status-running-bg);
-}
-
-.completed {
-  color: var(--status-completed-text);
-  background: var(--status-completed-bg);
-}
-
-.failed {
-  color: var(--status-failed-text);
-  background: var(--status-failed-bg);
 }

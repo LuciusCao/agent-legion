@@ -13,10 +13,12 @@ interface JobState {
   expandedId: string | null
   statusFilter: JobStatus | 'all'
   searchQuery: string
+  selectMode: boolean
 
   fetchJobs: (workspaceId: string) => Promise<void>
   setStatusFilter: (filter: JobStatus | 'all') => void
   setSearchQuery: (query: string) => void
+  toggleSelectMode: () => void
   toggleSelect: (id: string) => void
   selectAll: () => void
   selectFailed: () => void
@@ -66,6 +68,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   expandedId: null,
   statusFilter: 'all',
   searchQuery: '',
+  selectMode: false,
 
   async fetchJobs(workspaceId: string) {
     set({ isLoading: true, error: null })
@@ -84,6 +87,13 @@ export const useJobStore = create<JobState>((set, get) => ({
 
   setSearchQuery(query) {
     set({ searchQuery: query, selectedIds: new Set() })
+  },
+
+  toggleSelectMode() {
+    set((state) => ({
+      selectMode: !state.selectMode,
+      selectedIds: new Set(),
+    }))
   },
 
   toggleSelect(id: string) {

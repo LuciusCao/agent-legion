@@ -11,7 +11,6 @@ import styles from './WorkspaceMainPage.module.css'
 const sectionStyle = {
   padding: 16,
   borderRadius: 12,
-  border: '1px solid var(--md-sys-color-outline-variant)',
   background: 'var(--md-sys-color-surface)',
 } as React.CSSProperties
 
@@ -132,37 +131,37 @@ export default function WorkspaceMainPage() {
         </div>
       )}
 
-      <section className="stats-section" style={sectionStyle}>
-        <WorkspaceStatCards
-          counts={counts}
-          activeFilter={statusFilter}
-          onFilterChange={(filter) =>
-            setStatusFilter(
-              filter as 'all' | 'pending' | 'running' | 'completed' | 'failed'
-            )
-          }
-        />
-      </section>
-
-      <section className="filter-section" style={sectionStyle}>
-        <md-outlined-text-field
-          type="search"
-          placeholder="搜索 ID 或标题"
-          value={searchInputValue}
-          onInput={(e: React.FormEvent<HTMLElement>) => {
-            const value = (e.target as HTMLInputElement).value
-            setSearchInputValue(value)
-            debouncedSetSearchQuery(value)
-          }}
-        />
+      <section style={sectionStyle}>
+        <div className={styles.filterRow}>
+          <WorkspaceStatCards
+            counts={counts}
+            activeFilter={statusFilter}
+            onFilterChange={(filter) =>
+              setStatusFilter(
+                filter as 'all' | 'pending' | 'running' | 'completed' | 'failed'
+              )
+            }
+          />
+          <md-outlined-text-field
+            type="search"
+            placeholder="搜索 ID 或标题"
+            value={searchInputValue}
+            onInput={(e: React.FormEvent<HTMLElement>) => {
+              const value = (e.target as HTMLInputElement).value
+              setSearchInputValue(value)
+              debouncedSetSearchQuery(value)
+            }}
+            style={{ width: 280, flexShrink: 0 }}
+          />
+        </div>
       </section>
 
       {filteredJobs.length === 0 && totalJobs === 0 ? (
-        <section className="empty-section" style={sectionStyle}>
+        <section style={sectionStyle}>
           <EmptyStateGuide steps={emptyStateSteps} />
         </section>
       ) : (
-        <section className="list-section" style={{ ...sectionStyle, flex: 1 }}>
+        <section style={{ ...sectionStyle, flex: 1, padding: 0 }}>
           <JobList workspaceId={workspaceId!} />
         </section>
       )}

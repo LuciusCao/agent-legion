@@ -16,6 +16,7 @@ export function JobList({ workspaceId }: JobListProps) {
   const fetchJobs = useJobStore((state) => state.fetchJobs)
   const toggleSelect = useJobStore((state) => state.toggleSelect)
   const toggleExpand = useJobStore((state) => state.toggleExpand)
+  const selectMode = useJobStore((state) => state.selectMode)
 
   useEffect(() => {
     fetchJobs(workspaceId)
@@ -48,6 +49,7 @@ export function JobList({ workspaceId }: JobListProps) {
               job={job}
               selected={selectedIds.has(job.id)}
               expanded={isExpanded}
+              selectMode={selectMode}
               onToggleSelect={() => toggleSelect(job.id)}
               onToggleExpand={() => toggleExpand(job.id)}
               workspaceId={workspaceId}

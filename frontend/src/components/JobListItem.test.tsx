@@ -24,6 +24,7 @@ describe('JobListItem', () => {
           job={mockJob}
           selected={false}
           expanded={false}
+          selectMode={false}
           onToggleSelect={vi.fn()}
           onToggleExpand={vi.fn()}
         />
@@ -42,6 +43,7 @@ describe('JobListItem', () => {
           job={{ ...mockJob, title: '' }}
           selected={false}
           expanded={false}
+          selectMode={false}
           onToggleSelect={vi.fn()}
           onToggleExpand={vi.fn()}
         />
@@ -58,6 +60,7 @@ describe('JobListItem', () => {
           job={mockJob}
           selected={false}
           expanded={false}
+          selectMode={true}
           onToggleSelect={vi.fn()}
           onToggleExpand={vi.fn()}
         />
@@ -73,6 +76,7 @@ describe('JobListItem', () => {
           job={mockJob}
           selected={true}
           expanded={false}
+          selectMode={true}
           onToggleSelect={vi.fn()}
           onToggleExpand={vi.fn()}
         />
@@ -90,6 +94,7 @@ describe('JobListItem', () => {
           job={mockJob}
           selected={false}
           expanded={false}
+          selectMode={false}
           onToggleSelect={vi.fn()}
           onToggleExpand={onToggleExpand}
         />
@@ -107,6 +112,7 @@ describe('JobListItem', () => {
           job={mockJob}
           selected={false}
           expanded={true}
+          selectMode={false}
           onToggleSelect={vi.fn()}
           onToggleExpand={vi.fn()}
         />
@@ -123,6 +129,7 @@ describe('JobListItem', () => {
           job={mockJob}
           selected={false}
           expanded={false}
+          selectMode={false}
           onToggleSelect={vi.fn()}
           onToggleExpand={vi.fn()}
         />
