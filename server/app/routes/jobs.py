@@ -826,7 +826,11 @@ def create_jobs_router(
                 results.append({"job_id": job_id, "status": "skipped", "reason": "running"})
                 continue
             definition = _definition(settings, str(job["pipeline_key"]))
-            first_node = next(iter(definition.nodes))
+            root_nodes = [key for key, node in definition.nodes.items() if not node.after]
+            if not root_nodes:
+                results.append({"job_id": job_id, "status": "skipped", "reason": "no_root_node"})
+                continue
+            first_node = root_nodes[0]
             stale_nodes = downstream_nodes(definition, first_node)
             try:
                 clear_rerun_outputs(definition, first_node, Path(str(job["storage_dir"])))
