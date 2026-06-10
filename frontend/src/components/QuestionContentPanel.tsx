@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { fetchQuestionDetail } from '../api'
 import type { QuestionDetailResponse } from '../types'
+import { renderLatexInHtml } from '../lib/latex'
+import { LaTeXText } from './LaTeXText'
 import styles from './QuestionContentPanel.module.css'
 
 const ALLOWED_TAGS = new Set([
@@ -14,6 +16,15 @@ const ALLOWED_TAGS = new Set([
   'SPAN',
   'DIV',
 ])
+
+function formatAnswer(answer: unknown): string | null {
+  if (answer == null) return null
+  if (typeof answer === 'string') return answer
+  if (Array.isArray(answer) && answer.every((a) => typeof a === 'string')) {
+    return answer.join('、')
+  }
+  return null
+}
 
 function sanitizeHtml(html: string): string {
   const parser = new DOMParser()
@@ -82,15 +93,13 @@ export function QuestionContentPanel({
   const stem = detail?.normalized.stem
   const stemHtml = useMemo(() => {
     if (!stem) return ''
-    return sanitizeHtml(stem)
+    return renderLatexInHtml(sanitizeHtml(stem))
   }, [stem])
 
   const analysis = detail?.normalized.analysis
   const analysisHtml = useMemo(() => {
-    if (!analysis) return ''
-    const raw =
-      typeof analysis === 'string' ? analysis : JSON.stringify(analysis)
-    return sanitizeHtml(raw)
+    if (!analysis || typeof analysis !== 'string') return ''
+    return renderLatexInHtml(sanitizeHtml(analysis))
   }, [analysis])
 
   if (loading) {
@@ -138,7 +147,9 @@ export function QuestionContentPanel({
                   }`}
                 >
                   <span className={styles.optionLabel}>{label}.</span>
-                  <span className={styles.optionContent}>{content}</span>
+                  <span className={styles.optionContent}>
+                    <LaTeXText>{content}</LaTeXText>
+                  </span>
                 </li>
               )
             })}
@@ -149,19 +160,40 @@ export function QuestionContentPanel({
       {detail?.normalized.answer != null && (
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>答案</h2>
-          <pre className={styles.pre}>
-            {JSON.stringify(detail.normalized.answer, null, 2)}
-          </pre>
+          {(() => {
+            const formatted = formatAnswer(detail.normalized.answer)
+            if (formatted != null) {
+              return (
+                <div className={styles.answerText}>
+                  正确答案：{formatted}
+                </div>
+              )
+            }
+            return (
+              <details>
+                <summary>查看原始数据</summary>
+                <pre className={styles.pre}>
+                  {JSON.stringify(detail.normalized.answer, null, 2)}
+                </pre>
+              </details>
+            )
+          })()}
         </section>
       )}
 
       {detail?.normalized.analysis != null && (
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>解析</h2>
-          <div
-            className={styles.richText}
-            dangerouslySetInnerHTML={{ __html: analysisHtml }}
-          />
+          {typeof detail.normalized.analysis === 'string' ? (
+            <div
+              className={styles.richText}
+              dangerouslySetInnerHTML={{ __html: analysisHtml }}
+            />
+          ) : (
+            <pre className={styles.pre}>
+              {JSON.stringify(detail.normalized.analysis, null, 2)}
+            </pre>
+          )}
         </section>
       )}
 

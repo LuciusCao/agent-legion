@@ -57,20 +57,17 @@
 }
 
 .section {
-  padding: 24px 0;
+  padding: 20px 24px;
+  background: var(--md-sys-color-surface-container-low);
+  border-radius: 16px;
+  margin-bottom: 16px;
 }
 
 .sectionTitle {
   font-size: 18px;
   font-weight: 500;
-  margin: 0 0 16px 0;
+  margin: 0 0 20px 0;
   color: var(--md-sys-color-on-surface);
-}
-
-.sectionDivider {
-  border: none;
-  border-top: 1px solid var(--md-sys-color-outline-variant);
-  margin: 0;
 }
 
 .field {
@@ -83,15 +80,6 @@
 .field label {
   font-size: 12px;
   color: var(--md-sys-color-on-surface-variant);
-}
-
-.field select {
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--md-sys-color-outline);
-  background: var(--md-sys-color-surface);
-  color: var(--md-sys-color-on-surface);
-  font-size: 14px;
 }
 
 .saveBadge {
