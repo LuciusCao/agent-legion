@@ -1320,8 +1320,8 @@ def test_get_resource_providers_returns_provider_list(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
     app.state.settings.config["resource_providers"] = {
-        "cms.question.detail": {"api_url": "http://cms.example/detail"},
-        "cms.question.list_by_knowledge": {"api_url": "http://cms.example/list"},
+        "cms.question.detail": {"path": "/question/detail"},
+        "cms.question.list_by_knowledge": {"path": "/question/list"},
     }
     app.state.settings.config["cms"] = {
         "env": "prod",
@@ -1337,7 +1337,7 @@ def test_get_resource_providers_returns_provider_list(tmp_path):
     providers = {p["key"]: p for p in body["providers"]}
     assert "question_detail" in providers
     assert providers["question_detail"]["provider"] == "cms.question.detail"
-    assert providers["question_detail"]["apiUrl"] == "http://cms.example/detail"
+    assert providers["question_detail"]["path"] == "/question/detail"
     assert providers["question_detail"]["defaultParams"] == {
         "bank_version": "v5",
         "country_id": "1",
@@ -1363,7 +1363,7 @@ def test_get_global_services_returns_cms_status(tmp_path):
     app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
     app.state.settings.config["cms"] = {
         "env": "prod",
-        "question_detail_url": "http://cms.internal.example.com/v2/question/detail",
+        "base_url": "http://cms.internal.example.com/v2",
         "token": "secret123",
     }
     with TestClient(app) as c:
@@ -1371,18 +1371,26 @@ def test_get_global_services_returns_cms_status(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["cms"]["url"] == "http://cms.***.cn/v2/question/detail"
+    assert body["cms"]["baseUrl"] == "http://cms.***.cn/v2"
     assert body["cms"]["tokenConfigured"] is True
     assert body["cms"]["env"] == "prod"
     assert body["cms"]["healthy"] is None
 
 
-def test_get_global_services_unconfigured_token(tmp_path):
+def test_get_global_services_unconfigured_token(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
+    for key in (
+        "BASECMS_APP_ID",
+        "BASECMS_NONCE",
+        "BASECMS_SECRET",
+        "BASECMS_TOKEN_URL",
+        "BASECMS_TOKEN",
+    ):
+        monkeypatch.delenv(key, raising=False)
     app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
     app.state.settings.config["cms"] = {"env": "dev"}
     with TestClient(app) as c:
@@ -1391,6 +1399,31 @@ def test_get_global_services_unconfigured_token(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["cms"]["tokenConfigured"] is False
+
+
+def test_get_global_services_token_gen_configured(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config["cms"] = {
+        "env": "prod",
+        "base_url": "http://cms.example/v2",
+        "token_gen": {
+            "app_id": "app1",
+            "nonce": "n1",
+            "secret": "s1",
+            "url": "http://token.example/generate",
+        },
+    }
+    with TestClient(app) as c:
+        response = c.get("/api/global-services")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["cms"]["tokenConfigured"] is True
 
 
 def test_workspace_settings_without_cms_fields(tmp_path):
@@ -1501,13 +1534,13 @@ def test_job_batch_rejects_disabled_resource_provider(tmp_path):
         "cms.question.list_by_knowledge": {"api_url": "http://cms.example/list"},
     }
     with TestClient(app) as c:
-        workspace = c.post("/api/workspaces", json={"name": "Disabled Resource"}).json()["workspace"]
+        workspace = c.post("/api/workspaces", json={"name": "Disabled Resource"}).json()[
+            "workspace"
+        ]
         c.patch(
             f"/api/workspaces/{workspace['id']}",
             json={
-                "resource_config": {
-                    "resources": {"by_knowledge": {"enabled": False, "config": {}}}
-                }
+                "resource_config": {"resources": {"by_knowledge": {"enabled": False, "config": {}}}}
             },
         )
         response = c.post(

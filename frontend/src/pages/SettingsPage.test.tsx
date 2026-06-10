@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  within,
+} from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { SettingsPage } from './SettingsPage'
 import { useSettingStore } from '../stores/settingStore'
@@ -42,7 +48,7 @@ const defaultState = {
   },
   globalServices: {
     cms: {
-      url: 'http://cms.example.com',
+      baseUrl: 'http://cms.example.com',
       tokenConfigured: true,
       env: 'prod',
       healthy: null,
@@ -118,7 +124,7 @@ describe('SettingsPage', () => {
     expect(screen.getByText('全局服务')).toBeInTheDocument()
     expect(screen.getByText('资源接口')).toBeInTheDocument()
     expect(screen.getByText('接入模式')).toBeInTheDocument()
-    expect(screen.getByText('流水线')).toBeInTheDocument()
+    expect(screen.getAllByText('流水线').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('智能体')).toBeInTheDocument()
   })
 
@@ -129,8 +135,6 @@ describe('SettingsPage', () => {
 
   it('updates workspace name and description on save', async () => {
     renderPage()
-    const basicHeader = screen.getByText('基本信息')
-    fireEvent.click(basicHeader)
     await waitFor(() => {
       expect(
         document.querySelector('md-outlined-text-field[label="Workspace 名称"]')
@@ -232,8 +236,11 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('测试连接')).toBeInTheDocument()
     })
-    const saveBtns = screen.getAllByText('保存')
-    fireEvent.click(saveBtns[0])
+    const resourceCard = screen
+      .getByText('资源接口')
+      .closest('.card-outlined') as HTMLElement
+    const saveBtn = within(resourceCard).getByText('保存')
+    fireEvent.click(saveBtn)
     await waitFor(() => {
       expect(mockApi).toHaveBeenCalledWith(
         '/api/workspaces/ws1/settings/resources',
@@ -241,7 +248,10 @@ describe('SettingsPage', () => {
           method: 'PATCH',
           body: JSON.stringify({
             resources: {
-              question_detail: { enabled: true, config: { bank_version: 'v5' } },
+              question_detail: {
+                enabled: true,
+                config: { bank_version: 'v5' },
+              },
             },
           }),
         })
@@ -265,17 +275,18 @@ describe('SettingsPage', () => {
     mockApi.mockRejectedValueOnce(
       Object.assign(new Error('Server Error'), { status: 500 })
     )
-    const saveBtns = screen.getAllByText('保存')
-    fireEvent.click(saveBtns[0])
+    const resourceCard = screen
+      .getByText('资源接口')
+      .closest('.card-outlined') as HTMLElement
+    const saveBtn = within(resourceCard).getByText('保存')
+    fireEvent.click(saveBtn)
     await waitFor(() => {
-      expect(screen.getByText('Server Error')).toBeInTheDocument()
+      expect(within(resourceCard).getByText('Server Error')).toBeInTheDocument()
     })
   })
 
   it('updates labelOverrides state when textarea input is valid JSON', () => {
     renderPage()
-    const intakeHeader = screen.getByText('接入模式')
-    fireEvent.click(intakeHeader)
     const textarea = document.querySelector(
       'md-outlined-text-field[label="标签覆盖 (JSON)"]'
     ) as HTMLElement
@@ -289,8 +300,6 @@ describe('SettingsPage', () => {
 
   it('renders AgentAllocationList instead of placeholder in agents card', async () => {
     renderPage()
-    const agentsHeader = screen.getByText('智能体')
-    fireEvent.click(agentsHeader)
     await waitFor(() => {
       expect(screen.getByText('可用智能体')).toBeInTheDocument()
     })
@@ -304,7 +313,7 @@ describe('SettingsPage', () => {
     useSettingStore.setState({
       globalServices: {
         cms: {
-          url: 'http://cms.example.com',
+          baseUrl: 'http://cms.example.com',
           tokenConfigured: true,
           env: 'prod',
           healthy: null,
@@ -313,8 +322,6 @@ describe('SettingsPage', () => {
       },
     })
     renderPage()
-    const globalHeader = screen.getByText('全局服务')
-    fireEvent.click(globalHeader)
     await waitFor(() => {
       expect(screen.getByText('http://cms.example.com')).toBeInTheDocument()
     })
@@ -328,7 +335,7 @@ describe('SettingsPage', () => {
         {
           key: 'question_detail',
           provider: 'cms.question.detail',
-          apiUrl: 'http://api.example.com',
+          path: '/question/detail',
           defaultParams: { bank_version: 'v5' },
           paramKeys: ['bank_version', 'country_id'],
         },

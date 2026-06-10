@@ -80,7 +80,15 @@ def _provider_defaults(settings_config: dict[str, Any], provider: str) -> dict[s
     if not isinstance(providers, dict):
         return {}
     defaults = providers.get(provider)
-    return dict(defaults) if isinstance(defaults, dict) else {}
+    if not isinstance(defaults, dict):
+        return {}
+    result = dict(defaults)
+    cms_config = settings_config.get("cms", {}) or {}
+    base_url = str(cms_config.get("base_url", "")).rstrip("/")
+    path = str(result.get("path", "")).lstrip("/")
+    if base_url and path:
+        result["api_url"] = f"{base_url}/{path}"
+    return result
 
 
 def resolve_cms_resource(

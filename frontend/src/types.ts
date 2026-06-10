@@ -46,7 +46,7 @@ export type WorkspaceAgentAssignment = {
 
 export type GlobalServiceStatus = {
   cms: {
-    url: string
+    baseUrl: string
     tokenConfigured: boolean
     env: string
     healthy: boolean | null
@@ -57,7 +57,7 @@ export type GlobalServiceStatus = {
 export type ResourceProviderDefinition = {
   key: string
   provider: string
-  apiUrl: string
+  path: string
   defaultParams: Record<string, string>
   paramKeys: string[]
 }
