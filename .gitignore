@@ -14,3 +14,4 @@ frontend/dist/
 .superpowers/
 .coverage
 coverage/
+.DS_Store
