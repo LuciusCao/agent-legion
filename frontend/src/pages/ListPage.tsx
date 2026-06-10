@@ -3,7 +3,6 @@ import { useVideoStore } from '../stores/videoStore'
 import { useUiStore } from '../stores/uiStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
-import { AgentPanel } from '../components/AgentPanel'
 import { StatCards } from '../components/StatCards'
 import { VideoList } from '../components/VideoList'
 import { BatchToolbar } from '../components/BatchToolbar'
@@ -55,8 +54,6 @@ export function ListPage() {
   return (
     <section className="view workbench-view">
       <div className="list-fixed-header">
-        <AgentPanel />
-
         <section className="filters-row">
           <md-tabs
             ref={tabsRef}
