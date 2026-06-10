@@ -81,7 +81,20 @@ cd frontend
 npm run dev
 ```
 
-Open the Vite URL shown by npm. The frontend calls the backend API on the same origin in production; for development, use a proxy if the browser blocks cross-origin API calls.
+Open the Vite URL shown by npm. The frontend calls the backend API on the same origin in production; during development, Vite proxies `/api` to `VITE_API_TARGET` from `frontend/.env` and defaults to `http://127.0.0.1:8000`.
+
+For multiple coding agents working in separate git worktrees, give each worktree its own backend/frontend ports and local frontend env:
+
+```bash
+# worktree A
+UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8001
+cd frontend
+cp .env.example .env
+printf 'VITE_API_TARGET=http://127.0.0.1:8001\n' > .env
+npm run dev -- --port 5174
+```
+
+Use different ports for each additional worktree, and keep each worktree's default `data/` directory separate so SQLite state, logs, videos, packages, and jobs do not overlap.
 
 Production-style frontend build:
 
