@@ -14,6 +14,7 @@ from server.app.cms.client import get_token
 from server.app.cms.question import list_questions_by_knowledge
 from server.app.db import Database
 from server.app.jobs import JobQueries
+from server.app.pipelines.artifacts import clear_rerun_outputs
 from server.app.pipelines.definition import PipelineDefinition
 from server.app.pipelines.registry import load_registered_pipeline
 from server.app.pipelines.resources import (
@@ -826,7 +827,19 @@ def create_jobs_router(
                 continue
             definition = _definition(settings, str(job["pipeline_key"]))
             first_node = next(iter(definition.nodes))
-            job_db.mark_node_for_rerun(job_id, first_node, downstream_nodes(definition, first_node))
+            stale_nodes = downstream_nodes(definition, first_node)
+            try:
+                clear_rerun_outputs(definition, first_node, Path(str(job["storage_dir"])))
+            except ValueError as exc:
+                results.append(
+                    {
+                        "job_id": job_id,
+                        "status": "skipped",
+                        "reason": f"cleanup_failed: {exc}",
+                    }
+                )
+                continue
+            job_db.mark_node_for_rerun(job_id, first_node, stale_nodes)
             results.append({"job_id": job_id, "status": "rerun", "node_key": first_node})
         return BatchJobResponse(results=results)
 
@@ -955,7 +968,13 @@ def create_jobs_router(
         definition = _definition(settings, str(job["pipeline_key"]))
         if node_key not in definition.nodes:
             raise HTTPException(status_code=404, detail="Node not found")
+        if job["status"] == "running":
+            raise HTTPException(status_code=400, detail="Cannot rerun a running job")
         stale_nodes = downstream_nodes(definition, node_key)
+        try:
+            clear_rerun_outputs(definition, node_key, Path(str(job["storage_dir"])))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Cleanup failed: {exc}") from exc
         try:
             job_db.mark_node_for_rerun(job_id, node_key, stale_nodes)
         except ValueError as exc:
