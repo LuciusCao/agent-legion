@@ -78,8 +78,11 @@ export function JobListItem({
         }}
         style={{ cursor: 'pointer' }}
       >
-        <div className={styles.sourceId}>{job.source_id}</div>
-        <div className={styles.title}>{job.title || '—'}</div>
+        <div className={styles.sourceId}>
+          {job.title
+            ? `${job.title.length > 30 ? job.title.slice(0, 30) + '…' : job.title} - ${job.source_id}`
+            : job.source_id}
+        </div>
       </div>
       <span className={`${styles.badge} ${statusClass(job.status)}`}>
         {JOB_STATUS_LABELS[job.status] || job.status}

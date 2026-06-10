@@ -105,53 +105,53 @@ export default function WorkspaceLayout() {
           backTo={backTo}
           scrolled={scrolled}
           rightActions={
-            <>
-              {showListActions && (
-                <>
-                  <md-icon-button
-                    aria-label={selectMode ? '完成' : '多选'}
-                    onClick={toggleSelectMode}
-                    className={selectMode ? 'active-icon' : ''}
-                  >
-                    <md-icon>{selectMode ? 'close' : 'checklist'}</md-icon>
-                  </md-icon-button>
-                  <md-icon-button
-                    aria-label="添加"
-                    onClick={() => {
-                      if (isVideoHive) {
-                        openAddDialog()
-                      } else if (workspaceId) {
-                        navigate(`/workspaces/${workspaceId}/jobs`)
-                      }
-                    }}
-                  >
-                    <md-icon>add</md-icon>
-                  </md-icon-button>
-                  <md-icon-button
-                    aria-label="包历史"
-                    onClick={() => {
-                      if (workspaceId) {
-                        navigate(`/workspaces/${workspaceId}/packages`)
-                      }
-                    }}
-                  >
-                    <md-icon>inventory_2</md-icon>
-                  </md-icon-button>
-                </>
-              )}
-              <AgentPanel
-                autoFetch={false}
-                bare
-                compact
-                allowedAgentIds={allowedAgentIds}
-              />
-              <md-icon-button
-                aria-label={WORKSPACE_LABELS.settings}
-                onClick={() => navigate(`/workspaces/${workspaceId}/settings`)}
-              >
-                <md-icon>settings</md-icon>
-              </md-icon-button>
-            </>
+            showListActions ? (
+              <>
+                <md-icon-button
+                  aria-label={selectMode ? '完成' : '多选'}
+                  onClick={toggleSelectMode}
+                  className={selectMode ? 'active-icon' : ''}
+                >
+                  <md-icon>{selectMode ? 'close' : 'checklist'}</md-icon>
+                </md-icon-button>
+                <md-icon-button
+                  aria-label="添加"
+                  onClick={() => {
+                    if (isVideoHive) {
+                      openAddDialog()
+                    } else if (workspaceId) {
+                      navigate(`/workspaces/${workspaceId}/jobs`)
+                    }
+                  }}
+                >
+                  <md-icon>add</md-icon>
+                </md-icon-button>
+                <md-icon-button
+                  aria-label="包历史"
+                  onClick={() => {
+                    if (workspaceId) {
+                      navigate(`/workspaces/${workspaceId}/packages`)
+                    }
+                  }}
+                >
+                  <md-icon>inventory_2</md-icon>
+                </md-icon-button>
+                <AgentPanel
+                  autoFetch={false}
+                  bare
+                  compact
+                  allowedAgentIds={allowedAgentIds}
+                />
+                <md-icon-button
+                  aria-label={WORKSPACE_LABELS.settings}
+                  onClick={() =>
+                    navigate(`/workspaces/${workspaceId}/settings`)
+                  }
+                >
+                  <md-icon>settings</md-icon>
+                </md-icon-button>
+              </>
+            ) : undefined
           }
         />
       )}
