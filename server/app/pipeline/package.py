@@ -14,6 +14,40 @@ PACKAGE_FILES = [
 ]
 
 
+def create_workspace_package(
+    jobs: list[Any], packages_dir: Path, jobs_base_dir: Path
+) -> tuple[Path, int]:
+    packages_dir.mkdir(parents=True, exist_ok=True)
+    package_path = (
+        packages_dir / f"workspace-jobs-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}.zip"
+    )
+    manifest = {
+        "created_at": datetime.now(UTC).isoformat(),
+        "jobs": [
+            {
+                "id": job["id"],
+                "source_id": job.get("source_id", ""),
+                "pipeline_key": job.get("pipeline_key", ""),
+                "status": job.get("status", ""),
+            }
+            for job in jobs
+        ],
+    }
+    job_count = 0
+    with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        for job in jobs:
+            storage_dir = job.get("storage_dir", "")
+            job_dir = Path(storage_dir) if storage_dir else jobs_base_dir / job["id"]
+            if job_dir.exists():
+                for f in job_dir.rglob("*"):
+                    if f.is_file():
+                        arcname = f"{job['id']}/{f.relative_to(job_dir)}"
+                        zf.write(f, arcname)
+            job_count += 1
+    return package_path, job_count
+
+
 def create_package(
     videos: list[Any], packages_dir: Path, videos_base_dir: Path | None = None
 ) -> tuple[Path, int]:
