@@ -6,6 +6,7 @@ import { useUiStore } from '../stores/uiStore'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
 import { AgentPanel } from '../components/AgentPanel'
+import { AddDialog } from '../components/AddDialog'
 import { WORKSPACE_LABELS } from '../labels'
 
 export const VIDEO_HIVE_ID = 'video-hive'
@@ -23,7 +24,15 @@ export default function WorkspaceLayout() {
     fetchWorkspaceStats,
   } = useWorkspaceStore()
 
-  const { fetchWorkerStatus, pageTitle, openAddDialog } = useUiStore()
+  const {
+    fetchWorkerStatus,
+    pageTitle,
+    openAddDialog,
+    addDialogOpen,
+    closeAddDialog,
+    addDialogContext,
+    addDialogWorkspaceId,
+  } = useUiStore()
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
 
@@ -118,9 +127,9 @@ export default function WorkspaceLayout() {
                   aria-label="添加"
                   onClick={() => {
                     if (isVideoHive) {
-                      openAddDialog()
+                      openAddDialog({ context: 'video' })
                     } else if (workspaceId) {
-                      navigate(`/workspaces/${workspaceId}/jobs`)
+                      openAddDialog({ context: 'workspace', workspaceId })
                     }
                   }}
                 >
@@ -158,6 +167,12 @@ export default function WorkspaceLayout() {
       mainClassName="workspace-main"
     >
       <Outlet />
+      <AddDialog
+        open={addDialogOpen}
+        onClose={closeAddDialog}
+        context={addDialogContext}
+        workspaceId={addDialogWorkspaceId}
+      />
     </AppShell>
   )
 }
