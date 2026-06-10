@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react'
 import type { CSSProperties } from 'react'
 import { DagStepper } from './DagStepper'
+import { durationSeconds } from '../helpers'
 import type { JobNodeRecord, NodeRunRecord } from '../types'
 import { JOB_STATUS_LABELS } from '../labels'
 import styles from './JobProgressPanel.module.css'
@@ -24,18 +25,6 @@ const BADGE_STATUS_CLASS: Record<string, string> = {
   running: styles.badgeRunning,
   failed: styles.badgeFailed,
   pending: styles.badgePending,
-}
-
-function durationSeconds(
-  start?: string | null,
-  end?: string | null
-): number | undefined {
-  if (!start || !end) return undefined
-  const s = new Date(start).getTime()
-  const e = new Date(end).getTime()
-  if (Number.isNaN(s) || Number.isNaN(e)) return undefined
-  const diff = Math.round((e - s) / 1000)
-  return diff >= 0 ? diff : 0
 }
 
 function formatDuration(seconds?: number): string {

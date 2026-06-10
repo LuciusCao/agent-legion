@@ -168,9 +168,8 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       try {
         const refreshed = await fetchJobs(workspaceId, pipelineKey)
         setJobs(refreshed.jobs)
-      } catch (refreshErr) {
+      } catch {
         // refresh failure should not erase success message
-        console.error('Failed to refresh jobs:', refreshErr)
       }
     } catch (err) {
       setMessage('')

@@ -4,7 +4,15 @@ import type { QuestionDetailResponse } from '../types'
 import styles from './QuestionContentPanel.module.css'
 
 const ALLOWED_TAGS = new Set([
-  'P', 'BR', 'STRONG', 'EM', 'UL', 'OL', 'LI', 'SPAN', 'DIV',
+  'P',
+  'BR',
+  'STRONG',
+  'EM',
+  'UL',
+  'OL',
+  'LI',
+  'SPAN',
+  'DIV',
 ])
 
 function sanitizeHtml(html: string): string {

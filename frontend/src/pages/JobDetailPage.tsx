@@ -5,6 +5,7 @@ import { NodeDetailPanel } from '../components/NodeDetailPanel'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact, fetchJobDetail } from '../api'
+import { durationSeconds } from '../helpers'
 import { useUiStore } from '../stores/uiStore'
 import type { JobDetailResponse, JobNodeRecord } from '../types'
 import styles from './JobDetailPage.module.css'
@@ -43,18 +44,6 @@ function toDagEdges(nodes: JobNodeRecord[]): DagEdge[] {
     }
   })
   return edges
-}
-
-function durationSeconds(
-  start?: string | null,
-  end?: string | null
-): number | undefined {
-  if (!start || !end) return undefined
-  const s = new Date(start).getTime()
-  const e = new Date(end).getTime()
-  if (Number.isNaN(s) || Number.isNaN(e)) return undefined
-  const diff = Math.round((e - s) / 1000)
-  return diff >= 0 ? diff : 0
 }
 
 export default function JobDetailPage() {
@@ -163,46 +152,39 @@ export default function JobDetailPage() {
     return <p className={styles.loading}>加载中...</p>
   }
 
-  const sourceType = detail?.job.source_type
-
-  const renderLeftContent = () => {
-    if (sourceType === 'question' && workspaceId) {
-      return (
-        <QuestionContentPanel
-          workspaceId={workspaceId}
-          questionId={detail!.job.source_id}
-        />
-      )
-    }
-    return (
-      <>
-        <div className={styles.graphWrap}>
-          <DagGraph
-            nodes={dagNodes}
-            edges={dagEdges}
-            selectedNodeKey={selectedNodeKey}
-            onNodeClick={setSelectedNodeKey}
-          />
-        </div>
-        <NodeDetailPanel
-          node={selectedNode}
-          onViewLogs={() => {
-            /* TODO view logs */
-          }}
-          onRerunNode={() => {
-            /* TODO rerun node */
-          }}
-        />
-      </>
-    )
-  }
-
   return (
     <div className={styles.page}>
       {error ? <p className={styles.error}>{error}</p> : null}
 
       <div className={styles.columns}>
-        <div className={styles.left}>{renderLeftContent()}</div>
+        <div className={styles.left}>
+          {detail?.job.source_type === 'question' && workspaceId ? (
+            <QuestionContentPanel
+              workspaceId={workspaceId}
+              questionId={detail.job.source_id}
+            />
+          ) : (
+            <>
+              <div className={styles.graphWrap}>
+                <DagGraph
+                  nodes={dagNodes}
+                  edges={dagEdges}
+                  selectedNodeKey={selectedNodeKey}
+                  onNodeClick={setSelectedNodeKey}
+                />
+              </div>
+              <NodeDetailPanel
+                node={selectedNode}
+                onViewLogs={() => {
+                  /* TODO view logs */
+                }}
+                onRerunNode={() => {
+                  /* TODO rerun node */
+                }}
+              />
+            </>
+          )}
+        </div>
 
         <div className={styles.right}>
           {detail && (
