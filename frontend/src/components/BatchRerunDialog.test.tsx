@@ -98,10 +98,7 @@ describe('BatchRerunDialog', () => {
       screen.getByText('重跑 2 个视频').click()
     })
 
-    expect(onConfirm).toHaveBeenCalledWith(
-      ['v1', 'v2'],
-      'download'
-    )
+    expect(onConfirm).toHaveBeenCalledWith(['v1', 'v2'], 'download')
     expect(onClose).toHaveBeenCalled()
   })
 
@@ -156,10 +153,7 @@ describe('BatchRerunDialog', () => {
       screen.getByText('重跑 1 个视频').click()
     })
 
-    expect(onConfirm).toHaveBeenCalledWith(
-      ['v1', 'v2'],
-      '__failed__'
-    )
+    expect(onConfirm).toHaveBeenCalledWith(['v1', 'v2'], '__failed__')
     expect(onClose).toHaveBeenCalled()
   })
 })

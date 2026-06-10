@@ -29,7 +29,9 @@ export function AddDialog({
   const [results, setResults] = useState<AddResult[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [workspace, setWorkspace] = useState<WorkspaceRecord | null>(null)
-  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(null)
+  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(
+    null
+  )
   const [selectedModeKey, setSelectedModeKey] = useState('')
   const [loadingModes, setLoadingModes] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -39,7 +41,9 @@ export function AddDialog({
     if (!pipeline?.intake?.modes) return []
     const enabledModes = workspace?.intake_config?.enabled_modes || []
     if (enabledModes.length === 0) return pipeline.intake.modes
-    return pipeline.intake.modes.filter((mode) => enabledModes.includes(mode.key))
+    return pipeline.intake.modes.filter((mode) =>
+      enabledModes.includes(mode.key)
+    )
   }, [pipeline, workspace])
 
   const getEffectiveLabel = useCallback(
@@ -94,19 +98,19 @@ export function AddDialog({
       if (items.length === 0) return
       setIsSubmitting(true)
       try {
-        const response = await api<{ videos: VideoItem[]; results: AddResult[] }>(
-          '/api/videos',
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              items: items.map((item) => ({
-                content_type: addContentType,
-                external_id: item.external_id,
-                source_uuid: item.source_uuid,
-              })),
-            }),
-          }
-        )
+        const response = await api<{
+          videos: VideoItem[]
+          results: AddResult[]
+        }>('/api/videos', {
+          method: 'POST',
+          body: JSON.stringify({
+            items: items.map((item) => ({
+              content_type: addContentType,
+              external_id: item.external_id,
+              source_uuid: item.source_uuid,
+            })),
+          }),
+        })
         setResults(response.results)
         if (textareaRef.current) textareaRef.current.value = ''
       } finally {

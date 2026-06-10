@@ -72,9 +72,7 @@ export function BatchToolbar({
             </md-outlined-button>
           )
         })}
-        <md-outlined-button onClick={onExitSelectMode}>
-          退出
-        </md-outlined-button>
+        <md-outlined-button onClick={onExitSelectMode}>退出</md-outlined-button>
       </div>
     </div>
   )
