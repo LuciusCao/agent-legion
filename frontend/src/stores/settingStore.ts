@@ -4,6 +4,7 @@ import type {
   GlobalServiceStatus,
   ResourceProviderDefinition,
   ResourceBinding,
+  PipelineDefinitionRecord,
 } from '../types'
 import { api } from '../api'
 import { useUiStore } from './uiStore'
@@ -25,6 +26,7 @@ type SettingState = {
   settings: WorkspaceSettings
   globalServices: GlobalServiceStatus | null
   resourceProviders: ResourceProviderDefinition[]
+  pipelineDefinition: PipelineDefinitionRecord | null
   testStatus: TestStatus
   isSaving: boolean
   saveError: string | null
@@ -33,6 +35,7 @@ type SettingState = {
   fetchSettings: (workspaceId: string) => Promise<void>
   fetchGlobalServices: () => Promise<void>
   fetchResourceProviders: () => Promise<void>
+  fetchPipelineDefinition: () => Promise<void>
   saveSection: (
     section: SettingSection,
     data:
@@ -58,6 +61,7 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   settings: defaultSettings,
   globalServices: null,
   resourceProviders: [],
+  pipelineDefinition: null,
   testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
@@ -120,6 +124,21 @@ export const useSettingStore = create<SettingState>((set, get) => ({
             result as { providers: ResourceProviderDefinition[] }
           ).providers,
         })
+      }
+    } catch {
+      // Silently fail
+    }
+  },
+
+  async fetchPipelineDefinition() {
+    const { settings } = get()
+    const pipelineKey = settings.pipelineKey || 'question_content'
+    try {
+      const result = await api<{ pipeline: PipelineDefinitionRecord }>(
+        `/api/pipelines/${encodeURIComponent(pipelineKey)}`
+      )
+      if (result && typeof result === 'object' && 'pipeline' in result) {
+        set({ pipelineDefinition: result.pipeline })
       }
     } catch {
       // Silently fail
