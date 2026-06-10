@@ -10,7 +10,6 @@ export interface JobListItemProps {
   selectMode: boolean
   onToggleSelect: () => void
   workspaceId?: string
-  entity?: string
 }
 
 function statusClass(status: string): string {
@@ -48,14 +47,11 @@ export function JobListItem({
   selectMode,
   onToggleSelect,
   workspaceId,
-  entity,
 }: JobListItemProps) {
   const navigate = useNavigate()
 
   const handleRowClick = () => {
-    if (entity === 'question' && workspaceId) {
-      navigate(`/workspaces/${workspaceId}/questions/${job.source_id}`)
-    } else if (workspaceId) {
+    if (workspaceId) {
       navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)
     }
   }
