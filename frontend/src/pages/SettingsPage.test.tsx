@@ -165,7 +165,7 @@ describe('SettingsPage', () => {
     mockUnassignAgent.mockResolvedValue(undefined)
   })
 
-  it('renders all 4 sections with nav sidebar', () => {
+  it('renders 3 sections with nav sidebar for non-video-hive workspace', () => {
     useSettingStore.setState({
       pipelineDefinition: {
         key: 'question_content',
@@ -195,6 +195,29 @@ describe('SettingsPage', () => {
     expect(screen.getAllByText('基本信息').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('接入配置').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Pipeline').length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText('智能体')).not.toBeInTheDocument()
+  })
+
+  it('renders agents section for video-hive workspace', () => {
+    useSettingStore.setState({
+      pipelineDefinition: {
+        key: 'question_content',
+        label: '题目内容生成',
+        concurrency: { local: 8, agent: 2 },
+        intake: {
+          modes: [
+            {
+              key: 'direct_ids',
+              label: '直接输入 ID',
+              input_field: 'question_ids',
+              resource: '',
+            },
+          ],
+        },
+        nodes: [],
+      },
+    })
+    renderPage(['/workspaces/video-hive/settings'])
     expect(screen.getAllByText('智能体').length).toBeGreaterThanOrEqual(1)
   })
 
@@ -330,15 +353,14 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('renders AgentAllocationList instead of placeholder in agents card', async () => {
+  it('does not render AgentAllocationList for non-video-hive workspace', async () => {
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('可用智能体')).toBeInTheDocument()
+      expect(screen.queryByText('可用智能体')).not.toBeInTheDocument()
     })
     expect(
-      screen.queryByText(/智能体配置将在后续步骤实现/)
+      screen.queryByText('当前工作空间未分配智能体')
     ).not.toBeInTheDocument()
-    expect(screen.getByText('当前工作空间未分配智能体')).toBeInTheDocument()
   })
 
   it('renders resource provider params when intake mode is checked', async () => {

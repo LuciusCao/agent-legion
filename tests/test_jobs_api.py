@@ -469,7 +469,9 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     assert node_keys[0] == "fetch_question_context"
     assert "assemble_package" in node_keys
     assert all("label" in node for node in body["pipeline"]["nodes"])
-    fetch_node = next(node for node in body["pipeline"]["nodes"] if node["key"] == "fetch_question_context")
+    fetch_node = next(
+        node for node in body["pipeline"]["nodes"] if node["key"] == "fetch_question_context"
+    )
     assert fetch_node["label"] == "获取题目上下文"
     graph_node = next(
         node for node in body["pipeline"]["nodes"] if node["key"] == "content_graph_generation"

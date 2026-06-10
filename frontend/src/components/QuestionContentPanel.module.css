@@ -91,3 +91,9 @@
   line-height: 1.5;
   margin: 0;
 }
+
+.answerText {
+  line-height: 1.6;
+  color: var(--md-sys-color-on-surface);
+  font-size: 14px;
+}

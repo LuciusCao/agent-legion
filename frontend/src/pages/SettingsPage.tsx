@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useSettingStore } from '../stores/settingStore'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { AgentAllocationList } from '../components/AgentAllocationList'
+import { VIDEO_HIVE_ID } from '../layouts/WorkspaceLayout'
 import styles from './SettingsPage.module.css'
 
 const PIPELINE_OPTIONS = [
@@ -36,15 +37,9 @@ function ConnectionStatusPill({
   )
 }
 
-const NAV_ITEMS = [
-  { id: 'basic-info', label: '基本信息' },
-  { id: 'intake-config', label: '接入配置' },
-  { id: 'pipeline', label: 'Pipeline' },
-  { id: 'agents', label: '智能体' },
-]
-
 export function SettingsPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
+  const isVideoHive = workspaceId === VIDEO_HIVE_ID
   const {
     setWorkspaceId,
     workspaceName,
@@ -71,6 +66,16 @@ export function SettingsPage() {
     fetchPipelineDefinition,
   } = useSettingStore()
 
+  const navItems = useMemo(
+    () => [
+      { id: 'basic-info', label: '基本信息' },
+      { id: 'intake-config', label: '接入配置' },
+      { id: 'pipeline', label: 'Pipeline' },
+      ...(isVideoHive ? [{ id: 'agents', label: '智能体' }] : []),
+    ],
+    [isVideoHive]
+  )
+
   const [activeSection, setActiveSection] = useState('basic-info')
 
   useEffect(() => {
@@ -80,9 +85,12 @@ export function SettingsPage() {
     void fetchSettings(workspaceId).then(() => {
       void fetchPipelineDefinition()
     })
-    void fetchAgentAssignments(workspaceId)
+    if (isVideoHive) {
+      void fetchAgentAssignments(workspaceId)
+    }
   }, [
     workspaceId,
+    isVideoHive,
     setWorkspaceId,
     resetTestStatus,
     fetchSettings,
@@ -158,7 +166,7 @@ export function SettingsPage() {
       <div className={styles.settingsLayout}>
         <nav className={styles.navSidebar}>
           <ul className={styles.navList}>
-            {NAV_ITEMS.map((item) => (
+            {navItems.map((item) => (
               <li
                 key={item.id}
                 className={
@@ -208,23 +216,28 @@ export function SettingsPage() {
             <h2 className={styles.sectionTitle}>接入配置</h2>
             <hr className={styles.sectionDivider} />
             <div className={styles.field}>
-              <label htmlFor="entity-type">默认实体类型</label>
-              <select
-                id="entity-type"
+              <md-outlined-select
+                label="默认实体类型"
                 value={settings.entityType}
-                onChange={(e) =>
+                onChange={(e: React.FormEvent<HTMLSelectElement>) =>
                   setSettings({
-                    entityType: e.target.value as
+                    entityType: (e.target as HTMLSelectElement).value as
                       | 'question'
                       | 'knowledge'
                       | 'video',
                   })
                 }
               >
-                <option value="question">question</option>
-                <option value="knowledge">knowledge</option>
-                <option value="video">video</option>
-              </select>
+                <md-select-option value="question">
+                  <div slot="headline">question</div>
+                </md-select-option>
+                <md-select-option value="knowledge">
+                  <div slot="headline">knowledge</div>
+                </md-select-option>
+                <md-select-option value="video">
+                  <div slot="headline">video</div>
+                </md-select-option>
+              </md-outlined-select>
             </div>
 
             <div className={styles.field}>
@@ -394,19 +407,24 @@ export function SettingsPage() {
             <h2 className={styles.sectionTitle}>Pipeline</h2>
             <hr className={styles.sectionDivider} />
             <div className={styles.field}>
-              <label htmlFor="pipeline-select">流水线</label>
-              <select
-                id="pipeline-select"
-                value={settings.pipelineKey}
-                onChange={(e) => setSettings({ pipelineKey: e.target.value })}
+              <md-outlined-select
+                label="流水线"
+                value={settings.pipelineKey || ''}
+                onChange={(e: React.FormEvent<HTMLSelectElement>) =>
+                  setSettings({
+                    pipelineKey: (e.target as HTMLSelectElement).value,
+                  })
+                }
               >
-                <option value="">请选择</option>
+                <md-select-option value="">
+                  <div slot="headline">请选择</div>
+                </md-select-option>
                 {PIPELINE_OPTIONS.map((p) => (
-                  <option key={p.key} value={p.key}>
-                    {p.label}
-                  </option>
+                  <md-select-option key={p.key} value={p.key}>
+                    <div slot="headline">{p.label}</div>
+                  </md-select-option>
                 ))}
-              </select>
+              </md-outlined-select>
             </div>
             <div className={styles.field}>
               <label htmlFor="local-concurrency">本地并发限制</label>
@@ -442,15 +460,16 @@ export function SettingsPage() {
             </div>
           </section>
 
-          <section id="agents" className={styles.section}>
-            <h2 className={styles.sectionTitle}>智能体</h2>
-            <hr className={styles.sectionDivider} />
-            <AgentAllocationList
-              workspaceId={workspaceId}
-              assignments={agentAssignments}
-              onAssignmentsChange={setAgentAssignments}
-            />
-          </section>
+          {isVideoHive && (
+            <section id="agents" className={styles.section}>
+              <h2 className={styles.sectionTitle}>智能体</h2>
+              <AgentAllocationList
+                workspaceId={workspaceId}
+                assignments={agentAssignments}
+                onAssignmentsChange={setAgentAssignments}
+              />
+            </section>
+          )}
         </div>
       </div>
     </AppShell>
