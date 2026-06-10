@@ -253,6 +253,8 @@ export type NodeRunRecord = {
   error_message: string
   started_at: string
   finished_at: string | null
+  run_dir: string
+  session_dir: string
 }
 
 export type JobDetailResponse = {

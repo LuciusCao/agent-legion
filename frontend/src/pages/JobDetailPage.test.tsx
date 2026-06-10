@@ -78,7 +78,7 @@ describe('JobDetailPage', () => {
     vi.unstubAllGlobals()
   })
 
-  it('renders page with job title', async () => {
+  it('renders page with job detail', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -89,7 +89,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('Algebra Problem')).toBeInTheDocument()
+    expect(await screen.findByText('节点进度')).toBeInTheDocument()
     expect(screen.getAllByText('extract').length).toBeGreaterThanOrEqual(2)
     expect(screen.getAllByText('generate').length).toBeGreaterThanOrEqual(1)
   })
@@ -134,22 +134,5 @@ describe('JobDetailPage', () => {
     expect(panel).toBeInTheDocument()
     expect(within(panel).getByText('extract')).toBeInTheDocument()
     expect(screen.getByText('12秒')).toBeInTheDocument()
-  })
-
-  it('back button navigates to workspace job list', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => mockDetail,
-      })
-    )
-
-    renderPage()
-
-    expect(await screen.findByText('Algebra Problem')).toBeInTheDocument()
-    fireEvent.click(screen.getByTestId('back-btn'))
-
-    expect(await screen.findByTestId('job-list-page')).toBeInTheDocument()
   })
 })

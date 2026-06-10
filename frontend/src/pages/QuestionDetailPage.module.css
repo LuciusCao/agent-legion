@@ -19,44 +19,15 @@
   border-radius: 8px;
 }
 
-.topBar {
+.sectionHeader {
   display: flex;
   align-items: center;
-  gap: 16px;
-  flex-wrap: wrap;
+  justify-content: space-between;
+  margin-bottom: 12px;
 }
 
-.backBtn {
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--md-sys-color-outline, #d1d5db);
-  background: var(--md-sys-color-surface, #ffffff);
-  color: var(--md-sys-color-on-surface, #111827);
-  font-size: 14px;
-  cursor: pointer;
-}
-
-.title {
-  flex: 1;
-  font-size: 18px;
-  font-weight: 600;
-  margin: 0;
-  color: var(--md-sys-color-on-surface, #111827);
-}
-
-.topActions {
-  display: flex;
-  gap: 10px;
-}
-
-.actionBtn {
-  padding: 8px 12px;
-  border-radius: 8px;
-  border: 1px solid var(--md-sys-color-outline, #d1d5db);
-  background: var(--md-sys-color-surface, #ffffff);
-  color: var(--md-sys-color-on-surface, #111827);
-  font-size: 14px;
-  cursor: pointer;
+.sectionHeader .sectionTitle {
+  margin-bottom: 0;
 }
 
 .columns {

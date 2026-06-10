@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { fetchQuestionDetail } from '../api'
 import { JOB_STATUS_LABELS } from '../labels'
+import { useUiStore } from '../stores/uiStore'
 import type { JobRecord, QuestionDetailResponse } from '../types'
 import styles from './QuestionDetailPage.module.css'
 
@@ -36,7 +37,6 @@ function sanitizeHtml(html: string): string {
     }
     parent.removeChild(el)
   })
-  // Strip all attributes from allowed tags to prevent XSS via event handlers / styles
   const attrWalker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
   while (attrWalker.nextNode()) {
     const el = attrWalker.currentNode as Element
@@ -62,6 +62,7 @@ export default function QuestionDetailPage() {
     questionId: string
   }>()
   const navigate = useNavigate()
+  const { setPageTitle } = useUiStore()
   const [detail, setDetail] = useState<QuestionDetailResponse | null>(null)
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
@@ -71,7 +72,10 @@ export default function QuestionDetailPage() {
     let cancelled = false
     fetchQuestionDetail(workspaceId, questionId)
       .then((data) => {
-        if (!cancelled) setDetail(data)
+        if (!cancelled) {
+          setDetail(data)
+          setPageTitle(`${data.title || '知识点'} - ${questionId}`)
+        }
       })
       .catch((err) => {
         if (!cancelled)
@@ -82,8 +86,9 @@ export default function QuestionDetailPage() {
       })
     return () => {
       cancelled = true
+      setPageTitle(null)
     }
-  }, [workspaceId, questionId])
+  }, [workspaceId, questionId, setPageTitle])
 
   useEffect(() => {
     if (!workspaceId || !questionId) return
@@ -91,7 +96,10 @@ export default function QuestionDetailPage() {
     const timer = setInterval(() => {
       fetchQuestionDetail(workspaceId, questionId)
         .then((data) => {
-          if (!cancelled) setDetail(data)
+          if (!cancelled) {
+            setDetail(data)
+            setPageTitle(`${data.title || '知识点'} - ${questionId}`)
+          }
         })
         .catch(() => {})
     }, 5000)
@@ -99,7 +107,7 @@ export default function QuestionDetailPage() {
       cancelled = true
       clearInterval(timer)
     }
-  }, [workspaceId, questionId])
+  }, [workspaceId, questionId, setPageTitle])
 
   const stem = detail?.normalized.stem
   const stemHtml = useMemo(() => {
@@ -137,26 +145,6 @@ export default function QuestionDetailPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.topBar}>
-        <button
-          type="button"
-          className={styles.backBtn}
-          onClick={() => navigate(`/workspaces/${workspaceId}`)}
-        >
-          ◀ 返回 workspace
-        </button>
-        <h1 className={styles.title}>{detail?.title || questionId}</h1>
-        <div className={styles.topActions}>
-          <button
-            type="button"
-            className={styles.actionBtn}
-            onClick={handleRefresh}
-          >
-            <md-icon>refresh</md-icon> 刷新
-          </button>
-        </div>
-      </div>
-
       {error ? <p className={styles.error}>{error}</p> : null}
 
       <div className={styles.columns}>
@@ -236,7 +224,16 @@ export default function QuestionDetailPage() {
 
         <div className={styles.right}>
           <section className={styles.card}>
-            <h2 className={styles.sectionTitle}>处理记录</h2>
+            <div className={styles.sectionHeader}>
+              <h2 className={styles.sectionTitle}>处理记录</h2>
+              <md-icon-button
+                aria-label="刷新"
+                onClick={handleRefresh}
+                title="刷新"
+              >
+                <md-icon>refresh</md-icon>
+              </md-icon-button>
+            </div>
             {detail && detail.jobs.length > 0 ? (
               <ul className={styles.jobList}>
                 {detail.jobs.map((job) => (

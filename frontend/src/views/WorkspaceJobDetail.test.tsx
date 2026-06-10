@@ -136,4 +136,68 @@ describe('WorkspaceJobDetail', () => {
     fireEvent.click(screen.getByText('log.txt'))
     expect(await screen.findByText('plain text content')).toBeInTheDocument()
   })
+
+  it('renders Pi badge and session for agent runs', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        job: {
+          id: 'j1',
+          workspace_id: 'math_ws',
+          pipeline_key: 'reading_analysis',
+          source_id: 'q1',
+          title: 'Q1',
+          status: 'completed',
+        },
+        nodes: [
+          {
+            id: 1,
+            job_id: 'j1',
+            node_key: 'extract_keywords',
+            status: 'completed',
+            error_message: '',
+          },
+        ],
+        runs: [
+          {
+            id: 1,
+            job_id: 'j1',
+            node_key: 'extract_keywords',
+            status: 'completed',
+            command_json: JSON.stringify([
+              'pi',
+              '--mode',
+              'json',
+              '--session-dir',
+              '/data/jobs/j1/runs/extract_keywords/r1/session',
+            ]),
+            exit_code: 0,
+            log_path: '/data/jobs/j1/runs/extract_keywords/r1/events.jsonl',
+            error_message: '',
+            started_at: '2026-06-08 10:00:00',
+            finished_at: '2026-06-08 10:00:01',
+            run_dir: '/data/jobs/j1/runs/extract_keywords/r1',
+            session_dir: '/data/jobs/j1/runs/extract_keywords/r1/session',
+          },
+        ],
+        artifacts: ['keywords_raw.json'],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/workspaces/math_ws/jobs/j1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/jobs/:jobId"
+            element={<WorkspaceJobDetail />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByText('Q1')).toBeInTheDocument()
+    expect(screen.getByText('Pi')).toBeInTheDocument()
+    expect(screen.getByText(/session: session/)).toBeInTheDocument()
+  })
 })
