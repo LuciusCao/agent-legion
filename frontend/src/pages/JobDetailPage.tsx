@@ -3,7 +3,9 @@ import { useParams } from 'react-router-dom'
 import { DagGraph, type DagEdge, type DagNode } from '../components/DagGraph'
 import { NodeDetailPanel } from '../components/NodeDetailPanel'
 import { JobProgressPanel } from '../components/JobProgressPanel'
+import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact, fetchJobDetail } from '../api'
+import { durationSeconds } from '../helpers'
 import { useUiStore } from '../stores/uiStore'
 import type { JobDetailResponse, JobNodeRecord } from '../types'
 import styles from './JobDetailPage.module.css'
@@ -44,20 +46,8 @@ function toDagEdges(nodes: JobNodeRecord[]): DagEdge[] {
   return edges
 }
 
-function durationSeconds(
-  start?: string | null,
-  end?: string | null
-): number | undefined {
-  if (!start || !end) return undefined
-  const s = new Date(start).getTime()
-  const e = new Date(end).getTime()
-  if (Number.isNaN(s) || Number.isNaN(e)) return undefined
-  const diff = Math.round((e - s) / 1000)
-  return diff >= 0 ? diff : 0
-}
-
 export default function JobDetailPage() {
-  const { jobId } = useParams<{
+  const { workspaceId, jobId } = useParams<{
     workspaceId: string
     jobId: string
   }>()
@@ -93,6 +83,27 @@ export default function JobDetailPage() {
       setPageTitle(null)
     }
   }, [jobId, setPageTitle])
+
+  // Poll every 5s for running jobs
+  const detailRef = useRef(detail)
+  detailRef.current = detail
+  useEffect(() => {
+    if (!jobId) return
+    let stale = false
+    const timer = setInterval(() => {
+      if (detailRef.current?.job.status === 'running') {
+        fetchJobDetail(jobId)
+          .then((data) => {
+            if (!stale) setDetail(data)
+          })
+          .catch(() => {})
+      }
+    }, 5000)
+    return () => {
+      stale = true
+      clearInterval(timer)
+    }
+  }, [jobId])
 
   const dagNodes = useMemo(
     () => (detail ? toDagNodes(detail.nodes) : []),
@@ -147,23 +158,32 @@ export default function JobDetailPage() {
 
       <div className={styles.columns}>
         <div className={styles.left}>
-          <div className={styles.graphWrap}>
-            <DagGraph
-              nodes={dagNodes}
-              edges={dagEdges}
-              selectedNodeKey={selectedNodeKey}
-              onNodeClick={setSelectedNodeKey}
+          {detail?.job.source_type === 'question' && workspaceId ? (
+            <QuestionContentPanel
+              workspaceId={workspaceId}
+              questionId={detail.job.source_id}
             />
-          </div>
-          <NodeDetailPanel
-            node={selectedNode}
-            onViewLogs={() => {
-              /* TODO view logs */
-            }}
-            onRerunNode={() => {
-              /* TODO rerun node */
-            }}
-          />
+          ) : (
+            <>
+              <div className={styles.graphWrap}>
+                <DagGraph
+                  nodes={dagNodes}
+                  edges={dagEdges}
+                  selectedNodeKey={selectedNodeKey}
+                  onNodeClick={setSelectedNodeKey}
+                />
+              </div>
+              <NodeDetailPanel
+                node={selectedNode}
+                onViewLogs={() => {
+                  /* TODO view logs */
+                }}
+                onRerunNode={() => {
+                  /* TODO rerun node */
+                }}
+              />
+            </>
+          )}
         </div>
 
         <div className={styles.right}>
