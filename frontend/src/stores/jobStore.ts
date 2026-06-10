@@ -197,7 +197,7 @@ export const useJobStore = create<JobState>((set, get) => ({
       (id) => get().jobs.find((j) => j.id === id)?.status === 'completed'
     )
     if (completedIds.length === 0) {
-      useUiStore.getState().showToast('没有已完成的任务可打包', 'warning')
+      useUiStore.getState().showToast('没有已完成的任务可打包', 'error')
       return
     }
     set({ batchPackageLoading: true })
@@ -209,11 +209,14 @@ export const useJobStore = create<JobState>((set, get) => ({
           body: JSON.stringify({ job_ids: completedIds }),
         }
       )
-      useUiStore.getState().showToast(`已打包 ${completedIds.length} 个任务`, 'success')
+      useUiStore
+        .getState()
+        .showToast(`已打包 ${completedIds.length} 个任务`, 'success')
       await get().fetchJobs(workspaceId)
       get().clearSelection()
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'Batch package failed'
+      const message =
+        err instanceof Error ? err.message : 'Batch package failed'
       set({ error: message })
       useUiStore.getState().showToast(message, 'error')
       throw err

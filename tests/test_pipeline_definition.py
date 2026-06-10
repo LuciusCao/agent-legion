@@ -34,6 +34,26 @@ def test_load_question_content_definition():
     ]
 
 
+def test_load_reading_analysis_agent_contracts():
+    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+
+    assert definition.key == "reading_analysis"
+    assert definition.label == "题目审题分析 Pipeline"
+    assert definition.concurrency.local == 4
+    assert definition.concurrency.agent == 2
+    assert set(definition.intake.modes) == {"batch_by_knowledge", "batch_by_ids"}
+
+    node = definition.nodes["extract_keywords"]
+    assert node.runner == "agent"
+    assert node.agent is not None
+    assert node.agent.engine == "pi"
+    assert node.agent.skill == "reading_analysis/extract_keywords"
+    assert node.agent.tools == ["read", "write", "bash"]
+    assert definition.nodes["fetch_questions"].agent is None
+    assert definition.nodes["clean_and_parse"].agent is None
+    assert definition.nodes["mark_question"].agent is None
+
+
 def test_reject_unknown_dependency(tmp_path):
     config = tmp_path / "bad.yaml"
     config.write_text(
@@ -88,3 +108,142 @@ nodes:
 
     with pytest.raises(PipelineDefinitionError, match="runner"):
         load_pipeline_definition(config)
+
+
+def test_reject_agent_block_on_local_node(tmp_path):
+    config = tmp_path / "bad-agent-local.yaml"
+    config.write_text(
+        """
+key: bad
+label: Bad
+nodes:
+  one:
+    runner: local
+    agent:
+      engine: pi
+      skill: foo
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineDefinitionError, match="agent block"):
+        load_pipeline_definition(config)
+
+
+def test_reject_unsupported_agent_engine(tmp_path):
+    config = tmp_path / "bad-engine.yaml"
+    config.write_text(
+        """
+key: bad
+label: Bad
+nodes:
+  one:
+    runner: agent
+    agent:
+      engine: other
+      skill: foo
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineDefinitionError, match="engine"):
+        load_pipeline_definition(config)
+
+
+def test_reject_empty_agent_skill(tmp_path):
+    config = tmp_path / "bad-skill.yaml"
+    config.write_text(
+        """
+key: bad
+label: Bad
+nodes:
+  one:
+    runner: agent
+    agent:
+      engine: pi
+      skill: ""
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineDefinitionError, match="skill"):
+        load_pipeline_definition(config)
+
+
+def test_reject_absolute_agent_skill(tmp_path):
+    config = tmp_path / "bad-abs-skill.yaml"
+    config.write_text(
+        """
+key: bad
+label: Bad
+nodes:
+  one:
+    runner: agent
+    agent:
+      engine: pi
+      skill: /foo
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineDefinitionError, match="skill"):
+        load_pipeline_definition(config)
+
+
+def test_reject_parent_traversal_agent_skill(tmp_path):
+    config = tmp_path / "bad-traverse-skill.yaml"
+    config.write_text(
+        """
+key: bad
+label: Bad
+nodes:
+  one:
+    runner: agent
+    agent:
+      engine: pi
+      skill: foo/../bar
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineDefinitionError, match="skill"):
+        load_pipeline_definition(config)
+
+
+def test_reject_invalid_agent_tool(tmp_path):
+    config = tmp_path / "bad-tool.yaml"
+    config.write_text(
+        """
+key: bad
+label: Bad
+nodes:
+  one:
+    runner: agent
+    agent:
+      engine: pi
+      skill: foo
+      tools: [read, unknown]
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineDefinitionError, match="tool"):
+        load_pipeline_definition(config)
+
+
+def test_legacy_agent_node_without_agent_block_is_readable(tmp_path):
+    config = tmp_path / "legacy.yaml"
+    config.write_text(
+        """
+key: legacy
+label: Legacy
+nodes:
+  one:
+    runner: agent
+""",
+        encoding="utf-8",
+    )
+
+    definition = load_pipeline_definition(config)
+    assert definition.nodes["one"].runner == "agent"
+    assert definition.nodes["one"].agent is None

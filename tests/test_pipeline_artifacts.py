@@ -1,42 +1,66 @@
-import json
 from pathlib import Path
 
-from server.app.pipeline.artifacts import clear_artifacts_from
-from server.app.pipeline.reader import read_artifacts
+import pytest
+
+from server.app.pipelines.artifacts import clear_rerun_outputs
+from server.app.pipelines.definition import load_pipeline_definition
 
 
-def test_clear_artifacts_from_keeps_earlier_outputs(tmp_path):
-    video_dir = tmp_path / "g1"
-    video_dir.mkdir()
-    for name in ["g1.mp4", "subtitles.srt", "chapters.json", "metadata.json"]:
-        (video_dir / name).write_text("x", encoding="utf-8")
+def test_clear_rerun_outputs_deletes_selected_and_downstream_only(tmp_path):
+    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+    for node in definition.nodes.values():
+        for output in node.outputs:
+            (tmp_path / output).write_text("old", encoding="utf-8")
 
-    clear_artifacts_from(video_dir, "transcribe", "g1")
+    cleared = clear_rerun_outputs(definition, "review_keywords", tmp_path)
 
-    assert (video_dir / "g1.mp4").exists()
-    assert not (video_dir / "subtitles.srt").exists()
-    assert not (video_dir / "chapters.json").exists()
-    assert not (video_dir / "metadata.json").exists()
+    assert "keywords_reviewed.json" in cleared
+    assert "difficulty_reviewed.json" in cleared
+    assert "distractors_reviewed.json" in cleared
+    assert "question_marks.json" in cleared
+    assert (tmp_path / "keywords_raw.json").exists()
+    assert not (tmp_path / "keywords_reviewed.json").exists()
 
 
-def test_read_artifacts_includes_checklist(tmp_path: Path) -> None:
-    video_dir = tmp_path / "v1"
-    video_dir.mkdir(parents=True)
-    (video_dir / "subtitles.srt").write_text(
-        "1\n00:00:00,000 --> 00:00:01,000\nhello\n", encoding="utf-8"
-    )
-    (video_dir / "interactions.json").write_text(json.dumps({"interactions": []}), encoding="utf-8")
-    (video_dir / "chapters.json").write_text(json.dumps({"chapters": []}), encoding="utf-8")
-    (video_dir / "checklist.json").write_text(
-        json.dumps({"video_id": "v1", "checklist": {"content_usability": {"issues": []}}}),
-        encoding="utf-8",
-    )
-    (video_dir / "review_result.json").write_text(
-        json.dumps({"score": 100, "status": "published"}), encoding="utf-8"
-    )
+def test_clear_rerun_outputs_leaves_runs_history_untouched(tmp_path):
+    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+    for output in definition.nodes["extract_keywords"].outputs:
+        (tmp_path / output).write_text("old", encoding="utf-8")
+    runs_dir = tmp_path / "runs" / "extract_keywords" / "abc"
+    runs_dir.mkdir(parents=True)
+    (runs_dir / "run.json").write_text("{}", encoding="utf-8")
 
-    result = read_artifacts(video_dir)
-    assert result["checklist"] is not None
-    assert result["checklist"]["checklist"]["content_usability"]["issues"] == []
-    assert result["review"] is not None
-    assert result["review"]["score"] == 100
+    cleared = clear_rerun_outputs(definition, "extract_keywords", tmp_path)
+
+    assert "keywords_raw.json" in cleared
+    assert runs_dir.exists()
+    assert (runs_dir / "run.json").exists()
+
+
+def test_clear_rerun_outputs_rejects_escaping_paths(tmp_path):
+    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+
+    with pytest.raises(ValueError, match="Unknown node"):
+        clear_rerun_outputs(definition, "nonexistent", tmp_path)
+
+
+def test_clear_rerun_outputs_returns_sorted_names(tmp_path):
+    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+    for node in definition.nodes.values():
+        for output in node.outputs:
+            (tmp_path / output).write_text("old", encoding="utf-8")
+
+    cleared = clear_rerun_outputs(definition, "fetch_questions", tmp_path)
+
+    assert cleared == sorted(cleared)
+    assert "questions.json" in cleared
+
+
+def test_clear_rerun_outputs_skips_missing_files(tmp_path):
+    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+    # Only create one output
+    (tmp_path / "questions.json").write_text("old", encoding="utf-8")
+
+    cleared = clear_rerun_outputs(definition, "fetch_questions", tmp_path)
+
+    assert cleared == ["questions.json"]
