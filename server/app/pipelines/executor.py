@@ -88,6 +88,7 @@ def execute_agent_node_once(
         skill_dir=skill_dir,
         inputs=node.inputs,
         outputs=node.outputs,
+        tools=node.agent.tools,
         job_db=job_db,
     )
     return result.status == "completed"
