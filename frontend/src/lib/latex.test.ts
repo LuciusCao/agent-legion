@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { decodeHtmlEntities } from './latex'
+import { decodeHtmlEntities, extractLatexParts } from './latex'
 
 describe('decodeHtmlEntities', () => {
   it('decodes basic entities', () => {
@@ -25,5 +25,58 @@ describe('decodeHtmlEntities', () => {
 
   it('decodes mixed content', () => {
     expect(decodeHtmlEntities('a &lt; b &amp; c')).toBe('a < b & c')
+  })
+})
+
+describe('extractLatexParts', () => {
+  it('returns plain text as-is', () => {
+    expect(extractLatexParts('hello world')).toEqual([
+      { type: 'text', content: 'hello world', display: false },
+    ])
+  })
+
+  it('extracts single inline formula with $', () => {
+    expect(extractLatexParts('x = $\\frac{1}{2}$')).toEqual([
+      { type: 'text', content: 'x = ', display: false },
+      { type: 'latex', content: '\\frac{1}{2}', display: false },
+    ])
+  })
+
+  it('extracts display formula $$ and downgrades to inline', () => {
+    expect(extractLatexParts('$$\\sum_{i=1}^n i$$')).toEqual([
+      { type: 'latex', content: '\\sum_{i=1}^n i', display: false },
+    ])
+  })
+
+  it('extracts display formula \\[...\\] and downgrades to inline', () => {
+    expect(extractLatexParts('\\[\\sqrt{2}\\]')).toEqual([
+      { type: 'latex', content: '\\sqrt{2}', display: false },
+    ])
+  })
+
+  it('extracts inline with \\(...\\)', () => {
+    expect(extractLatexParts('面积 \\(S=\\pi r^2\\) 公式')).toEqual([
+      { type: 'text', content: '面积 ', display: false },
+      { type: 'latex', content: 'S=\\pi r^2', display: false },
+      { type: 'text', content: ' 公式', display: false },
+    ])
+  })
+
+  it('handles multiple formulas', () => {
+    expect(extractLatexParts('$a$ 和 $b$')).toEqual([
+      { type: 'latex', content: 'a', display: false },
+      { type: 'text', content: ' 和 ', display: false },
+      { type: 'latex', content: 'b', display: false },
+    ])
+  })
+
+  it('returns empty array for empty string', () => {
+    expect(extractLatexParts('')).toEqual([])
+  })
+
+  it('handles text with only spaces', () => {
+    expect(extractLatexParts('   ')).toEqual([
+      { type: 'text', content: '   ', display: false },
+    ])
   })
 })
