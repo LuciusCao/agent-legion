@@ -331,14 +331,29 @@ export function SettingsPage() {
               >
                 接入模式
               </span>
-              <div className="intake-chip-row">
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  marginTop: 8,
+                }}
+              >
                 {(pipelineDefinition?.intake?.modes || []).map((mode) => (
-                  <md-filter-chip
+                  <div
                     key={mode.key}
-                    label={mode.label}
-                    selected={settings.intakeModes.includes(mode.key)}
-                    onClick={() => toggleIntakeMode(mode.key)}
-                  />
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <md-checkbox
+                      checked={settings.intakeModes.includes(mode.key)}
+                      onClick={() => toggleIntakeMode(mode.key)}
+                    />
+                    <span style={{ fontSize: 14 }}>{mode.label}</span>
+                  </div>
                 ))}
               </div>
             </div>
