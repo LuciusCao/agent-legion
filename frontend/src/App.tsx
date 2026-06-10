@@ -31,6 +31,11 @@ const VideoHiveSettingsPage = lazy(() =>
     default: m.VideoHiveSettingsPage,
   }))
 )
+const QuestionDetailPage = lazy(() =>
+  import('./pages/QuestionDetailPage').then((m) => ({
+    default: m.default,
+  }))
+)
 
 function WorkspaceJobListWrapper() {
   const { workspaceId } = useParams()
@@ -67,6 +72,10 @@ export default function App() {
             <Route index element={<WorkspaceMainPage />} />
             <Route path="jobs" element={<WorkspaceJobListWrapper />} />
             <Route path="jobs/:jobId" element={<JobDetailPage />} />
+            <Route
+              path="questions/:questionId"
+              element={<QuestionDetailPage />}
+            />
             <Route
               path="packages"
               element={<div>{WORKSPACE_LABELS.packages}视图 — 待实现</div>}

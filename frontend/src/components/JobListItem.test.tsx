@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import { MemoryRouter } from 'react-router-dom'
 import { JobListItem } from './JobListItem'
 import type { JobRecord } from '../types'
 
@@ -18,13 +19,15 @@ const mockJob: JobRecord = {
 describe('JobListItem', () => {
   it('renders source_id, title, and status badge', () => {
     render(
-      <JobListItem
-        job={mockJob}
-        selected={false}
-        expanded={false}
-        onToggleSelect={vi.fn()}
-        onToggleExpand={vi.fn()}
-      />
+      <MemoryRouter>
+        <JobListItem
+          job={mockJob}
+          selected={false}
+          expanded={false}
+          onToggleSelect={vi.fn()}
+          onToggleExpand={vi.fn()}
+        />
+      </MemoryRouter>
     )
 
     expect(screen.getByText('Q100')).toBeInTheDocument()
@@ -34,13 +37,15 @@ describe('JobListItem', () => {
 
   it('shows em dash when title is missing', () => {
     render(
-      <JobListItem
-        job={{ ...mockJob, title: '' }}
-        selected={false}
-        expanded={false}
-        onToggleSelect={vi.fn()}
-        onToggleExpand={vi.fn()}
-      />
+      <MemoryRouter>
+        <JobListItem
+          job={{ ...mockJob, title: '' }}
+          selected={false}
+          expanded={false}
+          onToggleSelect={vi.fn()}
+          onToggleExpand={vi.fn()}
+        />
+      </MemoryRouter>
     )
 
     expect(screen.getByText('—')).toBeInTheDocument()
@@ -48,26 +53,30 @@ describe('JobListItem', () => {
 
   it('checkbox checked state matches prop', () => {
     const { rerender } = render(
-      <JobListItem
-        job={mockJob}
-        selected={false}
-        expanded={false}
-        onToggleSelect={vi.fn()}
-        onToggleExpand={vi.fn()}
-      />
+      <MemoryRouter>
+        <JobListItem
+          job={mockJob}
+          selected={false}
+          expanded={false}
+          onToggleSelect={vi.fn()}
+          onToggleExpand={vi.fn()}
+        />
+      </MemoryRouter>
     )
 
     const checkbox = screen.getByRole('checkbox') as HTMLInputElement
     expect(checkbox.checked).toBe(false)
 
     rerender(
-      <JobListItem
-        job={mockJob}
-        selected={true}
-        expanded={false}
-        onToggleSelect={vi.fn()}
-        onToggleExpand={vi.fn()}
-      />
+      <MemoryRouter>
+        <JobListItem
+          job={mockJob}
+          selected={true}
+          expanded={false}
+          onToggleSelect={vi.fn()}
+          onToggleExpand={vi.fn()}
+        />
+      </MemoryRouter>
     )
 
     expect(checkbox.checked).toBe(true)
@@ -76,13 +85,15 @@ describe('JobListItem', () => {
   it('clicking expand button calls onToggleExpand', () => {
     const onToggleExpand = vi.fn()
     render(
-      <JobListItem
-        job={mockJob}
-        selected={false}
-        expanded={false}
-        onToggleSelect={vi.fn()}
-        onToggleExpand={onToggleExpand}
-      />
+      <MemoryRouter>
+        <JobListItem
+          job={mockJob}
+          selected={false}
+          expanded={false}
+          onToggleSelect={vi.fn()}
+          onToggleExpand={onToggleExpand}
+        />
+      </MemoryRouter>
     )
 
     fireEvent.click(screen.getByText('展开 ▼'))
@@ -91,13 +102,15 @@ describe('JobListItem', () => {
 
   it('renders collapse text when expanded', () => {
     render(
-      <JobListItem
-        job={mockJob}
-        selected={false}
-        expanded={true}
-        onToggleSelect={vi.fn()}
-        onToggleExpand={vi.fn()}
-      />
+      <MemoryRouter>
+        <JobListItem
+          job={mockJob}
+          selected={false}
+          expanded={true}
+          onToggleSelect={vi.fn()}
+          onToggleExpand={vi.fn()}
+        />
+      </MemoryRouter>
     )
 
     expect(screen.getByText('收起 ▲')).toBeInTheDocument()
@@ -105,13 +118,15 @@ describe('JobListItem', () => {
 
   it('progress bar width is correct', () => {
     const { container } = render(
-      <JobListItem
-        job={mockJob}
-        selected={false}
-        expanded={false}
-        onToggleSelect={vi.fn()}
-        onToggleExpand={vi.fn()}
-      />
+      <MemoryRouter>
+        <JobListItem
+          job={mockJob}
+          selected={false}
+          expanded={false}
+          onToggleSelect={vi.fn()}
+          onToggleExpand={vi.fn()}
+        />
+      </MemoryRouter>
     )
 
     const fill = container.querySelector('[data-progress="40"]')
