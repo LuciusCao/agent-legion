@@ -1,10 +1,6 @@
 .list {
   display: flex;
   flex-direction: column;
-  border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: 12px;
-  overflow: hidden;
-  background: var(--md-sys-color-surface);
 }
 
 .item {

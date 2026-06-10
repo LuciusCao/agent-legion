@@ -8,6 +8,7 @@ export interface JobListItemProps {
   job: JobRecord
   selected: boolean
   expanded: boolean
+  selectMode: boolean
   onToggleSelect: () => void
   onToggleExpand: () => void
   workspaceId?: string
@@ -47,6 +48,7 @@ export function JobListItem({
   job,
   selected,
   expanded,
+  selectMode,
   onToggleSelect,
   onToggleExpand,
   workspaceId,
@@ -55,14 +57,16 @@ export function JobListItem({
   const navigate = useNavigate()
   return (
     <div className={styles.row} data-job={job.id}>
-      <input
-        type="checkbox"
-        className={styles.checkbox}
-        checked={selected}
-        onChange={onToggleSelect}
-        onClick={(e) => e.stopPropagation()}
-        aria-label={`选择任务 ${job.source_id}`}
-      />
+      {selectMode && (
+        <input
+          type="checkbox"
+          className={styles.checkbox}
+          checked={selected}
+          onChange={onToggleSelect}
+          onClick={(e) => e.stopPropagation()}
+          aria-label={`选择任务 ${job.source_id}`}
+        />
+      )}
       <div
         className={styles.main}
         onClick={() => {
