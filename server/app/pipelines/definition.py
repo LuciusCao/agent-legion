@@ -32,6 +32,7 @@ class PipelineAgent:
 @dataclass(frozen=True)
 class PipelineNode:
     key: str
+    label: str
     runner: RunnerKind
     after: list[str] = field(default_factory=list)
     inputs: list[str] = field(default_factory=list)
@@ -215,10 +216,15 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
         if runner not in {"local", "agent"}:
             raise PipelineDefinitionError(f"Node {node_key} has invalid runner {runner!r}")
 
+        node_label = raw_node.get("label", node_key)
+        if not isinstance(node_label, str) or not node_label:
+            raise PipelineDefinitionError(f"Node {node_key} label must be a non-empty string")
+
         agent = _load_agent(raw_node, node_key, runner)
 
         nodes[node_key] = PipelineNode(
             key=node_key,
+            label=node_label,
             runner=runner,
             after=_string_list(raw_node.get("after"), "after", node_key),
             inputs=_string_list(raw_node.get("inputs"), "inputs", node_key),
