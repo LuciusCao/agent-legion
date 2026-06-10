@@ -14,7 +14,9 @@ class FakeAgentManager:
         self._assignments = assignments
 
     def get_allowed_agents(self, workspace_id):
-        return self._assignments.get(workspace_id, [])
+        if workspace_id not in self._assignments:
+            return None
+        return self._assignments[workspace_id]
 
 
 def test_runner_pool_acquire_filters_by_workspace():

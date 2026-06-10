@@ -158,7 +158,7 @@ class RunnerPool:
         allowed: set[str] | None = None
         if workspace_id and self._agent_manager is not None:
             assigned_agents = self._agent_manager.get_allowed_agents(workspace_id)
-            if assigned_agents:
+            if assigned_agents is not None:
                 allowed = set(assigned_agents)
         for i, runner in enumerate(self._runners):
             if i in self._busy_indices:

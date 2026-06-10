@@ -54,8 +54,8 @@ class AgentStatusManager:
 
     def load_workspace_assignments(self, db: "Database") -> None:
         self._workspace_assignments = {}
-        for row in db.list_workspace_agents("video-hive"):
-            self._workspace_assignments.setdefault("video-hive", {})[row["agent_id"]] = row[
+        for row in db.list_all_workspace_agents():
+            self._workspace_assignments.setdefault(row["workspace_id"], {})[row["agent_id"]] = row[
                 "concurrency_limit"
             ]
 
@@ -67,11 +67,15 @@ class AgentStatusManager:
     def remove_workspace_assignment(self, workspace_id: str, agent_id: str) -> None:
         self._workspace_assignments.get(workspace_id, {}).pop(agent_id, None)
 
-    def get_allowed_agents(self, workspace_id: str) -> list[str]:
-        return list(self._workspace_assignments.get(workspace_id, {}).keys())
+    def get_allowed_agents(self, workspace_id: str) -> list[str] | None:
+        if workspace_id not in self._workspace_assignments:
+            return None if workspace_id == "video-hive" else []
+        return list(self._workspace_assignments[workspace_id].keys())
 
     def is_agent_allowed(self, workspace_id: str, agent_id: str) -> bool:
-        return agent_id in self._workspace_assignments.get(workspace_id, {})
+        if workspace_id not in self._workspace_assignments:
+            return workspace_id == "video-hive"
+        return agent_id in self._workspace_assignments[workspace_id]
 
     def get_all(self) -> list[AgentStatus]:
         return list(self.agents)
