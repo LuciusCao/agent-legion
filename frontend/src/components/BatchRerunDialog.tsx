@@ -1,52 +1,71 @@
 import { useState } from 'react'
-import { useVideoStore } from '../stores/videoStore'
-import { useUiStore } from '../stores/uiStore'
-import { getPhases, canRerunFrom, canRerunFromFailedPhase } from '../helpers'
 import { PHASE_LABELS } from '../labels'
-import type { VideoItem } from '../types'
 import styles from './BatchRerunDialog.module.css'
+
+export type RerunItem = {
+  id: string
+  name: string
+  currentPhase?: string
+  status?: string
+}
 
 type BatchRerunDialogProps = {
   open: boolean
-  videoIds: string[]
+  items: RerunItem[]
+  phases?: string[]
+  itemLabel?: string
+  onConfirm: (itemIds: string[], selectedPhase: string) => void | Promise<void>
   onClose: () => void
+}
+
+function isRunnable(
+  item: RerunItem,
+  selectedPhase: string,
+  phases: string[]
+): boolean {
+  if (phases.length === 0) return true
+  if (selectedPhase === '__failed__') {
+    return item.status === 'failed'
+  }
+  if (item.status === 'running') return false
+  if (item.status === 'completed') return true
+  const currentIdx = phases.indexOf(item.currentPhase ?? '')
+  const phaseIdx = phases.indexOf(selectedPhase)
+  if (currentIdx === -1 || phaseIdx === -1) return false
+  return phaseIdx <= currentIdx
 }
 
 export function BatchRerunDialog({
   open,
-  videoIds,
+  items,
+  phases = [],
+  itemLabel = '项',
+  onConfirm,
   onClose,
 }: BatchRerunDialogProps) {
-  const { videos, batchRerun, exitSelectMode, fetchVideos } = useVideoStore()
-  const { showToast } = useUiStore()
   const [selectedPhase, setSelectedPhase] = useState('download')
+  const [loading, setLoading] = useState(false)
 
   if (!open) return null
 
-  const selectedVideos = videos.filter((v) => videoIds.includes(v.id))
-  const contentType = selectedVideos[0]?.content_type ?? 'knowledge'
-  const phases = getPhases(contentType)
-
-  const runnableCount = selectedVideos.filter((v) =>
-    selectedPhase === '__failed__'
-      ? canRerunFromFailedPhase(v)
-      : canRerunFrom(v, selectedPhase)
+  const runnableCount = items.filter((item) =>
+    isRunnable(item, selectedPhase, phases)
   ).length
 
-  const displayName = (video: VideoItem) =>
-    video.external_id || video.title || video.id
-
   const handleConfirm = async () => {
-    await batchRerun(videoIds, selectedPhase)
-    onClose()
-    exitSelectMode()
-    await fetchVideos()
-    const err = useVideoStore.getState().error
-    if (err) {
-      showToast(`加载失败: ${err}`, 'error')
-      useVideoStore.getState().clearError()
+    setLoading(true)
+    try {
+      await onConfirm(
+        items.map((item) => item.id),
+        selectedPhase
+      )
+    } finally {
+      setLoading(false)
     }
+    onClose()
   }
+
+  const showPhaseGrid = phases.length > 0
 
   return (
     <md-dialog
@@ -64,38 +83,37 @@ export function BatchRerunDialog({
       <div slot="headline">选择重跑阶段</div>
       <div slot="content">
         <div className={styles.content}>
-          <div className={styles.phaseGrid}>
-            <md-filter-chip
-              label={PHASE_LABELS['__failed__']}
-              selected={selectedPhase === '__failed__' || undefined}
-              onClick={() => setSelectedPhase('__failed__')}
-            />
-            {phases.map((phase) => (
+          {showPhaseGrid && (
+            <div className={styles.phaseGrid}>
               <md-filter-chip
-                key={phase}
-                label={PHASE_LABELS[phase] ?? phase}
-                selected={selectedPhase === phase || undefined}
-                onClick={() => setSelectedPhase(phase)}
+                label={PHASE_LABELS['__failed__']}
+                selected={selectedPhase === '__failed__' || undefined}
+                onClick={() => setSelectedPhase('__failed__')}
               />
-            ))}
-          </div>
+              {phases.map((phase) => (
+                <md-filter-chip
+                  key={phase}
+                  label={PHASE_LABELS[phase] ?? phase}
+                  selected={selectedPhase === phase || undefined}
+                  onClick={() => setSelectedPhase(phase)}
+                />
+              ))}
+            </div>
+          )}
           <div className={styles.videoGrid}>
-            {selectedVideos.map((video) => {
-              const runnable =
-                selectedPhase === '__failed__'
-                  ? canRerunFromFailedPhase(video)
-                  : canRerunFrom(video, selectedPhase)
+            {items.map((item) => {
+              const runnable = isRunnable(item, selectedPhase, phases)
               return (
                 <div
-                  key={video.id}
+                  key={item.id}
                   className={`${styles.videoTile} ${runnable ? '' : styles.videoTileDisabled}`}
                 >
-                  <span className={styles.videoName}>{displayName(video)}</span>
-                  {!runnable && (
+                  <span className={styles.videoName}>{item.name}</span>
+                  {!runnable && showPhaseGrid && (
                     <span className={styles.videoHint}>
                       {selectedPhase === '__failed__'
                         ? '未失败，跳过'
-                        : `当前处于 ${PHASE_LABELS[video.current_phase] ?? video.current_phase}，无法重跑`}
+                        : `当前处于 ${PHASE_LABELS[item.currentPhase ?? ''] ?? item.currentPhase}，无法重跑`}
                     </span>
                   )}
                 </div>
@@ -103,7 +121,7 @@ export function BatchRerunDialog({
             })}
           </div>
           <div className={styles.summary}>
-            已选择 {selectedVideos.length} 个视频，可重跑 {runnableCount} 个
+            已选择 {items.length} 个{itemLabel}，可重跑 {runnableCount} 个
           </div>
         </div>
       </div>
@@ -113,9 +131,9 @@ export function BatchRerunDialog({
         </md-text-button>
         <md-filled-button
           onClick={handleConfirm}
-          disabled={runnableCount === 0 || undefined}
+          disabled={runnableCount === 0 || loading || undefined}
         >
-          重跑 {runnableCount} 个视频
+          重跑 {runnableCount} 个{itemLabel}
         </md-filled-button>
       </div>
     </md-dialog>

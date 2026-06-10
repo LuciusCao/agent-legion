@@ -3,6 +3,7 @@ import { useVideoStore } from '../stores/videoStore'
 import { useUiStore } from '../stores/uiStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
+import { getPhases } from '../helpers'
 import { StatCards } from '../components/StatCards'
 import { VideoList } from '../components/VideoList'
 import {
@@ -37,6 +38,7 @@ export function ListPage() {
     (state) => state.selectReviewNotPassed
   )
   const batchDelete = useVideoStore((state) => state.batchDelete)
+  const batchRerun = useVideoStore((state) => state.batchRerun)
   const batchRunTo = useVideoStore((state) => state.batchRunTo)
   const batchPackage = useVideoStore((state) => state.batchPackage)
   const exitSelectMode = useVideoStore((state) => state.exitSelectMode)
@@ -249,7 +251,24 @@ export function ListPage() {
       />
       <BatchRerunDialog
         open={rerunDialogOpen}
-        videoIds={Array.from(selectedIds)}
+        items={selectedVideos.map((v) => ({
+          id: v.id,
+          name: v.external_id || v.title || v.id,
+          currentPhase: v.current_phase,
+          status: v.status,
+        }))}
+        phases={getPhases(selectedVideos[0]?.content_type ?? 'knowledge')}
+        itemLabel="视频"
+        onConfirm={async (ids, phase) => {
+          await batchRerun(ids, phase)
+          exitSelectMode()
+          await fetchVideos()
+          const err = useVideoStore.getState().error
+          if (err) {
+            showToast(`加载失败: ${err}`, 'error')
+            useVideoStore.getState().clearError()
+          }
+        }}
         onClose={() => setRerunDialogOpen(false)}
       />
       <BatchDeleteDialog
