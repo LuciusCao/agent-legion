@@ -468,6 +468,9 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     node_keys = [node["key"] for node in body["pipeline"]["nodes"]]
     assert node_keys[0] == "fetch_question_context"
     assert "assemble_package" in node_keys
+    assert all("label" in node for node in body["pipeline"]["nodes"])
+    fetch_node = next(node for node in body["pipeline"]["nodes"] if node["key"] == "fetch_question_context")
+    assert fetch_node["label"] == "fetch_question_context"
     graph_node = next(
         node for node in body["pipeline"]["nodes"] if node["key"] == "content_graph_generation"
     )
@@ -559,6 +562,7 @@ def test_job_detail_includes_node_dependencies(tmp_path):
         response = c.get(f"/api/jobs/{job_id}")
 
     assert response.status_code == 200
+    assert all("label" in node for node in response.json()["nodes"])
     nodes = {node["node_key"]: node for node in response.json()["nodes"]}
     assert nodes["content_graph_generation"]["after"] == ["solution_decomposition"]
 
@@ -1346,6 +1350,7 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["pipeline"]["key"] == "reading_analysis"
+    assert all("label" in node for node in body["nodes"])
     first = body["nodes"][0]
     assert first["key"] == "fetch_questions"
     assert first["runner"] == "local"

@@ -363,6 +363,7 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
     for node in definition.nodes.values():
         node_payload: dict[str, Any] = {
             "key": node.key,
+            "label": node.label,
             "runner": node.runner,
             "after": node.after,
             "inputs": node.inputs,
@@ -436,6 +437,9 @@ def _job_nodes_with_definition(
     return [
         {
             **node,
+            "label": definition.nodes[node["node_key"]].label
+            if node["node_key"] in definition.nodes
+            else node["node_key"],
             "after": definition.nodes[node["node_key"]].after
             if node["node_key"] in definition.nodes
             else [],
@@ -954,6 +958,7 @@ def create_jobs_router(
             nodes=[
                 {
                     "key": node.key,
+                    "label": node.label,
                     "runner": node.runner,
                     "after": node.after,
                     "inputs": node.inputs,
