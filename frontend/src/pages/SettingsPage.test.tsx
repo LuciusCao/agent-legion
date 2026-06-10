@@ -119,11 +119,34 @@ describe('SettingsPage', () => {
   })
 
   it('renders all 5 cards', () => {
+    useSettingStore.setState({
+      pipelineDefinition: {
+        key: 'question_content',
+        label: '题目内容生成',
+        concurrency: { local: 8, agent: 2 },
+        intake: {
+          modes: [
+            {
+              key: 'direct_ids',
+              label: '直接输入 ID',
+              input_field: 'question_ids',
+              resource: '',
+            },
+            {
+              key: 'by_knowledge',
+              label: '按知识点',
+              input_field: 'knowledge_codes',
+              resource: 'by_knowledge',
+            },
+          ],
+        },
+        nodes: [],
+      },
+    })
     renderPage()
     expect(screen.getByText('基本信息')).toBeInTheDocument()
     expect(screen.getByText('全局服务')).toBeInTheDocument()
-    expect(screen.getByText('资源接口')).toBeInTheDocument()
-    expect(screen.getByText('接入模式')).toBeInTheDocument()
+    expect(screen.getByText('接入配置')).toBeInTheDocument()
     expect(screen.getAllByText('流水线').length).toBeGreaterThanOrEqual(1)
     expect(screen.getByText('智能体')).toBeInTheDocument()
   })
@@ -223,10 +246,11 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('calls saveSection when resources save is clicked', async () => {
+  it('calls saveIntakeConfig when save is clicked', async () => {
     useSettingStore.setState({
       settings: {
         ...defaultState.settings,
+        intakeModes: ['direct_ids'],
         resources: {
           question_detail: { enabled: true, config: { bank_version: 'v5' } },
         },
@@ -236,33 +260,27 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('测试连接')).toBeInTheDocument()
     })
-    const resourceCard = screen
-      .getByText('资源接口')
+    const card = screen
+      .getByText('接入配置')
       .closest('.card-outlined') as HTMLElement
-    const saveBtn = within(resourceCard).getByText('保存')
+    const saveBtn = within(card).getByText('保存')
     fireEvent.click(saveBtn)
     await waitFor(() => {
       expect(mockApi).toHaveBeenCalledWith(
-        '/api/workspaces/ws1/settings/resources',
+        '/api/workspaces/ws1',
         expect.objectContaining({
           method: 'PATCH',
-          body: JSON.stringify({
-            resources: {
-              question_detail: {
-                enabled: true,
-                config: { bank_version: 'v5' },
-              },
-            },
-          }),
+          body: expect.stringContaining('resource_config'),
         })
       )
     })
   })
 
-  it('displays save error when saveSection fails', async () => {
+  it('displays save error when save fails', async () => {
     useSettingStore.setState({
       settings: {
         ...defaultState.settings,
+        intakeModes: ['direct_ids'],
         resources: {
           question_detail: { enabled: true, config: {} },
         },
@@ -275,26 +293,13 @@ describe('SettingsPage', () => {
     mockApi.mockRejectedValueOnce(
       Object.assign(new Error('Server Error'), { status: 500 })
     )
-    const resourceCard = screen
-      .getByText('资源接口')
+    const card = screen
+      .getByText('接入配置')
       .closest('.card-outlined') as HTMLElement
-    const saveBtn = within(resourceCard).getByText('保存')
+    const saveBtn = within(card).getByText('保存')
     fireEvent.click(saveBtn)
     await waitFor(() => {
-      expect(within(resourceCard).getByText('Server Error')).toBeInTheDocument()
-    })
-  })
-
-  it('updates labelOverrides state when textarea input is valid JSON', () => {
-    renderPage()
-    const textarea = document.querySelector(
-      'md-outlined-text-field[label="标签覆盖 (JSON)"]'
-    ) as HTMLElement
-    expect(textarea).toBeTruthy()
-    ;(textarea as HTMLInputElement).value = '{"direct_ids":"输入 ID"}'
-    fireEvent.input(textarea)
-    expect(useSettingStore.getState().settings.labelOverrides).toEqual({
-      direct_ids: '输入 ID',
+      expect(within(card).getByText('Server Error')).toBeInTheDocument()
     })
   })
 
@@ -329,8 +334,24 @@ describe('SettingsPage', () => {
     expect(screen.getByText('prod')).toBeInTheDocument()
   })
 
-  it('renders resource providers with checkboxes and inputs', async () => {
+  it('renders resource provider params when intake mode is checked', async () => {
     useSettingStore.setState({
+      pipelineDefinition: {
+        key: 'question_content',
+        label: '题目内容生成',
+        concurrency: { local: 8, agent: 2 },
+        intake: {
+          modes: [
+            {
+              key: 'by_knowledge',
+              label: '按知识点',
+              input_field: 'knowledge_codes',
+              resource: 'question_detail',
+            },
+          ],
+        },
+        nodes: [],
+      },
       resourceProviders: [
         {
           key: 'question_detail',
@@ -340,6 +361,13 @@ describe('SettingsPage', () => {
           paramKeys: ['bank_version', 'country_id'],
         },
       ],
+      settings: {
+        ...defaultState.settings,
+        intakeModes: ['by_knowledge'],
+        resources: {
+          question_detail: { enabled: true, config: {} },
+        },
+      },
     })
     renderPage()
     await waitFor(() => {
