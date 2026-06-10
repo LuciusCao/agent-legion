@@ -15,6 +15,7 @@ interface UiState {
   deleteDialogOpen: boolean
   workerPaused: boolean
   toast: Toast | null
+  pageTitle: string | null
   connectAgentsWs: () => () => void
   fetchWorkerStatus: () => Promise<void>
   setWorkerPaused: (paused: boolean) => Promise<void>
@@ -27,6 +28,7 @@ interface UiState {
   closeDeleteDialog: () => void
   showToast: (message: string, type: 'success' | 'error') => void
   clearToast: () => void
+  setPageTitle: (title: string | null) => void
 }
 
 let wsInstance: WebSocket | null = null
@@ -40,6 +42,7 @@ export const useUiStore = create<UiState>((set) => ({
   deleteDialogOpen: false,
   workerPaused: false,
   toast: null,
+  pageTitle: null,
 
   connectAgentsWs: () => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -103,4 +106,5 @@ export const useUiStore = create<UiState>((set) => ({
   closeDeleteDialog: () => set({ deleteDialogOpen: false }),
   showToast: (message, type) => set({ toast: { message, type } }),
   clearToast: () => set({ toast: null }),
+  setPageTitle: (title) => set({ pageTitle: title }),
 }))

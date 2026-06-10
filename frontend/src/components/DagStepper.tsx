@@ -1,0 +1,33 @@
+import type { JobNodeRecord } from '../types'
+import styles from './DagStepper.module.css'
+
+type StepState = 'completed' | 'running' | 'failed' | 'pending'
+
+function getStepState(status: string): StepState {
+  if (status === 'completed') return 'completed'
+  if (status === 'running') return 'running'
+  if (status === 'failed') return 'failed'
+  return 'pending'
+}
+
+export function DagStepper({ nodes }: { nodes: JobNodeRecord[] }) {
+  if (nodes.length === 0) return null
+
+  return (
+    <div className={styles.dagStepper}>
+      {nodes.map((node) => {
+        const state = getStepState(node.status)
+        return (
+          <div
+            key={node.node_key}
+            className={styles.step}
+            title={node.node_key}
+          >
+            <div className={`${styles.stepBar} ${styles[state]}`} />
+            <span className={styles.stepLabel}>{node.node_key}</span>
+          </div>
+        )
+      })}
+    </div>
+  )
+}

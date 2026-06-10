@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { DagGraph, type DagEdge, type DagNode } from '../components/DagGraph'
 import { NodeDetailPanel } from '../components/NodeDetailPanel'
-import { NodeRunsTable, type NodeRun } from '../components/NodeRunsTable'
+import { JobProgressPanel } from '../components/JobProgressPanel'
 import { fetchJobArtifact, fetchJobDetail } from '../api'
-import { JOB_STATUS_LABELS } from '../labels'
-import type { JobDetailResponse, JobNodeRecord, NodeRunRecord } from '../types'
+import { useUiStore } from '../stores/uiStore'
+import type { JobDetailResponse, JobNodeRecord } from '../types'
 import styles from './JobDetailPage.module.css'
 
 const VALID_STATUSES = new Set<DagNode['status']>([
@@ -56,25 +56,12 @@ function durationSeconds(
   return diff >= 0 ? diff : 0
 }
 
-function formatRunDuration(run: NodeRunRecord): string {
-  const d = durationSeconds(run.started_at, run.finished_at)
-  return typeof d === 'number' ? `${d}s` : '—'
-}
-
-function formatRunTime(run: NodeRunRecord): string {
-  if (!run.started_at) return '—'
-  const date = new Date(run.started_at)
-  return Number.isNaN(date.getTime())
-    ? run.started_at
-    : date.toLocaleString('zh-CN')
-}
-
 export default function JobDetailPage() {
-  const { workspaceId, jobId } = useParams<{
+  const { jobId } = useParams<{
     workspaceId: string
     jobId: string
   }>()
-  const navigate = useNavigate()
+  const { setPageTitle } = useUiStore()
   const [detail, setDetail] = useState<JobDetailResponse | null>(null)
   const [error, setError] = useState('')
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
@@ -95,6 +82,7 @@ export default function JobDetailPage() {
       .then((data) => {
         if (stale) return
         setDetail(data)
+        setPageTitle(data.job.title || data.job.source_id || '任务详情')
       })
       .catch((err) => {
         if (stale) return
@@ -102,8 +90,9 @@ export default function JobDetailPage() {
       })
     return () => {
       stale = true
+      setPageTitle(null)
     }
-  }, [jobId])
+  }, [jobId, setPageTitle])
 
   const dagNodes = useMemo(
     () => (detail ? toDagNodes(detail.nodes) : []),
@@ -128,17 +117,6 @@ export default function JobDetailPage() {
       agentId: undefined,
     }
   }, [detail, selectedNodeKey])
-
-  const nodeRuns: NodeRun[] = useMemo(() => {
-    if (!detail) return []
-    return detail.runs.map((run) => ({
-      nodeKey: run.node_key,
-      nodeLabel: run.node_key,
-      status: JOB_STATUS_LABELS[run.status] || run.status,
-      time: formatRunTime(run),
-      duration: formatRunDuration(run),
-    }))
-  }, [detail])
 
   async function openArtifact(name: string) {
     if (!jobId) return
@@ -165,44 +143,6 @@ export default function JobDetailPage() {
 
   return (
     <div className={styles.page}>
-      <div className={styles.topBar}>
-        <button
-          type="button"
-          className={styles.backBtn}
-          onClick={() => navigate(`/workspaces/${workspaceId}/jobs`)}
-          data-testid="back-btn"
-        >
-          ◀ 返回列表
-        </button>
-        <h1 className={styles.title}>
-          {detail?.job.title || detail?.job.source_id || '任务详情'}
-        </h1>
-        <div className={styles.topActions}>
-          <button
-            type="button"
-            className={styles.actionBtn}
-            disabled
-            title="即将支持"
-            onClick={() => {
-              /* TODO rerun */
-            }}
-          >
-            <md-icon>restart_alt</md-icon> 重跑
-          </button>
-          <button
-            type="button"
-            className={styles.actionBtn}
-            disabled
-            title="即将支持"
-            onClick={() => {
-              /* TODO run to */
-            }}
-          >
-            ▶️ 运行到...
-          </button>
-        </div>
-      </div>
-
       {error ? <p className={styles.error}>{error}</p> : null}
 
       <div className={styles.columns}>
@@ -227,37 +167,16 @@ export default function JobDetailPage() {
         </div>
 
         <div className={styles.right}>
-          <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>运行记录</h3>
-            <NodeRunsTable runs={nodeRuns} />
-          </section>
-
-          <section className={styles.section}>
-            <h3 className={styles.sectionTitle}>产物文件</h3>
-            {detail && detail.artifacts.length > 0 ? (
-              <ul className={styles.artifactList}>
-                {detail.artifacts.map((name) => (
-                  <li key={name}>
-                    <button
-                      type="button"
-                      className={styles.artifactBtn}
-                      onClick={() => openArtifact(name)}
-                    >
-                      {name}
-                    </button>
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className={styles.empty}>暂无产物</p>
-            )}
-            {artifactName ? (
-              <div className={styles.artifactPreview}>
-                <h4 className={styles.artifactName}>{artifactName}</h4>
-                <pre className={styles.artifactPre}>{artifactContent}</pre>
-              </div>
-            ) : null}
-          </section>
+          {detail && (
+            <JobProgressPanel
+              nodes={detail.nodes}
+              runs={detail.runs}
+              artifacts={detail.artifacts}
+              activeArtifact={artifactName}
+              activeArtifactContent={artifactContent}
+              onArtifactClick={openArtifact}
+            />
+          )}
         </div>
       </div>
     </div>

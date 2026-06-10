@@ -99,18 +99,4 @@ describe('QuestionDetailPage', () => {
     fireEvent.click(titles[titles.length - 1])
     expect(await screen.findByTestId('job-detail-page')).toBeInTheDocument()
   })
-
-  it('navigates back to workspace', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => mockDetail,
-      })
-    )
-    renderPage()
-    await waitFor(() => screen.getByText('What is 2+2?'))
-    fireEvent.click(screen.getByText('◀ 返回 workspace'))
-    expect(await screen.findByTestId('workspace-page')).toBeInTheDocument()
-  })
 })
