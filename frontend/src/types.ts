@@ -276,6 +276,23 @@ export type CreateJobBatchInput = {
   values: string[]
 }
 
+export type QuestionOption = Record<string, unknown>
+
+export type QuestionNormalized = {
+  stem?: string
+  options?: QuestionOption[]
+  answer?: unknown
+  analysis?: unknown
+}
+
+export type QuestionDetailResponse = {
+  question_id: string
+  title: string
+  normalized: QuestionNormalized
+  cms_payload: Record<string, unknown> | null
+  jobs: JobRecord[]
+}
+
 export type WorkspacesResponse = {
   workspaces: WorkspaceRecord[]
 }
