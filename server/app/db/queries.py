@@ -619,6 +619,20 @@ class VideoQueries:
             {"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows
         ]
 
+    def list_all_workspace_agents(self) -> list[dict[str, Any]]:
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                "select workspace_id, agent_id, concurrency_limit from workspace_agent_assignments"
+            ).fetchall()
+        return [
+            {
+                "workspace_id": r["workspace_id"],
+                "agent_id": r["agent_id"],
+                "concurrency_limit": r["concurrency_limit"],
+            }
+            for r in rows
+        ]
+
     def set_workspace_agent_assignment(
         self, workspace_id: str, agent_id: str, concurrency_limit: int = 1
     ) -> None:
