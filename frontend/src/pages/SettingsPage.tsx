@@ -7,20 +7,10 @@ import { SettingsCard } from '../components/SettingsCard'
 import { WORKSPACE_LABELS } from '../labels'
 import type { GlobalServiceStatus } from '../types'
 
-const INTAKE_MODE_OPTIONS = [
-  { key: 'direct_ids', label: '直接输入 ID' },
-  { key: 'by_knowledge', label: '按知识点' },
-  { key: 'batch_upload', label: '批量上传' },
-]
-
 const PIPELINE_OPTIONS = [
   { key: 'question_content', label: 'question_content' },
   { key: 'knowledge_content', label: 'knowledge_content' },
 ]
-
-const MODE_TO_RESOURCE: Record<string, string> = {
-  by_knowledge: 'by_knowledge',
-}
 
 type ConnectionState = 'idle' | 'testing' | 'success' | 'failed'
 
@@ -108,6 +98,7 @@ export function SettingsPage() {
     setSettings,
     globalServices,
     resourceProviders,
+    pipelineDefinition,
     testStatus,
     isSaving,
     saveError,
@@ -117,6 +108,7 @@ export function SettingsPage() {
     fetchSettings,
     fetchGlobalServices,
     fetchResourceProviders,
+    fetchPipelineDefinition,
   } = useSettingStore()
 
   const [labelOverridesText, setLabelOverridesText] = useState('')
@@ -142,8 +134,15 @@ export function SettingsPage() {
           2
         )
       )
+      void fetchPipelineDefinition()
     })
-  }, [workspaceId, setWorkspaceId, resetTestStatus, fetchSettings])
+  }, [
+    workspaceId,
+    setWorkspaceId,
+    resetTestStatus,
+    fetchSettings,
+    fetchPipelineDefinition,
+  ])
 
   useEffect(() => {
     if (!workspaceId) return
@@ -470,15 +469,15 @@ export function SettingsPage() {
                 启用的接入模式
               </span>
               <div className="intake-chip-row">
-                {INTAKE_MODE_OPTIONS.map((mode) => {
-                  const providerKey = MODE_TO_RESOURCE[mode.key]
-                  const providerDisabled = providerKey
-                    ? settings.resources[providerKey]?.enabled === false
+                {(pipelineDefinition?.intake?.modes || []).map((mode) => {
+                  const providerDisabled = mode.resource
+                    ? settings.resources[mode.resource]?.enabled === false
                     : false
+                  const label = settings.labelOverrides[mode.key] || mode.label
                   return (
                     <md-filter-chip
                       key={mode.key}
-                      label={mode.label}
+                      label={label}
                       selected={settings.intakeModes.includes(mode.key)}
                       onClick={() =>
                         !providerDisabled && toggleIntakeMode(mode.key)
