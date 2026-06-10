@@ -15,7 +15,7 @@ export function extractLatexParts(text: string): LatexPart[] {
 
   const parts: LatexPart[] = []
   const regex =
-    /(\$\$[\s\S]*?\$\$)|(\$[^\$\r\n]*?\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))/g
+    /(\$\$[\s\S]*?\$\$)|(\$[^$\r\n]*?\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))/g
 
   let lastIndex = 0
   let match: RegExpExecArray | null
@@ -85,7 +85,7 @@ export function extractLatexParts(text: string): LatexPart[] {
 }
 
 export function sanitizeLatex(raw: string): string {
-  let text = decodeHtmlEntities(raw)
+  const text = decodeHtmlEntities(raw)
   const parts = extractLatexParts(text)
   const rebuilt: string[] = []
 
