@@ -584,6 +584,20 @@ pre {
   }
 }
 
+@keyframes pulse-blue {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.pulse-blue {
+  animation: pulse-blue 1.4s ease-in-out infinite;
+}
+
 .workspace-job-create,
 .workspace-job-list,
 .workspace-job-detail .card-outlined {
