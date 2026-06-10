@@ -1,0 +1,102 @@
+.settingsLayout {
+  display: flex;
+  gap: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 24px;
+}
+
+.navSidebar {
+  width: 200px;
+  flex-shrink: 0;
+  position: sticky;
+  top: 24px;
+  align-self: flex-start;
+}
+
+.navList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.navItem {
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  transition: background-color 0.2s, color 0.2s;
+}
+
+.navItem:hover {
+  background-color: var(--md-sys-color-surface-variant);
+}
+
+.navItemActive {
+  composes: navItem;
+  background-color: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  font-weight: 500;
+}
+
+.contentArea {
+  flex: 1;
+  min-width: 0;
+}
+
+.section {
+  padding: 24px 0;
+}
+
+.sectionTitle {
+  font-size: 18px;
+  font-weight: 500;
+  margin: 0 0 16px 0;
+  color: var(--md-sys-color-on-surface);
+}
+
+.sectionDivider {
+  border: none;
+  border-top: 1px solid var(--md-sys-color-outline-variant);
+  margin: 0;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 16px;
+}
+
+.field label {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.field select {
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--md-sys-color-outline);
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+  font-size: 14px;
+}
+
+.saveBadge {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: var(--md-sys-color-error);
+}
+
+.saveButtonWrap {
+  position: relative;
+  display: inline-flex;
+}
