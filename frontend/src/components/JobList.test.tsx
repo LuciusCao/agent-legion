@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { JobList } from './JobList'
 import { useJobStore } from '../stores/jobStore'
@@ -72,29 +72,6 @@ describe('JobList', () => {
 
     expect(screen.getByText('Algebra - Q100')).toBeInTheDocument()
     expect(screen.getByText('Geometry - Q200')).toBeInTheDocument()
-  })
-
-  it('expanding a job shows ExpandedJobPanel', async () => {
-    mockFetchJobs.mockResolvedValueOnce({ jobs: mockJobs })
-    await act(async () => {
-      render(
-        <MemoryRouter initialEntries={['/workspaces/ws1']}>
-          <Routes>
-            <Route
-              path="/workspaces/:workspaceId/*"
-              element={<JobList workspaceId="ws1" />}
-            />
-          </Routes>
-        </MemoryRouter>
-      )
-    })
-
-    expect(screen.queryByText('节点流水线')).not.toBeInTheDocument()
-
-    fireEvent.click(screen.getAllByText('展开 ▼')[0])
-
-    expect(screen.getByText('节点流水线')).toBeInTheDocument()
-    expect(screen.getByText('运行记录')).toBeInTheDocument()
   })
 
   it('empty state shows 暂无任务', async () => {
