@@ -287,6 +287,7 @@ class JobQueries:
         pipeline_key: str | None = None,
         status: str | None = None,
         workspace_id: str | None = "default",
+        source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         params: list[Any] = []
@@ -299,6 +300,9 @@ class JobQueries:
         if status:
             clauses.append("status=?")
             params.append(status)
+        if source_id:
+            clauses.append("source_id=?")
+            params.append(source_id)
         where = f" where {' and '.join(clauses)}" if clauses else ""
         with self._connect_read() as conn:
             rows = conn.execute(f"select * from jobs{where} order by created_at desc", params)
