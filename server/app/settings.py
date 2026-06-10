@@ -2,6 +2,7 @@ import os
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import yaml
 
@@ -35,6 +36,34 @@ def load_env_file(path: Path) -> None:
             os.environ[key] = value
 
 
+def _normalize_cms_config(config: dict[str, Any]) -> None:
+    """Derive legacy URL fields from base_url when present."""
+    cms = config.get("cms")
+    if not isinstance(cms, dict):
+        return
+    base_url = str(cms.get("base_url", "")).rstrip("/")
+    if not base_url:
+        return
+    params: dict[str, str] = {
+        "bank_version": str(cms.get("bank_version", "v5")),
+        "country_id": str(cms.get("country_id", "1")),
+        "subject_id": str(cms.get("subject_id", "2")),
+    }
+    if not cms.get("knowledge_url"):
+        cms["knowledge_url"] = f"{base_url}/knowledge/detail?" + urlencode(params)
+    if not cms.get("question_url"):
+        cms["question_url"] = f"{base_url}/question/detail?" + urlencode(params)
+    if not cms.get("question_detail_url"):
+        cms["question_detail_url"] = cms["question_url"]
+    list_params = {**params}
+    if "page_size" in cms and cms["page_size"] not in (None, ""):
+        list_params["page_size"] = str(cms["page_size"])
+    else:
+        list_params["page_size"] = "50"
+    if not cms.get("question_list_url"):
+        cms["question_list_url"] = f"{base_url}/question/list?" + urlencode(list_params)
+
+
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
     root_dir = Path(__file__).resolve().parents[2]
     load_env_file(root_dir / ".env")
@@ -44,6 +73,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         loaded = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             config = loaded
+    _normalize_cms_config(config)
     resolved_data_dir = data_dir or root_dir / str(config.get("data_dir", "data"))
     videos_dir = resolved_data_dir / "videos"
     logs_dir = resolved_data_dir / "logs"

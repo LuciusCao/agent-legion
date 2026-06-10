@@ -66,7 +66,7 @@ function GlobalServicesCard({
           >
             {WORKSPACE_LABELS.globalUrl}
           </span>
-          <div style={{ fontSize: 14, marginTop: 4 }}>{cms.url}</div>
+          <div style={{ fontSize: 14, marginTop: 4 }}>{cms.baseUrl}</div>
         </div>
         <div>
           <span
@@ -308,7 +308,6 @@ export function SettingsPage() {
                 {connectionStatus}
               </div>
             }
-            defaultExpanded
           >
             {resourceProviders.length === 0 ? (
               <div
@@ -332,8 +331,7 @@ export function SettingsPage() {
                     <div
                       key={provider.key}
                       style={{
-                        border:
-                          '1px solid var(--md-sys-color-outline-variant)',
+                        border: '1px solid var(--md-sys-color-outline-variant)',
                         borderRadius: 12,
                         padding: 16,
                       }}
@@ -370,21 +368,18 @@ export function SettingsPage() {
                           marginBottom: 8,
                         }}
                       >
-                        API: {provider.apiUrl}
+                        Path: {provider.path}
                       </div>
                       <div style={{ display: 'grid', gap: 8 }}>
                         {provider.paramKeys.map((paramKey) => (
                           <md-outlined-text-field
                             key={paramKey}
                             label={paramKey}
-                            placeholder={
-                              provider.defaultParams[paramKey] || ''
-                            }
+                            placeholder={provider.defaultParams[paramKey] || ''}
                             value={binding.config[paramKey] || ''}
                             onInput={(event: Event) => {
-                              const value = (
-                                event.target as HTMLInputElement
-                              ).value
+                              const value = (event.target as HTMLInputElement)
+                                .value
                               const nextConfig = { ...binding.config }
                               if (value) {
                                 nextConfig[paramKey] = value
@@ -546,9 +541,7 @@ export function SettingsPage() {
               <select
                 id="pipeline-select"
                 value={settings.pipelineKey}
-                onChange={(e) =>
-                  setSettings({ pipelineKey: e.target.value })
-                }
+                onChange={(e) => setSettings({ pipelineKey: e.target.value })}
               >
                 <option value="">请选择</option>
                 {PIPELINE_OPTIONS.map((p) => (

@@ -259,33 +259,29 @@ def _url_to_params(url: str) -> dict[str, str]:
 
 
 def _resource_provider_payload(settings: Settings) -> list[dict[str, Any]]:
-
     providers_config = settings.config.get("resource_providers")
     if not isinstance(providers_config, dict):
         return []
     cms_config = settings.config.get("cms", {}) or {}
-    default_params = _url_to_params(str(cms_config.get("question_detail_url", "")))
-    default_params.update(_url_to_params(str(cms_config.get("question_list_url", ""))))
-    for key in ("bank_version", "country_id", "subject_id", "page_size"):
-        if key in cms_config and cms_config[key] not in (None, ""):
-            default_params[key] = str(cms_config[key])
 
     result: list[dict[str, Any]] = []
     for key, meta in RESOURCE_PROVIDERS.items():
         provider = str(meta.get("provider") or "")
         provider_config = providers_config.get(provider) or {}
-        api_url = str(provider_config.get("api_url", ""))
+        path = str(provider_config.get("path", ""))
         param_keys = list(RESOURCE_PARAM_KEYS)
         if key == "question_detail" and "page_size" in param_keys:
             param_keys.remove("page_size")
+        default_params: dict[str, str] = {}
+        for param_key in param_keys:
+            if param_key in cms_config and cms_config[param_key] not in (None, ""):
+                default_params[param_key] = str(cms_config[param_key])
         result.append(
             {
                 "key": key,
                 "provider": provider,
-                "apiUrl": api_url,
-                "defaultParams": {
-                    k: default_params.get(k, "") for k in param_keys if default_params.get(k)
-                },
+                "path": path,
+                "defaultParams": default_params,
                 "paramKeys": param_keys,
             }
         )
@@ -307,13 +303,29 @@ def _mask_url(url: str) -> str:
     return f"{parsed.scheme}://{masked}{parsed.path}"
 
 
+def _token_available(cms_config: dict[str, Any]) -> bool:
+    import os
+
+    if cms_config.get("token"):
+        return True
+    if os.environ.get("BASECMS_TOKEN"):
+        return True
+    token_gen = cms_config.get("token_gen") or {}
+    if all(token_gen.get(k) for k in ("app_id", "nonce", "secret", "url")):
+        return True
+    return all(
+        os.environ.get(env_key)
+        for env_key in ("BASECMS_APP_ID", "BASECMS_NONCE", "BASECMS_SECRET", "BASECMS_TOKEN_URL")
+    )
+
+
 def _global_services_payload(settings: Settings) -> dict[str, Any]:
     cms_config = settings.config.get("cms", {}) or {}
-    url = str(cms_config.get("question_detail_url", ""))
+    base_url = str(cms_config.get("base_url", ""))
     return {
         "cms": {
-            "url": _mask_url(url),
-            "tokenConfigured": bool(cms_config.get("token")),
+            "baseUrl": _mask_url(base_url) if base_url else "",
+            "tokenConfigured": _token_available(cms_config),
             "env": str(cms_config.get("env", "")),
             "healthy": None,
             "lastCheckedAt": None,
@@ -415,7 +427,9 @@ def create_jobs_router(
         _require_enabled(settings)
         workspace = _workspace_or_404(job_db, workspace_id)
         definition = _definition(settings, payload.pipeline_key)
-        intake_mode = definition.intake.modes.get(payload.source_kind) if definition.intake else None
+        intake_mode = (
+            definition.intake.modes.get(payload.source_kind) if definition.intake else None
+        )
         resource_key = intake_mode.resource if intake_mode else None
         if resource_key:
             ws_resource_config = workspace.get("resource_config") or {}
@@ -732,9 +746,9 @@ def create_jobs_router(
         _require_enabled(settings)
         workspace = _workspace_or_404(job_db, workspace_id)
         pipeline_key = workspace.get("default_pipeline_key", "question_content")
-        allowed_ids = set(agent_manager.get_allowed_agents(workspace_id))
+        allowed = agent_manager.get_allowed_agents(workspace_id)
         all_agents = agent_manager.get_all()
-        agents = [a for a in all_agents if a.id in allowed_ids]
+        agents = all_agents if allowed is None else [a for a in all_agents if a.id in allowed]
         busy = sum(1 for a in agents if a.busy)
         latest_run = job_db.get_latest_node_run_for_workspace(workspace_id)
         return WorkspaceStatsResponse(
