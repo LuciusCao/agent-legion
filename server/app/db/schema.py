@@ -112,7 +112,9 @@ def init_db(path: Path) -> None:
                   command_json text not null default '[]',
                   exit_code integer,
                   log_path text not null default '',
-                  error_message text not null default ''
+                  error_message text not null default '',
+                  run_dir text not null default '',
+                  session_dir text not null default ''
                 );
                 create table if not exists workspace_agent_assignments (
                   workspace_id text not null,
@@ -211,6 +213,17 @@ def init_db(path: Path) -> None:
             }
             for column, statement in job_migrations.items():
                 if column not in existing_job_columns:
+                    conn.execute(statement)
+
+            existing_node_run_columns = {
+                row["name"] for row in conn.execute("pragma table_info(node_runs)").fetchall()
+            }
+            node_run_migrations = {
+                "run_dir": "alter table node_runs add column run_dir text not null default ''",
+                "session_dir": "alter table node_runs add column session_dir text not null default ''",
+            }
+            for column, statement in node_run_migrations.items():
+                if column not in existing_node_run_columns:
                     conn.execute(statement)
 
             # Performance indexes for issue 012
