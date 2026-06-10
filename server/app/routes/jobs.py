@@ -244,6 +244,10 @@ def _artifact_path(job: dict[str, Any], artifact_name: str) -> Path:
     return path
 
 
+def _job_has_running_nodes(job_db: JobQueries, job_id: str) -> bool:
+    return any(node["status"] == "running" for node in job_db.list_job_nodes(job_id))
+
+
 def _artifact_names(job: dict[str, Any]) -> list[str]:
     base = Path(str(job["storage_dir"]))
     if not base.exists():
@@ -822,7 +826,7 @@ def create_jobs_router(
             if job is None or job["workspace_id"] != workspace_id:
                 results.append({"job_id": job_id, "status": "not_found"})
                 continue
-            if job["status"] == "running":
+            if _job_has_running_nodes(job_db, job_id):
                 results.append({"job_id": job_id, "status": "skipped", "reason": "running"})
                 continue
             definition = _definition(settings, str(job["pipeline_key"]))
@@ -860,7 +864,7 @@ def create_jobs_router(
             if job is None or job["workspace_id"] != workspace_id:
                 results.append({"job_id": job_id, "status": "not_found"})
                 continue
-            if job["status"] == "running":
+            if _job_has_running_nodes(job_db, job_id):
                 results.append({"job_id": job_id, "status": "skipped", "reason": "running"})
                 continue
             storage_dir = Path(str(job["storage_dir"]))
@@ -972,7 +976,7 @@ def create_jobs_router(
         definition = _definition(settings, str(job["pipeline_key"]))
         if node_key not in definition.nodes:
             raise HTTPException(status_code=404, detail="Node not found")
-        if job["status"] == "running":
+        if _job_has_running_nodes(job_db, job_id):
             raise HTTPException(status_code=400, detail="Cannot rerun a running job")
         stale_nodes = downstream_nodes(definition, node_key)
         try:
@@ -991,7 +995,7 @@ def create_jobs_router(
         job = job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
-        if job["status"] == "running":
+        if _job_has_running_nodes(job_db, job_id):
             raise HTTPException(status_code=400, detail="Cannot delete a running job")
         storage_dir = Path(str(job["storage_dir"]))
         try:

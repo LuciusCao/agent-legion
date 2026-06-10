@@ -445,7 +445,7 @@ def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkey
     )
 
     worker = PipelineWorkerThread(queries, settings)
-    worker._definition = definition
+    worker._definitions = [definition]
     worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
     worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
     worker._skill_root = tmp_path / "skills"
@@ -498,7 +498,7 @@ def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
     )
 
     worker = PipelineWorkerThread(queries, settings)
-    worker._definition = definition
+    worker._definitions = [definition]
     worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
     worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
     worker._skill_root = tmp_path / "skills"
@@ -557,7 +557,7 @@ def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatc
     )
 
     worker = PipelineWorkerThread(queries, settings)
-    worker._definition = definition
+    worker._definitions = [definition]
     worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
     worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
     worker._skill_root = tmp_path / "skills"
@@ -601,7 +601,7 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
     )
 
     worker = PipelineWorkerThread(queries, settings)
-    worker._definition = definition
+    worker._definitions = [definition]
     worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
     worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
     worker._skill_root = tmp_path / "skills"
