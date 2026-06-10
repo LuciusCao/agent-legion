@@ -3,6 +3,7 @@ import json
 import logging
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,8 @@ from pydantic import BaseModel
 
 from ..db import Database
 from ..events import VideoEventManager
-from ..pipeline.package import create_package
+from ..jobs import JobQueries
+from ..pipeline.package import create_package, create_workspace_package
 from ..security import validate_package_filename
 from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
@@ -38,7 +40,7 @@ class PackageResponse(BaseModel):
 
 
 def create_packages_router(
-    db: Database, settings: Settings, video_event_manager: VideoEventManager
+    db: Database, job_db: JobQueries, settings: Settings, video_event_manager: VideoEventManager
 ) -> APIRouter:
     router = APIRouter(tags=["packages"])
 
@@ -149,6 +151,68 @@ def create_packages_router(
         try:
             resolved = package_path.resolve()
             resolved.relative_to(settings.packages_dir.resolve())
+        except (ValueError, RuntimeError):
+            raise HTTPException(status_code=404, detail="Package not found") from None
+        if not resolved.exists() or not resolved.is_file():
+            raise HTTPException(status_code=404, detail="Package not found")
+        return FileResponse(resolved, media_type="application/zip", filename=filename)
+
+    @router.get("/workspaces/{workspace_id}/packages")
+    def list_workspace_packages(workspace_id: str) -> dict[str, Any]:
+        packages_dir = settings.packages_dir / f"workspace-{workspace_id}"
+        if not packages_dir.exists():
+            return {"packages": []}
+        packages = []
+        for p in sorted(packages_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
+            if p.suffix == ".zip":
+                packages.append(
+                    {
+                        "id": p.name,
+                        "name": p.stem,
+                        "path": str(p),
+                        "size_bytes": p.stat().st_size,
+                        "created_at": datetime.fromtimestamp(p.stat().st_mtime, UTC).isoformat(),
+                        "locked": 0,
+                        "video_count": 0,
+                    }
+                )
+        return {"packages": packages}
+
+    @router.post("/workspaces/{workspace_id}/jobs/package", response_model=PackageResponse)
+    def package_workspace_jobs(workspace_id: str, request: PackageRequest) -> dict[str, bool]:
+        job_ids = request.video_ids or []
+        if not job_ids:
+            raise HTTPException(status_code=400, detail="No job_ids provided")
+
+        jobs = []
+        for job_id in job_ids:
+            job = job_db.get_job(job_id)
+            if job and job.get("status") == "completed":
+                jobs.append(job)
+
+        if not jobs:
+            raise HTTPException(status_code=400, detail="No completed jobs to package")
+
+        workspace_packages_dir = settings.packages_dir / f"workspace-{workspace_id}"
+        workspace_packages_dir.mkdir(parents=True, exist_ok=True)
+
+        package_path, count = create_workspace_package(
+            jobs, workspace_packages_dir, settings.jobs_dir
+        )
+
+        return {"accepted": True}
+
+    @router.get("/workspaces/{workspace_id}/packages/{filename:path}")
+    def download_workspace_package(workspace_id: str, filename: str):
+        try:
+            validate_package_filename(filename)
+        except ValueError:
+            raise HTTPException(status_code=404, detail="Package not found") from None
+        packages_dir = settings.packages_dir / f"workspace-{workspace_id}"
+        package_path = packages_dir / filename
+        try:
+            resolved = package_path.resolve()
+            resolved.relative_to(packages_dir.resolve())
         except (ValueError, RuntimeError):
             raise HTTPException(status_code=404, detail="Package not found") from None
         if not resolved.exists() or not resolved.is_file():
