@@ -393,7 +393,14 @@ class JobQueries:
             )
 
     def start_node_run(
-        self, job_id: str, node_key: str, command: Sequence[str], log_path: str
+        self,
+        job_id: str,
+        node_key: str,
+        command: Sequence[str],
+        log_path: str,
+        *,
+        run_dir: str = "",
+        session_dir: str = "",
     ) -> dict[str, Any]:
         command_json = json.dumps(list(command))
         with self.connect() as conn:
@@ -413,10 +420,10 @@ class JobQueries:
                 raise ValueError(f"Unknown job node: {job_id}.{node_key}")
             cursor = conn.execute(
                 """
-                insert into node_runs(job_id, node_key, status, command_json, log_path)
-                values (?, ?, 'running', ?, ?)
+                insert into node_runs(job_id, node_key, status, command_json, log_path, run_dir, session_dir)
+                values (?, ?, 'running', ?, ?, ?, ?)
                 """,
-                (job_id, node_key, command_json, log_path),
+                (job_id, node_key, command_json, log_path, run_dir, session_dir),
             )
             row = conn.execute("select * from node_runs where id=?", (cursor.lastrowid,)).fetchone()
         return dict(row)

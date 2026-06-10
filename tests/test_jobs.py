@@ -212,3 +212,26 @@ def test_start_node_run_clears_stale_reason(tmp_path):
 
     assert running["stale_reason"] == ""
     assert completed["stale_reason"] == ""
+
+
+def test_start_node_run_persists_run_and_session_directories(tmp_path):
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q203",
+        batch_id="",
+        title="Question Q203",
+        node_keys=["fetch_question_context"],
+    )
+    run = queries.start_node_run(
+        job["id"],
+        "fetch_question_context",
+        ["pi", "--mode", "json"],
+        str(tmp_path / "events.jsonl"),
+        run_dir=str(tmp_path / "run-1"),
+        session_dir=str(tmp_path / "run-1/session"),
+    )
+
+    assert run["run_dir"] == str(tmp_path / "run-1")
+    assert run["session_dir"] == str(tmp_path / "run-1/session")

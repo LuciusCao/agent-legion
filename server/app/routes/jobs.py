@@ -14,7 +14,9 @@ from server.app.cms.client import get_token
 from server.app.cms.question import list_questions_by_knowledge
 from server.app.db import Database
 from server.app.jobs import JobQueries
-from server.app.pipelines.definition import PipelineDefinition, load_pipeline_definition
+from server.app.pipelines.artifacts import clear_rerun_outputs
+from server.app.pipelines.definition import PipelineDefinition
+from server.app.pipelines.registry import load_registered_pipeline
 from server.app.pipelines.resources import (
     RESOURCE_PARAM_KEYS,
     RESOURCE_PROVIDERS,
@@ -27,6 +29,8 @@ from server.app.settings import Settings
 RESOLVER_MAP: dict[tuple[str, str], str] = {
     ("question", "direct_ids"): "direct.question_ids",
     ("question", "by_knowledge"): "cms.questions_by_knowledge",
+    ("question", "batch_by_ids"): "direct.question_ids",
+    ("question", "batch_by_knowledge"): "cms.questions_by_knowledge",
     ("video", "direct_ids"): "direct.video_ids",
     ("video", "by_knowledge"): "cms.videos_by_knowledge",
 }
@@ -52,7 +56,7 @@ def _candidate(
 
 
 class JobBatchRequest(BaseModel):
-    pipeline_key: str = "question_content"
+    pipeline_key: str = "reading_analysis"
     entity: str | None = None
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
@@ -75,7 +79,7 @@ class PipelineResponse(BaseModel):
 
 class WorkspaceCreateRequest(BaseModel):
     name: str
-    default_pipeline_key: str = "question_content"
+    default_pipeline_key: str = "reading_analysis"
     default_entity: str = "question"
     cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)
@@ -197,10 +201,10 @@ def _require_enabled(settings: Settings) -> None:
 
 
 def _definition(settings: Settings, pipeline_key: str) -> PipelineDefinition:
-    if pipeline_key != "question_content":
-        raise HTTPException(status_code=404, detail="Unknown pipeline")
-    path = settings.root_dir / "config" / "pipelines" / "question_content.yaml"
-    return load_pipeline_definition(path)
+    try:
+        return load_registered_pipeline(settings.root_dir, pipeline_key)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown pipeline") from exc
 
 
 def _workspace_or_404(job_db: JobQueries, workspace_id: str) -> dict[str, Any]:
@@ -240,6 +244,10 @@ def _artifact_path(job: dict[str, Any], artifact_name: str) -> Path:
     if path.parent != base:
         raise HTTPException(status_code=400, detail="Invalid artifact path")
     return path
+
+
+def _job_has_running_nodes(job_db: JobQueries, job_id: str) -> bool:
+    return any(node["status"] == "running" for node in job_db.list_job_nodes(job_id))
 
 
 def _artifact_names(job: dict[str, Any]) -> list[str]:
@@ -347,6 +355,22 @@ def _enabled_intake_modes(workspace: dict[str, Any]) -> set[str] | None:
 
 def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
     definition = _definition(settings, pipeline_key)
+    nodes: list[dict[str, Any]] = []
+    for node in definition.nodes.values():
+        node_payload: dict[str, Any] = {
+            "key": node.key,
+            "runner": node.runner,
+            "after": node.after,
+            "inputs": node.inputs,
+            "outputs": node.outputs,
+        }
+        if node.agent is not None:
+            node_payload["agent"] = {
+                "engine": node.agent.engine,
+                "skill": node.agent.skill,
+                "tools": node.agent.tools,
+            }
+        nodes.append(node_payload)
     return {
         "key": definition.key,
         "label": definition.label,
@@ -365,16 +389,7 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
                 for mode in definition.intake.modes.values()
             ]
         },
-        "nodes": [
-            {
-                "key": node.key,
-                "runner": node.runner,
-                "after": node.after,
-                "inputs": node.inputs,
-                "outputs": node.outputs,
-            }
-            for node in definition.nodes.values()
-        ],
+        "nodes": nodes,
     }
 
 
@@ -819,12 +834,28 @@ def create_jobs_router(
             if job is None or job["workspace_id"] != workspace_id:
                 results.append({"job_id": job_id, "status": "not_found"})
                 continue
-            if job["status"] == "running":
+            if _job_has_running_nodes(job_db, job_id):
                 results.append({"job_id": job_id, "status": "skipped", "reason": "running"})
                 continue
             definition = _definition(settings, str(job["pipeline_key"]))
-            first_node = next(iter(definition.nodes))
-            job_db.mark_node_for_rerun(job_id, first_node, downstream_nodes(definition, first_node))
+            root_nodes = [key for key, node in definition.nodes.items() if not node.after]
+            if not root_nodes:
+                results.append({"job_id": job_id, "status": "skipped", "reason": "no_root_node"})
+                continue
+            first_node = root_nodes[0]
+            stale_nodes = downstream_nodes(definition, first_node)
+            try:
+                clear_rerun_outputs(definition, first_node, Path(str(job["storage_dir"])))
+            except ValueError as exc:
+                results.append(
+                    {
+                        "job_id": job_id,
+                        "status": "skipped",
+                        "reason": f"cleanup_failed: {exc}",
+                    }
+                )
+                continue
+            job_db.mark_node_for_rerun(job_id, first_node, stale_nodes)
             results.append({"job_id": job_id, "status": "rerun", "node_key": first_node})
         return BatchJobResponse(results=results)
 
@@ -841,7 +872,7 @@ def create_jobs_router(
             if job is None or job["workspace_id"] != workspace_id:
                 results.append({"job_id": job_id, "status": "not_found"})
                 continue
-            if job["status"] == "running":
+            if _job_has_running_nodes(job_db, job_id):
                 results.append({"job_id": job_id, "status": "skipped", "reason": "running"})
                 continue
             storage_dir = Path(str(job["storage_dir"]))
@@ -953,7 +984,13 @@ def create_jobs_router(
         definition = _definition(settings, str(job["pipeline_key"]))
         if node_key not in definition.nodes:
             raise HTTPException(status_code=404, detail="Node not found")
+        if _job_has_running_nodes(job_db, job_id):
+            raise HTTPException(status_code=400, detail="Cannot rerun a running job")
         stale_nodes = downstream_nodes(definition, node_key)
+        try:
+            clear_rerun_outputs(definition, node_key, Path(str(job["storage_dir"])))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=f"Cleanup failed: {exc}") from exc
         try:
             job_db.mark_node_for_rerun(job_id, node_key, stale_nodes)
         except ValueError as exc:
@@ -966,7 +1003,7 @@ def create_jobs_router(
         job = job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
-        if job["status"] == "running":
+        if _job_has_running_nodes(job_db, job_id):
             raise HTTPException(status_code=400, detail="Cannot delete a running job")
         storage_dir = Path(str(job["storage_dir"]))
         try:

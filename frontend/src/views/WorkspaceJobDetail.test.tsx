@@ -43,6 +43,8 @@ describe('WorkspaceJobDetail', () => {
               error_message: '',
               started_at: '2026-06-08 10:00:00',
               finished_at: '2026-06-08 10:00:01',
+              run_dir: '',
+              session_dir: '',
             },
           ],
           artifacts: ['question_context.json'],
@@ -198,6 +200,161 @@ describe('WorkspaceJobDetail', () => {
 
     expect(await screen.findByText('Q1')).toBeInTheDocument()
     expect(screen.getByText('Pi')).toBeInTheDocument()
+    expect(screen.getByText(/session: session/)).toBeInTheDocument()
+  })
+
+  it('does not render Pi badge for non-pi commands', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        job: {
+          id: 'j1',
+          workspace_id: 'math_ws',
+          pipeline_key: 'reading_analysis',
+          source_id: 'q1',
+          title: 'Q1',
+          status: 'completed',
+        },
+        nodes: [],
+        runs: [
+          {
+            id: 1,
+            job_id: 'j1',
+            node_key: 'fetch_questions',
+            status: 'completed',
+            command_json: JSON.stringify(['python', 'script.py']),
+            exit_code: 0,
+            log_path: '',
+            error_message: '',
+            started_at: '2026-06-08 10:00:00',
+            finished_at: '2026-06-08 10:00:01',
+            run_dir: '/data/j1/r1',
+            session_dir: '',
+          },
+        ],
+        artifacts: [],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/workspaces/math_ws/jobs/j1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/jobs/:jobId"
+            element={<WorkspaceJobDetail />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByText('Q1')).toBeInTheDocument()
+    expect(screen.queryByText('Pi')).not.toBeInTheDocument()
+  })
+
+  it('handles empty or invalid command_json gracefully', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        job: {
+          id: 'j1',
+          workspace_id: 'math_ws',
+          pipeline_key: 'reading_analysis',
+          source_id: 'q1',
+          title: 'Q1',
+          status: 'completed',
+        },
+        nodes: [],
+        runs: [
+          {
+            id: 1,
+            job_id: 'j1',
+            node_key: 'fetch_questions',
+            status: 'completed',
+            command_json: '',
+            exit_code: 0,
+            log_path: '',
+            error_message: '',
+            started_at: '2026-06-08 10:00:00',
+            finished_at: '2026-06-08 10:00:01',
+            run_dir: '/data/j1/r1',
+            session_dir: '/data/j1/r1/session/',
+          },
+        ],
+        artifacts: [],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/workspaces/math_ws/jobs/j1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/jobs/:jobId"
+            element={<WorkspaceJobDetail />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByText('Q1')).toBeInTheDocument()
+    expect(screen.queryByText('Pi')).not.toBeInTheDocument()
+    // session_dir is hidden for non-Pi runs
+    expect(screen.queryByText(/session:/)).not.toBeInTheDocument()
+  })
+
+  it('renders session basename with trailing slash', async () => {
+    const fetchMock = vi.fn().mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        job: {
+          id: 'j1',
+          workspace_id: 'math_ws',
+          pipeline_key: 'reading_analysis',
+          source_id: 'q1',
+          title: 'Q1',
+          status: 'completed',
+        },
+        nodes: [],
+        runs: [
+          {
+            id: 1,
+            job_id: 'j1',
+            node_key: 'extract_keywords',
+            status: 'completed',
+            command_json: JSON.stringify([
+              'pi',
+              '--mode',
+              'json',
+              '--session-dir',
+              '/data/jobs/j1/runs/extract_keywords/r1/session/',
+            ]),
+            exit_code: 0,
+            log_path: '',
+            error_message: '',
+            started_at: '2026-06-08 10:00:00',
+            finished_at: '2026-06-08 10:00:01',
+            run_dir: '/data/jobs/j1/runs/extract_keywords/r1',
+            session_dir: '/data/jobs/j1/runs/extract_keywords/r1/session/',
+          },
+        ],
+        artifacts: [],
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(
+      <MemoryRouter initialEntries={['/workspaces/math_ws/jobs/j1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/jobs/:jobId"
+            element={<WorkspaceJobDetail />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(await screen.findByText('Q1')).toBeInTheDocument()
     expect(screen.getByText(/session: session/)).toBeInTheDocument()
   })
 })

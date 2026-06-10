@@ -431,8 +431,8 @@ def test_job_detail_includes_pi_run_trace(tmp_path):
     body = detail.json()
     runs = body["runs"]
     assert len(runs) == 1
-    assert "/runs/extract_keywords/" in runs[0]["run_dir"]
-    assert runs[0]["session_dir"] == f"{runs[0]['run_dir']}/session"
+    assert runs[0]["run_dir"] == str(tmp_path / "run-1")
+    assert runs[0]["session_dir"] == str(tmp_path / "run-1" / "session")
     assert json.loads(runs[0]["command_json"])[0] == "pi"
 
 
@@ -588,8 +588,8 @@ def test_workspace_stats_returns_counts_and_agent_status(tmp_path):
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "pipeline_key": "question_content",
-                "source_kind": "direct_ids",
+                "pipeline_key": "reading_analysis",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q301", "Q302"],
                 "knowledge_codes": [],
             },
@@ -600,8 +600,8 @@ def test_workspace_stats_returns_counts_and_agent_status(tmp_path):
     body = stats.json()
     assert body["workspace_id"] == ws_id
     assert body["name"] == "Stats WS"
-    assert body["pipeline_key"] == "question_content"
-    assert body["pipeline_label"] == "题目内容生成"
+    assert body["pipeline_key"] == "reading_analysis"
+    assert body["pipeline_label"] == "题目审题分析 Pipeline"
     assert body["job_stats"]["pending"] == 2
     assert "queued" not in body["job_stats"]
     assert body["agent_status"]["total"] == 0
@@ -1335,8 +1335,8 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
         c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
-                "source_kind": "direct_ids",
+                "pipeline_key": "reading_analysis",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q001", "Q002"],
                 "knowledge_codes": [],
             },
@@ -1345,9 +1345,9 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["pipeline"]["key"] == "question_content"
+    assert body["pipeline"]["key"] == "reading_analysis"
     first = body["nodes"][0]
-    assert first["key"] == "fetch_question_context"
+    assert first["key"] == "fetch_questions"
     assert first["runner"] == "local"
     assert first["status_counts"]["pending"] == 2
 
@@ -1595,3 +1595,70 @@ def test_job_batch_rejects_disabled_resource_provider(tmp_path):
 
     assert response.status_code == 400
     assert "disabled" in response.json()["detail"].lower()
+
+
+def test_reading_analysis_batch_by_ids_creates_one_job_per_question(client):
+    response = client.post(
+        "/api/workspaces/default/job-batches",
+        json={
+            "pipeline_key": "reading_analysis",
+            "source_kind": "batch_by_ids",
+            "question_ids": ["Q1", "Q2", "Q1"],
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["created_count"] == 2
+    assert {job["source_id"] for job in body["jobs"]} == {"Q1", "Q2"}
+    assert all(job["pipeline_key"] == "reading_analysis" for job in body["jobs"])
+
+
+def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.cms.question import CmsQuestionSummary
+    from server.app.main import create_app
+
+    calls = []
+
+    def fake_list_questions_by_knowledge(code, api_url=None, token=None):
+        calls.append({"code": code, "api_url": api_url, "token": token})
+        return [
+            CmsQuestionSummary("Q1", "题目一", {"uuid": "Q1"}),
+            CmsQuestionSummary("Q2", "题目二", {"uuid": "Q2"}),
+        ]
+
+    monkeypatch.setattr(
+        "server.app.routes.jobs.list_questions_by_knowledge",
+        fake_list_questions_by_knowledge,
+    )
+    monkeypatch.setattr("server.app.routes.jobs.get_token", lambda env, config: "token")
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config["cms"] = {
+        "env": "prod",
+        "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
+    }
+    with TestClient(app) as c:
+        response = c.post(
+            "/api/workspaces/default/job-batches",
+            json={
+                "pipeline_key": "reading_analysis",
+                "source_kind": "batch_by_knowledge",
+                "question_ids": [],
+                "knowledge_codes": ["K001", "K001", " K002 "],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    payload = json.loads(body["batch"]["source_payload_json"])
+    assert [call["code"] for call in calls] == ["K001", "K002"]
+    assert payload["knowledge_codes"] == ["K001", "K002"]
+    assert payload["question_ids"] == ["Q1", "Q2"]
+    assert body["created_count"] == 2
+    assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
+    assert [job["title"] for job in body["jobs"]] == ["题目一", "题目二"]
+    assert all(job["pipeline_key"] == "reading_analysis" for job in body["jobs"])
