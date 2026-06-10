@@ -95,6 +95,8 @@ describe('WorkspaceMainPage', () => {
     })
     useSettingStore.setState({
       workspaceId: 'ws1',
+      workspaceName: 'WS One',
+      workspaceDescription: '',
       settings: {
         cmsUrl: '',
         cmsToken: '',
@@ -104,7 +106,24 @@ describe('WorkspaceMainPage', () => {
         pipelineKey: '',
         agentIds: [],
         concurrencyLimit: 2,
+        resources: {},
       },
+      agentAssignments: null,
+      originalWorkspaceName: 'WS One',
+      originalWorkspaceDescription: '',
+      originalSettings: {
+        cmsUrl: '',
+        cmsToken: '',
+        entityType: 'question',
+        intakeModes: [],
+        labelOverrides: {},
+        pipelineKey: '',
+        agentIds: [],
+        concurrencyLimit: 2,
+        resources: {},
+      },
+      originalAgentAssignments: null,
+      isDirty: false,
       testStatus: { state: 'idle' },
       isSaving: false,
       saveError: null,
