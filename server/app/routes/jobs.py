@@ -597,7 +597,6 @@ def create_jobs_router(
 
     @router.get("/global-services", response_model=GlobalServicesResponse)
     def get_global_services() -> GlobalServicesResponse:
-        _require_enabled(settings)
         return GlobalServicesResponse(**_global_services_payload(settings))
 
     @router.get("/pipelines/{pipeline_key}", response_model=PipelineResponse)

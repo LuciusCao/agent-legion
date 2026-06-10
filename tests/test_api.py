@@ -8,6 +8,14 @@ from fastapi.testclient import TestClient
 from server.app.settings import Settings
 
 
+def test_global_services_returns_200(client: TestClient):
+    response = client.get("/api/global-services")
+    assert response.status_code == 200
+    data = response.json()
+    assert "cms" in data
+    assert "baseUrl" in data["cms"]
+
+
 def test_core_api_routes_declare_response_models(client):
     schema = client.get("/openapi.json").json()
     paths = schema["paths"]
