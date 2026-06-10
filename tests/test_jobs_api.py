@@ -1669,3 +1669,21 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["title"] for job in body["jobs"]] == ["题目一", "题目二"]
     assert all(job["pipeline_key"] == "reading_analysis" for job in body["jobs"])
+
+
+def test_workspace_settings_returns_agent_assignments(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post("/api/agents/agent-1/assign?workspace_id=default&concurrency_limit=2")
+        c.post("/api/agents/agent-2/assign?workspace_id=default&concurrency_limit=1")
+        response = c.get("/api/workspaces/default/settings")
+
+    assert response.status_code == 200
+    settings = response.json()["settings"]
+    assert settings["agentIds"] == ["agent-1", "agent-2"]
+    assert settings["concurrencyLimit"] == 2

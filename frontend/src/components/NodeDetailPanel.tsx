@@ -19,6 +19,7 @@ export interface NodeDetailPanelProps {
     endedAt?: string
     duration?: number
     agentId?: string
+    errorMessage?: string
   } | null
   onViewLogs: () => void
   onRerunNode: () => void
@@ -80,6 +81,12 @@ export function NodeDetailPanel({
           <dt>智能体</dt>
           <dd>{node.agentId || '—'}</dd>
         </div>
+        {node.errorMessage && (
+          <div className={styles.row}>
+            <dt>错误信息</dt>
+            <dd className={styles.errorText}>{node.errorMessage}</dd>
+          </div>
+        )}
       </dl>
 
       <div className={styles.actions}>

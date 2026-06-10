@@ -398,7 +398,9 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
     }
 
 
-def _workspace_settings_payload(workspace: dict[str, Any], settings: Settings) -> dict[str, Any]:
+def _workspace_settings_payload(
+    workspace: dict[str, Any], settings: Settings, job_db: JobQueries
+) -> dict[str, Any]:
     intake_config = workspace.get("intake_config")
     if not isinstance(intake_config, dict):
         intake_config = {}
@@ -416,13 +418,14 @@ def _workspace_settings_payload(workspace: dict[str, Any], settings: Settings) -
     definition = _definition(
         settings, str(workspace.get("default_pipeline_key") or "question_content")
     )
+    assignments = job_db.list_workspace_agents(str(workspace.get("id") or ""))
     return {
         "entityType": str(workspace.get("default_entity") or "question"),
         "intakeModes": enabled_modes if isinstance(enabled_modes, list) else [],
         "labelOverrides": label_overrides if isinstance(label_overrides, dict) else {},
         "pipelineKey": str(workspace.get("default_pipeline_key") or "question_content"),
-        "agentIds": [],
-        "concurrencyLimit": 1,
+        "agentIds": [a["agent_id"] for a in assignments],
+        "concurrencyLimit": max((a["concurrency_limit"] for a in assignments), default=1),
         "resources": resources,
         "localConcurrency": pipeline_config.get("local", definition.concurrency.local),
         "agentConcurrency": pipeline_config.get("agent", definition.concurrency.agent),
@@ -684,7 +687,9 @@ def create_jobs_router(
     def get_workspace_settings(workspace_id: str) -> WorkspaceSettingsResponse:
         _require_enabled(settings)
         workspace = _workspace_or_404(job_db, workspace_id)
-        return WorkspaceSettingsResponse(settings=_workspace_settings_payload(workspace, settings))
+        return WorkspaceSettingsResponse(
+            settings=_workspace_settings_payload(workspace, settings, job_db)
+        )
 
     @router.patch(
         "/workspaces/{workspace_id}/settings/{section}",
@@ -758,7 +763,9 @@ def create_jobs_router(
             )
         else:
             raise HTTPException(status_code=404, detail="Unknown settings section")
-        return WorkspaceSettingsResponse(settings=_workspace_settings_payload(workspace, settings))
+        return WorkspaceSettingsResponse(
+            settings=_workspace_settings_payload(workspace, settings, job_db)
+        )
 
     @router.post(
         "/workspaces/{workspace_id}/settings/test-connection",

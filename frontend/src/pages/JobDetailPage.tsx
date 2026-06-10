@@ -122,12 +122,13 @@ export default function JobDetailPage() {
     if (!n) return null
     return {
       key: n.node_key,
-      label: n.node_key,
+      label: n.label || n.node_key,
       status: normalizeStatus(n.status),
       startedAt: n.started_at || undefined,
       endedAt: n.finished_at || undefined,
       duration: durationSeconds(n.started_at, n.finished_at),
       agentId: undefined,
+      errorMessage: n.error_message || undefined,
     }
   }, [detail, selectedNodeKey])
 
@@ -160,32 +161,29 @@ export default function JobDetailPage() {
 
       <div className={styles.columns}>
         <div className={styles.left}>
-          {detail?.job.source_type === 'question' && workspaceId ? (
+          {detail?.job.source_type === 'question' && workspaceId && (
             <QuestionContentPanel
               workspaceId={workspaceId}
               questionId={detail.job.source_id}
             />
-          ) : (
-            <>
-              <div className={styles.graphWrap}>
-                <DagGraph
-                  nodes={dagNodes}
-                  edges={dagEdges}
-                  selectedNodeKey={selectedNodeKey}
-                  onNodeClick={setSelectedNodeKey}
-                />
-              </div>
-              <NodeDetailPanel
-                node={selectedNode}
-                onViewLogs={() => {
-                  /* TODO view logs */
-                }}
-                onRerunNode={() => {
-                  /* TODO rerun node */
-                }}
-              />
-            </>
           )}
+          <div className={styles.graphWrap}>
+            <DagGraph
+              nodes={dagNodes}
+              edges={dagEdges}
+              selectedNodeKey={selectedNodeKey}
+              onNodeClick={setSelectedNodeKey}
+            />
+          </div>
+          <NodeDetailPanel
+            node={selectedNode}
+            onViewLogs={() => {
+              /* TODO view logs */
+            }}
+            onRerunNode={() => {
+              /* TODO rerun node */
+            }}
+          />
         </div>
 
         <div className={styles.right}>

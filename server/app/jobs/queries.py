@@ -608,3 +608,13 @@ class JobQueries:
             )
             if cursor.rowcount == 0:
                 raise ValueError("Workspace not found")
+
+    def list_workspace_agents(self, workspace_id: str) -> list[dict[str, Any]]:
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                "select agent_id, concurrency_limit from workspace_agent_assignments where workspace_id = ?",
+                (workspace_id,),
+            ).fetchall()
+        return [
+            {"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows
+        ]

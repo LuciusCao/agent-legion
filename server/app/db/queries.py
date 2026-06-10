@@ -79,8 +79,10 @@ class VideoQueries:
 
     @contextmanager
     def connect(self):
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         try:
             with conn:
                 yield conn
@@ -90,8 +92,10 @@ class VideoQueries:
     @contextmanager
     def _connect_read(self):
         """Read-only connection context that does not implicitly commit."""
-        conn = sqlite3.connect(self.path)
+        conn = sqlite3.connect(self.path, check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA journal_mode=WAL")
+        conn.execute("PRAGMA synchronous=NORMAL")
         try:
             yield conn
         finally:

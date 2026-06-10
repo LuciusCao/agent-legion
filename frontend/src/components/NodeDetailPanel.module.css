@@ -101,3 +101,9 @@
 .btn:hover {
   background: var(--md-sys-color-surface-container, #f3f4f6);
 }
+
+.errorText {
+  color: var(--md-sys-color-error, #b91c1c);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

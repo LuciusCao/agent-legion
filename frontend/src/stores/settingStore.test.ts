@@ -171,7 +171,7 @@ describe('settingStore', () => {
         body: expect.stringContaining('pipelineKey'),
       })
     )
-    expect(mockAssignAgent).not.toHaveBeenCalled()
+    expect(mockAssignAgent).toHaveBeenCalledWith('ws1', 'agent-1', 2)
     expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
   })
 

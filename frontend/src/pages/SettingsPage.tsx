@@ -71,9 +71,9 @@ export function SettingsPage() {
       { id: 'basic-info', label: '基本信息' },
       { id: 'intake-config', label: '接入配置' },
       { id: 'pipeline', label: 'Pipeline' },
-      ...(isVideoHive ? [{ id: 'agents', label: '智能体' }] : []),
+      { id: 'agents', label: '智能体' },
     ],
-    [isVideoHive]
+    []
   )
 
   const [activeSection, setActiveSection] = useState('basic-info')
@@ -85,9 +85,7 @@ export function SettingsPage() {
     void fetchSettings(workspaceId).then(() => {
       void fetchPipelineDefinition()
     })
-    if (isVideoHive) {
-      void fetchAgentAssignments(workspaceId)
-    }
+    void fetchAgentAssignments(workspaceId)
   }, [
     workspaceId,
     isVideoHive,
@@ -460,16 +458,14 @@ export function SettingsPage() {
             </div>
           </section>
 
-          {isVideoHive && (
-            <section id="agents" className={styles.section}>
-              <h2 className={styles.sectionTitle}>智能体</h2>
-              <AgentAllocationList
-                workspaceId={workspaceId}
-                assignments={agentAssignments}
-                onAssignmentsChange={setAgentAssignments}
-              />
-            </section>
-          )}
+          <section id="agents" className={styles.section}>
+            <h2 className={styles.sectionTitle}>智能体</h2>
+            <AgentAllocationList
+              workspaceId={workspaceId}
+              assignments={agentAssignments}
+              onAssignmentsChange={setAgentAssignments}
+            />
+          </section>
         </div>
       </div>
     </AppShell>
