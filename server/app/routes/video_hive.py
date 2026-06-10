@@ -1,22 +1,28 @@
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict, Field
 
 from ..settings import Settings
 
 
 class AsrConfigResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     provider: str
-    whisperConfigured: bool
-    sensevoiceConfigured: bool
-    vadEnabled: bool
+    whisper_configured: bool = Field(alias="whisperConfigured")
+    sensevoice_configured: bool = Field(alias="sensevoiceConfigured")
+    vad_enabled: bool = Field(alias="vadEnabled")
 
 
 class OpenclawConfigResponse(BaseModel):
-    runnerCount: int
-    timeoutSeconds: int
+    model_config = ConfigDict(populate_by_name=True)
+
+    runner_count: int = Field(alias="runnerCount")
+    timeout_seconds: int = Field(alias="timeoutSeconds")
 
 
 class VideoHiveConfigResponse(BaseModel):
+    model_config = ConfigDict(populate_by_name=True)
+
     asr: AsrConfigResponse
     openclaw: OpenclawConfigResponse
 
@@ -37,15 +43,15 @@ def create_video_hive_router(settings: Settings) -> APIRouter:
         vad_enabled = bool(whisper.get("vad_model"))
 
         return VideoHiveConfigResponse(
-            asr=AsrConfigResponse(
+            asr=AsrConfigResponse.model_construct(
                 provider=str(asr.get("provider", "auto")),
-                whisperConfigured=whisper_configured,
-                sensevoiceConfigured=sensevoice_configured,
-                vadEnabled=vad_enabled,
+                whisper_configured=whisper_configured,
+                sensevoice_configured=sensevoice_configured,
+                vad_enabled=vad_enabled,
             ),
-            openclaw=OpenclawConfigResponse(
-                runnerCount=len(runners) if isinstance(runners, list) else 0,
-                timeoutSeconds=int(openclaw.get("timeout_seconds", 600)),
+            openclaw=OpenclawConfigResponse.model_construct(
+                runner_count=len(runners) if isinstance(runners, list) else 0,
+                timeout_seconds=int(openclaw.get("timeout_seconds", 600)),
             ),
         )
 

@@ -65,6 +65,15 @@ export function AppShell({ appBar, children, mainClassName }: AppShellProps) {
     return () => main.removeEventListener('scroll', handleScroll)
   }, [])
 
+  useEffect(() => {
+    if (reportedScrolled === null) {
+      const main = mainRef.current
+      if (main) {
+        setNativeScrolled(main.scrollTop > 0)
+      }
+    }
+  }, [reportedScrolled])
+
   const ctxValue = useMemo(
     () => ({ reportScrolled, resetReportedScroll }),
     [reportScrolled, resetReportedScroll]
