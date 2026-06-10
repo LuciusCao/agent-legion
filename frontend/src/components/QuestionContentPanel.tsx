@@ -125,9 +125,8 @@ export function QuestionContentPanel({
     return renderLatexInHtml(sanitizeHtml(analysis))
   }, [analysis])
 
-  const answerItems = detail?.normalized.answer
-    ? extractAnswerItems(detail.normalized.answer)
-    : null
+  const rawAnswer = detail?.normalized.answer
+  const answerItems = rawAnswer ? extractAnswerItems(rawAnswer) : null
 
   if (loading) {
     return <p className={styles.loading}>加载题目中...</p>
@@ -188,10 +187,10 @@ export function QuestionContentPanel({
         </section>
       )}
 
-      {answerItems != null && (
+      {(answerItems != null || rawAnswer != null) && (
         <section className={`${styles.card} ${styles.answerCard}`}>
           <h2 className={styles.sectionTitle}>答案</h2>
-          {answerItems.length > 0 ? (
+          {answerItems != null && answerItems.length > 0 ? (
             <div className={styles.answerBadges}>
               {answerItems.map((item, idx) => (
                 <span key={idx} className={styles.answerBadge}>
