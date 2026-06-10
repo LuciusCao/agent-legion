@@ -179,8 +179,15 @@ def init_db(path: Path) -> None:
             conn.execute(
                 """
                 insert into workspaces(id, name, default_pipeline_key)
-                values ('default', '默认工作空间', 'question_content')
+                values ('default', '默认工作空间', 'reading_analysis')
                 on conflict(id) do nothing
+                """
+            )
+            conn.execute(
+                """
+                update workspaces
+                set default_pipeline_key = 'reading_analysis'
+                where id = 'default' and default_pipeline_key = 'question_content'
                 """
             )
 
