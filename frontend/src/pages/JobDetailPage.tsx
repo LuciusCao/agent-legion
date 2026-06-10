@@ -96,17 +96,25 @@ export default function JobDetailPage() {
   }, [jobId, setPageTitle])
 
   // Poll every 5s for running jobs
+  const detailRef = useRef(detail)
+  detailRef.current = detail
   useEffect(() => {
     if (!jobId) return
+    let stale = false
     const timer = setInterval(() => {
-      if (detail?.job.status === 'running') {
+      if (detailRef.current?.job.status === 'running') {
         fetchJobDetail(jobId)
-          .then((data) => setDetail(data))
+          .then((data) => {
+            if (!stale) setDetail(data)
+          })
           .catch(() => {})
       }
     }, 5000)
-    return () => clearInterval(timer)
-  }, [jobId, detail?.job.status])
+    return () => {
+      stale = true
+      clearInterval(timer)
+    }
+  }, [jobId])
 
   const dagNodes = useMemo(
     () => (detail ? toDagNodes(detail.nodes) : []),
