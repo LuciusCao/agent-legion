@@ -14,7 +14,8 @@ from server.app.cms.client import get_token
 from server.app.cms.question import list_questions_by_knowledge
 from server.app.db import Database
 from server.app.jobs import JobQueries
-from server.app.pipelines.definition import PipelineDefinition, load_pipeline_definition
+from server.app.pipelines.definition import PipelineDefinition
+from server.app.pipelines.registry import load_registered_pipeline
 from server.app.pipelines.resources import (
     RESOURCE_PARAM_KEYS,
     RESOURCE_PROVIDERS,
@@ -27,6 +28,8 @@ from server.app.settings import Settings
 RESOLVER_MAP: dict[tuple[str, str], str] = {
     ("question", "direct_ids"): "direct.question_ids",
     ("question", "by_knowledge"): "cms.questions_by_knowledge",
+    ("question", "batch_by_ids"): "direct.question_ids",
+    ("question", "batch_by_knowledge"): "cms.questions_by_knowledge",
     ("video", "direct_ids"): "direct.video_ids",
     ("video", "by_knowledge"): "cms.videos_by_knowledge",
 }
@@ -50,7 +53,7 @@ def _candidate(
 
 
 class JobBatchRequest(BaseModel):
-    pipeline_key: str = "question_content"
+    pipeline_key: str = "reading_analysis"
     entity: str | None = None
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
@@ -73,7 +76,7 @@ class PipelineResponse(BaseModel):
 
 class WorkspaceCreateRequest(BaseModel):
     name: str
-    default_pipeline_key: str = "question_content"
+    default_pipeline_key: str = "reading_analysis"
     default_entity: str = "question"
     cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)
@@ -195,10 +198,10 @@ def _require_enabled(settings: Settings) -> None:
 
 
 def _definition(settings: Settings, pipeline_key: str) -> PipelineDefinition:
-    if pipeline_key != "question_content":
-        raise HTTPException(status_code=404, detail="Unknown pipeline")
-    path = settings.root_dir / "config" / "pipelines" / "question_content.yaml"
-    return load_pipeline_definition(path)
+    try:
+        return load_registered_pipeline(settings.root_dir, pipeline_key)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Unknown pipeline") from exc
 
 
 def _workspace_or_404(job_db: JobQueries, workspace_id: str) -> dict[str, Any]:
@@ -345,6 +348,22 @@ def _enabled_intake_modes(workspace: dict[str, Any]) -> set[str] | None:
 
 def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
     definition = _definition(settings, pipeline_key)
+    nodes: list[dict[str, Any]] = []
+    for node in definition.nodes.values():
+        node_payload: dict[str, Any] = {
+            "key": node.key,
+            "runner": node.runner,
+            "after": node.after,
+            "inputs": node.inputs,
+            "outputs": node.outputs,
+        }
+        if node.agent is not None:
+            node_payload["agent"] = {
+                "engine": node.agent.engine,
+                "skill": node.agent.skill,
+                "tools": node.agent.tools,
+            }
+        nodes.append(node_payload)
     return {
         "key": definition.key,
         "label": definition.label,
@@ -363,16 +382,7 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
                 for mode in definition.intake.modes.values()
             ]
         },
-        "nodes": [
-            {
-                "key": node.key,
-                "runner": node.runner,
-                "after": node.after,
-                "inputs": node.inputs,
-                "outputs": node.outputs,
-            }
-            for node in definition.nodes.values()
-        ],
+        "nodes": nodes,
     }
 
 

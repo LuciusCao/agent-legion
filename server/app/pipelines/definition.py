@@ -7,6 +7,9 @@ from typing import Any, Literal
 import yaml
 
 RunnerKind = Literal["local", "agent"]
+AgentEngine = Literal["pi"]
+
+PI_TOOLS = {"read", "write", "edit", "bash", "grep", "find", "ls"}
 
 
 class PipelineDefinitionError(ValueError):
@@ -20,12 +23,20 @@ class PipelineConcurrency:
 
 
 @dataclass(frozen=True)
+class PipelineAgent:
+    engine: AgentEngine
+    skill: str
+    tools: list[str] = field(default_factory=lambda: ["read", "write", "bash"])
+
+
+@dataclass(frozen=True)
 class PipelineNode:
     key: str
     runner: RunnerKind
     after: list[str] = field(default_factory=list)
     inputs: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
+    agent: PipelineAgent | None = None
 
 
 @dataclass(frozen=True)
@@ -124,6 +135,47 @@ def _load_intake(raw: dict[str, Any]) -> PipelineIntake:
     return PipelineIntake(modes=modes)
 
 
+def _load_agent(
+    raw_node: dict[str, Any], node_key: str, runner: RunnerKind
+) -> PipelineAgent | None:
+    raw_agent = raw_node.get("agent")
+    if raw_agent is None:
+        return None
+    if not isinstance(raw_agent, dict):
+        raise PipelineDefinitionError(f"Node {node_key} agent block must be a mapping")
+    if runner == "local":
+        raise PipelineDefinitionError(f"Node {node_key} has agent block but runner is local")
+
+    engine = raw_agent.get("engine")
+    if engine != "pi":
+        raise PipelineDefinitionError(f"Node {node_key} agent.engine must be 'pi', got {engine!r}")
+
+    skill = raw_agent.get("skill", "")
+    if not isinstance(skill, str) or not skill:
+        raise PipelineDefinitionError(f"Node {node_key} agent.skill must be a non-empty string")
+    if skill.startswith("/"):
+        raise PipelineDefinitionError(
+            f"Node {node_key} agent.skill must be a relative path, got {skill!r}"
+        )
+    if ".." in skill.split("/"):
+        raise PipelineDefinitionError(
+            f"Node {node_key} agent.skill must not contain '..' components, got {skill!r}"
+        )
+
+    raw_tools = raw_agent.get("tools", ["read", "write", "bash"])
+    if not isinstance(raw_tools, list) or not raw_tools:
+        raise PipelineDefinitionError(f"Node {node_key} agent.tools must be a non-empty list")
+    tools: list[str] = []
+    for tool in raw_tools:
+        if not isinstance(tool, str) or tool not in PI_TOOLS:
+            raise PipelineDefinitionError(
+                f"Node {node_key} agent.tools contains invalid tool {tool!r}"
+            )
+        tools.append(tool)
+
+    return PipelineAgent(engine="pi", skill=skill, tools=tools)
+
+
 def load_pipeline_definition(path: Path) -> PipelineDefinition:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -163,12 +215,15 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
         if runner not in {"local", "agent"}:
             raise PipelineDefinitionError(f"Node {node_key} has invalid runner {runner!r}")
 
+        agent = _load_agent(raw_node, node_key, runner)
+
         nodes[node_key] = PipelineNode(
             key=node_key,
             runner=runner,
             after=_string_list(raw_node.get("after"), "after", node_key),
             inputs=_string_list(raw_node.get("inputs"), "inputs", node_key),
             outputs=_string_list(raw_node.get("outputs"), "outputs", node_key),
+            agent=agent,
         )
 
     for node in nodes.values():
