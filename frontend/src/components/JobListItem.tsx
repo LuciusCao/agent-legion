@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom'
 import { JOB_STATUS_LABELS } from '../labels'
 import { formatRelativeTime } from '../helpers'
 import type { JobRecord } from '../types'
@@ -9,6 +10,8 @@ export interface JobListItemProps {
   expanded: boolean
   onToggleSelect: () => void
   onToggleExpand: () => void
+  workspaceId?: string
+  entity?: string
 }
 
 function statusClass(status: string): string {
@@ -46,7 +49,10 @@ export function JobListItem({
   expanded,
   onToggleSelect,
   onToggleExpand,
+  workspaceId,
+  entity,
 }: JobListItemProps) {
+  const navigate = useNavigate()
   return (
     <div className={styles.row} data-job={job.id}>
       <input
@@ -57,7 +63,17 @@ export function JobListItem({
         onClick={(e) => e.stopPropagation()}
         aria-label={`选择任务 ${job.source_id}`}
       />
-      <div className={styles.main}>
+      <div
+        className={styles.main}
+        onClick={() => {
+          if (entity === 'question' && workspaceId) {
+            navigate(`/workspaces/${workspaceId}/questions/${job.source_id}`)
+          } else if (workspaceId) {
+            navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)
+          }
+        }}
+        style={{ cursor: 'pointer' }}
+      >
         <div className={styles.sourceId}>{job.source_id}</div>
         <div className={styles.title}>{job.title || '—'}</div>
       </div>
@@ -80,7 +96,10 @@ export function JobListItem({
       <button
         type="button"
         className={styles.expandBtn}
-        onClick={onToggleExpand}
+        onClick={(e) => {
+          e.stopPropagation()
+          onToggleExpand()
+        }}
         aria-expanded={expanded}
       >
         {expanded ? '收起 ▲' : '展开 ▼'}
