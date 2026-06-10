@@ -602,7 +602,8 @@ def test_workspace_stats_returns_counts_and_agent_status(tmp_path):
     assert body["name"] == "Stats WS"
     assert body["pipeline_key"] == "question_content"
     assert body["pipeline_label"] == "题目内容生成"
-    assert body["job_stats"]["queued"] == 2
+    assert body["job_stats"]["pending"] == 2
+    assert "queued" not in body["job_stats"]
     assert body["agent_status"]["total"] == 0
     assert body["agent_status"]["busy"] == 0
     assert body["agent_status"]["idle"] == 0

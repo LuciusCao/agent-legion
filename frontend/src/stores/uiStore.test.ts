@@ -27,6 +27,10 @@ describe('uiStore', () => {
     })
   })
 
+  it('defaults workerPaused to true to match backend', () => {
+    expect(useUiStore.getState().workerPaused).toBe(true)
+  })
+
   it('connectAgentsWs returns a cleanup function', () => {
     const cleanup = useUiStore.getState().connectAgentsWs()
     expect(typeof cleanup).toBe('function')

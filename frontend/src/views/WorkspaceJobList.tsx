@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { WORKSPACE_LABELS } from '../labels'
+import { JOB_STATUS_LABELS, WORKSPACE_LABELS } from '../labels'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
@@ -287,8 +287,11 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
             >
               <div slot="headline">{job.title}</div>
               <div slot="supporting-text">{job.source_id}</div>
-              <span slot="end" className={`status-badge ${job.status}`}>
-                {job.status}
+              <span
+                slot="end"
+                className={`status-badge ${job.status === 'queued' ? 'pending' : job.status}`}
+              >
+                {JOB_STATUS_LABELS[job.status] || job.status}
               </span>
               <md-icon-button
                 slot="end"
