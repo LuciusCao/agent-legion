@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, renderHook } from '@testing-library/react'
 import { useEffect } from 'react'
 import { AppShell, useAppShellScroll } from './AppShell'
 
@@ -35,18 +35,17 @@ describe('AppShell', () => {
 
   it('detects native main scroll and passes scrolled=true', () => {
     const appBarFn = vi.fn(() => <div>Bar</div>)
-    render(
+    const { container } = render(
       <AppShell appBar={appBarFn}>
         <div style={{ height: '2000px' }}>Tall content</div>
       </AppShell>
     )
-    const main = document.querySelector('main')
-    if (main) {
-      act(() => {
-        main.scrollTop = 10
-        main.dispatchEvent(new Event('scroll', { bubbles: false }))
-      })
-    }
+    const main = container.querySelector('main')
+    expect(main).toBeTruthy()
+    act(() => {
+      main!.scrollTop = 10
+      main!.dispatchEvent(new Event('scroll', { bubbles: false }))
+    })
     expect(appBarFn).toHaveBeenLastCalledWith({ scrolled: true })
   })
 
@@ -70,21 +69,17 @@ describe('AppShell', () => {
 
   it('applies mainClassName to main element', () => {
     const appBarFn = vi.fn(() => <div>Bar</div>)
-    render(
+    const { container } = render(
       <AppShell appBar={appBarFn} mainClassName="custom-class">
         <div>Content</div>
       </AppShell>
     )
-    const main = document.querySelector('main')
+    const main = container.querySelector('main')
     expect(main?.classList.contains('custom-class')).toBe(true)
   })
 
   it('throws when useAppShellScroll is used outside AppShell', () => {
-    function BadComponent() {
-      useAppShellScroll()
-      return <div />
-    }
-    expect(() => render(<BadComponent />)).toThrow(
+    expect(() => renderHook(() => useAppShellScroll())).toThrow(
       'useAppShellScroll must be used inside AppShell'
     )
   })
