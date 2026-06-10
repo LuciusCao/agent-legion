@@ -5,14 +5,17 @@
   padding: 12px 16px;
   background: var(--md-sys-color-surface);
   cursor: pointer;
-  transition: background 180ms ease, box-shadow 180ms ease;
+  transition: background 200ms ease, box-shadow 200ms ease, transform 200ms ease;
   border-radius: 12px;
-  margin: 2px 8px;
+  margin: 4px 8px;
 }
 
 .row:hover {
-  background: var(--md-sys-color-surface-container-low);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+  background: var(--md-sys-color-surface-container);
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
 }
 
 .row:not(:last-child) {
