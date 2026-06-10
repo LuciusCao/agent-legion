@@ -1,0 +1,123 @@
+import { useEffect, useState } from 'react'
+import { AppShell } from '../layouts/AppShell'
+import { AppBar } from '../components/AppBar'
+import { useUiStore } from '../stores/uiStore'
+import { api } from '../api'
+import { SettingsCard } from '../components/SettingsCard'
+import type { GlobalServiceStatus } from '../types'
+
+export function VideoHiveSettingsPage() {
+  const { workerPaused, fetchWorkerStatus, setWorkerPaused, showToast } =
+    useUiStore()
+  const [services, setServices] = useState<GlobalServiceStatus | null>(null)
+
+  useEffect(() => {
+    fetchWorkerStatus().catch(() => {})
+    api<{ cms: { baseUrl: string; tokenConfigured: boolean; env: string } }>(
+      '/api/global-services'
+    )
+      .then((data) =>
+        setServices({
+          cms: {
+            baseUrl: data.cms.baseUrl,
+            tokenConfigured: data.cms.tokenConfigured,
+            env: data.cms.env,
+            healthy: null,
+            lastCheckedAt: null,
+          },
+        })
+      )
+      .catch(() => {})
+  }, [fetchWorkerStatus])
+
+  const togglePause = async () => {
+    const next = !workerPaused
+    try {
+      await setWorkerPaused(next)
+      showToast(next ? '已关闭自动调度' : '已开启自动调度', 'success')
+    } catch {
+      showToast('更新失败', 'error')
+    }
+  }
+
+  return (
+    <AppShell
+      appBar={({ scrolled }) => (
+        <AppBar
+          title="Video Hive / 设置"
+          backTo="/video-hive"
+          scrolled={scrolled}
+        />
+      )}
+      mainClassName="settings-main"
+    >
+      <div style={{ maxWidth: 800, margin: '0 auto' }}>
+        <SettingsCard icon="cloud" title="全局服务状态">
+          {services ? (
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                  }}
+                >
+                  CMS Base URL
+                </span>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {services.cms.baseUrl || '-'}
+                </div>
+              </div>
+              <div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                  }}
+                >
+                  Token 状态
+                </span>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {services.cms.tokenConfigured ? '已配置' : '未配置'}
+                </div>
+              </div>
+              <div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                  }}
+                >
+                  环境
+                </span>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {services.cms.env || '-'}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>加载中…</div>
+          )}
+        </SettingsCard>
+
+        <SettingsCard icon="toggle_on" title="Worker 控制">
+          <label
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 12,
+              fontSize: 14,
+            }}
+          >
+            <span>自动调度</span>
+            <md-switch
+              selected={!workerPaused || undefined}
+              onClick={togglePause}
+            />
+          </label>
+        </SettingsCard>
+      </div>
+    </AppShell>
+  )
+}
