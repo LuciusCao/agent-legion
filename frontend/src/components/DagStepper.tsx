@@ -18,11 +18,7 @@ export function DagStepper({ nodes }: { nodes: JobNodeRecord[] }) {
       {nodes.map((node) => {
         const state = getStepState(node.status)
         return (
-          <div
-            key={node.node_key}
-            className={styles.step}
-            title={node.label}
-          >
+          <div key={node.node_key} className={styles.step} title={node.label}>
             <div className={`${styles.stepBar} ${styles[state]}`} />
             <span className={styles.stepLabel}>{node.label}</span>
           </div>
