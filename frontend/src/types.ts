@@ -155,6 +155,7 @@ export type JobRecord = {
   workspace_id: string
   pipeline_key: string
   source_id: string
+  source_type?: string
   title: string
   stem: string
   status: string

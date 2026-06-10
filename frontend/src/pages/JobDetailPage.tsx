@@ -3,6 +3,7 @@ import { useParams } from 'react-router-dom'
 import { DagGraph, type DagEdge, type DagNode } from '../components/DagGraph'
 import { NodeDetailPanel } from '../components/NodeDetailPanel'
 import { JobProgressPanel } from '../components/JobProgressPanel'
+import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact, fetchJobDetail } from '../api'
 import { useUiStore } from '../stores/uiStore'
 import type { JobDetailResponse, JobNodeRecord } from '../types'
@@ -57,7 +58,7 @@ function durationSeconds(
 }
 
 export default function JobDetailPage() {
-  const { jobId } = useParams<{
+  const { workspaceId, jobId } = useParams<{
     workspaceId: string
     jobId: string
   }>()
@@ -93,6 +94,19 @@ export default function JobDetailPage() {
       setPageTitle(null)
     }
   }, [jobId, setPageTitle])
+
+  // Poll every 5s for running jobs
+  useEffect(() => {
+    if (!jobId) return
+    const timer = setInterval(() => {
+      if (detail?.job.status === 'running') {
+        fetchJobDetail(jobId)
+          .then((data) => setDetail(data))
+          .catch(() => {})
+      }
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [jobId, detail?.job.status])
 
   const dagNodes = useMemo(
     () => (detail ? toDagNodes(detail.nodes) : []),
@@ -141,30 +155,46 @@ export default function JobDetailPage() {
     return <p className={styles.loading}>加载中...</p>
   }
 
+  const sourceType = detail?.job.source_type
+
+  const renderLeftContent = () => {
+    if (sourceType === 'question' && workspaceId) {
+      return (
+        <QuestionContentPanel
+          workspaceId={workspaceId}
+          questionId={detail!.job.source_id}
+        />
+      )
+    }
+    return (
+      <>
+        <div className={styles.graphWrap}>
+          <DagGraph
+            nodes={dagNodes}
+            edges={dagEdges}
+            selectedNodeKey={selectedNodeKey}
+            onNodeClick={setSelectedNodeKey}
+          />
+        </div>
+        <NodeDetailPanel
+          node={selectedNode}
+          onViewLogs={() => {
+            /* TODO view logs */
+          }}
+          onRerunNode={() => {
+            /* TODO rerun node */
+          }}
+        />
+      </>
+    )
+  }
+
   return (
     <div className={styles.page}>
       {error ? <p className={styles.error}>{error}</p> : null}
 
       <div className={styles.columns}>
-        <div className={styles.left}>
-          <div className={styles.graphWrap}>
-            <DagGraph
-              nodes={dagNodes}
-              edges={dagEdges}
-              selectedNodeKey={selectedNodeKey}
-              onNodeClick={setSelectedNodeKey}
-            />
-          </div>
-          <NodeDetailPanel
-            node={selectedNode}
-            onViewLogs={() => {
-              /* TODO view logs */
-            }}
-            onRerunNode={() => {
-              /* TODO rerun node */
-            }}
-          />
-        </div>
+        <div className={styles.left}>{renderLeftContent()}</div>
 
         <div className={styles.right}>
           {detail && (
