@@ -504,6 +504,17 @@ def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
     worker._skill_root = tmp_path / "skills"
     worker._skill_root.mkdir(parents=True)
 
+    # Block the wrapped execution so the future stays in-flight across polls.
+    import threading as _threading
+
+    _blocker = _threading.Event()
+
+    def _slow_execute(*args, **kwargs):
+        _blocker.wait(timeout=5)
+        return True
+
+    monkeypatch.setattr("server.app.pipeline_worker_thread._execute_node_wrapped", _slow_execute)
+
     # First poll submits fetch_questions
     processed = worker._poll()
     assert processed is True
@@ -513,6 +524,7 @@ def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
     processed = worker._poll()
     assert len(worker._futures) == 1
 
+    _blocker.set()
     worker.stop()
 
 
