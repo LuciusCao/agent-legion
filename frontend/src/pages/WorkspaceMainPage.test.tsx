@@ -169,7 +169,10 @@ describe('WorkspaceMainPage', () => {
   })
 
   it('batch toolbar appears when items selected', async () => {
-    useJobStore.setState({ selectedIds: new Set(['j1', 'j2']), selectMode: true })
+    useJobStore.setState({
+      selectedIds: new Set(['j1', 'j2']),
+      selectMode: true,
+    })
 
     await act(async () => {
       renderPage()

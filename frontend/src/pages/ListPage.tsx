@@ -42,7 +42,8 @@ export function ListPage() {
   const batchRunTo = useVideoStore((state) => state.batchRunTo)
   const batchPackage = useVideoStore((state) => state.batchPackage)
   const exitSelectMode = useVideoStore((state) => state.exitSelectMode)
-  const { openAddDialog, closeAddDialog, addDialogOpen, showToast } = useUiStore()
+  const { openAddDialog, closeAddDialog, addDialogOpen, showToast } =
+    useUiStore()
   const [packageDialogOpen, setPackageDialogOpen] = useState(false)
   const [rerunDialogOpen, setRerunDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)

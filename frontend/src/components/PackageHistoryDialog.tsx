@@ -224,9 +224,7 @@ export function PackageHistoryDialog({
                           <md-icon-button
                             disabled={pkg.locked || undefined}
                             onClick={() => handleDelete(pkg.id)}
-                            title={
-                              pkg.locked ? '已锁定，无法删除' : '删除'
-                            }
+                            title={pkg.locked ? '已锁定，无法删除' : '删除'}
                             style={{
                               color: pkg.locked
                                 ? 'var(--md-sys-color-outline)'

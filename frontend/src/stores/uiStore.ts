@@ -21,7 +21,10 @@ interface UiState {
   connectAgentsWs: () => () => void
   fetchWorkerStatus: () => Promise<void>
   setWorkerPaused: (paused: boolean) => Promise<void>
-  openAddDialog: (opts?: { context?: 'video' | 'workspace'; workspaceId?: string }) => void
+  openAddDialog: (opts?: {
+    context?: 'video' | 'workspace'
+    workspaceId?: string
+  }) => void
   closeAddDialog: () => void
   setAddContentType: (type: ContentType) => void
   openRerunDialog: () => void
