@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { decodeHtmlEntities, extractLatexParts, sanitizeLatex } from './latex'
+import {
+  decodeHtmlEntities,
+  extractLatexParts,
+  sanitizeLatex,
+  renderLatexInHtml,
+} from './latex'
 
 describe('decodeHtmlEntities', () => {
   it('decodes basic entities', () => {
@@ -114,5 +119,53 @@ describe('sanitizeLatex', () => {
 
   it('handles empty string', () => {
     expect(sanitizeLatex('')).toBe('')
+  })
+})
+
+describe('renderLatexInHtml', () => {
+  it('renders latex in plain text within html', () => {
+    const html = '<p>面积 $S=\\pi r^2$ 公式</p>'
+    const result = renderLatexInHtml(html)
+    expect(result).toContain('katex')
+    expect(result).toContain('面积')
+    expect(result).toContain('公式')
+  })
+
+  it('renders latex in html with html entities', () => {
+    const html = '<p>&lt; $x &lt; 5$</p>'
+    const result = renderLatexInHtml(html)
+    expect(result).toContain('katex')
+    expect(result).toContain('<')
+  })
+
+  it('renders bare latex commands without delimiters', () => {
+    const html = '<p>x = \\frac{1}{2}</p>'
+    const result = renderLatexInHtml(html)
+    expect(result).toContain('katex')
+    expect(result).toContain('x = ')
+  })
+
+  it('downgrades display formula to inline', () => {
+    const html = '<p>$$\\sum_{i=1}^n i$$</p>'
+    const result = renderLatexInHtml(html)
+    expect(result).toContain('katex')
+  })
+
+  it('leaves plain text html unchanged', () => {
+    const html = '<p>hello world</p>'
+    const result = renderLatexInHtml(html)
+    expect(result).toBe('<p>hello world</p>')
+  })
+
+  it('returns empty string for empty input', () => {
+    expect(renderLatexInHtml('')).toBe('')
+  })
+
+  it('preserves html structure', () => {
+    const html = '<ul><li>$a^2$</li><li>$b^2$</li></ul>'
+    const result = renderLatexInHtml(html)
+    expect(result).toContain('<ul>')
+    expect(result).toContain('<li>')
+    expect(result).toContain('katex')
   })
 })

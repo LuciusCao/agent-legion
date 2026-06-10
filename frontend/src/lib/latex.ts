@@ -138,3 +138,55 @@ function looksLikePath(text: string, start: number, end: number): boolean {
   if (before === '.') return true
   return false
 }
+
+import katex from 'katex'
+
+/**
+ * Render LaTeX formulas inside an HTML string.
+ * Walks text nodes only, leaving HTML tags intact.
+ */
+export function renderLatexInHtml(html: string): string {
+  if (!html) return ''
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_TEXT)
+  const textNodes: Text[] = []
+  while (walker.nextNode()) {
+    textNodes.push(walker.currentNode as Text)
+  }
+
+  for (const textNode of textNodes) {
+    const text = textNode.textContent || ''
+    const sanitized = sanitizeLatex(text)
+    const parts = extractLatexParts(sanitized)
+
+    if (!parts.some((p) => p.type === 'latex')) continue
+
+    const fragment = doc.createDocumentFragment()
+    for (const part of parts) {
+      if (part.type === 'latex') {
+        try {
+          const latexHtml = katex.renderToString(part.content, {
+            throwOnError: false,
+            displayMode: false,
+          })
+          const wrapper = doc.createElement('span')
+          wrapper.innerHTML = latexHtml
+          fragment.appendChild(wrapper)
+        } catch {
+          fragment.appendChild(doc.createTextNode(part.content))
+        }
+      } else {
+        fragment.appendChild(doc.createTextNode(part.content))
+      }
+    }
+
+    const parent = textNode.parentNode
+    if (parent) {
+      parent.replaceChild(fragment, textNode)
+    }
+  }
+
+  return doc.body.innerHTML
+}
