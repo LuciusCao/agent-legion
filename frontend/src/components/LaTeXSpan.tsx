@@ -23,9 +23,6 @@ export function LaTeXSpan({ latex }: LaTeXSpanProps) {
   }
 
   return (
-    <span
-      data-testid="latex-span"
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+    <span data-testid="latex-span" dangerouslySetInnerHTML={{ __html: html }} />
   )
 }

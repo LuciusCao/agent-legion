@@ -1,6 +1,5 @@
 import { useEffect } from 'react'
 import { useJobStore } from '../stores/jobStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
 import { JobListItem } from './JobListItem'
 import styles from './JobList.module.css'
 
@@ -18,10 +17,6 @@ export function JobList({ workspaceId }: JobListProps) {
   useEffect(() => {
     fetchJobs(workspaceId)
   }, [workspaceId, fetchJobs])
-
-  const entity = useWorkspaceStore(
-    (state) => state.currentWorkspace?.default_entity || 'question'
-  )
 
   if (jobs.length === 0) {
     return (
@@ -46,7 +41,6 @@ export function JobList({ workspaceId }: JobListProps) {
             selectMode={selectMode}
             onToggleSelect={() => toggleSelect(job.id)}
             workspaceId={workspaceId}
-            entity={entity}
           />
         </div>
       ))}

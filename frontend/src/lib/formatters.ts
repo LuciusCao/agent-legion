@@ -67,6 +67,18 @@ export function formatRelativeTime(isoDate: string): string {
   return date.toLocaleDateString('zh-CN')
 }
 
+export function durationSeconds(
+  start?: string | null,
+  end?: string | null
+): number | undefined {
+  if (!start || !end) return undefined
+  const s = new Date(start).getTime()
+  const e = new Date(end).getTime()
+  if (Number.isNaN(s) || Number.isNaN(e)) return undefined
+  const diff = Math.round((e - s) / 1000)
+  return diff >= 0 ? diff : 0
+}
+
 export function formatInteractionStats(
   stats: Record<string, InteractionStats> | undefined
 ): string {

@@ -65,7 +65,11 @@ export function extractLatexParts(text: string): LatexPart[] {
 
   const collapsed: LatexPart[] = []
   for (const part of parts) {
-    if (part.type === 'text' && collapsed.length > 0 && collapsed[collapsed.length - 1].type === 'text') {
+    if (
+      part.type === 'text' &&
+      collapsed.length > 0 &&
+      collapsed[collapsed.length - 1].type === 'text'
+    ) {
       collapsed[collapsed.length - 1].content += part.content
     } else {
       collapsed.push(part)
