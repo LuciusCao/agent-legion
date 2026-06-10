@@ -614,6 +614,10 @@ pre {
   white-space: pre-wrap;
 }
 
+.workspace-main {
+  padding: 24px;
+}
+
 .artifact-preview {
   max-height: 420px;
   overflow: auto;
