@@ -38,6 +38,7 @@ export const PhaseStepper = React.memo(function PhaseStepper({
         return (
           <div key={phase} className={styles.step} title={PHASE_LABELS[phase]}>
             <div
+              /* .pulse-blue is a global utility class defined in styles.css */
               className={`${styles.stepBar} ${styles[state]} ${state === 'running' ? 'pulse-blue' : ''}`}
             />
           </div>
