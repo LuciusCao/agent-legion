@@ -4,6 +4,8 @@ import { fetchQuestionDetail } from '../api'
 import { JOB_STATUS_LABELS } from '../labels'
 import { useUiStore } from '../stores/uiStore'
 import type { JobRecord, QuestionDetailResponse } from '../types'
+import { renderLatexInHtml } from '../lib/latex'
+import { LaTeXText } from '../components/LaTeXText'
 import styles from './QuestionDetailPage.module.css'
 
 const ALLOWED_TAGS = new Set([
@@ -112,7 +114,7 @@ export default function QuestionDetailPage() {
   const stem = detail?.normalized.stem
   const stemHtml = useMemo(() => {
     if (!stem) return ''
-    return sanitizeHtml(stem)
+    return renderLatexInHtml(sanitizeHtml(stem))
   }, [stem])
 
   const analysis = detail?.normalized.analysis
@@ -120,7 +122,7 @@ export default function QuestionDetailPage() {
     if (!analysis) return ''
     const raw =
       typeof analysis === 'string' ? analysis : JSON.stringify(analysis)
-    return sanitizeHtml(raw)
+    return renderLatexInHtml(sanitizeHtml(raw))
   }, [analysis])
 
   const handleRefresh = () => {
@@ -185,7 +187,9 @@ export default function QuestionDetailPage() {
                         }`}
                       >
                         <span className={styles.optionLabel}>{label}.</span>
-                        <span className={styles.optionContent}>{content}</span>
+                        <span className={styles.optionContent}>
+                          <LaTeXText>{content}</LaTeXText>
+                        </span>
                       </li>
                     )
                   })}
