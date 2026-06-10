@@ -2,7 +2,7 @@ import { sanitizeLatex, extractLatexParts } from '../lib/latex'
 import { LaTeXSpan } from './LaTeXSpan'
 
 interface LaTeXTextProps {
-  children: string
+  children: string | string[]
 }
 
 export function LaTeXText({ children }: LaTeXTextProps) {
