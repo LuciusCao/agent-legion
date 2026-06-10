@@ -105,13 +105,12 @@ export function SettingsPage() {
     testConnection,
     resetTestStatus,
     saveSection,
+    saveIntakeConfig,
     fetchSettings,
     fetchGlobalServices,
     fetchResourceProviders,
     fetchPipelineDefinition,
   } = useSettingStore()
-
-  const [labelOverridesText, setLabelOverridesText] = useState('')
 
   const { workspaces, fetchWorkspaces, updateWorkspace } = useWorkspaceStore()
 
@@ -127,13 +126,6 @@ export function SettingsPage() {
     setWorkspaceId(workspaceId)
     resetTestStatus()
     void fetchSettings(workspaceId).then(() => {
-      setLabelOverridesText(
-        JSON.stringify(
-          useSettingStore.getState().settings.labelOverrides,
-          null,
-          2
-        )
-      )
       void fetchPipelineDefinition()
     })
   }, [
@@ -173,10 +165,25 @@ export function SettingsPage() {
   const isTesting = testStatus.state === 'testing'
 
   const toggleIntakeMode = (key: string) => {
-    const next = settings.intakeModes.includes(key)
+    const isEnabled = settings.intakeModes.includes(key)
+    const nextModes = isEnabled
       ? settings.intakeModes.filter((k) => k !== key)
       : [...settings.intakeModes, key]
-    setSettings({ intakeModes: next })
+
+    const mode = pipelineDefinition?.intake?.modes.find((m) => m.key === key)
+    if (mode?.resource) {
+      const binding = settings.resources[mode.resource] || {
+        enabled: true,
+        config: {},
+      }
+      const nextResources = {
+        ...settings.resources,
+        [mode.resource]: { ...binding, enabled: !isEnabled },
+      }
+      setSettings({ intakeModes: nextModes, resources: nextResources })
+    } else {
+      setSettings({ intakeModes: nextModes })
+    }
   }
 
   if (!workspaceId) return null
@@ -194,19 +201,6 @@ export function SettingsPage() {
       setWorkspaceSaveError(String(err))
     } finally {
       setIsSavingWorkspace(false)
-    }
-  }
-
-  const handleLabelOverridesInput = (event: Event) => {
-    const value = (event.target as HTMLInputElement).value
-    setLabelOverridesText(value)
-    try {
-      const parsed = value.trim() === '' ? {} : JSON.parse(value)
-      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-        setSettings({ labelOverrides: parsed as Record<string, string> })
-      }
-    } catch {
-      // Ignore parse errors while the user is typing.
     }
   }
 
@@ -300,145 +294,14 @@ export function SettingsPage() {
           <GlobalServicesCard services={globalServices} />
 
           <SettingsCard
-            icon="settings_remote"
-            title={WORKSPACE_LABELS.resourceProviders}
+            icon="input"
+            title="接入配置"
             status={
               <div aria-live="polite" aria-atomic="true">
                 {connectionStatus}
               </div>
             }
           >
-            {resourceProviders.length === 0 ? (
-              <div
-                style={{
-                  color: 'var(--md-sys-color-on-surface-variant)',
-                  fontSize: 14,
-                }}
-              >
-                {WORKSPACE_LABELS.noResourceProviders}
-              </div>
-            ) : (
-              <div
-                style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
-              >
-                {resourceProviders.map((provider) => {
-                  const binding = settings.resources[provider.key] || {
-                    enabled: true,
-                    config: {},
-                  }
-                  return (
-                    <div
-                      key={provider.key}
-                      style={{
-                        border: '1px solid var(--md-sys-color-outline-variant)',
-                        borderRadius: 12,
-                        padding: 16,
-                      }}
-                    >
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 8,
-                          marginBottom: 12,
-                        }}
-                      >
-                        <md-checkbox
-                          checked={binding.enabled}
-                          onClick={() => {
-                            const next = {
-                              ...settings.resources,
-                              [provider.key]: {
-                                ...binding,
-                                enabled: !binding.enabled,
-                              },
-                            }
-                            setSettings({ resources: next })
-                          }}
-                        />
-                        <span style={{ fontWeight: 500, fontSize: 14 }}>
-                          {provider.provider}
-                        </span>
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 12,
-                          color: 'var(--md-sys-color-on-surface-variant)',
-                          marginBottom: 8,
-                        }}
-                      >
-                        Path: {provider.path}
-                      </div>
-                      <div style={{ display: 'grid', gap: 8 }}>
-                        {provider.paramKeys.map((paramKey) => (
-                          <md-outlined-text-field
-                            key={paramKey}
-                            label={paramKey}
-                            placeholder={provider.defaultParams[paramKey] || ''}
-                            value={binding.config[paramKey] || ''}
-                            onInput={(event: Event) => {
-                              const value = (event.target as HTMLInputElement)
-                                .value
-                              const nextConfig = { ...binding.config }
-                              if (value) {
-                                nextConfig[paramKey] = value
-                              } else {
-                                delete nextConfig[paramKey]
-                              }
-                              setSettings({
-                                resources: {
-                                  ...settings.resources,
-                                  [provider.key]: {
-                                    ...binding,
-                                    config: nextConfig,
-                                  },
-                                },
-                              })
-                            }}
-                            style={{ width: '100%' }}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-            <div
-              style={{
-                display: 'flex',
-                gap: 12,
-                flexWrap: 'wrap',
-                marginTop: 16,
-              }}
-            >
-              <md-outlined-button
-                onClick={testConnection}
-                disabled={isTesting || isSaving || undefined}
-              >
-                {isTesting ? '测试中...' : '测试连接'}
-              </md-outlined-button>
-              <md-filled-button
-                onClick={() =>
-                  saveSection('resources', { resources: settings.resources })
-                }
-                disabled={isSaving || undefined}
-              >
-                保存
-              </md-filled-button>
-            </div>
-            {saveError && (
-              <div
-                className="error-text"
-                role="alert"
-                style={{ color: 'var(--md-sys-color-error)' }}
-              >
-                {saveError}
-              </div>
-            )}
-          </SettingsCard>
-
-          <SettingsCard icon="input" title={WORKSPACE_LABELS.intake}>
             <div className="field">
               <label htmlFor="entity-type">默认实体类型</label>
               <select
@@ -466,72 +329,146 @@ export function SettingsPage() {
                   color: 'var(--md-sys-color-on-surface-variant)',
                 }}
               >
-                启用的接入模式
+                接入模式
               </span>
               <div className="intake-chip-row">
-                {(pipelineDefinition?.intake?.modes || []).map((mode) => {
-                  const providerDisabled = mode.resource
-                    ? settings.resources[mode.resource]?.enabled === false
-                    : false
-                  const label = settings.labelOverrides[mode.key] || mode.label
-                  return (
-                    <md-filter-chip
-                      key={mode.key}
-                      label={label}
-                      selected={settings.intakeModes.includes(mode.key)}
-                      onClick={() =>
-                        !providerDisabled && toggleIntakeMode(mode.key)
-                      }
-                      style={
-                        providerDisabled
-                          ? { opacity: 0.4, pointerEvents: 'none' }
-                          : undefined
-                      }
-                    />
-                  )
-                })}
+                {(pipelineDefinition?.intake?.modes || []).map((mode) => (
+                  <md-filter-chip
+                    key={mode.key}
+                    label={mode.label}
+                    selected={settings.intakeModes.includes(mode.key)}
+                    onClick={() => toggleIntakeMode(mode.key)}
+                  />
+                ))}
               </div>
             </div>
 
-            <md-outlined-text-field
-              label="标签覆盖 (JSON)"
-              type="textarea"
-              rows={3}
-              value={labelOverridesText}
-              onInput={handleLabelOverridesInput}
-              style={{ width: '100%' }}
-            />
+            {(() => {
+              const activeKeys = new Set<string>()
+              for (const mode of pipelineDefinition?.intake?.modes || []) {
+                if (settings.intakeModes.includes(mode.key) && mode.resource) {
+                  activeKeys.add(mode.resource)
+                }
+              }
+              if (activeKeys.size === 0) return null
+              return (
+                <div
+                  style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+                >
+                  <div
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                      marginTop: 8,
+                    }}
+                  >
+                    资源接口参数
+                  </div>
+                  {resourceProviders
+                    .filter((p) => activeKeys.has(p.key))
+                    .map((provider) => {
+                      const binding = settings.resources[provider.key] || {
+                        enabled: true,
+                        config: {},
+                      }
+                      return (
+                        <div
+                          key={provider.key}
+                          style={{
+                            border:
+                              '1px solid var(--md-sys-color-outline-variant)',
+                            borderRadius: 12,
+                            padding: 16,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: 500,
+                              fontSize: 14,
+                              marginBottom: 4,
+                            }}
+                          >
+                            {provider.provider}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: 'var(--md-sys-color-on-surface-variant)',
+                              marginBottom: 12,
+                            }}
+                          >
+                            Path: {provider.path}
+                          </div>
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            {provider.paramKeys.map((paramKey) => (
+                              <md-outlined-text-field
+                                key={paramKey}
+                                label={paramKey}
+                                placeholder={
+                                  provider.defaultParams[paramKey] || ''
+                                }
+                                value={binding.config[paramKey] || ''}
+                                onInput={(event: Event) => {
+                                  const value = (
+                                    event.target as HTMLInputElement
+                                  ).value
+                                  const nextConfig = { ...binding.config }
+                                  if (value) {
+                                    nextConfig[paramKey] = value
+                                  } else {
+                                    delete nextConfig[paramKey]
+                                  }
+                                  setSettings({
+                                    resources: {
+                                      ...settings.resources,
+                                      [provider.key]: {
+                                        ...binding,
+                                        config: nextConfig,
+                                      },
+                                    },
+                                  })
+                                }}
+                                style={{ width: '100%' }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                </div>
+              )
+            })()}
 
             <div
               style={{
                 display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'flex-end',
-                gap: 8,
+                gap: 12,
+                flexWrap: 'wrap',
+                marginTop: 16,
               }}
             >
+              <md-outlined-button
+                onClick={testConnection}
+                disabled={isTesting || isSaving || undefined}
+              >
+                {isTesting ? '测试中...' : '测试连接'}
+              </md-outlined-button>
               <md-filled-button
-                onClick={() =>
-                  saveSection('intake', {
-                    entityType: settings.entityType,
-                    intakeModes: settings.intakeModes,
-                    labelOverrides: settings.labelOverrides,
-                  })
-                }
+                onClick={() => void saveIntakeConfig()}
                 disabled={isSaving || undefined}
               >
                 保存
               </md-filled-button>
-              {saveError && (
-                <div
-                  className="error-text"
-                  role="alert"
-                  style={{ color: 'var(--md-sys-color-error)' }}
-                >
-                  {saveError}
-                </div>
-              )}
             </div>
+            {saveError && (
+              <div
+                className="error-text"
+                role="alert"
+                style={{ color: 'var(--md-sys-color-error)' }}
+              >
+                {saveError}
+              </div>
+            )}
           </SettingsCard>
 
           <SettingsCard icon="route" title={WORKSPACE_LABELS.pipeline}>

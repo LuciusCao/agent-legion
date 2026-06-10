@@ -42,6 +42,7 @@ type SettingState = {
       | Partial<WorkspaceSettings>
       | { resources: Record<string, ResourceBinding> }
   ) => Promise<void>
+  saveIntakeConfig: () => Promise<void>
   testConnection: () => Promise<void>
   resetTestStatus: () => void
 }
@@ -157,6 +158,30 @@ export const useSettingStore = create<SettingState>((set, get) => ({
           body: JSON.stringify(data),
         }
       )
+      useUiStore.getState().showToast('设置已保存', 'success')
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '保存失败'
+      set({ saveError: message })
+      useUiStore.getState().showToast(message, 'error')
+    } finally {
+      set({ isSaving: false })
+    }
+  },
+
+  async saveIntakeConfig() {
+    const { workspaceId, settings } = get()
+    if (!workspaceId) return
+    set({ isSaving: true, saveError: null })
+    try {
+      const payload: Record<string, unknown> = {
+        resource_config: { resources: settings.resources },
+        intake_config: { enabled_modes: settings.intakeModes },
+        default_entity: settings.entityType,
+      }
+      await api(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(payload),
+      })
       useUiStore.getState().showToast('设置已保存', 'success')
     } catch (err) {
       const message = err instanceof Error ? err.message : '保存失败'
