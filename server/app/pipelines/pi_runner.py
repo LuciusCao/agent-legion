@@ -144,6 +144,8 @@ class PiRunner:
                 node_key,
                 command,
                 str(events_file),
+                run_dir=str(run_dir),
+                session_dir=str(session_dir),
             )
 
         env = dict(os.environ)
