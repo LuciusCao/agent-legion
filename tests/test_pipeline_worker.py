@@ -614,3 +614,95 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
     worker.stop()
     assert worker._local_executor._shutdown is True
     assert worker._agent_executor._shutdown is True
+
+
+def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
+    from server.app.pipeline_worker_thread import PipelineWorkerThread
+    from server.app.pipelines.registry import load_registered_pipeline
+    from server.app.settings import Settings
+
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    queries.create_job(
+        pipeline_key="reading_analysis",
+        source_type="question",
+        source_id="Q100",
+        batch_id="",
+        title="Question Q100",
+        node_keys=list(definition.nodes),
+    )
+
+    settings = Settings(
+        root_dir=Path("."),
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={"pipelines": {"enabled": True}},
+    )
+
+    worker = PipelineWorkerThread(queries, settings)
+    # start() should not raise even though pi config is missing
+    worker.start()
+    assert worker._pi_runner is None
+    assert worker._thread is not None
+    worker.stop()
+
+
+def test_pipeline_worker_fails_agent_node_when_pi_runner_missing(tmp_path, monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+
+    from server.app.pipeline_worker_thread import PipelineWorkerThread
+    from server.app.pipelines.registry import load_registered_pipeline
+    from server.app.settings import Settings
+
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    job = queries.create_job(
+        pipeline_key="reading_analysis",
+        source_type="question",
+        source_id="Q100",
+        batch_id="",
+        title="Question Q100",
+        node_keys=list(definition.nodes),
+    )
+    job_dir = Path(job["storage_dir"])
+    (job_dir / "questions_parsed.json").write_text(
+        json.dumps({"questions": [{"question_id": "Q100"}]}), encoding="utf-8"
+    )
+
+    settings = Settings(
+        root_dir=Path("."),
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={"pipelines": {"enabled": True}},
+    )
+
+    worker = PipelineWorkerThread(queries, settings)
+    worker._definitions = [definition]
+    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
+    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
+    worker._skill_root = tmp_path / "skills"
+    worker._skill_root.mkdir(parents=True)
+
+    # Poll should process fetch_questions (local) and clean_and_parse (local)
+    # Then extract_keywords (agent) should be marked failed because pi runner is missing
+    for _ in range(10):
+        worker._poll()
+        import time
+
+        time.sleep(0.5)
+        job_state = queries.get_job(job["id"])
+        if job_state["status"] == "failed":
+            break
+
+    node = queries.get_job_node(job["id"], "extract_keywords")
+    assert node["status"] == "failed"
+    assert "Pi runner is not configured" in node["error_message"]
+    assert queries.get_job(job["id"])["status"] == "failed"
+
+    worker.stop()

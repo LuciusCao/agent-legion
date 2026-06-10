@@ -135,7 +135,10 @@ class PipelineWorkerThread:
         pi_raw = self.settings.config.get("pipelines", {}).get("pi", {})
         if isinstance(pi_raw, dict):
             self._skill_root = self.settings.root_dir / "server" / "app" / "pipelines" / "skills"
-            self._pi_runner = PiRunner.from_config(pi_raw, self._skill_root)
+            try:
+                self._pi_runner = PiRunner.from_config(pi_raw, self._skill_root)
+            except Exception:
+                logger.exception("failed to initialise pi runner")
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -212,6 +215,20 @@ class PipelineWorkerThread:
                             self._pi_runner,
                             self._skill_root,
                         )
+                        processed = True
+                    elif node.runner == "agent":
+                        error_message = "Pi runner is not configured"
+                        log_path = self.settings.logs_dir / "jobs" / f"{job['id']}-{node.key}.log"
+                        log_path.parent.mkdir(parents=True, exist_ok=True)
+                        log_path.write_text(error_message, encoding="utf-8")
+                        run = self.job_db.start_node_run(
+                            job["id"],
+                            node.key,
+                            ["agent", node.key],
+                            str(log_path),
+                        )
+                        self.job_db.finish_node_run(run["id"], "failed", 1, error_message)
+                        _refresh_job_status(self.job_db, job["id"])
                         processed = True
 
         return processed

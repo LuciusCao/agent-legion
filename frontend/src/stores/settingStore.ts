@@ -273,30 +273,28 @@ export const useSettingStore = create<SettingState>((set, get) => ({
           }),
         }
       )
-      // 4. POST agent assignments one by one (only for video-hive workspace)
-      if (workspaceId === 'video-hive') {
-        if (agentAssignments) {
-          for (const assignment of agentAssignments) {
-            await assignAgent(
-              workspaceId,
-              assignment.agent_id,
-              assignment.concurrency_limit
-            )
-          }
-        }
-        // Unassign removed agents
-        if (originalAgentAssignments) {
-          const currentIds = new Set(
-            agentAssignments?.map((a) => a.agent_id) || []
+      // 4. POST agent assignments one by one
+      if (agentAssignments) {
+        for (const assignment of agentAssignments) {
+          await assignAgent(
+            workspaceId,
+            assignment.agent_id,
+            assignment.concurrency_limit
           )
-          for (const original of originalAgentAssignments) {
-            if (!currentIds.has(original.agent_id)) {
-              await unassignAgent(workspaceId, original.agent_id)
-            }
+        }
+      }
+      // Unassign removed agents
+      if (originalAgentAssignments) {
+        const currentIds = new Set(
+          agentAssignments?.map((a) => a.agent_id) || []
+        )
+        for (const original of originalAgentAssignments) {
+          if (!currentIds.has(original.agent_id)) {
+            await unassignAgent(workspaceId, original.agent_id)
           }
         }
-        await get().fetchAgentAssignments(workspaceId)
       }
+      await get().fetchAgentAssignments(workspaceId)
       useUiStore.getState().showToast('设置已保存', 'success')
       // Refresh originals
       await get().fetchSettings(workspaceId)

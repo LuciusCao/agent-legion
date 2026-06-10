@@ -58,19 +58,19 @@ export function JobProgressPanel({
   activeArtifactContent,
   onArtifactClick,
 }: JobProgressPanelProps) {
-  const [expandedErrors, setExpandedErrors] = useState<Set<number>>(new Set())
+  const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
   const [logDialog, setLogDialog] = useState<{
     nodeKey: string
     content: string
   } | null>(null)
 
-  const toggleError = useCallback((runId: number) => {
+  const toggleError = useCallback((nodeKey: string) => {
     setExpandedErrors((prev) => {
       const next = new Set(prev)
-      if (next.has(runId)) {
-        next.delete(runId)
+      if (next.has(nodeKey)) {
+        next.delete(nodeKey)
       } else {
-        next.add(runId)
+        next.add(nodeKey)
       }
       return next
     })
@@ -106,7 +106,7 @@ export function JobProgressPanel({
             const icon = STATUS_ICONS[node.status] || 'help'
             const statusText = JOB_STATUS_LABELS[node.status] || node.status
             const hasError = !!(run?.error_message || node.error_message)
-            const isExpanded = run ? expandedErrors.has(run.id) : false
+            const isExpanded = expandedErrors.has(node.node_key)
             const dur = durationSeconds(node.started_at, node.finished_at)
 
             return (
@@ -163,7 +163,7 @@ export function JobProgressPanel({
                   {hasError && (
                     <button
                       className={styles.detailToggle}
-                      onClick={() => run && toggleError(run.id)}
+                      onClick={() => toggleError(node.node_key)}
                     >
                       <md-icon className={styles.toggleIcon}>error</md-icon>
                       错误详情

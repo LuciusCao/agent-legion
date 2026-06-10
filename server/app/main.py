@@ -1,4 +1,5 @@
 import asyncio
+import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -64,7 +65,10 @@ def create_app(
             pipelines_config = settings.config.get("pipelines", {})
             if isinstance(pipelines_config, dict) and pipelines_config.get("enabled"):
                 pipeline_worker_thread = PipelineWorkerThread(job_db, settings)
-                pipeline_worker_thread.start()
+                try:
+                    pipeline_worker_thread.start()
+                except Exception:
+                    logging.getLogger(__name__).exception("pipeline worker failed to start")
         yield
         if pipeline_worker_thread is not None:
             pipeline_worker_thread.stop()

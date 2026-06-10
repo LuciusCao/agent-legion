@@ -165,7 +165,7 @@ describe('SettingsPage', () => {
     mockUnassignAgent.mockResolvedValue(undefined)
   })
 
-  it('renders 3 sections with nav sidebar for non-video-hive workspace', () => {
+  it('renders 4 sections with nav sidebar for non-video-hive workspace', () => {
     useSettingStore.setState({
       pipelineDefinition: {
         key: 'question_content',
@@ -195,7 +195,7 @@ describe('SettingsPage', () => {
     expect(screen.getAllByText('基本信息').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('接入配置').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('Pipeline').length).toBeGreaterThanOrEqual(1)
-    expect(screen.queryByText('智能体')).not.toBeInTheDocument()
+    expect(screen.getAllByText('智能体').length).toBeGreaterThanOrEqual(1)
   })
 
   it('renders agents section for video-hive workspace', () => {
@@ -353,14 +353,12 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('does not render AgentAllocationList for non-video-hive workspace', async () => {
+  it('renders AgentAllocationList for non-video-hive workspace', async () => {
     renderPage()
     await waitFor(() => {
-      expect(screen.queryByText('可用智能体')).not.toBeInTheDocument()
+      expect(screen.getByText('可用智能体')).toBeInTheDocument()
     })
-    expect(
-      screen.queryByText('当前工作空间未分配智能体')
-    ).not.toBeInTheDocument()
+    expect(screen.getByText('当前工作空间未分配智能体')).toBeInTheDocument()
   })
 
   it('renders resource provider params when intake mode is checked', async () => {
