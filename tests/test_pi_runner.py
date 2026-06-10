@@ -1,7 +1,9 @@
+import json
 from pathlib import Path
 
 import pytest
 
+from server.app.jobs import JobQueries
 from server.app.pipelines.pi_runner import PiConfig, PiRunner
 
 
@@ -103,8 +105,6 @@ def test_pirunner_rejects_invalid_timeout():
 
 
 def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
-    import json
-
     # Create a fake pi executable that writes valid JSON lines and creates outputs
     fake_pi = tmp_path / "fake_pi"
     fake_pi.write_text(
@@ -141,16 +141,13 @@ def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
     job_dir.mkdir()
     job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
 
-    # We need to monkeypatch subprocess.run to capture what happens
-    # Actually, let's use the real subprocess but with our fake binary
     result = runner.run(
         job=job,
         node_key="extract_keywords",
         skill_dir=skill_dir,
         inputs=["questions_parsed.json"],
         outputs=["keywords_raw.json", "keywords_report.json"],
-        job_db=None,  # type: ignore[arg-type]
-        run_id=1,
+        job_db=None,
     )
 
     assert result.status == "completed"
@@ -167,6 +164,69 @@ def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
     run_meta = json.loads((result.run_dir / "run.json").read_text())
     assert run_meta["node_key"] == "extract_keywords"
     assert run_meta["exit_code"] == 0
+    assert "start_time" in run_meta
+    assert "end_time" in run_meta
+    assert run_meta["start_time"] is not None
+    assert run_meta["end_time"] is not None
+
+
+def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        '#!/bin/bash\necho \'{"event":"done"}\'\necho \'{"questions": []}\' > keywords_raw.json\n'
+    )
+    fake_pi.chmod(0o755)
+
+    runner = PiRunner.from_config(
+        {"binary": str(fake_pi), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "job_dir = Path(sys.argv[1])\n"
+        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+    )
+    validator.chmod(0o755)
+
+    db_path = tmp_path / "jobs.sqlite"
+    job_db = JobQueries(db_path, tmp_path / "jobs")
+    job = job_db.create_job(
+        pipeline_key="reading_analysis",
+        source_type="question",
+        source_id="Q1",
+        batch_id="b1",
+        title="Q1",
+        node_keys=["extract_keywords"],
+    )
+    job_dir = Path(job["storage_dir"])
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    result = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=job_db,
+    )
+
+    assert result.status == "completed"
+    runs = job_db.list_node_runs(job["id"])
+    assert len(runs) == 1
+    assert runs[0]["status"] == "completed"
+    assert runs[0]["exit_code"] == 0
+    assert runs[0]["run_dir"] == str(result.run_dir)
+    assert runs[0]["session_dir"] == str(result.session_dir)
+    assert json.loads(runs[0]["command_json"])[0] == str(fake_pi)
+
+    node = job_db.get_job_node(job["id"], "extract_keywords")
+    assert node["status"] == "completed"
 
 
 def test_run_fails_when_output_missing(tmp_path, monkeypatch):
@@ -195,8 +255,7 @@ def test_run_fails_when_output_missing(tmp_path, monkeypatch):
         skill_dir=skill_dir,
         inputs=["questions_parsed.json"],
         outputs=["keywords_raw.json", "keywords_report.json"],
-        job_db=None,  # type: ignore[arg-type]
-        run_id=1,
+        job_db=None,
     )
 
     assert result.status == "failed"
@@ -225,8 +284,45 @@ def test_run_fails_when_binary_missing(tmp_path):
         skill_dir=skill_dir,
         inputs=["questions_parsed.json"],
         outputs=["keywords_raw.json", "keywords_report.json"],
-        job_db=None,  # type: ignore[arg-type]
-        run_id=1,
+        job_db=None,
     )
 
     assert result.status == "failed"
+    assert result.exit_code == 127
+
+
+def test_run_fails_when_validator_rejects_output(tmp_path, monkeypatch):
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        '#!/bin/bash\necho \'{"event":"done"}\'\necho \'{"bad": true}\' > keywords_raw.json\n'
+    )
+    fake_pi.chmod(0o755)
+
+    runner = PiRunner.from_config(
+        {"binary": str(fake_pi), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text(
+        "#!/usr/bin/env python3\nimport sys\nsys.stderr.write('validation failed')\nsys.exit(1)\n"
+    )
+    validator.chmod(0o755)
+
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+
+    result = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=None,
+    )
+
+    assert result.status == "failed"
+    assert "validation failed" in result.error_message
