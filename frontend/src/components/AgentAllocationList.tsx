@@ -8,6 +8,7 @@ import {
 } from '../api'
 import { WORKSPACE_LABELS } from '../labels'
 import { useUiStore } from '../stores/uiStore'
+import { useWorkspaceStore } from '../stores/workspaceStore'
 import styles from './AgentAllocationList.module.css'
 
 interface AgentAllocationListProps {
@@ -29,6 +30,9 @@ export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
   const [limitDrafts, setLimitDrafts] = useState<Record<string, string>>({})
 
   const showToast = useUiStore((state) => state.showToast)
+  const fetchWorkspaceStats = useWorkspaceStore(
+    (state) => state.fetchWorkspaceStats
+  )
   const cancelledRef = useRef(false)
 
   const loadData = useCallback(async () => {
@@ -96,6 +100,7 @@ export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
       showToast('分配成功', 'success')
       setEditingId(null)
       removeDraft(agentId)
+      await fetchWorkspaceStats(workspaceId)
       if (!cancelledRef.current) {
         await loadData()
       }
@@ -113,6 +118,7 @@ export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
       await unassignAgent(workspaceId, agentId)
       showToast('已取消分配', 'success')
       removeDraft(agentId)
+      await fetchWorkspaceStats(workspaceId)
       if (!cancelledRef.current) {
         await loadData()
       }
@@ -149,6 +155,7 @@ export function AgentAllocationList({ workspaceId }: AgentAllocationListProps) {
       await assignAgent(workspaceId, agentId, current)
       showToast('并发限制已更新', 'success')
       removeDraft(agentId)
+      await fetchWorkspaceStats(workspaceId)
       if (!cancelledRef.current) {
         await loadData()
       }
