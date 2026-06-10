@@ -114,6 +114,9 @@ export function SettingsPage() {
     fetchGlobalServices,
     fetchResourceProviders,
     fetchPipelineDefinition,
+    agentAssignments,
+    setAgentAssignments,
+    fetchAgentAssignments,
   } = useSettingStore()
 
   const { workspaces, fetchWorkspaces } = useWorkspaceStore()
@@ -137,7 +140,8 @@ export function SettingsPage() {
     if (!workspaceId) return
     void fetchGlobalServices()
     void fetchResourceProviders()
-  }, [workspaceId, fetchGlobalServices, fetchResourceProviders])
+    void fetchAgentAssignments(workspaceId)
+  }, [workspaceId, fetchGlobalServices, fetchResourceProviders, fetchAgentAssignments])
 
   useEffect(() => {
     if (workspaces.length === 0) {
@@ -474,7 +478,11 @@ export function SettingsPage() {
         </SettingsCard>
 
         <SettingsCard icon="smart_toy" title={WORKSPACE_LABELS.agents}>
-          <AgentAllocationList workspaceId={workspaceId} />
+          <AgentAllocationList
+            workspaceId={workspaceId}
+            assignments={agentAssignments}
+            onAssignmentsChange={setAgentAssignments}
+          />
         </SettingsCard>
       </div>
     </AppShell>
