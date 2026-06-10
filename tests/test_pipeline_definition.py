@@ -20,8 +20,8 @@ def test_load_question_content_definition():
     assert knowledge_mode.label == "按知识点查询"
     assert knowledge_mode.input_field == "knowledge_codes"
     assert knowledge_mode.resource == "by_knowledge"
-    assert definition.nodes["fetch_question_context"].label == "fetch_question_context"
-    assert definition.nodes["question_understanding"].label == "question_understanding"
+    assert definition.nodes["fetch_question_context"].label == "获取题目上下文"
+    assert definition.nodes["question_understanding"].label == "题目理解"
     assert definition.nodes["question_understanding"].after == ["fetch_question_context"]
     assert definition.nodes["assemble_package"].inputs == [
         "question_context.json",
