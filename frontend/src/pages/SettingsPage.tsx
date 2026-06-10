@@ -1,13 +1,10 @@
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useSettingStore } from '../stores/settingStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { AgentAllocationList } from '../components/AgentAllocationList'
-import { SettingsCard } from '../components/SettingsCard'
-import { WORKSPACE_LABELS } from '../labels'
-import type { GlobalServiceStatus } from '../types'
+import styles from './SettingsPage.module.css'
 
 const PIPELINE_OPTIONS = [
   { key: 'question_content', label: 'question_content' },
@@ -39,57 +36,12 @@ function ConnectionStatusPill({
   )
 }
 
-function GlobalServicesCard({
-  services,
-}: {
-  services: GlobalServiceStatus | null
-}) {
-  if (!services) return null
-  const { cms } = services
-  return (
-    <SettingsCard icon="cloud" title={WORKSPACE_LABELS.globalServices}>
-      <div style={{ display: 'grid', gap: 12 }}>
-        <div>
-          <span
-            style={{
-              fontSize: 12,
-              color: 'var(--md-sys-color-on-surface-variant)',
-            }}
-          >
-            {WORKSPACE_LABELS.globalUrl}
-          </span>
-          <div style={{ fontSize: 14, marginTop: 4 }}>{cms.baseUrl}</div>
-        </div>
-        <div>
-          <span
-            style={{
-              fontSize: 12,
-              color: 'var(--md-sys-color-on-surface-variant)',
-            }}
-          >
-            {WORKSPACE_LABELS.tokenStatus}
-          </span>
-          <div style={{ fontSize: 14, marginTop: 4 }}>
-            {cms.tokenConfigured
-              ? WORKSPACE_LABELS.tokenConfigured
-              : WORKSPACE_LABELS.tokenNotConfigured}
-          </div>
-        </div>
-        <div>
-          <span
-            style={{
-              fontSize: 12,
-              color: 'var(--md-sys-color-on-surface-variant)',
-            }}
-          >
-            {WORKSPACE_LABELS.env}
-          </span>
-          <div style={{ fontSize: 14, marginTop: 4 }}>{cms.env || '-'}</div>
-        </div>
-      </div>
-    </SettingsCard>
-  )
-}
+const NAV_ITEMS = [
+  { id: 'basic-info', label: '基本信息' },
+  { id: 'intake-config', label: '接入配置' },
+  { id: 'pipeline', label: 'Pipeline' },
+  { id: 'agents', label: '智能体' },
+]
 
 export function SettingsPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
@@ -97,29 +49,29 @@ export function SettingsPage() {
     setWorkspaceId,
     workspaceName,
     workspaceDescription,
+    settings,
     setWorkspaceName,
     setWorkspaceDescription,
-    settings,
     setSettings,
-    globalServices,
+    agentAssignments,
+    setAgentAssignments,
+    isDirty,
+    isSaving,
+    saveError,
     resourceProviders,
     pipelineDefinition,
     testStatus,
-    isSaving,
-    saveError,
+    saveAll,
     testConnection,
     resetTestStatus,
-    saveAll,
     fetchSettings,
+    fetchAgentAssignments,
     fetchGlobalServices,
     fetchResourceProviders,
     fetchPipelineDefinition,
-    agentAssignments,
-    setAgentAssignments,
-    fetchAgentAssignments,
   } = useSettingStore()
 
-  const { workspaces, fetchWorkspaces } = useWorkspaceStore()
+  const [activeSection, setActiveSection] = useState('basic-info')
 
   useEffect(() => {
     if (!workspaceId) return
@@ -128,30 +80,48 @@ export function SettingsPage() {
     void fetchSettings(workspaceId).then(() => {
       void fetchPipelineDefinition()
     })
+    void fetchAgentAssignments(workspaceId)
   }, [
     workspaceId,
     setWorkspaceId,
     resetTestStatus,
     fetchSettings,
     fetchPipelineDefinition,
+    fetchAgentAssignments,
   ])
 
   useEffect(() => {
     if (!workspaceId) return
     void fetchGlobalServices()
     void fetchResourceProviders()
-    void fetchAgentAssignments(workspaceId)
-  }, [workspaceId, fetchGlobalServices, fetchResourceProviders, fetchAgentAssignments])
+  }, [workspaceId, fetchGlobalServices, fetchResourceProviders])
 
   useEffect(() => {
-    if (workspaces.length === 0) {
-      fetchWorkspaces()
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveSection(entry.target.id)
+          }
+        }
+      },
+      { threshold: 0.5 }
+    )
+    for (const id of NAV_ITEMS.map((item) => item.id)) {
+      const el = document.getElementById(id)
+      if (el) {
+        observer.observe(el)
+      }
     }
-  }, [workspaces.length, fetchWorkspaces])
+    return () => observer.disconnect()
+  }, [])
 
-  const displayWorkspaceName = workspaceName || workspaceId || ''
-
-  const isTesting = testStatus.state === 'testing'
+  const scrollToSection = useCallback((id: string) => {
+    const el = document.getElementById(id)
+    if (el) {
+      el.scrollIntoView({ behavior: 'smooth' })
+    }
+  }, [])
 
   const toggleIntakeMode = (key: string) => {
     const isEnabled = settings.intakeModes.includes(key)
@@ -177,313 +147,330 @@ export function SettingsPage() {
 
   if (!workspaceId) return null
 
-  const connectionStatus = (
-    <ConnectionStatusPill
-      state={testStatus.state}
-      message={testStatus.message}
-    />
+  const isTesting = testStatus.state === 'testing'
+
+  const rightActions = (
+    <div className={styles.saveButtonWrap}>
+      <md-icon-button
+        onClick={() => void saveAll()}
+        disabled={!isDirty || isSaving || undefined}
+        aria-label="保存"
+      >
+        <md-icon>save</md-icon>
+      </md-icon-button>
+      {isDirty && <span className={styles.saveBadge} aria-hidden="true" />}
+    </div>
   )
 
   return (
     <AppShell
       appBar={({ scrolled }) => (
         <AppBar
-          title={`${displayWorkspaceName} / 设置`}
+          title={`${workspaceName} / 设置`}
           backTo={`/workspaces/${workspaceId}`}
           scrolled={scrolled}
+          rightActions={rightActions}
         />
       )}
       mainClassName="settings-main"
     >
-      <div style={{ maxWidth: 800, margin: '0 auto' }}>
-        <SettingsCard icon="info" title="基本信息">
-          <md-outlined-text-field
-            label="Workspace 名称"
-            value={workspaceName}
-            onInput={(event: Event) =>
-              setWorkspaceName((event.target as HTMLInputElement).value)
-            }
-            style={{ width: '100%' }}
-          />
-          <md-outlined-text-field
-            label="描述"
-            type="textarea"
-            rows={2}
-            value={workspaceDescription}
-            onInput={(event: Event) =>
-              setWorkspaceDescription((event.target as HTMLInputElement).value)
-            }
-            style={{ width: '100%' }}
-          />
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-end',
-              gap: 8,
-            }}
-          >
-            <md-filled-button
-              onClick={() => void saveAll()}
-              disabled={isSaving || undefined}
-            >
-              保存
-            </md-filled-button>
-            {saveError && (
-              <div
-                className="error-text"
-                role="alert"
-                style={{ color: 'var(--md-sys-color-error)' }}
+      <div className={styles.settingsLayout}>
+        <nav className={styles.navSidebar}>
+          <ul className={styles.navList}>
+            {NAV_ITEMS.map((item) => (
+              <li
+                key={item.id}
+                className={
+                  activeSection === item.id
+                    ? styles.navItemActive
+                    : styles.navItem
+                }
+                onClick={() => scrollToSection(item.id)}
               >
-                {saveError}
-              </div>
-            )}
-          </div>
-        </SettingsCard>
+                {item.label}
+              </li>
+            ))}
+          </ul>
+        </nav>
 
-        <GlobalServicesCard services={globalServices} />
-
-        <SettingsCard
-          icon="input"
-          title="接入配置"
-          status={
-            <div aria-live="polite" aria-atomic="true">
-              {connectionStatus}
+        <div className={styles.contentArea}>
+          <section id="basic-info" className={styles.section}>
+            <h2 className={styles.sectionTitle}>基本信息</h2>
+            <hr className={styles.sectionDivider} />
+            <div className={styles.field}>
+              <md-outlined-text-field
+                label="Workspace 名称"
+                value={workspaceName}
+                onInput={(event: Event) =>
+                  setWorkspaceName((event.target as HTMLInputElement).value)
+                }
+                style={{ width: '100%' }}
+              />
             </div>
-          }
-        >
-          <div className="field">
-            <label htmlFor="entity-type">默认实体类型</label>
-            <select
-              id="entity-type"
-              value={settings.entityType}
-              onChange={(e) =>
-                setSettings({
-                  entityType: e.target.value as
-                    | 'question'
-                    | 'knowledge'
-                    | 'video',
-                })
-              }
-            >
-              <option value="question">question</option>
-              <option value="knowledge">knowledge</option>
-              <option value="video">video</option>
-            </select>
-          </div>
+            <div className={styles.field}>
+              <md-outlined-text-field
+                label="描述"
+                type="textarea"
+                rows={2}
+                value={workspaceDescription}
+                onInput={(event: Event) =>
+                  setWorkspaceDescription(
+                    (event.target as HTMLInputElement).value
+                  )
+                }
+                style={{ width: '100%' }}
+              />
+            </div>
+          </section>
 
-          <div>
-            <span
-              style={{
-                fontSize: 12,
-                color: 'var(--md-sys-color-on-surface-variant)',
-              }}
-            >
-              接入模式
-            </span>
+          <section id="intake-config" className={styles.section}>
+            <h2 className={styles.sectionTitle}>接入配置</h2>
+            <hr className={styles.sectionDivider} />
+            <div className={styles.field}>
+              <label htmlFor="entity-type">默认实体类型</label>
+              <select
+                id="entity-type"
+                value={settings.entityType}
+                onChange={(e) =>
+                  setSettings({
+                    entityType: e.target.value as
+                      | 'question'
+                      | 'knowledge'
+                      | 'video',
+                  })
+                }
+              >
+                <option value="question">question</option>
+                <option value="knowledge">knowledge</option>
+                <option value="video">video</option>
+              </select>
+            </div>
+
+            <div className={styles.field}>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: 'var(--md-sys-color-on-surface-variant)',
+                }}
+              >
+                接入模式
+              </span>
+              <div
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 8,
+                  marginTop: 8,
+                }}
+              >
+                {(pipelineDefinition?.intake?.modes || []).map((mode) => (
+                  <div
+                    key={mode.key}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                    }}
+                  >
+                    <md-checkbox
+                      checked={settings.intakeModes.includes(mode.key)}
+                      onClick={() => toggleIntakeMode(mode.key)}
+                    />
+                    <span style={{ fontSize: 14 }}>{mode.label}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {(() => {
+              const activeKeys = new Set<string>()
+              for (const mode of pipelineDefinition?.intake?.modes || []) {
+                if (settings.intakeModes.includes(mode.key) && mode.resource) {
+                  activeKeys.add(mode.resource)
+                }
+              }
+              if (activeKeys.size === 0) return null
+              return (
+                <div
+                  style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+                >
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    资源接口参数
+                  </span>
+                  {resourceProviders
+                    .filter((p) => activeKeys.has(p.key))
+                    .map((provider) => {
+                      const binding = settings.resources[provider.key] || {
+                        enabled: true,
+                        config: {},
+                      }
+                      return (
+                        <div
+                          key={provider.key}
+                          style={{
+                            border:
+                              '1px solid var(--md-sys-color-outline-variant)',
+                            borderRadius: 12,
+                            padding: 16,
+                          }}
+                        >
+                          <div
+                            style={{
+                              fontWeight: 500,
+                              fontSize: 14,
+                              marginBottom: 4,
+                            }}
+                          >
+                            {provider.provider}
+                          </div>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: 'var(--md-sys-color-on-surface-variant)',
+                              marginBottom: 12,
+                            }}
+                          >
+                            Path: {provider.path}
+                          </div>
+                          <div style={{ display: 'grid', gap: 8 }}>
+                            {provider.paramKeys.map((paramKey) => (
+                              <md-outlined-text-field
+                                key={paramKey}
+                                label={paramKey}
+                                placeholder={
+                                  provider.defaultParams[paramKey] || ''
+                                }
+                                value={binding.config[paramKey] || ''}
+                                onInput={(event: Event) => {
+                                  const value = (
+                                    event.target as HTMLInputElement
+                                  ).value
+                                  const nextConfig = { ...binding.config }
+                                  if (value) {
+                                    nextConfig[paramKey] = value
+                                  } else {
+                                    delete nextConfig[paramKey]
+                                  }
+                                  setSettings({
+                                    resources: {
+                                      ...settings.resources,
+                                      [provider.key]: {
+                                        ...binding,
+                                        config: nextConfig,
+                                      },
+                                    },
+                                  })
+                                }}
+                                style={{ width: '100%' }}
+                              />
+                            ))}
+                          </div>
+                        </div>
+                      )
+                    })}
+                </div>
+              )
+            })()}
+
             <div
               style={{
                 display: 'flex',
-                flexDirection: 'column',
-                gap: 8,
-                marginTop: 8,
+                gap: 12,
+                flexWrap: 'wrap',
+                marginTop: 16,
               }}
             >
-              {(pipelineDefinition?.intake?.modes || []).map((mode) => (
-                <div
-                  key={mode.key}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                  }}
-                >
-                  <md-checkbox
-                    checked={settings.intakeModes.includes(mode.key)}
-                    onClick={() => toggleIntakeMode(mode.key)}
-                  />
-                  <span style={{ fontSize: 14 }}>{mode.label}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {(() => {
-            const activeKeys = new Set<string>()
-            for (const mode of pipelineDefinition?.intake?.modes || []) {
-              if (settings.intakeModes.includes(mode.key) && mode.resource) {
-                activeKeys.add(mode.resource)
-              }
-            }
-            if (activeKeys.size === 0) return null
-            return (
-              <div
-                style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
+              <md-outlined-button
+                onClick={testConnection}
+                disabled={isTesting || isSaving || undefined}
               >
-                <div
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                    marginTop: 8,
-                  }}
-                >
-                  资源接口参数
-                </div>
-                {resourceProviders
-                  .filter((p) => activeKeys.has(p.key))
-                  .map((provider) => {
-                    const binding = settings.resources[provider.key] || {
-                      enabled: true,
-                      config: {},
-                    }
-                    return (
-                      <div
-                        key={provider.key}
-                        style={{
-                          border:
-                            '1px solid var(--md-sys-color-outline-variant)',
-                          borderRadius: 12,
-                          padding: 16,
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontWeight: 500,
-                            fontSize: 14,
-                            marginBottom: 4,
-                          }}
-                        >
-                          {provider.provider}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: 12,
-                            color: 'var(--md-sys-color-on-surface-variant)',
-                            marginBottom: 12,
-                          }}
-                        >
-                          Path: {provider.path}
-                        </div>
-                        <div style={{ display: 'grid', gap: 8 }}>
-                          {provider.paramKeys.map((paramKey) => (
-                            <md-outlined-text-field
-                              key={paramKey}
-                              label={paramKey}
-                              placeholder={
-                                provider.defaultParams[paramKey] || ''
-                              }
-                              value={binding.config[paramKey] || ''}
-                              onInput={(event: Event) => {
-                                const value = (event.target as HTMLInputElement)
-                                  .value
-                                const nextConfig = { ...binding.config }
-                                if (value) {
-                                  nextConfig[paramKey] = value
-                                } else {
-                                  delete nextConfig[paramKey]
-                                }
-                                setSettings({
-                                  resources: {
-                                    ...settings.resources,
-                                    [provider.key]: {
-                                      ...binding,
-                                      config: nextConfig,
-                                    },
-                                  },
-                                })
-                              }}
-                              style={{ width: '100%' }}
-                            />
-                          ))}
-                        </div>
-                      </div>
-                    )
-                  })}
+                {isTesting ? '测试中...' : '测试连接'}
+              </md-outlined-button>
+              <div aria-live="polite" aria-atomic="true">
+                <ConnectionStatusPill
+                  state={testStatus.state}
+                  message={testStatus.message}
+                />
               </div>
-            )
-          })()}
-
-          <div
-            style={{
-              display: 'flex',
-              gap: 12,
-              flexWrap: 'wrap',
-              marginTop: 16,
-            }}
-          >
-            <md-outlined-button
-              onClick={testConnection}
-              disabled={isTesting || isSaving || undefined}
-            >
-              {isTesting ? '测试中...' : '测试连接'}
-            </md-outlined-button>
-            <md-filled-button
-              onClick={() => void saveAll()}
-              disabled={isSaving || undefined}
-            >
-              保存
-            </md-filled-button>
-          </div>
-          {saveError && (
-            <div
-              className="error-text"
-              role="alert"
-              style={{ color: 'var(--md-sys-color-error)' }}
-            >
-              {saveError}
             </div>
-          )}
-        </SettingsCard>
-
-        <SettingsCard icon="route" title={WORKSPACE_LABELS.pipeline}>
-          <div className="field">
-            <label htmlFor="pipeline-select">流水线</label>
-            <select
-              id="pipeline-select"
-              value={settings.pipelineKey}
-              onChange={(e) => setSettings({ pipelineKey: e.target.value })}
-            >
-              <option value="">请选择</option>
-              {PIPELINE_OPTIONS.map((p) => (
-                <option key={p.key} value={p.key}>
-                  {p.label}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'flex-end',
-              gap: 8,
-            }}
-          >
-            <md-filled-button
-              onClick={() => void saveAll()}
-              disabled={isSaving || undefined}
-            >
-              保存
-            </md-filled-button>
             {saveError && (
               <div
                 className="error-text"
                 role="alert"
-                style={{ color: 'var(--md-sys-color-error)' }}
+                style={{ color: 'var(--md-sys-color-error)', marginTop: 12 }}
               >
                 {saveError}
               </div>
             )}
-          </div>
-        </SettingsCard>
+          </section>
 
-        <SettingsCard icon="smart_toy" title={WORKSPACE_LABELS.agents}>
-          <AgentAllocationList
-            workspaceId={workspaceId}
-            assignments={agentAssignments}
-            onAssignmentsChange={setAgentAssignments}
-          />
-        </SettingsCard>
+          <section id="pipeline" className={styles.section}>
+            <h2 className={styles.sectionTitle}>Pipeline</h2>
+            <hr className={styles.sectionDivider} />
+            <div className={styles.field}>
+              <label htmlFor="pipeline-select">流水线</label>
+              <select
+                id="pipeline-select"
+                value={settings.pipelineKey}
+                onChange={(e) => setSettings({ pipelineKey: e.target.value })}
+              >
+                <option value="">请选择</option>
+                {PIPELINE_OPTIONS.map((p) => (
+                  <option key={p.key} value={p.key}>
+                    {p.label}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="local-concurrency">本地并发限制</label>
+              <md-outlined-text-field
+                id="local-concurrency"
+                type="number"
+                min={1}
+                value={settings.localConcurrency ?? ''}
+                onInput={(event: Event) => {
+                  const value = Number((event.target as HTMLInputElement).value)
+                  setSettings({
+                    localConcurrency: Number.isNaN(value) ? undefined : value,
+                  })
+                }}
+                style={{ width: '100%' }}
+              />
+            </div>
+            <div className={styles.field}>
+              <label htmlFor="agent-concurrency">智能体并发限制</label>
+              <md-outlined-text-field
+                id="agent-concurrency"
+                type="number"
+                min={1}
+                value={settings.agentConcurrency ?? ''}
+                onInput={(event: Event) => {
+                  const value = Number((event.target as HTMLInputElement).value)
+                  setSettings({
+                    agentConcurrency: Number.isNaN(value) ? undefined : value,
+                  })
+                }}
+                style={{ width: '100%' }}
+              />
+            </div>
+          </section>
+
+          <section id="agents" className={styles.section}>
+            <h2 className={styles.sectionTitle}>智能体</h2>
+            <hr className={styles.sectionDivider} />
+            <AgentAllocationList
+              workspaceId={workspaceId}
+              assignments={agentAssignments}
+              onAssignmentsChange={setAgentAssignments}
+            />
+          </section>
+        </div>
       </div>
     </AppShell>
   )
