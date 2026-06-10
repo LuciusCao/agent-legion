@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { JobListItem } from './JobListItem'
 import type { JobRecord } from '../types'
@@ -24,10 +24,8 @@ describe('JobListItem', () => {
         <JobListItem
           job={mockJob}
           selected={false}
-          expanded={false}
           selectMode={false}
           onToggleSelect={vi.fn()}
-          onToggleExpand={vi.fn()}
         />
       </MemoryRouter>
     )
@@ -42,10 +40,8 @@ describe('JobListItem', () => {
         <JobListItem
           job={{ ...mockJob, title: '' }}
           selected={false}
-          expanded={false}
           selectMode={false}
           onToggleSelect={vi.fn()}
-          onToggleExpand={vi.fn()}
         />
       </MemoryRouter>
     )
@@ -59,10 +55,8 @@ describe('JobListItem', () => {
         <JobListItem
           job={mockJob}
           selected={false}
-          expanded={false}
           selectMode={true}
           onToggleSelect={vi.fn()}
-          onToggleExpand={vi.fn()}
         />
       </MemoryRouter>
     )
@@ -75,51 +69,13 @@ describe('JobListItem', () => {
         <JobListItem
           job={mockJob}
           selected={true}
-          expanded={false}
           selectMode={true}
           onToggleSelect={vi.fn()}
-          onToggleExpand={vi.fn()}
         />
       </MemoryRouter>
     )
 
     expect(checkbox.checked).toBe(true)
-  })
-
-  it('clicking expand button calls onToggleExpand', () => {
-    const onToggleExpand = vi.fn()
-    render(
-      <MemoryRouter>
-        <JobListItem
-          job={mockJob}
-          selected={false}
-          expanded={false}
-          selectMode={false}
-          onToggleSelect={vi.fn()}
-          onToggleExpand={onToggleExpand}
-        />
-      </MemoryRouter>
-    )
-
-    fireEvent.click(screen.getByText('展开 ▼'))
-    expect(onToggleExpand).toHaveBeenCalledTimes(1)
-  })
-
-  it('renders collapse text when expanded', () => {
-    render(
-      <MemoryRouter>
-        <JobListItem
-          job={mockJob}
-          selected={false}
-          expanded={true}
-          selectMode={false}
-          onToggleSelect={vi.fn()}
-          onToggleExpand={vi.fn()}
-        />
-      </MemoryRouter>
-    )
-
-    expect(screen.getByText('收起 ▲')).toBeInTheDocument()
   })
 
   it('progress bar width is correct', () => {
@@ -128,10 +84,8 @@ describe('JobListItem', () => {
         <JobListItem
           job={mockJob}
           selected={false}
-          expanded={false}
           selectMode={false}
           onToggleSelect={vi.fn()}
-          onToggleExpand={vi.fn()}
         />
       </MemoryRouter>
     )

@@ -7,10 +7,8 @@ import styles from './JobListItem.module.css'
 export interface JobListItemProps {
   job: JobRecord
   selected: boolean
-  expanded: boolean
   selectMode: boolean
   onToggleSelect: () => void
-  onToggleExpand: () => void
   workspaceId?: string
   entity?: string
 }
@@ -47,37 +45,37 @@ function progressPercent(job: JobRecord): number {
 export function JobListItem({
   job,
   selected,
-  expanded,
   selectMode,
   onToggleSelect,
-  onToggleExpand,
   workspaceId,
   entity,
 }: JobListItemProps) {
   const navigate = useNavigate()
+
+  const handleRowClick = () => {
+    if (entity === 'question' && workspaceId) {
+      navigate(`/workspaces/${workspaceId}/questions/${job.source_id}`)
+    } else if (workspaceId) {
+      navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)
+    }
+  }
+
   return (
-    <div className={styles.row} data-job={job.id}>
+    <div className={styles.row} data-job={job.id} onClick={handleRowClick}>
       {selectMode && (
         <input
           type="checkbox"
           className={styles.checkbox}
           checked={selected}
-          onChange={onToggleSelect}
+          onChange={(e) => {
+            e.stopPropagation()
+            onToggleSelect()
+          }}
           onClick={(e) => e.stopPropagation()}
           aria-label={`选择任务 ${job.source_id}`}
         />
       )}
-      <div
-        className={styles.main}
-        onClick={() => {
-          if (entity === 'question' && workspaceId) {
-            navigate(`/workspaces/${workspaceId}/questions/${job.source_id}`)
-          } else if (workspaceId) {
-            navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)
-          }
-        }}
-        style={{ cursor: 'pointer' }}
-      >
+      <div className={styles.main}>
         <div className={styles.sourceId}>
           {job.title
             ? `${job.title.length > 30 ? job.title.slice(0, 30) + '…' : job.title} - ${job.source_id}`
@@ -105,17 +103,6 @@ export function JobListItem({
         </div>
         <span className={styles.progressLabel}>{progressText(job)}</span>
       </div>
-      <button
-        type="button"
-        className={styles.expandBtn}
-        onClick={(e) => {
-          e.stopPropagation()
-          onToggleExpand()
-        }}
-        aria-expanded={expanded}
-      >
-        {expanded ? '收起 ▲' : '展开 ▼'}
-      </button>
     </div>
   )
 }

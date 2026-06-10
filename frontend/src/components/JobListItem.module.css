@@ -5,11 +5,14 @@
   padding: 12px 16px;
   background: var(--md-sys-color-surface);
   cursor: pointer;
-  transition: background 120ms ease;
+  transition: background 180ms ease, box-shadow 180ms ease;
+  border-radius: 12px;
+  margin: 2px 8px;
 }
 
 .row:hover {
   background: var(--md-sys-color-surface-container-low);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .row:not(:last-child) {
