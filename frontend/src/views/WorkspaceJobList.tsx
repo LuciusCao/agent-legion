@@ -276,13 +276,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
               key={job.id}
               type="button"
               onClick={() => {
-                if (entity === 'question') {
-                  navigate(
-                    `/workspaces/${workspaceId}/questions/${job.source_id}`
-                  )
-                } else {
-                  navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)
-                }
+                navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)
               }}
             >
               <div slot="headline">{job.title}</div>
