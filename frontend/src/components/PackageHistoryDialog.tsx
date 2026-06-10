@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { deletePackage, updatePackage } from '../api'
+import { deletePackage, updatePackage, api } from '../api'
 import { triggerDownload } from '../lib/download'
 import { usePackageStore } from '../stores/packageStore'
 import styles from './PackageHistoryDialog.module.css'
@@ -17,6 +17,8 @@ interface PackageItem {
 interface Props {
   open: boolean
   onClose: () => void
+  scope?: 'global' | 'workspace'
+  workspaceId?: string
 }
 
 function formatSize(bytes: number): string {
@@ -41,27 +43,57 @@ function formatRelativeTime(iso: string): string {
   return date.toLocaleDateString('zh-CN')
 }
 
-export function PackageHistoryDialog({ open, onClose }: Props) {
+export function PackageHistoryDialog({
+  open,
+  onClose,
+  scope = 'global',
+  workspaceId,
+}: Props) {
   const packages = usePackageStore((state) => state.packages)
   const loading = usePackageStore((state) => state.loading)
   const fetchPackagesList = usePackageStore((state) => state.fetchPackagesList)
   const removePackage = usePackageStore((state) => state.removePackage)
   const renamePackage = usePackageStore((state) => state.renamePackage)
   const toggleLockStore = usePackageStore((state) => state.toggleLock)
+
+  const [workspacePackages, setWorkspacePackages] = useState<PackageItem[]>([])
+  const [wsLoading, setWsLoading] = useState(false)
+
   const [editingId, setEditingId] = useState<number | null>(null)
   const [editValue, setEditValue] = useState('')
 
+  const isWorkspace = scope === 'workspace'
+  const displayPackages = isWorkspace ? workspacePackages : packages
+  const displayLoading = isWorkspace ? wsLoading : loading
+
   useEffect(() => {
-    if (open) {
+    if (!open) return
+    if (isWorkspace && workspaceId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setWsLoading(true)
+      api<{ packages: PackageItem[] }>(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/packages`
+      )
+        .then((data) => {
+          setWorkspacePackages(data.packages || [])
+        })
+        .catch(() => setWorkspacePackages([]))
+        .finally(() => setWsLoading(false))
+    } else if (!isWorkspace) {
       fetchPackagesList()
     }
-  }, [open, fetchPackagesList])
+  }, [open, isWorkspace, workspaceId, fetchPackagesList])
 
   if (!open) return null
 
   const handleDownload = (pkg: PackageItem) => {
     const filename = pkg.path.split('/').pop() || ''
-    if (filename) {
+    if (!filename) return
+    if (isWorkspace && workspaceId) {
+      triggerDownload(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/packages/${filename}`
+      )
+    } else {
       triggerDownload(`/api/packages/${filename}`)
     }
   }
@@ -109,16 +141,19 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
     <md-dialog open>
       <div slot="headline">包历史</div>
       <div slot="content" className={styles.dialogContent}>
-        {loading && <div className={styles.empty}>加载中...</div>}
-        {!loading && packages.length === 0 && (
+        {isWorkspace && !workspaceId && (
+          <div className={styles.empty}>未提供工作区 ID</div>
+        )}
+        {displayLoading && <div className={styles.empty}>加载中...</div>}
+        {!displayLoading && displayPackages.length === 0 && (
           <div className={styles.empty}>暂无打包记录</div>
         )}
-        {!loading && packages.length > 0 && (
+        {!displayLoading && displayPackages.length > 0 && (
           <div className={styles.list}>
-            {packages.map((pkg) => (
+            {displayPackages.map((pkg) => (
               <div key={pkg.id} className={styles.item}>
                 <div className={styles.itemInfo}>
-                  {editingId === pkg.id ? (
+                  {editingId === pkg.id && !isWorkspace ? (
                     <md-outlined-text-field
                       value={editValue}
                       onInput={(e: Event) =>
@@ -134,9 +169,11 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
                     <>
                       <span
                         className={styles.itemName}
-                        onClick={() => startEdit(pkg)}
-                        style={{ cursor: 'pointer' }}
-                        title="点击重命名"
+                        onClick={() => !isWorkspace && startEdit(pkg)}
+                        style={{
+                          cursor: isWorkspace ? 'default' : 'pointer',
+                        }}
+                        title={isWorkspace ? '' : '点击重命名'}
                       >
                         {pkg.locked ? (
                           <md-icon
@@ -159,7 +196,7 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
                   )}
                 </div>
                 <div className={styles.itemActions}>
-                  {editingId === pkg.id ? (
+                  {editingId === pkg.id && !isWorkspace ? (
                     <md-icon-button
                       onClick={() => handleRename(pkg.id)}
                       title="确认"
@@ -168,30 +205,44 @@ export function PackageHistoryDialog({ open, onClose }: Props) {
                     </md-icon-button>
                   ) : (
                     <>
-                      <md-icon-button
-                        onClick={() => handleToggleLock(pkg)}
-                        title={pkg.locked ? '解锁' : '锁定'}
-                      >
-                        <md-icon>{pkg.locked ? 'lock' : 'lock_open'}</md-icon>
-                      </md-icon-button>
-                      <md-icon-button
-                        onClick={() => handleDownload(pkg)}
-                        title="下载"
-                      >
-                        <md-icon>download</md-icon>
-                      </md-icon-button>
-                      <md-icon-button
-                        disabled={pkg.locked || undefined}
-                        onClick={() => handleDelete(pkg.id)}
-                        title={pkg.locked ? '已锁定，无法删除' : '删除'}
-                        style={{
-                          color: pkg.locked
-                            ? 'var(--md-sys-color-outline)'
-                            : 'var(--md-sys-color-error)',
-                        }}
-                      >
-                        <md-icon>delete</md-icon>
-                      </md-icon-button>
+                      {!isWorkspace && (
+                        <>
+                          <md-icon-button
+                            onClick={() => handleToggleLock(pkg)}
+                            title={pkg.locked ? '解锁' : '锁定'}
+                          >
+                            <md-icon>
+                              {pkg.locked ? 'lock' : 'lock_open'}
+                            </md-icon>
+                          </md-icon-button>
+                          <md-icon-button
+                            onClick={() => handleDownload(pkg)}
+                            title="下载"
+                          >
+                            <md-icon>download</md-icon>
+                          </md-icon-button>
+                          <md-icon-button
+                            disabled={pkg.locked || undefined}
+                            onClick={() => handleDelete(pkg.id)}
+                            title={pkg.locked ? '已锁定，无法删除' : '删除'}
+                            style={{
+                              color: pkg.locked
+                                ? 'var(--md-sys-color-outline)'
+                                : 'var(--md-sys-color-error)',
+                            }}
+                          >
+                            <md-icon>delete</md-icon>
+                          </md-icon-button>
+                        </>
+                      )}
+                      {isWorkspace && (
+                        <md-icon-button
+                          onClick={() => handleDownload(pkg)}
+                          title="下载"
+                        >
+                          <md-icon>download</md-icon>
+                        </md-icon-button>
+                      )}
                     </>
                   )}
                 </div>

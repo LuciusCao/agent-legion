@@ -1,179 +1,79 @@
-import { useState } from 'react'
-import { useVideoStore } from '../stores/videoStore'
-import { useUiStore } from '../stores/uiStore'
-import { BatchRerunDialog } from './BatchRerunDialog'
-import { BatchDeleteDialog } from './BatchDeleteDialog'
-import { RunToDialog } from './RunToDialog'
 import styles from './BatchToolbar.module.css'
 
-export function BatchToolbar() {
-  const videos = useVideoStore((state) => state.videos)
-  const selectedIds = useVideoStore((state) => state.selectedIds)
-  const selectMode = useVideoStore((state) => state.selectMode)
-  const toggleSelectMode = useVideoStore((state) => state.toggleSelectMode)
-  const clearSelection = useVideoStore((state) => state.clearSelection)
-  const selectAllVisible = useVideoStore((state) => state.selectAllVisible)
-  const selectUnpacked = useVideoStore((state) => state.selectUnpacked)
-  const selectReviewApproved = useVideoStore(
-    (state) => state.selectReviewApproved
-  )
-  const selectReviewNotPassed = useVideoStore(
-    (state) => state.selectReviewNotPassed
-  )
-  const batchDelete = useVideoStore((state) => state.batchDelete)
-  const batchRunTo = useVideoStore((state) => state.batchRunTo)
-  const batchPackage = useVideoStore((state) => state.batchPackage)
-  const fetchVideos = useVideoStore((state) => state.fetchVideos)
-  const exitSelectMode = useVideoStore((state) => state.exitSelectMode)
-  const { showToast } = useUiStore()
+export type BatchFilter = {
+  key: string
+  label: string
+  onClick: () => void
+}
 
-  const [rerunDialogOpen, setRerunDialogOpen] = useState(false)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [runToDialogOpen, setRunToDialogOpen] = useState(false)
+export type BatchAction = {
+  key: string
+  label: string
+  variant?: 'text' | 'outlined' | 'filled'
+  danger?: boolean
+  onClick: () => void
+}
 
-  const selectedVideos = videos.filter((video) => selectedIds.has(video.id))
+export type BatchToolbarProps = {
+  selectedCount: number
+  filters: BatchFilter[]
+  actions: BatchAction[]
+  onExitSelectMode: () => void
+}
 
-  if (!selectMode) return null
-
-  const count = selectedIds.size
-  const hasSelection = count > 0
-
-  const handleDeleteConfirm = async () => {
-    const result = await batchDelete(Array.from(selectedIds))
-    const succeeded = result.results.filter(
-      (r) => r.status === 'deleted'
-    ).length
-    const failed = result.results.length - succeeded
-    showToast(
-      failed > 0
-        ? `删除完成：成功 ${succeeded} 项，失败 ${failed} 项`
-        : `删除完成：成功 ${succeeded} 项`,
-      failed > 0 ? 'error' : 'success'
-    )
-    clearSelection()
-    setDeleteDialogOpen(false)
-    await fetchVideos()
-    const err = useVideoStore.getState().error
-    if (err) {
-      showToast(`加载失败: ${err}`, 'error')
-      useVideoStore.getState().clearError()
-    }
-  }
-
-  const handleRerun = () => {
-    if (!hasSelection) return
-    setRerunDialogOpen(true)
-  }
-
-  const handleDelete = () => {
-    if (!hasSelection) return
-    setDeleteDialogOpen(true)
-  }
-
-  const handlePackage = async () => {
-    if (!hasSelection) return
-    await batchPackage(Array.from(selectedIds))
-    showToast('打包已提交，完成后将自动下载', 'success')
-    exitSelectMode()
-  }
-
-  const handleRunToConfirm = async ({
-    targetPhase,
-    startPhase,
-  }: {
-    targetPhase: string
-    startPhase: string | null
-  }) => {
-    const result = await batchRunTo(
-      Array.from(selectedIds),
-      targetPhase,
-      startPhase
-    )
-    const succeeded = result.results.filter(
-      (r) => r.status === 'run_to' || r.status === 'rerun_to'
-    ).length
-    const failed = result.results.length - succeeded
-    showToast(
-      failed > 0
-        ? `运行提交完成：成功 ${succeeded} 项，跳过 ${failed} 项`
-        : `运行提交完成：成功 ${succeeded} 项`,
-      failed > 0 ? 'error' : 'success'
-    )
-    setRunToDialogOpen(false)
-    exitSelectMode()
-    await fetchVideos()
-    const err = useVideoStore.getState().error
-    if (err) {
-      showToast(`加载失败: ${err}`, 'error')
-      useVideoStore.getState().clearError()
-    }
-  }
-
+export function BatchToolbar({
+  selectedCount,
+  filters,
+  actions,
+  onExitSelectMode,
+}: BatchToolbarProps) {
   return (
-    <>
-      <div className={`${styles.batchToolbar} card-elevated`}>
-        <span>已选择 {count} 项</span>
-        <div className={styles.batchActions}>
-          <md-text-button onClick={selectAllVisible}>全选</md-text-button>
-          <md-text-button onClick={selectUnpacked}>未打包</md-text-button>
-          <md-text-button onClick={selectReviewApproved}>
-            仅已通过
+    <div className={`${styles.batchToolbar} card-elevated`}>
+      <span>已选择 {selectedCount} 项</span>
+      <div className={styles.batchActions}>
+        {filters.map((filter) => (
+          <md-text-button key={filter.key} onClick={filter.onClick}>
+            {filter.label}
           </md-text-button>
-          <md-text-button onClick={selectReviewNotPassed}>
-            未通过/部分通过
-          </md-text-button>
-          <md-text-button onClick={clearSelection}>取消选择</md-text-button>
-          <md-icon-button
-            disabled={!hasSelection || undefined}
-            onClick={handleRerun}
-            title="重跑"
-          >
-            <md-icon>restart_alt</md-icon>
-          </md-icon-button>
-          <md-icon-button
-            disabled={!hasSelection || undefined}
-            onClick={() => setRunToDialogOpen(true)}
-            title="运行到"
-          >
-            <md-icon>play_circle</md-icon>
-          </md-icon-button>
-          <md-icon-button
-            disabled={!hasSelection || undefined}
-            onClick={handlePackage}
-            title="打包"
-          >
-            <md-icon>inventory_2</md-icon>
-          </md-icon-button>
-          <md-icon-button
-            disabled={!hasSelection || undefined}
-            style={{ color: 'var(--md-sys-color-error)' }}
-            onClick={handleDelete}
-            title="删除"
-          >
-            <md-icon>delete</md-icon>
-          </md-icon-button>
-          <md-outlined-button onClick={toggleSelectMode}>
-            退出
-          </md-outlined-button>
-        </div>
+        ))}
+        {actions.map((action) => {
+          const buttonStyle = action.danger
+            ? ({ color: 'var(--md-sys-color-error)' } as React.CSSProperties)
+            : undefined
+          if (action.variant === 'text') {
+            return (
+              <md-text-button
+                key={action.key}
+                onClick={action.onClick}
+                style={buttonStyle}
+              >
+                {action.label}
+              </md-text-button>
+            )
+          }
+          if (action.variant === 'filled') {
+            return (
+              <md-filled-button
+                key={action.key}
+                onClick={action.onClick}
+                style={buttonStyle}
+              >
+                {action.label}
+              </md-filled-button>
+            )
+          }
+          return (
+            <md-outlined-button
+              key={action.key}
+              onClick={action.onClick}
+              style={buttonStyle}
+            >
+              {action.label}
+            </md-outlined-button>
+          )
+        })}
+        <md-outlined-button onClick={onExitSelectMode}>退出</md-outlined-button>
       </div>
-      <BatchRerunDialog
-        open={rerunDialogOpen}
-        videoIds={Array.from(selectedIds)}
-        onClose={() => setRerunDialogOpen(false)}
-      />
-      <BatchDeleteDialog
-        open={deleteDialogOpen}
-        count={count}
-        onClose={() => setDeleteDialogOpen(false)}
-        onConfirm={handleDeleteConfirm}
-      />
-      <RunToDialog
-        open={runToDialogOpen}
-        videos={selectedVideos}
-        onClose={() => setRunToDialogOpen(false)}
-        onConfirm={handleRunToConfirm}
-      />
-    </>
+    </div>
   )
 }

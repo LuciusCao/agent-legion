@@ -11,6 +11,8 @@ interface UiState {
   agents: AgentStatus[]
   addDialogOpen: boolean
   addContentType: ContentType
+  addDialogContext: 'video' | 'workspace'
+  addDialogWorkspaceId: string | undefined
   rerunDialogOpen: boolean
   deleteDialogOpen: boolean
   workerPaused: boolean
@@ -19,7 +21,10 @@ interface UiState {
   connectAgentsWs: () => () => void
   fetchWorkerStatus: () => Promise<void>
   setWorkerPaused: (paused: boolean) => Promise<void>
-  openAddDialog: () => void
+  openAddDialog: (opts?: {
+    context?: 'video' | 'workspace'
+    workspaceId?: string
+  }) => void
   closeAddDialog: () => void
   setAddContentType: (type: ContentType) => void
   openRerunDialog: () => void
@@ -38,6 +43,8 @@ export const useUiStore = create<UiState>((set) => ({
   agents: [],
   addDialogOpen: false,
   addContentType: 'knowledge',
+  addDialogContext: 'video',
+  addDialogWorkspaceId: undefined,
   rerunDialogOpen: false,
   deleteDialogOpen: false,
   workerPaused: true,
@@ -96,8 +103,13 @@ export const useUiStore = create<UiState>((set) => ({
     set({ workerPaused: data.paused })
   },
 
-  openAddDialog: () =>
-    set({ addDialogOpen: true, addContentType: 'knowledge' }),
+  openAddDialog: (opts) =>
+    set({
+      addDialogOpen: true,
+      addContentType: 'knowledge',
+      addDialogContext: opts?.context || 'video',
+      addDialogWorkspaceId: opts?.workspaceId,
+    }),
   closeAddDialog: () => set({ addDialogOpen: false }),
   setAddContentType: (type) => set({ addContentType: type }),
   openRerunDialog: () => set({ rerunDialogOpen: true }),
