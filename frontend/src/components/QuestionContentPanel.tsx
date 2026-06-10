@@ -164,9 +164,7 @@ export function QuestionContentPanel({
             const formatted = formatAnswer(detail.normalized.answer)
             if (formatted != null) {
               return (
-                <div className={styles.answerText}>
-                  正确答案：{formatted}
-                </div>
+                <div className={styles.answerText}>正确答案：{formatted}</div>
               )
             }
             return (
