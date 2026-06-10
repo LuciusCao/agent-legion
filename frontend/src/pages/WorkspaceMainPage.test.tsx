@@ -169,15 +169,15 @@ describe('WorkspaceMainPage', () => {
   })
 
   it('batch toolbar appears when items selected', async () => {
-    useJobStore.setState({ selectedIds: new Set(['j1', 'j2']) })
+    useJobStore.setState({ selectedIds: new Set(['j1', 'j2']), selectMode: true })
 
     await act(async () => {
       renderPage()
     })
 
     expect(screen.getByText('已选择 2 项')).toBeInTheDocument()
-    expect(screen.getByText('批量重跑')).toBeInTheDocument()
-    expect(screen.getByText('批量删除')).toBeInTheDocument()
+    expect(screen.getByText('重跑')).toBeInTheDocument()
+    expect(screen.getByText('删除')).toBeInTheDocument()
     expect(screen.getByText('全选')).toBeInTheDocument()
     expect(screen.getByText('仅失败')).toBeInTheDocument()
   })

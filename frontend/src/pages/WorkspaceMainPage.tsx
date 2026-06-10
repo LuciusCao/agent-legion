@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useCallback, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
@@ -6,6 +6,13 @@ import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 import { WorkspaceStatCards } from '../components/WorkspaceStatCards'
 import { JobList } from '../components/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
+import {
+  BatchToolbar,
+  type BatchFilter,
+  type BatchAction,
+} from '../components/BatchToolbar'
+import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
+import { BatchRerunDialog } from '../components/BatchRerunDialog'
 import styles from './WorkspaceMainPage.module.css'
 
 const sectionStyle = {
@@ -20,6 +27,7 @@ export default function WorkspaceMainPage() {
   const { fetchWorkspaceStats, workspaceStats } = useWorkspaceStore()
   const {
     fetchJobs,
+    jobs,
     selectedIds,
     statusFilter,
     setStatusFilter,
@@ -28,9 +36,12 @@ export default function WorkspaceMainPage() {
     selectAll,
     selectFailed,
     clearSelection,
-    batchRerun,
     batchDelete,
+    batchPackage,
+    batchRerun,
     getFilteredJobs,
+    selectMode,
+    toggleSelectMode,
   } = useJobStore()
 
   useEffect(() => {
@@ -51,6 +62,9 @@ export default function WorkspaceMainPage() {
   const debouncedSetSearchQuery = useDebouncedCallback(setSearchQuery, 250)
   const [searchInputValue, setSearchInputValue] = useState(searchQuery)
 
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [rerunDialogOpen, setRerunDialogOpen] = useState(false)
+
   const currentStats = workspaceId ? workspaceStats[workspaceId] : undefined
   const counts = useMemo(() => {
     const jobStats = currentStats?.job_stats || {}
@@ -69,24 +83,35 @@ export default function WorkspaceMainPage() {
 
   const filteredJobs = getFilteredJobs()
   const totalJobs = counts.all
+  const selectedJobs = jobs.filter((j) => selectedIds.has(j.id))
 
-  const handleSelectAll = useCallback(() => {
-    selectAll()
-  }, [selectAll])
+  const filters: BatchFilter[] = [
+    { key: 'all', label: '全选', onClick: selectAll },
+    { key: 'failed', label: '仅失败', onClick: selectFailed },
+    { key: 'clear', label: '取消选择', onClick: clearSelection },
+  ]
 
-  const handleSelectFailed = useCallback(() => {
-    selectFailed()
-  }, [selectFailed])
-
-  const handleBatchRerun = useCallback(async () => {
-    if (!workspaceId || selectedIds.size === 0) return
-    await batchRerun(workspaceId)
-  }, [workspaceId, selectedIds, batchRerun])
-
-  const handleBatchDelete = useCallback(async () => {
-    if (!workspaceId || selectedIds.size === 0) return
-    await batchDelete(workspaceId)
-  }, [workspaceId, selectedIds, batchDelete])
+  const actions: BatchAction[] = [
+    {
+      key: 'rerun',
+      label: '重跑',
+      onClick: () => setRerunDialogOpen(true),
+    },
+    {
+      key: 'package',
+      label: '打包',
+      onClick: async () => {
+        if (!workspaceId) return
+        await batchPackage(workspaceId)
+      },
+    },
+    {
+      key: 'delete',
+      label: '删除',
+      danger: true,
+      onClick: () => setDeleteDialogOpen(true),
+    },
+  ]
 
   const emptyStateSteps = useMemo(
     () => [
@@ -111,24 +136,40 @@ export default function WorkspaceMainPage() {
         gap: 16,
       }}
     >
-      {selectedIds.size > 0 && (
-        <div className={`${styles.batchToolbar} card-elevated`}>
-          <span>已选择 {selectedIds.size} 项</span>
-          <div className={styles.batchActions}>
-            <md-text-button onClick={handleSelectAll}>全选</md-text-button>
-            <md-text-button onClick={handleSelectFailed}>仅失败</md-text-button>
-            <md-text-button onClick={clearSelection}>取消选择</md-text-button>
-            <md-outlined-button onClick={handleBatchRerun}>
-              批量重跑
-            </md-outlined-button>
-            <md-outlined-button
-              style={{ color: 'var(--md-sys-color-error)' }}
-              onClick={handleBatchDelete}
-            >
-              批量删除
-            </md-outlined-button>
-          </div>
-        </div>
+      {selectMode && (
+        <>
+          <BatchToolbar
+            selectedCount={selectedIds.size}
+            filters={filters}
+            actions={actions}
+            onExitSelectMode={toggleSelectMode}
+          />
+          <BatchDeleteDialog
+            open={deleteDialogOpen}
+            count={selectedIds.size}
+            onClose={() => setDeleteDialogOpen(false)}
+            onConfirm={async () => {
+              if (!workspaceId) return
+              await batchDelete(workspaceId)
+              setDeleteDialogOpen(false)
+            }}
+          />
+          <BatchRerunDialog
+            open={rerunDialogOpen}
+            items={selectedJobs.map((j) => ({
+              id: j.id,
+              name: j.source_id || j.id,
+            }))}
+            phases={[]}
+            itemLabel="任务"
+            onConfirm={async () => {
+              if (!workspaceId) return
+              await batchRerun(workspaceId)
+              setRerunDialogOpen(false)
+            }}
+            onClose={() => setRerunDialogOpen(false)}
+          />
+        </>
       )}
 
       <section style={sectionStyle}>
@@ -162,7 +203,7 @@ export default function WorkspaceMainPage() {
         </section>
       ) : (
         <section style={{ ...sectionStyle, flex: 1, padding: 0 }}>
-          <JobList workspaceId={workspaceId!} />
+          {workspaceId ? <JobList workspaceId={workspaceId} /> : null}
         </section>
       )}
     </div>
