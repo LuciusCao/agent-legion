@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { useParams } from 'react-router-dom'
 import { useSettingStore } from '../stores/settingStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
@@ -95,6 +95,10 @@ export function SettingsPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const {
     setWorkspaceId,
+    workspaceName,
+    workspaceDescription,
+    setWorkspaceName,
+    setWorkspaceDescription,
     settings,
     setSettings,
     globalServices,
@@ -105,22 +109,14 @@ export function SettingsPage() {
     saveError,
     testConnection,
     resetTestStatus,
-    saveSection,
-    saveIntakeConfig,
+    saveAll,
     fetchSettings,
     fetchGlobalServices,
     fetchResourceProviders,
     fetchPipelineDefinition,
   } = useSettingStore()
 
-  const { workspaces, fetchWorkspaces, updateWorkspace } = useWorkspaceStore()
-
-  const [workspaceEditName, setWorkspaceEditName] = useState('')
-  const [workspaceEditDescription, setWorkspaceEditDescription] = useState('')
-  const [isSavingWorkspace, setIsSavingWorkspace] = useState(false)
-  const [workspaceSaveError, setWorkspaceSaveError] = useState<string | null>(
-    null
-  )
+  const { workspaces, fetchWorkspaces } = useWorkspaceStore()
 
   useEffect(() => {
     if (!workspaceId) return
@@ -149,19 +145,7 @@ export function SettingsPage() {
     }
   }, [workspaces.length, fetchWorkspaces])
 
-  const workspace = workspaceId
-    ? workspaces.find((w) => w.id === workspaceId)
-    : undefined
-  const workspaceName = workspace?.name || workspaceId || ''
-
-  /* eslint-disable react-hooks/set-state-in-effect */
-  useEffect(() => {
-    if (workspace) {
-      setWorkspaceEditName(workspace.name)
-      setWorkspaceEditDescription(workspace.description || '')
-    }
-  }, [workspace])
-  /* eslint-enable react-hooks/set-state-in-effect */
+  const displayWorkspaceName = workspaceName || workspaceId || ''
 
   const isTesting = testStatus.state === 'testing'
 
@@ -189,22 +173,6 @@ export function SettingsPage() {
 
   if (!workspaceId) return null
 
-  const handleSaveWorkspaceInfo = async () => {
-    if (!workspaceId) return
-    setIsSavingWorkspace(true)
-    setWorkspaceSaveError(null)
-    try {
-      await updateWorkspace(workspaceId, {
-        name: workspaceEditName,
-        description: workspaceEditDescription,
-      })
-    } catch (err) {
-      setWorkspaceSaveError(String(err))
-    } finally {
-      setIsSavingWorkspace(false)
-    }
-  }
-
   const connectionStatus = (
     <ConnectionStatusPill
       state={testStatus.state}
@@ -216,7 +184,7 @@ export function SettingsPage() {
     <AppShell
       appBar={({ scrolled }) => (
         <AppBar
-          title={`${workspaceName} / 设置`}
+          title={`${displayWorkspaceName} / 设置`}
           backTo={`/workspaces/${workspaceId}`}
           scrolled={scrolled}
         />
@@ -227,9 +195,9 @@ export function SettingsPage() {
         <SettingsCard icon="info" title="基本信息">
           <md-outlined-text-field
             label="Workspace 名称"
-            value={workspaceEditName}
+            value={workspaceName}
             onInput={(event: Event) =>
-              setWorkspaceEditName((event.target as HTMLInputElement).value)
+              setWorkspaceName((event.target as HTMLInputElement).value)
             }
             style={{ width: '100%' }}
           />
@@ -237,11 +205,9 @@ export function SettingsPage() {
             label="描述"
             type="textarea"
             rows={2}
-            value={workspaceEditDescription}
+            value={workspaceDescription}
             onInput={(event: Event) =>
-              setWorkspaceEditDescription(
-                (event.target as HTMLInputElement).value
-              )
+              setWorkspaceDescription((event.target as HTMLInputElement).value)
             }
             style={{ width: '100%' }}
           />
@@ -254,18 +220,18 @@ export function SettingsPage() {
             }}
           >
             <md-filled-button
-              onClick={handleSaveWorkspaceInfo}
-              disabled={isSavingWorkspace || undefined}
+              onClick={() => void saveAll()}
+              disabled={isSaving || undefined}
             >
               保存
             </md-filled-button>
-            {workspaceSaveError && (
+            {saveError && (
               <div
                 className="error-text"
                 role="alert"
                 style={{ color: 'var(--md-sys-color-error)' }}
               >
-                {workspaceSaveError}
+                {saveError}
               </div>
             )}
           </div>
@@ -448,7 +414,7 @@ export function SettingsPage() {
               {isTesting ? '测试中...' : '测试连接'}
             </md-outlined-button>
             <md-filled-button
-              onClick={() => void saveIntakeConfig()}
+              onClick={() => void saveAll()}
               disabled={isSaving || undefined}
             >
               保存
@@ -490,11 +456,7 @@ export function SettingsPage() {
             }}
           >
             <md-filled-button
-              onClick={() =>
-                saveSection('pipeline', {
-                  pipelineKey: settings.pipelineKey,
-                })
-              }
+              onClick={() => void saveAll()}
               disabled={isSaving || undefined}
             >
               保存

@@ -17,7 +17,6 @@ import {
   fetchAgents,
   fetchWorkspaceAgents,
   unassignAgent,
-  updateWorkspace,
 } from '../api'
 
 vi.mock('../api', () => ({
@@ -27,25 +26,36 @@ vi.mock('../api', () => ({
   assignAgent: vi.fn(),
   unassignAgent: vi.fn(),
   fetchWorkspaces: vi.fn(),
-  updateWorkspace: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)
 const mockFetchAgents = vi.mocked(fetchAgents)
 const mockFetchWorkspaceAgents = vi.mocked(fetchWorkspaceAgents)
-const mockUpdateWorkspace = vi.mocked(updateWorkspace)
+
+const defaultSettings = {
+  entityType: 'question' as const,
+  intakeModes: [] as string[],
+  labelOverrides: {} as Record<string, string>,
+  pipelineKey: '',
+  agentIds: [] as string[],
+  concurrencyLimit: 1,
+  resources: {} as Record<
+    string,
+    { enabled: boolean; config: Record<string, string> }
+  >,
+}
 
 const defaultState = {
   workspaceId: 'ws1',
-  settings: {
-    entityType: 'question' as const,
-    intakeModes: [],
-    labelOverrides: {},
-    pipelineKey: '',
-    agentIds: [],
-    concurrencyLimit: 1,
-    resources: {},
-  },
+  workspaceName: '测试空间',
+  workspaceDescription: '测试描述',
+  settings: defaultSettings,
+  agentAssignments: null as null,
+  originalWorkspaceName: '测试空间',
+  originalWorkspaceDescription: '测试描述',
+  originalSettings: defaultSettings,
+  originalAgentAssignments: null as null,
+  isDirty: false,
   globalServices: {
     cms: {
       baseUrl: 'http://cms.example.com',
@@ -106,14 +116,6 @@ describe('SettingsPage', () => {
     mockFetchAgents.mockResolvedValue({ agents: [] })
     mockFetchWorkspaceAgents.mockReset()
     mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
-    mockUpdateWorkspace.mockReset()
-    mockUpdateWorkspace.mockResolvedValue({
-      id: 'ws1',
-      name: '新名称',
-      description: '新描述',
-      default_pipeline_key: 'question_content',
-      default_entity: 'question',
-    })
     vi.mocked(assignAgent).mockReset()
     vi.mocked(unassignAgent).mockReset()
   })
@@ -176,10 +178,13 @@ describe('SettingsPage', () => {
     const saveBtns = screen.getAllByText('保存')
     fireEvent.click(saveBtns[0])
     await waitFor(() => {
-      expect(mockUpdateWorkspace).toHaveBeenCalledWith('ws1', {
-        name: '新名称',
-        description: '新描述',
-      })
+      expect(mockApi).toHaveBeenCalledWith(
+        '/api/workspaces/ws1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ name: '新名称', description: '新描述' }),
+        })
+      )
     })
   })
 
@@ -246,7 +251,7 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('calls saveIntakeConfig when save is clicked', async () => {
+  it('calls saveAll when intake save is clicked', async () => {
     useSettingStore.setState({
       settings: {
         ...defaultState.settings,
