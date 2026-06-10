@@ -17,7 +17,6 @@ function clampLimit(value: string): number {
 }
 
 export function AgentAllocationList({
-  workspaceId,
   assignments,
   onAssignmentsChange,
 }: AgentAllocationListProps) {

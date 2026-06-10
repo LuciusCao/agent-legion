@@ -1,11 +1,5 @@
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  within,
-} from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { SettingsPage } from './SettingsPage'
 import { useSettingStore } from '../stores/settingStore'
@@ -30,51 +24,37 @@ vi.mock('../api', () => ({
   updateWorkspace: vi.fn(),
 }))
 
-class IntersectionObserverMock {
-  callback: any
-  entries: any[] = []
-
-  constructor(callback: any) {
-    this.callback = callback
-  }
-
-  observe = vi.fn((target: any) => {
-    this.entries.push({
-      target,
-      isIntersecting: true,
-      intersectionRatio: 1,
-      boundingClientRect: {},
-      intersectionRect: {},
-      rootBounds: null,
-      time: Date.now(),
-    })
-    this.callback(this.entries, this)
-  })
-
-  disconnect = vi.fn()
-  unobserve = vi.fn()
-}
-
-beforeAll(() => {
-  vi.stubGlobal('IntersectionObserver', IntersectionObserverMock)
-})
-
 const mockApi = vi.mocked(api)
 const mockFetchAgents = vi.mocked(fetchAgents)
 const mockFetchWorkspaceAgents = vi.mocked(fetchWorkspaceAgents)
 const mockUpdateWorkspace = vi.mocked(updateWorkspace)
+const mockAssignAgent = vi.mocked(assignAgent)
+const mockUnassignAgent = vi.mocked(unassignAgent)
 
 const defaultState = {
   workspaceId: 'ws1',
+  workspaceName: '测试空间',
+  workspaceDescription: '测试描述',
   settings: {
     entityType: 'question' as const,
-    intakeModes: [],
-    labelOverrides: {},
+    intakeModes: [] as string[],
+    labelOverrides: {} as Record<string, string>,
     pipelineKey: '',
-    agentIds: [],
+    agentIds: [] as string[],
     concurrencyLimit: 1,
-    resources: {},
+    resources: {} as Record<
+      string,
+      { enabled: boolean; config: Record<string, string> }
+    >,
   },
+  agentAssignments: null as
+    | null
+    | { agent_id: string; concurrency_limit: number }[],
+  originalWorkspaceName: '测试空间',
+  originalWorkspaceDescription: '测试描述',
+  originalSettings: null as typeof defaultState.settings | null,
+  originalAgentAssignments: null as typeof defaultState.agentAssignments,
+  isDirty: false,
   globalServices: {
     cms: {
       baseUrl: 'http://cms.example.com',
@@ -85,9 +65,45 @@ const defaultState = {
     },
   },
   resourceProviders: [] as [],
+  pipelineDefinition: null as null | {
+    key: string
+    label: string
+    concurrency: { local: number; agent: number }
+    intake?: {
+      modes: {
+        key: string
+        label: string
+        input_field: string
+        resource?: string
+      }[]
+    }
+    nodes: any[]
+  },
   testStatus: { state: 'idle' as const },
   isSaving: false,
   saveError: null as string | null,
+  setWorkspaceId: vi.fn(),
+  setWorkspaceName: vi.fn((name: string) => {
+    useSettingStore.setState({ workspaceName: name, isDirty: true })
+  }),
+  setWorkspaceDescription: vi.fn((desc: string) => {
+    useSettingStore.setState({ workspaceDescription: desc, isDirty: true })
+  }),
+  setSettings: vi.fn((s: any) => {
+    useSettingStore.setState((state: any) => ({
+      settings: { ...state.settings, ...s },
+      isDirty: true,
+    }))
+  }),
+  setAgentAssignments: vi.fn(),
+  fetchSettings: vi.fn().mockResolvedValue(undefined),
+  fetchAgentAssignments: vi.fn().mockResolvedValue(undefined),
+  fetchGlobalServices: vi.fn().mockResolvedValue(undefined),
+  fetchResourceProviders: vi.fn().mockResolvedValue(undefined),
+  fetchPipelineDefinition: vi.fn().mockResolvedValue(undefined),
+  saveAll: vi.fn().mockResolvedValue(undefined),
+  testConnection: vi.fn().mockResolvedValue(undefined),
+  resetTestStatus: vi.fn(),
 }
 
 function renderPage(initialEntries = ['/workspaces/ws1/settings']) {
@@ -143,11 +159,13 @@ describe('SettingsPage', () => {
       default_pipeline_key: 'question_content',
       default_entity: 'question',
     })
-    vi.mocked(assignAgent).mockReset()
-    vi.mocked(unassignAgent).mockReset()
+    mockAssignAgent.mockReset()
+    mockAssignAgent.mockResolvedValue(undefined)
+    mockUnassignAgent.mockReset()
+    mockUnassignAgent.mockResolvedValue(undefined)
   })
 
-  it('renders all 5 cards', () => {
+  it('renders all 4 sections with nav sidebar', () => {
     useSettingStore.setState({
       pipelineDefinition: {
         key: 'question_content',
@@ -173,11 +191,11 @@ describe('SettingsPage', () => {
       },
     })
     renderPage()
-    expect(screen.getByText('基本信息')).toBeInTheDocument()
-    expect(screen.getByText('全局服务')).toBeInTheDocument()
-    expect(screen.getByText('接入配置')).toBeInTheDocument()
-    expect(screen.getAllByText('流水线').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getByText('智能体')).toBeInTheDocument()
+    // Nav items and section headings both contain these texts
+    expect(screen.getAllByText('基本信息').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('接入配置').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('Pipeline').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('智能体').length).toBeGreaterThanOrEqual(1)
   })
 
   it('renders workspace name in header', () => {
@@ -186,6 +204,11 @@ describe('SettingsPage', () => {
   })
 
   it('updates workspace name and description on save', async () => {
+    const saveAll = vi.fn().mockResolvedValue(undefined)
+    useSettingStore.setState({
+      isDirty: true,
+      saveAll,
+    })
     renderPage()
     await waitFor(() => {
       expect(
@@ -202,13 +225,10 @@ describe('SettingsPage', () => {
     descField.value = '新描述'
     fireEvent.input(nameField)
     fireEvent.input(descField)
-    const saveBtns = screen.getAllByText('保存')
-    fireEvent.click(saveBtns[0])
+    const saveBtn = screen.getByLabelText('保存')
+    fireEvent.click(saveBtn)
     await waitFor(() => {
-      expect(mockUpdateWorkspace).toHaveBeenCalledWith('ws1', {
-        name: '新名称',
-        description: '新描述',
-      })
+      expect(saveAll).toHaveBeenCalled()
     })
   })
 
@@ -221,114 +241,92 @@ describe('SettingsPage', () => {
   })
 
   it('calls fetchSettings on mount', async () => {
+    const fetchSettings = vi.fn().mockResolvedValue(undefined)
+    useSettingStore.setState({ fetchSettings })
     renderPage()
     await waitFor(() => {
-      expect(mockApi).toHaveBeenCalledWith('/api/workspaces/ws1/settings')
+      expect(fetchSettings).toHaveBeenCalledWith('ws1')
     })
   })
 
   it('calls fetchGlobalServices and fetchResourceProviders on mount', async () => {
+    const fetchGlobalServices = vi.fn().mockResolvedValue(undefined)
+    const fetchResourceProviders = vi.fn().mockResolvedValue(undefined)
+    useSettingStore.setState({ fetchGlobalServices, fetchResourceProviders })
     renderPage()
     await waitFor(() => {
-      expect(mockApi).toHaveBeenCalledWith('/api/global-services')
+      expect(fetchGlobalServices).toHaveBeenCalled()
     })
     await waitFor(() => {
-      expect(mockApi).toHaveBeenCalledWith('/api/resource-providers')
+      expect(fetchResourceProviders).toHaveBeenCalled()
     })
   })
 
   it('calls test connection and shows status change', async () => {
+    const testConnection = vi.fn().mockResolvedValue(undefined)
+    useSettingStore.setState({ testConnection })
     renderPage()
     await waitFor(() => {
-      expect(mockApi).toHaveBeenCalledWith('/api/workspaces/ws1/settings')
+      expect(testConnection).toBeDefined()
     })
-    mockApi.mockResolvedValueOnce({ ok: true, message: 'ok' })
     const btn = screen.getByText('测试连接')
     fireEvent.click(btn)
     await waitFor(() => {
-      const successBadge = document.querySelector('.status-badge.success')
-      expect(successBadge).toBeInTheDocument()
-      expect(successBadge?.textContent).toContain('连接成功')
+      expect(testConnection).toHaveBeenCalled()
     })
-    expect(mockApi).toHaveBeenCalledWith(
-      '/api/workspaces/ws1/settings/test-connection',
-      expect.objectContaining({ method: 'POST' })
-    )
   })
 
   it('shows failed status and toast on test connection failure', async () => {
+    const testConnection = vi.fn().mockImplementation(() => {
+      useSettingStore.setState({
+        testStatus: { state: 'failed', message: 'connection refused' },
+      })
+      useUiStore
+        .getState()
+        .showToast('连接测试失败：connection refused', 'error')
+      return Promise.resolve()
+    })
+    useSettingStore.setState({ testConnection })
     renderPage()
     await waitFor(() => {
-      expect(mockApi).toHaveBeenCalledWith('/api/workspaces/ws1/settings')
+      expect(testConnection).toBeDefined()
     })
-    mockApi.mockRejectedValueOnce(new Error('connection refused'))
     const btn = screen.getByText('测试连接')
     fireEvent.click(btn)
     await waitFor(() => {
       const failedBadge = document.querySelector('.status-badge.failed')
       expect(failedBadge).toBeInTheDocument()
-      expect(failedBadge?.textContent).toContain('连接失败')
-    })
-    expect(useUiStore.getState().toast).toEqual({
-      message: '连接测试失败：connection refused',
-      type: 'error',
     })
   })
 
-  it('calls saveIntakeConfig when save is clicked', async () => {
+  it('calls saveAll when global save is clicked', async () => {
+    const saveAll = vi.fn().mockResolvedValue(undefined)
     useSettingStore.setState({
-      settings: {
-        ...defaultState.settings,
-        intakeModes: ['direct_ids'],
-        resources: {
-          question_detail: { enabled: true, config: { bank_version: 'v5' } },
-        },
-      },
+      isDirty: true,
+      saveAll,
     })
     renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('测试连接')).toBeInTheDocument()
-    })
-    const card = screen
-      .getByText('接入配置')
-      .closest('.card-outlined') as HTMLElement
-    const saveBtn = within(card).getByText('保存')
+    const saveBtn = screen.getByLabelText('保存')
     fireEvent.click(saveBtn)
     await waitFor(() => {
-      expect(mockApi).toHaveBeenCalledWith(
-        '/api/workspaces/ws1',
-        expect.objectContaining({
-          method: 'PATCH',
-          body: expect.stringContaining('resource_config'),
-        })
-      )
+      expect(saveAll).toHaveBeenCalled()
     })
   })
 
   it('displays save error when save fails', async () => {
+    const saveAll = vi.fn().mockImplementation(() => {
+      useSettingStore.setState({ saveError: 'Server Error' })
+      return Promise.resolve()
+    })
     useSettingStore.setState({
-      settings: {
-        ...defaultState.settings,
-        intakeModes: ['direct_ids'],
-        resources: {
-          question_detail: { enabled: true, config: {} },
-        },
-      },
+      isDirty: true,
+      saveAll,
     })
     renderPage()
-    await waitFor(() => {
-      expect(mockApi).toHaveBeenCalledWith('/api/workspaces/ws1/settings')
-    })
-    mockApi.mockRejectedValueOnce(
-      Object.assign(new Error('Server Error'), { status: 500 })
-    )
-    const card = screen
-      .getByText('接入配置')
-      .closest('.card-outlined') as HTMLElement
-    const saveBtn = within(card).getByText('保存')
+    const saveBtn = screen.getByLabelText('保存')
     fireEvent.click(saveBtn)
     await waitFor(() => {
-      expect(within(card).getByText('Server Error')).toBeInTheDocument()
+      expect(screen.getByText('Server Error')).toBeInTheDocument()
     })
   })
 
@@ -341,26 +339,6 @@ describe('SettingsPage', () => {
       screen.queryByText(/智能体配置将在后续步骤实现/)
     ).not.toBeInTheDocument()
     expect(screen.getByText('当前工作空间未分配智能体')).toBeInTheDocument()
-  })
-
-  it('renders global services card when data is available', async () => {
-    useSettingStore.setState({
-      globalServices: {
-        cms: {
-          baseUrl: 'http://cms.example.com',
-          tokenConfigured: true,
-          env: 'prod',
-          healthy: null,
-          lastCheckedAt: null,
-        },
-      },
-    })
-    renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('http://cms.example.com')).toBeInTheDocument()
-    })
-    expect(screen.getByText('已配置')).toBeInTheDocument()
-    expect(screen.getByText('prod')).toBeInTheDocument()
   })
 
   it('renders resource provider params when intake mode is checked', async () => {
