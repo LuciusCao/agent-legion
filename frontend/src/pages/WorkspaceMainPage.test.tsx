@@ -35,7 +35,15 @@ const baseStats = {
   pipeline_key: 'question_content',
   pipeline_label: 'Question Content',
   job_stats: { pending: 1, running: 2, completed: 3, failed: 1 },
-  agent_status: { total: 2, busy: 1, idle: 1 },
+  agent_status: {
+    total: 2,
+    busy: 1,
+    idle: 1,
+    agents: [
+      { id: 'agent-a', name: 'Agent A', busy: false },
+      { id: 'agent-b', name: 'Agent B', busy: true },
+    ],
+  },
   latest_run: null,
 } as const
 
@@ -126,7 +134,6 @@ describe('WorkspaceMainPage', () => {
     })
 
     expect(screen.getByText('全部（7）')).toBeInTheDocument()
-    expect(screen.getByText('agent-a')).toBeInTheDocument()
   })
 
   it('shows empty message when no jobs', async () => {

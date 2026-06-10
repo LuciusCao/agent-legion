@@ -2,11 +2,8 @@ import { useEffect, useMemo, useCallback, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
-import { useUiStore } from '../stores/uiStore'
-import { useSettingStore } from '../stores/settingStore'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 import { WorkspaceStatCards } from '../components/WorkspaceStatCards'
-import { AgentPills } from '../components/AgentPills'
 import { JobList } from '../components/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
 import styles from './WorkspaceMainPage.module.css'
@@ -36,9 +33,6 @@ export default function WorkspaceMainPage() {
     batchDelete,
     getFilteredJobs,
   } = useJobStore()
-  const agents = useUiStore((state) => state.agents)
-  const maxConcurrency =
-    useSettingStore((state) => state.settings.concurrencyLimit) || 2
 
   useEffect(() => {
     if (workspaceId) {
@@ -73,19 +67,6 @@ export default function WorkspaceMainPage() {
       failed,
     }
   }, [currentStats])
-
-  const agentPills = useMemo(() => {
-    const agentStatus = currentStats?.agent_status
-    if (!agentStatus || agentStatus.total <= 0) return []
-    const names = agents.slice(0, agentStatus.total).map((a) => a.id)
-    const list: Array<{ id: string; status: 'idle' | 'busy' }> = []
-    for (let i = 0; i < agentStatus.total; i++) {
-      const id = names[i] ?? `agent-${i + 1}`
-      const status: 'idle' | 'busy' = i < agentStatus.busy ? 'busy' : 'idle'
-      list.push({ id, status })
-    }
-    return list
-  }, [currentStats, agents])
 
   const filteredJobs = getFilteredJobs()
   const totalJobs = counts.all
@@ -161,10 +142,6 @@ export default function WorkspaceMainPage() {
             )
           }
         />
-      </section>
-
-      <section className="agents-section" style={sectionStyle}>
-        <AgentPills agents={agentPills} maxConcurrency={maxConcurrency} />
       </section>
 
       <section className="filter-section" style={sectionStyle}>
