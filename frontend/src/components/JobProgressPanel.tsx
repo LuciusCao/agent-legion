@@ -124,7 +124,7 @@ export function JobProgressPanel({
 
                 <div className={styles.timelineContent}>
                   <div className={styles.timelineHeader}>
-                    <span className={styles.nodeName}>{node.node_key}</span>
+                    <span className={styles.nodeName}>{node.label}</span>
                     <span
                       className={`${styles.statusBadge} ${BADGE_STATUS_CLASS[node.status] || ''}`}
                     >
