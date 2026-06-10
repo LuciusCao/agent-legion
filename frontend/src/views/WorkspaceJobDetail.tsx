@@ -23,7 +23,7 @@ function isPiRun(run: NodeRunRecord): boolean {
 
 function sessionBasename(dir: string): string {
   if (!dir) return ''
-  const parts = dir.split(/[/\\]/)
+  const parts = dir.split(/[/\\]/).filter(Boolean)
   return parts[parts.length - 1] || ''
 }
 
@@ -160,34 +160,41 @@ export default function WorkspaceJobDetail() {
           <section className="card-outlined">
             <h3>{WORKSPACE_LABELS.runs}</h3>
             <md-list>
-              {detail.runs.map((run) => (
-                <md-list-item key={run.id}>
-                  <div slot="headline">
-                    {run.node_key}
-                    {isPiRun(run) ? (
-                      <span
-                        style={{
-                          marginLeft: '8px',
-                          fontSize: '0.75rem',
-                          color: 'var(--md-sys-color-primary)',
-                        }}
-                      >
-                        Pi
-                      </span>
-                    ) : null}
-                  </div>
-                  <div slot="supporting-text">
-                    {run.started_at} - {run.finished_at || 'running'}
-                    {run.exit_code !== null ? ` · exit: ${run.exit_code}` : ''}
-                    {isPiRun(run) && run.session_dir
-                      ? ` · session: ${sessionBasename(run.session_dir)}`
-                      : ''}
-                  </div>
-                  <span slot="end" className={`status-badge ${run.status}`}>
-                    {run.status}
-                  </span>
-                </md-list-item>
-              ))}
+              {detail.runs.map((run) => {
+                const pi = isPiRun(run)
+                return (
+                  <md-list-item key={run.id}>
+                    <div slot="headline">
+                      {run.node_key}
+                      {pi ? (
+                        <span
+                          title="Pi agent run"
+                          aria-label="Pi agent run"
+                          style={{
+                            marginLeft: '8px',
+                            fontSize: '0.75rem',
+                            color: 'var(--md-sys-color-primary)',
+                          }}
+                        >
+                          Pi
+                        </span>
+                      ) : null}
+                    </div>
+                    <div slot="supporting-text">
+                      {run.started_at} - {run.finished_at || 'running'}
+                      {run.exit_code !== null
+                        ? ` · exit: ${run.exit_code}`
+                        : ''}
+                      {pi && run.session_dir
+                        ? ` · session: ${sessionBasename(run.session_dir)}`
+                        : ''}
+                    </div>
+                    <span slot="end" className={`status-badge ${run.status}`}>
+                      {run.status}
+                    </span>
+                  </md-list-item>
+                )
+              })}
             </md-list>
           </section>
 
