@@ -198,6 +198,7 @@ export type WorkspaceSettings = {
 
 export type PipelineNodeRecord = {
   key: string
+  label: string
   runner: 'local' | 'agent'
   after: string[]
   inputs: string[]
@@ -238,6 +239,7 @@ export type JobNodeRecord = {
   id: number
   job_id: string
   node_key: string
+  label: string
   status: string
   after?: string[]
   stale_reason?: string
