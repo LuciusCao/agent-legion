@@ -1531,6 +1531,33 @@ def test_patch_package_name(tmp_path, client, monkeypatch):
     assert response.json()["name"] == "新名称"
 
 
+def test_video_hive_config_field_whitelist(client: TestClient):
+    response = client.get("/api/video-hive/config")
+    assert response.status_code == 200
+    data = response.json()
+    assert "asr" in data
+    assert "provider" in data["asr"]
+    assert isinstance(data["asr"]["whisperConfigured"], bool)
+    assert "openclaw" in data
+    assert "runnerCount" in data["openclaw"]
+    # Ensure no local paths or secrets leak
+    text = response.text.lower()
+    forbidden = [
+        "binary",
+        "model",
+        "script",
+        "cwd",
+        "command_template",
+        "token",
+        "secret",
+        "nonce",
+        "app_id",
+        "path",
+    ]
+    for word in forbidden:
+        assert word not in text, f"Field '{word}' should not appear in response"
+
+
 def test_list_packages_returns_new_fields(tmp_path, client, monkeypatch):
     client.post(
         "/api/videos",
