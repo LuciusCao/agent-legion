@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
 import {
   render,
   screen,
@@ -29,6 +29,35 @@ vi.mock('../api', () => ({
   fetchWorkspaces: vi.fn(),
   updateWorkspace: vi.fn(),
 }))
+
+class IntersectionObserverMock {
+  callback: any
+  entries: any[] = []
+
+  constructor(callback: any) {
+    this.callback = callback
+  }
+
+  observe = vi.fn((target: any) => {
+    this.entries.push({
+      target,
+      isIntersecting: true,
+      intersectionRatio: 1,
+      boundingClientRect: {},
+      intersectionRect: {},
+      rootBounds: null,
+      time: Date.now(),
+    })
+    this.callback(this.entries, this)
+  })
+
+  disconnect = vi.fn()
+  unobserve = vi.fn()
+}
+
+beforeAll(() => {
+  vi.stubGlobal('IntersectionObserver', IntersectionObserverMock)
+})
 
 const mockApi = vi.mocked(api)
 const mockFetchAgents = vi.mocked(fetchAgents)

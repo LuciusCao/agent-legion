@@ -1,0 +1,22 @@
+[
+  {
+    "name": "default_weights",
+    "weights": {
+      "knowledge_complexity": 0.3,
+      "reasoning_steps": 0.3,
+      "calculation_load": 0.2,
+      "reading_filter_load": 0.2
+    },
+    "expected_difficulty": 47
+  },
+  {
+    "name": "alternative_weights",
+    "weights": {
+      "knowledge_complexity": 0.1,
+      "reasoning_steps": 0.1,
+      "calculation_load": 0.4,
+      "reading_filter_load": 0.4
+    },
+    "expected_difficulty": 45
+  }
+]

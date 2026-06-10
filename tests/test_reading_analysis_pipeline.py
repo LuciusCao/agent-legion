@@ -171,15 +171,15 @@ def test_mark_question_joins_reviewed_artifacts(tmp_path):
     )
     artifact_dir = Path(job["storage_dir"])
     (artifact_dir / "keywords_reviewed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q100", "keywords": ["加法"]}]}),
+        json.dumps({"question_id": "Q100", "keywords": ["加法"]}),
         encoding="utf-8",
     )
     (artifact_dir / "difficulty_reviewed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q100", "difficulty": {"level": 1}}]}),
+        json.dumps({"question_id": "Q100", "reading_difficulty": 1}),
         encoding="utf-8",
     )
     (artifact_dir / "distractors_reviewed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q100", "distractors": []}]}),
+        json.dumps({"question_id": "Q100", "distractors": []}),
         encoding="utf-8",
     )
 
@@ -191,7 +191,7 @@ def test_mark_question_joins_reviewed_artifacts(tmp_path):
             {
                 "question_id": "Q100",
                 "keywords": ["加法"],
-                "difficulty": {"level": 1},
+                "reading_difficulty": 1,
                 "distractors": [],
             }
         ]
@@ -211,15 +211,15 @@ def test_mark_question_fails_when_question_id_mismatch(tmp_path):
     )
     artifact_dir = Path(job["storage_dir"])
     (artifact_dir / "keywords_reviewed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q100", "keywords": ["加法"]}]}),
+        json.dumps({"question_id": "Q100", "keywords": ["加法"]}),
         encoding="utf-8",
     )
     (artifact_dir / "difficulty_reviewed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q200", "difficulty": {"level": 1}}]}),
+        json.dumps({"question_id": "Q200", "reading_difficulty": 1}),
         encoding="utf-8",
     )
     (artifact_dir / "distractors_reviewed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q100", "distractors": []}]}),
+        json.dumps({"question_id": "Q100", "distractors": []}),
         encoding="utf-8",
     )
 

@@ -10,6 +10,12 @@ Read only the input artifacts named in this skill. Produce the required output a
 - `distractors_raw.json`
 - `distractors_report.json`
 
+## Core Rule
+
+A reading distractor is different from an answer distractor. A candidate is related to the scenario or topic, but replacing or deleting it leaves the model, required constraints, solution path, and answer unchanged.
+
+This skill controls the final candidate count directly. Do not intentionally over-generate for a later selector, because every approved candidate enters CMS.
+
 ## Workflow
 1. Read `references/output-contract.md`.
 2. Read every declared input artifact from the current directory.

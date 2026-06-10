@@ -1,0 +1,12 @@
+[
+  {
+    "name": "distance_is_required",
+    "expect_keyword": "单程 1400km",
+    "reason": "removing it makes the numeric solution impossible"
+  },
+  {
+    "name": "cities_are_context_only",
+    "reject_keywords": ["上海", "北京"],
+    "reason": "replacing city names does not change the model or answer"
+  }
+]

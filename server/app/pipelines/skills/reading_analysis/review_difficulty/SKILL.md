@@ -1,22 +1,10 @@
-# Review Difficulty
+---
+name: review-reading-difficulty
+description: Use when a four-dimension reading difficulty assessment must be approved or rejected before CMS projection.
+---
 
-Read only the input artifacts named in this skill. Produce the required output artifact in the current job directory.
+# Review Reading Difficulty
 
-## Inputs
-- `questions_parsed.json`
-- `keywords_reviewed.json`
-- `difficulty_raw.json`
+Review only. Never rescore dimensions, alter weights, or change `reading_difficulty`.
 
-## Output
-- `difficulty_reviewed.json`
-- `difficulty_review_report.json`
-
-## Workflow
-1. Read `references/output-contract.md`.
-2. Read every declared input artifact from the current directory.
-3. Analyze the question according to the reference contract.
-4. Write `difficulty_reviewed.json` and `difficulty_review_report.json` directly in the current directory.
-5. Run `python scripts/validate_output.py .` using the absolute script path supplied in the prompt.
-6. Fix the artifact and rerun validation until it exits successfully.
-
-Do not create files outside the declared output list. Do not modify input artifacts.
+Verify bounds, configured weights, arithmetic, evidence support, internal consistency, and independence from distractor artifacts. On failure, write only the failed report and exit non-zero. On success, project exactly `question_id` and `reading_difficulty` into `difficulty_reviewed.json`.

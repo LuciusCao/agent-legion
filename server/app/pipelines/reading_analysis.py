@@ -102,24 +102,19 @@ def mark_question(
         if not path.is_file():
             raise ValueError(f"Missing input: {path.name}")
         content = json.loads(path.read_text(encoding="utf-8"))
-        questions = content.get("questions", [])
-        if not isinstance(questions, list):
-            raise ValueError(f"Invalid questions in {path.name}")
-        for q in questions:
-            if not isinstance(q, dict):
-                continue
-            raw_qid = q.get("question_id")
-            if not isinstance(raw_qid, str):
-                continue
-            qid: str = raw_qid
-            if qid not in data:
-                data[qid] = {"question_id": qid}
-            if key == "keywords":
-                data[qid]["keywords"] = q.get("keywords", [])
-            elif key == "difficulty":
-                data[qid]["difficulty"] = q.get("difficulty", {})
-            elif key == "distractors":
-                data[qid]["distractors"] = q.get("distractors", [])
+        if not isinstance(content, dict):
+            raise ValueError(f"Invalid content in {path.name}")
+        qid = content.get("question_id")
+        if not isinstance(qid, str):
+            raise ValueError(f"Missing question_id in {path.name}")
+        if qid not in data:
+            data[qid] = {"question_id": qid}
+        if key == "keywords":
+            data[qid]["keywords"] = content.get("keywords", [])
+        elif key == "difficulty":
+            data[qid]["reading_difficulty"] = content.get("reading_difficulty")
+        elif key == "distractors":
+            data[qid]["distractors"] = content.get("distractors", [])
 
     source_id = str(job["source_id"])
     if source_id not in data:

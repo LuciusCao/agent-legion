@@ -29,7 +29,9 @@
   cursor: pointer;
   font-size: 14px;
   color: var(--md-sys-color-on-surface-variant);
-  transition: background-color 0.2s, color 0.2s;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
 }
 
 .navItem:hover {
@@ -37,7 +39,13 @@
 }
 
 .navItemActive {
-  composes: navItem;
+  padding: 10px 16px;
+  border-radius: 8px;
+  cursor: pointer;
+  font-size: 14px;
+  transition:
+    background-color 0.2s,
+    color 0.2s;
   background-color: var(--md-sys-color-secondary-container);
   color: var(--md-sys-color-on-secondary-container);
   font-weight: 500;
