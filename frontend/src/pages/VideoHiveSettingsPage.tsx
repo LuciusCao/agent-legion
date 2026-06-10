@@ -3,7 +3,6 @@ import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { useUiStore } from '../stores/uiStore'
 import { api } from '../api'
-import { SettingsCard } from '../components/SettingsCard'
 import type { GlobalServiceStatus } from '../types'
 
 type VideoHiveConfig = {
@@ -69,158 +68,203 @@ export function VideoHiveSettingsPage() {
       mainClassName="settings-main"
     >
       <div style={{ maxWidth: 800, margin: '0 auto' }}>
-        <SettingsCard icon="cloud" title="全局服务状态">
-          {services ? (
-            <div style={{ display: 'grid', gap: 12 }}>
-              <div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  CMS Base URL
-                </span>
-                <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {services.cms.baseUrl || '-'}
-                </div>
-              </div>
-              <div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  Token 状态
-                </span>
-                <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {services.cms.tokenConfigured ? '已配置' : '未配置'}
-                </div>
-              </div>
-              <div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  环境
-                </span>
-                <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {services.cms.env || '-'}
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div>加载中…</div>
-          )}
-        </SettingsCard>
-
-        <SettingsCard icon="toggle_on" title="Worker 控制">
-          <label
+        <div className="card-outlined" style={{ marginBottom: 16 }}>
+          <div
             style={{
+              padding: 16,
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'space-between',
               gap: 12,
-              fontSize: 14,
+              fontWeight: 500,
+              fontSize: 16,
             }}
           >
-            <span>自动调度</span>
-            <md-switch
-              selected={!workerPaused || undefined}
-              onClick={togglePause}
-            />
-          </label>
-        </SettingsCard>
+            <md-icon>cloud</md-icon>
+            <span>全局服务状态</span>
+          </div>
+          <div style={{ padding: '0 16px 16px' }}>
+            {services ? (
+              <div style={{ display: 'grid', gap: 12 }}>
+                <div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    CMS Base URL
+                  </span>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>
+                    {services.cms.baseUrl || '-'}
+                  </div>
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    Token 状态
+                  </span>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>
+                    {services.cms.tokenConfigured ? '已配置' : '未配置'}
+                  </div>
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    环境
+                  </span>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>
+                    {services.cms.env || '-'}
+                  </div>
+                </div>
+              </div>
+            ) : (
+              <div>加载中…</div>
+            )}
+          </div>
+        </div>
 
-        <SettingsCard icon="stream" title="流水线信息">
-          {config ? (
-            <div style={{ display: 'grid', gap: 12 }}>
-              <div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  ASR Provider
-                </span>
-                <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {config.asr.provider}
+        <div className="card-outlined" style={{ marginBottom: 16 }}>
+          <div
+            style={{
+              padding: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              fontWeight: 500,
+              fontSize: 16,
+            }}
+          >
+            <md-icon>toggle_on</md-icon>
+            <span>Worker 控制</span>
+          </div>
+          <div style={{ padding: '0 16px 16px' }}>
+            <label
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 12,
+                fontSize: 14,
+              }}
+            >
+              <span>自动调度</span>
+              <md-switch
+                selected={!workerPaused || undefined}
+                onClick={togglePause}
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="card-outlined" style={{ marginBottom: 16 }}>
+          <div
+            style={{
+              padding: 16,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              fontWeight: 500,
+              fontSize: 16,
+            }}
+          >
+            <md-icon>stream</md-icon>
+            <span>流水线信息</span>
+          </div>
+          <div style={{ padding: '0 16px 16px' }}>
+            {config ? (
+              <div style={{ display: 'grid', gap: 12 }}>
+                <div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    ASR Provider
+                  </span>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>
+                    {config.asr.provider}
+                  </div>
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    Whisper 配置
+                  </span>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>
+                    {config.asr.whisperConfigured ? '已配置' : '未配置'}
+                  </div>
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    SenseVoice 配置
+                  </span>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>
+                    {config.asr.sensevoiceConfigured ? '已配置' : '未配置'}
+                  </div>
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    VAD
+                  </span>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>
+                    {config.asr.vadEnabled ? '已启用' : '未启用'}
+                  </div>
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    OpenClaw Runners
+                  </span>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>
+                    {config.openclaw.runnerCount}
+                  </div>
+                </div>
+                <div>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    超时时间
+                  </span>
+                  <div style={{ fontSize: 14, marginTop: 4 }}>
+                    {config.openclaw.timeoutSeconds}s
+                  </div>
                 </div>
               </div>
-              <div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  Whisper 配置
-                </span>
-                <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {config.asr.whisperConfigured ? '已配置' : '未配置'}
-                </div>
-              </div>
-              <div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  SenseVoice 配置
-                </span>
-                <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {config.asr.sensevoiceConfigured ? '已配置' : '未配置'}
-                </div>
-              </div>
-              <div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  VAD
-                </span>
-                <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {config.asr.vadEnabled ? '已启用' : '未启用'}
-                </div>
-              </div>
-              <div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  OpenClaw Runners
-                </span>
-                <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {config.openclaw.runnerCount}
-                </div>
-              </div>
-              <div>
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                  }}
-                >
-                  超时时间
-                </span>
-                <div style={{ fontSize: 14, marginTop: 4 }}>
-                  {config.openclaw.timeoutSeconds}s
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div>加载中…</div>
-          )}
-        </SettingsCard>
+            ) : (
+              <div>加载中…</div>
+            )}
+          </div>
+        </div>
       </div>
     </AppShell>
   )

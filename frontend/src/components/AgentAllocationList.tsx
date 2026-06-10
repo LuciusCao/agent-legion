@@ -203,9 +203,7 @@ export function AgentAllocationList({
                   style={{ width: 96 }}
                   aria-label={WORKSPACE_LABELS.concurrencyLimit}
                 />
-                <md-outlined-button
-                  onClick={() => handleUnassign(agent_id)}
-                >
+                <md-outlined-button onClick={() => handleUnassign(agent_id)}>
                   {WORKSPACE_LABELS.unassignAgent}
                 </md-outlined-button>
               </li>
