@@ -1,0 +1,170 @@
+import { useEffect, useMemo, useState } from 'react'
+import { fetchQuestionDetail } from '../api'
+import type { QuestionDetailResponse } from '../types'
+import styles from './QuestionContentPanel.module.css'
+
+const ALLOWED_TAGS = new Set([
+  'P', 'BR', 'STRONG', 'EM', 'UL', 'OL', 'LI', 'SPAN', 'DIV',
+])
+
+function sanitizeHtml(html: string): string {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
+  const toRemove: Element[] = []
+  while (walker.nextNode()) {
+    const el = walker.currentNode as Element
+    if (!ALLOWED_TAGS.has(el.tagName)) {
+      toRemove.push(el)
+    }
+  }
+  toRemove.forEach((el) => {
+    const parent = el.parentNode
+    if (!parent) return
+    while (el.firstChild) {
+      parent.insertBefore(el.firstChild, el)
+    }
+    parent.removeChild(el)
+  })
+  const attrWalker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
+  while (attrWalker.nextNode()) {
+    const el = attrWalker.currentNode as Element
+    if (ALLOWED_TAGS.has(el.tagName)) {
+      while (el.attributes.length > 0) {
+        el.removeAttribute(el.attributes[0].name)
+      }
+    }
+  }
+  return doc.body.innerHTML
+}
+
+export interface QuestionContentPanelProps {
+  workspaceId: string
+  questionId: string
+}
+
+export function QuestionContentPanel({
+  workspaceId,
+  questionId,
+}: QuestionContentPanelProps) {
+  const [detail, setDetail] = useState<QuestionDetailResponse | null>(null)
+  const [error, setError] = useState('')
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    let cancelled = false
+    fetchQuestionDetail(workspaceId, questionId)
+      .then((data) => {
+        if (!cancelled) {
+          setDetail(data)
+        }
+      })
+      .catch((err) => {
+        if (!cancelled)
+          setError(err instanceof Error ? err.message : String(err))
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [workspaceId, questionId])
+
+  const stem = detail?.normalized.stem
+  const stemHtml = useMemo(() => {
+    if (!stem) return ''
+    return sanitizeHtml(stem)
+  }, [stem])
+
+  const analysis = detail?.normalized.analysis
+  const analysisHtml = useMemo(() => {
+    if (!analysis) return ''
+    const raw =
+      typeof analysis === 'string' ? analysis : JSON.stringify(analysis)
+    return sanitizeHtml(raw)
+  }, [analysis])
+
+  if (loading) {
+    return <p className={styles.loading}>加载题目中...</p>
+  }
+
+  if (error) {
+    return <p className={styles.error}>{error}</p>
+  }
+
+  return (
+    <div className={styles.panel}>
+      <section className={styles.card}>
+        <h2 className={styles.sectionTitle}>题干</h2>
+        {detail?.normalized.stem ? (
+          <div
+            className={styles.richText}
+            dangerouslySetInnerHTML={{ __html: stemHtml }}
+          />
+        ) : (
+          <p className={styles.empty}>未在 CMS 找到该题</p>
+        )}
+      </section>
+
+      {detail?.normalized.options && detail.normalized.options.length > 0 && (
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>选项</h2>
+          <ul className={styles.optionList}>
+            {detail.normalized.options.map((opt, idx) => {
+              const label = String(
+                (opt as Record<string, unknown>).label ||
+                  String.fromCharCode(65 + idx)
+              )
+              const content = String(
+                (opt as Record<string, unknown>).content || ''
+              )
+              const isCorrect = Array.isArray(detail.normalized.answer)
+                ? detail.normalized.answer.includes(label)
+                : false
+              return (
+                <li
+                  key={idx}
+                  className={`${styles.optionItem} ${
+                    isCorrect ? styles.correct : ''
+                  }`}
+                >
+                  <span className={styles.optionLabel}>{label}.</span>
+                  <span className={styles.optionContent}>{content}</span>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
+      {detail?.normalized.answer != null && (
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>答案</h2>
+          <pre className={styles.pre}>
+            {JSON.stringify(detail.normalized.answer, null, 2)}
+          </pre>
+        </section>
+      )}
+
+      {detail?.normalized.analysis != null && (
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>解析</h2>
+          <div
+            className={styles.richText}
+            dangerouslySetInnerHTML={{ __html: analysisHtml }}
+          />
+        </section>
+      )}
+
+      {detail?.cms_payload && (
+        <details className={styles.card}>
+          <summary>原始 CMS 数据</summary>
+          <pre className={styles.pre}>
+            {JSON.stringify(detail.cms_payload, null, 2)}
+          </pre>
+        </details>
+      )}
+    </div>
+  )
+}
