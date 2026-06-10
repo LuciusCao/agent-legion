@@ -130,7 +130,7 @@ describe('WorkspaceLayout', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/settings')
   })
 
-  it('navigates to home when back button is clicked', () => {
+  it('navigates to home when home button is clicked', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
