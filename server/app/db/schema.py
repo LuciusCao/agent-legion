@@ -64,7 +64,10 @@ def init_db(path: Path) -> None:
                   cms_config_json text not null default '{}',
                   resource_config_json text not null default '{}',
                   created_at text not null default current_timestamp,
-                  updated_at text not null default current_timestamp
+                  updated_at text not null default current_timestamp,
+                  default_entity text not null default 'question',
+                  intake_config_json text not null default '{}',
+                  pipeline_config_json text not null default '{}'
                 );
                 create table if not exists job_batches (
                   id text primary key,
@@ -159,6 +162,9 @@ def init_db(path: Path) -> None:
                 ),
                 "description": (
                     "alter table workspaces add column description text not null default ''"
+                ),
+                "pipeline_config_json": (
+                    "alter table workspaces add column pipeline_config_json text not null default '{}'"
                 ),
             }
             for column, statement in workspace_migrations.items():

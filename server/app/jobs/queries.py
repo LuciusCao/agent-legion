@@ -41,6 +41,7 @@ def _workspace_record(row: sqlite3.Row) -> dict[str, Any]:
     record["cms_config"] = _decode_json_object(record.get("cms_config_json"))
     record["resource_config"] = _decode_json_object(record.get("resource_config_json"))
     record["intake_config"] = _decode_json_object(record.get("intake_config_json"))
+    record["pipeline_config"] = _decode_json_object(record.get("pipeline_config_json"))
     return record
 
 
@@ -77,6 +78,7 @@ class JobQueries:
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
         intake_config: dict[str, Any] | None = None,
+        pipeline_config: dict[str, Any] | None = None,
         description: str = "",
     ) -> dict[str, Any]:
         clean_name = name.strip()
@@ -90,6 +92,11 @@ class JobQueries:
         )
         clean_entity = (default_entity or "question").strip() or "question"
         intake_config_json = json.dumps(intake_config or {}, ensure_ascii=False, sort_keys=True)
+        pipeline_config_json = json.dumps(
+            pipeline_config or {},
+            ensure_ascii=False,
+            sort_keys=True,
+        )
         clean_description = (description or "").strip()
 
         base_id = _workspace_id(clean_name)
@@ -104,9 +111,9 @@ class JobQueries:
                 """
                 insert into workspaces(
                   id, name, description, default_pipeline_key, cms_config_json, resource_config_json,
-                  default_entity, intake_config_json
+                  default_entity, intake_config_json, pipeline_config_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     workspace_id,
@@ -117,6 +124,7 @@ class JobQueries:
                     resource_config_json,
                     clean_entity,
                     intake_config_json,
+                    pipeline_config_json,
                 ),
             )
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
@@ -143,6 +151,7 @@ class JobQueries:
         resource_config: dict[str, Any] | None = None,
         default_entity: str | None = None,
         intake_config: dict[str, Any] | None = None,
+        pipeline_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if name is not None:
@@ -172,6 +181,12 @@ class JobQueries:
         if intake_config is not None:
             fields["intake_config_json"] = json.dumps(
                 intake_config,
+                ensure_ascii=False,
+                sort_keys=True,
+            )
+        if pipeline_config is not None:
+            fields["pipeline_config_json"] = json.dumps(
+                pipeline_config,
                 ensure_ascii=False,
                 sort_keys=True,
             )
