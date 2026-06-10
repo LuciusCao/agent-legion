@@ -445,7 +445,13 @@ class JobQueries:
                 "select status, count(*) as cnt from jobs where workspace_id = ? group by status",
                 (workspace_id,),
             )
-            return {row["status"]: row["cnt"] for row in rows}
+            result: dict[str, int] = {}
+            for row in rows:
+                status = row["status"]
+                if status == "queued":
+                    status = "pending"
+                result[status] = result.get(status, 0) + row["cnt"]
+            return result
 
     def count_workspace_job_nodes_by_status(
         self, workspace_id: str, pipeline_key: str

@@ -38,7 +38,7 @@ export const useUiStore = create<UiState>((set) => ({
   addContentType: 'knowledge',
   rerunDialogOpen: false,
   deleteDialogOpen: false,
-  workerPaused: false,
+  workerPaused: true,
   toast: null,
 
   connectAgentsWs: () => {
