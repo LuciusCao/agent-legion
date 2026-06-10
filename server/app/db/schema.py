@@ -201,6 +201,7 @@ def init_db(path: Path) -> None:
             }
             job_migrations = {
                 "workspace_id": "alter table jobs add column workspace_id text not null default 'default'",
+                "stem": "alter table jobs add column stem text not null default ''",
             }
             for column, statement in job_migrations.items():
                 if column not in existing_job_columns:

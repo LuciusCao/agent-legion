@@ -10,6 +10,7 @@ const mockJob: JobRecord = {
   pipeline_key: 'p1',
   source_id: 'Q100',
   title: 'Algebra Problem',
+  stem: '',
   status: 'running',
   created_at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
   completed_nodes: 2,
@@ -31,12 +32,11 @@ describe('JobListItem', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText('Q100')).toBeInTheDocument()
-    expect(screen.getByText('Algebra Problem')).toBeInTheDocument()
+    expect(screen.getByText('Algebra Problem - Q100')).toBeInTheDocument()
     expect(screen.getByText('处理中')).toBeInTheDocument()
   })
 
-  it('shows em dash when title is missing', () => {
+  it('shows source_id when title is missing', () => {
     render(
       <MemoryRouter>
         <JobListItem
@@ -50,7 +50,7 @@ describe('JobListItem', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText('—')).toBeInTheDocument()
+    expect(screen.getByText('Q100')).toBeInTheDocument()
   })
 
   it('checkbox checked state matches prop', () => {
