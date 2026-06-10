@@ -618,6 +618,10 @@ pre {
   padding: 24px;
 }
 
+.video-hive-main {
+  overflow: hidden;
+}
+
 .artifact-preview {
   max-height: 420px;
   overflow: auto;
