@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, useCallback } from 'react'
 import { useParams, useNavigate, Outlet } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
+import { AgentPanel } from '../components/AgentPanel'
 import { WORKSPACE_LABELS } from '../labels'
 
 export const VIDEO_HIVE_ID = 'video-hive'
@@ -35,11 +36,31 @@ export default function WorkspaceLayout() {
     setCurrentWorkspace(ws || null)
   }, [workspaceId, workspaces, setCurrentWorkspace])
 
-  useEffect(() => {
-    if (workspaceId && !isVideoHive && !workspaceStats[workspaceId]) {
+  const lastFetchedId = useRef<string | null>(null)
+
+  const refreshStats = useCallback(() => {
+    if (workspaceId) {
+      lastFetchedId.current = workspaceId
       fetchWorkspaceStats(workspaceId)
     }
-  }, [workspaceId, isVideoHive, workspaceStats, fetchWorkspaceStats])
+  }, [workspaceId, fetchWorkspaceStats])
+
+  useEffect(() => {
+    if (workspaceId && workspaceId !== lastFetchedId.current) {
+      refreshStats()
+    }
+  }, [workspaceId, refreshStats])
+
+  useEffect(() => {
+    const handleVisibility = () => {
+      if (!document.hidden && workspaceId) {
+        refreshStats()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () =>
+      document.removeEventListener('visibilitychange', handleVisibility)
+  }, [workspaceId, refreshStats])
 
   useEffect(() => {
     fetchWorkerStatus()
@@ -58,6 +79,10 @@ export default function WorkspaceLayout() {
   const workspaceName = isVideoHive
     ? 'Video Hive'
     : currentWorkspace?.name || workspaceId
+
+  const allowedAgentIds =
+    workspaceStats[workspaceId || '']?.agent_status?.agents?.map((a) => a.id) ??
+    undefined
 
   const headerStyle: React.CSSProperties = scrolled
     ? {
@@ -109,11 +134,23 @@ export default function WorkspaceLayout() {
           >
             {workspaceName}
           </h1>
-
         </div>
 
         {/* Right */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            minWidth: 0,
+          }}
+        >
+          <AgentPanel
+            autoFetch={false}
+            bare
+            compact
+            allowedAgentIds={allowedAgentIds}
+          />
           <md-icon-button
             aria-label={WORKSPACE_LABELS.settings}
             onClick={() => navigate(`/workspaces/${workspaceId}/settings`)}
