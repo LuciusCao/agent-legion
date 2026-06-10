@@ -48,6 +48,15 @@
   text-overflow: ellipsis;
 }
 
+.stem {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  opacity: 0.75;
+}
+
 .badge {
   font-size: 12px;
   padding: 4px 10px;

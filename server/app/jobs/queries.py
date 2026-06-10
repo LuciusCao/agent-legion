@@ -235,6 +235,7 @@ class JobQueries:
         title: str,
         node_keys: list[str],
         workspace_id: str = "default",
+        stem: str = "",
     ) -> dict[str, Any]:
         job_id = _job_id(workspace_id, pipeline_key, source_id)
         storage_dir = self.jobs_dir / workspace_id / job_id
@@ -252,11 +253,12 @@ class JobQueries:
             conn.execute(
                 """
                 insert into jobs(
-                  id, workspace_id, pipeline_key, source_type, source_id, batch_id, title, storage_dir
+                  id, workspace_id, pipeline_key, source_type, source_id, batch_id, title, storage_dir, stem
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                   title=excluded.title,
+                  stem=excluded.stem,
                   batch_id=excluded.batch_id,
                   updated_at=current_timestamp
                 """,
@@ -269,6 +271,7 @@ class JobQueries:
                     batch_id,
                     title,
                     str(storage_dir),
+                    stem,
                 ),
             )
             for node_key in node_keys:

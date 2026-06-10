@@ -83,6 +83,11 @@ export function JobListItem({
             ? `${job.title.length > 30 ? job.title.slice(0, 30) + '…' : job.title} - ${job.source_id}`
             : job.source_id}
         </div>
+        {job.stem && (
+          <div className={styles.stem}>
+            {job.stem.length > 60 ? job.stem.slice(0, 60) + '…' : job.stem}
+          </div>
+        )}
       </div>
       <span className={`${styles.badge} ${statusClass(job.status)}`}>
         {JOB_STATUS_LABELS[job.status] || job.status}

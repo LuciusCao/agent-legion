@@ -40,11 +40,13 @@ def _candidate(
     title: str,
     source_kind: str,
     source_value: str,
+    stem: str = "",
 ) -> dict[str, Any]:
     return {
         "entity_type": entity_type,
         "entity_id": entity_id,
         "title": title,
+        "stem": stem,
         "source": {"kind": source_kind, "value": source_value},
     }
 
@@ -524,6 +526,10 @@ def create_jobs_router(
                     if summary.question_id in seen_question_ids:
                         continue
                     seen_question_ids.add(summary.question_id)
+                    stem = ""
+                    body = summary.payload.get("body")
+                    if isinstance(body, dict):
+                        stem = str(body.get("content") or "").strip()
                     candidates.append(
                         _candidate(
                             entity,
@@ -531,6 +537,7 @@ def create_jobs_router(
                             summary.title or f"Question {summary.question_id}",
                             "knowledge_code",
                             knowledge_code,
+                            stem=stem,
                         )
                     )
         else:
@@ -584,6 +591,7 @@ def create_jobs_router(
                     title=str(candidate["title"]),
                     node_keys=list(definition.nodes),
                     workspace_id=workspace_id,
+                    stem=str(candidate.get("stem", "")),
                 )
             )
 

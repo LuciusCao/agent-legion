@@ -21,6 +21,7 @@ const mockJobs: JobRecord[] = [
     pipeline_key: 'p1',
     source_id: 'Q100',
     title: 'Algebra',
+    stem: '',
     status: 'running',
     created_at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
     completed_nodes: 2,
@@ -32,6 +33,7 @@ const mockJobs: JobRecord[] = [
     pipeline_key: 'p1',
     source_id: 'Q200',
     title: 'Geometry',
+    stem: '',
     status: 'completed',
     created_at: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
     completed_nodes: 5,
@@ -68,10 +70,8 @@ describe('JobList', () => {
       )
     })
 
-    expect(screen.getByText('Q100')).toBeInTheDocument()
-    expect(screen.getByText('Q200')).toBeInTheDocument()
-    expect(screen.getByText('Algebra')).toBeInTheDocument()
-    expect(screen.getByText('Geometry')).toBeInTheDocument()
+    expect(screen.getByText('Algebra - Q100')).toBeInTheDocument()
+    expect(screen.getByText('Geometry - Q200')).toBeInTheDocument()
   })
 
   it('expanding a job shows ExpandedJobPanel', async () => {
