@@ -4,6 +4,13 @@ import { MemoryRouter } from 'react-router-dom'
 import { VideoList } from './VideoList'
 import { useVideoStore } from '../stores/videoStore'
 
+vi.mock('../layouts/AppShell', () => ({
+  useAppShellScroll: () => ({
+    reportScrolled: vi.fn(),
+    resetReportedScroll: vi.fn(),
+  }),
+}))
+
 vi.mock('@tanstack/react-virtual', () => ({
   useVirtualizer: vi.fn(() => ({
     getVirtualItems: () => [

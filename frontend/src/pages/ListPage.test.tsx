@@ -9,6 +9,13 @@ vi.mock('../api', () => ({
   api: (...args: any[]) => mockApi(...args),
 }))
 
+vi.mock('../layouts/AppShell', () => ({
+  useAppShellScroll: () => ({
+    reportScrolled: vi.fn(),
+    resetReportedScroll: vi.fn(),
+  }),
+}))
+
 describe('ListPage', () => {
   beforeEach(() => {
     mockApi.mockReset()
