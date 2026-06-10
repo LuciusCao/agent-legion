@@ -21,10 +21,10 @@ export function DagStepper({ nodes }: { nodes: JobNodeRecord[] }) {
           <div
             key={node.node_key}
             className={styles.step}
-            title={node.node_key}
+            title={node.label}
           >
             <div className={`${styles.stepBar} ${styles[state]}`} />
-            <span className={styles.stepLabel}>{node.node_key}</span>
+            <span className={styles.stepLabel}>{node.label}</span>
           </div>
         )
       })}
