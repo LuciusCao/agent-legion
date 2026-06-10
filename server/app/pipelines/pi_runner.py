@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import os
@@ -104,8 +105,7 @@ class PiRunner:
         skill_dir: Path,
         inputs: list[str],
         outputs: list[str],
-        job_db: JobQueries | None,
-        run_id: int,
+        job_db: JobQueries | None = None,
     ) -> PiRunResult:
         job_dir = Path(str(job["storage_dir"]))
         run_token = str(uuid.uuid4())
@@ -138,22 +138,25 @@ class PiRunner:
             prompt_file=prompt_file,
         )
 
-        if job_db is not None:
-            job_db.start_node_run(
-                job["id"],
-                node_key,
-                command,
-                str(events_file),
-                run_dir=str(run_dir),
-                session_dir=str(session_dir),
-            )
-
-        env = dict(os.environ)
-        env.update(self.config.environment)
-
+        run_record: dict[str, Any] | None = None
+        start_time = datetime.datetime.now(datetime.UTC).isoformat()
         exit_code = 0
         error_message = ""
+
         try:
+            if job_db is not None:
+                run_record = job_db.start_node_run(
+                    job["id"],
+                    node_key,
+                    command,
+                    str(events_file),
+                    run_dir=str(run_dir),
+                    session_dir=str(session_dir),
+                )
+
+            env = dict(os.environ)
+            env.update(self.config.environment)
+
             with (
                 open(events_file, "w") as stdout_fh,
                 open(stderr_file, "w") as stderr_fh,
@@ -170,10 +173,10 @@ class PiRunner:
                 except subprocess.TimeoutExpired:
                     proc.terminate()
                     try:
-                        exit_code = proc.wait(timeout=5)
+                        proc.wait(timeout=5)
                     except subprocess.TimeoutExpired:
                         proc.kill()
-                        exit_code = proc.wait()
+                        proc.wait()
                     exit_code = -1
                     error_message = f"Pi session timed out after {self.config.timeout_seconds}s"
         except FileNotFoundError:
@@ -207,12 +210,13 @@ class PiRunner:
                     exit_code = 1
                     error_message = f"Validator error: {exc}"
 
+        end_time = datetime.datetime.now(datetime.UTC).isoformat()
         run_meta = {
             "node_key": node_key,
             "run_id": run_token,
             "command": command,
-            "start_time": None,
-            "end_time": None,
+            "start_time": start_time,
+            "end_time": end_time,
             "exit_code": exit_code,
             "model": {
                 "provider": self.config.provider,
@@ -227,6 +231,9 @@ class PiRunner:
         (run_dir / "run.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2))
 
         status = "completed" if exit_code == 0 else "failed"
+        if job_db is not None and run_record is not None:
+            job_db.finish_node_run(run_record["id"], status, exit_code, error_message)
+
         return PiRunResult(
             status=status,
             exit_code=exit_code,
