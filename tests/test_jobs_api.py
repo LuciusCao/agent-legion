@@ -397,6 +397,45 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     assert traversal.status_code == 400
 
 
+def test_job_detail_includes_pi_run_trace(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        created = c.post(
+            "/api/job-batches",
+            json={
+                "pipeline_key": "reading_analysis",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q100"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        job_id = created["jobs"][0]["id"]
+        run = app.state.job_db.start_node_run(
+            job_id,
+            "extract_keywords",
+            ["pi", "--mode", "json"],
+            "events.jsonl",
+            run_dir=str(tmp_path / "run-1"),
+            session_dir=str(tmp_path / "run-1" / "session"),
+        )
+        app.state.job_db.finish_node_run(run["id"], "completed", 0, "")
+
+        detail = c.get(f"/api/jobs/{job_id}")
+
+    assert detail.status_code == 200
+    body = detail.json()
+    runs = body["runs"]
+    assert len(runs) == 1
+    assert runs[0]["run_dir"] == str(tmp_path / "run-1")
+    assert runs[0]["session_dir"] == str(tmp_path / "run-1" / "session")
+    assert json.loads(runs[0]["command_json"])[0] == "pi"
+
+
 def test_get_pipeline_definition_when_enabled(tmp_path):
     from fastapi.testclient import TestClient
 

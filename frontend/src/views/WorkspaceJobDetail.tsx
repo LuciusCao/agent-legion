@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { fetchJobArtifact, fetchJobDetail } from '../api'
-import type { JobDetailResponse } from '../types'
+import type { JobDetailResponse, NodeRunRecord } from '../types'
 import { WORKSPACE_LABELS } from '../labels'
 
 function formatArtifact(content: string): string {
@@ -10,6 +10,21 @@ function formatArtifact(content: string): string {
   } catch {
     return content
   }
+}
+
+function isPiRun(run: NodeRunRecord): boolean {
+  try {
+    const cmd = JSON.parse(run.command_json)
+    return Array.isArray(cmd) && cmd[0] === 'pi'
+  } catch {
+    return false
+  }
+}
+
+function sessionBasename(dir: string): string {
+  if (!dir) return ''
+  const parts = dir.split(/[/\\]/)
+  return parts[parts.length - 1] || ''
 }
 
 export default function WorkspaceJobDetail() {
@@ -147,10 +162,26 @@ export default function WorkspaceJobDetail() {
             <md-list>
               {detail.runs.map((run) => (
                 <md-list-item key={run.id}>
-                  <div slot="headline">{run.node_key}</div>
+                  <div slot="headline">
+                    {run.node_key}
+                    {isPiRun(run) ? (
+                      <span
+                        style={{
+                          marginLeft: '8px',
+                          fontSize: '0.75rem',
+                          color: 'var(--md-sys-color-primary)',
+                        }}
+                      >
+                        Pi
+                      </span>
+                    ) : null}
+                  </div>
                   <div slot="supporting-text">
                     {run.started_at} - {run.finished_at || 'running'}
                     {run.exit_code !== null ? ` · exit: ${run.exit_code}` : ''}
+                    {isPiRun(run) && run.session_dir
+                      ? ` · session: ${sessionBasename(run.session_dir)}`
+                      : ''}
                   </div>
                   <span slot="end" className={`status-badge ${run.status}`}>
                     {run.status}
