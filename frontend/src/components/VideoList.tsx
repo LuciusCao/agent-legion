@@ -1,4 +1,4 @@
-import { useRef } from 'react'
+import { useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useVideoStore } from '../stores/videoStore'
@@ -6,10 +6,12 @@ import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from '../labels'
 import { statusGroup, formatInteractionStats } from '../helpers'
 import { PhaseStepper } from './PhaseStepper'
 import { InteractionReviewBadge } from './InteractionReviewBadge'
+import { useAppShellScroll } from '../layouts/AppShell'
 import styles from './VideoList.module.css'
 
 export function VideoList() {
   const navigate = useNavigate()
+  const { reportScrolled, resetReportedScroll } = useAppShellScroll()
   const filtered = useVideoStore((state) => state._filteredVideos)
   const selectedType = useVideoStore((state) => state.selectedType)
   const selectMode = useVideoStore((state) => state.selectMode)
@@ -19,6 +21,18 @@ export function VideoList() {
   )
 
   const parentRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = parentRef.current
+    if (!el) return
+    const onScroll = () => reportScrolled(el.scrollTop > 0)
+    el.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      resetReportedScroll()
+    }
+  }, [reportScrolled, resetReportedScroll])
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is known to be safe here
   const virtualizer = useVirtualizer({
     count: filtered.length,

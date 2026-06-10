@@ -53,7 +53,7 @@ input {
 .workbench-view {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
 }
@@ -612,6 +612,18 @@ pre {
 .workspace-job-create .error-text,
 .workspace-job-detail .error-text {
   white-space: pre-wrap;
+}
+
+.workspace-main {
+  padding: 24px;
+}
+
+main.video-hive-main {
+  overflow: hidden;
+}
+
+.settings-main {
+  padding: 24px 24px 32px;
 }
 
 .artifact-preview {
