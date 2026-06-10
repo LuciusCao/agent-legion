@@ -17,15 +17,6 @@ const ALLOWED_TAGS = new Set([
   'DIV',
 ])
 
-function formatAnswer(answer: unknown): string | null {
-  if (answer == null) return null
-  if (typeof answer === 'string') return answer
-  if (Array.isArray(answer) && answer.every((a) => typeof a === 'string')) {
-    return answer.join('、')
-  }
-  return null
-}
-
 function sanitizeHtml(html: string): string {
   const parser = new DOMParser()
   const doc = parser.parseFromString(html, 'text/html')
@@ -55,6 +46,27 @@ function sanitizeHtml(html: string): string {
     }
   }
   return doc.body.innerHTML
+}
+
+function extractAnswerItems(answer: unknown): string[] | null {
+  if (answer == null) return null
+  if (typeof answer === 'string') return [answer]
+  if (Array.isArray(answer) && answer.every((a) => typeof a === 'string')) {
+    return answer
+  }
+  if (typeof answer === 'object') {
+    const obj = answer as Record<string, unknown>
+    if (typeof obj.value === 'string') return [obj.value]
+    if (typeof obj.answer === 'string') return [obj.answer]
+    if (Array.isArray(obj.value) && obj.value.every((a) => typeof a === 'string')) {
+      return obj.value
+    }
+  }
+  return null
+}
+
+function hasLatex(text: string): boolean {
+  return /(\$\$[\s\S]*?\$\$)|(\$[^$\r\n]*?\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))/.test(text)
 }
 
 export interface QuestionContentPanelProps {
@@ -146,6 +158,9 @@ export function QuestionContentPanel({
                     isCorrect ? styles.correct : ''
                   }`}
                 >
+                  {isCorrect && (
+                    <md-icon className={styles.checkIcon}>check</md-icon>
+                  )}
                   <span className={styles.optionLabel}>{label}.</span>
                   <span className={styles.optionContent}>
                     <LaTeXText>{content}</LaTeXText>
@@ -158,13 +173,23 @@ export function QuestionContentPanel({
       )}
 
       {detail?.normalized.answer != null && (
-        <section className={styles.card}>
+        <section className={`${styles.card} ${styles.answerCard}`}>
           <h2 className={styles.sectionTitle}>答案</h2>
           {(() => {
-            const formatted = formatAnswer(detail.normalized.answer)
-            if (formatted != null) {
+            const items = extractAnswerItems(detail.normalized.answer)
+            if (items != null && items.length > 0) {
               return (
-                <div className={styles.answerText}>正确答案：{formatted}</div>
+                <div className={styles.answerBadges}>
+                  {items.map((item, idx) => (
+                    <span key={idx} className={styles.answerBadge}>
+                      {hasLatex(item) ? (
+                        <LaTeXText>{item}</LaTeXText>
+                      ) : (
+                        item
+                      )}
+                    </span>
+                  ))}
+                </div>
               )
             }
             return (
