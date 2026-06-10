@@ -127,6 +127,70 @@ Final phase:
 
 The package endpoint creates a zip with per-video JSON plus `manifest.json`. The manifest includes `content_type`, `external_id`, `knowledge_code`, and `question_id`.
 
+## Pi Agent Runner
+
+Video Hive can execute `reading_analysis` pipeline agent nodes through the Pi CLI (`@earendil-works/pi-coding-agent`).
+
+### Installation
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+pi
+# Follow the login prompt to authenticate
+./scripts/check-pi.sh
+```
+
+### Configuration
+
+Pi settings live in `config/pipeline.yaml` under `pipelines.pi`:
+
+```yaml
+pipelines:
+  enabled: true
+  pi:
+    binary: pi
+    provider: ""        # empty = use Pi default
+    model: ""           # empty = use Pi default
+    thinking: low
+    timeout_seconds: 600
+    environment:
+      PI_SKIP_VERSION_CHECK: "1"
+      PI_TELEMETRY: "0"
+```
+
+- `provider` / `model`: leave empty to use Pi's configured default.
+- `timeout_seconds`: per-node timeout. Pi is terminated if it exceeds this.
+- `environment`: merged into Pi's subprocess environment.
+
+### Repository Skills
+
+Each agent node in `reading_analysis` maps to one repository-owned skill under `server/app/pipelines/skills/reading_analysis/{node_key}/`. Every skill contains:
+
+- `SKILL.md` — execution workflow and I/O contract
+- `references/output-contract.md` — field-level artifact specification
+- `scripts/validate_output.py` — node-specific validator
+
+Pi loads **only** the declared skill. Automatic skill discovery, extensions, prompt templates, and context files are disabled.
+
+### Run Directory Layout
+
+Every Pi execution creates a fresh trace under `{job_dir}/runs/{node_key}/{run_token}/`:
+
+```
+runs/extract_keywords/550e8400-e29b-41d4-a716-446655440000/
+  prompt.md          # orchestration prompt passed to Pi
+  events.jsonl       # Pi JSON event stream (stdout)
+  stderr.log         # Pi diagnostic output (stderr)
+  run.json           # metadata: command, start/end time, exit code, error
+  session/           # Pi session directory
+```
+
+Previous runs are preserved. Rerunning a node deletes that node's and all downstream nodes' declared outputs, but never touches `runs/` history.
+
+### Authentication
+
+Do not pass API keys on the command line. Pi inherits authentication from its environment or existing login store. Set provider credentials through Pi's standard environment variables if needed.
+
 ## API Notes
 
 Add a knowledge video with URL:
