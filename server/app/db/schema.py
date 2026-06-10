@@ -160,6 +160,9 @@ def init_db(path: Path) -> None:
                 "description": (
                     "alter table workspaces add column description text not null default ''"
                 ),
+                "pipeline_config_json": (
+                    "alter table workspaces add column pipeline_config_json text not null default '{}'"
+                ),
             }
             for column, statement in workspace_migrations.items():
                 if column not in existing_workspace_columns:
