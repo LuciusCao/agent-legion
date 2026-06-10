@@ -6,10 +6,24 @@ import { api } from '../api'
 import { SettingsCard } from '../components/SettingsCard'
 import type { GlobalServiceStatus } from '../types'
 
+type VideoHiveConfig = {
+  asr: {
+    provider: string
+    whisperConfigured: boolean
+    sensevoiceConfigured: boolean
+    vadEnabled: boolean
+  }
+  openclaw: {
+    runnerCount: number
+    timeoutSeconds: number
+  }
+}
+
 export function VideoHiveSettingsPage() {
   const { workerPaused, fetchWorkerStatus, setWorkerPaused, showToast } =
     useUiStore()
   const [services, setServices] = useState<GlobalServiceStatus | null>(null)
+  const [config, setConfig] = useState<VideoHiveConfig | null>(null)
 
   useEffect(() => {
     fetchWorkerStatus().catch(() => {})
@@ -27,6 +41,9 @@ export function VideoHiveSettingsPage() {
           },
         })
       )
+      .catch(() => {})
+    api<VideoHiveConfig>('/api/video-hive/config')
+      .then((data) => setConfig(data))
       .catch(() => {})
   }, [fetchWorkerStatus])
 
@@ -116,6 +133,93 @@ export function VideoHiveSettingsPage() {
               onClick={togglePause}
             />
           </label>
+        </SettingsCard>
+
+        <SettingsCard icon="stream" title="流水线信息">
+          {config ? (
+            <div style={{ display: 'grid', gap: 12 }}>
+              <div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                  }}
+                >
+                  ASR Provider
+                </span>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {config.asr.provider}
+                </div>
+              </div>
+              <div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                  }}
+                >
+                  Whisper 配置
+                </span>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {config.asr.whisperConfigured ? '已配置' : '未配置'}
+                </div>
+              </div>
+              <div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                  }}
+                >
+                  SenseVoice 配置
+                </span>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {config.asr.sensevoiceConfigured ? '已配置' : '未配置'}
+                </div>
+              </div>
+              <div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                  }}
+                >
+                  VAD
+                </span>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {config.asr.vadEnabled ? '已启用' : '未启用'}
+                </div>
+              </div>
+              <div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                  }}
+                >
+                  OpenClaw Runners
+                </span>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {config.openclaw.runnerCount}
+                </div>
+              </div>
+              <div>
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                  }}
+                >
+                  超时时间
+                </span>
+                <div style={{ fontSize: 14, marginTop: 4 }}>
+                  {config.openclaw.timeoutSeconds}s
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div>加载中…</div>
+          )}
         </SettingsCard>
       </div>
     </AppShell>

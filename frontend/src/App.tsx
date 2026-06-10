@@ -57,8 +57,11 @@ export default function App() {
           <Route path="/" element={<DashboardPage />} />
           <Route path="/video-hive" element={<VideoHiveLayout />}>
             <Route index element={<ListPage />} />
-            <Route path="settings" element={<VideoHiveSettingsPage />} />
           </Route>
+          <Route
+            path="/video-hive/settings"
+            element={<VideoHiveSettingsPage />}
+          />
           <Route path="/workspaces" element={<Navigate to="/" replace />} />
           <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
             <Route index element={<WorkspaceMainPage />} />
