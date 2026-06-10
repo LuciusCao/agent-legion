@@ -10,7 +10,7 @@ from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition
 from server.app.pipelines.executor import execute_node_once
 from server.app.pipelines.pi_runner import PiRunner
-from server.app.pipelines.registry import load_registered_pipeline
+from server.app.pipelines.registry import list_registered_pipelines
 from server.app.pipelines.scheduler import find_ready_nodes, summarize_job_status
 from server.app.settings import Settings
 
@@ -122,14 +122,16 @@ class PipelineWorkerThread:
         self._local_executor: ThreadPoolExecutor | None = None
         self._agent_executor: ThreadPoolExecutor | None = None
         self._futures: dict[tuple[str, str], Future[bool]] = {}
-        self._definition: PipelineDefinition | None = None
+        self._definitions: list[PipelineDefinition] = []
         self._pi_runner: PiRunner | None = None
         self._skill_root: Path | None = None
 
     def start(self) -> None:
-        self._definition = load_registered_pipeline(self.settings.root_dir, "reading_analysis")
-        self._local_executor = ThreadPoolExecutor(max_workers=self._definition.concurrency.local)
-        self._agent_executor = ThreadPoolExecutor(max_workers=self._definition.concurrency.agent)
+        self._definitions = list_registered_pipelines(self.settings.root_dir)
+        max_local = max((d.concurrency.local for d in self._definitions), default=1)
+        max_agent = max((d.concurrency.agent for d in self._definitions), default=1)
+        self._local_executor = ThreadPoolExecutor(max_workers=max_local)
+        self._agent_executor = ThreadPoolExecutor(max_workers=max_agent)
         pi_raw = self.settings.config.get("pipelines", {}).get("pi", {})
         if isinstance(pi_raw, dict):
             self._skill_root = self.settings.root_dir / "server" / "app" / "pipelines" / "skills"
@@ -148,8 +150,7 @@ class PipelineWorkerThread:
         self._thread.start()
 
     def _poll(self) -> bool:
-        definition = self._definition
-        if definition is None:
+        if not self._definitions:
             return False
 
         # Reap completed futures
@@ -164,53 +165,54 @@ class PipelineWorkerThread:
                 _refresh_job_status(self.job_db, job_id)
                 del self._futures[key]
 
-        # Submit new ready nodes
+        # Submit new ready nodes across all registered pipelines
         processed = False
-        for job in self.job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
-            statuses = _node_statuses(self.job_db, job["id"])
-            ready_nodes = find_ready_nodes(definition, statuses, Path(str(job["storage_dir"])))
-            if not ready_nodes:
-                _refresh_job_status(self.job_db, job["id"])
-                continue
-
-            for node in ready_nodes:
-                key = (job["id"], node.key)
-                if key in self._futures:
+        for definition in self._definitions:
+            for job in self.job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
+                statuses = _node_statuses(self.job_db, job["id"])
+                ready_nodes = find_ready_nodes(definition, statuses, Path(str(job["storage_dir"])))
+                if not ready_nodes:
+                    _refresh_job_status(self.job_db, job["id"])
                     continue
 
-                if node.runner == "local":
-                    assert self._local_executor is not None
-                    self._futures[key] = self._local_executor.submit(
-                        _execute_node_wrapped,
-                        self.job_db,
-                        definition,
-                        job,
-                        node.key,
-                        self.settings.logs_dir,
-                        self.settings.config,
-                        None,
-                        None,
-                    )
-                    processed = True
-                elif (
-                    node.agent is not None
-                    and node.agent.engine == "pi"
-                    and self._pi_runner is not None
-                    and self._skill_root is not None
-                ):
-                    assert self._agent_executor is not None
-                    self._futures[key] = self._agent_executor.submit(
-                        _execute_node_wrapped,
-                        self.job_db,
-                        definition,
-                        job,
-                        node.key,
-                        self.settings.logs_dir,
-                        self.settings.config,
-                        self._pi_runner,
-                        self._skill_root,
-                    )
-                    processed = True
+                for node in ready_nodes:
+                    key = (job["id"], node.key)
+                    if key in self._futures:
+                        continue
+
+                    if node.runner == "local":
+                        assert self._local_executor is not None
+                        self._futures[key] = self._local_executor.submit(
+                            _execute_node_wrapped,
+                            self.job_db,
+                            definition,
+                            job,
+                            node.key,
+                            self.settings.logs_dir,
+                            self.settings.config,
+                            None,
+                            None,
+                        )
+                        processed = True
+                    elif (
+                        node.agent is not None
+                        and node.agent.engine == "pi"
+                        and self._pi_runner is not None
+                        and self._skill_root is not None
+                    ):
+                        assert self._agent_executor is not None
+                        self._futures[key] = self._agent_executor.submit(
+                            _execute_node_wrapped,
+                            self.job_db,
+                            definition,
+                            job,
+                            node.key,
+                            self.settings.logs_dir,
+                            self.settings.config,
+                            self._pi_runner,
+                            self._skill_root,
+                        )
+                        processed = True
 
         return processed
 
