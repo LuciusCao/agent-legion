@@ -11,6 +11,7 @@ from .artifacts import create_artifacts_router
 from .common import create_common_router
 from .jobs import create_jobs_router
 from .packages import create_packages_router
+from .questions import create_questions_router
 from .videos import create_videos_router
 from .worker import create_worker_router
 
@@ -32,5 +33,6 @@ def create_router(
     router.include_router(create_packages_router(db, settings, video_event_manager))
     router.include_router(create_worker_router(worker_control))
     router.include_router(create_jobs_router(job_db, settings, agent_manager))
+    router.include_router(create_questions_router(job_db, settings))
 
     return router
