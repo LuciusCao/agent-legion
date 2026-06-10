@@ -1,22 +1,53 @@
 import { useEffect } from 'react'
 import { useUiStore } from '../stores/uiStore'
+import type { AgentStatus } from '../types'
 import styles from './AgentPanel.module.css'
 
-export function AgentPanel() {
-  const agents = useUiStore((state) => state.agents)
-  const workerPaused = useUiStore((state) => state.workerPaused)
+export interface AgentPanelProps {
+  agents?: AgentStatus[]
+  workerPaused?: boolean
+  onTogglePause?: () => void
+  autoFetch?: boolean
+  bare?: boolean
+  compact?: boolean
+  allowedAgentIds?: string[]
+}
+
+export function AgentPanel({
+  agents: propAgents,
+  workerPaused: propPaused,
+  onTogglePause,
+  autoFetch = true,
+  bare = false,
+  compact = false,
+  allowedAgentIds,
+}: AgentPanelProps) {
+  const storeAgents = useUiStore((state) => state.agents)
+  const storePaused = useUiStore((state) => state.workerPaused)
   const fetchWorkerStatus = useUiStore((state) => state.fetchWorkerStatus)
   const setWorkerPaused = useUiStore((state) => state.setWorkerPaused)
   const showToast = useUiStore((state) => state.showToast)
 
+  const rawAgents = propAgents ?? storeAgents
+  const agents =
+    allowedAgentIds !== undefined
+      ? rawAgents.filter((a) => allowedAgentIds.includes(a.id))
+      : rawAgents
+  const workerPaused = propPaused ?? storePaused
+
   useEffect(() => {
+    if (!autoFetch) return
     fetchWorkerStatus().catch((err) => {
       const message = err instanceof Error ? err.message : String(err)
       showToast(`加载自动调度状态失败: ${message}`, 'error')
     })
-  }, [fetchWorkerStatus, showToast])
+  }, [autoFetch, fetchWorkerStatus, showToast])
 
   const handlePausedChange = async () => {
+    if (onTogglePause) {
+      onTogglePause()
+      return
+    }
     const paused = !workerPaused
     try {
       await setWorkerPaused(paused)
@@ -27,37 +58,88 @@ export function AgentPanel() {
     }
   }
 
-  return (
-    <div className={`${styles.agentPanel} card-outlined`}>
-      <div className={styles.agentContent}>
-        {agents.length === 0 ? (
-          <div className="empty-state">暂无运行中的 Agent</div>
-        ) : (
-          <div className={styles.agentList}>
-            {agents.map((agent, i) => (
-              <div
-                key={i}
-                className={`${styles.agentCard} ${agent.busy ? styles.busy : styles.idle}`}
-              >
-                <span className={styles.agentDot} />
-                <span>{agent.name}</span>
-                <span className={styles.agentPill}>
-                  {agent.busy
-                    ? `忙碌 (${agent.task_count}/${agent.max_tasks})`
-                    : '空闲'}
-                </span>
-              </div>
-            ))}
-          </div>
-        )}
-        <label className={styles.assignmentSwitch}>
+  const overallStatus =
+    agents.length === 0 ? 'none' : agents.some((a) => a.busy) ? 'busy' : 'idle'
+
+  const content = compact ? (
+    <div className={styles.agentTrigger}>
+      <md-icon-button aria-label="Agent 状态">
+        <md-icon>smart_toy</md-icon>
+        <span
+          className={`${styles.indicator} ${styles[`indicator${overallStatus.charAt(0).toUpperCase() + overallStatus.slice(1)}`]}`}
+        />
+      </md-icon-button>
+      <div className={styles.agentPopover}>
+        <label className={styles.popoverAction}>
           <span>{workerPaused ? '自动调度关闭' : '自动调度开启'}</span>
           <md-switch
             selected={!workerPaused || undefined}
             onClick={handlePausedChange}
           />
         </label>
+        <div className={styles.popoverDivider} />
+        {agents.length === 0 ? (
+          <div className={styles.popoverEmpty}>暂无运行中的 Agent</div>
+        ) : (
+          <div className={styles.popoverList}>
+            {agents.map((agent, i) => (
+              <div key={i} className={styles.popoverItem}>
+                <span
+                  className={`${styles.popoverDot} ${agent.busy ? styles.busy : styles.idle}`}
+                />
+                <span className={styles.popoverName}>
+                  {agent.name || agent.id}
+                </span>
+                <span className={styles.popoverStatus}>
+                  {agent.busy
+                    ? agent.task_count > 0
+                      ? `忙碌 (${agent.task_count}/${agent.max_tasks})`
+                      : '忙碌'
+                    : '空闲'}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
+  ) : (
+    <div className={styles.agentContent}>
+      {agents.length === 0 ? (
+        <div className="empty-state">暂无运行中的 Agent</div>
+      ) : (
+        <div className={styles.agentList}>
+          {agents.map((agent, i) => (
+            <div
+              key={i}
+              className={`${styles.agentCard} ${agent.busy ? styles.busy : styles.idle}`}
+            >
+              <span className={styles.agentDot} />
+              <span>{agent.name || agent.id}</span>
+              <span className={styles.agentPill}>
+                {agent.busy
+                  ? agent.task_count > 0
+                    ? `忙碌 (${agent.task_count}/${agent.max_tasks})`
+                    : '忙碌'
+                  : '空闲'}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+      <label className={styles.assignmentSwitch}>
+        <span>{workerPaused ? '自动调度关闭' : '自动调度开启'}</span>
+        <md-switch
+          selected={!workerPaused || undefined}
+          onClick={handlePausedChange}
+        />
+      </label>
+    </div>
   )
+
+  if (bare) {
+    return content
+  }
+
+  return <div className={`${styles.agentPanel} card-outlined`}>{content}</div>
 }
