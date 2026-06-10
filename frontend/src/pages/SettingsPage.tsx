@@ -96,27 +96,8 @@ export function SettingsPage() {
     void fetchResourceProviders()
   }, [workspaceId, fetchGlobalServices, fetchResourceProviders])
 
-  useEffect(() => {
-    const observer = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            setActiveSection(entry.target.id)
-          }
-        }
-      },
-      { threshold: 0.5 }
-    )
-    for (const id of NAV_ITEMS.map((item) => item.id)) {
-      const el = document.getElementById(id)
-      if (el) {
-        observer.observe(el)
-      }
-    }
-    return () => observer.disconnect()
-  }, [])
-
   const scrollToSection = useCallback((id: string) => {
+    setActiveSection(id)
     const el = document.getElementById(id)
     if (el) {
       el.scrollIntoView({ behavior: 'smooth' })
