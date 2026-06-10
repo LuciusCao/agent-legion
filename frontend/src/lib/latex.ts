@@ -83,3 +83,58 @@ export function extractLatexParts(text: string): LatexPart[] {
 
   return collapsed
 }
+
+export function sanitizeLatex(raw: string): string {
+  let text = decodeHtmlEntities(raw)
+  const parts = extractLatexParts(text)
+  const rebuilt: string[] = []
+
+  for (const part of parts) {
+    if (part.type === 'latex') {
+      rebuilt.push(wrapInline(part.content))
+    } else {
+      rebuilt.push(fixBareLatex(part.content))
+    }
+  }
+
+  return rebuilt.join('')
+}
+
+function wrapInline(content: string): string {
+  const trimmed = content.trim()
+  if (trimmed.startsWith('$') && trimmed.endsWith('$')) return trimmed
+  return `$${trimmed}$`
+}
+
+const BARE_LATEX_REGEX = /\\[a-zA-Z]+(?:\{[^}]*\})*/g
+
+function fixBareLatex(text: string): string {
+  const result: string[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = BARE_LATEX_REGEX.exec(text)) !== null) {
+    const start = match.index
+    const end = BARE_LATEX_REGEX.lastIndex
+    const cmd = match[0]
+
+    if (looksLikePath(text, start, end)) {
+      continue
+    }
+
+    result.push(text.slice(lastIndex, start))
+    result.push(`$${cmd}$`)
+    lastIndex = end
+  }
+
+  result.push(text.slice(lastIndex))
+  return result.join('')
+}
+
+function looksLikePath(text: string, start: number, end: number): boolean {
+  const after = text[end]
+  if (after === '.' || after === '/') return true
+  const before = text[start - 1]
+  if (before === '.') return true
+  return false
+}
