@@ -1,7 +1,7 @@
 .dagStepper {
   display: flex;
   align-items: center;
-  gap: 2px;
+  gap: 4px;
   width: 100%;
   padding: 4px 0;
 }
@@ -17,33 +17,37 @@
 
 .stepBar {
   width: 100%;
-  height: 6px;
-  border-radius: 3px;
-  background: var(--md-sys-color-surface-variant, #e5e7eb);
-  transition: background 0.3s ease;
+  height: 4px;
+  border-radius: 4px;
+  background: var(--md-sys-color-outline-variant);
+  transition: background 200ms ease;
 }
 
 .stepLabel {
   font-size: 10px;
-  color: var(--md-sys-color-on-surface-variant, #6b7280);
+  color: var(--md-sys-color-on-surface-variant);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   max-width: 100%;
 }
 
+.compact .stepLabel {
+  display: none;
+}
+
 .completed {
-  background: var(--md-sys-color-primary, #2563eb);
+  background: var(--status-completed-border);
 }
 
 .running {
-  background: var(--md-sys-color-tertiary, #f59e0b);
+  background: var(--status-running-border);
 }
 
 .failed {
-  background: var(--md-sys-color-error, #dc2626);
+  background: var(--status-failed-border);
 }
 
 .pending {
-  background: var(--md-sys-color-surface-variant, #e5e7eb);
+  background: var(--md-sys-color-outline-variant);
 }
