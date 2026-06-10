@@ -14,6 +14,9 @@ interface JobState {
   statusFilter: JobStatus | 'all'
   searchQuery: string
   selectMode: boolean
+  batchDeleteLoading: boolean
+  batchPackageLoading: boolean
+  batchRerunLoading: boolean
 
   fetchJobs: (workspaceId: string) => Promise<void>
   setStatusFilter: (filter: JobStatus | 'all') => void
@@ -27,6 +30,7 @@ interface JobState {
   getFilteredJobs: () => JobRecord[]
   batchRerun: (workspaceId: string) => Promise<void>
   batchDelete: (workspaceId: string) => Promise<void>
+  batchPackage: (workspaceId: string) => Promise<void>
 }
 
 function normalizeJobStatus(status: string): JobStatus {
@@ -69,6 +73,9 @@ export const useJobStore = create<JobState>((set, get) => ({
   statusFilter: 'all',
   searchQuery: '',
   selectMode: false,
+  batchDeleteLoading: false,
+  batchPackageLoading: false,
+  batchRerunLoading: false,
 
   async fetchJobs(workspaceId: string) {
     set({ isLoading: true, error: null })
@@ -136,6 +143,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   async batchRerun(workspaceId: string) {
     const ids = Array.from(get().selectedIds)
     if (ids.length === 0) return
+    set({ batchRerunLoading: true })
     try {
       await api(
         `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-rerun`,
@@ -148,17 +156,21 @@ export const useJobStore = create<JobState>((set, get) => ({
       useUiStore
         .getState()
         .showToast(`成功重跑 ${ids.length} 个任务`, 'success')
+      await get().fetchJobs(workspaceId)
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Batch rerun failed'
       set({ error: message })
       useUiStore.getState().showToast(message, 'error')
       throw err
+    } finally {
+      set({ batchRerunLoading: false })
     }
   },
 
   async batchDelete(workspaceId: string) {
     const ids = Array.from(get().selectedIds)
     if (ids.length === 0) return
+    set({ batchDeleteLoading: true })
     try {
       await api(
         `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch`,
@@ -179,6 +191,40 @@ export const useJobStore = create<JobState>((set, get) => ({
       set({ error: message })
       useUiStore.getState().showToast(message, 'error')
       throw err
+    } finally {
+      set({ batchDeleteLoading: false })
+    }
+  },
+
+  async batchPackage(workspaceId: string) {
+    const ids = Array.from(get().selectedIds)
+    if (ids.length === 0) return
+    const completedIds = ids.filter(
+      (id) => get().jobs.find((j) => j.id === id)?.status === 'completed'
+    )
+    if (completedIds.length === 0) {
+      useUiStore.getState().showToast('没有已完成的任务可打包', 'error')
+      return
+    }
+    set({ batchPackageLoading: true })
+    try {
+      await api(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/package`,
+        {
+          method: 'POST',
+          body: JSON.stringify({ job_ids: completedIds }),
+        }
+      )
+      useUiStore.getState().showToast(`已打包 ${completedIds.length} 个任务`, 'success')
+      await get().fetchJobs(workspaceId)
+      get().clearSelection()
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Batch package failed'
+      set({ error: message })
+      useUiStore.getState().showToast(message, 'error')
+      throw err
+    } finally {
+      set({ batchPackageLoading: false })
     }
   },
 }))
