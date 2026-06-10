@@ -27,6 +27,7 @@ import '@material/web/select/outlined-select.js'
 import '@material/web/select/select-option.js'
 
 import App from './App'
+import 'katex/dist/katex.min.css'
 import './styles.css'
 
 applyTheme()
