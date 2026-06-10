@@ -171,7 +171,7 @@ describe('WorkspaceJobList', () => {
     )
 
     fireEvent.click(await screen.findByText('Q1'))
-    expect(navigate).toHaveBeenCalledWith('/workspaces/math_ws/jobs/j1')
+    expect(navigate).toHaveBeenCalledWith('/workspaces/math_ws/questions/q1')
   })
 
   it('requires confirmation before deleting a job', async () => {
