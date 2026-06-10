@@ -9,7 +9,7 @@ import styles from './SettingsPage.module.css'
 
 const PIPELINE_OPTIONS = [
   { key: 'question_content', label: 'question_content' },
-  { key: 'knowledge_content', label: 'knowledge_content' },
+  { key: 'reading_analysis', label: 'reading_analysis' },
 ]
 
 type ConnectionState = 'idle' | 'testing' | 'success' | 'failed'
