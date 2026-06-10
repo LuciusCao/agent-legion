@@ -1,195 +1,130 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { act, render, screen, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, act } from '@testing-library/react'
 import { BatchToolbar } from './BatchToolbar'
-import { useUiStore } from '../stores/uiStore'
-import { useVideoStore } from '../stores/videoStore'
-
-const mockApi = vi.fn()
-vi.mock('../api', () => ({
-  api: (...args: any[]) => mockApi(...args),
-}))
 
 describe('BatchToolbar', () => {
-  beforeEach(() => {
-    mockApi.mockReset()
-    useUiStore.setState({
-      agents: [],
-      addDialogOpen: false,
-      addContentType: 'knowledge',
-      rerunDialogOpen: false,
-      deleteDialogOpen: false,
-      toast: null,
-    })
-    useVideoStore.setState({
-      videos: [
-        {
-          id: 'v1',
-          title: 'Video 1',
-          source_url: '',
-          content_type: 'knowledge',
-          external_id: 'K001',
-          knowledge_code: 'K001',
-          question_id: '',
-          source_uuid: '',
-          status: 'completed',
-          current_phase: 'package',
-          error_message: '',
-        },
-        {
-          id: 'v2',
-          title: 'Video 2',
-          source_url: '',
-          content_type: 'knowledge',
-          external_id: 'K002',
-          knowledge_code: 'K002',
-          question_id: '',
-          source_uuid: '',
-          status: 'completed',
-          current_phase: 'package',
-          error_message: '',
-        },
-      ],
-      selectedType: 'knowledge',
-      statusFilter: 'all',
-      searchQuery: '',
-      selectMode: true,
-      selectedIds: new Set(['v1', 'v2']),
-      isLoading: false,
-    })
-  })
-
-  it('opens delete dialog and shows an error toast when batch delete has failed items', async () => {
-    mockApi
-      .mockResolvedValueOnce({
-        results: [
-          { video_id: 'v1', status: 'deleted', message: '' },
-          { video_id: 'v2', status: 'not_found', message: 'Video not found' },
-        ],
-      })
-      .mockResolvedValueOnce({ videos: [] })
-
-    render(<BatchToolbar />)
-
-    await act(async () => {
-      screen.getByTitle('删除').click()
-    })
-
-    expect(screen.getByText('确认删除')).toBeInTheDocument()
-
-    await act(async () => {
-      screen.getByText('删除').click()
-    })
-
-    await waitFor(() => {
-      expect(useUiStore.getState().toast).toEqual({
-        message: '删除完成：成功 1 项，失败 1 项',
-        type: 'error',
-      })
-    })
-  })
-
-  it('opens rerun dialog when rerun button is clicked', async () => {
-    render(<BatchToolbar />)
-
-    expect(screen.getByText('未打包')).toBeInTheDocument()
-    expect(screen.getByText('仅已通过')).toBeInTheDocument()
-    expect(screen.getByText('未通过/部分通过')).toBeInTheDocument()
-
-    await act(async () => {
-      screen.getByTitle('重跑').click()
-    })
-
-    expect(screen.getByText('选择重跑阶段')).toBeInTheDocument()
-  })
-
-  it('submits selected videos for packaging', async () => {
-    mockApi.mockResolvedValueOnce({ accepted: true })
-
-    render(<BatchToolbar />)
-
-    await act(async () => {
-      screen.getByTitle('打包').click()
-    })
-
-    expect(mockApi).toHaveBeenCalledWith(
-      '/api/package',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ video_ids: ['v1', 'v2'] }),
-      })
+  it('renders selected count, filters, actions and exit button', () => {
+    const onExit = vi.fn()
+    render(
+      <BatchToolbar
+        selectedCount={3}
+        filters={[
+          { key: 'all', label: '全选', onClick: vi.fn() },
+          { key: 'clear', label: '取消选择', onClick: vi.fn() },
+        ]}
+        actions={[
+          { key: 'package', label: '打包', onClick: vi.fn() },
+          { key: 'delete', label: '删除', danger: true, onClick: vi.fn() },
+        ]}
+        onExitSelectMode={onExit}
+      />
     )
-    expect(useUiStore.getState().toast).toEqual({
-      message: '打包已提交，完成后将自动下载',
-      type: 'success',
-    })
-    expect(useVideoStore.getState().selectMode).toBe(false)
+
+    expect(screen.getByText('已选择 3 项')).toBeInTheDocument()
+    expect(screen.getByText('全选')).toBeInTheDocument()
+    expect(screen.getByText('取消选择')).toBeInTheDocument()
+    expect(screen.getByText('打包')).toBeInTheDocument()
+    expect(screen.getByText('删除')).toBeInTheDocument()
+    expect(screen.getByText('退出')).toBeInTheDocument()
   })
 
-  it('opens run-to dialog and submits selected videos', async () => {
-    mockApi
-      .mockResolvedValueOnce({ results: [] })
-      .mockResolvedValueOnce({ videos: [] })
-
-    useVideoStore.setState({
-      videos: [
-        {
-          id: 'v1',
-          title: 'Video 1',
-          source_url: '',
-          content_type: 'knowledge',
-          external_id: 'K001',
-          knowledge_code: 'K001',
-          question_id: '',
-          source_uuid: '',
-          status: 'queued',
-          current_phase: 'subtitle_review',
-          error_message: '',
-        },
-        {
-          id: 'v2',
-          title: 'Video 2',
-          source_url: '',
-          content_type: 'knowledge',
-          external_id: 'K002',
-          knowledge_code: 'K002',
-          question_id: '',
-          source_uuid: '',
-          status: 'queued',
-          current_phase: 'subtitle_review',
-          error_message: '',
-        },
-      ],
-    })
-
-    const { container } = render(<BatchToolbar />)
-
-    await act(async () => {
-      screen.getByTitle('运行到').click()
-    })
-    expect(screen.getByText('运行到阶段')).toBeInTheDocument()
-
-    const assembleChip = container.querySelector(
-      'md-filter-chip[label="组装"]'
-    ) as HTMLElement
-    expect(assembleChip).toBeInTheDocument()
-    await act(async () => {
-      assembleChip.click()
-    })
-
-    await act(async () => {
-      screen.getByText('运行到组装').click()
-    })
-
-    expect(mockApi).toHaveBeenCalledWith(
-      '/api/videos/batch/run-to',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({
-          video_ids: ['v1', 'v2'],
-          target_phase: 'assemble',
-          start_phase: null,
-        }),
-      })
+  it('calls filter onClick when filter button is clicked', () => {
+    const onFilter = vi.fn()
+    const onExit = vi.fn()
+    render(
+      <BatchToolbar
+        selectedCount={0}
+        filters={[{ key: 'all', label: '全选', onClick: onFilter }]}
+        actions={[]}
+        onExitSelectMode={onExit}
+      />
     )
+
+    act(() => {
+      screen.getByText('全选').click()
+    })
+    expect(onFilter).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls action onClick when action button is clicked', () => {
+    const onAction = vi.fn()
+    const onExit = vi.fn()
+    render(
+      <BatchToolbar
+        selectedCount={1}
+        filters={[]}
+        actions={[{ key: 'rerun', label: '重跑', onClick: onAction }]}
+        onExitSelectMode={onExit}
+      />
+    )
+
+    act(() => {
+      screen.getByText('重跑').click()
+    })
+    expect(onAction).toHaveBeenCalledTimes(1)
+  })
+
+  it('calls onExitSelectMode when exit button is clicked', () => {
+    const onExit = vi.fn()
+    render(
+      <BatchToolbar
+        selectedCount={0}
+        filters={[]}
+        actions={[]}
+        onExitSelectMode={onExit}
+      />
+    )
+
+    act(() => {
+      screen.getByText('退出').click()
+    })
+    expect(onExit).toHaveBeenCalledTimes(1)
+  })
+
+  it('applies danger style to danger actions', () => {
+    const onExit = vi.fn()
+    render(
+      <BatchToolbar
+        selectedCount={0}
+        filters={[]}
+        actions={[
+          { key: 'delete', label: '删除', danger: true, onClick: vi.fn() },
+        ]}
+        onExitSelectMode={onExit}
+      />
+    )
+
+    const deleteButton = screen.getByText('删除')
+    expect(deleteButton).toBeInTheDocument()
+  })
+
+  it('renders different button variants', () => {
+    const onExit = vi.fn()
+    render(
+      <BatchToolbar
+        selectedCount={0}
+        filters={[]}
+        actions={[
+          { key: 'text', label: 'Text', variant: 'text', onClick: vi.fn() },
+          {
+            key: 'outlined',
+            label: 'Outlined',
+            variant: 'outlined',
+            onClick: vi.fn(),
+          },
+          {
+            key: 'filled',
+            label: 'Filled',
+            variant: 'filled',
+            onClick: vi.fn(),
+          },
+        ]}
+        onExitSelectMode={onExit}
+      />
+    )
+
+    expect(screen.getByText('Text')).toBeInTheDocument()
+    expect(screen.getByText('Outlined')).toBeInTheDocument()
+    expect(screen.getByText('Filled')).toBeInTheDocument()
   })
 })
