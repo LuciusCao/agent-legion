@@ -9,25 +9,14 @@ import {
 } from '@testing-library/react'
 import { AgentAllocationList } from './AgentAllocationList'
 import { useUiStore } from '../stores/uiStore'
-import {
-  assignAgent,
-  fetchAgents,
-  fetchWorkspaceAgents,
-  unassignAgent,
-} from '../api'
+import { fetchAgents } from '../api'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
   fetchAgents: vi.fn(),
-  fetchWorkspaceAgents: vi.fn(),
-  assignAgent: vi.fn(),
-  unassignAgent: vi.fn(),
 }))
 
 const mockFetchAgents = vi.mocked(fetchAgents)
-const mockFetchWorkspaceAgents = vi.mocked(fetchWorkspaceAgents)
-const mockAssignAgent = vi.mocked(assignAgent)
-const mockUnassignAgent = vi.mocked(unassignAgent)
 
 const agents = [
   {
@@ -54,25 +43,29 @@ describe('AgentAllocationList', () => {
     useUiStore.setState({ toast: null })
     mockFetchAgents.mockReset()
     mockFetchAgents.mockResolvedValue({ agents: [] })
-    mockFetchWorkspaceAgents.mockReset()
-    mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
-    mockAssignAgent.mockReset()
-    mockUnassignAgent.mockReset()
   })
 
   it('shows loading state initially', () => {
     mockFetchAgents.mockImplementation(() => new Promise(() => {}))
-    mockFetchWorkspaceAgents.mockImplementation(() => new Promise(() => {}))
-    render(<AgentAllocationList workspaceId="ws1" />)
+    render(
+      <AgentAllocationList
+        workspaceId="ws1"
+        assignments={null}
+        onAssignmentsChange={() => {}}
+      />
+    )
     expect(screen.getByText('加载中...')).toBeInTheDocument()
   })
 
   it('renders available and assigned agents after fetch', async () => {
     mockFetchAgents.mockResolvedValue({ agents })
-    mockFetchWorkspaceAgents.mockResolvedValue({
-      agents: [{ agent_id: 'a1', concurrency_limit: 2 }],
-    })
-    render(<AgentAllocationList workspaceId="ws1" />)
+    render(
+      <AgentAllocationList
+        workspaceId="ws1"
+        assignments={[{ agent_id: 'a1', concurrency_limit: 2 }]}
+        onAssignmentsChange={() => {}}
+      />
+    )
 
     await waitFor(() => {
       expect(screen.getByText('Agent One')).toBeInTheDocument()
@@ -87,18 +80,16 @@ describe('AgentAllocationList', () => {
   })
 
   it('opens concurrency input and assigns agent on confirm', async () => {
-    let workspaceAgents: { agent_id: string; concurrency_limit: number }[] = []
     mockFetchAgents.mockResolvedValue({ agents })
-    mockFetchWorkspaceAgents.mockImplementation(() =>
-      Promise.resolve({ agents: workspaceAgents })
-    )
-    mockAssignAgent.mockResolvedValue({
-      agent_id: 'a2',
-      workspace_id: 'ws1',
-      concurrency_limit: 3,
-    })
 
-    render(<AgentAllocationList workspaceId="ws1" />)
+    const onAssignmentsChange = vi.fn()
+    render(
+      <AgentAllocationList
+        workspaceId="ws1"
+        assignments={null}
+        onAssignmentsChange={onAssignmentsChange}
+      />
+    )
     await waitFor(() => {
       expect(screen.getByText('Agent Two')).toBeInTheDocument()
     })
@@ -118,26 +109,27 @@ describe('AgentAllocationList', () => {
     input.value = '3'
     fireEvent.input(input)
 
-    workspaceAgents = [{ agent_id: 'a2', concurrency_limit: 3 }]
     await act(async () => {
       screen.getByText('确认').click()
     })
 
     await waitFor(() => {
-      expect(mockAssignAgent).toHaveBeenCalledWith('ws1', 'a2', 3)
-    })
-    expect(mockFetchWorkspaceAgents).toHaveBeenCalledTimes(2)
-    expect(useUiStore.getState().toast).toEqual({
-      message: '分配成功',
-      type: 'success',
+      expect(onAssignmentsChange).toHaveBeenCalledWith([
+        { agent_id: 'a2', concurrency_limit: 3 },
+      ])
     })
   })
 
   it('closes inline form when cancel is clicked', async () => {
     mockFetchAgents.mockResolvedValue({ agents })
-    mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
 
-    render(<AgentAllocationList workspaceId="ws1" />)
+    render(
+      <AgentAllocationList
+        workspaceId="ws1"
+        assignments={null}
+        onAssignmentsChange={() => {}}
+      />
+    )
     await waitFor(() => {
       expect(screen.getByText('Agent Two')).toBeInTheDocument()
     })
@@ -164,23 +156,17 @@ describe('AgentAllocationList', () => {
     expect(within(agentTwoRow).getByText('分配')).toBeInTheDocument()
   })
 
-  it('disables assign buttons while an assignment is in flight', async () => {
+  it('assigns agent with concurrency limit on confirm', async () => {
     mockFetchAgents.mockResolvedValue({ agents })
-    mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
 
-    let resolveAssign: (value: {
-      agent_id: string
-      workspace_id: string
-      concurrency_limit: number
-    }) => void
-    mockAssignAgent.mockImplementation(
-      () =>
-        new Promise((resolve) => {
-          resolveAssign = resolve
-        })
+    const onAssignmentsChange = vi.fn()
+    render(
+      <AgentAllocationList
+        workspaceId="ws1"
+        assignments={null}
+        onAssignmentsChange={onAssignmentsChange}
+      />
     )
-
-    render(<AgentAllocationList workspaceId="ws1" />)
     await waitFor(() => {
       expect(screen.getByText('Agent Two')).toBeInTheDocument()
     })
@@ -203,31 +189,23 @@ describe('AgentAllocationList', () => {
       screen.getByText('确认').click()
     })
 
-    const confirmBtn = screen
-      .getByText('确认')
-      .closest('md-filled-button') as HTMLElement
-    expect(confirmBtn).toHaveAttribute('disabled')
-
-    await act(async () => {
-      resolveAssign({
-        agent_id: 'a2',
-        workspace_id: 'ws1',
-        concurrency_limit: 2,
-      })
-    })
-
     await waitFor(() => {
-      expect(mockAssignAgent).toHaveBeenCalledWith('ws1', 'a2', 2)
+      expect(onAssignmentsChange).toHaveBeenCalledWith([
+        { agent_id: 'a2', concurrency_limit: 2 },
+      ])
     })
   })
 
   it('shows toast error when initial fetch fails', async () => {
     mockFetchAgents.mockRejectedValue(new Error('fetch agents failed'))
-    mockFetchWorkspaceAgents.mockRejectedValue(
-      new Error('fetch workspace agents failed')
-    )
 
-    render(<AgentAllocationList workspaceId="ws1" />)
+    render(
+      <AgentAllocationList
+        workspaceId="ws1"
+        assignments={null}
+        onAssignmentsChange={() => {}}
+      />
+    )
 
     await waitFor(() => {
       expect(useUiStore.getState().toast).toEqual({
@@ -238,20 +216,16 @@ describe('AgentAllocationList', () => {
   })
 
   it('unassigns agent when cancel button is clicked', async () => {
-    let workspaceAgents: { agent_id: string; concurrency_limit: number }[] = [
-      { agent_id: 'a1', concurrency_limit: 2 },
-    ]
     mockFetchAgents.mockResolvedValue({ agents })
-    mockFetchWorkspaceAgents.mockImplementation(() =>
-      Promise.resolve({ agents: workspaceAgents })
-    )
-    mockUnassignAgent.mockResolvedValue({
-      agent_id: 'a1',
-      workspace_id: 'ws1',
-      removed: true,
-    })
 
-    render(<AgentAllocationList workspaceId="ws1" />)
+    const onAssignmentsChange = vi.fn()
+    render(
+      <AgentAllocationList
+        workspaceId="ws1"
+        assignments={[{ agent_id: 'a1', concurrency_limit: 2 }]}
+        onAssignmentsChange={onAssignmentsChange}
+      />
+    )
     await waitFor(() => {
       expect(screen.getByText('Agent One')).toBeInTheDocument()
     })
@@ -260,36 +234,26 @@ describe('AgentAllocationList', () => {
       .getByText('Agent One')
       .closest('li') as HTMLElement
     const unassignBtn = within(agentOneRow).getByText('取消分配')
-    workspaceAgents = []
     await act(async () => {
       unassignBtn.click()
     })
 
     await waitFor(() => {
-      expect(mockUnassignAgent).toHaveBeenCalledWith('ws1', 'a1')
-    })
-    expect(mockFetchWorkspaceAgents).toHaveBeenCalledTimes(2)
-    expect(useUiStore.getState().toast).toEqual({
-      message: '已取消分配',
-      type: 'success',
+      expect(onAssignmentsChange).toHaveBeenCalledWith([])
     })
   })
 
   it('updates concurrency limit and saves assignment', async () => {
-    let workspaceAgents: { agent_id: string; concurrency_limit: number }[] = [
-      { agent_id: 'a1', concurrency_limit: 2 },
-    ]
     mockFetchAgents.mockResolvedValue({ agents })
-    mockFetchWorkspaceAgents.mockImplementation(() =>
-      Promise.resolve({ agents: workspaceAgents })
-    )
-    mockAssignAgent.mockResolvedValue({
-      agent_id: 'a1',
-      workspace_id: 'ws1',
-      concurrency_limit: 5,
-    })
 
-    render(<AgentAllocationList workspaceId="ws1" />)
+    const onAssignmentsChange = vi.fn()
+    render(
+      <AgentAllocationList
+        workspaceId="ws1"
+        assignments={[{ agent_id: 'a1', concurrency_limit: 2 }]}
+        onAssignmentsChange={onAssignmentsChange}
+      />
+    )
     await waitFor(() => {
       expect(screen.getByText('Agent One')).toBeInTheDocument()
     })
@@ -303,58 +267,10 @@ describe('AgentAllocationList', () => {
     input.value = '5'
     fireEvent.input(input)
 
-    workspaceAgents = [{ agent_id: 'a1', concurrency_limit: 5 }]
-    await act(async () => {
-      within(agentOneRow).getByText('保存分配').click()
-    })
-
     await waitFor(() => {
-      expect(mockAssignAgent).toHaveBeenCalledWith('ws1', 'a1', 5)
+      expect(onAssignmentsChange).toHaveBeenCalledWith([
+        { agent_id: 'a1', concurrency_limit: 5 },
+      ])
     })
-    expect(mockFetchWorkspaceAgents).toHaveBeenCalledTimes(2)
-    expect(useUiStore.getState().toast).toEqual({
-      message: '并发限制已更新',
-      type: 'success',
-    })
-  })
-
-  it('shows toast on API error', async () => {
-    mockFetchAgents.mockResolvedValue({ agents })
-    mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
-    mockAssignAgent.mockRejectedValue(new Error('network error'))
-
-    render(<AgentAllocationList workspaceId="ws1" />)
-    await waitFor(() => {
-      expect(screen.getByText('Agent Two')).toBeInTheDocument()
-    })
-
-    const agentTwoRow = screen
-      .getByText('Agent Two')
-      .closest('li') as HTMLElement
-    await act(async () => {
-      within(agentTwoRow).getByText('分配').click()
-    })
-
-    const input = agentTwoRow.querySelector(
-      'md-outlined-text-field[aria-label="并发限制"]'
-    ) as HTMLInputElement
-    input.value = '2'
-    fireEvent.input(input)
-
-    await act(async () => {
-      screen.getByText('确认').click()
-    })
-
-    await waitFor(() => {
-      expect(useUiStore.getState().toast).toEqual({
-        message: 'network error',
-        type: 'error',
-      })
-    })
-
-    // Inline form should stay open after a failed assignment
-    expect(
-      agentTwoRow.querySelector('md-outlined-text-field[aria-label="并发限制"]')
-    ).toBeInTheDocument()
   })
 })

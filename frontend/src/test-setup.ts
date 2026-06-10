@@ -39,3 +39,30 @@ class ResizeObserverMock {
 ;(
   globalThis as unknown as { ResizeObserver: typeof ResizeObserver }
 ).ResizeObserver = ResizeObserverMock as unknown as typeof ResizeObserver
+
+class IntersectionObserverMock {
+  callback: any
+  entries: any[] = []
+
+  constructor(callback: any) {
+    this.callback = callback
+  }
+
+  observe = vi.fn((target: any) => {
+    this.entries.push({
+      target,
+      isIntersecting: true,
+      intersectionRatio: 1,
+      boundingClientRect: {},
+      intersectionRect: {},
+      rootBounds: null,
+      time: Date.now(),
+    })
+    this.callback(this.entries, this)
+  })
+
+  disconnect = vi.fn()
+  unobserve = vi.fn()
+}
+
+;(globalThis as any).IntersectionObserver = IntersectionObserverMock

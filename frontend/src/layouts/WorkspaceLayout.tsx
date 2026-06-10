@@ -41,16 +41,9 @@ export default function WorkspaceLayout() {
   const isJobDetail =
     workspaceId &&
     location.pathname.startsWith(`/workspaces/${workspaceId}/jobs/`)
-  const isQuestionDetail =
-    workspaceId &&
-    location.pathname.startsWith(`/workspaces/${workspaceId}/questions/`)
-  const isDetailPage = isJobDetail || isQuestionDetail
+  const isDetailPage = isJobDetail
 
-  const backTo = isJobDetail
-    ? `/workspaces/${workspaceId}/jobs`
-    : isQuestionDetail
-      ? `/workspaces/${workspaceId}`
-      : undefined
+  const backTo = isDetailPage ? `/workspaces/${workspaceId}` : undefined
 
   useEffect(() => {
     if (workspaces.length === 0) {
