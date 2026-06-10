@@ -622,6 +622,10 @@ pre {
   overflow: hidden;
 }
 
+.settings-main {
+  padding: 24px 24px 32px;
+}
+
 .artifact-preview {
   max-height: 420px;
   overflow: auto;
