@@ -52,11 +52,15 @@ const setWorkerPausedMock = vi.fn()
 const fetchWorkerStatusMock = vi.fn()
 
 vi.mock('../stores/uiStore', () => ({
-  useUiStore: () => ({
-    workerPaused: false,
-    fetchWorkerStatus: fetchWorkerStatusMock,
-    setWorkerPaused: setWorkerPausedMock,
-  }),
+  useUiStore: (selector?: (state: any) => any) => {
+    const state = {
+      agents: [],
+      workerPaused: false,
+      fetchWorkerStatus: fetchWorkerStatusMock,
+      setWorkerPaused: setWorkerPausedMock,
+    }
+    return selector ? selector(state) : state
+  },
 }))
 
 describe('WorkspaceLayout', () => {
@@ -153,7 +157,9 @@ describe('WorkspaceLayout', () => {
     )
     const header = container.querySelector('header')
     expect(header).toBeTruthy()
-    expect(header?.getAttribute('style')).toContain('border-bottom: 1px solid transparent')
+    expect(header?.getAttribute('style')).toContain(
+      'border-bottom: 1px solid transparent'
+    )
     expect(header?.getAttribute('style')).not.toContain('box-shadow')
   })
 
