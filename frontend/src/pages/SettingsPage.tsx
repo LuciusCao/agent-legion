@@ -163,7 +163,7 @@ export function SettingsPage() {
                 key={item.id}
                 className={
                   activeSection === item.id
-                    ? `${styles.navItem} ${styles.navItemActive}`
+                    ? styles.navItemActive
                     : styles.navItem
                 }
                 onClick={() => scrollToSection(item.id)}

@@ -1,6 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
-  act,
   fireEvent,
   render,
   screen,
@@ -14,6 +13,9 @@ import { fetchAgents } from '../api'
 vi.mock('../api', () => ({
   api: vi.fn(),
   fetchAgents: vi.fn(),
+  fetchWorkspaceAgents: vi.fn(),
+  assignAgent: vi.fn(),
+  unassignAgent: vi.fn(),
 }))
 
 const mockFetchAgents = vi.mocked(fetchAgents)
@@ -51,7 +53,7 @@ describe('AgentAllocationList', () => {
       <AgentAllocationList
         workspaceId="ws1"
         assignments={null}
-        onAssignmentsChange={() => {}}
+        onAssignmentsChange={vi.fn()}
       />
     )
     expect(screen.getByText('加载中...')).toBeInTheDocument()
@@ -63,7 +65,7 @@ describe('AgentAllocationList', () => {
       <AgentAllocationList
         workspaceId="ws1"
         assignments={[{ agent_id: 'a1', concurrency_limit: 2 }]}
-        onAssignmentsChange={() => {}}
+        onAssignmentsChange={vi.fn()}
       />
     )
 
@@ -80,38 +82,29 @@ describe('AgentAllocationList', () => {
   })
 
   it('opens concurrency input and assigns agent on confirm', async () => {
-    mockFetchAgents.mockResolvedValue({ agents })
-
     const onAssignmentsChange = vi.fn()
+    mockFetchAgents.mockResolvedValue({ agents })
     render(
       <AgentAllocationList
         workspaceId="ws1"
-        assignments={null}
+        assignments={[]}
         onAssignmentsChange={onAssignmentsChange}
       />
     )
+
     await waitFor(() => {
       expect(screen.getByText('Agent Two')).toBeInTheDocument()
     })
 
-    const agentTwoRow = screen
-      .getByText('Agent Two')
-      .closest('li') as HTMLElement
-    const assignBtn = within(agentTwoRow).getByText('分配')
-    await act(async () => {
-      assignBtn.click()
+    fireEvent.click(screen.getAllByText('分配')[1])
+    await waitFor(() => {
+      expect(screen.getByLabelText('并发限制')).toBeInTheDocument()
     })
 
-    const input = agentTwoRow.querySelector(
-      'md-outlined-text-field[aria-label="并发限制"]'
-    ) as HTMLInputElement
-    expect(input).toBeInTheDocument()
+    const input = screen.getByLabelText('并发限制') as any
     input.value = '3'
     fireEvent.input(input)
-
-    await act(async () => {
-      screen.getByText('确认').click()
-    })
+    fireEvent.click(screen.getByText('确认'))
 
     await waitFor(() => {
       expect(onAssignmentsChange).toHaveBeenCalledWith([
@@ -122,103 +115,66 @@ describe('AgentAllocationList', () => {
 
   it('closes inline form when cancel is clicked', async () => {
     mockFetchAgents.mockResolvedValue({ agents })
-
     render(
       <AgentAllocationList
         workspaceId="ws1"
-        assignments={null}
-        onAssignmentsChange={() => {}}
+        assignments={[]}
+        onAssignmentsChange={vi.fn()}
       />
     )
+
     await waitFor(() => {
       expect(screen.getByText('Agent Two')).toBeInTheDocument()
     })
 
-    const agentTwoRow = screen
-      .getByText('Agent Two')
-      .closest('li') as HTMLElement
-    const assignBtn = within(agentTwoRow).getByText('分配')
-    await act(async () => {
-      assignBtn.click()
+    fireEvent.click(screen.getAllByText('分配')[1])
+    await waitFor(() => {
+      expect(screen.getByText('取消')).toBeInTheDocument()
     })
 
-    expect(
-      agentTwoRow.querySelector('md-outlined-text-field[aria-label="并发限制"]')
-    ).toBeInTheDocument()
-
-    await act(async () => {
-      screen.getByText('取消').click()
+    fireEvent.click(screen.getByText('取消'))
+    await waitFor(() => {
+      expect(screen.queryByLabelText('并发限制')).not.toBeInTheDocument()
     })
-
-    expect(
-      agentTwoRow.querySelector('md-outlined-text-field[aria-label="并发限制"]')
-    ).not.toBeInTheDocument()
-    expect(within(agentTwoRow).getByText('分配')).toBeInTheDocument()
   })
 
-  it('assigns agent with concurrency limit on confirm', async () => {
-    mockFetchAgents.mockResolvedValue({ agents })
-
-    const onAssignmentsChange = vi.fn()
+  it('shows empty states when no agents', async () => {
+    mockFetchAgents.mockResolvedValue({ agents: [] })
     render(
       <AgentAllocationList
         workspaceId="ws1"
-        assignments={null}
-        onAssignmentsChange={onAssignmentsChange}
+        assignments={[]}
+        onAssignmentsChange={vi.fn()}
       />
     )
-    await waitFor(() => {
-      expect(screen.getByText('Agent Two')).toBeInTheDocument()
-    })
-
-    const agentTwoRow = screen
-      .getByText('Agent Two')
-      .closest('li') as HTMLElement
-    const assignBtn = within(agentTwoRow).getByText('分配')
-    await act(async () => {
-      assignBtn.click()
-    })
-
-    const input = agentTwoRow.querySelector(
-      'md-outlined-text-field[aria-label="并发限制"]'
-    ) as HTMLInputElement
-    input.value = '2'
-    fireEvent.input(input)
-
-    await act(async () => {
-      screen.getByText('确认').click()
-    })
 
     await waitFor(() => {
-      expect(onAssignmentsChange).toHaveBeenCalledWith([
-        { agent_id: 'a2', concurrency_limit: 2 },
-      ])
+      expect(screen.getByText('暂无可用智能体')).toBeInTheDocument()
     })
+    expect(screen.getByText('当前工作空间未分配智能体')).toBeInTheDocument()
   })
 
   it('shows toast error when initial fetch fails', async () => {
-    mockFetchAgents.mockRejectedValue(new Error('fetch agents failed'))
-
+    mockFetchAgents.mockRejectedValue(new Error('network error'))
     render(
       <AgentAllocationList
         workspaceId="ws1"
         assignments={null}
-        onAssignmentsChange={() => {}}
+        onAssignmentsChange={vi.fn()}
       />
     )
 
     await waitFor(() => {
       expect(useUiStore.getState().toast).toEqual({
-        message: 'fetch agents failed',
+        message: 'network error',
         type: 'error',
       })
     })
   })
 
   it('unassigns agent when cancel button is clicked', async () => {
-    mockFetchAgents.mockResolvedValue({ agents })
-
     const onAssignmentsChange = vi.fn()
+    mockFetchAgents.mockResolvedValue({ agents })
     render(
       <AgentAllocationList
         workspaceId="ws1"
@@ -226,27 +182,22 @@ describe('AgentAllocationList', () => {
         onAssignmentsChange={onAssignmentsChange}
       />
     )
+
     await waitFor(() => {
       expect(screen.getByText('Agent One')).toBeInTheDocument()
     })
 
-    const agentOneRow = screen
-      .getByText('Agent One')
-      .closest('li') as HTMLElement
-    const unassignBtn = within(agentOneRow).getByText('取消分配')
-    await act(async () => {
-      unassignBtn.click()
-    })
+    const assignedSection = screen.getByTestId('assigned-agents')
+    fireEvent.click(within(assignedSection).getByText('取消分配'))
 
     await waitFor(() => {
       expect(onAssignmentsChange).toHaveBeenCalledWith([])
     })
   })
 
-  it('updates concurrency limit and saves assignment', async () => {
-    mockFetchAgents.mockResolvedValue({ agents })
-
+  it('updates concurrency limit via inline input', async () => {
     const onAssignmentsChange = vi.fn()
+    mockFetchAgents.mockResolvedValue({ agents })
     render(
       <AgentAllocationList
         workspaceId="ws1"
@@ -254,22 +205,46 @@ describe('AgentAllocationList', () => {
         onAssignmentsChange={onAssignmentsChange}
       />
     )
+
     await waitFor(() => {
       expect(screen.getByText('Agent One')).toBeInTheDocument()
     })
 
-    const agentOneRow = screen
-      .getByText('Agent One')
-      .closest('li') as HTMLElement
-    const input = agentOneRow.querySelector(
-      'md-outlined-text-field[aria-label="并发限制"]'
-    ) as HTMLInputElement
+    const assignedSection = screen.getByTestId('assigned-agents')
+    const input = within(assignedSection).getByLabelText('并发限制') as any
     input.value = '5'
     fireEvent.input(input)
 
     await waitFor(() => {
       expect(onAssignmentsChange).toHaveBeenCalledWith([
         { agent_id: 'a1', concurrency_limit: 5 },
+      ])
+    })
+  })
+
+  it('clamps concurrency limit to minimum of 1', async () => {
+    const onAssignmentsChange = vi.fn()
+    mockFetchAgents.mockResolvedValue({ agents })
+    render(
+      <AgentAllocationList
+        workspaceId="ws1"
+        assignments={[{ agent_id: 'a1', concurrency_limit: 2 }]}
+        onAssignmentsChange={onAssignmentsChange}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('Agent One')).toBeInTheDocument()
+    })
+
+    const assignedSection = screen.getByTestId('assigned-agents')
+    const input = within(assignedSection).getByLabelText('并发限制') as any
+    input.value = '0'
+    fireEvent.input(input)
+
+    await waitFor(() => {
+      expect(onAssignmentsChange).toHaveBeenCalledWith([
+        { agent_id: 'a1', concurrency_limit: 1 },
       ])
     })
   })

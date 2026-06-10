@@ -84,6 +84,7 @@ class WorkspaceCreateRequest(BaseModel):
     cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)
     intake_config: dict[str, Any] = Field(default_factory=dict)
+    pipeline_config: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkspaceUpdateRequest(BaseModel):
@@ -94,6 +95,7 @@ class WorkspaceUpdateRequest(BaseModel):
     cms_config: dict[str, Any] | None = None
     resource_config: dict[str, Any] | None = None
     intake_config: dict[str, Any] | None = None
+    pipeline_config: dict[str, Any] | None = None
 
 
 class WorkspaceSettingsResponse(BaseModel):
@@ -107,6 +109,8 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
     pipelineKey: str | None = None
+    localConcurrency: int | None = None
+    agentConcurrency: int | None = None
     resources: dict[str, Any] | None = None
 
 
@@ -393,7 +397,7 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
     }
 
 
-def _workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
+def _workspace_settings_payload(workspace: dict[str, Any], settings: Settings) -> dict[str, Any]:
     intake_config = workspace.get("intake_config")
     if not isinstance(intake_config, dict):
         intake_config = {}
@@ -405,6 +409,12 @@ def _workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
     resources = resource_config.get("resources")
     if not isinstance(resources, dict):
         resources = {}
+    pipeline_config = workspace.get("pipeline_config")
+    if not isinstance(pipeline_config, dict):
+        pipeline_config = {}
+    definition = _definition(
+        settings, str(workspace.get("default_pipeline_key") or "question_content")
+    )
     return {
         "entityType": str(workspace.get("default_entity") or "question"),
         "intakeModes": enabled_modes if isinstance(enabled_modes, list) else [],
@@ -413,6 +423,8 @@ def _workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
         "agentIds": [],
         "concurrencyLimit": 1,
         "resources": resources,
+        "localConcurrency": pipeline_config.get("local", definition.concurrency.local),
+        "agentConcurrency": pipeline_config.get("agent", definition.concurrency.agent),
     }
 
 
@@ -644,6 +656,7 @@ def create_jobs_router(
                 cms_config=payload.cms_config,
                 resource_config=payload.resource_config,
                 intake_config=payload.intake_config,
+                pipeline_config=payload.pipeline_config,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
@@ -667,7 +680,7 @@ def create_jobs_router(
     def get_workspace_settings(workspace_id: str) -> WorkspaceSettingsResponse:
         _require_enabled(settings)
         workspace = _workspace_or_404(job_db, workspace_id)
-        return WorkspaceSettingsResponse(settings=_workspace_settings_payload(workspace))
+        return WorkspaceSettingsResponse(settings=_workspace_settings_payload(workspace, settings))
 
     @router.patch(
         "/workspaces/{workspace_id}/settings/{section}",
@@ -719,13 +732,29 @@ def create_jobs_router(
         elif section == "pipeline":
             if payload.pipelineKey is not None:
                 _definition(settings, payload.pipelineKey)
+            pipeline_config = workspace.get("pipeline_config")
+            if not isinstance(pipeline_config, dict):
+                pipeline_config = {}
+            if payload.localConcurrency is not None:
+                if payload.localConcurrency < 1:
+                    raise HTTPException(
+                        status_code=400, detail="localConcurrency must be at least 1"
+                    )
+                pipeline_config["local"] = payload.localConcurrency
+            if payload.agentConcurrency is not None:
+                if payload.agentConcurrency < 1:
+                    raise HTTPException(
+                        status_code=400, detail="agentConcurrency must be at least 1"
+                    )
+                pipeline_config["agent"] = payload.agentConcurrency
             workspace = job_db.update_workspace(
                 workspace_id,
                 default_pipeline_key=payload.pipelineKey,
+                pipeline_config=pipeline_config if pipeline_config else None,
             )
         else:
             raise HTTPException(status_code=404, detail="Unknown settings section")
-        return WorkspaceSettingsResponse(settings=_workspace_settings_payload(workspace))
+        return WorkspaceSettingsResponse(settings=_workspace_settings_payload(workspace, settings))
 
     @router.post(
         "/workspaces/{workspace_id}/settings/test-connection",
@@ -758,6 +787,7 @@ def create_jobs_router(
                 cms_config=payload.cms_config,
                 resource_config=payload.resource_config,
                 intake_config=payload.intake_config,
+                pipeline_config=payload.pipeline_config,
             )
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc

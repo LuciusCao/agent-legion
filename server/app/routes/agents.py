@@ -1,6 +1,6 @@
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, WebSocket
+from fastapi import APIRouter, Depends, HTTPException, WebSocket
 from pydantic import BaseModel
 
 from ..agents import AgentStatusManager
@@ -61,6 +61,8 @@ def create_agents_router(agent_manager: AgentStatusManager) -> APIRouter:
         manager: Annotated[AgentStatusManager, Depends(get_agent_manager)],
         concurrency_limit: int = 1,
     ) -> dict[str, Any]:
+        if concurrency_limit < 1:
+            raise HTTPException(status_code=400, detail="concurrency_limit must be at least 1")
         db.set_workspace_agent_assignment(workspace_id, agent_id, concurrency_limit)
         manager.set_workspace_assignment(workspace_id, agent_id, concurrency_limit)
         return {
