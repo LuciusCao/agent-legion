@@ -86,7 +86,9 @@ export default function JobDetailPage() {
 
   // Poll every 5s for running jobs
   const detailRef = useRef(detail)
-  detailRef.current = detail
+  useEffect(() => {
+    detailRef.current = detail
+  }, [detail])
   useEffect(() => {
     if (!jobId) return
     let stale = false
