@@ -4,6 +4,9 @@ import { formatRelativeTime } from '../helpers'
 import type { JobRecord } from '../types'
 import styles from './JobListItem.module.css'
 
+const TITLE_MAX_LEN = 30
+const STEM_MAX_LEN = 60
+
 export interface JobListItemProps {
   job: JobRecord
   selected: boolean
@@ -57,7 +60,19 @@ export function JobListItem({
   }
 
   return (
-    <div className={styles.row} data-job={job.id} onClick={handleRowClick}>
+    <div
+      className={styles.row}
+      data-job={job.id}
+      onClick={handleRowClick}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault()
+          handleRowClick()
+        }
+      }}
+    >
       {selectMode && (
         <input
           type="checkbox"
@@ -74,12 +89,14 @@ export function JobListItem({
       <div className={styles.main}>
         <div className={styles.sourceId}>
           {job.title
-            ? `${job.title.length > 30 ? job.title.slice(0, 30) + '…' : job.title} - ${job.source_id}`
+            ? `${job.title.length > TITLE_MAX_LEN ? job.title.slice(0, TITLE_MAX_LEN) + '…' : job.title} - ${job.source_id}`
             : job.source_id}
         </div>
         {job.stem && (
           <div className={styles.stem}>
-            {job.stem.length > 60 ? job.stem.slice(0, 60) + '…' : job.stem}
+            {job.stem.length > STEM_MAX_LEN
+              ? job.stem.slice(0, STEM_MAX_LEN) + '…'
+              : job.stem}
           </div>
         )}
       </div>
