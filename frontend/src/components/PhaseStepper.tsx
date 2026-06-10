@@ -37,7 +37,9 @@ export const PhaseStepper = React.memo(function PhaseStepper({
         const state = getStepState(video, index, currentIndex)
         return (
           <div key={phase} className={styles.step} title={PHASE_LABELS[phase]}>
-            <div className={`${styles.stepBar} ${styles[state]}`} />
+            <div
+              className={`${styles.stepBar} ${styles[state]} ${state === 'running' ? 'pulse-blue' : ''}`}
+            />
           </div>
         )
       })}
