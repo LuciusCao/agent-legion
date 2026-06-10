@@ -187,6 +187,19 @@ npm run dev
 
 The Vite dev server runs on `http://localhost:5173`. `vite.config.ts` already proxies `/api` requests to the backend at `http://127.0.0.1:8000`, so open the browser at **5173** for development.
 
+For multi-agent development in separate git worktrees, each worktree must use separate backend/frontend ports and its own local `data/` directory. Configure the Vite API proxy per worktree with `frontend/.env`:
+
+```bash
+# Example for one secondary worktree
+UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8001
+cd frontend
+cp .env.example .env
+printf 'VITE_API_TARGET=http://127.0.0.1:8001\n' > .env
+npm run dev -- --port 5174
+```
+
+Use a different backend port, frontend port, branch, and worktree path for each coding agent. Do not point multiple worktrees at the same `data_dir`, because SQLite state, logs, videos, packages, and Agent Legion jobs are local runtime data.
+
 ### Production-Style Frontend Build
 
 ```bash
