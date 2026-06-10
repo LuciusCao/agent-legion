@@ -6,6 +6,7 @@ import type {
   JobDetailResponse,
   JobsResponse,
   PipelineResponse,
+  QuestionDetailResponse,
   WorkspaceAgentAssignment,
   WorkspaceRecord,
   WorkspaceStats,
@@ -184,6 +185,15 @@ export async function fetchJobArtifact(
 ): Promise<ArtifactResponse> {
   return api(
     `/api/jobs/${encodeURIComponent(jobId)}/artifacts/${encodeURIComponent(artifactName)}`
+  )
+}
+
+export async function fetchQuestionDetail(
+  workspaceId: string,
+  questionId: string
+): Promise<QuestionDetailResponse> {
+  return api(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/questions/${encodeURIComponent(questionId)}`
   )
 }
 
