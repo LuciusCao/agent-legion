@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Update job titles from CMS knowledge names for existing question jobs."""
+"""Update job titles and stems from CMS for existing question jobs."""
 
 from __future__ import annotations
 
@@ -48,7 +48,7 @@ def main() -> None:
     conn = sqlite3.connect(db_path)
     cursor = conn.cursor()
 
-    cursor.execute("SELECT id, source_id, title FROM jobs WHERE source_type = 'question'")
+    cursor.execute("SELECT id, source_id, title, stem FROM jobs WHERE source_type = 'question'")
     jobs = cursor.fetchall()
     print(f"Found {len(jobs)} question jobs")
 
@@ -56,7 +56,7 @@ def main() -> None:
     skipped = 0
     failed = 0
 
-    for job_id, source_id, old_title in jobs:
+    for job_id, source_id, old_title, old_stem in jobs:
         try:
             payload = _fetch_json(api_url, {"uuid": source_id}, token, timeout=15)
             data = _parse_question_detail_payload(payload)
@@ -68,21 +68,36 @@ def main() -> None:
 
             new_title = _question_title_from_item(data)
 
-            if new_title == old_title:
-                print(f"  [{source_id}] unchanged: {new_title[:50]}")
+            body = data.get("body")
+            new_stem = ""
+            if isinstance(body, dict):
+                new_stem = str(body.get("content") or "").strip()
+
+            title_changed = new_title != old_title
+            stem_changed = new_stem != old_stem
+
+            if not title_changed and not stem_changed:
+                print(f"  [{source_id}] unchanged")
                 skipped += 1
                 continue
 
             cursor.execute(
-                "UPDATE jobs SET title = ? WHERE id = ?",
-                (new_title, job_id),
+                "UPDATE jobs SET title = ?, stem = ? WHERE id = ?",
+                (new_title, new_stem, job_id),
             )
             conn.commit()
-            print(
-                f"  [{source_id}] updated:\n"
-                f"    old: {old_title[:60]}{'...' if len(old_title) > 60 else ''}\n"
-                f"    new: {new_title[:60]}{'...' if len(new_title) > 60 else ''}"
-            )
+            changes = []
+            if title_changed:
+                changes.append(
+                    f"    title: {old_title[:40]}{'...' if len(old_title) > 40 else ''}"
+                    f" -> {new_title[:40]}{'...' if len(new_title) > 40 else ''}"
+                )
+            if stem_changed:
+                changes.append(
+                    f"    stem: {old_stem[:40]}{'...' if len(old_stem) > 40 else ''}"
+                    f" -> {new_stem[:40]}{'...' if len(new_stem) > 40 else ''}"
+                )
+            print(f"  [{source_id}] updated:\n" + "\n".join(changes))
             updated += 1
 
         except Exception as exc:
