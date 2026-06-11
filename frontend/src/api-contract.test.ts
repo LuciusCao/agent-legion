@@ -1,8 +1,11 @@
 import { describe, expectTypeOf, it } from 'vitest'
 
+import { getWorkspaceAgents } from './api'
 import type {
   WorkspaceAgentAssignmentTransport,
   WorkspaceAgentDraft,
+  WorkspaceAgentListTransport,
+  WorkspaceAgentRequestTransport,
 } from './api-contract'
 
 describe('workspace agent API contracts', () => {
@@ -15,9 +18,16 @@ describe('workspace agent API contracts', () => {
   })
 
   it('keeps the editable draft independent of workspace_id', () => {
-    expectTypeOf<WorkspaceAgentDraft>().toEqualTypeOf<{
+    expectTypeOf<WorkspaceAgentRequestTransport>().toEqualTypeOf<{
       agent_id: string
       concurrency_limit: number
     }>()
+    expectTypeOf<WorkspaceAgentDraft>().toEqualTypeOf<WorkspaceAgentRequestTransport>()
+  })
+
+  it('returns the complete generated list transport from the GET boundary', () => {
+    expectTypeOf(
+      getWorkspaceAgents
+    ).returns.resolves.toEqualTypeOf<WorkspaceAgentListTransport>()
   })
 })

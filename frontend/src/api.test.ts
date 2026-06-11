@@ -1,5 +1,5 @@
 /// <reference types="node" />
-import { describe, expect, it, vi } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import {
   api,
@@ -11,6 +11,13 @@ import {
   setWorkspaceAgent,
   updateWorkspace,
 } from './api'
+
+const originalFetch = global.fetch
+
+afterEach(() => {
+  global.fetch = originalFetch
+  vi.restoreAllMocks()
+})
 
 function mockFetch(response: { ok: boolean; status: number; text: string }) {
   return vi.fn().mockResolvedValue({
