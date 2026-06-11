@@ -112,9 +112,9 @@ def test_worker_thread_consumes_tick_signal():
     wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
     wt.start()
 
-    wait_for_predicate(lambda: not worker_control.consume_tick())
+    wait_for_predicate(lambda: not worker_control.has_tick())
 
-    assert not worker_control.consume_tick()
+    assert not worker_control.has_tick()
 
     wt.stop(timeout=2)
 
@@ -127,7 +127,7 @@ def test_worker_thread_executes_local_work():
     settings.config = {}
     runner_pool = MagicMock()
     runner_pool.size.return_value = 1
-    runner_pool.acquire.return_value = None
+    runner_pool.acquire.side_effect = RuntimeError("Runners not initialized.")
     agent_manager = MagicMock()
     worker_control = WorkerControl()
     worker_control.resume()

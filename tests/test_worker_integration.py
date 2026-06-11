@@ -3,7 +3,9 @@ from __future__ import annotations
 import pytest
 
 from server.app.agents import AgentStatusManager
+from server.app.db import Database
 from server.app.pipeline.runners import RunnerPool
+from server.app.settings import Settings
 from server.app.worker_control import WorkerControl
 from server.app.worker_thread import WorkerThread
 from tests.helpers import wait_for_predicate
@@ -22,6 +24,24 @@ def runner_pool(agent_manager):
 @pytest.fixture
 def worker_control():
     return WorkerControl()
+
+
+@pytest.fixture
+def settings(tmp_path):
+    return Settings(
+        root_dir=tmp_path,
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={},
+    )
+
+
+@pytest.fixture
+def db(settings):
+    return Database(settings.data_dir / "video_hive.sqlite")
 
 
 @pytest.fixture
@@ -59,3 +79,10 @@ def test_worker_advances_download_to_transcribe(db, worker_thread, worker_contro
         return v is not None and v["current_phase"] == "transcribe" and v["status"] == "queued"
 
     wait_for_predicate(_reached_transcribe, timeout=5.0)
+
+    v = db.get_video(video["id"])
+    assert v is not None
+    assert v["current_phase"] == "transcribe"
+    assert v["status"] == "queued"
+    phase_runs = db.list_phase_runs(video["id"])
+    assert not any(run["status"] == "failed" for run in phase_runs)
