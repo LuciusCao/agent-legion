@@ -45,12 +45,16 @@ interface JobProgressPanelProps {
   nodes: JobNodeRecord[]
   runs: NodeRunRecord[]
   onOpenDagDialog?: () => void
+  dagExpanded?: boolean
+  onToggleDag?: () => void
 }
 
 export function JobProgressPanel({
   nodes,
   runs,
   onOpenDagDialog,
+  dagExpanded,
+  onToggleDag,
 }: JobProgressPanelProps) {
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
   const [logDialog, setLogDialog] = useState<{
@@ -89,11 +93,26 @@ export function JobProgressPanel({
       <div className={styles.stepperWrap}>
         <div className={styles.stepperHeader}>
           <h3 className={styles.panelTitle}>节点进度</h3>
-          {onOpenDagDialog && (
-            <md-icon-button aria-label="查看完整 DAG" onClick={onOpenDagDialog}>
-              <md-icon>open_in_full</md-icon>
-            </md-icon-button>
-          )}
+          <div style={{ display: 'flex', gap: 4 }}>
+            {onToggleDag && (
+              <md-icon-button
+                aria-label={dagExpanded ? '收起 DAG' : '展开 DAG'}
+                onClick={onToggleDag}
+              >
+                <md-icon>
+                  {dagExpanded ? 'expand_less' : 'account_tree'}
+                </md-icon>
+              </md-icon-button>
+            )}
+            {onOpenDagDialog && (
+              <md-icon-button
+                aria-label="查看完整 DAG"
+                onClick={onOpenDagDialog}
+              >
+                <md-icon>open_in_full</md-icon>
+              </md-icon-button>
+            )}
+          </div>
         </div>
         <DagStepper nodes={nodes} />
       </div>

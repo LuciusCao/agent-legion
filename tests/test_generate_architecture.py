@@ -29,7 +29,9 @@ def test_replace_section_with_markers():
 
 
 def test_replace_section_with_todo_placeholder():
-    content = "# Title\n\n## API Surface / Interface\n\n<!-- TODO: 阶段 2 由 AST 自动生成 -->\n\nfooter"
+    content = (
+        "# Title\n\n## API Surface / Interface\n\n<!-- TODO: 阶段 2 由 AST 自动生成 -->\n\nfooter"
+    )
     result = replace_section(content, "generated")
     assert "generated" in result
     assert "TODO" not in result

@@ -65,7 +65,7 @@ export default function JobDetailPage() {
     name: string
     content: string
   } | null>(null)
-  const [dagExpanded, setDagExpanded] = useState(true)
+  const [dagExpanded, setDagExpanded] = useState(false)
   const [dagDialogOpen, setDagDialogOpen] = useState(false)
   const artifactRequestId = useRef(0)
 
@@ -242,6 +242,8 @@ export default function JobDetailPage() {
             <JobProgressPanel
               nodes={detail.nodes}
               runs={detail.runs}
+              dagExpanded={dagExpanded}
+              onToggleDag={() => setDagExpanded((v) => !v)}
               onOpenDagDialog={() => setDagDialogOpen(true)}
             />
           )}
