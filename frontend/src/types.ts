@@ -254,6 +254,8 @@ export type JobNodeRecord = {
   error_message?: string
   started_at?: string | null
   finished_at?: string | null
+  inputs?: string[]
+  outputs?: string[]
 }
 
 export type NodeRunRecord = {
@@ -294,11 +296,24 @@ export type CreateJobBatchInput = {
 
 export type QuestionOption = Record<string, unknown>
 
+export type AnswerBlank = {
+  alternatives: string[]
+  isLatex: boolean
+}
+
+export type AnalysisStep = {
+  content: string
+  title?: string
+  step: number
+}
+
 export type QuestionNormalized = {
   stem?: string
   options?: QuestionOption[]
   answer?: unknown
   analysis?: unknown
+  answerBlanks?: AnswerBlank[]
+  analysisSteps?: AnalysisStep[][]
 }
 
 export type QuestionDetailResponse = {
