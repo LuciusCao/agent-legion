@@ -195,6 +195,7 @@ export type WorkspaceSettings = {
   cmsToken?: string
   localConcurrency?: number
   agentConcurrency?: number
+  nodeLocalConcurrency?: Record<string, number>
 }
 
 export type PipelineNodeRecord = {
@@ -219,6 +220,7 @@ export type PipelineDefinitionRecord = {
   concurrency: {
     local: number
     agent: number
+    nodes: Record<string, number>
   }
   intake?: {
     modes: PipelineIntakeModeRecord[]
@@ -234,7 +236,7 @@ export type PipelinesListResponse = {
   pipelines: Array<{
     key: string
     label: string
-    concurrency: { local: number; agent: number }
+    concurrency: { local: number; agent: number; nodes: Record<string, number> }
   }>
 }
 

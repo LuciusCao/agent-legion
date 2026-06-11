@@ -290,7 +290,7 @@ export const useSettingStore = create<SettingState>((set, get) => ({
           body: JSON.stringify({
             pipelineKey: settings.pipelineKey,
             localConcurrency: settings.localConcurrency,
-            agentConcurrency: settings.agentConcurrency,
+            nodeLocalConcurrency: settings.nodeLocalConcurrency,
           }),
         }
       )
