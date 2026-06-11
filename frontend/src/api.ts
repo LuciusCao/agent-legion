@@ -1,6 +1,7 @@
 import type {
   WorkspaceAgentAssignmentTransport,
   WorkspaceAgentListTransport,
+  WorkspaceAgentRequestTransport,
 } from './api-contract'
 import type {
   AgentStatus,
@@ -11,7 +12,6 @@ import type {
   JobsResponse,
   PipelineResponse,
   QuestionDetailResponse,
-  WorkspaceAgentAssignment,
   WorkspaceRecord,
   WorkspaceStats,
   WorkspacesResponse,
@@ -217,7 +217,7 @@ export async function fetchAgents(): Promise<{ agents: AgentStatus[] }> {
 
 export async function getWorkspaceAgents(
   workspaceId: string
-): Promise<WorkspaceAgentAssignment[]> {
+): Promise<WorkspaceAgentListTransport> {
   return api<WorkspaceAgentListTransport>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`
   )
@@ -228,13 +228,17 @@ export async function setWorkspaceAgent(
   agentId: string,
   concurrencyLimit: number
 ): Promise<WorkspaceAgentAssignmentTransport> {
-  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
-    method: 'POST',
-    body: JSON.stringify({
-      agent_id: agentId,
-      concurrency_limit: concurrencyLimit,
-    }),
-  })
+  const body: WorkspaceAgentRequestTransport = {
+    agent_id: agentId,
+    concurrency_limit: concurrencyLimit,
+  }
+  return api<WorkspaceAgentAssignmentTransport>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  )
 }
 
 export async function assignAgent(
