@@ -6,13 +6,7 @@ import type {
   PipelineDefinitionRecord,
   WorkspaceAgentAssignment,
 } from '../types'
-import {
-  api,
-  assignAgent,
-  getWorkspaceAgents,
-  setWorkspaceAgent,
-  unassignAgent,
-} from '../api'
+import { api, getWorkspaceAgents } from '../api'
 import { useUiStore } from './uiStore'
 
 type TestStatus = {
@@ -256,73 +250,53 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       workspaceDescription,
       settings,
       agentAssignments,
-      originalAgentAssignments,
       piAgentConcurrency,
     } = get()
     if (!workspaceId) return
     set({ isSaving: true, saveError: null })
     try {
-      // 1. PATCH name/description
-      await api(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
-        method: 'PATCH',
+      const assignments = new Map(
+        (agentAssignments || []).map((assignment) => [
+          assignment.agent_id,
+          assignment,
+        ])
+      )
+      if (piAgentConcurrency !== undefined) {
+        assignments.set('pi', {
+          agent_id: 'pi',
+          concurrency_limit: piAgentConcurrency,
+        })
+      }
+      const result = await api<{
+        workspace: { name: string; description?: string }
+        settings: WorkspaceSettings
+        agents: WorkspaceAgentAssignment[]
+      }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/configuration`, {
+        method: 'PUT',
         body: JSON.stringify({
           name: workspaceName,
           description: workspaceDescription,
+          settings,
+          agents: Array.from(assignments.values()),
         }),
       })
-      // 2. PATCH resource_config/intake_config/default_entity
-      await api(`/api/workspaces/${encodeURIComponent(workspaceId)}`, {
-        method: 'PATCH',
-        body: JSON.stringify({
-          resource_config: { resources: settings.resources },
-          intake_config: {
-            enabled_modes: settings.intakeModes,
-            label_overrides: settings.labelOverrides,
-          },
-          default_entity: settings.entityType,
-        }),
+      const savedPi = result.agents.find(
+        (assignment) => assignment.agent_id === 'pi'
+      )?.concurrency_limit
+      set({
+        workspaceName: result.workspace.name,
+        workspaceDescription: result.workspace.description || '',
+        settings: result.settings,
+        agentAssignments: result.agents,
+        piAgentConcurrency: savedPi,
+        originalWorkspaceName: result.workspace.name,
+        originalWorkspaceDescription: result.workspace.description || '',
+        originalSettings: result.settings,
+        originalAgentAssignments: result.agents,
+        originalPiAgentConcurrency: savedPi,
+        isDirty: false,
       })
-      // 3. PATCH pipeline settings
-      await api(
-        `/api/workspaces/${encodeURIComponent(workspaceId)}/settings/pipeline`,
-        {
-          method: 'PATCH',
-          body: JSON.stringify({
-            pipelineKey: settings.pipelineKey,
-            localConcurrency: settings.localConcurrency,
-            nodeLocalConcurrency: settings.nodeLocalConcurrency,
-          }),
-        }
-      )
-      // 4. POST pi agent concurrency
-      if (piAgentConcurrency !== undefined) {
-        await setWorkspaceAgent(workspaceId, 'pi', piAgentConcurrency)
-      }
-      // 5. POST agent assignments one by one
-      if (agentAssignments) {
-        for (const assignment of agentAssignments) {
-          await assignAgent(
-            workspaceId,
-            assignment.agent_id,
-            assignment.concurrency_limit
-          )
-        }
-      }
-      // Unassign removed agents
-      if (originalAgentAssignments) {
-        const currentIds = new Set(
-          agentAssignments?.map((a) => a.agent_id) || []
-        )
-        for (const original of originalAgentAssignments) {
-          if (!currentIds.has(original.agent_id)) {
-            await unassignAgent(workspaceId, original.agent_id)
-          }
-        }
-      }
-      await get().fetchAgentAssignments(workspaceId)
       useUiStore.getState().showToast('设置已保存', 'success')
-      // Refresh originals
-      await get().fetchSettings(workspaceId)
     } catch (err) {
       const message = err instanceof Error ? err.message : '保存失败'
       set({ saveError: message })

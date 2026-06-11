@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
-import { DagGraph, type DagEdge, type DagNode } from '../components/DagGraph'
+import type { DagEdge, DagNode } from '../components/DagGraph'
 import { NodeDetailPanel } from '../components/NodeDetailPanel'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
@@ -65,7 +65,6 @@ export default function JobDetailPage() {
     name: string
     content: string
   } | null>(null)
-  const [dagExpanded, setDagExpanded] = useState(false)
   const [dagDialogOpen, setDagDialogOpen] = useState(false)
   const artifactRequestId = useRef(0)
 
@@ -203,29 +202,6 @@ export default function JobDetailPage() {
               questionId={detail.job.source_id}
             />
           )}
-          <div
-            className={`${styles.graphWrap} ${dagExpanded ? styles.graphExpanded : styles.graphCollapsed}`}
-          >
-            <div className={styles.graphHeader}>
-              <span className={styles.graphTitle}>DAG 流水线</span>
-              <md-icon-button
-                aria-label={dagExpanded ? '收起' : '展开'}
-                onClick={() => setDagExpanded((v) => !v)}
-              >
-                <md-icon>{dagExpanded ? 'expand_less' : 'expand_more'}</md-icon>
-              </md-icon-button>
-            </div>
-            {dagExpanded && (
-              <div className={styles.graphBody}>
-                <DagGraph
-                  nodes={dagNodes}
-                  edges={dagEdges}
-                  selectedNodeKey={selectedNodeKey}
-                  onNodeClick={setSelectedNodeKey}
-                />
-              </div>
-            )}
-          </div>
           <NodeDetailPanel
             node={selectedNode}
             onViewLogs={() => {
@@ -242,9 +218,9 @@ export default function JobDetailPage() {
             <JobProgressPanel
               nodes={detail.nodes}
               runs={detail.runs}
-              dagExpanded={dagExpanded}
-              onToggleDag={() => setDagExpanded((v) => !v)}
               onOpenDagDialog={() => setDagDialogOpen(true)}
+              onNodeClick={setSelectedNodeKey}
+              selectedNodeKey={selectedNodeKey}
             />
           )}
         </div>

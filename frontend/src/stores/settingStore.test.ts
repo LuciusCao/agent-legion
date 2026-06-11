@@ -1,20 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSettingStore } from './settingStore'
 import { useUiStore } from './uiStore'
-import {
-  api,
-  assignAgent,
-  getWorkspaceAgents,
-  setWorkspaceAgent,
-  unassignAgent,
-} from '../api'
+import { api, getWorkspaceAgents } from '../api'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
-  assignAgent: vi.fn(),
   getWorkspaceAgents: vi.fn(),
-  setWorkspaceAgent: vi.fn(),
-  unassignAgent: vi.fn(),
 }))
 
 vi.mock('./uiStore', () => ({
@@ -25,10 +16,7 @@ vi.mock('./uiStore', () => ({
 }))
 
 const mockApi = vi.mocked(api)
-const mockAssignAgent = vi.mocked(assignAgent)
 const mockGetWorkspaceAgents = vi.mocked(getWorkspaceAgents)
-const mockSetWorkspaceAgent = vi.mocked(setWorkspaceAgent)
-const mockUnassignAgent = vi.mocked(unassignAgent)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
 
@@ -66,10 +54,7 @@ describe('settingStore', () => {
   beforeEach(() => {
     useSettingStore.setState(defaultState)
     mockApi.mockReset()
-    mockAssignAgent.mockReset()
     mockGetWorkspaceAgents.mockReset()
-    mockSetWorkspaceAgent.mockReset()
-    mockUnassignAgent.mockReset()
     mockShowToast.mockReset()
     mockGetState.mockReturnValue({ showToast: mockShowToast })
   })
@@ -155,8 +140,17 @@ describe('settingStore', () => {
     )
   })
 
-  it('saveAll calls PATCH endpoints and shows success toast for non-video-hive', async () => {
-    mockApi.mockResolvedValue(undefined)
+  it('saveAll persists workspace settings with one atomic request', async () => {
+    mockApi.mockResolvedValue({
+      workspace: { name: 'Test', description: 'Desc' },
+      settings: {
+        ...defaultSettings,
+        pipelineKey: 'question_content',
+        intakeModes: ['direct_ids'],
+        resources: { question_detail: { enabled: true, config: {} } },
+      },
+      agents: [{ agent_id: 'agent-1', concurrency_limit: 2 }],
+    })
     useSettingStore.setState({
       workspaceName: 'Test',
       workspaceDescription: 'Desc',
@@ -173,38 +167,22 @@ describe('settingStore', () => {
       originalAgentAssignments: [],
     })
     await useSettingStore.getState().saveAll()
+    expect(mockApi).toHaveBeenCalledTimes(1)
     expect(mockApi).toHaveBeenCalledWith(
-      '/api/workspaces/ws1',
+      '/api/workspaces/ws1/configuration',
       expect.objectContaining({
-        method: 'PATCH',
-        body: JSON.stringify({ name: 'Test', description: 'Desc' }),
+        method: 'PUT',
+        body: expect.stringContaining('agent-1'),
       })
     )
-    expect(mockApi).toHaveBeenCalledWith(
-      '/api/workspaces/ws1',
-      expect.objectContaining({
-        method: 'PATCH',
-        body: expect.stringContaining('resource_config'),
-      })
-    )
-    expect(mockApi).toHaveBeenCalledWith(
-      '/api/workspaces/ws1/settings/pipeline',
-      expect.objectContaining({
-        method: 'PATCH',
-        body: expect.stringContaining('pipelineKey'),
-      })
-    )
-    expect(mockAssignAgent).toHaveBeenCalledWith('ws1', 'agent-1', 2)
-    expect(mockSetWorkspaceAgent).not.toHaveBeenCalled()
     expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
   })
 
-  it('saveAll calls setWorkspaceAgent when piAgentConcurrency is set', async () => {
-    mockApi.mockResolvedValue(undefined)
-    mockSetWorkspaceAgent.mockResolvedValue({
-      agent_id: 'pi',
-      workspace_id: 'ws1',
-      concurrency_limit: 3,
+  it('saveAll includes pi concurrency in the atomic request', async () => {
+    mockApi.mockResolvedValue({
+      workspace: { name: 'Test', description: 'Desc' },
+      settings: defaultSettings,
+      agents: [{ agent_id: 'pi', concurrency_limit: 3 }],
     })
     useSettingStore.setState({
       workspaceName: 'Test',
@@ -217,16 +195,20 @@ describe('settingStore', () => {
       originalPiAgentConcurrency: 1,
     })
     await useSettingStore.getState().saveAll()
-    expect(mockSetWorkspaceAgent).toHaveBeenCalledWith('ws1', 'pi', 3)
+    expect(mockApi).toHaveBeenCalledWith(
+      '/api/workspaces/ws1/configuration',
+      expect.objectContaining({
+        body: expect.stringContaining('"agent_id":"pi"'),
+      })
+    )
     expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
   })
 
-  it('saveAll assigns agents for video-hive workspace', async () => {
-    mockApi.mockResolvedValue(undefined)
-    mockAssignAgent.mockResolvedValue({
-      agent_id: 'agent-1',
-      workspace_id: 'video-hive',
-      concurrency_limit: 2,
+  it('saveAll replaces agents for video-hive workspace atomically', async () => {
+    mockApi.mockResolvedValue({
+      workspace: { name: 'Test', description: 'Desc' },
+      settings: defaultSettings,
+      agents: [{ agent_id: 'agent-1', concurrency_limit: 2 }],
     })
     useSettingStore.setState({
       workspaceId: 'video-hive',
@@ -245,16 +227,18 @@ describe('settingStore', () => {
       originalAgentAssignments: [],
     })
     await useSettingStore.getState().saveAll()
-    expect(mockAssignAgent).toHaveBeenCalledWith('video-hive', 'agent-1', 2)
+    expect(mockApi).toHaveBeenCalledWith(
+      '/api/workspaces/video-hive/configuration',
+      expect.objectContaining({ body: expect.stringContaining('agent-1') })
+    )
     expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
   })
 
-  it('saveAll unassigns removed agents for video-hive workspace', async () => {
-    mockApi.mockResolvedValue(undefined)
-    mockUnassignAgent.mockResolvedValue({
-      agent_id: 'agent-1',
-      workspace_id: 'video-hive',
-      removed: true,
+  it('saveAll removes omitted agents through replacement semantics', async () => {
+    mockApi.mockResolvedValue({
+      workspace: { name: '', description: '' },
+      settings: defaultSettings,
+      agents: [],
     })
     useSettingStore.setState({
       workspaceId: 'video-hive',
@@ -264,7 +248,10 @@ describe('settingStore', () => {
       originalAgentAssignments: [{ agent_id: 'agent-1', concurrency_limit: 2 }],
     })
     await useSettingStore.getState().saveAll()
-    expect(mockUnassignAgent).toHaveBeenCalledWith('video-hive', 'agent-1')
+    expect(mockApi).toHaveBeenCalledWith(
+      '/api/workspaces/video-hive/configuration',
+      expect.objectContaining({ body: expect.stringContaining('"agents":[]') })
+    )
   })
 
   it('saveAll surfaces errors and shows error toast', async () => {

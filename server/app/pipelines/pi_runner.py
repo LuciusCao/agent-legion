@@ -155,6 +155,14 @@ class PiRunner:
                     run_dir=str(run_dir),
                     session_dir=str(session_dir),
                 )
+                if run_record is None:
+                    return PiRunResult(
+                        status="skipped",
+                        exit_code=0,
+                        command=command,
+                        run_dir=run_dir,
+                        session_dir=session_dir,
+                    )
 
             env = dict(os.environ)
             env.update(self.config.environment)

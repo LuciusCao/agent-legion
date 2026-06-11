@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
+from server.app.db.connection import connect_sqlite
 from server.app.db.schema import init_db
 
 
@@ -53,8 +54,7 @@ class JobQueries:
 
     @contextmanager
     def connect(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = connect_sqlite(self.path)
         try:
             with conn:
                 yield conn
@@ -63,8 +63,7 @@ class JobQueries:
 
     @contextmanager
     def _connect_read(self) -> Iterator[sqlite3.Connection]:
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = connect_sqlite(self.path)
         try:
             yield conn
         finally:
@@ -211,6 +210,77 @@ class JobQueries:
                 raise ValueError("Workspace not found")
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
         return _workspace_record(row)
+
+    def update_workspace_configuration(
+        self,
+        workspace_id: str,
+        *,
+        name: str,
+        description: str,
+        default_pipeline_key: str,
+        default_entity: str,
+        resource_config: dict[str, Any],
+        intake_config: dict[str, Any],
+        pipeline_config: dict[str, Any],
+        agent_assignments: list[dict[str, Any]],
+    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("Workspace name is required")
+        agent_ids = [str(item.get("agent_id") or "").strip() for item in agent_assignments]
+        if any(not agent_id for agent_id in agent_ids):
+            raise ValueError("Agent ID is required")
+        if len(agent_ids) != len(set(agent_ids)):
+            raise ValueError("Duplicate agent IDs are not allowed")
+        if any(int(item.get("concurrency_limit") or 0) < 1 for item in agent_assignments):
+            raise ValueError("Agent concurrency must be at least 1")
+
+        with self.connect() as conn:
+            exists = conn.execute("select 1 from workspaces where id=?", (workspace_id,)).fetchone()
+            if exists is None:
+                raise ValueError("Workspace not found")
+            conn.execute(
+                """
+                update workspaces
+                set name=?, description=?, default_pipeline_key=?, default_entity=?,
+                    resource_config_json=?, intake_config_json=?, pipeline_config_json=?,
+                    updated_at=current_timestamp
+                where id=?
+                """,
+                (
+                    clean_name,
+                    description.strip(),
+                    default_pipeline_key,
+                    default_entity,
+                    json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
+                    json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
+                    json.dumps(pipeline_config, ensure_ascii=False, sort_keys=True),
+                    workspace_id,
+                ),
+            )
+            conn.execute(
+                "delete from workspace_agent_assignments where workspace_id=?",
+                (workspace_id,),
+            )
+            for item, agent_id in zip(agent_assignments, agent_ids, strict=True):
+                conn.execute(
+                    """
+                    insert into workspace_agent_assignments(
+                      workspace_id, agent_id, concurrency_limit
+                    ) values (?, ?, ?)
+                    """,
+                    (workspace_id, agent_id, int(item["concurrency_limit"])),
+                )
+            row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+            assignments = conn.execute(
+                """
+                select agent_id, concurrency_limit
+                from workspace_agent_assignments
+                where workspace_id=? order by rowid
+                """,
+                (workspace_id,),
+            ).fetchall()
+        return _workspace_record(row), [dict(item) for item in assignments]
 
     def create_batch(
         self,
@@ -416,7 +486,7 @@ class JobQueries:
         *,
         run_dir: str = "",
         session_dir: str = "",
-    ) -> dict[str, Any]:
+    ) -> dict[str, Any] | None:
         command_json = json.dumps(list(command))
         with self.connect() as conn:
             cursor = conn.execute(
@@ -427,12 +497,18 @@ class JobQueries:
                     started_at=current_timestamp,
                     finished_at=null,
                     error_message=''
-                where job_id=? and node_key=?
+                where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
                 """,
                 (job_id, node_key),
             )
             if cursor.rowcount == 0:
-                raise ValueError(f"Unknown job node: {job_id}.{node_key}")
+                exists = conn.execute(
+                    "select 1 from job_nodes where job_id=? and node_key=?",
+                    (job_id, node_key),
+                ).fetchone()
+                if exists is None:
+                    raise ValueError(f"Unknown job node: {job_id}.{node_key}")
+                return None
             conn.execute(
                 """
                 update jobs

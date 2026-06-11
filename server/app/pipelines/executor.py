@@ -44,6 +44,8 @@ def execute_local_node_once(
     log_path = logs_dir / "jobs" / f"{job['id']}-{node_key}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     run = job_db.start_node_run(job["id"], node_key, ["local", node_key], str(log_path))
+    if run is None:
+        return False
 
     try:
         handler(

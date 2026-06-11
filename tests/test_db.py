@@ -10,6 +10,15 @@ from server.app.db.notifications import NotificationHub
 from server.app.records import PHASE_RUN_FIELDS, VIDEO_RECORD_FIELDS
 
 
+def test_video_query_connections_enable_sqlite_safety_pragmas(tmp_path):
+    database = Database(tmp_path / "video_hive.sqlite")
+
+    with database._connect_read() as conn:
+        assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
+        assert conn.execute("pragma journal_mode").fetchone()[0] == "wal"
+        assert conn.execute("pragma busy_timeout").fetchone()[0] >= 5000
+
+
 def test_database_creates_video_and_phase_run(db):
     video = db.create_video("https://example.com/path/a.mp4", "Title A")
     run = db.start_phase(video["id"], "download", ["python3", "download.py"])
