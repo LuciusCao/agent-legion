@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 
 from server.app.pipeline.transcribe import TranscriptionProvider
+from server.app.settings import Settings
 
 
 class BadProvider(TranscriptionProvider):
@@ -66,3 +67,33 @@ class InputItem:
         self.title = title
         self.content_type = content_type
         self.external_id = external_id
+
+
+def setup_spa_app(
+    tmp_path, monkeypatch, *, root_dir_name="project", data_dir_name="data", config=None
+):
+    """Create a minimal filesystem layout and patch load_settings so create_app mounts the SPA."""
+    from server.app import main
+
+    root_dir = tmp_path / root_dir_name
+    data_dir = tmp_path / data_dir_name
+    for sub in ("videos", "logs", "packages", "jobs"):
+        (data_dir / sub).mkdir(parents=True, exist_ok=True)
+
+    cfg = config if config is not None else {}
+    default_data_dir = data_dir
+
+    def fake_load_settings(data_dir=None):
+        resolved = data_dir if data_dir is not None else default_data_dir
+        return Settings(
+            root_dir=root_dir,
+            data_dir=resolved,
+            videos_dir=resolved / "videos",
+            logs_dir=resolved / "logs",
+            packages_dir=resolved / "packages",
+            jobs_dir=resolved / "jobs",
+            config=cfg,
+        )
+
+    monkeypatch.setattr(main, "load_settings", fake_load_settings)
+    return root_dir, data_dir
