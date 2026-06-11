@@ -1687,3 +1687,26 @@ def test_workspace_settings_returns_agent_assignments(tmp_path):
     settings = response.json()["settings"]
     assert settings["agentIds"] == ["agent-1", "agent-2"]
     assert settings["concurrencyLimit"] == 2
+
+
+def test_get_and_set_workspace_agent(client):
+    # 先创建 workspace
+    resp = client.post("/api/workspaces", json={"name": "Test WS"})
+    assert resp.status_code == 200
+    ws_id = resp.json()["workspace"]["id"]
+
+    # set
+    resp = client.post(
+        f"/api/workspaces/{ws_id}/agents",
+        json={"agent_id": "pi", "concurrency_limit": 3},
+    )
+    assert resp.status_code == 200
+    assert resp.json()["concurrency_limit"] == 3
+
+    # get
+    resp = client.get(f"/api/workspaces/{ws_id}/agents")
+    assert resp.status_code == 200
+    agents = resp.json()
+    assert len(agents) == 1
+    assert agents[0]["agent_id"] == "pi"
+    assert agents[0]["concurrency_limit"] == 3
