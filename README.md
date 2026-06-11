@@ -81,7 +81,17 @@ cd frontend
 npm run dev
 ```
 
-Open the Vite URL shown by npm. The frontend calls the backend API on the same origin in production; during development, Vite proxies `/api` to `VITE_API_TARGET` from `frontend/.env` and defaults to `http://127.0.0.1:8000`.
+Open the Vite URL shown by npm.
+
+Generated frontend transport types are committed to `frontend/src/generated/api.ts`. After changing
+any Pydantic response model, regenerate them before committing:
+
+```bash
+cd frontend
+npm run api:generate
+```
+
+The frontend calls the backend API on the same origin in production; during development, Vite proxies `/api` to `VITE_API_TARGET` from `frontend/.env` and defaults to `http://127.0.0.1:8000`.
 
 For multiple coding agents working in separate git worktrees, give each worktree its own backend/frontend ports and local frontend env:
 
@@ -113,7 +123,10 @@ Quick gate (for daily development):
 ./scripts/check-quick.sh
 ```
 
-Runs Ruff lint + format check, Python tests with coverage (`fail_under = 75`), mypy, and frontend Prettier + ESLint + typecheck + Vitest.
+Runs Ruff lint + format check, Python tests with coverage (`fail_under = 75`), mypy, architecture
+contract checks (`scripts/check_architecture.py`), generated API type drift check
+(`npm run api:check`), frontend Prettier + ESLint + typecheck + Vitest, and the spec health check
+(`scripts/verify_specs.py --check`).
 
 Full gate (before committing or handing off):
 

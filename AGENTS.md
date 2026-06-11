@@ -184,7 +184,7 @@ Before committing or handing off work, run the full gate:
 ./scripts/check.sh
 ```
 
-The quick gate (`./scripts/check-quick.sh`) runs Ruff, pytest with coverage (`fail_under = 75`), mypy, and frontend lint/typecheck/Vitest. The full gate adds the production build.
+The quick gate (`./scripts/check-quick.sh`) runs Ruff, pytest with coverage (`fail_under = 75`), mypy, architecture contract checks (`scripts/check_architecture.py`), generated API type drift check (`npm run api:check`), frontend lint/typecheck/Vitest, and the spec health check (`scripts/verify_specs.py --check`). The full gate adds the production build.
 
 Install the optional pre-commit hook:
 
@@ -358,3 +358,38 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 - OpenClaw commands are executed via `subprocess.run` with user-defined templates in `config/pipeline.yaml`. Ensure the configuration file is not writable by untrusted users.
 - The SQLite database and video storage are local; there is no authentication layer. Do not expose the dev server to untrusted networks.
 - `data/` is gitignored; never commit runtime data or secrets.
+
+## Workspace Executor Extension Rules
+
+The required extension order is:
+
+1. Add or reuse a business `capability` on the Pipeline Node.
+2. Implement that capability in an Executor definition or adapter.
+3. Allocate the Executor to the Workspace with a Workspace upper limit.
+4. Bind the Node to one compatible allocated Executor.
+
+Do not put OpenClaw skill names, Pi skill directories, command templates, or Agent kinds in a
+Pipeline Node. Do not read `_futures` or create per-Workspace pools to make capacity decisions.
+Routes must declare Pydantic response models; frontend transport types come from
+`frontend/src/generated/api.ts` and are never handwritten twice.
+
+Wrong and correct Pipeline Node declarations:
+
+```yaml
+# Wrong: Pipeline leaks Agent implementation details.
+review_keywords:
+  runner: pi
+  skill: reading_analysis/review_keywords
+
+# Correct: Pipeline declares business capability only.
+review_keywords:
+  capability: review_keywords
+```
+
+Run the architecture contract and generated API checks:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/check_architecture.py
+cd frontend && npm run api:check
+./scripts/check-quick.sh
+```
