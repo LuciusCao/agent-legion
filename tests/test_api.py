@@ -5,7 +5,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
-from server.app.settings import Settings
+from tests.helpers import setup_spa_app
 
 
 def test_global_services_returns_200(client: TestClient):
@@ -79,28 +79,10 @@ def test_worker_tick_returns_accepted(client):
 def test_app_ignores_partial_frontend_dist(tmp_path, monkeypatch):
     from server.app import main
 
-    root_dir = tmp_path / "project"
+    root_dir, data_dir = setup_spa_app(tmp_path, monkeypatch)
     frontend_dist = root_dir / "frontend" / "dist"
     frontend_dist.mkdir(parents=True)
     (frontend_dist / "index.html").write_text("<div>partial build</div>", encoding="utf-8")
-
-    data_dir = tmp_path / "data"
-    for path_name in ["videos", "logs", "packages", "jobs"]:
-        (data_dir / path_name).mkdir(parents=True)
-
-    def fake_load_settings(data_dir=None):
-        resolved_data_dir = data_dir or tmp_path / "data"
-        return Settings(
-            root_dir=root_dir,
-            data_dir=resolved_data_dir,
-            videos_dir=resolved_data_dir / "videos",
-            logs_dir=resolved_data_dir / "logs",
-            packages_dir=resolved_data_dir / "packages",
-            jobs_dir=resolved_data_dir / "jobs",
-            config={},
-        )
-
-    monkeypatch.setattr(main, "load_settings", fake_load_settings)
 
     app = main.create_app(data_dir=data_dir)
     with TestClient(app) as c:

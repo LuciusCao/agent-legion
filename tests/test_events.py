@@ -1,7 +1,7 @@
 import asyncio
 import contextlib
 import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -26,7 +26,6 @@ async def _set_loop(manager: VideoEventManager) -> None:
 def test_connect_video_yields_heartbeat_and_cleans_up_on_disconnect(event_manager):
     async def _test():
         await _set_loop(event_manager)
-        request = MagicMock()
 
         # Patch wait_for to immediately timeout so we receive a heartbeat.
         async def fake_wait_for(coro, timeout):
@@ -38,7 +37,7 @@ def test_connect_video_yields_heartbeat_and_cleans_up_on_disconnect(event_manage
             raise TimeoutError()
 
         with patch("server.app.events.asyncio.wait_for", fake_wait_for):
-            response = await event_manager.connect_video(request, "v1")
+            response = await event_manager.connect_video(None, "v1")
             gen = response.body_iterator
             chunk = await anext(gen)
             assert chunk == ":heartbeat\n\n"
@@ -54,8 +53,7 @@ def test_connect_video_yields_heartbeat_and_cleans_up_on_disconnect(event_manage
 def test_connect_video_yields_payload_and_cleans_up(event_manager):
     async def _test():
         await _set_loop(event_manager)
-        request = MagicMock()
-        response = await event_manager.connect_video(request, "v1")
+        response = await event_manager.connect_video(None, "v1")
         gen = response.body_iterator
 
         # The queue was added to both indexes.
@@ -183,3 +181,23 @@ def test_broadcast_removes_dead_clients_from_global_and_video_indexes(event_mana
         assert await asyncio.wait_for(live_queue_v2.get(), timeout=1.0)
 
     asyncio.run(_test())
+
+
+def test_connect_video_route_via_testclient(client, monkeypatch):
+    """Drive the video events endpoint through the public API to verify wiring."""
+    from fastapi.responses import StreamingResponse
+
+    video_event_manager = client.app.state.video_event_manager
+
+    async def finite_connect_video(request, video_id):
+        async def event_stream():
+            yield ":heartbeat\n\n"
+
+        return StreamingResponse(event_stream(), media_type="text/event-stream")
+
+    monkeypatch.setattr(video_event_manager, "connect_video", finite_connect_video)
+
+    with client.stream("GET", "/api/videos/v1/events") as response:
+        assert response.status_code == 200
+        chunk = next(response.iter_text())
+        assert ":heartbeat" in chunk

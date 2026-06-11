@@ -32,6 +32,8 @@ def _create_completed_job(client: TestClient, workspace_id: str, question_id: st
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "question_context.json").write_text('{"question_id":"' + question_id + '"}')
 
+    # There is no public "force complete" endpoint, so mutate the job status
+    # directly through the internal DB handle.
     job_db.update_job_status(job_id, "completed")
     return job_id
 
@@ -57,6 +59,12 @@ def test_create_workspace_package_job_accepted(workspace_client):
     )
     assert response.status_code == 200
     assert response.json() == {"accepted": True}
+
+    settings = workspace_client.app.state.settings
+    workspace_packages_dir = settings.packages_dir / f"workspace-{ws_id}"
+    zip_files = [p for p in workspace_packages_dir.iterdir() if p.suffix == ".zip"]
+    assert len(zip_files) == 1
+    assert zip_files[0].stat().st_size > 0
 
 
 def test_create_workspace_package_job_rejects_no_job_ids(workspace_client):
@@ -122,8 +130,8 @@ def test_workspace_package_download_rejects_subdirectory(workspace_client, tmp_p
     assert response.status_code == 404
 
 
-def test_delete_package_rejects_locked_package(client, db):
-    db.insert_package("/tmp/locked-package.zip", name="Locked Package", locked=1)
+def test_delete_package_rejects_locked_package(client, db, tmp_path):
+    db.insert_package(str(tmp_path / "locked-package.zip"), name="Locked Package", locked=1)
     pkg = db.list_packages(limit=1)[0]
 
     response = client.delete(f"/api/packages/{pkg['id']}")
@@ -131,8 +139,8 @@ def test_delete_package_rejects_locked_package(client, db):
     assert "locked" in response.json()["detail"].lower()
 
 
-def test_patch_package_updates_locked(client, db):
-    db.insert_package("/tmp/patchable-package.zip", name="Patchable", locked=0)
+def test_patch_package_updates_locked(client, db, tmp_path):
+    db.insert_package(str(tmp_path / "patchable-package.zip"), name="Patchable", locked=0)
     pkg = db.list_packages(limit=1)[0]
 
     response = client.patch(f"/api/packages/{pkg['id']}", json={"locked": True})
@@ -143,8 +151,8 @@ def test_patch_package_updates_locked(client, db):
     assert updated["locked"] == 1
 
 
-def test_patch_package_unlocks(client, db):
-    db.insert_package("/tmp/locked-package.zip", name="Locked", locked=1)
+def test_patch_package_unlocks(client, db, tmp_path):
+    db.insert_package(str(tmp_path / "locked-package.zip"), name="Locked", locked=1)
     pkg = db.list_packages(limit=1)[0]
 
     response = client.patch(f"/api/packages/{pkg['id']}", json={"locked": False})
@@ -155,10 +163,15 @@ def test_patch_package_unlocks(client, db):
     assert updated["locked"] == 0
 
 
-def test_patch_package_unknown_field_ignored(client, db):
-    db.insert_package("/tmp/another-package.zip", name="Original", locked=0)
+def test_patch_package_unknown_field_ignored(client, db, tmp_path):
+    db.insert_package(str(tmp_path / "another-package.zip"), name="Original", locked=0)
     pkg = db.list_packages(limit=1)[0]
 
-    response = client.patch(f"/api/packages/{pkg['id']}", json={"locked": True})
+    response = client.patch(
+        f"/api/packages/{pkg['id']}",
+        json={"locked": True, "unknown": "x"},
+    )
     assert response.status_code == 200
-    assert response.json() == {"id": pkg["id"], "locked": True}
+    result = response.json()
+    assert result == {"id": pkg["id"], "locked": True}
+    assert "unknown" not in result
