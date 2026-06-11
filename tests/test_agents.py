@@ -11,6 +11,7 @@ def _agent_dict(**kwargs):
         "busy": False,
         "task_count": 0,
         "max_tasks": 1,
+        "workspace_id": "",
         "current_video_id": None,
         "current_title": "",
         "current_content_type": "",
@@ -237,3 +238,46 @@ def test_openclaw_runner_extracts_agent_id_at_end_of_list():
         timeout_seconds=600,
     )
     assert runner.agent_id == "ops"
+
+
+def test_workspace_isolated_pi_status():
+    manager = AgentStatusManager()
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+    manager.add_pi_agent_for_workspace("ws-2", max_tasks=3)
+
+    manager.set_busy("pi", "video_1", workspace_id="ws-1")
+
+    ws1 = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    ws2 = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-2"][0]
+
+    assert ws1["task_count"] == 1
+    assert ws1["busy"] is True
+    assert ws1["current_video_id"] == "video_1"
+    assert ws2["task_count"] == 0
+    assert ws2["busy"] is False
+    assert ws2["current_video_id"] is None
+
+    manager.set_idle("pi", workspace_id="ws-1")
+
+    ws1 = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    assert ws1["task_count"] == 0
+    assert ws1["busy"] is False
+    assert ws1["current_video_id"] is None
+
+
+def test_idle_pops_correct_video_id():
+    manager = AgentStatusManager()
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+
+    manager.set_busy("pi", "video_a", workspace_id="ws-1")
+    manager.set_busy("pi", "video_b", workspace_id="ws-1")
+
+    agent = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    assert agent["task_count"] == 2
+    assert agent["current_video_id"] == "video_b"
+
+    manager.set_idle("pi", workspace_id="ws-1")
+
+    agent = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    assert agent["task_count"] == 1
+    assert agent["current_video_id"] == "video_a"
