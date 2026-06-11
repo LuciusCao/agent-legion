@@ -29,6 +29,10 @@ class WorkerControl:
             self._tick_requested = False
             return tick
 
+    def has_tick(self) -> bool:
+        with self._lock:
+            return self._tick_requested
+
 
 class WorkspaceWorkerControl:
     """Per-workspace worker pause/resume control (in-memory, defaults to paused)."""
