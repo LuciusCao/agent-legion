@@ -31,10 +31,25 @@ export function AgentPanel({
   const showToast = useUiStore((state) => state.showToast)
 
   const rawAgents = propAgents ?? storeAgents
-  const agents =
-    allowedAgentIds !== undefined
-      ? rawAgents.filter((a) => allowedAgentIds.includes(a.id))
-      : rawAgents
+  const agents = useMemo(() => {
+    let result = rawAgents
+    if (workspaceId) {
+      // Workspace view: show this workspace's pi agent + allowed openclaw agents
+      result = result.filter((a) => {
+        if (a.id === 'pi') {
+          return a.workspace_id === workspaceId
+        }
+        if (allowedAgentIds !== undefined) {
+          return allowedAgentIds.includes(a.id)
+        }
+        return true
+      })
+    } else {
+      // Global view (video-hive): only show global agents, no workspace-specific pi agents
+      result = result.filter((a) => !a.workspace_id)
+    }
+    return result
+  }, [rawAgents, workspaceId, allowedAgentIds])
   const workerPaused = propPaused ?? storePaused
 
   useEffect(() => {

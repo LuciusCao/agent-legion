@@ -113,6 +113,7 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     pipelineKey: str | None = None
     localConcurrency: int | None = None
     agentConcurrency: int | None = None
+    nodeLocalConcurrency: dict[str, int] | None = None
     resources: dict[str, Any] | None = None
 
 
@@ -389,6 +390,7 @@ def _pipeline_payload(settings: Settings, pipeline_key: str) -> dict[str, Any]:
         "concurrency": {
             "local": definition.concurrency.local,
             "agent": definition.concurrency.agent,
+            "nodes": definition.concurrency.nodes,
         },
         "intake": {
             "modes": [
@@ -436,6 +438,7 @@ def _workspace_settings_payload(
         "resources": resources,
         "localConcurrency": pipeline_config.get("local", definition.concurrency.local),
         "agentConcurrency": pipeline_config.get("agent", definition.concurrency.agent),
+        "nodeLocalConcurrency": pipeline_config.get("nodes", {}),
     }
 
 
@@ -660,6 +663,7 @@ def create_jobs_router(
                     "concurrency": {
                         "local": definition.concurrency.local,
                         "agent": definition.concurrency.agent,
+                        "nodes": definition.concurrency.nodes,
                     },
                 }
             )
@@ -790,6 +794,12 @@ def create_jobs_router(
                         status_code=400, detail="agentConcurrency must be at least 1"
                     )
                 pipeline_config["agent"] = payload.agentConcurrency
+            if payload.nodeLocalConcurrency is not None:
+                valid_nodes: dict[str, int] = {}
+                for node_key, limit in payload.nodeLocalConcurrency.items():
+                    if isinstance(limit, int) and limit >= 1:
+                        valid_nodes[node_key] = limit
+                pipeline_config["nodes"] = valid_nodes
             workspace = job_db.update_workspace(
                 workspace_id,
                 default_pipeline_key=payload.pipelineKey,

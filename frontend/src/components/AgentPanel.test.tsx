@@ -48,7 +48,7 @@ describe('AgentPanel', () => {
     expect(screen.queryByText(/Agent 状态/)).not.toBeInTheDocument()
   })
 
-  it('groups agents by workspace_id', () => {
+  it('groups agents by workspace_id in workspace view', () => {
     useUiStore.setState({
       agents: [
         {
@@ -73,11 +73,42 @@ describe('AgentPanel', () => {
       ],
     })
 
-    render(<AgentPanel />)
+    render(<AgentPanel workspaceId="ws-a" />)
 
     expect(screen.getByText('ws-a')).toBeInTheDocument()
-    expect(screen.getByText('ws-b')).toBeInTheDocument()
+    expect(screen.queryByText('ws-b')).not.toBeInTheDocument()
     expect(screen.getByText(/忙碌 \(1\/2\)/)).toBeInTheDocument()
+  })
+
+  it('global view filters out workspace-specific pi agents', () => {
+    useUiStore.setState({
+      agents: [
+        {
+          id: 'openclaw-1',
+          name: 'OpenClaw Agent',
+          workspace_id: '',
+          busy: false,
+          task_count: 0,
+          max_tasks: 1,
+          current_video_id: null,
+        },
+        {
+          id: 'pi',
+          name: 'Pi Agent',
+          workspace_id: 'ws-a',
+          busy: true,
+          task_count: 1,
+          max_tasks: 2,
+          current_video_id: 'v1',
+          current_title: 'Job A',
+        },
+      ],
+    })
+
+    render(<AgentPanel />)
+
+    expect(screen.getByText('OpenClaw Agent')).toBeInTheDocument()
+    expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
   })
 
   it('loads worker status and toggles queue scheduling', async () => {

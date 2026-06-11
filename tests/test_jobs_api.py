@@ -86,7 +86,11 @@ def test_workspace_settings_round_trip(tmp_path):
     with TestClient(app) as c:
         connection = c.patch(
             "/api/workspaces/default/settings/connection",
-            json={"resources": {"question_detail": {"enabled": True, "config": {}}}},
+            json={
+                "resources": {"question_detail": {"enabled": True, "config": {}}},
+                "cmsUrl": "https://cms.example",
+                "cmsToken": "secret",
+            },
         )
         intake = c.patch(
             "/api/workspaces/default/settings/intake",
@@ -98,7 +102,11 @@ def test_workspace_settings_round_trip(tmp_path):
         )
         pipeline = c.patch(
             "/api/workspaces/default/settings/pipeline",
-            json={"pipelineKey": "question_content"},
+            json={
+                "pipelineKey": "question_content",
+                "localConcurrency": 5,
+                "nodeLocalConcurrency": {"fetch_question_context": 3},
+            },
         )
         fetched = c.get("/api/workspaces/default/settings")
         test_connection = c.post("/api/workspaces/default/settings/test-connection")
@@ -115,6 +123,8 @@ def test_workspace_settings_round_trip(tmp_path):
     assert settings["intakeModes"] == ["direct_ids"]
     assert settings["labelOverrides"] == {"direct_ids": "输入 ID"}
     assert settings["pipelineKey"] == "question_content"
+    assert settings["localConcurrency"] == 5
+    assert settings["nodeLocalConcurrency"] == {"fetch_question_context": 3}
 
 
 def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
@@ -450,7 +460,7 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     body = response.json()
     assert body["pipeline"]["key"] == "question_content"
     assert body["pipeline"]["label"] == "题目内容生成"
-    assert body["pipeline"]["concurrency"] == {"local": 8, "agent": 2}
+    assert body["pipeline"]["concurrency"] == {"local": 8, "agent": 2, "nodes": {}}
     assert body["pipeline"]["intake"]["modes"] == [
         {
             "key": "direct_ids",
@@ -478,6 +488,21 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     )
     assert graph_node["runner"] == "agent"
     assert graph_node["after"] == ["solution_decomposition"]
+
+
+def test_list_pipelines_includes_nodes_concurrency(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.get("/api/pipelines")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert any("nodes" in p["concurrency"] for p in body["pipelines"])
 
 
 def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
@@ -777,7 +802,8 @@ def test_delete_job_rejects_running_job(tmp_path):
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{job_id}-fetch_question_context.log"
         log_path.write_text("running")
-        app.state.job_db.update_job_status(job_id, "running")
+        # Start a node run so _job_has_running_nodes returns True
+        app.state.job_db.start_node_run(job_id, "fetch_question_context", ["cmd"], str(log_path))
         resp = c.delete(f"/api/jobs/{job_id}")
     assert resp.status_code == 400
     assert "running" in resp.json()["detail"].lower()
@@ -1710,3 +1736,283 @@ def test_get_and_set_workspace_agent(client):
     assert len(agents) == 1
     assert agents[0]["agent_id"] == "pi"
     assert agents[0]["concurrency_limit"] == 3
+
+
+def test_workspace_settings_pipeline_rejects_invalid_concurrency(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        resp_local = c.patch(
+            "/api/workspaces/default/settings/pipeline",
+            json={"localConcurrency": 0},
+        )
+        resp_agent = c.patch(
+            "/api/workspaces/default/settings/pipeline",
+            json={"agentConcurrency": 0},
+        )
+
+    assert resp_local.status_code == 400
+    assert "localConcurrency must be at least 1" in resp_local.json()["detail"]
+    assert resp_agent.status_code == 400
+    assert "agentConcurrency must be at least 1" in resp_agent.json()["detail"]
+
+
+def test_update_workspace_rejects_invalid_pipeline_key(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        create_resp = c.post("/api/workspaces", json={"name": "Test"})
+        assert create_resp.status_code == 200, create_resp.text
+        ws_id = create_resp.json()["workspace"]["id"]
+        resp = c.patch(
+            f"/api/workspaces/{ws_id}",
+            json={"default_pipeline_key": "nonexistent"},
+        )
+
+    assert resp.status_code == 404
+    assert "Unknown pipeline" in resp.json()["detail"]
+
+
+def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        # Rerun non-existent job
+        resp = c.post(
+            "/api/workspaces/test/jobs/batch-rerun",
+            json={"job_ids": ["nonexistent"]},
+        )
+
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert any(r["status"] == "not_found" for r in results)
+
+
+def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        # Delete non-existent job
+        resp = c.request(
+            "DELETE",
+            "/api/workspaces/test/jobs/batch",
+            json={"job_ids": ["nonexistent"]},
+        )
+
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert any(r["status"] == "not_found" for r in results)
+
+
+def test_get_artifact_returns_404(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        # Job not found
+        resp = c.get("/api/jobs/nonexistent/artifacts/test.json")
+    assert resp.status_code == 404
+
+
+def test_rerun_node_errors(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "test_question_content_Q1"
+
+        # Job not found
+        resp = c.post("/api/jobs/nonexistent/nodes/fetch_question_context/rerun")
+        assert resp.status_code == 404
+
+        # Node not found
+        resp = c.post(f"/api/jobs/{job_id}/nodes/nonexistent/rerun")
+        assert resp.status_code == 404
+
+
+def test_rerun_node_rejects_running_job(tmp_path):
+
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "test_question_content_Q1"
+        log_dir = app.state.settings.logs_dir / "jobs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"{job_id}-fetch_question_context.log"
+        log_path.write_text("running")
+        app.state.job_db.start_node_run(job_id, "fetch_question_context", ["cmd"], str(log_path))
+        resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_question_context/rerun")
+    assert resp.status_code == 400
+    assert "running" in resp.json()["detail"].lower()
+
+
+def test_batch_delete_skips_running_job(tmp_path):
+
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "test_question_content_Q1"
+        log_dir = app.state.settings.logs_dir / "jobs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        log_path = log_dir / f"{job_id}-fetch_question_context.log"
+        log_path.write_text("running")
+        app.state.job_db.start_node_run(job_id, "fetch_question_context", ["cmd"], str(log_path))
+        resp = c.request(
+            "DELETE",
+            "/api/workspaces/test/jobs/batch",
+            json={"job_ids": [job_id]},
+        )
+    assert resp.status_code == 200
+    results = resp.json()["results"]
+    assert any(r["status"] == "skipped" and r["reason"] == "running" for r in results)
+
+
+def test_reject_invalid_job_subpath(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        # Job not found
+        resp = c.get("/api/jobs/nonexistent/invalid/path")
+    assert resp.status_code == 404
+
+
+def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "test_question_content_Q1"
+
+        def _fail_cleanup(*args, **kwargs):
+            raise ValueError("cannot remove artifact")
+
+        monkeypatch.setattr("server.app.routes.jobs.clear_rerun_outputs", _fail_cleanup)
+        resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_question_context/rerun")
+    assert resp.status_code == 400
+    assert "cleanup failed" in resp.json()["detail"].lower()
+
+
+def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "test_question_content_Q1"
+
+        def _fail_mark(*args, **kwargs):
+            raise ValueError("invalid node state")
+
+        monkeypatch.setattr("server.app.jobs.queries.JobQueries.mark_node_for_rerun", _fail_mark)
+        resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_question_context/rerun")
+    assert resp.status_code == 404
+    assert "invalid node state" in resp.json()["detail"].lower()

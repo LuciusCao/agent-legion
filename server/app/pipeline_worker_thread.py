@@ -156,8 +156,37 @@ class PipelineWorkerThread:
         else:
             pi_limit = pi_agent["concurrency_limit"]
 
+        workspace = self.job_db.get_workspace(workspace_id)
+        pipeline_config: dict[str, Any] = {}
+        if workspace is not None:
+            raw_config = workspace.get("pipeline_config")
+            if isinstance(raw_config, dict):
+                pipeline_config = raw_config
+
+        local_override = pipeline_config.get("local")
+        nodes_override = pipeline_config.get("nodes")
+        if not isinstance(nodes_override, dict):
+            nodes_override = {}
+
+        local_default = max((d.concurrency.local for d in self._definitions), default=1)
+        if isinstance(local_override, int) and local_override >= 1:
+            local_default = local_override
+
+        node_limit_sum = sum(
+            nodes_override.get(node.key, d.concurrency.nodes.get(node.key, d.concurrency.local))
+            for d in self._definitions
+            for node in d.nodes.values()
+            if node.runner == "local"
+        )
+        local_limit = max(local_default, node_limit_sum)
+
+        current_local_limit: int | None = None
+        if workspace_id in self._ws_local_executors:
+            current_local_limit = self._ws_local_executors[workspace_id]._max_workers
+
         if (
             workspace_id in self._ws_local_executors
+            and current_local_limit == local_limit
             and self._ws_agent_limits.get(workspace_id) == pi_limit
         ):
             return
@@ -168,15 +197,6 @@ class PipelineWorkerThread:
             self._ws_agent_executors[workspace_id].shutdown(wait=False, cancel_futures=True)
 
         self._ws_agent_limits[workspace_id] = pi_limit
-
-        local_default = max((d.concurrency.local for d in self._definitions), default=1)
-        node_limit_sum = sum(
-            d.concurrency.nodes.get(node.key, d.concurrency.local)
-            for d in self._definitions
-            for node in d.nodes.values()
-            if node.runner == "local"
-        )
-        local_limit = max(local_default, node_limit_sum)
 
         self._ws_local_executors[workspace_id] = ThreadPoolExecutor(max_workers=local_limit)
         self._ws_agent_executors[workspace_id] = ThreadPoolExecutor(max_workers=pi_limit)

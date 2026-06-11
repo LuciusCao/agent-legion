@@ -452,23 +452,100 @@ export function SettingsPage() {
                 }}
                 style={{ width: '100%' }}
               />
+              {pipelineDefinition && (
+                <span
+                  style={{
+                    fontSize: 12,
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                    marginTop: 4,
+                    display: 'block',
+                  }}
+                >
+                  Pipeline 默认值: 本地 {pipelineDefinition.concurrency.local} /
+                  智能体 {pipelineDefinition.concurrency.agent}
+                </span>
+              )}
             </div>
-            <div className={styles.field}>
-              <label htmlFor="agent-concurrency">智能体并发限制</label>
-              <md-outlined-text-field
-                id="agent-concurrency"
-                type="number"
-                min={1}
-                value={settings.agentConcurrency ?? ''}
-                onInput={(event: Event) => {
-                  const value = Number((event.target as HTMLInputElement).value)
-                  setSettings({
-                    agentConcurrency: Number.isNaN(value) ? undefined : value,
-                  })
-                }}
-                style={{ width: '100%' }}
-              />
-            </div>
+
+            {pipelineDefinition &&
+              pipelineDefinition.nodes.filter((n) => n.runner === 'local')
+                .length > 0 && (
+                <div className={styles.field}>
+                  <span
+                    style={{
+                      fontSize: 12,
+                      color: 'var(--md-sys-color-on-surface-variant)',
+                    }}
+                  >
+                    节点本地并发
+                  </span>
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 8,
+                      marginTop: 8,
+                    }}
+                  >
+                    {pipelineDefinition.nodes
+                      .filter((n) => n.runner === 'local')
+                      .map((node) => {
+                        const defaultLimit =
+                          pipelineDefinition.concurrency.nodes[node.key] ??
+                          pipelineDefinition.concurrency.local
+                        const currentLimit =
+                          settings.nodeLocalConcurrency?.[node.key]
+                        return (
+                          <div
+                            key={node.key}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: 12,
+                            }}
+                          >
+                            <span style={{ fontSize: 14, minWidth: 120 }}>
+                              {node.label}
+                            </span>
+                            <md-outlined-text-field
+                              type="number"
+                              min={1}
+                              value={currentLimit ?? ''}
+                              onInput={(event: Event) => {
+                                const value = Number(
+                                  (event.target as HTMLInputElement).value
+                                )
+                                const nextNodes = {
+                                  ...settings.nodeLocalConcurrency,
+                                }
+                                if (Number.isNaN(value)) {
+                                  delete nextNodes[node.key]
+                                } else {
+                                  nextNodes[node.key] = value
+                                }
+                                setSettings({
+                                  nodeLocalConcurrency: Object.keys(nextNodes)
+                                    .length
+                                    ? nextNodes
+                                    : undefined,
+                                })
+                              }}
+                              style={{ width: 120 }}
+                            />
+                            <span
+                              style={{
+                                fontSize: 12,
+                                color: 'var(--md-sys-color-on-surface-variant)',
+                              }}
+                            >
+                              默认: {defaultLimit}
+                            </span>
+                          </div>
+                        )
+                      })}
+                  </div>
+                </div>
+              )}
           </section>
 
           <section id="agents" className={styles.section}>
