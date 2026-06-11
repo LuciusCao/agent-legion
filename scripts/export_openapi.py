@@ -1,5 +1,6 @@
 import argparse
 import json
+from copy import deepcopy
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
@@ -12,7 +13,13 @@ def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
     app = create_app(data_dir=data_dir, start_worker=False)
     pipelines = app.state.settings.config.setdefault("pipelines", {})
     pipelines["enabled"] = True
-    return app.openapi()
+    schema = deepcopy(app.openapi())
+    schema["paths"] = {
+        path: definition
+        for path, definition in schema.get("paths", {}).items()
+        if path.startswith("/api")
+    }
+    return schema
 
 
 def main() -> None:
