@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -8,11 +9,16 @@ import pytest
 from server.app.pipelines.skills.reading_analysis._shared.review import validate_review_result
 from server.app.pipelines.skills.reading_analysis._shared.validation import (
     ContractError,
+    load_json_object,
     load_single_question,
     sha256_file,
+    validate_confidence,
     validate_exact_json_copy,
+    validate_question_id,
     validate_review_hash,
+    validate_score_1_99,
     validate_source_location,
+    validate_unique_ids,
 )
 
 
@@ -196,4 +202,258 @@ def test_passed_review_requires_reviewed_presence(tmp_path: Path) -> None:
             reviewed_path=reviewed_path,
             report_path=report_path,
             exact_copy=True,
+        )
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [1, "string", [], True, None],
+)
+def test_load_json_object_rejects_non_object(tmp_path: Path, payload: object) -> None:
+    path = tmp_path / "data.json"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+    expected = f"Expected JSON object in {path}, got {type(payload).__name__}"
+
+    with pytest.raises(ContractError, match=re.escape(expected)):
+        load_json_object(path)
+
+
+def test_load_single_question_rejects_non_dict_question(tmp_path: Path) -> None:
+    path = tmp_path / "questions_parsed.json"
+    path.write_text(json.dumps({"questions": ["not-a-dict"]}), encoding="utf-8")
+    expected = f"Expected question dict in {path}, got str"
+
+    with pytest.raises(ContractError, match=re.escape(expected)):
+        load_single_question(path)
+
+
+def test_validate_question_id_rejects_mismatch() -> None:
+    payload = {"question_id": "Q2"}
+    question = {"question_id": "Q1"}
+
+    with pytest.raises(
+        ContractError, match=re.escape("question_id mismatch: payload='Q2', source='Q1'")
+    ):
+        validate_question_id(payload, question)
+
+
+def test_validate_source_location_rejects_unknown_option_key() -> None:
+    question = {
+        "question_id": "Q100",
+        "stem": "题干",
+        "options": [{"key": "A", "text": "选项A"}],
+    }
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape("location.option_key 'B' not found in question options"),
+    ):
+        validate_source_location(
+            question,
+            "选项A",
+            {"source": "option", "option_key": "B", "start": 0, "end": 2},
+        )
+
+
+@pytest.mark.parametrize(
+    ("items", "prefix", "expected_message"),
+    [
+        ([{}], "keyword", "keyword item missing string 'id': {}"),
+        ([{"id": 1}], "keyword", "keyword item missing string 'id': {'id': 1}"),
+        ([{"id": "a"}, {"id": "a"}], "distractor", "distractor duplicate id: 'a'"),
+    ],
+)
+def test_validate_unique_ids_rejects_invalid_or_duplicate_ids(
+    items: list[dict[str, object]],
+    prefix: str,
+    expected_message: str,
+) -> None:
+    with pytest.raises(ContractError, match=re.escape(expected_message)):
+        validate_unique_ids(items, prefix)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_message"),
+    [
+        ("high", "confidence must be a number, got str"),
+        (1.1, "confidence must be in [0, 1], got 1.1"),
+        (-0.1, "confidence must be in [0, 1], got -0.1"),
+    ],
+)
+def test_validate_confidence_rejects_invalid_values(value: object, expected_message: str) -> None:
+    with pytest.raises(ContractError, match=re.escape(expected_message)):
+        validate_confidence(value)
+
+
+@pytest.mark.parametrize(
+    ("value", "expected_message"),
+    [
+        ("x", "score must be an int, got str"),
+        (True, "score must be an int, got bool"),
+        (1.5, "score must be an int, got float"),
+        (0, "score must be in [1, 99], got 0"),
+        (100, "score must be in [1, 99], got 100"),
+    ],
+)
+def test_validate_score_1_99_rejects_invalid_values(value: object, expected_message: str) -> None:
+    with pytest.raises(ContractError, match=re.escape(expected_message)):
+        validate_score_1_99(value, "score")
+
+
+def test_validate_review_hash_rejects_mismatch(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    source.write_text('{"question_id":"Q1"}', encoding="utf-8")
+    expected = sha256_file(source)
+    report = {"source_artifact_sha256": "bad-sha"}
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape(f"SHA-256 mismatch: expected {expected}, got 'bad-sha'"),
+    ):
+        validate_review_hash(source, report)
+
+
+@pytest.mark.parametrize("status", [None, "", "ok"])
+def test_validate_review_result_rejects_invalid_status(tmp_path: Path, status: object) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": status,
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    expected = f"report status must be 'passed' or 'failed', got {status!r}"
+    with pytest.raises(ContractError, match=re.escape(expected)):
+        validate_review_result(
+            source_path=source,
+            reviewed_path=reviewed_path,
+            report_path=report_path,
+            exact_copy=True,
+        )
+
+
+def test_validate_review_result_failed_requires_issues(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContractError, match=re.escape("failed report must contain at least one issue")
+    ):
+        validate_review_result(
+            source_path=source,
+            reviewed_path=reviewed_path,
+            report_path=report_path,
+            exact_copy=True,
+        )
+
+
+def test_validate_review_result_passed_must_have_no_issues(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": [{"code": "ISSUE", "message": "bad"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    reviewed_path.write_text(
+        json.dumps({"question_id": "Q100"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ContractError, match=re.escape("passed report must contain no issues")):
+        validate_review_result(
+            source_path=source,
+            reviewed_path=reviewed_path,
+            report_path=report_path,
+            exact_copy=True,
+        )
+
+
+def test_validate_review_result_projection_mismatch_when_not_exact_copy(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100", "extra": 1}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    reviewed_path.write_text(
+        json.dumps({"question_id": "Q100", "extra": 2}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape("reviewed artifact does not match the expected projection"),
+    ):
+        validate_review_result(
+            source_path=source,
+            reviewed_path=reviewed_path,
+            report_path=report_path,
+            exact_copy=False,
+            projection=lambda raw: {"question_id": raw["question_id"], "extra": 99},
         )
