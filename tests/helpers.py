@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import time
-from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -15,30 +13,17 @@ from server.app.pipelines.registry import load_registered_pipeline
 from server.app.settings import Settings
 
 
-def wait_until(
-    condition: Callable[[], bool],
-    *,
-    timeout: float = 5.0,
-    interval: float = 0.05,
-) -> None:
-    """Wait until *condition* returns True, raising TimeoutError on expiry."""
-    end = time.monotonic() + timeout
-    while time.monotonic() < end:
-        if condition():
-            return
-        time.sleep(interval)
-    raise TimeoutError(f"Condition not met within {timeout}s")
-
-
 def make_pipeline_worker(
     tmp_path: Path,
     queries: JobQueries,
     *,
+    pipeline_key: str = "reading_analysis",
     pi_binary: str | None = "echo",
     pi_timeout: int = 1,
+    with_executors: bool = True,
 ) -> tuple[PipelineWorkerThread, PipelineDefinition]:
-    """Build a configured PipelineWorkerThread for the reading_analysis pipeline."""
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    """Build a configured PipelineWorkerThread for *pipeline_key*."""
+    definition = load_registered_pipeline(Path("."), pipeline_key)
     pipelines_config: dict[str, object] = {"enabled": True}
     if pi_binary is not None:
         pipelines_config["pi"] = {"binary": pi_binary, "timeout_seconds": pi_timeout}
@@ -55,8 +40,9 @@ def make_pipeline_worker(
 
     worker = PipelineWorkerThread(queries, settings)
     worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
+    if with_executors:
+        worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
+        worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
     worker._skill_root = tmp_path / "skills"
     worker._skill_root.mkdir(parents=True)
 
