@@ -39,6 +39,24 @@ scripts/
 - 质量门分为 `check-quick.sh`（日常）和 `check.sh`（提交前）。
 - 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录。
 
+## API Surface / Interface
+
+<!-- AUTO-GENERATED: scripts/generate_architecture.py -->
+
+### 顶层配置项
+
+- `asr` — ASR 提供商配置（whisper / SenseVoice）
+- `cleanup_video_after_assemble`
+- `cms`
+- `data_dir`
+- `openclaw` — OpenClaw 命令模板与工作目录
+- `pipelines` — Agent Legion DAG 流水线开关
+- `resource_providers`
+- `server`
+- `worker`
+
+<!-- END AUTO-GENERATED -->
+
 ## Related Specs
 
 - [质量门渐进建设](../superpowers/completed/2026-05-28-quality-gates-design.md)

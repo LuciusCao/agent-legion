@@ -48,7 +48,25 @@ frontend/src/
 
 ## API Surface / Interface
 
-<!-- TODO: 阶段 2 由 AST 自动生成 -->
+<!-- AUTO-GENERATED: scripts/generate_architecture.py -->
+
+### 页面路由
+
+| 路径 | 页面组件 |
+|------|----------|
+| `/` | DashboardPage |
+| `/video-hive` | VideoHiveLayout |
+| `(index)` | ListPage |
+| `/video-hive/settings` | VideoHiveSettingsPage |
+| `/workspaces/:workspaceId` | WorkspaceLayout |
+| `(index)` | WorkspaceMainPage |
+| `jobs` | WorkspaceJobListWrapper |
+| `jobs/:jobId` | JobDetailPage |
+| `packages` | WorkspacePackagesPage |
+| `/workspaces/:workspaceId/settings` | SettingsPage |
+| `/videos/:id` | DetailPage |
+
+<!-- END AUTO-GENERATED -->
 
 ## Related Specs
 
