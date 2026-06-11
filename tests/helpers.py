@@ -25,7 +25,7 @@ class GoodProvider(TranscriptionProvider):
 class TestProvider(TranscriptionProvider):
     name = "sensevoice"
 
-    def transcribe(self, video_path, output_path, title):
+    def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
         output_path.write_text("1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8")
 
 
