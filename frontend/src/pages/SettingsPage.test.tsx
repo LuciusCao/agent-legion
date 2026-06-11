@@ -9,6 +9,7 @@ import {
   api,
   assignAgent,
   fetchAgents,
+  fetchPipelines,
   fetchWorkspaceAgents,
   unassignAgent,
   updateWorkspace,
@@ -17,6 +18,7 @@ import {
 vi.mock('../api', () => ({
   api: vi.fn(),
   fetchAgents: vi.fn(),
+  fetchPipelines: vi.fn(),
   fetchWorkspaceAgents: vi.fn(),
   assignAgent: vi.fn(),
   unassignAgent: vi.fn(),
@@ -26,6 +28,7 @@ vi.mock('../api', () => ({
 
 const mockApi = vi.mocked(api)
 const mockFetchAgents = vi.mocked(fetchAgents)
+const mockFetchPipelines = vi.mocked(fetchPipelines)
 const mockFetchWorkspaceAgents = vi.mocked(fetchWorkspaceAgents)
 const mockUpdateWorkspace = vi.mocked(updateWorkspace)
 const mockAssignAgent = vi.mocked(assignAgent)
@@ -149,6 +152,8 @@ describe('SettingsPage', () => {
     mockApi.mockResolvedValue({})
     mockFetchAgents.mockReset()
     mockFetchAgents.mockResolvedValue({ agents: [] })
+    mockFetchPipelines.mockReset()
+    mockFetchPipelines.mockResolvedValue({ pipelines: [] })
     mockFetchWorkspaceAgents.mockReset()
     mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
     mockUpdateWorkspace.mockReset()

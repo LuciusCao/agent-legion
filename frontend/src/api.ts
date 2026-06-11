@@ -133,6 +133,16 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
   })
 }
 
+export async function fetchPipelines(): Promise<{
+  pipelines: Array<{
+    key: string
+    label: string
+    concurrency: { local: number; agent: number }
+  }>
+}> {
+  return api('/api/pipelines')
+}
+
 export async function fetchPipelineDefinition(
   pipelineKey = 'question_content'
 ): Promise<PipelineResponse> {

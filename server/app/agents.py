@@ -80,6 +80,22 @@ class AgentStatusManager:
     def get_all(self) -> list[AgentStatus]:
         return list(self.agents)
 
+    def add_pi_agent(self, max_tasks: int = 1) -> None:
+        for agent in self.agents:
+            if agent.id == "pi":
+                agent.max_tasks = max_tasks
+                return
+        self.agents.append(
+            AgentStatus(
+                id="pi",
+                name="Pi Agent",
+                busy=False,
+                task_count=0,
+                max_tasks=max_tasks,
+            )
+        )
+        self._broadcast()
+
     def set_busy(self, agent_id: str, video: str | dict[str, Any]) -> None:
         video_id = video if isinstance(video, str) else str(video.get("id", ""))
         if video_id:

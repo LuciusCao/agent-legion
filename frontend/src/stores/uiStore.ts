@@ -19,8 +19,8 @@ interface UiState {
   toast: Toast | null
   pageTitle: string | null
   connectAgentsWs: () => () => void
-  fetchWorkerStatus: () => Promise<void>
-  setWorkerPaused: (paused: boolean) => Promise<void>
+  fetchWorkerStatus: (workspaceId?: string) => Promise<void>
+  setWorkerPaused: (paused: boolean, workspaceId?: string) => Promise<void>
   openAddDialog: (opts?: {
     context?: 'video' | 'workspace'
     workspaceId?: string
@@ -90,14 +90,20 @@ export const useUiStore = create<UiState>((set) => ({
     }
   },
 
-  fetchWorkerStatus: async () => {
-    const data = await api<{ paused: boolean }>('/api/worker/status')
+  fetchWorkerStatus: async (workspaceId) => {
+    const query = workspaceId
+      ? `?workspace_id=${encodeURIComponent(workspaceId)}`
+      : ''
+    const data = await api<{ paused: boolean }>(`/api/worker/status${query}`)
     set({ workerPaused: data.paused })
   },
 
-  setWorkerPaused: async (paused) => {
+  setWorkerPaused: async (paused, workspaceId) => {
+    const query = workspaceId
+      ? `?workspace_id=${encodeURIComponent(workspaceId)}`
+      : ''
     const data = await api<{ paused: boolean }>(
-      paused ? '/api/worker/pause' : '/api/worker/resume',
+      `${paused ? '/api/worker/pause' : '/api/worker/resume'}${query}`,
       { method: 'POST' }
     )
     set({ workerPaused: data.paused })

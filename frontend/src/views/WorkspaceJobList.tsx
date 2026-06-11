@@ -29,10 +29,15 @@ function parseBatchInput(value: string): string[] {
 
 function isIntakeModeSupported(entity: string, modeKey: string): boolean {
   if (entity === 'question') {
-    return modeKey === 'direct_ids' || modeKey === 'by_knowledge'
+    return (
+      modeKey === 'direct_ids' ||
+      modeKey === 'by_knowledge' ||
+      modeKey === 'batch_by_ids' ||
+      modeKey === 'batch_by_knowledge'
+    )
   }
   if (entity === 'video') {
-    return modeKey === 'direct_ids'
+    return modeKey === 'direct_ids' || modeKey === 'batch_by_ids'
   }
   return false
 }

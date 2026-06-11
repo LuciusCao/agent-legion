@@ -17,7 +17,7 @@ from server.app.pipeline.runners import RunnerPool
 from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.routes import create_router
 from server.app.settings import load_settings
-from server.app.worker_control import WorkerControl
+from server.app.worker_control import WorkerControl, WorkspaceWorkerControl
 from server.app.worker_thread import WorkerThread
 
 
@@ -30,6 +30,7 @@ def create_app(
 
     agent_manager = AgentStatusManager()
     worker_control = WorkerControl()
+    workspace_worker_control = WorkspaceWorkerControl()
     video_event_manager = VideoEventManager()
     hub = NotificationHub()
     hub.on_change = video_event_manager.broadcast  # type: ignore[assignment]
@@ -64,7 +65,9 @@ def create_app(
             worker_thread.start()
             pipelines_config = settings.config.get("pipelines", {})
             if isinstance(pipelines_config, dict) and pipelines_config.get("enabled"):
-                pipeline_worker_thread = PipelineWorkerThread(job_db, settings)
+                pipeline_worker_thread = PipelineWorkerThread(
+                    job_db, settings, workspace_worker_control, agent_manager
+                )
                 try:
                     pipeline_worker_thread.start()
                 except Exception:
@@ -81,10 +84,19 @@ def create_app(
     app.state.job_db = job_db
     app.state.agent_manager = agent_manager
     app.state.worker_control = worker_control
+    app.state.workspace_worker_control = workspace_worker_control
     app.state.video_event_manager = video_event_manager
 
     app.include_router(
-        create_router(db, job_db, settings, agent_manager, video_event_manager, worker_control)
+        create_router(
+            db,
+            job_db,
+            settings,
+            agent_manager,
+            video_event_manager,
+            worker_control,
+            workspace_worker_control,
+        )
     )
 
     frontend_dist = settings.root_dir / "frontend" / "dist"

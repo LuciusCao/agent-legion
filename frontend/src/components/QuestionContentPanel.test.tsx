@@ -8,7 +8,8 @@ vi.mock('../api', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../api')>()
   return {
     ...mod,
-    fetchQuestionDetail: (...args: unknown[]) => mockFetchQuestionDetail(...args),
+    fetchQuestionDetail: (...args: unknown[]) =>
+      mockFetchQuestionDetail(...args),
   }
 })
 
