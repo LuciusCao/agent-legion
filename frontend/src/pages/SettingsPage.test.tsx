@@ -16,7 +16,6 @@ import {
   updateWorkspace,
 } from '../api'
 
-
 vi.mock('../api', () => ({
   api: vi.fn(),
   fetchAgents: vi.fn(),

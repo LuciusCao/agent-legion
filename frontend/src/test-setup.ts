@@ -67,4 +67,5 @@ class IntersectionObserverMock {
 
 ;(
   globalThis as unknown as { IntersectionObserver: typeof IntersectionObserver }
-).IntersectionObserver = IntersectionObserverMock as unknown as typeof IntersectionObserver
+).IntersectionObserver =
+  IntersectionObserverMock as unknown as typeof IntersectionObserver

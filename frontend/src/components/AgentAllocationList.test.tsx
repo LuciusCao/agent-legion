@@ -211,7 +211,9 @@ describe('AgentAllocationList', () => {
     })
 
     const assignedSection = screen.getByTestId('assigned-agents')
-    const input = within(assignedSection).getByLabelText('并发限制') as HTMLInputElement
+    const input = within(assignedSection).getByLabelText(
+      '并发限制'
+    ) as HTMLInputElement
     input.value = '5'
     fireEvent.input(input)
 
@@ -238,7 +240,9 @@ describe('AgentAllocationList', () => {
     })
 
     const assignedSection = screen.getByTestId('assigned-agents')
-    const input = within(assignedSection).getByLabelText('并发限制') as HTMLInputElement
+    const input = within(assignedSection).getByLabelText(
+      '并发限制'
+    ) as HTMLInputElement
     input.value = '0'
     fireEvent.input(input)
 

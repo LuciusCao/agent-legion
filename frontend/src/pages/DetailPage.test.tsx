@@ -115,7 +115,9 @@ describe('DetailPage', () => {
     const upper = document.querySelector('.detail-upper') as HTMLElement
     const primary = document.querySelector('.detail-primary') as HTMLElement
     const topbar = document.querySelector('.detail-topbar') as HTMLElement
-    const titleBlock = document.querySelector('.detail-title-block') as HTMLElement
+    const titleBlock = document.querySelector(
+      '.detail-title-block'
+    ) as HTMLElement
     const sidebar = document.querySelector('.phase-runs-sidebar') as HTMLElement
 
     expect(upper).toContainElement(primary)
