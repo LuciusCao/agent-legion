@@ -46,6 +46,8 @@ export function SettingsPage() {
     setSettings,
     agentAssignments,
     setAgentAssignments,
+    piAgentConcurrency,
+    setPiAgentConcurrency,
     isDirty,
     isSaving,
     saveError,
@@ -471,6 +473,22 @@ export function SettingsPage() {
 
           <section id="agents" className={styles.section}>
             <h2 className={styles.sectionTitle}>智能体</h2>
+            <hr className={styles.sectionDivider} />
+            <div className={styles.field}>
+              <label htmlFor="pi-agent-concurrency">Pi Agent 并发数</label>
+              <md-outlined-text-field
+                id="pi-agent-concurrency"
+                type="number"
+                min={1}
+                max={10}
+                value={piAgentConcurrency ?? ''}
+                onInput={(event: Event) => {
+                  const value = Number((event.target as HTMLInputElement).value)
+                  setPiAgentConcurrency(Number.isNaN(value) ? undefined : value)
+                }}
+                style={{ width: '100%' }}
+              />
+            </div>
             <AgentAllocationList
               workspaceId={workspaceId}
               assignments={agentAssignments}

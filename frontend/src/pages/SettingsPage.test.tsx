@@ -11,6 +11,8 @@ import {
   fetchAgents,
   fetchPipelines,
   fetchWorkspaceAgents,
+  getWorkspaceAgents,
+  setWorkspaceAgent,
   unassignAgent,
   updateWorkspace,
 } from '../api'
@@ -20,6 +22,8 @@ vi.mock('../api', () => ({
   fetchAgents: vi.fn(),
   fetchPipelines: vi.fn(),
   fetchWorkspaceAgents: vi.fn(),
+  getWorkspaceAgents: vi.fn(),
+  setWorkspaceAgent: vi.fn(),
   assignAgent: vi.fn(),
   unassignAgent: vi.fn(),
   fetchWorkspaces: vi.fn(),
@@ -30,6 +34,8 @@ const mockApi = vi.mocked(api)
 const mockFetchAgents = vi.mocked(fetchAgents)
 const mockFetchPipelines = vi.mocked(fetchPipelines)
 const mockFetchWorkspaceAgents = vi.mocked(fetchWorkspaceAgents)
+const mockGetWorkspaceAgents = vi.mocked(getWorkspaceAgents)
+const mockSetWorkspaceAgent = vi.mocked(setWorkspaceAgent)
 const mockUpdateWorkspace = vi.mocked(updateWorkspace)
 const mockAssignAgent = vi.mocked(assignAgent)
 const mockUnassignAgent = vi.mocked(unassignAgent)
@@ -57,6 +63,8 @@ const defaultState = {
   originalWorkspaceDescription: '测试描述',
   originalSettings: null as typeof defaultState.settings | null,
   originalAgentAssignments: null as typeof defaultState.agentAssignments,
+  piAgentConcurrency: undefined as number | undefined,
+  originalPiAgentConcurrency: undefined as number | undefined,
   isDirty: false,
   globalServices: {
     cms: {
@@ -99,6 +107,9 @@ const defaultState = {
     }))
   }),
   setAgentAssignments: vi.fn(),
+  setPiAgentConcurrency: vi.fn((value: number | undefined) => {
+    useSettingStore.setState({ piAgentConcurrency: value, isDirty: true })
+  }),
   fetchSettings: vi.fn().mockResolvedValue(undefined),
   fetchAgentAssignments: vi.fn().mockResolvedValue(undefined),
   fetchGlobalServices: vi.fn().mockResolvedValue(undefined),
@@ -156,6 +167,10 @@ describe('SettingsPage', () => {
     mockFetchPipelines.mockResolvedValue({ pipelines: [] })
     mockFetchWorkspaceAgents.mockReset()
     mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
+    mockGetWorkspaceAgents.mockReset()
+    mockGetWorkspaceAgents.mockResolvedValue({ agents: [] })
+    mockSetWorkspaceAgent.mockReset()
+    mockSetWorkspaceAgent.mockResolvedValue(undefined)
     mockUpdateWorkspace.mockReset()
     mockUpdateWorkspace.mockResolvedValue({
       id: 'ws1',
