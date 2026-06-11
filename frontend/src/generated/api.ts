@@ -4,23 +4,6 @@
  */
 
 export interface paths {
-  '/': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Frontend Missing */
-    get: operations['frontend_missing__get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/agents': {
     parameters: {
       query?: never
@@ -1575,26 +1558,6 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
-  frontend_missing__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'text/html': string
-        }
-      }
-    }
-  }
   list_agents_api_agents_get: {
     parameters: {
       query?: never
