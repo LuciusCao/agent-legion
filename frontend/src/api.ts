@@ -211,15 +211,9 @@ export async function fetchAgents(): Promise<{ agents: AgentStatus[] }> {
   return api('/api/agents')
 }
 
-export async function fetchWorkspaceAgents(
-  workspaceId: string
-): Promise<{ agents: WorkspaceAgentAssignment[] }> {
-  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`)
-}
-
 export async function getWorkspaceAgents(
   workspaceId: string
-): Promise<{ agents: WorkspaceAgentAssignment[] }> {
+): Promise<WorkspaceAgentAssignment[]> {
   return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`)
 }
 

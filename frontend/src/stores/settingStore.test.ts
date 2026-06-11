@@ -327,9 +327,9 @@ describe('settingStore', () => {
   })
 
   it('fetchAgentAssignments hydrates agent assignments', async () => {
-    mockGetWorkspaceAgents.mockResolvedValueOnce({
-      agents: [{ agent_id: 'agent-1', concurrency_limit: 2 }],
-    })
+    mockGetWorkspaceAgents.mockResolvedValueOnce([
+      { agent_id: 'agent-1', concurrency_limit: 2 },
+    ])
     await useSettingStore.getState().fetchAgentAssignments('ws1')
     const state = useSettingStore.getState()
     expect(state.agentAssignments).toEqual([
@@ -341,12 +341,10 @@ describe('settingStore', () => {
   })
 
   it('fetchAgentAssignments extracts pi agent concurrency', async () => {
-    mockGetWorkspaceAgents.mockResolvedValueOnce({
-      agents: [
-        { agent_id: 'agent-1', concurrency_limit: 2 },
-        { agent_id: 'pi', concurrency_limit: 5 },
-      ],
-    })
+    mockGetWorkspaceAgents.mockResolvedValueOnce([
+      { agent_id: 'agent-1', concurrency_limit: 2 },
+      { agent_id: 'pi', concurrency_limit: 5 },
+    ])
     await useSettingStore.getState().fetchAgentAssignments('ws1')
     const state = useSettingStore.getState()
     expect(state.piAgentConcurrency).toBe(5)

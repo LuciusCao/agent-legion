@@ -261,7 +261,8 @@ class PipelineWorkerThread:
                             except Exception:
                                 logger.exception("failed to set pi idle")
                 self._futures.pop(key, None)
-                self._job_workspace_ids.pop(job_id, None)
+                if not any(k[0] == job_id for k in self._futures):
+                    self._job_workspace_ids.pop(job_id, None)
 
         # Defensive: reconcile orphaned agent-future keys (e.g. after a crash)
         for ws_id, keys in list(self._ws_agent_futures.items()):
@@ -398,3 +399,8 @@ class PipelineWorkerThread:
             executor.shutdown(wait=False, cancel_futures=True)
         for executor in self._ws_agent_executors.values():
             executor.shutdown(wait=False, cancel_futures=True)
+        self._ws_local_executors.clear()
+        self._ws_agent_executors.clear()
+        self._ws_agent_futures.clear()
+        self._ws_local_futures.clear()
+        self._ws_agent_limits.clear()
