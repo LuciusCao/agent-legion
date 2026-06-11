@@ -24,6 +24,13 @@ UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q --cov=server --cov-re
 echo "=== MyPy Type Check ==="
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app
 
+echo "=== Architecture Contracts ==="
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_architecture.py
+
+echo "=== Generated API Contract ==="
+cd "$ROOT_DIR/frontend"
+npm run api:check
+
 echo "=== Frontend Tests ==="
 cd "$ROOT_DIR/frontend"
 npm run format:check

@@ -90,8 +90,10 @@ server/app/
 | GET | `/workspaces` | `list_workspaces` | routes/jobs.py |
 | POST | `/workspaces` | `create_workspace` | routes/jobs.py |
 | GET | `/workspaces/{workspace_id}` | `get_workspace` | routes/jobs.py |
-| GET | `/workspaces/{workspace_id}/agents` | `list_workspace_agents` | routes/jobs.py |
+| GET | `/workspaces/{workspace_id}/agents` | `get_workspace_agents` | routes/jobs.py |
+| POST | `/workspaces/{workspace_id}/agents` | `set_workspace_agent` | routes/jobs.py |
 | GET | `/workspaces/{workspace_id}/settings` | `get_workspace_settings` | routes/jobs.py |
+| PUT | `/workspaces/{workspace_id}/configuration` | `replace_workspace_configuration` | routes/jobs.py |
 | PATCH | `/workspaces/{workspace_id}/settings/{section}` | `update_workspace_settings_section` | routes/jobs.py |
 | POST | `/workspaces/{workspace_id}/settings/test-connection` | `test_workspace_connection` | routes/jobs.py |
 | PATCH | `/workspaces/{workspace_id}` | `update_workspace` | routes/jobs.py |
@@ -161,6 +163,8 @@ server/app/
 | WorkspaceResponse | BaseModel | workspace: dict[str, Any] | app/routes/jobs.py |
 | WorkspacesResponse | BaseModel | workspaces: list[dict[str, Any]] | app/routes/jobs.py |
 | WorkspaceAgentsResponse | BaseModel | agents: list[dict[str, Any]] | app/routes/jobs.py |
+| WorkspaceAgentAssignmentResponse | BaseModel | agent_id: str, workspace_id: str, concurrency_limit: int | app/routes/jobs.py |
+| DeleteJobResponse | BaseModel | deleted: str | app/routes/jobs.py |
 | JobDetailResponse | BaseModel | job: dict[str, Any], nodes: list[dict[str, Any]], runs: list[dict[str, Any]],... | app/routes/jobs.py |
 | ArtifactResponse | BaseModel | name: str, content: str | app/routes/jobs.py |
 | RerunNodeResponse | BaseModel | job_id: str, node_key: str, stale_nodes: list[str] | app/routes/jobs.py |
@@ -168,6 +172,10 @@ server/app/
 | BatchJobResponse | BaseModel | results: list[dict[str, Any]] | app/routes/jobs.py |
 | WorkspaceRunsResponse | BaseModel | runs: list[dict[str, Any]] | app/routes/jobs.py |
 | WorkspaceDagResponse | BaseModel | pipeline: dict[str, Any], nodes: list[dict[str, Any]] | app/routes/jobs.py |
+| WorkspaceAgentConfig | BaseModel | agent_id: str, concurrency_limit: int | app/routes/jobs.py |
+| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/jobs.py |
+| WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/jobs.py |
+| WorkspaceConfigurationResponse | BaseModel | workspace: dict[str, Any], settings: dict[str, Any], agents: list[dict[str, A... | app/routes/jobs.py |
 | WorkspaceAgentStatus | BaseModel | id: str, name: str, busy: bool | app/routes/jobs.py |
 | WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, pipeline_key: str, pipeline_label: str, job_sta... | app/routes/jobs.py |
 | DeleteWorkspaceResponse | BaseModel | deleted: str | app/routes/jobs.py |
@@ -194,6 +202,13 @@ server/app/
 | WorkerStatusResponse | BaseModel | paused: bool | app/routes/worker.py |
 
 <!-- END AUTO-GENERATED -->
+
+## 接口契约与架构守护
+
+- FastAPI 路由必须使用 Pydantic 响应模型，它们是 HTTP 接口的唯一事实来源。
+- `scripts/export_openapi.py` 在不启动 Worker 的情况下导出 OpenAPI 模式。
+- `frontend/src/generated/api.ts` 由 OpenAPI 模式生成，并通过 `npm run api:check` 做漂移检查；禁止手写重复的传输类型。
+- `scripts/check_architecture.py` 在质量门禁中执行，负责约束模块边界与体积预算。
 
 ## Related Specs
 
