@@ -140,6 +140,50 @@ def _extract_video_url_from_detail(data: dict[str, Any]) -> tuple[str | None, st
     return None, None
 
 
+def _parse_cms_answer(answer: Any) -> list[dict[str, Any]]:
+    """Parse CMS answer[blank][alternative] into structured blanks."""
+    if not isinstance(answer, list):
+        return []
+    result: list[dict[str, Any]] = []
+    for blank in answer:
+        if not isinstance(blank, list):
+            continue
+        alternatives: list[str] = []
+        is_latex = False
+        for alt in blank:
+            if isinstance(alt, dict):
+                content = alt.get("content", "")
+                alternatives.append(str(content))
+                if alt.get("is_latex"):
+                    is_latex = True
+        if alternatives:
+            result.append({"alternatives": alternatives, "is_latex": is_latex})
+    return result
+
+
+def _parse_cms_analysis(analysis: Any) -> list[list[dict[str, Any]]]:
+    """Parse CMS analyze[group][step] into structured steps."""
+    if not isinstance(analysis, list):
+        return []
+    result: list[list[dict[str, Any]]] = []
+    for group in analysis:
+        if not isinstance(group, list):
+            continue
+        steps: list[dict[str, Any]] = []
+        for step in group:
+            if isinstance(step, dict):
+                steps.append(
+                    {
+                        "content": str(step.get("content", "")),
+                        "title": str(step.get("title", "")) or None,
+                        "step": step.get("step", 0),
+                    }
+                )
+        if steps:
+            result.append(steps)
+    return result
+
+
 def _normalize_question_detail(data: dict[str, Any]) -> dict[str, Any]:
     normalized: dict[str, Any] = {}
     body = data.get("body")
@@ -155,10 +199,12 @@ def _normalize_question_detail(data: dict[str, Any]) -> dict[str, Any]:
     answer = data.get("answer")
     if answer:
         normalized["answer"] = answer
+        normalized["answer_blanks"] = _parse_cms_answer(answer)
 
     analyze = data.get("analyze")
     if analyze:
         normalized["analysis"] = analyze
+        normalized["analysis_steps"] = _parse_cms_analysis(analyze)
 
     return normalized
 
