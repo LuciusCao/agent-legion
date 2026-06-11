@@ -450,6 +450,12 @@ def _job_nodes_with_definition(
             "after": definition.nodes[node["node_key"]].after
             if node["node_key"] in definition.nodes
             else [],
+            "inputs": definition.nodes[node["node_key"]].inputs
+            if node["node_key"] in definition.nodes
+            else [],
+            "outputs": definition.nodes[node["node_key"]].outputs
+            if node["node_key"] in definition.nodes
+            else [],
         }
         for node in nodes
     ]
