@@ -14,7 +14,7 @@ type TestStatus = {
   message?: string
 }
 
-type SettingState = {
+export type SettingState = {
   workspaceId: string | null
   workspaceName: string
   workspaceDescription: string
