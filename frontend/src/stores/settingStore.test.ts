@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSettingStore } from './settingStore'
 import { useUiStore } from './uiStore'
+import type { UiState } from './uiStore'
 import { api, assignAgent, unassignAgent } from '../api'
 
 vi.mock('../api', () => ({
@@ -21,6 +22,37 @@ const mockAssignAgent = vi.mocked(assignAgent)
 const mockUnassignAgent = vi.mocked(unassignAgent)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
+
+function createMockUiState(partial: Partial<UiState> = {}): UiState {
+  return {
+    agents: [],
+    addDialogOpen: false,
+    addContentType: 'knowledge',
+    addDialogContext: 'video',
+    addDialogWorkspaceId: undefined,
+    rerunDialogOpen: false,
+    deleteDialogOpen: false,
+    workerPaused: false,
+    toast: null,
+    pageTitle: null,
+    detailPageActions: null,
+    connectAgentsWs: vi.fn(() => vi.fn()),
+    fetchWorkerStatus: vi.fn(),
+    setWorkerPaused: vi.fn(),
+    openAddDialog: vi.fn(),
+    closeAddDialog: vi.fn(),
+    setAddContentType: vi.fn(),
+    openRerunDialog: vi.fn(),
+    closeRerunDialog: vi.fn(),
+    openDeleteDialog: vi.fn(),
+    closeDeleteDialog: vi.fn(),
+    showToast: mockShowToast,
+    clearToast: vi.fn(),
+    setPageTitle: vi.fn(),
+    setDetailPageActions: vi.fn(),
+    ...partial,
+  }
+}
 
 const defaultSettings = {
   entityType: 'question' as const,
@@ -57,7 +89,7 @@ describe('settingStore', () => {
     mockAssignAgent.mockReset()
     mockUnassignAgent.mockReset()
     mockShowToast.mockReset()
-    mockGetState.mockReturnValue({ showToast: mockShowToast })
+    mockGetState.mockReturnValue(createMockUiState())
   })
 
   it('updates settings via setSettings', () => {

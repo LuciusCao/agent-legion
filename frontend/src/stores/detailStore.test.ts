@@ -72,13 +72,18 @@ describe('detailStore', () => {
         {
           id: 1,
           video_id: 'old',
-          phase: 'download',
+          phase_key: 'download',
           status: 'completed',
-          created_at: '',
+          started_at: '',
+          finished_at: null,
+          command_json: '',
+          exit_code: null,
+          log_path: '',
+          error_message: '',
         },
       ],
       transcriptionRuns: [
-        { id: 1, video_id: 'old', provider: 'whisper', created_at: '' },
+        { id: 1, video_id: 'old', provider: 'whisper', status: 'completed', started_at: '', finished_at: null, srt_entry_count: 0, validation_summary: '', fallback_reason: '' },
       ],
     })
     mockApi.mockRejectedValueOnce(new Error('not found'))

@@ -10,6 +10,7 @@ const mockJob: JobRecord = {
   pipeline_key: 'p1',
   source_id: 'Q100',
   title: 'Algebra Problem',
+  stem: '',
   status: 'running',
   completed_nodes: 2,
   total_nodes: 5,

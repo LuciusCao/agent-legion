@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useWorkspaceStore } from './workspaceStore'
-import type { WorkspaceRecord } from '../types'
+import type { WorkspaceRecord, WorkspaceStats } from '../types'
 
 vi.mock('../api', () => ({
   fetchWorkspaces: vi.fn(),
@@ -53,6 +53,7 @@ describe('workspaceStore', () => {
         id: 'ws1',
         name: 'Test Workspace',
         default_pipeline_key: 'question_content',
+        default_entity: 'question',
       },
     ]
     mockFetchWorkspaces.mockResolvedValueOnce({ workspaces })
@@ -78,6 +79,7 @@ describe('workspaceStore', () => {
       id: 'ws2',
       name: 'New Workspace',
       default_pipeline_key: 'question_content',
+      default_entity: 'question',
     }
     mockCreateWorkspace.mockResolvedValueOnce(ws)
 
@@ -104,11 +106,13 @@ describe('workspaceStore', () => {
       id: 'ws1',
       name: 'Old',
       default_pipeline_key: 'question_content',
+      default_entity: 'question',
     }
     const updated: WorkspaceRecord = {
       id: 'ws1',
       name: 'Old',
       default_pipeline_key: 'question_content',
+      default_entity: 'question',
       cms_config: { subject_id: '5' },
     }
     useWorkspaceStore.setState({
@@ -129,8 +133,18 @@ describe('workspaceStore', () => {
   it('deleteWorkspace removes from list', async () => {
     useWorkspaceStore.setState({
       workspaces: [
-        { id: 'ws1', name: 'A', default_pipeline_key: 'question_content' },
-        { id: 'ws2', name: 'B', default_pipeline_key: 'question_content' },
+        {
+          id: 'ws1',
+          name: 'A',
+          default_pipeline_key: 'question_content',
+          default_entity: 'question',
+        },
+        {
+          id: 'ws2',
+          name: 'B',
+          default_pipeline_key: 'question_content',
+          default_entity: 'question',
+        },
       ],
     })
     mockDeleteWorkspace.mockResolvedValueOnce(undefined)
@@ -156,18 +170,27 @@ describe('workspaceStore', () => {
       id: 'ws1',
       name: 'Current',
       default_pipeline_key: 'question_content',
+      default_entity: 'question',
     }
     useWorkspaceStore.getState().setCurrentWorkspace(ws)
     expect(useWorkspaceStore.getState().currentWorkspace).toEqual(ws)
   })
 
   it('fetchWorkspaceStats sets stats on success', async () => {
-    const stats = {
-      total_jobs: 10,
-      pending: 3,
-      running: 2,
-      completed: 4,
-      failed: 1,
+    const stats: WorkspaceStats = {
+      workspace_id: 'ws1',
+      name: 'Test Workspace',
+      pipeline_key: 'question_content',
+      pipeline_label: 'Question Content',
+      job_stats: {
+        total_jobs: 10,
+        pending: 3,
+        running: 2,
+        completed: 4,
+        failed: 1,
+      },
+      agent_status: { total: 0, busy: 0, idle: 0 },
+      latest_run: null,
     }
     mockFetchWorkspaceStats.mockResolvedValueOnce(stats)
 

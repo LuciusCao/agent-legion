@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useJobStore } from './jobStore'
 import type { JobRecord } from '../types'
+import type { UiState } from './uiStore'
 
 vi.mock('../api', () => ({
   fetchJobs: vi.fn(),
@@ -22,6 +23,37 @@ const mockApi = vi.mocked(api)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
 
+function createMockUiState(partial: Partial<UiState> = {}): UiState {
+  return {
+    agents: [],
+    addDialogOpen: false,
+    addContentType: 'knowledge',
+    addDialogContext: 'video',
+    addDialogWorkspaceId: undefined,
+    rerunDialogOpen: false,
+    deleteDialogOpen: false,
+    workerPaused: false,
+    toast: null,
+    pageTitle: null,
+    detailPageActions: null,
+    connectAgentsWs: vi.fn(() => vi.fn()),
+    fetchWorkerStatus: vi.fn(),
+    setWorkerPaused: vi.fn(),
+    openAddDialog: vi.fn(),
+    closeAddDialog: vi.fn(),
+    setAddContentType: vi.fn(),
+    openRerunDialog: vi.fn(),
+    closeRerunDialog: vi.fn(),
+    openDeleteDialog: vi.fn(),
+    closeDeleteDialog: vi.fn(),
+    showToast: mockShowToast,
+    clearToast: vi.fn(),
+    setPageTitle: vi.fn(),
+    setDetailPageActions: vi.fn(),
+    ...partial,
+  }
+}
+
 describe('jobStore', () => {
   beforeEach(() => {
     useJobStore.setState({
@@ -36,7 +68,7 @@ describe('jobStore', () => {
     mockFetchJobs.mockReset()
     mockApi.mockReset()
     mockShowToast.mockReset()
-    mockGetState.mockReturnValue({ showToast: mockShowToast })
+    mockGetState.mockReturnValue(createMockUiState())
   })
 
   it('toggles selection', () => {
@@ -54,6 +86,7 @@ describe('jobStore', () => {
           status: 'pending',
           source_id: 'Q1',
           title: '',
+          stem: '',
           workspace_id: 'ws1',
           pipeline_key: 'p1',
         },
@@ -62,6 +95,7 @@ describe('jobStore', () => {
           status: 'completed',
           source_id: 'Q2',
           title: '',
+          stem: '',
           workspace_id: 'ws1',
           pipeline_key: 'p1',
         },
@@ -79,6 +113,7 @@ describe('jobStore', () => {
           status: 'pending',
           source_id: 'Q1',
           title: '',
+          stem: '',
           workspace_id: 'ws1',
           pipeline_key: 'p1',
         },
@@ -87,6 +122,7 @@ describe('jobStore', () => {
           status: 'completed',
           source_id: 'Q2',
           title: '',
+          stem: '',
           workspace_id: 'ws1',
           pipeline_key: 'p1',
         },
@@ -106,6 +142,7 @@ describe('jobStore', () => {
           status: 'pending',
           source_id: 'Q100',
           title: 'Algebra',
+          stem: '',
           workspace_id: 'ws1',
           pipeline_key: 'p1',
         },
@@ -114,6 +151,7 @@ describe('jobStore', () => {
           status: 'completed',
           source_id: 'Q200',
           title: 'Geometry',
+          stem: '',
           workspace_id: 'ws1',
           pipeline_key: 'p1',
         },
@@ -132,6 +170,7 @@ describe('jobStore', () => {
         status: 'pending',
         source_id: 'Q1',
         title: 'One',
+        stem: '',
         workspace_id: 'ws1',
         pipeline_key: 'p1',
       },
@@ -182,6 +221,7 @@ describe('jobStore', () => {
           status: 'failed',
           source_id: 'Q1',
           title: '',
+          stem: '',
           workspace_id: 'ws1',
           pipeline_key: 'p1',
         },
@@ -236,6 +276,7 @@ describe('jobStore', () => {
           status: 'completed',
           source_id: 'Q1',
           title: '',
+          stem: '',
           workspace_id: 'ws1',
           pipeline_key: 'p1',
         },
@@ -244,6 +285,7 @@ describe('jobStore', () => {
           status: 'completed',
           source_id: 'Q2',
           title: '',
+          stem: '',
           workspace_id: 'ws1',
           pipeline_key: 'p1',
         },

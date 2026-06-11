@@ -6,14 +6,15 @@ import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
-import type { JobRecord } from '../types'
+import { api, fetchJobs } from '../api'
+import type { JobRecord, WorkspaceStats } from '../types'
 
 const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
 
 vi.mock('../api', () => ({
-  api: (...args: any[]) => mockApi(...args),
-  fetchJobs: (...args: any[]) => mockFetchJobs(...args),
+  api: (...args: Parameters<typeof api>) => mockApi(...args),
+  fetchJobs: (...args: Parameters<typeof fetchJobs>) => mockFetchJobs(...args),
 }))
 
 function renderPage(workspaceId = 'ws1') {
@@ -29,7 +30,7 @@ function renderPage(workspaceId = 'ws1') {
   )
 }
 
-const baseStats = {
+const baseStats: WorkspaceStats = {
   workspace_id: 'ws1',
   name: 'WS One',
   pipeline_key: 'question_content',
@@ -45,7 +46,7 @@ const baseStats = {
     ],
   },
   latest_run: null,
-} as const
+}
 
 describe('WorkspaceMainPage', () => {
   beforeEach(() => {

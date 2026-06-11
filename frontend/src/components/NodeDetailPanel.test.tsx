@@ -6,7 +6,7 @@ describe('NodeDetailPanel', () => {
   const baseNode = {
     key: 'extract',
     label: '提取',
-    status: 'completed',
+    status: 'completed' as const,
     startedAt: '2026-06-09T08:00:00Z',
     endedAt: '2026-06-09T08:00:45Z',
     duration: 45,
@@ -62,7 +62,7 @@ describe('NodeDetailPanel', () => {
         node={{
           key: 'pending-node',
           label: '待处理节点',
-          status: 'pending',
+          status: 'pending' as const,
         }}
         onViewLogs={vi.fn()}
         onRerunNode={vi.fn()}
