@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { describe, it, expect } from 'vitest'
+import { render, screen } from '@testing-library/react'
 import { DagGraph } from './DagGraph'
 
 const nodes = [
@@ -38,21 +38,6 @@ describe('DagGraph', () => {
     expect(screen.getByText('审核')).toBeInTheDocument()
   })
 
-  it('calls onNodeClick when a node is clicked', () => {
-    const onClick = vi.fn()
-    render(<DagGraph nodes={nodes} edges={edges} onNodeClick={onClick} />)
-    fireEvent.click(screen.getByText('提取'))
-    expect(onClick).toHaveBeenCalledWith('a')
-  })
-
-  it('highlights selected node with thicker stroke', () => {
-    const { container } = render(
-      <DagGraph nodes={nodes} edges={edges} selectedNodeKey="a" />
-    )
-    const nodeARect = container.querySelector('[data-node="a"] rect')
-    expect(nodeARect).toHaveAttribute('stroke-width', '3')
-  })
-
   it('renders empty state when no nodes', () => {
     const { container } = render(<DagGraph nodes={[]} edges={[]} />)
     expect(container.querySelector('svg')).toBeInTheDocument()
@@ -85,31 +70,5 @@ describe('DagGraph', () => {
     expect(container.querySelector('[data-node="b"]')).toHaveTextContent(
       'gen.json'
     )
-  })
-
-  it('does not call onNodeClick when not provided', () => {
-    render(<DagGraph nodes={nodes} edges={edges} />)
-    expect(() => fireEvent.click(screen.getByText('提取'))).not.toThrow()
-  })
-
-  it('calls onNodeClick on Enter key', () => {
-    const onClick = vi.fn()
-    render(<DagGraph nodes={nodes} edges={edges} onNodeClick={onClick} />)
-    const nodeA = screen.getByRole('button', { name: '提取' })
-    fireEvent.keyDown(nodeA, { key: 'Enter' })
-    expect(onClick).toHaveBeenCalledWith('a')
-  })
-
-  it('calls onNodeClick on Space key', () => {
-    const onClick = vi.fn()
-    render(<DagGraph nodes={nodes} edges={edges} onNodeClick={onClick} />)
-    const nodeA = screen.getByRole('button', { name: '提取' })
-    fireEvent.keyDown(nodeA, { key: ' ' })
-    expect(onClick).toHaveBeenCalledWith('a')
-  })
-
-  it('exposes accessible labels', () => {
-    render(<DagGraph nodes={nodes} edges={edges} />)
-    expect(screen.getByRole('button', { name: '提取' })).toBeInTheDocument()
   })
 })

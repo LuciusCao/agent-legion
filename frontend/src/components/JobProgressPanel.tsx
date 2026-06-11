@@ -45,16 +45,12 @@ interface JobProgressPanelProps {
   nodes: JobNodeRecord[]
   runs: NodeRunRecord[]
   onOpenDagDialog?: () => void
-  onNodeClick?: (nodeKey: string) => void
-  selectedNodeKey?: string | null
 }
 
 export function JobProgressPanel({
   nodes,
   runs,
   onOpenDagDialog,
-  onNodeClick,
-  selectedNodeKey,
 }: JobProgressPanelProps) {
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
   const [logDialog, setLogDialog] = useState<{
@@ -128,18 +124,7 @@ export function JobProgressPanel({
                 </div>
 
                 <div className={styles.timelineContent}>
-                  <div
-                    className={`${styles.timelineHeader} ${selectedNodeKey === node.node_key ? styles.timelineHeaderSelected : ''}`}
-                    onClick={() => onNodeClick?.(node.node_key)}
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        onNodeClick?.(node.node_key)
-                      }
-                    }}
-                  >
+                  <div className={styles.timelineHeader}>
                     <span className={styles.nodeName}>{node.label}</span>
                     <span
                       className={`${styles.statusBadge} ${BADGE_STATUS_CLASS[node.status] || ''}`}

@@ -112,18 +112,7 @@
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
-  cursor: pointer;
   padding: 4px;
-  border-radius: 6px;
-  transition: background 150ms ease;
-}
-
-.timelineHeader:hover {
-  background: var(--md-sys-color-surface-variant, #f3f4f6);
-}
-
-.timelineHeaderSelected {
-  background: var(--md-sys-color-primary-container, #dbeafe);
 }
 
 .nodeName {

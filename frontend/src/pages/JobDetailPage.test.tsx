@@ -1,11 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest'
-import {
-  render,
-  screen,
-  fireEvent,
-  waitFor,
-  within,
-} from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import JobDetailPage from './JobDetailPage'
 
@@ -115,25 +109,5 @@ describe('JobDetailPage', () => {
     expect(container.querySelectorAll('path[data-testid="edge"]')).toHaveLength(
       1
     )
-  })
-
-  it('clicking a timeline node shows NodeDetailPanel', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => mockDetail,
-      })
-    )
-
-    renderPage()
-
-    const extractBtn = await screen.findByRole('button', { name: /extract/ })
-    fireEvent.click(extractBtn)
-
-    const panel = await screen.findByTestId('node-detail-panel')
-    expect(panel).toBeInTheDocument()
-    expect(within(panel).getByText('extract')).toBeInTheDocument()
-    expect(screen.getByText('12秒')).toBeInTheDocument()
   })
 })
