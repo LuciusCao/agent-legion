@@ -157,4 +157,45 @@ describe('QuestionContentPanel', () => {
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText('B')).toBeInTheDocument()
   })
+
+  it('renders structured analysis steps', async () => {
+    mockFetchQuestionDetail.mockResolvedValue({
+      question_id: 'Q8',
+      title: 'Test',
+      normalized: {
+        stem: '<p>Problem</p>',
+        analysisSteps: [
+          [
+            { content: '<p>First step</p>', title: '<p>Hint</p>', step: 0 },
+            { content: '<p>Second step</p>', title: '', step: 1 },
+          ],
+        ],
+      },
+      cms_payload: null,
+      jobs: [],
+    })
+
+    render(<QuestionContentPanel workspaceId="ws1" questionId="Q8" />)
+    await waitFor(() => expect(screen.getByText('解析')).toBeInTheDocument())
+    expect(screen.getByText('Hint')).toBeInTheDocument()
+    expect(screen.getByText('First step')).toBeInTheDocument()
+    expect(screen.getByText('Second step')).toBeInTheDocument()
+  })
+
+  it('falls back to raw analysis when analysisSteps missing', async () => {
+    mockFetchQuestionDetail.mockResolvedValue({
+      question_id: 'Q9',
+      title: 'Test',
+      normalized: {
+        stem: '<p>Problem</p>',
+        analysis: 'Plain text analysis.',
+      },
+      cms_payload: null,
+      jobs: [],
+    })
+
+    render(<QuestionContentPanel workspaceId="ws1" questionId="Q9" />)
+    await waitFor(() => expect(screen.getByText('解析')).toBeInTheDocument())
+    expect(screen.getByText('Plain text analysis.')).toBeInTheDocument()
+  })
 })
