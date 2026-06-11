@@ -13,7 +13,6 @@ import { fetchAgents } from '../api'
 vi.mock('../api', () => ({
   api: vi.fn(),
   fetchAgents: vi.fn(),
-  fetchWorkspaceAgents: vi.fn(),
   assignAgent: vi.fn(),
   unassignAgent: vi.fn(),
 }))

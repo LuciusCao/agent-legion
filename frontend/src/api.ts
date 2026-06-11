@@ -211,10 +211,28 @@ export async function fetchAgents(): Promise<{ agents: AgentStatus[] }> {
   return api('/api/agents')
 }
 
-export async function fetchWorkspaceAgents(
+export async function getWorkspaceAgents(
   workspaceId: string
-): Promise<{ agents: WorkspaceAgentAssignment[] }> {
+): Promise<WorkspaceAgentAssignment[]> {
   return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`)
+}
+
+export async function setWorkspaceAgent(
+  workspaceId: string,
+  agentId: string,
+  concurrencyLimit: number
+): Promise<{
+  agent_id: string
+  workspace_id: string
+  concurrency_limit: number
+}> {
+  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
+    method: 'POST',
+    body: JSON.stringify({
+      agent_id: agentId,
+      concurrency_limit: concurrencyLimit,
+    }),
+  })
 }
 
 export async function assignAgent(

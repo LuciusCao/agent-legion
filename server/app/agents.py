@@ -17,6 +17,7 @@ class AgentStatus:
     busy: bool
     task_count: int = 0
     max_tasks: int = 1
+    workspace_id: str = ""
     current_video_id: str | None = None
     current_title: str = ""
     current_content_type: str = ""
@@ -30,7 +31,7 @@ class AgentStatusManager:
         self._clients: set[WebSocket] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._busy_video_ids: set[str] = set()
-        self._agent_video_ids: dict[str, list[str]] = {}
+        self._agent_video_ids: dict[tuple[str, str], list[str]] = {}
         self._workspace_assignments: dict[str, dict[str, int]] = {}
 
     def discover(self) -> list[AgentStatus]:
@@ -80,9 +81,9 @@ class AgentStatusManager:
     def get_all(self) -> list[AgentStatus]:
         return list(self.agents)
 
-    def add_pi_agent(self, max_tasks: int = 1) -> None:
+    def add_pi_agent_for_workspace(self, workspace_id: str, max_tasks: int = 1) -> None:
         for agent in self.agents:
-            if agent.id == "pi":
+            if agent.id == "pi" and agent.workspace_id == workspace_id:
                 agent.max_tasks = max_tasks
                 return
         self.agents.append(
@@ -92,17 +93,25 @@ class AgentStatusManager:
                 busy=False,
                 task_count=0,
                 max_tasks=max_tasks,
+                workspace_id=workspace_id,
             )
         )
         self._broadcast()
 
-    def set_busy(self, agent_id: str, video: str | dict[str, Any]) -> None:
+    def add_pi_agent(self, max_tasks: int = 1) -> None:
+        """Deprecated: use add_pi_agent_for_workspace."""
+        self.add_pi_agent_for_workspace("", max_tasks)
+
+    def set_busy(
+        self, agent_id: str, video: str | dict[str, Any], *, workspace_id: str = ""
+    ) -> None:
         video_id = video if isinstance(video, str) else str(video.get("id", ""))
         if video_id:
             self._busy_video_ids.add(video_id)
-            self._agent_video_ids.setdefault(agent_id, []).append(video_id)
+            key = (agent_id, workspace_id)
+            self._agent_video_ids.setdefault(key, []).append(video_id)
         for agent in self.agents:
-            if agent.id == agent_id:
+            if agent.id == agent_id and agent.workspace_id == workspace_id:
                 agent.task_count += 1
                 agent.busy = True
                 agent.current_video_id = video_id
@@ -114,17 +123,18 @@ class AgentStatusManager:
                 break
         self._broadcast()
 
-    def set_idle(self, agent_id: str) -> None:
-        video_ids = self._agent_video_ids.get(agent_id, [])
+    def set_idle(self, agent_id: str, *, workspace_id: str = "") -> None:
+        key = (agent_id, workspace_id)
+        video_ids = self._agent_video_ids.get(key, [])
         video_id = video_ids.pop() if video_ids else ""
         if video_ids:
-            self._agent_video_ids[agent_id] = video_ids
+            self._agent_video_ids[key] = video_ids
         else:
-            self._agent_video_ids.pop(agent_id, None)
+            self._agent_video_ids.pop(key, None)
         if video_id:
             self._busy_video_ids.discard(video_id)
         for agent in self.agents:
-            if agent.id == agent_id:
+            if agent.id == agent_id and agent.workspace_id == workspace_id:
                 agent.task_count = max(0, agent.task_count - 1)
                 agent.busy = agent.task_count > 0
                 if agent.task_count == 0:
@@ -149,6 +159,7 @@ class AgentStatusManager:
                 "busy": a.busy,
                 "task_count": a.task_count,
                 "max_tasks": a.max_tasks,
+                "workspace_id": a.workspace_id,
                 "current_video_id": a.current_video_id,
                 "current_title": a.current_title,
                 "current_content_type": a.current_content_type,

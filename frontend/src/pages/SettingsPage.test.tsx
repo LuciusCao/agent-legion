@@ -10,7 +10,8 @@ import {
   assignAgent,
   fetchAgents,
   fetchPipelines,
-  fetchWorkspaceAgents,
+  getWorkspaceAgents,
+  setWorkspaceAgent,
   unassignAgent,
   updateWorkspace,
 } from '../api'
@@ -19,7 +20,8 @@ vi.mock('../api', () => ({
   api: vi.fn(),
   fetchAgents: vi.fn(),
   fetchPipelines: vi.fn(),
-  fetchWorkspaceAgents: vi.fn(),
+  getWorkspaceAgents: vi.fn(),
+  setWorkspaceAgent: vi.fn(),
   assignAgent: vi.fn(),
   unassignAgent: vi.fn(),
   fetchWorkspaces: vi.fn(),
@@ -29,7 +31,8 @@ vi.mock('../api', () => ({
 const mockApi = vi.mocked(api)
 const mockFetchAgents = vi.mocked(fetchAgents)
 const mockFetchPipelines = vi.mocked(fetchPipelines)
-const mockFetchWorkspaceAgents = vi.mocked(fetchWorkspaceAgents)
+const mockGetWorkspaceAgents = vi.mocked(getWorkspaceAgents)
+const mockSetWorkspaceAgent = vi.mocked(setWorkspaceAgent)
 const mockUpdateWorkspace = vi.mocked(updateWorkspace)
 const mockAssignAgent = vi.mocked(assignAgent)
 const mockUnassignAgent = vi.mocked(unassignAgent)
@@ -57,6 +60,8 @@ const defaultState = {
   originalWorkspaceDescription: '测试描述',
   originalSettings: null as typeof defaultState.settings | null,
   originalAgentAssignments: null as typeof defaultState.agentAssignments,
+  piAgentConcurrency: undefined as number | undefined,
+  originalPiAgentConcurrency: undefined as number | undefined,
   isDirty: false,
   globalServices: {
     cms: {
@@ -99,6 +104,9 @@ const defaultState = {
     }))
   }),
   setAgentAssignments: vi.fn(),
+  setPiAgentConcurrency: vi.fn((value: number | undefined) => {
+    useSettingStore.setState({ piAgentConcurrency: value, isDirty: true })
+  }),
   fetchSettings: vi.fn().mockResolvedValue(undefined),
   fetchAgentAssignments: vi.fn().mockResolvedValue(undefined),
   fetchGlobalServices: vi.fn().mockResolvedValue(undefined),
@@ -154,8 +162,10 @@ describe('SettingsPage', () => {
     mockFetchAgents.mockResolvedValue({ agents: [] })
     mockFetchPipelines.mockReset()
     mockFetchPipelines.mockResolvedValue({ pipelines: [] })
-    mockFetchWorkspaceAgents.mockReset()
-    mockFetchWorkspaceAgents.mockResolvedValue({ agents: [] })
+    mockGetWorkspaceAgents.mockReset()
+    mockGetWorkspaceAgents.mockResolvedValue([])
+    mockSetWorkspaceAgent.mockReset()
+    mockSetWorkspaceAgent.mockResolvedValue(undefined)
     mockUpdateWorkspace.mockReset()
     mockUpdateWorkspace.mockResolvedValue({
       id: 'ws1',
@@ -364,6 +374,28 @@ describe('SettingsPage', () => {
       expect(screen.getByText('可用智能体')).toBeInTheDocument()
     })
     expect(screen.getByText('当前工作空间未分配智能体')).toBeInTheDocument()
+  })
+
+  it('renders Pi Agent concurrency input', async () => {
+    useSettingStore.setState({
+      pipelineDefinition: {
+        key: 'question_content',
+        label: '题目内容生成',
+        concurrency: { local: 8, agent: 2 },
+        intake: { modes: [] },
+        nodes: [],
+      },
+      piAgentConcurrency: 3,
+    })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('Pi Agent 并发数')).toBeInTheDocument()
+    })
+    const input = document.querySelector(
+      'md-outlined-text-field#pi-agent-concurrency'
+    )
+    expect(input).toBeTruthy()
+    expect(input!.getAttribute('value')).toBe('3')
   })
 
   it('renders resource provider params when intake mode is checked', async () => {

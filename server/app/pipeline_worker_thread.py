@@ -127,6 +127,7 @@ class PipelineWorkerThread:
         self.agent_manager = agent_manager
         self.stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        # Compat aliases — old code/tests may reference these fields
         self._local_executor: ThreadPoolExecutor | None = None
         self._agent_executor: ThreadPoolExecutor | None = None
         self._futures: dict[tuple[str, str], Future[bool]] = {}
@@ -138,13 +139,55 @@ class PipelineWorkerThread:
         self._skill_root: Path | None = None
         self._max_local: int = 1
         self._max_agent: int = 1
+        # NEW per-workspace fields
+        self._ws_agent_executors: dict[str, ThreadPoolExecutor] = {}
+        self._ws_local_executors: dict[str, ThreadPoolExecutor] = {}
+        self._ws_agent_futures: dict[str, set[tuple[str, str]]] = {}
+        self._ws_local_futures: dict[tuple[str, str], set[tuple[str, str]]] = {}
+        self._ws_agent_limits: dict[str, int] = {}
+
+    def _ensure_workspace_executors(self, workspace_id: str) -> None:
+        agents = self.job_db.list_workspace_agents(workspace_id)
+        pi_agent = next((a for a in agents if a["agent_id"] == "pi"), None)
+
+        if pi_agent is None:
+            pi_limit = max((d.concurrency.agent for d in self._definitions), default=1)
+            self.job_db.upsert_workspace_agent_assignment(workspace_id, "pi", pi_limit)
+        else:
+            pi_limit = pi_agent["concurrency_limit"]
+
+        if (
+            workspace_id in self._ws_local_executors
+            and self._ws_agent_limits.get(workspace_id) == pi_limit
+        ):
+            return
+
+        # If recreating (config changed or old executor shut down), clean up first
+        if workspace_id in self._ws_local_executors:
+            self._ws_local_executors[workspace_id].shutdown(wait=False, cancel_futures=True)
+            self._ws_agent_executors[workspace_id].shutdown(wait=False, cancel_futures=True)
+
+        self._ws_agent_limits[workspace_id] = pi_limit
+
+        local_default = max((d.concurrency.local for d in self._definitions), default=1)
+        node_limit_sum = sum(
+            d.concurrency.nodes.get(node.key, d.concurrency.local)
+            for d in self._definitions
+            for node in d.nodes.values()
+            if node.runner == "local"
+        )
+        local_limit = max(local_default, node_limit_sum)
+
+        self._ws_local_executors[workspace_id] = ThreadPoolExecutor(max_workers=local_limit)
+        self._ws_agent_executors[workspace_id] = ThreadPoolExecutor(max_workers=pi_limit)
+
+        if self.agent_manager is not None:
+            self.agent_manager.add_pi_agent_for_workspace(workspace_id, pi_limit)
 
     def start(self) -> None:
         self._definitions = list_registered_pipelines(self.settings.root_dir)
         self._max_local = max((d.concurrency.local for d in self._definitions), default=1)
         self._max_agent = max((d.concurrency.agent for d in self._definitions), default=1)
-        self._local_executor = ThreadPoolExecutor(max_workers=self._max_local)
-        self._agent_executor = ThreadPoolExecutor(max_workers=self._max_agent)
         pi_raw = self.settings.config.get("pipelines", {}).get("pi", {})
         if isinstance(pi_raw, dict):
             self._skill_root = self.settings.root_dir / "server" / "app" / "pipelines" / "skills"
@@ -152,8 +195,9 @@ class PipelineWorkerThread:
                 self._pi_runner = PiRunner.from_config(pi_raw, self._skill_root)
             except Exception:
                 logger.exception("failed to initialise pi runner")
-        if self._pi_runner is not None and self.agent_manager is not None:
-            self.agent_manager.add_pi_agent(self._max_agent)
+
+        for ws in self.job_db.list_workspaces():
+            self._ensure_workspace_executors(ws["id"])
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -198,19 +242,49 @@ class PipelineWorkerThread:
                     )
                     should_clean = True
             if should_clean:
-                if key in self._local_futures:
-                    self._local_futures.discard(key)
-                if key in self._agent_futures:
-                    self._agent_futures.discard(key)
-                    if self.agent_manager is not None:
-                        try:
-                            self.agent_manager.set_idle("pi")
-                        except Exception:
-                            logger.exception("failed to set pi idle")
+                ws_id = self._job_workspace_ids.get(job_id)
+                if ws_id is not None:
+                    node_local_key = (ws_id, node_key)
+                    if (
+                        node_local_key in self._ws_local_futures
+                        and key in self._ws_local_futures[node_local_key]
+                    ):
+                        self._ws_local_futures[node_local_key].discard(key)
+                        if not self._ws_local_futures[node_local_key]:
+                            self._ws_local_futures.pop(node_local_key, None)
+                    if ws_id in self._ws_agent_futures and key in self._ws_agent_futures[ws_id]:
+                        self._ws_agent_futures[ws_id].discard(key)
+                        if self.agent_manager is not None:
+                            try:
+                                self.agent_manager.set_idle("pi", workspace_id=ws_id)
+                            except Exception:
+                                logger.exception("failed to set pi idle")
+                else:
+                    # Fallback to global compat sets
+                    if key in self._local_futures:
+                        self._local_futures.discard(key)
+                    if key in self._agent_futures:
+                        self._agent_futures.discard(key)
+                        if self.agent_manager is not None:
+                            try:
+                                self.agent_manager.set_idle("pi")
+                            except Exception:
+                                logger.exception("failed to set pi idle")
                 self._futures.pop(key, None)
-                self._job_workspace_ids.pop(job_id, None)
+                if not any(k[0] == job_id for k in self._futures):
+                    self._job_workspace_ids.pop(job_id, None)
 
         # Defensive: reconcile orphaned agent-future keys (e.g. after a crash)
+        for ws_id, keys in list(self._ws_agent_futures.items()):
+            for key in list(keys):
+                if key not in self._futures:
+                    self._ws_agent_futures[ws_id].discard(key)
+                    logger.warning("reconciled orphaned agent future %s.%s", key[0], key[1])
+                    if self.agent_manager is not None:
+                        try:
+                            self.agent_manager.set_idle("pi", workspace_id=ws_id)
+                        except Exception:
+                            logger.exception("failed to set pi idle during reconciliation")
         for key in list(self._agent_futures):
             if key not in self._futures:
                 self._agent_futures.discard(key)
@@ -228,6 +302,7 @@ class PipelineWorkerThread:
             for job in self.job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
                 workspace_id = str(job.get("workspace_id") or "default")
                 self._job_workspace_ids[job["id"]] = workspace_id
+                self._ensure_workspace_executors(workspace_id)
                 if workspace_id not in workspace_paused_cache:
                     if self.workspace_worker_control is not None:
                         workspace_paused_cache[workspace_id] = (
@@ -246,10 +321,22 @@ class PipelineWorkerThread:
                         continue
 
                     if node.runner == "local":
-                        if len(self._local_futures) >= self._max_local:
+                        node_limit = definition.concurrency.nodes.get(
+                            node.key, definition.concurrency.local
+                        )
+                        local_futures_for_node = self._ws_local_futures.get(
+                            (workspace_id, node.key), set()
+                        )
+                        if len(local_futures_for_node) >= node_limit:
                             continue
-                        assert self._local_executor is not None
-                        self._futures[key] = self._local_executor.submit(
+                        total_ws_local = sum(
+                            len(s)
+                            for (ws, _), s in self._ws_local_futures.items()
+                            if ws == workspace_id
+                        )
+                        if total_ws_local >= self._ws_local_executors[workspace_id]._max_workers:
+                            continue
+                        self._futures[key] = self._ws_local_executors[workspace_id].submit(
                             _execute_node_wrapped,
                             self.job_db,
                             definition,
@@ -260,7 +347,7 @@ class PipelineWorkerThread:
                             None,
                             None,
                         )
-                        self._local_futures.add(key)
+                        self._ws_local_futures.setdefault((workspace_id, node.key), set()).add(key)
                         processed = True
                     elif (
                         node.agent is not None
@@ -268,10 +355,11 @@ class PipelineWorkerThread:
                         and self._pi_runner is not None
                         and self._skill_root is not None
                     ):
-                        if len(self._agent_futures) >= self._max_agent:
+                        limit = self._ws_agent_limits.get(workspace_id, 1)
+                        agent_futures_for_ws = self._ws_agent_futures.get(workspace_id, set())
+                        if len(agent_futures_for_ws) >= limit:
                             continue
-                        assert self._agent_executor is not None
-                        self._futures[key] = self._agent_executor.submit(
+                        self._futures[key] = self._ws_agent_executors[workspace_id].submit(
                             _execute_node_wrapped,
                             self.job_db,
                             definition,
@@ -282,9 +370,9 @@ class PipelineWorkerThread:
                             self._pi_runner,
                             self._skill_root,
                         )
-                        self._agent_futures.add(key)
+                        self._ws_agent_futures.setdefault(workspace_id, set()).add(key)
                         if self.agent_manager is not None:
-                            self.agent_manager.set_busy("pi", job)
+                            self.agent_manager.set_busy("pi", job, workspace_id=workspace_id)
                         processed = True
                     elif node.runner == "agent":
                         error_message = "Pi runner is not configured"
@@ -317,3 +405,12 @@ class PipelineWorkerThread:
             self._local_executor.shutdown(wait=True, cancel_futures=False)
         if self._agent_executor is not None:
             self._agent_executor.shutdown(wait=True, cancel_futures=False)
+        for executor in self._ws_local_executors.values():
+            executor.shutdown(wait=False, cancel_futures=True)
+        for executor in self._ws_agent_executors.values():
+            executor.shutdown(wait=False, cancel_futures=True)
+        self._ws_local_executors.clear()
+        self._ws_agent_executors.clear()
+        self._ws_agent_futures.clear()
+        self._ws_local_futures.clear()
+        self._ws_agent_limits.clear()
