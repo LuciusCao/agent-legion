@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, RootModel
 
 from server.app.agents import AgentStatusManager
 from server.app.cms.client import get_token
@@ -132,6 +132,20 @@ class WorkspacesResponse(BaseModel):
 
 class WorkspaceAgentsResponse(BaseModel):
     agents: list[dict[str, Any]]
+
+
+class WorkspaceAgentAssignmentResponse(BaseModel):
+    agent_id: str
+    workspace_id: str
+    concurrency_limit: int
+
+
+class WorkspaceAgentListResponse(RootModel[list[WorkspaceAgentAssignmentResponse]]):
+    pass
+
+
+class DeleteJobResponse(BaseModel):
+    deleted: str
 
 
 class JobDetailResponse(BaseModel):
@@ -732,24 +746,41 @@ def create_jobs_router(
         _require_enabled(settings)
         return WorkspaceResponse(workspace=_workspace_or_404(job_db, workspace_id))
 
-    @router.get("/workspaces/{workspace_id}/agents")
+    @router.get(
+        "/workspaces/{workspace_id}/agents",
+        response_model=WorkspaceAgentListResponse,
+    )
     def get_workspace_agents(
         workspace_id: str,
-    ) -> list[dict[str, Any]]:
+    ) -> WorkspaceAgentListResponse:
         _require_enabled(settings)
         _workspace_or_404(job_db, workspace_id)
-        return job_db.list_workspace_agents(workspace_id)
+        assignments = job_db.list_workspace_agents(workspace_id)
+        return WorkspaceAgentListResponse(
+            root=[
+                WorkspaceAgentAssignmentResponse.model_validate(
+                    {**assignment, "workspace_id": workspace_id}
+                )
+                for assignment in assignments
+            ]
+        )
 
-    @router.post("/workspaces/{workspace_id}/agents")
+    @router.post(
+        "/workspaces/{workspace_id}/agents",
+        response_model=WorkspaceAgentAssignmentResponse,
+    )
     def set_workspace_agent(
         workspace_id: str,
         config: WorkspaceAgentConfig,
-    ) -> dict[str, Any]:
+    ) -> WorkspaceAgentAssignmentResponse:
         _require_enabled(settings)
         _workspace_or_404(job_db, workspace_id)
-        return job_db.upsert_workspace_agent_assignment(
-            workspace_id, config.agent_id, config.concurrency_limit
+        assignment = job_db.upsert_workspace_agent_assignment(
+            workspace_id,
+            config.agent_id,
+            config.concurrency_limit,
         )
+        return WorkspaceAgentAssignmentResponse.model_validate(assignment)
 
     @router.get("/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsResponse)
     def get_workspace_settings(workspace_id: str) -> WorkspaceSettingsResponse:
@@ -1182,8 +1213,8 @@ def create_jobs_router(
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         return RerunNodeResponse(job_id=job_id, node_key=node_key, stale_nodes=stale_nodes)
 
-    @router.delete("/jobs/{job_id}")
-    def delete_job(job_id: str) -> dict[str, str]:
+    @router.delete("/jobs/{job_id}", response_model=DeleteJobResponse)
+    def delete_job(job_id: str) -> DeleteJobResponse:
         _require_enabled(settings)
         job = job_db.get_job(job_id)
         if job is None:
@@ -1199,7 +1230,7 @@ def create_jobs_router(
             shutil.rmtree(storage_dir)
         for log_path in glob.glob(str(settings.logs_dir / "jobs" / f"{job_id}-*.log")):
             Path(log_path).unlink(missing_ok=True)
-        return {"deleted": job_id}
+        return DeleteJobResponse(deleted=job_id)
 
     @router.get("/jobs/{job_id}/{invalid_path:path}", response_model=ArtifactResponse)
     def reject_invalid_job_subpath(job_id: str, invalid_path: str) -> None:
