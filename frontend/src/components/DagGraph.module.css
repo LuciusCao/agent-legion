@@ -1,6 +1,6 @@
 .dag-graph {
   width: 100%;
-  height: auto;
+  height: 100%;
   display: block;
 }
 
@@ -29,7 +29,7 @@ g[role='button']:focus-visible .node-rect {
 }
 
 .node-icon {
-  font-size: 14px;
+  font-size: 12px;
   text-anchor: middle;
   dominant-baseline: middle;
   pointer-events: none;
@@ -42,6 +42,14 @@ g[role='button']:focus-visible .node-rect {
   dominant-baseline: middle;
   pointer-events: none;
   fill: #6b7280;
+}
+
+.chip-label {
+  font-size: 8px;
+  text-anchor: middle;
+  dominant-baseline: middle;
+  pointer-events: none;
+  fill: #374151;
 }
 
 .edge-line {

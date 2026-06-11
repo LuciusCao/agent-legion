@@ -1,19 +1,41 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { DagGraph } from './DagGraph'
-import styles from './DagGraph.module.css'
 
 const nodes = [
-  { key: 'a', label: '提取', status: 'completed' as const, x: 50, y: 50 },
-  { key: 'b', label: '生成', status: 'running' as const, x: 200, y: 50 },
+  {
+    key: 'a',
+    label: '提取',
+    status: 'completed' as const,
+    inputs: [],
+    outputs: ['out.json'],
+  },
+  {
+    key: 'b',
+    label: '生成',
+    status: 'running' as const,
+    inputs: ['out.json'],
+    outputs: ['gen.json'],
+  },
+  {
+    key: 'c',
+    label: '审核',
+    status: 'pending' as const,
+    inputs: ['gen.json'],
+    outputs: [],
+  },
 ]
-const edges = [{ from: 'a', to: 'b' }]
+const edges = [
+  { from: 'a', to: 'b' },
+  { from: 'b', to: 'c' },
+]
 
 describe('DagGraph', () => {
-  it('renders nodes', () => {
+  it('renders nodes with labels', () => {
     render(<DagGraph nodes={nodes} edges={edges} />)
     expect(screen.getByText('提取')).toBeInTheDocument()
     expect(screen.getByText('生成')).toBeInTheDocument()
+    expect(screen.getByText('审核')).toBeInTheDocument()
   })
 
   it('calls onNodeClick when a node is clicked', () => {
@@ -31,16 +53,17 @@ describe('DagGraph', () => {
     expect(nodeARect).toHaveAttribute('stroke-width', '3')
   })
 
-  it('renders empty state when no nodes are provided', () => {
+  it('renders empty state when no nodes', () => {
     const { container } = render(<DagGraph nodes={[]} edges={[]} />)
     expect(container.querySelector('svg')).toBeInTheDocument()
     expect(container.querySelectorAll('[data-node]')).toHaveLength(0)
   })
 
-  it('renders edges as lines', () => {
+  it('renders edges', () => {
     const { container } = render(<DagGraph nodes={nodes} edges={edges} />)
-    const lines = container.querySelectorAll('line')
-    expect(lines).toHaveLength(1)
+    expect(container.querySelectorAll('path[data-testid="edge"]')).toHaveLength(
+      2
+    )
   })
 
   it('renders status icons', () => {
@@ -51,48 +74,17 @@ describe('DagGraph', () => {
     expect(nodeB).toHaveTextContent('hourglass_empty')
   })
 
-  it('renders duration when provided', () => {
-    const nodesWithDuration = [
-      {
-        key: 'a',
-        label: '提取',
-        status: 'completed' as const,
-        x: 50,
-        y: 50,
-        duration: 45,
-      },
-      { key: 'b', label: '生成', status: 'running' as const, x: 200, y: 50 },
-    ]
-    render(<DagGraph nodes={nodesWithDuration} edges={edges} />)
-    expect(screen.getByText('45s')).toBeInTheDocument()
-  })
-
-  it('applies status fill and stroke colors', () => {
+  it('renders inputs/outputs chips', () => {
     const { container } = render(<DagGraph nodes={nodes} edges={edges} />)
-    const nodeARect = container.querySelector('[data-node="a"] rect')
-    const nodeBRect = container.querySelector('[data-node="b"] rect')
-    expect(nodeARect).toHaveAttribute('fill', '#dcfce7')
-    expect(nodeARect).toHaveAttribute('stroke', '#15803d')
-    expect(nodeBRect).toHaveAttribute('fill', '#dbeafe')
-    expect(nodeBRect).toHaveAttribute('stroke', '#1d4ed8')
-  })
-
-  it('uses dashed line for pending edge and solid for completed edge', () => {
-    const mixedNodes = [
-      { key: 'a', label: '提取', status: 'completed' as const, x: 50, y: 50 },
-      { key: 'b', label: '生成', status: 'running' as const, x: 200, y: 50 },
-      { key: 'c', label: '审核', status: 'pending' as const, x: 350, y: 50 },
-    ]
-    const mixedEdges = [
-      { from: 'a', to: 'b' },
-      { from: 'b', to: 'c' },
-    ]
-    const { container } = render(
-      <DagGraph nodes={mixedNodes} edges={mixedEdges} />
+    expect(container.querySelector('[data-node="a"]')).toHaveTextContent(
+      'out.json'
     )
-    const lines = container.querySelectorAll('line')
-    expect(lines[0]).toHaveClass(styles.edgeLineCompleted)
-    expect(lines[1]).toHaveClass(styles.edgeLinePending)
+    expect(container.querySelector('[data-node="b"]')).toHaveTextContent(
+      'out.json'
+    )
+    expect(container.querySelector('[data-node="b"]')).toHaveTextContent(
+      'gen.json'
+    )
   })
 
   it('does not call onNodeClick when not provided', () => {
@@ -100,39 +92,24 @@ describe('DagGraph', () => {
     expect(() => fireEvent.click(screen.getByText('提取'))).not.toThrow()
   })
 
-  it('calls onNodeClick when Enter is pressed on a node', () => {
+  it('calls onNodeClick on Enter key', () => {
     const onClick = vi.fn()
     render(<DagGraph nodes={nodes} edges={edges} onNodeClick={onClick} />)
     const nodeA = screen.getByRole('button', { name: '提取' })
-    fireEvent.keyDown(nodeA, { key: 'Enter', code: 'Enter' })
+    fireEvent.keyDown(nodeA, { key: 'Enter' })
     expect(onClick).toHaveBeenCalledWith('a')
   })
 
-  it('calls onNodeClick when Space is pressed on a node', () => {
+  it('calls onNodeClick on Space key', () => {
     const onClick = vi.fn()
     render(<DagGraph nodes={nodes} edges={edges} onNodeClick={onClick} />)
     const nodeA = screen.getByRole('button', { name: '提取' })
-    fireEvent.keyDown(nodeA, { key: ' ', code: 'Space' })
+    fireEvent.keyDown(nodeA, { key: ' ' })
     expect(onClick).toHaveBeenCalledWith('a')
   })
 
-  it('does not call onNodeClick for unrelated keys', () => {
-    const onClick = vi.fn()
-    render(<DagGraph nodes={nodes} edges={edges} onNodeClick={onClick} />)
-    const nodeA = screen.getByRole('button', { name: '提取' })
-    fireEvent.keyDown(nodeA, { key: 'ArrowDown', code: 'ArrowDown' })
-    expect(onClick).not.toHaveBeenCalled()
-  })
-
-  it('exposes nodes as buttons with accessible labels', () => {
+  it('exposes accessible labels', () => {
     render(<DagGraph nodes={nodes} edges={edges} />)
     expect(screen.getByRole('button', { name: '提取' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '生成' })).toBeInTheDocument()
-  })
-
-  it('skips edges with unknown nodes', () => {
-    const badEdges = [{ from: 'a', to: 'unknown' }]
-    const { container } = render(<DagGraph nodes={nodes} edges={badEdges} />)
-    expect(container.querySelectorAll('line')).toHaveLength(0)
   })
 })

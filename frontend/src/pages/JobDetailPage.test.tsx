@@ -110,7 +110,9 @@ describe('JobDetailPage', () => {
     await waitFor(() => {
       expect(container.querySelectorAll('[data-node]')).toHaveLength(2)
     })
-    expect(container.querySelectorAll('line')).toHaveLength(1)
+    expect(container.querySelectorAll('path[data-testid="edge"]')).toHaveLength(
+      1
+    )
   })
 
   it('clicking a node shows NodeDetailPanel', async () => {
@@ -136,5 +138,39 @@ describe('JobDetailPage', () => {
     expect(panel).toBeInTheDocument()
     expect(within(panel).getByText('extract')).toBeInTheDocument()
     expect(screen.getByText('12秒')).toBeInTheDocument()
+  })
+
+  it('renders collapsible DAG panel', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockDetail,
+      })
+    )
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('DAG 流水线')).toBeInTheDocument()
+    })
+    expect(screen.getByLabelText('收起')).toBeInTheDocument()
+  })
+
+  it('opens fullscreen dialog from progress panel', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => mockDetail,
+      })
+    )
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByLabelText('查看完整 DAG')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByLabelText('查看完整 DAG'))
+    expect(await screen.findByLabelText('关闭')).toBeInTheDocument()
+    expect(screen.getAllByText('DAG 流水线').length).toBeGreaterThanOrEqual(2)
   })
 })

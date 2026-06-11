@@ -125,8 +125,11 @@ export function QuestionContentPanel({
     return renderLatexInHtml(sanitizeHtml(analysis))
   }, [analysis])
 
+  const analysisSteps = detail?.normalized.analysis_steps
+
   const rawAnswer = detail?.normalized.answer
   const answerItems = rawAnswer ? extractAnswerItems(rawAnswer) : null
+  const answer_blanks = detail?.normalized.answer_blanks
 
   if (loading) {
     return <p className={styles.loading}>加载题目中...</p>
@@ -182,10 +185,29 @@ export function QuestionContentPanel({
         </section>
       )}
 
-      {(answerItems != null || rawAnswer != null) && (
+      {(answer_blanks != null || answerItems != null || rawAnswer != null) && (
         <section className={`${styles.card} ${styles.answerCard}`}>
           <h2 className={styles.sectionTitle}>答案</h2>
-          {answerItems != null && answerItems.length > 0 ? (
+          {answer_blanks != null && answer_blanks.length > 0 ? (
+            <div className={styles.answerBlankList}>
+              {answer_blanks.map((blank, idx) => (
+                <div key={idx} className={styles.answerBlank}>
+                  <span className={styles.blankLabel}>第{idx + 1}空：</span>
+                  <span className={styles.blankAlternatives}>
+                    {blank.alternatives.map((alt, aidx) => (
+                      <span key={aidx} className={styles.answerBadge}>
+                        {blank.is_latex && hasLatex(alt) ? (
+                          <LaTeXText>{alt}</LaTeXText>
+                        ) : (
+                          alt
+                        )}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : answerItems != null && answerItems.length > 0 ? (
             <div className={styles.answerBadges}>
               {answerItems.map((item, idx) => (
                 <span key={idx} className={styles.answerBadge}>
@@ -199,17 +221,43 @@ export function QuestionContentPanel({
         </section>
       )}
 
-      {detail?.normalized.analysis != null && (
+      {(detail?.normalized.analysis != null ||
+        (analysisSteps != null && analysisSteps.length > 0)) && (
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>解析</h2>
-          {typeof detail.normalized.analysis === 'string' ? (
+          {analysisSteps != null && analysisSteps.length > 0 ? (
+            <div className={styles.analysisGroups}>
+              {analysisSteps.map((group, gidx) => (
+                <div key={gidx} className={styles.analysisGroup}>
+                  {group.map((step, sidx) => (
+                    <div key={sidx} className={styles.analysisStep}>
+                      {step.title ? (
+                        <h4
+                          className={styles.stepTitle}
+                          dangerouslySetInnerHTML={{
+                            __html: renderLatexInHtml(sanitizeHtml(step.title)),
+                          }}
+                        />
+                      ) : null}
+                      <div
+                        className={styles.richText}
+                        dangerouslySetInnerHTML={{
+                          __html: renderLatexInHtml(sanitizeHtml(step.content)),
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : typeof detail!.normalized.analysis === 'string' ? (
             <div
               className={styles.richText}
               dangerouslySetInnerHTML={{ __html: analysisHtml }}
             />
           ) : (
             <pre className={styles.pre}>
-              {JSON.stringify(detail.normalized.analysis, null, 2)}
+              {JSON.stringify(detail!.normalized.analysis, null, 2)}
             </pre>
           )}
         </section>
