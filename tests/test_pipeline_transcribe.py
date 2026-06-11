@@ -10,7 +10,7 @@ from server.app.pipeline.transcribe import (
     run_transcription_with_providers,
     validate_srt,
 )
-from tests.conftest import BadProvider, GoodProvider
+from tests.helpers import BadProvider, GoodProvider
 
 
 def test_transcribe_auto_falls_back_to_sensevoice(tmp_path):
