@@ -1,3 +1,5 @@
+import type { WorkspaceAgentDraft } from './api-contract'
+
 export type ContentType = 'knowledge' | 'question'
 export type DetailTab = 'nodes' | 'subtitles' | 'logs' | 'metadata'
 export type RunToMode = 'continue' | 'rerun'
@@ -40,10 +42,7 @@ export type AgentStatus = {
   current_phase?: string
 }
 
-export type WorkspaceAgentAssignment = {
-  agent_id: string
-  concurrency_limit: number
-}
+export type WorkspaceAgentAssignment = WorkspaceAgentDraft
 
 export type GlobalServiceStatus = {
   cms: {

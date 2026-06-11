@@ -1,4 +1,8 @@
 import type {
+  WorkspaceAgentAssignmentTransport,
+  WorkspaceAgentListTransport,
+} from './api-contract'
+import type {
   AgentStatus,
   ArtifactResponse,
   CreateJobBatchInput,
@@ -214,18 +218,16 @@ export async function fetchAgents(): Promise<{ agents: AgentStatus[] }> {
 export async function getWorkspaceAgents(
   workspaceId: string
 ): Promise<WorkspaceAgentAssignment[]> {
-  return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`)
+  return api<WorkspaceAgentListTransport>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`
+  )
 }
 
 export async function setWorkspaceAgent(
   workspaceId: string,
   agentId: string,
   concurrencyLimit: number
-): Promise<{
-  agent_id: string
-  workspace_id: string
-  concurrency_limit: number
-}> {
+): Promise<WorkspaceAgentAssignmentTransport> {
   return api(`/api/workspaces/${encodeURIComponent(workspaceId)}/agents`, {
     method: 'POST',
     body: JSON.stringify({
