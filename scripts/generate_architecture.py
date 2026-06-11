@@ -116,9 +116,7 @@ def extract_fastapi_routes(root: Path) -> str:
                             path_arg = prefix.rstrip("/") + "/" + path_arg.lstrip("/")
                         elif prefix and not path_arg:
                             path_arg = prefix
-                        rows.append(
-                            (method, path_arg, child.name, f"routes/{py_file.name}")
-                        )
+                        rows.append((method, path_arg, child.name, f"routes/{py_file.name}"))
 
     if not rows:
         return "_No routes found._\n"
@@ -172,9 +170,7 @@ def extract_models(root: Path) -> str:
                     fields.append(f"{field_name}: {field_type}")
 
             rel_path = str(py_file.relative_to(app_dir.parent))
-            rows.append(
-                (node.name, kind, ", ".join(fields) or "—", rel_path)
-            )
+            rows.append((node.name, kind, ", ".join(fields) or "—", rel_path))
 
     if not rows:
         return "_No models found._\n"

@@ -108,6 +108,11 @@ describe('JobDetailPage', () => {
     const { container } = renderPage()
 
     await waitFor(() => {
+      expect(screen.getByLabelText('展开 DAG')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByLabelText('展开 DAG'))
+
+    await waitFor(() => {
       expect(container.querySelectorAll('[data-node]')).toHaveLength(2)
     })
     expect(container.querySelectorAll('path[data-testid="edge"]')).toHaveLength(
@@ -125,6 +130,11 @@ describe('JobDetailPage', () => {
     )
 
     const { container } = renderPage()
+
+    await waitFor(() => {
+      expect(screen.getByLabelText('展开 DAG')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByLabelText('展开 DAG'))
 
     await waitFor(() => {
       expect(
@@ -153,6 +163,9 @@ describe('JobDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByText('DAG 流水线')).toBeInTheDocument()
     })
+    expect(screen.getByLabelText('展开')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByLabelText('展开'))
     expect(screen.getByLabelText('收起')).toBeInTheDocument()
   })
 
