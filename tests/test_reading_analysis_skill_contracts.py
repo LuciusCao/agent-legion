@@ -457,3 +457,298 @@ def test_validate_review_result_projection_mismatch_when_not_exact_copy(
             exact_copy=False,
             projection=lambda raw: {"question_id": raw["question_id"], "extra": 99},
         )
+
+
+def test_validate_review_result_rejects_report_question_id_mismatch(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "question_id": "Q200",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape("report question_id mismatch: report='Q200', source='Q100'"),
+    ):
+        validate_review_result(
+            source_path=source,
+            reviewed_path=reviewed_path,
+            report_path=report_path,
+            exact_copy=True,
+        )
+
+
+def test_validate_review_result_rejects_non_array_checks(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": "not-a-list",
+                "issues": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape("report checks must be an array, got str"),
+    ):
+        validate_review_result(
+            source_path=source,
+            reviewed_path=reviewed_path,
+            report_path=report_path,
+            exact_copy=True,
+        )
+
+
+def test_validate_review_result_rejects_non_array_issues(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": "not-a-list",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape("report issues must be an array, got str"),
+    ):
+        validate_review_result(
+            source_path=source,
+            reviewed_path=reviewed_path,
+            report_path=report_path,
+            exact_copy=True,
+        )
+
+
+def test_validate_review_result_failed_rejects_reviewed_artifact(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100", "keywords": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "failed",
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": [{"code": "TEST", "message": "fail"}],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    reviewed_path.write_text(
+        json.dumps({"question_id": "Q100"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape("failed review must not produce a reviewed artifact"),
+    ):
+        validate_review_result(
+            source_path=source,
+            reviewed_path=reviewed_path,
+            report_path=report_path,
+            exact_copy=True,
+        )
+
+
+def test_validate_review_result_exact_copy_rejects_mutation(tmp_path: Path) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100", "keywords": []}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    reviewed_path.write_text(
+        json.dumps({"question_id": "Q100", "keywords": [{"id": "added"}]}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape("reviewed artifact must be an exact copy of the source artifact"),
+    ):
+        validate_review_result(
+            source_path=source,
+            reviewed_path=reviewed_path,
+            report_path=report_path,
+            exact_copy=True,
+        )
+
+
+def test_validate_review_result_projection_matches_when_not_exact_copy(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100", "extra": 1}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    reviewed_path.write_text(
+        json.dumps({"question_id": "Q100", "extra": 1}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    validate_review_result(
+        source_path=source,
+        reviewed_path=reviewed_path,
+        report_path=report_path,
+        exact_copy=False,
+        projection=lambda raw: {"question_id": raw["question_id"], "extra": raw["extra"]},
+    )
+
+
+def test_validate_review_result_skips_reviewed_validation_without_projection(
+    tmp_path: Path,
+) -> None:
+    source = tmp_path / "source.json"
+    report_path = tmp_path / "report.json"
+    reviewed_path = tmp_path / "reviewed.json"
+
+    source.write_text(
+        json.dumps({"question_id": "Q100", "extra": 1}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+    report_path.write_text(
+        json.dumps(
+            {
+                "status": "passed",
+                "question_id": "Q100",
+                "source_artifact_sha256": sha256_file(source),
+                "checks": [],
+                "issues": [],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    reviewed_path.write_text(
+        json.dumps({"question_id": "Q100", "extra": 999}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    validate_review_result(
+        source_path=source,
+        reviewed_path=reviewed_path,
+        report_path=report_path,
+        exact_copy=False,
+        projection=None,
+    )
+
+
+def test_validate_source_location_rejects_non_int_start() -> None:
+    question = {
+        "question_id": "Q100",
+        "stem": "题干",
+        "options": [],
+    }
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape("location.start must be a non-negative int, got '0'"),
+    ):
+        validate_source_location(
+            question,
+            "题",
+            {"source": "stem", "option_key": None, "start": "0", "end": 1},
+        )
+
+
+def test_validate_source_location_rejects_non_int_end() -> None:
+    question = {
+        "question_id": "Q100",
+        "stem": "题干",
+        "options": [],
+    }
+
+    with pytest.raises(
+        ContractError,
+        match=re.escape("location.end must be an int greater than start, got '1'"),
+    ):
+        validate_source_location(
+            question,
+            "题",
+            {"source": "stem", "option_key": None, "start": 0, "end": "1"},
+        )
