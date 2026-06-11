@@ -1,14 +1,12 @@
-import sqlite3
 from pathlib import Path
+
+from server.app.db.connection import connect_sqlite
 
 
 def init_db(path: Path) -> None:
     """Create tables and run lightweight migrations."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(path, check_same_thread=False)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA journal_mode=WAL")
-    conn.execute("PRAGMA synchronous=NORMAL")
+    conn = connect_sqlite(path)
     try:
         with conn:
             conn.executescript(
@@ -40,7 +38,8 @@ def init_db(path: Path) -> None:
                   command_json text not null default '[]',
                   exit_code integer,
                   log_path text not null default '',
-                  error_message text not null default ''
+                  error_message text not null default '',
+                  foreign key(video_id) references videos(id) on delete cascade
                 );
                 create table if not exists transcription_runs (
                   id integer primary key autoincrement,
@@ -51,7 +50,8 @@ def init_db(path: Path) -> None:
                   finished_at text,
                   srt_entry_count integer not null default 0,
                   validation_summary text not null default '',
-                  fallback_reason text not null default ''
+                  fallback_reason text not null default '',
+                  foreign key(video_id) references videos(id) on delete cascade
                 );
                 create table if not exists packages (
                   id integer primary key autoincrement,
@@ -80,7 +80,8 @@ def init_db(path: Path) -> None:
                   status text not null default 'created',
                   created_count integer not null default 0,
                   error_message text not null default '',
-                  created_at text not null default current_timestamp
+                  created_at text not null default current_timestamp,
+                  foreign key(workspace_id) references workspaces(id) on delete cascade
                 );
                 create table if not exists jobs (
                   id text primary key,
@@ -94,7 +95,8 @@ def init_db(path: Path) -> None:
                   storage_dir text not null default '',
                   error_message text not null default '',
                   created_at text not null default current_timestamp,
-                  updated_at text not null default current_timestamp
+                  updated_at text not null default current_timestamp,
+                  foreign key(workspace_id) references workspaces(id) on delete cascade
                 );
                 create table if not exists job_nodes (
                   id integer primary key autoincrement,
@@ -105,7 +107,8 @@ def init_db(path: Path) -> None:
                   error_message text not null default '',
                   started_at text,
                   finished_at text,
-                  unique(job_id, node_key)
+                  unique(job_id, node_key),
+                  foreign key(job_id) references jobs(id) on delete cascade
                 );
                 create table if not exists node_runs (
                   id integer primary key autoincrement,
@@ -119,7 +122,8 @@ def init_db(path: Path) -> None:
                   log_path text not null default '',
                   error_message text not null default '',
                   run_dir text not null default '',
-                  session_dir text not null default ''
+                  session_dir text not null default '',
+                  foreign key(job_id) references jobs(id) on delete cascade
                 );
                 create table if not exists workspace_agent_assignments (
                   workspace_id text not null,

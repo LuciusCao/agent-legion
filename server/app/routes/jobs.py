@@ -174,6 +174,30 @@ class WorkspaceAgentConfig(BaseModel):
     concurrency_limit: int
 
 
+class WorkspaceConfigurationSettingsRequest(BaseModel):
+    entityType: str | None = None
+    intakeModes: list[str] | None = None
+    labelOverrides: dict[str, str] | None = None
+    pipelineKey: str | None = None
+    resources: dict[str, Any] | None = None
+    localConcurrency: int | None = None
+    agentConcurrency: int | None = None
+    nodeLocalConcurrency: dict[str, int] | None = None
+
+
+class WorkspaceConfigurationRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    settings: WorkspaceConfigurationSettingsRequest
+    agents: list[WorkspaceAgentConfig] = Field(default_factory=list)
+
+
+class WorkspaceConfigurationResponse(BaseModel):
+    workspace: dict[str, Any]
+    settings: dict[str, Any]
+    agents: list[dict[str, Any]]
+
+
 class WorkspaceAgentStatus(BaseModel):
     id: str
     name: str
@@ -733,6 +757,75 @@ def create_jobs_router(
         workspace = _workspace_or_404(job_db, workspace_id)
         return WorkspaceSettingsResponse(
             settings=_workspace_settings_payload(workspace, settings, job_db)
+        )
+
+    @router.put(
+        "/workspaces/{workspace_id}/configuration",
+        response_model=WorkspaceConfigurationResponse,
+    )
+    def replace_workspace_configuration(
+        workspace_id: str,
+        payload: WorkspaceConfigurationRequest,
+    ) -> WorkspaceConfigurationResponse:
+        _require_enabled(settings)
+        workspace = _workspace_or_404(job_db, workspace_id)
+        current = _workspace_settings_payload(workspace, settings, job_db)
+        requested = payload.settings
+        pipeline_key = requested.pipelineKey or str(current["pipelineKey"])
+        _definition(settings, pipeline_key)
+
+        local_concurrency = requested.localConcurrency
+        agent_concurrency = requested.agentConcurrency
+        node_concurrency = requested.nodeLocalConcurrency
+        if local_concurrency is not None and local_concurrency < 1:
+            raise HTTPException(status_code=400, detail="localConcurrency must be at least 1")
+        if agent_concurrency is not None and agent_concurrency < 1:
+            raise HTTPException(status_code=400, detail="agentConcurrency must be at least 1")
+        if node_concurrency is not None and any(limit < 1 for limit in node_concurrency.values()):
+            raise HTTPException(status_code=400, detail="Node concurrency must be at least 1")
+
+        pipeline_config = {
+            "local": local_concurrency
+            if local_concurrency is not None
+            else current["localConcurrency"],
+            "agent": agent_concurrency
+            if agent_concurrency is not None
+            else current["agentConcurrency"],
+            "nodes": node_concurrency
+            if node_concurrency is not None
+            else current["nodeLocalConcurrency"],
+        }
+        try:
+            saved_workspace, assignments = job_db.update_workspace_configuration(
+                workspace_id,
+                name=payload.name if payload.name is not None else str(workspace["name"]),
+                description=payload.description
+                if payload.description is not None
+                else str(workspace.get("description") or ""),
+                default_pipeline_key=pipeline_key,
+                default_entity=requested.entityType or str(current["entityType"]),
+                resource_config={
+                    "resources": requested.resources
+                    if requested.resources is not None
+                    else current["resources"]
+                },
+                intake_config={
+                    "enabled_modes": requested.intakeModes
+                    if requested.intakeModes is not None
+                    else current["intakeModes"],
+                    "label_overrides": requested.labelOverrides
+                    if requested.labelOverrides is not None
+                    else current["labelOverrides"],
+                },
+                pipeline_config=pipeline_config,
+                agent_assignments=[assignment.model_dump() for assignment in payload.agents],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return WorkspaceConfigurationResponse(
+            workspace=saved_workspace,
+            settings=_workspace_settings_payload(saved_workspace, settings, job_db),
+            agents=assignments,
         )
 
     @router.patch(

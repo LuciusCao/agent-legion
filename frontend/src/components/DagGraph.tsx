@@ -1,4 +1,5 @@
 import { useId, useMemo, useState } from 'react'
+import * as dagre from 'dagre'
 import styles from './DagGraph.module.css'
 
 export interface DagNode {
@@ -66,104 +67,43 @@ function computeNodeSize(node: DagNode): { width: number; height: number } {
 }
 
 function computeLayout(nodes: DagNode[], edges: DagEdge[]) {
-  // 1. Compute topological depth (rank) for each node
-  const depthMap = new Map<string, number>()
-  for (const node of nodes) {
-    depthMap.set(node.key, 0)
-  }
-  let changed = true
-  while (changed) {
-    changed = false
-    for (const edge of edges) {
-      const fromDepth = depthMap.get(edge.from)!
-      const toDepth = depthMap.get(edge.to)!
-      if (toDepth < fromDepth + 1) {
-        depthMap.set(edge.to, fromDepth + 1)
-        changed = true
-      }
-    }
-  }
+  const g = new dagre.graphlib.Graph()
+  g.setGraph({
+    rankdir: 'LR',
+    nodesep: 60,
+    ranksep: 100,
+    marginx: 24,
+    marginy: 24,
+  })
+  g.setDefaultEdgeLabel(() => ({}))
 
-  // 2. Group nodes by depth, preserving original YAML order
-  const groups = new Map<number, DagNode[]>()
-  for (const node of nodes) {
-    const depth = depthMap.get(node.key)!
-    if (!groups.has(depth)) groups.set(depth, [])
-    groups.get(depth)!.push(node)
-  }
-
-  // 3. Compute sizes
   const sizeMap = new Map<string, { width: number; height: number }>()
   for (const node of nodes) {
-    sizeMap.set(node.key, computeNodeSize(node))
+    const size = computeNodeSize(node)
+    sizeMap.set(node.key, size)
+    g.setNode(node.key, { width: size.width, height: size.height })
+  }
+  for (const edge of edges) {
+    g.setEdge(edge.from, edge.to)
   }
 
-  const RANKSEP = 100
-  const NODESEP = 60
-  const MARGIN = 24
+  dagre.layout(g)
 
-  // 4. Position nodes: depth → x, index in group → y
-  type PositionedNode = DagNode & {
-    x: number
-    y: number
-    width: number
-    height: number
-  }
-  const positioned: PositionedNode[] = []
-  let currentX = MARGIN
-
-  const depths = Array.from(groups.keys()).sort((a, b) => a - b)
-  for (const depth of depths) {
-    const group = groups.get(depth)!
-    let maxWidthInGroup = 0
-    for (const node of group) {
-      const size = sizeMap.get(node.key)!
-      maxWidthInGroup = Math.max(maxWidthInGroup, size.width)
+  const positioned = nodes.map((node) => {
+    const gNode = g.node(node.key)
+    const size = sizeMap.get(node.key)!
+    return {
+      ...node,
+      x: gNode.x,
+      y: gNode.y,
+      width: size.width,
+      height: size.height,
     }
-
-    let currentY = MARGIN
-    for (const node of group) {
-      const size = sizeMap.get(node.key)!
-      positioned.push({
-        ...node,
-        x: currentX + size.width / 2,
-        y: currentY + size.height / 2,
-        width: size.width,
-        height: size.height,
-      })
-      currentY += size.height + NODESEP
-    }
-
-    currentX += maxWidthInGroup + RANKSEP
-  }
-
-  // 5. Compute edge paths (simple orthogonal polyline)
-  const nodeMap = new Map<string, PositionedNode>()
-  for (const node of positioned) {
-    nodeMap.set(node.key, node)
-  }
+  })
 
   const positionedEdges = edges.map((edge) => {
-    const from = nodeMap.get(edge.from)
-    const to = nodeMap.get(edge.to)
-    if (!from || !to) {
-      return { ...edge, points: [] as Array<{ x: number; y: number }> }
-    }
-    const startX = from.x + from.width / 2
-    const startY = from.y
-    const endX = to.x - to.width / 2
-    const endY = to.y
-    const midX = (startX + endX) / 2
-
-    return {
-      ...edge,
-      points: [
-        { x: startX, y: startY },
-        { x: midX, y: startY },
-        { x: midX, y: endY },
-        { x: endX, y: endY },
-      ],
-    }
+    const gEdge = g.edge(edge.from, edge.to)
+    return { ...edge, points: gEdge.points as Array<{ x: number; y: number }> }
   })
 
   return { nodes: positioned, edges: positionedEdges }

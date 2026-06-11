@@ -93,6 +93,27 @@ def test_node_run_lifecycle(tmp_path):
     assert runs[0]["status"] == "completed"
 
 
+def test_start_node_run_claims_each_node_only_once(tmp_path):
+    db_path = tmp_path / "video_hive.sqlite"
+    first = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    second = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    job = first.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q-CLAIM",
+        batch_id="",
+        title="Question Q-CLAIM",
+        node_keys=["fetch_question_context"],
+    )
+
+    claimed = first.start_node_run(job["id"], "fetch_question_context", ["local"], "first.log")
+    lost_claim = second.start_node_run(job["id"], "fetch_question_context", ["local"], "second.log")
+
+    assert claimed is not None
+    assert lost_claim is None
+    assert len(first.list_node_runs(job["id"])) == 1
+
+
 def test_create_job_rejects_identity_collision(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     queries.create_job(

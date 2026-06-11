@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from server.app.db.connection import connect_sqlite
 from server.app.db.notifications import NotificationHub
 from server.app.db.schema import init_db
 from server.app.pipeline.common import make_record_id, resolve_video_dir
@@ -79,10 +80,7 @@ class VideoQueries:
 
     @contextmanager
     def connect(self):
-        conn = sqlite3.connect(self.path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
+        conn = connect_sqlite(self.path)
         try:
             with conn:
                 yield conn
@@ -92,10 +90,7 @@ class VideoQueries:
     @contextmanager
     def _connect_read(self):
         """Read-only connection context that does not implicitly commit."""
-        conn = sqlite3.connect(self.path, check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA journal_mode=WAL")
-        conn.execute("PRAGMA synchronous=NORMAL")
+        conn = connect_sqlite(self.path)
         try:
             yield conn
         finally:

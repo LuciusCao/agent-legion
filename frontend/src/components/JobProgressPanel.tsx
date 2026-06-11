@@ -45,16 +45,16 @@ interface JobProgressPanelProps {
   nodes: JobNodeRecord[]
   runs: NodeRunRecord[]
   onOpenDagDialog?: () => void
-  dagExpanded?: boolean
-  onToggleDag?: () => void
+  onNodeClick?: (nodeKey: string) => void
+  selectedNodeKey?: string | null
 }
 
 export function JobProgressPanel({
   nodes,
   runs,
   onOpenDagDialog,
-  dagExpanded,
-  onToggleDag,
+  onNodeClick,
+  selectedNodeKey,
 }: JobProgressPanelProps) {
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
   const [logDialog, setLogDialog] = useState<{
@@ -93,26 +93,11 @@ export function JobProgressPanel({
       <div className={styles.stepperWrap}>
         <div className={styles.stepperHeader}>
           <h3 className={styles.panelTitle}>节点进度</h3>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {onToggleDag && (
-              <md-icon-button
-                aria-label={dagExpanded ? '收起 DAG' : '展开 DAG'}
-                onClick={onToggleDag}
-              >
-                <md-icon>
-                  {dagExpanded ? 'expand_less' : 'account_tree'}
-                </md-icon>
-              </md-icon-button>
-            )}
-            {onOpenDagDialog && (
-              <md-icon-button
-                aria-label="查看完整 DAG"
-                onClick={onOpenDagDialog}
-              >
-                <md-icon>open_in_full</md-icon>
-              </md-icon-button>
-            )}
-          </div>
+          {onOpenDagDialog && (
+            <md-icon-button aria-label="查看 DAG" onClick={onOpenDagDialog}>
+              <md-icon>account_tree</md-icon>
+            </md-icon-button>
+          )}
         </div>
         <DagStepper nodes={nodes} />
       </div>
@@ -143,7 +128,18 @@ export function JobProgressPanel({
                 </div>
 
                 <div className={styles.timelineContent}>
-                  <div className={styles.timelineHeader}>
+                  <div
+                    className={`${styles.timelineHeader} ${selectedNodeKey === node.node_key ? styles.timelineHeaderSelected : ''}`}
+                    onClick={() => onNodeClick?.(node.node_key)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        onNodeClick?.(node.node_key)
+                      }
+                    }}
+                  >
                     <span className={styles.nodeName}>{node.label}</span>
                     <span
                       className={`${styles.statusBadge} ${BADGE_STATUS_CLASS[node.status] || ''}`}

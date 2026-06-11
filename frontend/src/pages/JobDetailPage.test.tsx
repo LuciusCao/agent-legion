@@ -96,7 +96,7 @@ describe('JobDetailPage', () => {
     expect(screen.getAllByText('generate').length).toBeGreaterThanOrEqual(1)
   })
 
-  it('renders DAG graph', async () => {
+  it('opens fullscreen DAG dialog from progress panel', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -106,21 +106,18 @@ describe('JobDetailPage', () => {
     )
 
     const { container } = renderPage()
-
     await waitFor(() => {
-      expect(screen.getByLabelText('展开 DAG')).toBeInTheDocument()
+      expect(screen.getByLabelText('查看 DAG')).toBeInTheDocument()
     })
-    fireEvent.click(screen.getByLabelText('展开 DAG'))
-
-    await waitFor(() => {
-      expect(container.querySelectorAll('[data-node]')).toHaveLength(2)
-    })
+    fireEvent.click(screen.getByLabelText('查看 DAG'))
+    expect(await screen.findByLabelText('关闭')).toBeInTheDocument()
+    expect(container.querySelectorAll('[data-node]')).toHaveLength(2)
     expect(container.querySelectorAll('path[data-testid="edge"]')).toHaveLength(
       1
     )
   })
 
-  it('clicking a node shows NodeDetailPanel', async () => {
+  it('clicking a timeline node shows NodeDetailPanel', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn().mockResolvedValue({
@@ -129,61 +126,14 @@ describe('JobDetailPage', () => {
       })
     )
 
-    const { container } = renderPage()
+    renderPage()
 
-    await waitFor(() => {
-      expect(screen.getByLabelText('展开 DAG')).toBeInTheDocument()
-    })
-    fireEvent.click(screen.getByLabelText('展开 DAG'))
-
-    await waitFor(() => {
-      expect(
-        container.querySelector('[data-node="extract"]')
-      ).toBeInTheDocument()
-    })
-
-    fireEvent.click(container.querySelector('[data-node="extract"]')!)
+    const extractBtn = await screen.findByRole('button', { name: /extract/ })
+    fireEvent.click(extractBtn)
 
     const panel = await screen.findByTestId('node-detail-panel')
     expect(panel).toBeInTheDocument()
     expect(within(panel).getByText('extract')).toBeInTheDocument()
     expect(screen.getByText('12秒')).toBeInTheDocument()
-  })
-
-  it('renders collapsible DAG panel', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => mockDetail,
-      })
-    )
-
-    renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('DAG 流水线')).toBeInTheDocument()
-    })
-    expect(screen.getByLabelText('展开')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByLabelText('展开'))
-    expect(screen.getByLabelText('收起')).toBeInTheDocument()
-  })
-
-  it('opens fullscreen dialog from progress panel', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => mockDetail,
-      })
-    )
-
-    renderPage()
-    await waitFor(() => {
-      expect(screen.getByLabelText('查看完整 DAG')).toBeInTheDocument()
-    })
-    fireEvent.click(screen.getByLabelText('查看完整 DAG'))
-    expect(await screen.findByLabelText('关闭')).toBeInTheDocument()
-    expect(screen.getAllByText('DAG 流水线').length).toBeGreaterThanOrEqual(2)
   })
 })

@@ -127,6 +127,73 @@ def test_workspace_settings_round_trip(tmp_path):
     assert settings["nodeLocalConcurrency"] == {"fetch_question_context": 3}
 
 
+def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        response = c.put(
+            "/api/workspaces/default/configuration",
+            json={
+                "name": "Updated Workspace",
+                "description": "Atomic settings",
+                "settings": {
+                    "entityType": "video",
+                    "intakeModes": ["direct_ids"],
+                    "labelOverrides": {"direct_ids": "Video IDs"},
+                    "pipelineKey": "question_content",
+                    "resources": {"question_detail": {"enabled": True, "config": {}}},
+                    "localConcurrency": 4,
+                    "agentConcurrency": 2,
+                    "nodeLocalConcurrency": {"fetch_question_context": 3},
+                },
+                "agents": [
+                    {"agent_id": "pi", "concurrency_limit": 2},
+                    {"agent_id": "reviewer", "concurrency_limit": 1},
+                ],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["workspace"]["name"] == "Updated Workspace"
+    assert body["settings"]["entityType"] == "video"
+    assert body["settings"]["localConcurrency"] == 4
+    assert body["agents"] == [
+        {"agent_id": "pi", "concurrency_limit": 2},
+        {"agent_id": "reviewer", "concurrency_limit": 1},
+    ]
+
+
+def test_workspace_configuration_rejects_duplicate_agents_without_partial_update(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    with TestClient(app) as c:
+        original = c.get("/api/workspaces/default").json()["workspace"]
+        response = c.put(
+            "/api/workspaces/default/configuration",
+            json={
+                "name": "Must Roll Back",
+                "settings": {"pipelineKey": "question_content"},
+                "agents": [
+                    {"agent_id": "pi", "concurrency_limit": 1},
+                    {"agent_id": "pi", "concurrency_limit": 2},
+                ],
+            },
+        )
+        persisted = c.get("/api/workspaces/default").json()["workspace"]
+
+    assert response.status_code == 400
+    assert persisted["name"] == original["name"]
+
+
 def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
     from fastapi.testclient import TestClient
 

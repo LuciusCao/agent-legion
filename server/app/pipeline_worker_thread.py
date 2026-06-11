@@ -405,7 +405,8 @@ class PipelineWorkerThread:
                             ["agent", node.key],
                             str(log_path),
                         )
-                        self.job_db.finish_node_run(run["id"], "failed", 1, error_message)
+                        if run is not None:
+                            self.job_db.finish_node_run(run["id"], "failed", 1, error_message)
                         _refresh_job_status(self.job_db, job["id"])
                         processed = True
 
