@@ -68,7 +68,14 @@ video-hive/
 │   │       ├── definition.py   # Pipeline definition loader
 │   │       ├── executor.py     # Pipeline node executor
 │   │       ├── scheduler.py    # DAG scheduling and downstream node resolution
-│   │       └── question_content.py # Question content pipeline presets
+│   │       ├── registry.py     # Pipeline definition registry by key
+│   │       ├── reading_analysis.py # Reading analysis local node handlers
+│   │       ├── question_content.py # Question content pipeline presets
+│   │       ├── pi_runner.py    # Pi CLI runner for agent nodes
+│   │       ├── artifacts.py    # Artifact validation and rerun cleanup
+│   │       ├── skills.py       # Repository-owned skill resolution
+│   │       ├── resources.py    # Resource provider bindings
+│   │       └── skills/         # Repository-owned Pi skills (reading_analysis/*)
 ├── frontend/
 │   ├── package.json
 │   ├── tsconfig.json
@@ -143,7 +150,8 @@ video-hive/
 │   ├── test_worker.py          # Worker-phase integration tests
 │   ├── test_worker_scheduler.py
 │   ├── test_worker_thread.py
-│   ├── test_pipeline_*.py      # Pipeline stage unit tests
+│   ├── test_pipeline_*.py      # Pipeline stage unit tests (download, transcribe, assemble, etc.)
+│   ├── test_pi_runner.py       # Pi agent runner tests
 │   └── ...
 └── data/                       # Runtime data (gitignored)
     ├── video_hive.sqlite
@@ -155,110 +163,30 @@ video-hive/
 
 ## 文档体系
 
-- `README.md` — 项目概览与快速上手指南
-- `issues/` — 已知问题与修复记录（代码审查发现的全部问题）
-- `docs/superpowers/README.md` — 设计文档索引（specs / plans / issues）
+- `README.md` — 项目概览、快速上手、安装与运行命令
+- `AGENTS.md` — 本文件：架构说明、代码规范、测试与安全约定
+- `docs/superpowers/README.md` — 设计文档索引（specs / plans）
 - `docs/superpowers/specs/` — 设计规格文档，需用户批准后执行
 - `docs/superpowers/plans/` — 实施计划文档，由 Agent 按任务执行
-- `issues/` — 已知缺陷与修复记录
+- `issues/open/` — 待修复的已知问题
+- `issues/closed/` — 已修复的问题记录
 
-## Build and Run Commands
+## Development Workflow
 
-### Setup
-
-```bash
-uv sync
-cd frontend
-npm install
-```
-
-### Run Backend (with auto-reload and background worker)
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8000
-```
-
-### Run Frontend (development)
-
-```bash
-cd frontend
-npm run dev
-```
-
-The Vite dev server runs on `http://localhost:5173`. `vite.config.ts` already proxies `/api` requests to the backend at `http://127.0.0.1:8000`, so open the browser at **5173** for development.
-
-For multi-agent development in separate git worktrees, each worktree must use separate backend/frontend ports and its own local `data/` directory. Configure the Vite API proxy per worktree with `frontend/.env`:
-
-```bash
-# Example for one secondary worktree
-UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8001
-cd frontend
-cp .env.example .env
-printf 'VITE_API_TARGET=http://127.0.0.1:8001\n' > .env
-npm run dev -- --port 5174
-```
-
-Use a different backend port, frontend port, branch, and worktree path for each coding agent. Do not point multiple worktrees at the same `data_dir`, because SQLite state, logs, videos, packages, and Agent Legion jobs are local runtime data.
-
-### Production-Style Frontend Build
-
-```bash
-cd frontend
-npm run build
-```
-
-After `frontend/dist` exists, the FastAPI backend serves it automatically from the same origin at `http://127.0.0.1:8000`. Use 8000 for integration testing or when verifying the production build; use 5173 for daily development iteration.
-
-### Python Lint / Format
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run ruff check .
-UV_CACHE_DIR=.uv-cache uv run ruff format --check .
-```
-
-### Python Type Check
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run mypy server/app
-```
-
-### Python Test
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run pytest -q
-```
-
-### Frontend Lint / Format
-
-```bash
-cd frontend
-npm run lint
-npm run format:check
-```
+> **Setup, run, build, and quality-gate commands are documented in [README.md](../README.md).**
+> This section only covers conventions an Agent must follow.
 
 ### Quality Gates
 
-For normal local development, run the quick gate:
-
-```bash
-./scripts/check-quick.sh
-```
-
-Before committing, handing work off, or claiming a cross-stack change is complete, run the full gate:
+Before committing or handing off work, run the full gate:
 
 ```bash
 ./scripts/check.sh
 ```
 
-The quick gate runs:
-- Ruff lint + format check
-- Python tests with coverage (fail_under = 75)
-- mypy type check
-- Frontend Prettier check, ESLint, typecheck, and Vitest
+The quick gate (`./scripts/check-quick.sh`) runs Ruff, pytest with coverage (`fail_under = 75`), mypy, and frontend lint/typecheck/Vitest. The full gate adds the production build.
 
-The full gate runs the quick gate plus the frontend production build.
-
-To install the optional local pre-commit hook that runs the quick gate before each commit:
+Install the optional pre-commit hook:
 
 ```bash
 ./scripts/install-git-hooks.sh

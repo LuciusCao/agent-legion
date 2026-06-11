@@ -25,7 +25,7 @@ When running inside a restricted sandbox, keep the uv cache in the project:
 UV_CACHE_DIR=.uv-cache uv sync
 ```
 
-> For full build commands, quality gates, and development workflow, see [AGENTS.md](AGENTS.md).
+> For architecture details, code style, and testing conventions, see [AGENTS.md](AGENTS.md).
 
 ## Configuration
 
@@ -105,7 +105,31 @@ npm run build
 
 After `frontend/dist` exists, the FastAPI backend serves it from `http://127.0.0.1:8000`.
 
-> See [AGENTS.md](AGENTS.md) for full quality gates, test commands, and pre-commit hooks.
+## Quality Gates
+
+Quick gate (for daily development):
+
+```bash
+./scripts/check-quick.sh
+```
+
+Runs Ruff lint + format check, Python tests with coverage (`fail_under = 75`), mypy, and frontend Prettier + ESLint + typecheck + Vitest.
+
+Full gate (before committing or handing off):
+
+```bash
+./scripts/check.sh
+```
+
+Runs the quick gate plus the frontend production build.
+
+Install the optional pre-commit hook:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+> See [AGENTS.md](AGENTS.md) for architecture details, code style conventions, and security notes.
 
 ## Pipeline
 
