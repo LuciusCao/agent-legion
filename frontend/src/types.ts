@@ -29,6 +29,7 @@ export type VideoItem = {
 export type AgentStatus = {
   id: string
   name: string
+  workspace_id: string
   busy: boolean
   task_count: number
   max_tasks: number

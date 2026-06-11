@@ -33,6 +33,7 @@ describe('AgentPanel', () => {
         {
           id: 'agent-1',
           name: 'Agent A',
+          workspace_id: '',
           busy: false,
           task_count: 0,
           max_tasks: 1,

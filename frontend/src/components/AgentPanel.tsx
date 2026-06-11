@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useUiStore } from '../stores/uiStore'
 import type { AgentStatus } from '../types'
 import styles from './AgentPanel.module.css'
@@ -60,6 +60,16 @@ export function AgentPanel({
     }
   }
 
+  const byWorkspace = useMemo(() => {
+    const map = new Map<string, AgentStatus[]>()
+    for (const a of agents) {
+      const ws = a.workspace_id || 'global'
+      if (!map.has(ws)) map.set(ws, [])
+      map.get(ws)!.push(a)
+    }
+    return map
+  }, [agents])
+
   const overallStatus =
     agents.length === 0 ? 'none' : agents.some((a) => a.busy) ? 'busy' : 'idle'
 
@@ -84,21 +94,37 @@ export function AgentPanel({
           <div className={styles.popoverEmpty}>暂无运行中的 Agent</div>
         ) : (
           <div className={styles.popoverList}>
-            {agents.map((agent, i) => (
-              <div key={i} className={styles.popoverItem}>
-                <span
-                  className={`${styles.popoverDot} ${agent.busy ? styles.busy : styles.idle}`}
-                />
-                <span className={styles.popoverName}>
-                  {agent.name || agent.id}
-                </span>
-                <span className={styles.popoverStatus}>
-                  {agent.busy
-                    ? agent.task_count > 0
-                      ? `忙碌 (${agent.task_count}/${agent.max_tasks})`
-                      : '忙碌'
-                    : '空闲'}
-                </span>
+            {[...byWorkspace.entries()].map(([wsId, wsAgents]) => (
+              <div key={wsId}>
+                <div
+                  style={{
+                    fontSize: '12px',
+                    color: 'var(--md-sys-color-on-surface-variant)',
+                    padding: '4px 0',
+                  }}
+                >
+                  {wsId === 'global' ? '全局' : wsId}
+                </div>
+                {wsAgents.map((agent) => (
+                  <div
+                    key={`${agent.id}-${agent.workspace_id}`}
+                    className={styles.popoverItem}
+                  >
+                    <span
+                      className={`${styles.popoverDot} ${agent.busy ? styles.busy : styles.idle}`}
+                    />
+                    <span className={styles.popoverName}>
+                      {agent.name || agent.id}
+                    </span>
+                    <span className={styles.popoverStatus}>
+                      {agent.busy
+                        ? agent.task_count > 0
+                          ? `忙碌 (${agent.task_count}/${agent.max_tasks})`
+                          : '忙碌'
+                        : '空闲'}
+                    </span>
+                  </div>
+                ))}
               </div>
             ))}
           </div>
@@ -111,20 +137,43 @@ export function AgentPanel({
         <div className="empty-state">暂无运行中的 Agent</div>
       ) : (
         <div className={styles.agentList}>
-          {agents.map((agent, i) => (
+          {[...byWorkspace.entries()].map(([wsId, wsAgents]) => (
             <div
-              key={i}
-              className={`${styles.agentCard} ${agent.busy ? styles.busy : styles.idle}`}
+              key={wsId}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '4px',
+                width: '100%',
+              }}
             >
-              <span className={styles.agentDot} />
-              <span>{agent.name || agent.id}</span>
-              <span className={styles.agentPill}>
-                {agent.busy
-                  ? agent.task_count > 0
-                    ? `忙碌 (${agent.task_count}/${agent.max_tasks})`
-                    : '忙碌'
-                  : '空闲'}
-              </span>
+              <h4
+                style={{
+                  margin: 0,
+                  fontSize: '12px',
+                  color: 'var(--md-sys-color-on-surface-variant)',
+                }}
+              >
+                {wsId === 'global' ? '全局' : wsId}
+              </h4>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                {wsAgents.map((agent) => (
+                  <div
+                    key={`${agent.id}-${agent.workspace_id}`}
+                    className={`${styles.agentCard} ${agent.busy ? styles.busy : styles.idle}`}
+                  >
+                    <span className={styles.agentDot} />
+                    <span>{agent.name || agent.id}</span>
+                    <span className={styles.agentPill}>
+                      {agent.busy
+                        ? agent.task_count > 0
+                          ? `忙碌 (${agent.task_count}/${agent.max_tasks})`
+                          : '忙碌'
+                        : '空闲'}
+                    </span>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
