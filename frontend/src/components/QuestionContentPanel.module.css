@@ -147,3 +147,32 @@
   flex-wrap: wrap;
   gap: 8px;
 }
+
+.analysisGroups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.analysisGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.analysisStep {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stepTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface-variant);
+  margin: 0;
+}
+
+.stepTitle :global(p) {
+  margin: 0;
+}
