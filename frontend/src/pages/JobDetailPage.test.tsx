@@ -110,7 +110,9 @@ describe('JobDetailPage', () => {
     await waitFor(() => {
       expect(container.querySelectorAll('[data-node]')).toHaveLength(2)
     })
-    expect(container.querySelectorAll('line')).toHaveLength(1)
+    expect(container.querySelectorAll('path[data-testid="edge"]')).toHaveLength(
+      1
+    )
   })
 
   it('clicking a node shows NodeDetailPanel', async () => {
