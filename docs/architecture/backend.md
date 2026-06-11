@@ -69,7 +69,131 @@ server/app/
 
 ## API Surface / Interface
 
-<!-- TODO: 阶段 2 由 AST 自动生成 -->
+<!-- AUTO-GENERATED: scripts/generate_architecture.py -->
+
+### REST API 路由
+
+> 所有路由挂载在 `/api` 前缀下。
+
+| 方法 | 路径 | 处理函数 | 文件 |
+|------|------|----------|------|
+| GET | `/agents` | `list_agents` | routes/agents.py |
+| POST | `/agents/{agent_id}/assign` | `assign_agent` | routes/agents.py |
+| DELETE | `/agents/{agent_id}/assign` | `unassign_agent` | routes/agents.py |
+| GET | `/videos/{video_id}/artifacts` | `artifacts` | routes/artifacts.py |
+| GET | `/health` | `health` | routes/common.py |
+| POST | `/worker/tick` | `worker_tick` | routes/common.py |
+| GET | `/resource-providers` | `get_resource_providers` | routes/jobs.py |
+| GET | `/global-services` | `get_global_services` | routes/jobs.py |
+| GET | `/pipelines` | `list_pipelines` | routes/jobs.py |
+| GET | `/pipelines/{pipeline_key}` | `get_pipeline` | routes/jobs.py |
+| GET | `/workspaces` | `list_workspaces` | routes/jobs.py |
+| POST | `/workspaces` | `create_workspace` | routes/jobs.py |
+| GET | `/workspaces/{workspace_id}` | `get_workspace` | routes/jobs.py |
+| GET | `/workspaces/{workspace_id}/agents` | `list_workspace_agents` | routes/jobs.py |
+| GET | `/workspaces/{workspace_id}/settings` | `get_workspace_settings` | routes/jobs.py |
+| PATCH | `/workspaces/{workspace_id}/settings/{section}` | `update_workspace_settings_section` | routes/jobs.py |
+| POST | `/workspaces/{workspace_id}/settings/test-connection` | `test_workspace_connection` | routes/jobs.py |
+| PATCH | `/workspaces/{workspace_id}` | `update_workspace` | routes/jobs.py |
+| GET | `/workspaces/{workspace_id}/stats` | `get_workspace_stats` | routes/jobs.py |
+| DELETE | `/workspaces/{workspace_id}` | `delete_workspace` | routes/jobs.py |
+| POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/jobs.py |
+| GET | `/workspaces/{workspace_id}/jobs` | `list_workspace_jobs` | routes/jobs.py |
+| POST | `/workspaces/{workspace_id}/jobs/batch-rerun` | `batch_rerun_workspace_jobs` | routes/jobs.py |
+| DELETE | `/workspaces/{workspace_id}/jobs/batch` | `batch_delete_workspace_jobs` | routes/jobs.py |
+| GET | `/workspaces/{workspace_id}/runs` | `list_workspace_runs` | routes/jobs.py |
+| GET | `/workspaces/{workspace_id}/dag` | `get_workspace_dag` | routes/jobs.py |
+| POST | `/job-batches` | `create_job_batch` | routes/jobs.py |
+| GET | `/jobs` | `list_jobs` | routes/jobs.py |
+| GET | `/jobs/{job_id}` | `get_job` | routes/jobs.py |
+| GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/jobs.py |
+| POST | `/jobs/{job_id}/nodes/{node_key}/rerun` | `rerun_node` | routes/jobs.py |
+| DELETE | `/jobs/{job_id}` | `delete_job` | routes/jobs.py |
+| GET | `/jobs/{job_id}/{invalid_path:path}` | `reject_invalid_job_subpath` | routes/jobs.py |
+| POST | `/package` | `package_completed` | routes/packages.py |
+| GET | `/packages` | `list_packages` | routes/packages.py |
+| DELETE | `/packages/{package_id:int}` | `delete_package` | routes/packages.py |
+| PATCH | `/packages/{package_id:int}` | `update_package` | routes/packages.py |
+| GET | `/packages/{filename:path}` | `download_package` | routes/packages.py |
+| GET | `/workspaces/{workspace_id}/packages` | `list_workspace_packages` | routes/packages.py |
+| POST | `/workspaces/{workspace_id}/jobs/package` | `package_workspace_jobs` | routes/packages.py |
+| GET | `/workspaces/{workspace_id}/packages/{filename:path}` | `download_workspace_package` | routes/packages.py |
+| GET | `/workspaces/{workspace_id}/questions/{question_id}` | `get_question_detail` | routes/questions.py |
+| GET | `/video-hive/config` | `get_video_hive_config` | routes/video_hive.py |
+| POST | `/videos` | `add_videos` | routes/videos.py |
+| GET | `/videos` | `list_videos` | routes/videos.py |
+| GET | `/videos/{video_id}` | `get_video` | routes/videos.py |
+| POST | `/videos/batch/delete` | `batch_delete_videos` | routes/videos.py |
+| POST | `/videos/batch/rerun` | `batch_rerun_videos` | routes/videos.py |
+| POST | `/videos/batch/run-to` | `batch_run_to_videos` | routes/videos.py |
+| POST | `/videos/{video_id}/run-to` | `run_video_to_phase` | routes/videos.py |
+| POST | `/videos/{video_id}/rerun` | `rerun_video` | routes/videos.py |
+| DELETE | `/videos/{video_id}` | `delete_video` | routes/videos.py |
+| GET | `/videos/{video_id}/logs` | `logs` | routes/videos.py |
+| GET | `/videos/{video_id}/phase-runs/{run_id}/session` | `phase_run_session` | routes/videos.py |
+| GET | `/videos/{video_id}/video` | `video_file` | routes/videos.py |
+| HEAD | `/videos/{video_id}/video` | `video_file` | routes/videos.py |
+| GET | `/worker/status` | `worker_status` | routes/worker.py |
+| POST | `/worker/pause` | `pause_worker` | routes/worker.py |
+| POST | `/worker/resume` | `resume_worker` | routes/worker.py |
+
+### 数据模型
+
+| 模型 | 类型 | 字段 | 文件 |
+|------|------|------|------|
+| VideoRecord | TypedDict | id: str, source_url: str, title: str, content_type: str, external_id: str, kn... | app/records.py |
+| PhaseRunRecord | TypedDict | id: int, video_id: str, phase_key: str, status: str, started_at: str, finishe... | app/records.py |
+| AgentStatusResponse | BaseModel | id: str, name: str, busy: bool, current_video_id: str | None, current_title: ... | app/routes/agents.py |
+| AgentsResponse | BaseModel | agents: list[AgentStatusResponse] | app/routes/agents.py |
+| AgentAssignmentResponse | BaseModel | agent_id: str, workspace_id: str, concurrency_limit: int | app/routes/agents.py |
+| AgentUnassignmentResponse | BaseModel | agent_id: str, workspace_id: str, removed: bool | app/routes/agents.py |
+| HealthResponse | BaseModel | ok: bool | app/routes/common.py |
+| JobBatchRequest | BaseModel | pipeline_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/jobs.py |
+| JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/jobs.py |
+| JobsResponse | BaseModel | jobs: list[dict[str, Any]] | app/routes/jobs.py |
+| PipelineResponse | BaseModel | pipeline: dict[str, Any] | app/routes/jobs.py |
+| PipelinesListResponse | BaseModel | pipelines: list[dict[str, Any]] | app/routes/jobs.py |
+| WorkspaceCreateRequest | BaseModel | name: str, default_pipeline_key: str, default_entity: str, cms_config: dict[s... | app/routes/jobs.py |
+| WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_pipeline_key: str | None, ... | app/routes/jobs.py |
+| WorkspaceSettingsResponse | BaseModel | settings: dict[str, Any] | app/routes/jobs.py |
+| WorkspaceSettingsSectionRequest | BaseModel | cmsUrl: str | None, cmsToken: str | None, entityType: str | None, intakeModes... | app/routes/jobs.py |
+| WorkspaceSettingsTestResponse | BaseModel | ok: bool, message: str | app/routes/jobs.py |
+| WorkspaceResponse | BaseModel | workspace: dict[str, Any] | app/routes/jobs.py |
+| WorkspacesResponse | BaseModel | workspaces: list[dict[str, Any]] | app/routes/jobs.py |
+| WorkspaceAgentsResponse | BaseModel | agents: list[dict[str, Any]] | app/routes/jobs.py |
+| JobDetailResponse | BaseModel | job: dict[str, Any], nodes: list[dict[str, Any]], runs: list[dict[str, Any]],... | app/routes/jobs.py |
+| ArtifactResponse | BaseModel | name: str, content: str | app/routes/jobs.py |
+| RerunNodeResponse | BaseModel | job_id: str, node_key: str, stale_nodes: list[str] | app/routes/jobs.py |
+| BatchJobRequest | BaseModel | job_ids: list[str] | app/routes/jobs.py |
+| BatchJobResponse | BaseModel | results: list[dict[str, Any]] | app/routes/jobs.py |
+| WorkspaceRunsResponse | BaseModel | runs: list[dict[str, Any]] | app/routes/jobs.py |
+| WorkspaceDagResponse | BaseModel | pipeline: dict[str, Any], nodes: list[dict[str, Any]] | app/routes/jobs.py |
+| WorkspaceAgentStatus | BaseModel | id: str, name: str, busy: bool | app/routes/jobs.py |
+| WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, pipeline_key: str, pipeline_label: str, job_sta... | app/routes/jobs.py |
+| DeleteWorkspaceResponse | BaseModel | deleted: str | app/routes/jobs.py |
+| ResourceProvidersResponse | BaseModel | providers: list[dict[str, Any]] | app/routes/jobs.py |
+| GlobalServicesResponse | BaseModel | cms: dict[str, Any] | app/routes/jobs.py |
+| PackageRequest | BaseModel | video_ids: list[str] | None, name: str | None | app/routes/packages.py |
+| PackageUpdate | BaseModel | name: str | None, locked: bool | None | app/routes/packages.py |
+| PackageResponse | BaseModel | accepted: bool | app/routes/packages.py |
+| QuestionNormalized | BaseModel | stem: str | None, options: list[dict[str, Any]] | None, answer: Any | None, a... | app/routes/questions.py |
+| QuestionDetailResponse | BaseModel | question_id: str, title: str, normalized: QuestionNormalized, cms_payload: di... | app/routes/questions.py |
+| AsrConfigResponse | BaseModel | provider: str, whisper_configured: bool, sensevoice_configured: bool, vad_ena... | app/routes/video_hive.py |
+| OpenclawConfigResponse | BaseModel | runner_count: int, timeout_seconds: int | app/routes/video_hive.py |
+| VideoHiveConfigResponse | BaseModel | asr: AsrConfigResponse, openclaw: OpenclawConfigResponse | app/routes/video_hive.py |
+| VideoInput | BaseModel | url: str, title: str, content_type: str, external_id: str, source_uuid: str | app/routes/videos.py |
+| AddVideosRequest | BaseModel | items: list[VideoInput] | app/routes/videos.py |
+| RerunRequest | BaseModel | phase: str | app/routes/videos.py |
+| RunToRequest | BaseModel | target_phase: str, start_phase: str | None | app/routes/videos.py |
+| BatchVideoIdsRequest | BaseModel | video_ids: list[str] | app/routes/videos.py |
+| DeleteResult | BaseModel | video_id: str, status: str, message: str | app/routes/videos.py |
+| BatchDeleteResponse | BaseModel | results: list[DeleteResult] | app/routes/videos.py |
+| BatchRerunResponse | BaseModel | results: list[RerunResult] | app/routes/videos.py |
+| RunToSingleResponse | BaseModel | result: RunToResult, video: dict[str, Any] | None | app/routes/videos.py |
+| BatchRunToResponse | BaseModel | results: list[RunToResult] | app/routes/videos.py |
+| WorkerStatusResponse | BaseModel | paused: bool | app/routes/worker.py |
+
+<!-- END AUTO-GENERATED -->
 
 ## Related Specs
 

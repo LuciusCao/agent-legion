@@ -48,6 +48,19 @@ server/app/pipelines/
 - 每个阶段失败都会将视频标记为 `failed`，支持从任意阶段重跑。
 - Agent 阶段通过 OpenClaw 调用外部命令，模板化配置在 `config/pipeline.yaml` 中。
 
+## API Surface / Interface
+
+<!-- AUTO-GENERATED: scripts/generate_architecture.py -->
+
+### 视频流水线阶段
+
+**知识视频（8 阶段）：**
+`download` → `transcribe` → `subtitle_review` → `chapter_generate` → `interaction_generate` → `content_review` → `assemble`
+**题目解析视频（6 阶段）：**
+`download` → `transcribe` → `subtitle_review` → `chapter_generate` → `assemble`
+
+<!-- END AUTO-GENERATED -->
+
 ## Related Specs
 
 - [批量从失败阶段重跑](../superpowers/completed/2026-06-02-batch-rerun-from-failed-phase-design.md)
