@@ -139,39 +139,29 @@ def test_question_detail_parses_nested_answer_and_analysis(tmp_path, monkeypatch
         "question_detail_url": "https://cms.example/question/detail",
     }
 
-    def fake_fetch_question_detail(question_id, api_url, token):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title="Test Question",
-            normalized={
-                "stem": "<p>Fill in ___1___ and ___2___</p>",
+    def fake_fetch_json(url, params, token):
+        return {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "question_uuid": "Q001",
+                "body": {"content": "<p>Fill in ___1___ and ___2___</p>"},
                 "answer": [
                     [{"content": "A1", "is_latex": 1}, {"content": "A2", "is_latex": 0}],
                     [{"content": "B1", "is_latex": 0}],
                 ],
-                "answer_blanks": [
-                    {"alternatives": ["A1", "A2"], "is_latex": True},
-                    {"alternatives": ["B1"], "is_latex": False},
-                ],
-                "analysis": [
+                "analyze": [
                     [
                         {"content": "<p>Step 0</p>", "title": "<p>Title 0</p>", "step": 0},
                         {"content": "<p>Step 1</p>", "title": "", "step": 1},
                     ]
                 ],
-                "analysis_steps": [
-                    [
-                        {"content": "<p>Step 0</p>", "title": "<p>Title 0</p>", "step": 0},
-                        {"content": "<p>Step 1</p>", "title": None, "step": 1},
-                    ]
-                ],
             },
-            payload={"code": 0, "data": {"question_uuid": question_id}},
-        )
+        }
 
     monkeypatch.setattr(
-        "server.app.routes.questions.fetch_question_detail",
-        fake_fetch_question_detail,
+        "server.app.cms.question._fetch_json",
+        fake_fetch_json,
     )
     monkeypatch.setattr(
         "server.app.routes.questions.get_token",

@@ -44,9 +44,14 @@ function formatTime(iso?: string | null): string {
 interface JobProgressPanelProps {
   nodes: JobNodeRecord[]
   runs: NodeRunRecord[]
+  onOpenDagDialog?: () => void
 }
 
-export function JobProgressPanel({ nodes, runs }: JobProgressPanelProps) {
+export function JobProgressPanel({
+  nodes,
+  runs,
+  onOpenDagDialog,
+}: JobProgressPanelProps) {
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
   const [logDialog, setLogDialog] = useState<{
     nodeKey: string
@@ -82,7 +87,14 @@ export function JobProgressPanel({ nodes, runs }: JobProgressPanelProps) {
   return (
     <div className={styles.panel}>
       <div className={styles.stepperWrap}>
-        <h3 className={styles.panelTitle}>节点进度</h3>
+        <div className={styles.stepperHeader}>
+          <h3 className={styles.panelTitle}>节点进度</h3>
+          {onOpenDagDialog && (
+            <md-icon-button aria-label="查看完整 DAG" onClick={onOpenDagDialog}>
+              <md-icon>open_in_full</md-icon>
+            </md-icon-button>
+          )}
+        </div>
         <DagStepper nodes={nodes} />
       </div>
 
