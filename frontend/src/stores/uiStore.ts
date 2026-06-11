@@ -8,7 +8,7 @@ interface Toast {
   type: 'success' | 'error'
 }
 
-interface UiState {
+export interface UiState {
   agents: AgentStatus[]
   addDialogOpen: boolean
   addContentType: ContentType
