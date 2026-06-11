@@ -1,0 +1,99 @@
+{
+  "route_exemptions": [
+    "server/app/routes/artifacts.py:artifacts",
+    "server/app/routes/common.py:worker_tick",
+    "server/app/routes/packages.py:list_packages",
+    "server/app/routes/packages.py:delete_package",
+    "server/app/routes/packages.py:update_package",
+    "server/app/routes/packages.py:download_package",
+    "server/app/routes/packages.py:list_workspace_packages",
+    "server/app/routes/packages.py:download_workspace_package",
+    "server/app/routes/videos.py:videos_events",
+    "server/app/routes/videos.py:video_detail_events",
+    "server/app/routes/videos.py:add_videos",
+    "server/app/routes/videos.py:list_videos",
+    "server/app/routes/videos.py:get_video",
+    "server/app/routes/videos.py:rerun_video",
+    "server/app/routes/videos.py:delete_video",
+    "server/app/routes/videos.py:logs",
+    "server/app/routes/videos.py:phase_run_session",
+    "server/app/routes/videos.py:video_file"
+  ],
+  "route_exemption_reasons": {
+    "server/app/routes/artifacts.py:artifacts": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/common.py:worker_tick": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/packages.py:list_packages": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/packages.py:delete_package": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/packages.py:update_package": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/packages.py:download_package": "File download response",
+    "server/app/routes/packages.py:list_workspace_packages": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/packages.py:download_workspace_package": "File download response",
+    "server/app/routes/videos.py:videos_events": "SSE streaming response",
+    "server/app/routes/videos.py:video_detail_events": "SSE streaming response",
+    "server/app/routes/videos.py:add_videos": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/videos.py:list_videos": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/videos.py:get_video": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/videos.py:rerun_video": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/videos.py:delete_video": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/videos.py:logs": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/videos.py:phase_run_session": "Legacy JSON route pending Phase 2 transport models",
+    "server/app/routes/videos.py:video_file": "File download / redirect response"
+  },
+  "route_annotation_exemptions": [
+    "server/app/routes/agents.py:list_agents",
+    "server/app/routes/agents.py:assign_agent",
+    "server/app/routes/agents.py:unassign_agent",
+    "server/app/routes/artifacts.py:artifacts",
+    "server/app/routes/packages.py:list_packages",
+    "server/app/routes/packages.py:update_package",
+    "server/app/routes/packages.py:list_workspace_packages",
+    "server/app/routes/videos.py:add_videos",
+    "server/app/routes/videos.py:list_videos",
+    "server/app/routes/videos.py:get_video",
+    "server/app/routes/videos.py:batch_delete_videos",
+    "server/app/routes/videos.py:batch_rerun_videos",
+    "server/app/routes/videos.py:batch_run_to_videos",
+    "server/app/routes/videos.py:run_video_to_phase",
+    "server/app/routes/videos.py:rerun_video",
+    "server/app/routes/videos.py:delete_video"
+  ],
+  "route_annotation_exemption_reasons": {
+    "server/app/routes/agents.py:list_agents": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/agents.py:assign_agent": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/agents.py:unassign_agent": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/artifacts.py:artifacts": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/packages.py:list_packages": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/packages.py:update_package": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/packages.py:list_workspace_packages": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/videos.py:add_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/videos.py:list_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/videos.py:get_video": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/videos.py:batch_delete_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/videos.py:batch_rerun_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/videos.py:batch_run_to_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/videos.py:run_video_to_phase": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/videos.py:rerun_video": "Broad dict[str, Any] annotation pending Phase 2 transport models",
+    "server/app/routes/videos.py:delete_video": "Broad dict[str, Any] annotation pending Phase 2 transport models"
+  },
+  "route_import_exemptions": [
+    "server/app/routes/jobs.py",
+    "server/app/routes/questions.py"
+  ],
+  "route_import_exemption_reasons": {
+    "server/app/routes/jobs.py": "Legacy Workspace route importing CMS and pipeline artifact helpers",
+    "server/app/routes/questions.py": "Legacy Workspace route importing CMS helpers"
+  },
+  "scheduler_import_exemptions": [
+    "server/app/pipeline_worker_thread.py"
+  ],
+  "scheduler_import_exemption_reasons": {
+    "server/app/pipeline_worker_thread.py": "Legacy scheduler thread importing agent runner"
+  },
+  "scheduler_threadpool_exemptions": [
+    "server/app/pipeline_worker_thread.py"
+  ],
+  "scheduler_threadpool_exemption_reasons": {
+    "server/app/pipeline_worker_thread.py": "Legacy per-Workspace pools pending Phase 3 removal"
+  },
+  "files": {}
+}
