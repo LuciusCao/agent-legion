@@ -2,6 +2,28 @@ import json
 from pathlib import Path
 
 
+def test_workspace_job_response_models_are_exposed_in_openapi(tmp_path):
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    schema = app.openapi()
+
+    assert schema["paths"]["/api/workspaces/{workspace_id}/agents"]["get"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"]["$ref"] == ("#/components/schemas/WorkspaceAgentListResponse")
+    assert schema["paths"]["/api/workspaces/{workspace_id}/agents"]["post"]["responses"]["200"][
+        "content"
+    ]["application/json"]["schema"]["$ref"] == (
+        "#/components/schemas/WorkspaceAgentAssignmentResponse"
+    )
+    assert (
+        schema["paths"]["/api/jobs/{job_id}"]["delete"]["responses"]["200"]["content"][
+            "application/json"
+        ]["schema"]["$ref"]
+        == "#/components/schemas/DeleteJobResponse"
+    )
+
+
 def test_job_routes_are_hidden_when_pipelines_disabled(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -1794,15 +1816,18 @@ def test_get_and_set_workspace_agent(client):
         json={"agent_id": "pi", "concurrency_limit": 3},
     )
     assert resp.status_code == 200
-    assert resp.json()["concurrency_limit"] == 3
+    assignment = {
+        "agent_id": "pi",
+        "workspace_id": ws_id,
+        "concurrency_limit": 3,
+    }
+    assert resp.json() == assignment
 
     # get
     resp = client.get(f"/api/workspaces/{ws_id}/agents")
     assert resp.status_code == 200
     agents = resp.json()
-    assert len(agents) == 1
-    assert agents[0]["agent_id"] == "pi"
-    assert agents[0]["concurrency_limit"] == 3
+    assert agents == [assignment]
 
 
 def test_workspace_settings_pipeline_rejects_invalid_concurrency(tmp_path):
