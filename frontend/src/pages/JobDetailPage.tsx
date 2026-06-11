@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import type { DagEdge, DagNode } from '../components/DagGraph'
-import { NodeDetailPanel } from '../components/NodeDetailPanel'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact, fetchJobDetail } from '../api'
@@ -12,6 +11,8 @@ import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
+
+// NodeDetailPanel removed — node details shown inline in JobProgressPanel
 
 const VALID_STATUSES = new Set<DagNode['status']>([
   'pending',
@@ -58,7 +59,6 @@ export default function JobDetailPage() {
   const { setPageTitle, setDetailPageActions } = useUiStore()
   const [detail, setDetail] = useState<JobDetailResponse | null>(null)
   const [error, setError] = useState('')
-  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
   const [artifactListOpen, setArtifactListOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewArtifact, setPreviewArtifact] = useState<{
@@ -72,7 +72,6 @@ export default function JobDetailPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDetail(null)
     setError('')
-    setSelectedNodeKey(null)
     setArtifactListOpen(false)
     setPreviewOpen(false)
     setPreviewArtifact(null)
@@ -147,22 +146,6 @@ export default function JobDetailPage() {
     [detail]
   )
 
-  const selectedNode = useMemo(() => {
-    if (!detail || !selectedNodeKey) return null
-    const n = detail.nodes.find((item) => item.node_key === selectedNodeKey)
-    if (!n) return null
-    return {
-      key: n.node_key,
-      label: n.label || n.node_key,
-      status: normalizeStatus(n.status),
-      startedAt: n.started_at || undefined,
-      endedAt: n.finished_at || undefined,
-      duration: durationSeconds(n.started_at, n.finished_at),
-      agentId: undefined,
-      errorMessage: n.error_message || undefined,
-    }
-  }, [detail, selectedNodeKey])
-
   async function openArtifact(name: string) {
     if (!jobId) return
     const requestId = ++artifactRequestId.current
@@ -202,15 +185,6 @@ export default function JobDetailPage() {
               questionId={detail.job.source_id}
             />
           )}
-          <NodeDetailPanel
-            node={selectedNode}
-            onViewLogs={() => {
-              /* TODO view logs */
-            }}
-            onRerunNode={() => {
-              /* TODO rerun node */
-            }}
-          />
         </div>
 
         <div className={styles.right}>
@@ -219,8 +193,6 @@ export default function JobDetailPage() {
               nodes={detail.nodes}
               runs={detail.runs}
               onOpenDagDialog={() => setDagDialogOpen(true)}
-              onNodeClick={setSelectedNodeKey}
-              selectedNodeKey={selectedNodeKey}
             />
           )}
         </div>
@@ -245,8 +217,6 @@ export default function JobDetailPage() {
         open={dagDialogOpen}
         nodes={dagNodes}
         edges={dagEdges}
-        selectedNodeKey={selectedNodeKey}
-        onNodeClick={setSelectedNodeKey}
         onClose={() => setDagDialogOpen(false)}
       />
     </div>

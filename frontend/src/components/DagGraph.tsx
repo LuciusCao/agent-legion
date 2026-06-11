@@ -19,8 +19,6 @@ export interface DagEdge {
 interface DagGraphProps {
   nodes: DagNode[]
   edges: DagEdge[]
-  selectedNodeKey?: string | null
-  onNodeClick?: (nodeKey: string) => void
 }
 
 const NODE_PADDING_X = 16
@@ -118,12 +116,7 @@ function buildPath(points: Array<{ x: number; y: number }>): string {
   return d
 }
 
-export function DagGraph({
-  nodes,
-  edges,
-  selectedNodeKey,
-  onNodeClick,
-}: DagGraphProps) {
+export function DagGraph({ nodes, edges }: DagGraphProps) {
   const arrowMarkerId = useId().replace(/:/g, '-')
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
 
@@ -157,38 +150,6 @@ export function DagGraph({
     nodeMap.set(node.key, node)
   }
 
-  const upstream = new Set<string>()
-  const downstream = new Set<string>()
-  if (selectedNodeKey) {
-    const queue = [selectedNodeKey]
-    while (queue.length) {
-      const cur = queue.shift()!
-      for (const e of edges) {
-        if (e.to === cur && !upstream.has(e.from)) {
-          upstream.add(e.from)
-          queue.push(e.from)
-        }
-      }
-    }
-    const dq = [selectedNodeKey]
-    while (dq.length) {
-      const cur = dq.shift()!
-      for (const e of edges) {
-        if (e.from === cur && !downstream.has(e.to)) {
-          downstream.add(e.to)
-          dq.push(e.to)
-        }
-      }
-    }
-  }
-
-  const isDimmed = (key: string) => {
-    if (!selectedNodeKey) return false
-    if (key === selectedNodeKey) return false
-    if (upstream.has(key) || downstream.has(key)) return false
-    return true
-  }
-
   return (
     <svg
       className={styles.dagGraph}
@@ -217,13 +178,6 @@ export function DagGraph({
           const to = nodeMap.get(edge.to)
           if (!from || !to) return null
           const isCompleted = from.status === 'completed'
-          const isSelectedPath =
-            selectedNodeKey &&
-            (from.key === selectedNodeKey ||
-              to.key === selectedNodeKey ||
-              (upstream.has(from.key) && upstream.has(to.key)) ||
-              (downstream.has(from.key) && downstream.has(to.key)))
-          const dimmed = selectedNodeKey && !isSelectedPath
           return (
             <path
               key={`${edge.from}-${edge.to}-${idx}`}
@@ -233,7 +187,6 @@ export function DagGraph({
                 styles.edgeLine,
                 isCompleted ? styles.edgeLineCompleted : styles.edgeLinePending,
               ].join(' ')}
-              style={{ opacity: dimmed ? 0.2 : 1 }}
               markerEnd={`url(#${arrowMarkerId})`}
             />
           )
@@ -242,9 +195,7 @@ export function DagGraph({
 
       <g data-testid="nodes">
         {layoutNodes.map((node) => {
-          const isSelected = selectedNodeKey === node.key
           const icon = STATUS_ICON[node.status]
-          const dimmed = isDimmed(node.key)
           const ioCount =
             (node.inputs?.length || 0) + (node.outputs?.length || 0)
           const showChips = ioCount > 0
@@ -266,19 +217,8 @@ export function DagGraph({
             <g
               key={node.key}
               data-node={node.key}
-              role="button"
-              tabIndex={0}
-              aria-label={node.label}
-              onClick={() => onNodeClick?.(node.key)}
               onMouseEnter={() => setHoveredNode(node.key)}
               onMouseLeave={() => setHoveredNode(null)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault()
-                  onNodeClick?.(node.key)
-                }
-              }}
-              style={{ opacity: dimmed ? 0.3 : 1, transition: 'opacity 0.2s' }}
             >
               <rect
                 x={node.x - node.width / 2}
@@ -289,11 +229,8 @@ export function DagGraph({
                 ry={8}
                 fill={STATUS_FILL[node.status]}
                 stroke={STATUS_STROKE[node.status]}
-                strokeWidth={isSelected ? 3 : 1.5}
-                className={[
-                  styles.nodeRect,
-                  isSelected ? styles.selectedShadow : '',
-                ].join(' ')}
+                strokeWidth={1.5}
+                className={styles.nodeRect}
               />
               {icon && (
                 <text

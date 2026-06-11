@@ -6,8 +6,6 @@ interface DagFullscreenDialogProps {
   open: boolean
   nodes: DagNode[]
   edges: DagEdge[]
-  selectedNodeKey?: string | null
-  onNodeClick?: (nodeKey: string) => void
   onClose: () => void
 }
 
@@ -15,8 +13,6 @@ export function DagFullscreenDialog({
   open,
   nodes,
   edges,
-  selectedNodeKey,
-  onNodeClick,
   onClose,
 }: DagFullscreenDialogProps) {
   const [scale, setScale] = useState(1)
@@ -97,12 +93,7 @@ export function DagFullscreenDialog({
               transformOrigin: 'center center',
             }}
           >
-            <DagGraph
-              nodes={nodes}
-              edges={edges}
-              selectedNodeKey={selectedNodeKey}
-              onNodeClick={onNodeClick}
-            />
+            <DagGraph nodes={nodes} edges={edges} />
           </div>
         </div>
       </div>
