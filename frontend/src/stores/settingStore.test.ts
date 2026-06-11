@@ -1,7 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSettingStore } from './settingStore'
+import type { SettingState } from './settingStore'
 import { useUiStore } from './uiStore'
-import type { UiState } from './uiStore'
+import { createMockUiState } from '../testing/fixtures'
 import { api, assignAgent, unassignAgent } from '../api'
 
 vi.mock('../api', () => ({
@@ -23,37 +24,6 @@ const mockUnassignAgent = vi.mocked(unassignAgent)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
 
-function createMockUiState(partial: Partial<UiState> = {}): UiState {
-  return {
-    agents: [],
-    addDialogOpen: false,
-    addContentType: 'knowledge',
-    addDialogContext: 'video',
-    addDialogWorkspaceId: undefined,
-    rerunDialogOpen: false,
-    deleteDialogOpen: false,
-    workerPaused: false,
-    toast: null,
-    pageTitle: null,
-    detailPageActions: null,
-    connectAgentsWs: vi.fn(() => vi.fn()),
-    fetchWorkerStatus: vi.fn(),
-    setWorkerPaused: vi.fn(),
-    openAddDialog: vi.fn(),
-    closeAddDialog: vi.fn(),
-    setAddContentType: vi.fn(),
-    openRerunDialog: vi.fn(),
-    closeRerunDialog: vi.fn(),
-    openDeleteDialog: vi.fn(),
-    closeDeleteDialog: vi.fn(),
-    showToast: mockShowToast,
-    clearToast: vi.fn(),
-    setPageTitle: vi.fn(),
-    setDetailPageActions: vi.fn(),
-    ...partial,
-  }
-}
-
 const defaultSettings = {
   entityType: 'question' as const,
   intakeModes: [],
@@ -64,22 +34,23 @@ const defaultSettings = {
   resources: {},
 }
 
-const defaultState = {
+const defaultState: Partial<SettingState> = {
   workspaceId: 'ws1',
   workspaceName: '',
   workspaceDescription: '',
   settings: defaultSettings,
-  agentAssignments: null as null,
+  agentAssignments: null,
   originalWorkspaceName: '',
   originalWorkspaceDescription: '',
-  originalSettings: null as typeof defaultSettings | null,
-  originalAgentAssignments: null as null,
+  originalSettings: null,
+  originalAgentAssignments: null,
   isDirty: false,
-  globalServices: null as null,
-  resourceProviders: [] as [],
+  globalServices: null,
+  resourceProviders: [],
+  pipelineDefinition: null,
   testStatus: { state: 'idle' as const },
   isSaving: false,
-  saveError: null as string | null,
+  saveError: null,
 }
 
 describe('settingStore', () => {
@@ -89,7 +60,9 @@ describe('settingStore', () => {
     mockAssignAgent.mockReset()
     mockUnassignAgent.mockReset()
     mockShowToast.mockReset()
-    mockGetState.mockReturnValue(createMockUiState())
+    mockGetState.mockReturnValue(
+      createMockUiState({ showToast: mockShowToast })
+    )
   })
 
   it('updates settings via setSettings', () => {
