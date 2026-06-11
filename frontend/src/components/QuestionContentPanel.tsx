@@ -127,6 +127,11 @@ export function QuestionContentPanel({
 
   const rawAnswer = detail?.normalized.answer
   const answerItems = rawAnswer ? extractAnswerItems(rawAnswer) : null
+  const answerBlanks = (
+    detail?.normalized as {
+      answerBlanks?: Array<{ alternatives: string[]; isLatex: boolean }>
+    }
+  )?.answerBlanks
 
   if (loading) {
     return <p className={styles.loading}>加载题目中...</p>
@@ -182,10 +187,29 @@ export function QuestionContentPanel({
         </section>
       )}
 
-      {(answerItems != null || rawAnswer != null) && (
+      {(answerBlanks != null || answerItems != null || rawAnswer != null) && (
         <section className={`${styles.card} ${styles.answerCard}`}>
           <h2 className={styles.sectionTitle}>答案</h2>
-          {answerItems != null && answerItems.length > 0 ? (
+          {answerBlanks != null && answerBlanks.length > 0 ? (
+            <div className={styles.answerBlankList}>
+              {answerBlanks.map((blank, idx) => (
+                <div key={idx} className={styles.answerBlank}>
+                  <span className={styles.blankLabel}>第{idx + 1}空：</span>
+                  <span className={styles.blankAlternatives}>
+                    {blank.alternatives.map((alt, aidx) => (
+                      <span key={aidx} className={styles.answerBadge}>
+                        {blank.isLatex && hasLatex(alt) ? (
+                          <LaTeXText>{alt}</LaTeXText>
+                        ) : (
+                          alt
+                        )}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : answerItems != null && answerItems.length > 0 ? (
             <div className={styles.answerBadges}>
               {answerItems.map((item, idx) => (
                 <span key={idx} className={styles.answerBadge}>
