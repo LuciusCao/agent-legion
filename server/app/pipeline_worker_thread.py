@@ -175,38 +175,51 @@ class PipelineWorkerThread:
         for key in list(self._futures):
             future = self._futures[key]
             job_id, node_key = key
+            should_clean = False
             if future.done():
                 try:
                     future.result()
                 except Exception:
                     logger.exception("pipeline future %s.%s failed", job_id, node_key)
-                _refresh_job_status(self.job_db, job_id)
-                if key in self._local_futures:
-                    self._local_futures.discard(key)
-                if key in self._agent_futures:
-                    self._agent_futures.discard(key)
-                    if self.agent_manager is not None:
-                        self.agent_manager.set_idle("pi")
-                del self._futures[key]
-                self._job_workspace_ids.pop(job_id, None)
+                try:
+                    _refresh_job_status(self.job_db, job_id)
+                except Exception:
+                    logger.exception("failed to refresh job status for %s", job_id)
+                should_clean = True
             elif not future.running() and self.workspace_worker_control is not None:
                 ws_id = self._job_workspace_ids.get(job_id)
                 if ws_id is not None and self.workspace_worker_control.is_paused(ws_id):
                     future.cancel()
-                    del self._futures[key]
-                    if key in self._local_futures:
-                        self._local_futures.discard(key)
-                    if key in self._agent_futures:
-                        self._agent_futures.discard(key)
-                        if self.agent_manager is not None:
-                            self.agent_manager.set_idle("pi")
-                    self._job_workspace_ids.pop(job_id, None)
                     logger.info(
                         "cancelled pending future %s.%s for paused workspace %s",
                         job_id,
                         node_key,
                         ws_id,
                     )
+                    should_clean = True
+            if should_clean:
+                if key in self._local_futures:
+                    self._local_futures.discard(key)
+                if key in self._agent_futures:
+                    self._agent_futures.discard(key)
+                    if self.agent_manager is not None:
+                        try:
+                            self.agent_manager.set_idle("pi")
+                        except Exception:
+                            logger.exception("failed to set pi idle")
+                self._futures.pop(key, None)
+                self._job_workspace_ids.pop(job_id, None)
+
+        # Defensive: reconcile orphaned agent-future keys (e.g. after a crash)
+        for key in list(self._agent_futures):
+            if key not in self._futures:
+                self._agent_futures.discard(key)
+                logger.warning("reconciled orphaned agent future %s.%s", key[0], key[1])
+                if self.agent_manager is not None:
+                    try:
+                        self.agent_manager.set_idle("pi")
+                    except Exception:
+                        logger.exception("failed to set pi idle during reconciliation")
 
         # Submit new ready nodes across all registered pipelines
         processed = False
@@ -227,10 +240,6 @@ class PipelineWorkerThread:
 
                 statuses = _node_statuses(self.job_db, job["id"])
                 ready_nodes = find_ready_nodes(definition, statuses, Path(str(job["storage_dir"])))
-                if not ready_nodes:
-                    _refresh_job_status(self.job_db, job["id"])
-                    continue
-
                 for node in ready_nodes:
                     key = (job["id"], node.key)
                     if key in self._futures:
@@ -291,6 +300,12 @@ class PipelineWorkerThread:
                         self.job_db.finish_node_run(run["id"], "failed", 1, error_message)
                         _refresh_job_status(self.job_db, job["id"])
                         processed = True
+
+                # Always refresh job status so that a job whose active nodes have
+                # finished (but which still has pending ready nodes that could not
+                # be launched due to full concurrency slots) correctly reverts to
+                # queued instead of staying stale at running.
+                _refresh_job_status(self.job_db, job["id"])
 
         return processed
 

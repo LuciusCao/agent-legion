@@ -433,6 +433,14 @@ class JobQueries:
             )
             if cursor.rowcount == 0:
                 raise ValueError(f"Unknown job node: {job_id}.{node_key}")
+            conn.execute(
+                """
+                update jobs
+                set status='running', updated_at=current_timestamp
+                where id=? and status != 'running'
+                """,
+                (job_id,),
+            )
             cursor = conn.execute(
                 """
                 insert into node_runs(job_id, node_key, status, command_json, log_path, run_dir, session_dir)
@@ -468,6 +476,28 @@ class JobQueries:
                 """,
                 (node_status, error_message, run["job_id"], run["node_key"]),
             )
+            # Sync jobs.status when no nodes are still running
+            still_running = conn.execute(
+                "select 1 from job_nodes where job_id=? and status='running'",
+                (run["job_id"],),
+            ).fetchone()
+            if still_running is None:
+                any_failed = conn.execute(
+                    "select 1 from job_nodes where job_id=? and status='failed'",
+                    (run["job_id"],),
+                ).fetchone()
+                if any_failed is not None:
+                    new_status = "failed"
+                else:
+                    all_completed = conn.execute(
+                        "select 1 from job_nodes where job_id=? and status != 'completed'",
+                        (run["job_id"],),
+                    ).fetchone()
+                    new_status = "completed" if all_completed is None else "queued"
+                conn.execute(
+                    "update jobs set status=?, updated_at=current_timestamp where id=?",
+                    (new_status, run["job_id"]),
+                )
 
     def list_node_runs(self, job_id: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
