@@ -33,7 +33,7 @@ describe('LaTeXText', () => {
   })
 
   it('handles empty string', () => {
-    render(<LaTeXText></LaTeXText>)
+    render(<LaTeXText>{''}</LaTeXText>)
     const container = screen.getByTestId('latex-text')
     expect(container.textContent).toBe('')
   })
