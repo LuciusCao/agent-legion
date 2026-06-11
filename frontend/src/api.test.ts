@@ -7,6 +7,8 @@ import {
   createWorkspace,
   fetchJobArtifact,
   fetchJobDetail,
+  getWorkspaceAgents,
+  setWorkspaceAgent,
   updateWorkspace,
 } from './api'
 
@@ -57,6 +59,49 @@ describe('api error handling', () => {
 })
 
 describe('workspace api', () => {
+  it('returns workspace agent assignments from the GET boundary', async () => {
+    const assignments = [
+      {
+        agent_id: 'agent-1',
+        workspace_id: 'math',
+        concurrency_limit: 2,
+      },
+    ]
+    global.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(assignments),
+    } as Response)
+
+    await expect(getWorkspaceAgents('math')).resolves.toEqual(assignments)
+  })
+
+  it('posts a workspace agent draft and returns the transport response', async () => {
+    const assignment = {
+      agent_id: 'agent-1',
+      workspace_id: 'math',
+      concurrency_limit: 3,
+    }
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(assignment),
+    } as Response)
+    global.fetch = fetchMock
+
+    await expect(setWorkspaceAgent('math', 'agent-1', 3)).resolves.toEqual(
+      assignment
+    )
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/math/agents',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({
+          agent_id: 'agent-1',
+          concurrency_limit: 3,
+        }),
+      })
+    )
+  })
+
   it('patches workspace cms config', async () => {
     const fetchMock = vi.fn().mockResolvedValue({
       ok: true,
