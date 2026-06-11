@@ -1,5 +1,6 @@
 import { vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
+import { EventSourceMock } from './testing/eventSourceMock'
 
 class ResizeObserverMock {
   callback: ResizeObserverCallback
@@ -69,3 +70,5 @@ class IntersectionObserverMock {
   globalThis as unknown as { IntersectionObserver: typeof IntersectionObserver }
 ).IntersectionObserver =
   IntersectionObserverMock as unknown as typeof IntersectionObserver
+;(globalThis as unknown as { EventSource: typeof EventSource }).EventSource =
+  EventSourceMock as unknown as typeof EventSource
