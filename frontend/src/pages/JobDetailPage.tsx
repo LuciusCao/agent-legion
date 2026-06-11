@@ -11,6 +11,7 @@ import type { JobDetailResponse, JobNodeRecord } from '../types'
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
+import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
 
 const VALID_STATUSES = new Set<DagNode['status']>([
   'pending',
@@ -27,12 +28,13 @@ function normalizeStatus(status: string): DagNode['status'] {
 }
 
 function toDagNodes(nodes: JobNodeRecord[]): DagNode[] {
-  return nodes.map((n, idx) => ({
+  return nodes.map((n) => ({
     key: n.node_key,
-    label: n.node_key,
+    label: n.label || n.node_key,
     status: normalizeStatus(n.status),
-    x: idx * 140 + 50,
-    y: 80,
+    inputs: n.inputs,
+    outputs: n.outputs,
+    duration: durationSeconds(n.started_at, n.finished_at),
   }))
 }
 
@@ -63,6 +65,8 @@ export default function JobDetailPage() {
     name: string
     content: string
   } | null>(null)
+  const [dagExpanded, setDagExpanded] = useState(true)
+  const [dagDialogOpen, setDagDialogOpen] = useState(false)
   const artifactRequestId = useRef(0)
 
   useEffect(() => {
@@ -199,13 +203,28 @@ export default function JobDetailPage() {
               questionId={detail.job.source_id}
             />
           )}
-          <div className={styles.graphWrap}>
-            <DagGraph
-              nodes={dagNodes}
-              edges={dagEdges}
-              selectedNodeKey={selectedNodeKey}
-              onNodeClick={setSelectedNodeKey}
-            />
+          <div
+            className={`${styles.graphWrap} ${dagExpanded ? styles.graphExpanded : styles.graphCollapsed}`}
+          >
+            <div className={styles.graphHeader}>
+              <span className={styles.graphTitle}>DAG 流水线</span>
+              <md-icon-button
+                aria-label={dagExpanded ? '收起' : '展开'}
+                onClick={() => setDagExpanded((v) => !v)}
+              >
+                <md-icon>{dagExpanded ? 'expand_less' : 'expand_more'}</md-icon>
+              </md-icon-button>
+            </div>
+            {dagExpanded && (
+              <div className={styles.graphBody}>
+                <DagGraph
+                  nodes={dagNodes}
+                  edges={dagEdges}
+                  selectedNodeKey={selectedNodeKey}
+                  onNodeClick={setSelectedNodeKey}
+                />
+              </div>
+            )}
           </div>
           <NodeDetailPanel
             node={selectedNode}
@@ -220,7 +239,11 @@ export default function JobDetailPage() {
 
         <div className={styles.right}>
           {detail && (
-            <JobProgressPanel nodes={detail.nodes} runs={detail.runs} />
+            <JobProgressPanel
+              nodes={detail.nodes}
+              runs={detail.runs}
+              onOpenDagDialog={() => setDagDialogOpen(true)}
+            />
           )}
         </div>
       </div>
@@ -240,6 +263,14 @@ export default function JobDetailPage() {
           onClose={() => setPreviewOpen(false)}
         />
       )}
+      <DagFullscreenDialog
+        open={dagDialogOpen}
+        nodes={dagNodes}
+        edges={dagEdges}
+        selectedNodeKey={selectedNodeKey}
+        onNodeClick={setSelectedNodeKey}
+        onClose={() => setDagDialogOpen(false)}
+      />
     </div>
   )
 }
