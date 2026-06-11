@@ -3,12 +3,14 @@ import importlib
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from server.app.pipelines.definition import load_pipeline_definition
 from server.app.pipelines.skills import resolve_pipeline_skill
+from server.app.pipelines.skills.reading_analysis._shared.validation import ContractError
 
 FIXTURE_ROOT = Path("tests/fixtures/reading_analysis/eval")
 SKILL_NAMES = [
@@ -20,20 +22,15 @@ SKILL_NAMES = [
     "reading_analysis/review_distractors",
 ]
 
-SKILL_MODULES = {
-    name: importlib.import_module(
-        f"server.app.pipelines.skills.reading_analysis.{name.split('/')[-1]}.scripts.validate_output"
-    )
-    for name in SKILL_NAMES
-}
-
 
 def _run_validator(skill_name: str, job_dir: Path) -> list[str]:
     """Call a skill's in-process validate() and return a flat list of error messages."""
-    mod = SKILL_MODULES[skill_name]
+    mod = importlib.import_module(
+        f"server.app.pipelines.skills.reading_analysis.{skill_name.split('/')[-1]}.scripts.validate_output"
+    )
     try:
         result = mod.validate(job_dir)
-    except Exception as exc:  # noqa: BLE001
+    except (ContractError, mod.ContractError) as exc:
         return [str(exc)]
     if isinstance(result, list):
         return result
@@ -361,8 +358,15 @@ def test_validator_rejects_missing_output_in_process(skill_name, tmp_path):
 
     _setup_skill_inputs(skill_name, job_dir)
 
-    errors = _run_validator(skill_name, job_dir)
-    assert errors
+    try:
+        errors = _run_validator(skill_name, job_dir)
+    except FileNotFoundError as exc:
+        # Review validators that call validate_review_result directly raise
+        # FileNotFoundError when the report file is absent.
+        assert any(name in str(exc) for name in ("review_report.json", "reviewed.json")), str(exc)
+    else:
+        assert errors
+        assert any("Missing output file" in e for e in errors)
 
 
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
@@ -378,8 +382,8 @@ def test_validator_rejects_malformed_json_in_process(skill_name, tmp_path):
         if path.name.endswith(".json") and path.name != "questions_parsed.json":
             path.write_text("not json", encoding="utf-8")
 
-    errors = _run_validator(skill_name, job_dir)
-    assert errors
+    with pytest.raises(json.JSONDecodeError):
+        _run_validator(skill_name, job_dir)
 
 
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
@@ -461,7 +465,7 @@ def test_validator_cli_smoke_accepts_valid_output(skill_name, tmp_path):
     _setup_skill_valid_outputs(skill_name, job_dir)
 
     result = subprocess.run(
-        ["python", str(validator), str(job_dir)],
+        [sys.executable, str(validator), str(job_dir)],
         capture_output=True,
         text=True,
     )
@@ -473,7 +477,7 @@ def test_validator_usage_requires_directory_argument():
         "server/app/pipelines/skills/reading_analysis/extract_keywords/scripts/validate_output.py"
     )
     result = subprocess.run(
-        ["python", str(validator)],
+        [sys.executable, str(validator)],
         capture_output=True,
         text=True,
     )
