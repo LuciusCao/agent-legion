@@ -4,15 +4,14 @@ import glob
 import logging
 import shutil
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from server.app.agents import AgentStatusManager
 from server.app.cms.client import get_token
 from server.app.cms.question import list_questions_by_knowledge
-from server.app.db import Database
 from server.app.jobs import JobQueries
 from server.app.pipelines.artifacts import clear_rerun_outputs
 from server.app.pipelines.definition import PipelineDefinition
@@ -23,7 +22,6 @@ from server.app.pipelines.resources import (
     resolve_cms_resource,
 )
 from server.app.pipelines.scheduler import downstream_nodes
-from server.app.routes.dependencies import get_db
 from server.app.settings import Settings
 
 RESOLVER_MAP: dict[tuple[str, str], str] = {
@@ -168,6 +166,11 @@ class WorkspaceRunsResponse(BaseModel):
 class WorkspaceDagResponse(BaseModel):
     pipeline: dict[str, Any]
     nodes: list[dict[str, Any]]
+
+
+class WorkspaceAgentConfig(BaseModel):
+    agent_id: str
+    concurrency_limit: int
 
 
 class WorkspaceAgentStatus(BaseModel):
@@ -695,14 +698,24 @@ def create_jobs_router(
         _require_enabled(settings)
         return WorkspaceResponse(workspace=_workspace_or_404(job_db, workspace_id))
 
-    @router.get("/workspaces/{workspace_id}/agents", response_model=WorkspaceAgentsResponse)
-    def list_workspace_agents(
+    @router.get("/workspaces/{workspace_id}/agents")
+    def get_workspace_agents(
         workspace_id: str,
-        db: Annotated[Database, Depends(get_db)],
-    ) -> WorkspaceAgentsResponse:
+    ) -> list[dict[str, Any]]:
         _require_enabled(settings)
         _workspace_or_404(job_db, workspace_id)
-        return WorkspaceAgentsResponse(agents=db.list_workspace_agents(workspace_id))
+        return job_db.list_workspace_agents(workspace_id)
+
+    @router.post("/workspaces/{workspace_id}/agents")
+    def set_workspace_agent(
+        workspace_id: str,
+        config: WorkspaceAgentConfig,
+    ) -> dict[str, Any]:
+        _require_enabled(settings)
+        _workspace_or_404(job_db, workspace_id)
+        return job_db.upsert_workspace_agent_assignment(
+            workspace_id, config.agent_id, config.concurrency_limit
+        )
 
     @router.get("/workspaces/{workspace_id}/settings", response_model=WorkspaceSettingsResponse)
     def get_workspace_settings(workspace_id: str) -> WorkspaceSettingsResponse:
