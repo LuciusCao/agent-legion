@@ -109,6 +109,7 @@ def test_question_detail_cms_failure(tmp_path, monkeypatch):
 def test_question_detail_no_cms_config_returns_empty_normalized(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config["cms"] = {}
 
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Math"})
