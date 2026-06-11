@@ -9,11 +9,8 @@ schema_file="${temporary_dir}/openapi.json"
 generated_file="${temporary_dir}/api.ts"
 trap 'rm -rf "${temporary_dir}"' EXIT
 
-export UV_PROJECT_ENVIRONMENT="${UV_PROJECT_ENVIRONMENT:-/Users/user/GitHub/video-hive/.venv}"
-export UV_CACHE_DIR="${UV_CACHE_DIR:-${repo_dir}/.uv-cache}"
-
 cd "${repo_dir}"
-uv run python -m scripts.export_openapi "${schema_file}"
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python -m scripts.export_openapi "${schema_file}"
 
 cd "${frontend_dir}"
 if [[ "${1:-}" == "--check" ]]; then

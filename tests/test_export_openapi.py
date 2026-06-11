@@ -4,8 +4,8 @@ from scripts.export_openapi import build_openapi_schema
 
 
 def test_build_openapi_schema_is_deterministic_and_portable(tmp_path):
-    first = build_openapi_schema(tmp_path)
-    second = build_openapi_schema(tmp_path)
+    first = build_openapi_schema(tmp_path / "first")
+    second = build_openapi_schema(tmp_path / "second")
 
     assert first == second
     assert first["info"]["title"] == "Video Hive"
