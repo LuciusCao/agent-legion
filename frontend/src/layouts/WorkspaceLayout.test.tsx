@@ -3,6 +3,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import WorkspaceLayout from './WorkspaceLayout'
 import appBarStyles from '../components/AppBar.module.css'
+import { createMockUiState } from '../testing/fixtures'
 
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
@@ -53,15 +54,13 @@ const setWorkerPausedMock = vi.fn()
 const fetchWorkerStatusMock = vi.fn()
 
 vi.mock('../stores/uiStore', () => ({
-  useUiStore: (selector?: (state: any) => any) => {
-    const state = {
-      agents: [],
-      workerPaused: false,
-      pageTitle: null,
-      detailPageActions: null,
+  useUiStore: (
+    selector?: (state: ReturnType<typeof createMockUiState>) => unknown
+  ) => {
+    const state = createMockUiState({
       fetchWorkerStatus: fetchWorkerStatusMock,
       setWorkerPaused: setWorkerPausedMock,
-    }
+    })
     return selector ? selector(state) : state
   },
 }))

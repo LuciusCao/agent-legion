@@ -8,7 +8,7 @@ from server.app.services.video_actions import (
     rerun_video_record,
     select_videos_for_package,
 )
-from tests.conftest import InputItem, TestProvider
+from tests.helpers import InputItem, TestProvider
 
 
 def test_intake_normalizes_unknown_content_type_and_creates_storage(db, settings):

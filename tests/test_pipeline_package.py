@@ -1,17 +1,24 @@
 import json
 import zipfile
 
-from server.app.pipeline.package import create_package
+from server.app.pipeline.package import create_package, create_workspace_package
+
+
+def _make_video_dir(tmp_path, video_id, **files):
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True)
+    defaults = {
+        "metadata.json": json.dumps({"video_id": video_id}),
+        "chapters.json": "[]",
+        "interactions.json": json.dumps({"version": "1.0", "interactions": []}),
+    }
+    for name, content in {**defaults, **files}.items():
+        (video_dir / name).write_text(content, encoding="utf-8")
+    return video_dir
 
 
 def test_package_completed_videos(tmp_path):
-    video_dir = tmp_path / "videos" / "a"
-    video_dir.mkdir(parents=True)
-    (video_dir / "metadata.json").write_text(json.dumps({"video_id": "a"}), encoding="utf-8")
-    (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
-    (video_dir / "interactions.json").write_text(
-        json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
-    )
+    video_dir = _make_video_dir(tmp_path, "a")
 
     package_path, _ = create_package(
         videos=[
@@ -37,9 +44,7 @@ def test_package_completed_videos(tmp_path):
 
 
 def test_package_excludes_agent_workspace_pollution(tmp_path):
-    video_dir = tmp_path / "videos" / "a"
-    video_dir.mkdir(parents=True)
-    (video_dir / "metadata.json").write_text(json.dumps({"video_id": "a"}), encoding="utf-8")
+    video_dir = _make_video_dir(tmp_path, "a")
     (video_dir / "AGENTS.md").write_text("agent workspace", encoding="utf-8")
     (video_dir / "BOOTSTRAP.md").write_text("bootstrap", encoding="utf-8")
     (video_dir / ".openclaw").mkdir()
@@ -60,13 +65,7 @@ def test_package_excludes_agent_workspace_pollution(tmp_path):
 
 
 def test_package_includes_reviewed_subtitles_when_available(tmp_path):
-    video_dir = tmp_path / "videos" / "a"
-    video_dir.mkdir(parents=True)
-    (video_dir / "metadata.json").write_text(json.dumps({"video_id": "a"}), encoding="utf-8")
-    (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
-    (video_dir / "interactions.json").write_text(
-        json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
-    )
+    video_dir = _make_video_dir(tmp_path, "a")
     (video_dir / "subtitles.srt").write_text("original", encoding="utf-8")
     (video_dir / "subtitles_reviewed.srt").write_text("reviewed", encoding="utf-8")
 
@@ -80,13 +79,7 @@ def test_package_includes_reviewed_subtitles_when_available(tmp_path):
 
 
 def test_package_falls_back_to_original_subtitles_when_reviewed_missing(tmp_path):
-    video_dir = tmp_path / "videos" / "b"
-    video_dir.mkdir(parents=True)
-    (video_dir / "metadata.json").write_text(json.dumps({"video_id": "b"}), encoding="utf-8")
-    (video_dir / "chapters.json").write_text("[]", encoding="utf-8")
-    (video_dir / "interactions.json").write_text(
-        json.dumps({"version": "1.0", "interactions": []}), encoding="utf-8"
-    )
+    video_dir = _make_video_dir(tmp_path, "b")
     (video_dir / "subtitles.srt").write_text("original", encoding="utf-8")
 
     package_path, _ = create_package(
@@ -99,9 +92,7 @@ def test_package_falls_back_to_original_subtitles_when_reviewed_missing(tmp_path
 
 
 def test_package_fallback_to_videos_base_dir_when_storage_dir_empty(tmp_path):
-    video_dir = tmp_path / "videos" / "b"
-    video_dir.mkdir(parents=True)
-    (video_dir / "metadata.json").write_text(json.dumps({"video_id": "b"}), encoding="utf-8")
+    _make_video_dir(tmp_path, "b")
 
     package_path, _ = create_package(
         videos=[{"id": "b", "title": "B", "source_url": "", "storage_dir": ""}],
@@ -125,7 +116,7 @@ def test_package_skips_video_when_no_storage_dir_and_no_fallback(tmp_path):
         names = set(zf.namelist())
 
     assert "manifest.json" in names
-    assert "c/" not in " ".join(names)
+    assert not any(name.startswith("c/") for name in names)
 
 
 def test_packages_created_in_same_second_do_not_overwrite_each_other(tmp_path):
@@ -141,3 +132,97 @@ def test_packages_created_in_same_second_do_not_overwrite_each_other(tmp_path):
     assert first != second
     assert first.exists()
     assert second.exists()
+
+
+def test_create_workspace_package_includes_manifest_and_artifacts(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    job_dir = jobs_dir / "job_1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "result.json").write_text(json.dumps({"answer": 42}), encoding="utf-8")
+
+    jobs = [
+        {
+            "id": "job_1",
+            "source_id": "S1",
+            "pipeline_key": "test_pipeline",
+            "status": "completed",
+        }
+    ]
+
+    package_path, job_count = create_workspace_package(jobs, packages_dir, jobs_dir)
+
+    assert package_path.exists()
+    assert job_count == 1
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        assert "manifest.json" in names
+        assert "job_1/result.json" in names
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        assert manifest["jobs"] == [
+            {
+                "id": "job_1",
+                "source_id": "S1",
+                "pipeline_key": "test_pipeline",
+                "status": "completed",
+            }
+        ]
+        artifact = json.loads(zf.read("job_1/result.json").decode("utf-8"))
+        assert artifact == {"answer": 42}
+
+
+def test_workspace_package_falls_back_to_jobs_base_dir_when_storage_dir_empty(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    job_dir = jobs_dir / "job_2"
+    job_dir.mkdir(parents=True)
+    (job_dir / "artifact.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+
+    jobs = [
+        {
+            "id": "job_2",
+            "source_id": "S2",
+            "pipeline_key": "question_content",
+            "status": "completed",
+            "storage_dir": "",
+        }
+    ]
+
+    package_path, job_count = create_workspace_package(jobs, packages_dir, jobs_dir)
+
+    assert package_path.exists()
+    assert job_count == 1
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+
+    assert "job_2/artifact.json" in names
+    assert manifest["jobs"][0]["pipeline_key"] == "question_content"
+
+
+def test_workspace_package_skips_job_when_directory_missing(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    # Deliberately do not create jobs_dir / "job_3"
+
+    jobs = [
+        {
+            "id": "job_3",
+            "source_id": "S3",
+            "pipeline_key": "question_content",
+            "status": "completed",
+            "storage_dir": "",
+        }
+    ]
+
+    package_path, job_count = create_workspace_package(jobs, packages_dir, jobs_dir)
+
+    assert package_path.exists()
+    assert job_count == 1
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+
+    assert "manifest.json" in names
+    assert not any(name.startswith("job_3/") for name in names)
+    assert manifest["jobs"][0]["status"] == "completed"

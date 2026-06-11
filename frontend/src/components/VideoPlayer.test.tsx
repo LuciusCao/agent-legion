@@ -64,8 +64,8 @@ describe('VideoPlayer', () => {
     const subtitleArtifacts: VideoArtifacts = {
       ...artifacts,
       subtitles: [
-        { start: 0, end: 5, text: 'First subtitle' },
-        { start: 5, end: 10, text: 'Second subtitle' },
+        { index: 1, start: 0, end: 5, text: 'First subtitle' },
+        { index: 2, start: 5, end: 10, text: 'Second subtitle' },
       ],
     }
 

@@ -16,6 +16,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "freezegun>=1.5.5",
   "httpx",
   "mypy>=2.1.0",
   "pytest",
@@ -46,7 +47,7 @@ source = ["server"]
 omit = ["*/__pycache__/*"]
 
 [tool.coverage.report]
-fail_under = 80
+fail_under = 85
 show_missing = true
 skip_covered = false
 

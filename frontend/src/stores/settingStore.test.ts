@@ -1,11 +1,15 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSettingStore } from './settingStore'
+import type { SettingState } from './settingStore'
 import { useUiStore } from './uiStore'
+import { createMockUiState } from '../testing/fixtures'
 import { api, getWorkspaceAgents } from '../api'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
   getWorkspaceAgents: vi.fn(),
+  assignAgent: vi.fn(),
+  unassignAgent: vi.fn(),
 }))
 
 vi.mock('./uiStore', () => ({
@@ -30,24 +34,25 @@ const defaultSettings = {
   resources: {},
 }
 
-const defaultState = {
+const defaultState: Partial<SettingState> = {
   workspaceId: 'ws1',
   workspaceName: '',
   workspaceDescription: '',
   settings: defaultSettings,
-  agentAssignments: null as null,
+  agentAssignments: null,
   originalWorkspaceName: '',
   originalWorkspaceDescription: '',
-  originalSettings: null as typeof defaultSettings | null,
-  originalAgentAssignments: null as null,
-  piAgentConcurrency: undefined as number | undefined,
-  originalPiAgentConcurrency: undefined as number | undefined,
+  originalSettings: null,
+  originalAgentAssignments: null,
+  piAgentConcurrency: undefined,
+  originalPiAgentConcurrency: undefined,
   isDirty: false,
-  globalServices: null as null,
-  resourceProviders: [] as [],
+  globalServices: null,
+  resourceProviders: [],
+  pipelineDefinition: null,
   testStatus: { state: 'idle' as const },
   isSaving: false,
-  saveError: null as string | null,
+  saveError: null,
 }
 
 describe('settingStore', () => {
@@ -56,7 +61,9 @@ describe('settingStore', () => {
     mockApi.mockReset()
     mockGetWorkspaceAgents.mockReset()
     mockShowToast.mockReset()
-    mockGetState.mockReturnValue({ showToast: mockShowToast })
+    mockGetState.mockReturnValue(
+      createMockUiState({ showToast: mockShowToast })
+    )
   })
 
   it('updates settings via setSettings', () => {

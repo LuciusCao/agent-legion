@@ -23,6 +23,7 @@ const agents = [
   {
     id: 'a1',
     name: 'Agent One',
+    workspace_id: 'ws1',
     busy: false,
     task_count: 0,
     max_tasks: 2,
@@ -31,6 +32,7 @@ const agents = [
   {
     id: 'a2',
     name: 'Agent Two',
+    workspace_id: 'ws1',
     busy: true,
     task_count: 1,
     max_tasks: 1,
@@ -100,7 +102,7 @@ describe('AgentAllocationList', () => {
       expect(screen.getByLabelText('并发限制')).toBeInTheDocument()
     })
 
-    const input = screen.getByLabelText('并发限制') as any
+    const input = screen.getByLabelText('并发限制') as HTMLInputElement
     input.value = '3'
     fireEvent.input(input)
     fireEvent.click(screen.getByText('确认'))
@@ -210,7 +212,9 @@ describe('AgentAllocationList', () => {
     })
 
     const assignedSection = screen.getByTestId('assigned-agents')
-    const input = within(assignedSection).getByLabelText('并发限制') as any
+    const input = within(assignedSection).getByLabelText(
+      '并发限制'
+    ) as HTMLInputElement
     input.value = '5'
     fireEvent.input(input)
 
@@ -237,7 +241,9 @@ describe('AgentAllocationList', () => {
     })
 
     const assignedSection = screen.getByTestId('assigned-agents')
-    const input = within(assignedSection).getByLabelText('并发限制') as any
+    const input = within(assignedSection).getByLabelText(
+      '并发限制'
+    ) as HTMLInputElement
     input.value = '0'
     fireEvent.input(input)
 

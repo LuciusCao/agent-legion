@@ -29,6 +29,9 @@ const video = (overrides: Partial<VideoItem>): VideoItem => ({
   status: 'queued',
   current_phase: 'download',
   error_message: '',
+  storage_dir: '',
+  duration: 0,
+  packed: false,
   ...overrides,
 })
 
@@ -44,6 +47,9 @@ const makeVideo = (overrides: Partial<VideoItem> = {}): VideoItem => ({
   status: 'queued',
   current_phase: 'download',
   error_message: '',
+  storage_dir: '',
+  duration: 0,
+  packed: false,
   ...overrides,
 })
 
