@@ -16,6 +16,13 @@
   border-bottom: 1px solid var(--md-sys-color-outline-variant, #e5e7eb);
 }
 
+.stepperHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
 .panelTitle {
   font-size: 14px;
   font-weight: 600;
