@@ -158,6 +158,38 @@ def check_repository(root: Path) -> list[str]:
                     "return annotation may not contain Any"
                 )
 
+    file_budgets = config.get("files", {})
+    for relative_path, budget in file_budgets.items():
+        path = root / relative_path
+        if not path.exists():
+            errors.append(f"{relative_path}: budgeted file does not exist")
+            continue
+        line_count = len(path.read_text(encoding="utf-8").splitlines())
+        if line_count > int(budget):
+            errors.append(
+                f"{relative_path}: {line_count} lines exceeds budget {budget}; "
+                "split responsibilities before adding more code"
+            )
+
+    budgeted_paths = set(file_budgets)
+    defaults = config.get("defaults", {})
+    for dir_rel, budget in defaults.items():
+        dir_path = root / dir_rel
+        if not dir_path.is_dir():
+            continue
+        for path in sorted(dir_path.rglob("*.py")):
+            rel = path.relative_to(root).as_posix()
+            if rel in budgeted_paths:
+                continue
+            if path.name == "__init__.py" or path.name.startswith("test_"):
+                continue
+            line_count = len(path.read_text(encoding="utf-8").splitlines())
+            if line_count > int(budget):
+                errors.append(
+                    f"{rel}: {line_count} lines exceeds budget {budget}; "
+                    "split responsibilities before adding more code"
+                )
+
     return errors
 
 
