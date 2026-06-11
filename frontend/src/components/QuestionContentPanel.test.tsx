@@ -124,9 +124,9 @@ describe('QuestionContentPanel', () => {
       title: 'Test',
       normalized: {
         stem: '<p>Fill blanks</p>',
-        answerBlanks: [
-          { alternatives: ['\\[68\\]', '36'], isLatex: true },
-          { alternatives: ['52'], isLatex: false },
+        answer_blanks: [
+          { alternatives: ['\\[68\\]', '36'], is_latex: true },
+          { alternatives: ['52'], is_latex: false },
         ],
       },
       cms_payload: null,
@@ -141,7 +141,7 @@ describe('QuestionContentPanel', () => {
     expect(screen.getByText('52')).toBeInTheDocument()
   })
 
-  it('falls back to old extractAnswerItems when answerBlanks missing', async () => {
+  it('falls back to old extractAnswerItems when answer_blanks missing', async () => {
     mockFetchQuestionDetail.mockResolvedValue({
       question_id: 'Q7',
       title: 'Test',
@@ -164,7 +164,7 @@ describe('QuestionContentPanel', () => {
       title: 'Test',
       normalized: {
         stem: '<p>Problem</p>',
-        analysisSteps: [
+        analysis_steps: [
           [
             { content: '<p>First step</p>', title: '<p>Hint</p>', step: 0 },
             { content: '<p>Second step</p>', title: '', step: 1 },
@@ -182,7 +182,7 @@ describe('QuestionContentPanel', () => {
     expect(screen.getByText('Second step')).toBeInTheDocument()
   })
 
-  it('falls back to raw analysis when analysisSteps missing', async () => {
+  it('falls back to raw analysis when analysis_steps missing', async () => {
     mockFetchQuestionDetail.mockResolvedValue({
       question_id: 'Q9',
       title: 'Test',
