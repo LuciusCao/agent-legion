@@ -417,8 +417,6 @@ def test_pipeline_worker_does_not_start_when_app_worker_disabled(tmp_path, monke
 
 
 def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
     from server.app.pipeline_worker_thread import PipelineWorkerThread
     from server.app.pipelines.registry import load_registered_pipeline
     from server.app.settings import Settings
@@ -446,8 +444,7 @@ def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkey
 
     worker = PipelineWorkerThread(queries, settings)
     worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
+    worker._ensure_workspace_executors("default")
     worker._skill_root = tmp_path / "skills"
     worker._skill_root.mkdir(parents=True)
 
@@ -470,8 +467,6 @@ def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkey
 
 
 def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
     from server.app.pipeline_worker_thread import PipelineWorkerThread
     from server.app.pipelines.registry import load_registered_pipeline
     from server.app.settings import Settings
@@ -499,8 +494,7 @@ def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
 
     worker = PipelineWorkerThread(queries, settings)
     worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
+    worker._ensure_workspace_executors("default")
     worker._skill_root = tmp_path / "skills"
     worker._skill_root.mkdir(parents=True)
 
@@ -529,8 +523,6 @@ def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
 
 
 def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
     from server.app.pipeline_worker_thread import PipelineWorkerThread
     from server.app.pipelines.registry import load_registered_pipeline
     from server.app.settings import Settings
@@ -558,8 +550,7 @@ def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatc
 
     worker = PipelineWorkerThread(queries, settings)
     worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
+    worker._ensure_workspace_executors("default")
     worker._skill_root = tmp_path / "skills"
     worker._skill_root.mkdir(parents=True)
 
@@ -573,8 +564,6 @@ def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatc
 
 
 def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
     from server.app.pipeline_worker_thread import PipelineWorkerThread
     from server.app.pipelines.registry import load_registered_pipeline
     from server.app.settings import Settings
@@ -602,8 +591,7 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
 
     worker = PipelineWorkerThread(queries, settings)
     worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
+    worker._ensure_workspace_executors("default")
     worker._skill_root = tmp_path / "skills"
     worker._skill_root.mkdir(parents=True)
 
@@ -612,8 +600,8 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
 
     # Shutdown should wait for the submitted task
     worker.stop()
-    assert worker._local_executor._shutdown is True
-    assert worker._agent_executor._shutdown is True
+    assert worker._ws_local_executors["default"]._shutdown is True
+    assert worker._ws_agent_executors["default"]._shutdown is True
 
 
 def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
@@ -651,8 +639,6 @@ def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
 
 
 def test_pipeline_worker_fails_agent_node_when_pi_runner_missing(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
     from server.app.pipeline_worker_thread import PipelineWorkerThread
     from server.app.pipelines.registry import load_registered_pipeline
     from server.app.settings import Settings
@@ -684,8 +670,7 @@ def test_pipeline_worker_fails_agent_node_when_pi_runner_missing(tmp_path, monke
 
     worker = PipelineWorkerThread(queries, settings)
     worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
+    worker._ensure_workspace_executors("default")
     worker._skill_root = tmp_path / "skills"
     worker._skill_root.mkdir(parents=True)
 
