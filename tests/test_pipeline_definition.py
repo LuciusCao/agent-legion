@@ -282,3 +282,76 @@ nodes:
     )
     definition = load_pipeline_definition(config)
     assert definition.nodes["one"].label == "步骤一"
+
+
+def test_loads_node_concurrency(tmp_path):
+    config = tmp_path / "node-concurrency.yaml"
+    config.write_text(
+        """
+key: node_concurrency
+label: Node Concurrency
+concurrency:
+  local: 4
+  agent: 2
+  nodes:
+    fetch_questions: 10
+    clean_and_parse: 2
+    mark_question: 10
+nodes:
+  fetch_questions:
+    runner: local
+  clean_and_parse:
+    runner: local
+    after: [fetch_questions]
+  mark_question:
+    runner: local
+    after: [clean_and_parse]
+""",
+        encoding="utf-8",
+    )
+    definition = load_pipeline_definition(config)
+    assert definition.concurrency.nodes == {
+        "fetch_questions": 10,
+        "clean_and_parse": 2,
+        "mark_question": 10,
+    }
+
+
+def test_missing_nodes_defaults_to_empty(tmp_path):
+    config = tmp_path / "no-node-concurrency.yaml"
+    config.write_text(
+        """
+key: no_node_concurrency
+label: No Node Concurrency
+concurrency:
+  local: 4
+  agent: 2
+nodes:
+  one:
+    runner: local
+""",
+        encoding="utf-8",
+    )
+    definition = load_pipeline_definition(config)
+    assert definition.concurrency.nodes == {}
+
+
+def test_invalid_node_limit_rejected(tmp_path):
+    config = tmp_path / "bad-node-limit.yaml"
+    config.write_text(
+        """
+key: bad_node_limit
+label: Bad Node Limit
+concurrency:
+  local: 4
+  agent: 2
+  nodes:
+    one: invalid
+nodes:
+  one:
+    runner: local
+""",
+        encoding="utf-8",
+    )
+    with pytest.raises(PipelineDefinitionError, match="concurrency.nodes"):
+        load_pipeline_definition(config)
