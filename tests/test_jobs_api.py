@@ -23,6 +23,27 @@ def test_workspace_job_response_models_are_exposed_in_openapi(tmp_path):
         == "#/components/schemas/DeleteJobResponse"
     )
 
+    schemas = schema["components"]["schemas"]
+    agent_list_schema = schemas["WorkspaceAgentListResponse"]
+    assert agent_list_schema["type"] == "array"
+    assert agent_list_schema["items"] == {
+        "$ref": "#/components/schemas/WorkspaceAgentAssignmentResponse"
+    }
+
+    assignment_schema = schemas["WorkspaceAgentAssignmentResponse"]
+    assert set(assignment_schema["required"]) == {
+        "agent_id",
+        "workspace_id",
+        "concurrency_limit",
+    }
+    assert assignment_schema["properties"]["agent_id"]["type"] == "string"
+    assert assignment_schema["properties"]["workspace_id"]["type"] == "string"
+    assert assignment_schema["properties"]["concurrency_limit"]["type"] == "integer"
+
+    delete_schema = schemas["DeleteJobResponse"]
+    assert set(delete_schema["required"]) == {"deleted"}
+    assert delete_schema["properties"]["deleted"]["type"] == "string"
+
 
 def test_job_routes_are_hidden_when_pipelines_disabled(tmp_path):
     from fastapi.testclient import TestClient
