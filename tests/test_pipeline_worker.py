@@ -25,7 +25,7 @@ from server.app.pipelines.executor import (
     execute_node_once,
 )
 from server.app.pipelines.pi_runner import PiRunner
-from tests.helpers import make_pipeline_worker, wait_until
+from tests.helpers import make_pipeline_worker
 
 
 def test_execute_fetch_question_context_writes_artifact(tmp_path):
@@ -539,7 +539,9 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
 
 def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    worker, definition = make_pipeline_worker(tmp_path, queries, pi_binary=None)
+    worker, definition = make_pipeline_worker(
+        tmp_path, queries, pi_binary=None, with_executors=False
+    )
     queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -572,13 +574,19 @@ def test_pipeline_worker_fails_agent_node_when_pi_runner_missing(tmp_path, monke
         json.dumps({"questions": [{"question_id": "Q100"}]}), encoding="utf-8"
     )
 
-    # Poll should process fetch_questions (local) and clean_and_parse (local)
-    # Then extract_keywords (agent) should be marked failed because pi runner is missing
-    def _extract_keywords_failed() -> bool:
-        worker._poll()
-        return queries.get_job_node(job["id"], "extract_keywords")["status"] == "failed"
+    # Run fetch_questions (local) and wait for it to finish.
+    processed = worker._poll()
+    assert processed is True
+    worker._futures[(job["id"], "fetch_questions")].result(timeout=5)
 
-    wait_until(_extract_keywords_failed, timeout=5.0)
+    # Run clean_and_parse (local) and wait for it to finish.
+    processed = worker._poll()
+    assert processed is True
+    worker._futures[(job["id"], "clean_and_parse")].result(timeout=5)
+
+    # extract_keywords (agent) fails synchronously because pi runner is missing.
+    processed = worker._poll()
+    assert processed is True
 
     node = queries.get_job_node(job["id"], "extract_keywords")
     assert node["status"] == "failed"
