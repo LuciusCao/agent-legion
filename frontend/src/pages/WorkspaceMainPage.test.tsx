@@ -7,7 +7,8 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
 import { api, fetchJobs } from '../api'
-import type { JobRecord, WorkspaceStats } from '../types'
+import type { WorkspaceStats } from '../types'
+import { makeJob } from '../testing/fixtures'
 
 const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
@@ -138,14 +139,12 @@ describe('WorkspaceMainPage', () => {
   it('renders stat cards when jobs exist', async () => {
     useJobStore.setState({
       jobs: [
-        {
+        makeJob({
           id: 'j1',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
           source_id: 'Q100',
           title: 'Algebra',
           status: 'running',
-        } as JobRecord,
+        }),
       ],
     })
 

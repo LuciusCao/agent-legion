@@ -1,7 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useJobStore } from './jobStore'
-import type { JobRecord } from '../types'
-import type { UiState } from './uiStore'
+import { createMockUiState, makeJob } from '../testing/fixtures'
 
 vi.mock('../api', () => ({
   fetchJobs: vi.fn(),
@@ -23,37 +22,6 @@ const mockApi = vi.mocked(api)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
 
-function createMockUiState(partial: Partial<UiState> = {}): UiState {
-  return {
-    agents: [],
-    addDialogOpen: false,
-    addContentType: 'knowledge',
-    addDialogContext: 'video',
-    addDialogWorkspaceId: undefined,
-    rerunDialogOpen: false,
-    deleteDialogOpen: false,
-    workerPaused: false,
-    toast: null,
-    pageTitle: null,
-    detailPageActions: null,
-    connectAgentsWs: vi.fn(() => vi.fn()),
-    fetchWorkerStatus: vi.fn(),
-    setWorkerPaused: vi.fn(),
-    openAddDialog: vi.fn(),
-    closeAddDialog: vi.fn(),
-    setAddContentType: vi.fn(),
-    openRerunDialog: vi.fn(),
-    closeRerunDialog: vi.fn(),
-    openDeleteDialog: vi.fn(),
-    closeDeleteDialog: vi.fn(),
-    showToast: mockShowToast,
-    clearToast: vi.fn(),
-    setPageTitle: vi.fn(),
-    setDetailPageActions: vi.fn(),
-    ...partial,
-  }
-}
-
 describe('jobStore', () => {
   beforeEach(() => {
     useJobStore.setState({
@@ -68,7 +36,9 @@ describe('jobStore', () => {
     mockFetchJobs.mockReset()
     mockApi.mockReset()
     mockShowToast.mockReset()
-    mockGetState.mockReturnValue(createMockUiState())
+    mockGetState.mockReturnValue(
+      createMockUiState({ showToast: mockShowToast })
+    )
   })
 
   it('toggles selection', () => {
@@ -81,25 +51,9 @@ describe('jobStore', () => {
   it('selects all visible jobs', () => {
     useJobStore.setState({
       jobs: [
-        {
-          id: 'j1',
-          status: 'pending',
-          source_id: 'Q1',
-          title: '',
-          stem: '',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
-        },
-        {
-          id: 'j2',
-          status: 'completed',
-          source_id: 'Q2',
-          title: '',
-          stem: '',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
-        },
-      ] as JobRecord[],
+        makeJob({ id: 'j1', status: 'pending' }),
+        makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
+      ],
     })
     useJobStore.getState().selectAll()
     expect(useJobStore.getState().selectedIds.size).toBe(2)
@@ -108,25 +62,9 @@ describe('jobStore', () => {
   it('filters by status', () => {
     useJobStore.setState({
       jobs: [
-        {
-          id: 'j1',
-          status: 'pending',
-          source_id: 'Q1',
-          title: '',
-          stem: '',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
-        },
-        {
-          id: 'j2',
-          status: 'completed',
-          source_id: 'Q2',
-          title: '',
-          stem: '',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
-        },
-      ] as JobRecord[],
+        makeJob({ id: 'j1', status: 'pending' }),
+        makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
+      ],
     })
     useJobStore.getState().setStatusFilter('completed')
     const filtered = useJobStore.getState().getFilteredJobs()
@@ -137,25 +75,9 @@ describe('jobStore', () => {
   it('filters by search query', () => {
     useJobStore.setState({
       jobs: [
-        {
-          id: 'j1',
-          status: 'pending',
-          source_id: 'Q100',
-          title: 'Algebra',
-          stem: '',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
-        },
-        {
-          id: 'j2',
-          status: 'completed',
-          source_id: 'Q200',
-          title: 'Geometry',
-          stem: '',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
-        },
-      ] as JobRecord[],
+        makeJob({ id: 'j1', source_id: 'Q100', title: 'Algebra' }),
+        makeJob({ id: 'j2', source_id: 'Q200', title: 'Geometry' }),
+      ],
     })
     useJobStore.getState().setSearchQuery('Q100')
     const filtered = useJobStore.getState().getFilteredJobs()
@@ -164,17 +86,7 @@ describe('jobStore', () => {
   })
 
   it('fetches jobs and sets state on success', async () => {
-    const jobs: JobRecord[] = [
-      {
-        id: 'j1',
-        status: 'pending',
-        source_id: 'Q1',
-        title: 'One',
-        stem: '',
-        workspace_id: 'ws1',
-        pipeline_key: 'p1',
-      },
-    ]
+    const jobs = [makeJob({ id: 'j1', title: 'One' })]
     mockFetchJobs.mockResolvedValueOnce({ jobs })
 
     await useJobStore.getState().fetchJobs('ws1')
@@ -215,17 +127,7 @@ describe('jobStore', () => {
 
   it('calls batch rerun endpoint and clears selection on success', async () => {
     useJobStore.setState({
-      jobs: [
-        {
-          id: 'j1',
-          status: 'failed',
-          source_id: 'Q1',
-          title: '',
-          stem: '',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
-        },
-      ] as JobRecord[],
+      jobs: [makeJob({ id: 'j1', status: 'failed' })],
       selectedIds: new Set(['j1']),
     })
     mockApi.mockResolvedValueOnce({ accepted: true })
@@ -271,25 +173,9 @@ describe('jobStore', () => {
   it('calls batch delete endpoint and removes jobs on success', async () => {
     useJobStore.setState({
       jobs: [
-        {
-          id: 'j1',
-          status: 'completed',
-          source_id: 'Q1',
-          title: '',
-          stem: '',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
-        },
-        {
-          id: 'j2',
-          status: 'completed',
-          source_id: 'Q2',
-          title: '',
-          stem: '',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
-        },
-      ] as JobRecord[],
+        makeJob({ id: 'j1', status: 'completed' }),
+        makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
+      ],
       selectedIds: new Set(['j1']),
     })
     mockApi.mockResolvedValueOnce({ deleted: 1 })

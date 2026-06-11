@@ -3,7 +3,7 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import WorkspaceLayout from './WorkspaceLayout'
 import appBarStyles from '../components/AppBar.module.css'
-import type { UiState } from '../stores/uiStore'
+import { createMockUiState } from '../testing/fixtures'
 
 const mockNavigate = vi.fn()
 vi.mock('react-router-dom', async () => {
@@ -53,40 +53,14 @@ vi.mock('../stores/workspaceStore', () => ({
 const setWorkerPausedMock = vi.fn()
 const fetchWorkerStatusMock = vi.fn()
 
-function createMockUiState(partial: Partial<UiState> = {}): UiState {
-  return {
-    agents: [],
-    addDialogOpen: false,
-    addContentType: 'knowledge',
-    addDialogContext: 'video',
-    addDialogWorkspaceId: undefined,
-    rerunDialogOpen: false,
-    deleteDialogOpen: false,
-    workerPaused: false,
-    toast: null,
-    pageTitle: null,
-    detailPageActions: null,
-    connectAgentsWs: vi.fn(() => vi.fn()),
-    fetchWorkerStatus: fetchWorkerStatusMock,
-    setWorkerPaused: setWorkerPausedMock,
-    openAddDialog: vi.fn(),
-    closeAddDialog: vi.fn(),
-    setAddContentType: vi.fn(),
-    openRerunDialog: vi.fn(),
-    closeRerunDialog: vi.fn(),
-    openDeleteDialog: vi.fn(),
-    closeDeleteDialog: vi.fn(),
-    showToast: vi.fn(),
-    clearToast: vi.fn(),
-    setPageTitle: vi.fn(),
-    setDetailPageActions: vi.fn(),
-    ...partial,
-  }
-}
-
 vi.mock('../stores/uiStore', () => ({
-  useUiStore: (selector?: (state: UiState) => unknown) => {
-    const state = createMockUiState()
+  useUiStore: (
+    selector?: (state: ReturnType<typeof createMockUiState>) => unknown
+  ) => {
+    const state = createMockUiState({
+      fetchWorkerStatus: fetchWorkerStatusMock,
+      setWorkerPaused: setWorkerPausedMock,
+    })
     return selector ? selector(state) : state
   },
 }))
