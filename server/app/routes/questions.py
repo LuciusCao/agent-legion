@@ -20,6 +20,8 @@ class QuestionNormalized(BaseModel):
     options: list[dict[str, Any]] | None = None
     answer: Any | None = None
     analysis: Any | None = None
+    answer_blanks: list[dict[str, Any]] | None = None
+    analysis_steps: list[list[dict[str, Any]]] | None = None
 
 
 class QuestionDetailResponse(BaseModel):
