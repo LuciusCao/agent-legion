@@ -30,3 +30,7 @@ npm run format:check
 npm run lint
 npm run typecheck
 npm run test
+
+echo "=== Spec Health Check ==="
+cd "$ROOT_DIR"
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/verify_specs.py --check
