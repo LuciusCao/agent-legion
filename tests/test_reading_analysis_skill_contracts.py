@@ -43,6 +43,17 @@ def test_validate_location_matches_stem_text() -> None:
     validate_source_location(question, "上海", location)
 
 
+def test_validate_location_matches_option_text() -> None:
+    question = {
+        "question_id": "Q100",
+        "stem": "题干",
+        "options": [{"key": "A", "text": "选项A"}],
+    }
+    location = {"source": "option", "option_key": "A", "start": 0, "end": 3}
+
+    validate_source_location(question, "选项A", location)
+
+
 def test_validate_location_rejects_analysis_source() -> None:
     with pytest.raises(ContractError, match="stem or option"):
         validate_source_location(
@@ -216,6 +227,28 @@ def test_load_json_object_rejects_non_object(tmp_path: Path, payload: object) ->
 
     with pytest.raises(ContractError, match=re.escape(expected)):
         load_json_object(path)
+
+
+def test_load_single_question_returns_the_only_question(tmp_path: Path) -> None:
+    path = tmp_path / "questions_parsed.json"
+    path.write_text(
+        json.dumps({"questions": [{"question_id": "Q1", "stem": "s"}]}),
+        encoding="utf-8",
+    )
+
+    result = load_single_question(path)
+
+    assert result == {"question_id": "Q1", "stem": "s"}
+
+
+@pytest.mark.parametrize("questions", ["not-a-list", 123, {"foo": "bar"}])
+def test_load_single_question_rejects_non_list_questions(tmp_path: Path, questions: object) -> None:
+    path = tmp_path / "questions_parsed.json"
+    path.write_text(json.dumps({"questions": questions}), encoding="utf-8")
+    expected = f"Expected exactly one question in {path}, found {type(questions).__name__}"
+
+    with pytest.raises(ContractError, match=re.escape(expected)):
+        load_single_question(path)
 
 
 def test_load_single_question_rejects_non_dict_question(tmp_path: Path) -> None:
