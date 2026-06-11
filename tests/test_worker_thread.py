@@ -1,9 +1,9 @@
-import time
 from concurrent.futures import Future
 from unittest.mock import MagicMock, patch
 
 from server.app.worker_control import WorkerControl
 from server.app.worker_thread import WorkerThread
+from tests.helpers import wait_for_predicate
 
 
 def test_worker_thread_start_and_stop():
@@ -23,8 +23,6 @@ def test_worker_thread_start_and_stop():
     assert wt.executor is not None
     assert wt._thread is not None
     assert wt._thread.is_alive()
-
-    time.sleep(0.3)
 
     wt.stop(timeout=2)
     assert not wt._thread.is_alive()
@@ -114,7 +112,7 @@ def test_worker_thread_consumes_tick_signal():
     wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
     wt.start()
 
-    time.sleep(0.3)
+    wait_for_predicate(lambda: not worker_control.consume_tick())
 
     assert not worker_control.consume_tick()
 
@@ -133,12 +131,13 @@ def test_worker_thread_executes_local_work():
     agent_manager = MagicMock()
     worker_control = WorkerControl()
     worker_control.resume()
+    worker_control.request_tick()
 
     wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
 
-    with patch("server.app.worker.process_video_once", return_value=True):
+    with patch("server.app.worker.process_video_once", return_value=True) as mock_once:
         wt.start()
-        time.sleep(0.6)
+        wait_for_predicate(lambda: mock_once.called)
 
     wt.stop(timeout=2)
     assert not wt._thread.is_alive()
@@ -160,12 +159,13 @@ def test_worker_thread_executes_agent_work():
     agent_manager = MagicMock()
     worker_control = WorkerControl()
     worker_control.resume()
+    worker_control.request_tick()
 
     wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
 
-    with patch("server.app.worker.process_video_once", return_value=True):
+    with patch("server.app.worker.process_video_once", return_value=True) as mock_once:
         wt.start()
-        time.sleep(0.6)
+        wait_for_predicate(lambda: mock_once.called)
 
     wt.stop(timeout=2)
     assert not wt._thread.is_alive()

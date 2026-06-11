@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import time
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
@@ -142,3 +144,18 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)
     return root_dir, data_dir
+
+
+def wait_for_predicate(
+    predicate: Callable[[], bool], timeout: float = 5.0, interval: float = 0.01
+) -> None:
+    """Poll *predicate* until it returns True or *timeout* expires.
+
+    Uses a short sleep between polls; this is acceptable when waiting on
+    external thread state, while avoiding arbitrary long sleeps in tests.
+    """
+    deadline = time.monotonic() + timeout
+    while not predicate():
+        if time.monotonic() > deadline:
+            raise TimeoutError("Predicate was not satisfied in time")
+        time.sleep(interval)
