@@ -164,8 +164,6 @@ describe('SettingsPage', () => {
     mockFetchPipelines.mockResolvedValue({ pipelines: [] })
     mockGetWorkspaceAgents.mockReset()
     mockGetWorkspaceAgents.mockResolvedValue([])
-    mockGetWorkspaceAgents.mockReset()
-    mockGetWorkspaceAgents.mockResolvedValue({ agents: [] })
     mockSetWorkspaceAgent.mockReset()
     mockSetWorkspaceAgent.mockResolvedValue(undefined)
     mockUpdateWorkspace.mockReset()
@@ -376,6 +374,28 @@ describe('SettingsPage', () => {
       expect(screen.getByText('可用智能体')).toBeInTheDocument()
     })
     expect(screen.getByText('当前工作空间未分配智能体')).toBeInTheDocument()
+  })
+
+  it('renders Pi Agent concurrency input', async () => {
+    useSettingStore.setState({
+      pipelineDefinition: {
+        key: 'question_content',
+        label: '题目内容生成',
+        concurrency: { local: 8, agent: 2 },
+        intake: { modes: [] },
+        nodes: [],
+      },
+      piAgentConcurrency: 3,
+    })
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('Pi Agent 并发数')).toBeInTheDocument()
+    })
+    const input = document.querySelector(
+      'md-outlined-text-field#pi-agent-concurrency'
+    )
+    expect(input).toBeTruthy()
+    expect(input!.getAttribute('value')).toBe('3')
   })
 
   it('renders resource provider params when intake mode is checked', async () => {

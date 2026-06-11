@@ -147,9 +147,6 @@ class PipelineWorkerThread:
         self._ws_agent_limits: dict[str, int] = {}
 
     def _ensure_workspace_executors(self, workspace_id: str) -> None:
-        if workspace_id in self._ws_local_executors:
-            return
-
         agents = self.job_db.list_workspace_agents(workspace_id)
         pi_agent = next((a for a in agents if a["agent_id"] == "pi"), None)
 
@@ -158,6 +155,17 @@ class PipelineWorkerThread:
             self.job_db.upsert_workspace_agent_assignment(workspace_id, "pi", pi_limit)
         else:
             pi_limit = pi_agent["concurrency_limit"]
+
+        if (
+            workspace_id in self._ws_local_executors
+            and self._ws_agent_limits.get(workspace_id) == pi_limit
+        ):
+            return
+
+        # If recreating (config changed or old executor shut down), clean up first
+        if workspace_id in self._ws_local_executors:
+            self._ws_local_executors[workspace_id].shutdown(wait=False, cancel_futures=True)
+            self._ws_agent_executors[workspace_id].shutdown(wait=False, cancel_futures=True)
 
         self._ws_agent_limits[workspace_id] = pi_limit
 
@@ -242,6 +250,8 @@ class PipelineWorkerThread:
                         and key in self._ws_local_futures[node_local_key]
                     ):
                         self._ws_local_futures[node_local_key].discard(key)
+                        if not self._ws_local_futures[node_local_key]:
+                            self._ws_local_futures.pop(node_local_key, None)
                     if ws_id in self._ws_agent_futures and key in self._ws_agent_futures[ws_id]:
                         self._ws_agent_futures[ws_id].discard(key)
                         if self.agent_manager is not None:
