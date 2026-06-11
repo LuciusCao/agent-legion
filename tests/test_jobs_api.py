@@ -1687,3 +1687,34 @@ def test_workspace_settings_returns_agent_assignments(tmp_path):
     settings = response.json()["settings"]
     assert settings["agentIds"] == ["agent-1", "agent-2"]
     assert settings["concurrencyLimit"] == 2
+
+
+def test_job_detail_includes_node_inputs_outputs(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "WS"})
+        batch = c.post(
+            "/api/workspaces/ws/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        job_id = batch["jobs"][0]["id"]
+        response = c.get(f"/api/jobs/{job_id}")
+
+    assert response.status_code == 200
+    body = response.json()
+    for node in body["nodes"]:
+        assert "inputs" in node
+        assert "outputs" in node
+        assert isinstance(node["inputs"], list)
+        assert isinstance(node["outputs"], list)
