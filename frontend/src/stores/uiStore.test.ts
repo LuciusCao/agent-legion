@@ -9,6 +9,7 @@ describe('uiStore', () => {
       addContentType: 'knowledge',
       rerunDialogOpen: false,
       toast: null,
+      detailPageActions: null,
     })
   })
 
@@ -35,5 +36,16 @@ describe('uiStore', () => {
     const cleanup = useUiStore.getState().connectAgentsWs()
     expect(typeof cleanup).toBe('function')
     expect(() => cleanup()).not.toThrow()
+  })
+
+  it('defaults detailPageActions to null', () => {
+    expect(useUiStore.getState().detailPageActions).toBe(null)
+  })
+
+  it('sets detailPageActions', () => {
+    useUiStore.getState().setDetailPageActions('action')
+    expect(useUiStore.getState().detailPageActions).not.toBe(null)
+    useUiStore.getState().setDetailPageActions(null)
+    expect(useUiStore.getState().detailPageActions).toBe(null)
   })
 })
