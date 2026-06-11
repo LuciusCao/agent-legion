@@ -1,7 +1,7 @@
 import json
 import zipfile
 
-from server.app.pipeline.package import create_package
+from server.app.pipeline.package import create_package, create_workspace_package
 
 
 def test_package_completed_videos(tmp_path):
@@ -141,3 +141,40 @@ def test_packages_created_in_same_second_do_not_overwrite_each_other(tmp_path):
     assert first != second
     assert first.exists()
     assert second.exists()
+
+
+def test_create_workspace_package_includes_manifest_and_artifacts(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    job_dir = jobs_dir / "job_1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "result.json").write_text(json.dumps({"answer": 42}), encoding="utf-8")
+
+    jobs = [
+        {
+            "id": "job_1",
+            "source_id": "S1",
+            "pipeline_key": "test_pipeline",
+            "status": "completed",
+        }
+    ]
+
+    package_path, job_count = create_workspace_package(jobs, packages_dir, jobs_dir)
+
+    assert package_path.exists()
+    assert job_count == 1
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        assert "manifest.json" in names
+        assert "job_1/result.json" in names
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        assert manifest["jobs"] == [
+            {
+                "id": "job_1",
+                "source_id": "S1",
+                "pipeline_key": "test_pipeline",
+                "status": "completed",
+            }
+        ]
+        artifact = json.loads(zf.read("job_1/result.json").decode("utf-8"))
+        assert artifact == {"answer": 42}
