@@ -56,7 +56,12 @@ function computeNodeSize(node: DagNode): { width: number; height: number } {
   const chipRows = ioCount > 0 ? Math.ceil(Math.min(ioCount, 3) / 2) : 0
   const chipHeight =
     chipRows > 0 ? chipRows * (CHIP_HEIGHT + CHIP_GAP) + CHIP_GAP : 0
-  const width = Math.max(BASE_WIDTH, labelWidth + NODE_PADDING_X * 2)
+
+  const visibleChipCount = Math.min(ioCount, 2)
+  const hiddenCount = ioCount - visibleChipCount
+  const chipWidth = visibleChipCount * 52 + (hiddenCount > 0 ? 20 : 0) + 16
+
+  const width = Math.max(BASE_WIDTH, labelWidth + NODE_PADDING_X * 2, chipWidth)
   const height = BASE_HEIGHT + chipHeight
   return { width, height }
 }
@@ -354,29 +359,23 @@ export function DagGraph({
               {hoveredNode === node.key && (
                 <g>
                   <rect
-                    x={node.x + node.width / 2 + 8}
-                    y={node.y - node.height / 2}
-                    width={120}
-                    height={60}
-                    rx={6}
-                    ry={6}
-                    fill="rgba(0,0,0,0.8)"
+                    x={node.x - node.width / 2 + 2}
+                    y={node.y - node.height / 2 + 2}
+                    width={node.width - 4}
+                    height={28}
+                    rx={4}
+                    ry={4}
+                    fill="rgba(0,0,0,0.75)"
                   />
                   <text
-                    x={node.x + node.width / 2 + 16}
-                    y={node.y - node.height / 2 + 18}
+                    x={node.x}
+                    y={node.y - node.height / 2 + 16}
                     fill="white"
-                    fontSize="10"
+                    fontSize="8"
+                    textAnchor="middle"
                   >
-                    Inputs: {(node.inputs || []).join(', ') || '—'}
-                  </text>
-                  <text
-                    x={node.x + node.width / 2 + 16}
-                    y={node.y - node.height / 2 + 36}
-                    fill="white"
-                    fontSize="10"
-                  >
-                    Outputs: {(node.outputs || []).join(', ') || '—'}
+                    {(node.inputs || []).join(', ') || '—'} →{' '}
+                    {(node.outputs || []).join(', ') || '—'}
                   </text>
                 </g>
               )}

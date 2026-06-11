@@ -298,7 +298,7 @@ export type QuestionOption = Record<string, unknown>
 
 export type AnswerBlank = {
   alternatives: string[]
-  isLatex: boolean
+  is_latex: boolean
 }
 
 export type AnalysisStep = {
@@ -312,8 +312,8 @@ export type QuestionNormalized = {
   options?: QuestionOption[]
   answer?: unknown
   analysis?: unknown
-  answerBlanks?: AnswerBlank[]
-  analysisSteps?: AnalysisStep[][]
+  answer_blanks?: AnswerBlank[]
+  analysis_steps?: AnalysisStep[][]
 }
 
 export type QuestionDetailResponse = {
