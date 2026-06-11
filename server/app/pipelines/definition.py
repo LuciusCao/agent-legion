@@ -20,6 +20,7 @@ class PipelineDefinitionError(ValueError):
 class PipelineConcurrency:
     local: int = 1
     agent: int = 1
+    nodes: dict[str, int] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,25 @@ def _positive_int(value: Any, field_name: str) -> int:
     if not isinstance(value, int) or isinstance(value, bool) or value < 1:
         raise PipelineDefinitionError(f"concurrency.{field_name} must be a positive integer")
     return value
+
+
+def _node_concurrency(raw: Any) -> dict[str, int]:
+    if raw is None:
+        return {}
+    if not isinstance(raw, dict):
+        raise PipelineDefinitionError("concurrency.nodes must be a mapping")
+    result: dict[str, int] = {}
+    for node_key, limit in raw.items():
+        if not isinstance(node_key, str) or not node_key:
+            raise PipelineDefinitionError("concurrency.nodes keys must be non-empty strings")
+        try:
+            limit_int = int(limit)
+        except (TypeError, ValueError):
+            raise PipelineDefinitionError(
+                f"concurrency.nodes[{node_key!r}] must be an integer, got {limit!r}"
+            ) from None
+        result[node_key] = max(1, limit_int)
+    return result
 
 
 def _validate_acyclic(nodes: dict[str, PipelineNode]) -> None:
@@ -202,6 +222,7 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
     concurrency = PipelineConcurrency(
         local=_positive_int(raw_concurrency.get("local", 1), "local"),
         agent=_positive_int(raw_concurrency.get("agent", 1), "agent"),
+        nodes=_node_concurrency(raw_concurrency.get("nodes")),
     )
     intake = _load_intake(raw)
 

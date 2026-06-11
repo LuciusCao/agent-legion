@@ -1,11 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useSettingStore } from './settingStore'
 import { useUiStore } from './uiStore'
-import { api, assignAgent, unassignAgent } from '../api'
+import {
+  api,
+  assignAgent,
+  getWorkspaceAgents,
+  setWorkspaceAgent,
+  unassignAgent,
+} from '../api'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
   assignAgent: vi.fn(),
+  getWorkspaceAgents: vi.fn(),
+  setWorkspaceAgent: vi.fn(),
   unassignAgent: vi.fn(),
 }))
 
@@ -18,6 +26,8 @@ vi.mock('./uiStore', () => ({
 
 const mockApi = vi.mocked(api)
 const mockAssignAgent = vi.mocked(assignAgent)
+const mockGetWorkspaceAgents = vi.mocked(getWorkspaceAgents)
+const mockSetWorkspaceAgent = vi.mocked(setWorkspaceAgent)
 const mockUnassignAgent = vi.mocked(unassignAgent)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
@@ -42,6 +52,8 @@ const defaultState = {
   originalWorkspaceDescription: '',
   originalSettings: null as typeof defaultSettings | null,
   originalAgentAssignments: null as null,
+  piAgentConcurrency: undefined as number | undefined,
+  originalPiAgentConcurrency: undefined as number | undefined,
   isDirty: false,
   globalServices: null as null,
   resourceProviders: [] as [],
@@ -55,6 +67,8 @@ describe('settingStore', () => {
     useSettingStore.setState(defaultState)
     mockApi.mockReset()
     mockAssignAgent.mockReset()
+    mockGetWorkspaceAgents.mockReset()
+    mockSetWorkspaceAgent.mockReset()
     mockUnassignAgent.mockReset()
     mockShowToast.mockReset()
     mockGetState.mockReturnValue({ showToast: mockShowToast })
@@ -109,6 +123,15 @@ describe('settingStore', () => {
     })
     useSettingStore.getState().setWorkspaceName('Name')
     expect(useSettingStore.getState().isDirty).toBe(false)
+  })
+
+  it('isDirty is true when piAgentConcurrency differs from original', () => {
+    useSettingStore.setState({
+      originalSettings: defaultSettings,
+      originalPiAgentConcurrency: 1,
+    })
+    useSettingStore.getState().setPiAgentConcurrency(3)
+    expect(useSettingStore.getState().isDirty).toBe(true)
   })
 
   it('cycles through testConnection states', async () => {
@@ -172,6 +195,29 @@ describe('settingStore', () => {
       })
     )
     expect(mockAssignAgent).toHaveBeenCalledWith('ws1', 'agent-1', 2)
+    expect(mockSetWorkspaceAgent).not.toHaveBeenCalled()
+    expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
+  })
+
+  it('saveAll calls setWorkspaceAgent when piAgentConcurrency is set', async () => {
+    mockApi.mockResolvedValue(undefined)
+    mockSetWorkspaceAgent.mockResolvedValue({
+      agent_id: 'pi',
+      workspace_id: 'ws1',
+      concurrency_limit: 3,
+    })
+    useSettingStore.setState({
+      workspaceName: 'Test',
+      workspaceDescription: 'Desc',
+      originalWorkspaceName: '',
+      originalWorkspaceDescription: '',
+      originalSettings: defaultSettings,
+      settings: defaultSettings,
+      piAgentConcurrency: 3,
+      originalPiAgentConcurrency: 1,
+    })
+    await useSettingStore.getState().saveAll()
+    expect(mockSetWorkspaceAgent).toHaveBeenCalledWith('ws1', 'pi', 3)
     expect(mockShowToast).toHaveBeenCalledWith('设置已保存', 'success')
   })
 
@@ -281,9 +327,9 @@ describe('settingStore', () => {
   })
 
   it('fetchAgentAssignments hydrates agent assignments', async () => {
-    mockApi.mockResolvedValueOnce({
-      agents: [{ agent_id: 'agent-1', concurrency_limit: 2 }],
-    })
+    mockGetWorkspaceAgents.mockResolvedValueOnce([
+      { agent_id: 'agent-1', concurrency_limit: 2 },
+    ])
     await useSettingStore.getState().fetchAgentAssignments('ws1')
     const state = useSettingStore.getState()
     expect(state.agentAssignments).toEqual([
@@ -292,6 +338,17 @@ describe('settingStore', () => {
     expect(state.originalAgentAssignments).toEqual([
       { agent_id: 'agent-1', concurrency_limit: 2 },
     ])
+  })
+
+  it('fetchAgentAssignments extracts pi agent concurrency', async () => {
+    mockGetWorkspaceAgents.mockResolvedValueOnce([
+      { agent_id: 'agent-1', concurrency_limit: 2 },
+      { agent_id: 'pi', concurrency_limit: 5 },
+    ])
+    await useSettingStore.getState().fetchAgentAssignments('ws1')
+    const state = useSettingStore.getState()
+    expect(state.piAgentConcurrency).toBe(5)
+    expect(state.originalPiAgentConcurrency).toBe(5)
   })
 
   it('fetchGlobalServices hydrates global services from API', async () => {

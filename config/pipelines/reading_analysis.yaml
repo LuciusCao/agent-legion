@@ -3,6 +3,10 @@ label: 题目审题分析 Pipeline
 concurrency:
   local: 4
   agent: 2
+  nodes:
+    fetch_questions: 10
+    clean_and_parse: 2
+    mark_question: 10
 intake:
   modes:
     batch_by_knowledge:

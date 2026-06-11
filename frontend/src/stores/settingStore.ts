@@ -6,7 +6,13 @@ import type {
   PipelineDefinitionRecord,
   WorkspaceAgentAssignment,
 } from '../types'
-import { api, assignAgent, unassignAgent } from '../api'
+import {
+  api,
+  assignAgent,
+  getWorkspaceAgents,
+  setWorkspaceAgent,
+  unassignAgent,
+} from '../api'
 import { useUiStore } from './uiStore'
 
 type TestStatus = {
@@ -24,6 +30,8 @@ type SettingState = {
   originalWorkspaceDescription: string
   originalSettings: WorkspaceSettings | null
   originalAgentAssignments: WorkspaceAgentAssignment[] | null
+  piAgentConcurrency: number | undefined
+  originalPiAgentConcurrency: number | undefined
   isDirty: boolean
   isSaving: boolean
   saveError: string | null
@@ -36,6 +44,7 @@ type SettingState = {
   setWorkspaceDescription: (description: string) => void
   setSettings: (s: Partial<WorkspaceSettings>) => void
   setAgentAssignments: (assignments: WorkspaceAgentAssignment[] | null) => void
+  setPiAgentConcurrency: (value: number | undefined) => void
   fetchSettings: (workspaceId: string) => Promise<void>
   fetchAgentAssignments: (workspaceId: string) => Promise<void>
   fetchGlobalServices: () => Promise<void>
@@ -68,6 +77,7 @@ function computeDirty(state: Omit<SettingState, 'isDirty'>): boolean {
     JSON.stringify(state.originalAgentAssignments)
   )
     return true
+  if (state.piAgentConcurrency !== state.originalPiAgentConcurrency) return true
   return false
 }
 
@@ -81,6 +91,8 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   originalWorkspaceDescription: '',
   originalSettings: null,
   originalAgentAssignments: null,
+  piAgentConcurrency: undefined,
+  originalPiAgentConcurrency: undefined,
   isDirty: false,
   globalServices: null,
   resourceProviders: [],
@@ -118,6 +130,13 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   setAgentAssignments(assignments) {
     set((state) => {
       const nextState = { ...state, agentAssignments: assignments }
+      return { ...nextState, isDirty: computeDirty(nextState) }
+    })
+  },
+
+  setPiAgentConcurrency(value) {
+    set((state) => {
+      const nextState = { ...state, piAgentConcurrency: value }
       return { ...nextState, isDirty: computeDirty(nextState) }
     })
   },
@@ -167,15 +186,16 @@ export const useSettingStore = create<SettingState>((set, get) => ({
 
   async fetchAgentAssignments(workspaceId) {
     try {
-      const result = await api<{ agents: WorkspaceAgentAssignment[] }>(
-        `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`
-      )
-      const assignments = result?.agents || null
+      const assignments = await getWorkspaceAgents(workspaceId)
+      const piAssignment = assignments.find((a) => a.agent_id === 'pi')
+      const piConcurrency = piAssignment?.concurrency_limit
       set((state) => {
         const nextState = {
           ...state,
           agentAssignments: assignments,
           originalAgentAssignments: assignments,
+          piAgentConcurrency: piConcurrency,
+          originalPiAgentConcurrency: piConcurrency,
         }
         return { ...nextState, isDirty: computeDirty(nextState) }
       })
@@ -237,6 +257,7 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       settings,
       agentAssignments,
       originalAgentAssignments,
+      piAgentConcurrency,
     } = get()
     if (!workspaceId) return
     set({ isSaving: true, saveError: null })
@@ -273,7 +294,11 @@ export const useSettingStore = create<SettingState>((set, get) => ({
           }),
         }
       )
-      // 4. POST agent assignments one by one
+      // 4. POST pi agent concurrency
+      if (piAgentConcurrency !== undefined) {
+        await setWorkspaceAgent(workspaceId, 'pi', piAgentConcurrency)
+      }
+      // 5. POST agent assignments one by one
       if (agentAssignments) {
         for (const assignment of agentAssignments) {
           await assignAgent(
