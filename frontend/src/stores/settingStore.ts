@@ -186,9 +186,8 @@ export const useSettingStore = create<SettingState>((set, get) => ({
 
   async fetchAgentAssignments(workspaceId) {
     try {
-      const result = await getWorkspaceAgents(workspaceId)
-      const assignments = result?.agents || null
-      const piAssignment = assignments?.find((a) => a.agent_id === 'pi')
+      const assignments = await getWorkspaceAgents(workspaceId)
+      const piAssignment = assignments.find((a) => a.agent_id === 'pi')
       const piConcurrency = piAssignment?.concurrency_limit
       set((state) => {
         const nextState = {

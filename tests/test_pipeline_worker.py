@@ -598,10 +598,13 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
     worker._poll()
     assert len(worker._futures) == 1
 
+    local_exec = worker._ws_local_executors["default"]
+    agent_exec = worker._ws_agent_executors["default"]
+
     # Shutdown should wait for the submitted task
     worker.stop()
-    assert worker._ws_local_executors["default"]._shutdown is True
-    assert worker._ws_agent_executors["default"]._shutdown is True
+    assert local_exec._shutdown is True
+    assert agent_exec._shutdown is True
 
 
 def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
