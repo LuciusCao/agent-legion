@@ -27,6 +27,7 @@ export default function WorkspaceLayout() {
   const {
     fetchWorkerStatus,
     pageTitle,
+    detailPageActions,
     openAddDialog,
     addDialogOpen,
     closeAddDialog,
@@ -154,7 +155,9 @@ export default function WorkspaceLayout() {
                   <md-icon>settings</md-icon>
                 </md-icon-button>
               </>
-            ) : undefined
+            ) : (
+              detailPageActions
+            )
           }
         />
       )}

@@ -57,6 +57,8 @@ vi.mock('../stores/uiStore', () => ({
     const state = {
       agents: [],
       workerPaused: false,
+      pageTitle: null,
+      detailPageActions: null,
       fetchWorkerStatus: fetchWorkerStatusMock,
       setWorkerPaused: setWorkerPausedMock,
     }

@@ -9,6 +9,8 @@ import { durationSeconds } from '../helpers'
 import { useUiStore } from '../stores/uiStore'
 import type { JobDetailResponse, JobNodeRecord } from '../types'
 import styles from './JobDetailPage.module.css'
+import { ArtifactListDialog } from '../components/ArtifactListDialog'
+import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 
 const VALID_STATUSES = new Set<DagNode['status']>([
   'pending',
@@ -51,12 +53,16 @@ export default function JobDetailPage() {
     workspaceId: string
     jobId: string
   }>()
-  const { setPageTitle } = useUiStore()
+  const { setPageTitle, setDetailPageActions } = useUiStore()
   const [detail, setDetail] = useState<JobDetailResponse | null>(null)
   const [error, setError] = useState('')
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
-  const [artifactName, setArtifactName] = useState('')
-  const [artifactContent, setArtifactContent] = useState('')
+  const [artifactListOpen, setArtifactListOpen] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewArtifact, setPreviewArtifact] = useState<{
+    name: string
+    content: string
+  } | null>(null)
   const artifactRequestId = useRef(0)
 
   useEffect(() => {
@@ -64,8 +70,9 @@ export default function JobDetailPage() {
     setDetail(null)
     setError('')
     setSelectedNodeKey(null)
-    setArtifactName('')
-    setArtifactContent('')
+    setArtifactListOpen(false)
+    setPreviewOpen(false)
+    setPreviewArtifact(null)
     if (!jobId) return
     let stale = false
     fetchJobDetail(jobId)
@@ -81,8 +88,29 @@ export default function JobDetailPage() {
     return () => {
       stale = true
       setPageTitle(null)
+      setArtifactListOpen(false)
+      setPreviewOpen(false)
+      setPreviewArtifact(null)
     }
   }, [jobId, setPageTitle])
+
+  useEffect(() => {
+    if (!detail) {
+      setDetailPageActions(null)
+      return
+    }
+    setDetailPageActions(
+      <md-icon-button
+        aria-label="产物文件"
+        onClick={() => setArtifactListOpen(true)}
+      >
+        <md-icon>folder_open</md-icon>
+      </md-icon-button>
+    )
+    return () => {
+      setDetailPageActions(null)
+    }
+  }, [detail, setDetailPageActions])
 
   // Poll every 5s for running jobs
   const detailRef = useRef(detail)
@@ -135,15 +163,19 @@ export default function JobDetailPage() {
   async function openArtifact(name: string) {
     if (!jobId) return
     const requestId = ++artifactRequestId.current
-    setArtifactName(name)
-    setArtifactContent('')
+    setArtifactListOpen(false)
+    setPreviewArtifact({ name, content: '' })
+    setPreviewOpen(true)
     try {
       const artifact = await fetchJobArtifact(jobId, name)
       if (requestId !== artifactRequestId.current) return
-      setArtifactContent(artifact.content)
+      setPreviewArtifact({ name, content: artifact.content })
     } catch (err) {
       if (requestId !== artifactRequestId.current) return
-      setArtifactContent(err instanceof Error ? err.message : String(err))
+      setPreviewArtifact({
+        name,
+        content: err instanceof Error ? err.message : String(err),
+      })
     }
   }
 
@@ -188,17 +220,26 @@ export default function JobDetailPage() {
 
         <div className={styles.right}>
           {detail && (
-            <JobProgressPanel
-              nodes={detail.nodes}
-              runs={detail.runs}
-              artifacts={detail.artifacts}
-              activeArtifact={artifactName}
-              activeArtifactContent={artifactContent}
-              onArtifactClick={openArtifact}
-            />
+            <JobProgressPanel nodes={detail.nodes} runs={detail.runs} />
           )}
         </div>
       </div>
+      {detail && (
+        <ArtifactListDialog
+          open={artifactListOpen}
+          artifacts={detail.artifacts}
+          onClose={() => setArtifactListOpen(false)}
+          onSelect={openArtifact}
+        />
+      )}
+      {previewArtifact && (
+        <ArtifactPreviewDialog
+          open={previewOpen}
+          name={previewArtifact.name}
+          content={previewArtifact.content}
+          onClose={() => setPreviewOpen(false)}
+        />
+      )}
     </div>
   )
 }
