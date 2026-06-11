@@ -34,6 +34,9 @@ const mockVideos = [
     status: 'completed',
     current_phase: 'package',
     error_message: '',
+    storage_dir: '',
+    duration: 0,
+    packed: false,
   },
   {
     id: 'v2',
@@ -47,6 +50,9 @@ const mockVideos = [
     status: 'completed',
     current_phase: 'package',
     error_message: '',
+    storage_dir: '',
+    duration: 0,
+    packed: false,
   },
 ]
 

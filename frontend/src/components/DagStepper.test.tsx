@@ -21,7 +21,7 @@ describe('DagStepper', () => {
 
   it('hides labels when node count > 8', () => {
     const { container } = render(<DagStepper nodes={makeNodes(9)} />)
-    expect(container.firstChild?.className).toContain('compact')
+    expect((container.firstChild as HTMLElement).className).toContain('compact')
   })
 
   it('applies status classes', () => {

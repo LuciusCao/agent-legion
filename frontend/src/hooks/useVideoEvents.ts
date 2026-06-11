@@ -1,14 +1,25 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useVideoStore } from '../stores/videoStore'
 import { triggerDownload } from '../lib/download'
 import { fetchPackages } from '../api'
+import type { VideoItem } from '../types'
 
 const LAST_DOWNLOADED_KEY = 'video-hive:last-downloaded-package-id'
 
-export function useVideoEvents(enabled = true) {
+interface VideoEventPayload {
+  type: string
+  video?: VideoItem
+  video_id?: string | number
+  download_url?: string
+}
+
+export function useVideoEvents(enabled = true): {
+  events: VideoEventPayload[]
+} {
   const { mergeVideo, removeVideo, setSseConnected, fetchVideos } =
     useVideoStore()
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const [events, setEvents] = useState<VideoEventPayload[]>([])
 
   useEffect(() => {
     if (!enabled) return
@@ -30,11 +41,12 @@ export function useVideoEvents(enabled = true) {
       source.onmessage = (event) => {
         if (!event.data || event.data.startsWith(':heartbeat')) return
         try {
-          const payload = JSON.parse(event.data)
+          const payload = JSON.parse(event.data) as VideoEventPayload
+          setEvents((prev) => [...prev, payload])
           if (payload.type === 'video_updated' && payload.video) {
             mergeVideo(payload.video)
           } else if (payload.type === 'video_deleted' && payload.video_id) {
-            removeVideo(payload.video_id)
+            removeVideo(String(payload.video_id))
           } else if (payload.type === 'package_ready' && payload.download_url) {
             triggerDownload(payload.download_url)
             fetchVideos()
@@ -50,7 +62,6 @@ export function useVideoEvents(enabled = true) {
           source.close()
           source = null
         }
-        // Exponential backoff reconnect
         reconnectTimerRef.current = setTimeout(() => {
           reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay)
           connect()
@@ -60,9 +71,6 @@ export function useVideoEvents(enabled = true) {
 
     connect()
 
-    // On page load, check for packages created while the page was away
-    // (e.g. user refreshed during packaging). If the latest package has
-    // not been downloaded yet, trigger the download automatically.
     const checkPendingPackages = async () => {
       try {
         const data = await fetchPackages()
@@ -91,4 +99,6 @@ export function useVideoEvents(enabled = true) {
       }
     }
   }, [enabled, mergeVideo, removeVideo, setSseConnected, fetchVideos])
+
+  return { events }
 }

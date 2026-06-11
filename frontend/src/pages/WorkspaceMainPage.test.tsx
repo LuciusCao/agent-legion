@@ -6,14 +6,16 @@ import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
-import type { JobRecord } from '../types'
+import { api, fetchJobs } from '../api'
+import type { WorkspaceStats } from '../types'
+import { makeJob } from '../testing/fixtures'
 
 const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
 
 vi.mock('../api', () => ({
-  api: (...args: any[]) => mockApi(...args),
-  fetchJobs: (...args: any[]) => mockFetchJobs(...args),
+  api: (...args: Parameters<typeof api>) => mockApi(...args),
+  fetchJobs: (...args: Parameters<typeof fetchJobs>) => mockFetchJobs(...args),
 }))
 
 function renderPage(workspaceId = 'ws1') {
@@ -29,7 +31,7 @@ function renderPage(workspaceId = 'ws1') {
   )
 }
 
-const baseStats = {
+const baseStats: WorkspaceStats = {
   workspace_id: 'ws1',
   name: 'WS One',
   pipeline_key: 'question_content',
@@ -45,7 +47,7 @@ const baseStats = {
     ],
   },
   latest_run: null,
-} as const
+}
 
 describe('WorkspaceMainPage', () => {
   beforeEach(() => {
@@ -80,6 +82,7 @@ describe('WorkspaceMainPage', () => {
         {
           id: 'agent-a',
           name: 'Agent A',
+          workspace_id: 'ws1',
           busy: false,
           task_count: 0,
           max_tasks: 1,
@@ -137,14 +140,12 @@ describe('WorkspaceMainPage', () => {
   it('renders stat cards when jobs exist', async () => {
     useJobStore.setState({
       jobs: [
-        {
+        makeJob({
           id: 'j1',
-          workspace_id: 'ws1',
-          pipeline_key: 'p1',
           source_id: 'Q100',
           title: 'Algebra',
           status: 'running',
-        } as JobRecord,
+        }),
       ],
     })
 

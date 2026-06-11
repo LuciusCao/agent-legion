@@ -16,7 +16,7 @@ from server.app.worker import (
     process_next,
     process_video_once,
 )
-from tests.conftest import ChapterRunner, TestProvider
+from tests.helpers import ChapterRunner, TestProvider
 
 
 def test_worker_processes_transcribe_phase(db, settings):

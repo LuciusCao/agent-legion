@@ -3,6 +3,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { SettingsPage } from './SettingsPage'
 import { useSettingStore } from '../stores/settingStore'
+import type { SettingState } from '../stores/settingStore'
 import { useUiStore } from '../stores/uiStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import {
@@ -37,31 +38,26 @@ const mockUpdateWorkspace = vi.mocked(updateWorkspace)
 const mockAssignAgent = vi.mocked(assignAgent)
 const mockUnassignAgent = vi.mocked(unassignAgent)
 
-const defaultState = {
+const defaultState: SettingState = {
   workspaceId: 'ws1',
   workspaceName: '测试空间',
   workspaceDescription: '测试描述',
   settings: {
-    entityType: 'question' as const,
-    intakeModes: [] as string[],
-    labelOverrides: {} as Record<string, string>,
+    entityType: 'question',
+    intakeModes: [],
+    labelOverrides: {},
     pipelineKey: '',
-    agentIds: [] as string[],
+    agentIds: [],
     concurrencyLimit: 1,
-    resources: {} as Record<
-      string,
-      { enabled: boolean; config: Record<string, string> }
-    >,
+    resources: {},
   },
-  agentAssignments: null as
-    | null
-    | { agent_id: string; concurrency_limit: number }[],
+  agentAssignments: null,
   originalWorkspaceName: '测试空间',
   originalWorkspaceDescription: '测试描述',
-  originalSettings: null as typeof defaultState.settings | null,
-  originalAgentAssignments: null as typeof defaultState.agentAssignments,
-  piAgentConcurrency: undefined as number | undefined,
-  originalPiAgentConcurrency: undefined as number | undefined,
+  originalSettings: null,
+  originalAgentAssignments: null,
+  piAgentConcurrency: undefined,
+  originalPiAgentConcurrency: undefined,
   isDirty: false,
   globalServices: {
     cms: {
@@ -72,24 +68,11 @@ const defaultState = {
       lastCheckedAt: null,
     },
   },
-  resourceProviders: [] as [],
-  pipelineDefinition: null as null | {
-    key: string
-    label: string
-    concurrency: { local: number; agent: number }
-    intake?: {
-      modes: {
-        key: string
-        label: string
-        input_field: string
-        resource?: string
-      }[]
-    }
-    nodes: any[]
-  },
-  testStatus: { state: 'idle' as const },
+  resourceProviders: [],
+  pipelineDefinition: null,
+  testStatus: { state: 'idle' },
   isSaving: false,
-  saveError: null as string | null,
+  saveError: null,
   setWorkspaceId: vi.fn(),
   setWorkspaceName: vi.fn((name: string) => {
     useSettingStore.setState({ workspaceName: name, isDirty: true })
@@ -97,8 +80,8 @@ const defaultState = {
   setWorkspaceDescription: vi.fn((desc: string) => {
     useSettingStore.setState({ workspaceDescription: desc, isDirty: true })
   }),
-  setSettings: vi.fn((s: any) => {
-    useSettingStore.setState((state: any) => ({
+  setSettings: vi.fn((s) => {
+    useSettingStore.setState((state) => ({
       settings: { ...state.settings, ...s },
       isDirty: true,
     }))
@@ -165,7 +148,11 @@ describe('SettingsPage', () => {
     mockGetWorkspaceAgents.mockReset()
     mockGetWorkspaceAgents.mockResolvedValue([])
     mockSetWorkspaceAgent.mockReset()
-    mockSetWorkspaceAgent.mockResolvedValue(undefined)
+    mockSetWorkspaceAgent.mockResolvedValue({
+      agent_id: 'agent-1',
+      workspace_id: 'ws1',
+      concurrency_limit: 1,
+    })
     mockUpdateWorkspace.mockReset()
     mockUpdateWorkspace.mockResolvedValue({
       id: 'ws1',
@@ -175,9 +162,17 @@ describe('SettingsPage', () => {
       default_entity: 'question',
     })
     mockAssignAgent.mockReset()
-    mockAssignAgent.mockResolvedValue(undefined)
+    mockAssignAgent.mockResolvedValue({
+      agent_id: 'agent-1',
+      workspace_id: 'ws1',
+      concurrency_limit: 1,
+    })
     mockUnassignAgent.mockReset()
-    mockUnassignAgent.mockResolvedValue(undefined)
+    mockUnassignAgent.mockResolvedValue({
+      agent_id: 'agent-1',
+      workspace_id: 'ws1',
+      removed: true,
+    })
   })
 
   it('renders 4 sections with nav sidebar for non-video-hive workspace', () => {
@@ -185,7 +180,7 @@ describe('SettingsPage', () => {
       pipelineDefinition: {
         key: 'question_content',
         label: '题目内容生成',
-        concurrency: { local: 8, agent: 2 },
+        concurrency: { local: 8, agent: 2, nodes: {} },
         intake: {
           modes: [
             {
@@ -218,7 +213,7 @@ describe('SettingsPage', () => {
       pipelineDefinition: {
         key: 'question_content',
         label: '题目内容生成',
-        concurrency: { local: 8, agent: 2 },
+        concurrency: { local: 8, agent: 2, nodes: {} },
         intake: {
           modes: [
             {
@@ -381,7 +376,7 @@ describe('SettingsPage', () => {
       pipelineDefinition: {
         key: 'question_content',
         label: '题目内容生成',
-        concurrency: { local: 8, agent: 2 },
+        concurrency: { local: 8, agent: 2, nodes: {} },
         intake: { modes: [] },
         nodes: [],
       },
@@ -403,7 +398,7 @@ describe('SettingsPage', () => {
       pipelineDefinition: {
         key: 'question_content',
         label: '题目内容生成',
-        concurrency: { local: 8, agent: 2 },
+        concurrency: { local: 8, agent: 2, nodes: {} },
         intake: {
           modes: [
             {

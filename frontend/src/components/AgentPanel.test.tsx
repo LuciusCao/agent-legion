@@ -3,9 +3,11 @@ import { act, render, screen, waitFor } from '@testing-library/react'
 import { AgentPanel } from './AgentPanel'
 import { useUiStore } from '../stores/uiStore'
 
+import { api } from '../api'
+
 const mockApi = vi.fn()
 vi.mock('../api', () => ({
-  api: (...args: any[]) => mockApi(...args),
+  api: (...args: Parameters<typeof api>) => mockApi(...args),
 }))
 
 describe('AgentPanel', () => {

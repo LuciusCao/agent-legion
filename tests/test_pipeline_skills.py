@@ -1,13 +1,16 @@
 import hashlib
+import importlib
 import json
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
 import pytest
 
 from server.app.pipelines.definition import load_pipeline_definition
 from server.app.pipelines.skills import resolve_pipeline_skill
+from server.app.pipelines.skills.reading_analysis._shared.validation import ContractError
 
 FIXTURE_ROOT = Path("tests/fixtures/reading_analysis/eval")
 SKILL_NAMES = [
@@ -18,6 +21,20 @@ SKILL_NAMES = [
     "reading_analysis/generate_distractors",
     "reading_analysis/review_distractors",
 ]
+
+
+def _run_validator(skill_name: str, job_dir: Path) -> list[str]:
+    """Call a skill's in-process validate() and return a flat list of error messages."""
+    mod = importlib.import_module(
+        f"server.app.pipelines.skills.reading_analysis.{skill_name.split('/')[-1]}.scripts.validate_output"
+    )
+    try:
+        result = mod.validate(job_dir)
+    except (ContractError, mod.ContractError) as exc:
+        return [str(exc)]
+    if isinstance(result, list):
+        return result
+    return []
 
 
 def _setup_skill_inputs(skill_name: str, job_dir: Path) -> None:
@@ -323,47 +340,37 @@ def test_resolve_pipeline_skill_requires_contract_files(tmp_path):
 
 
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
-def test_validator_accepts_valid_output(skill_name, tmp_path):
-    root = Path("server/app/pipelines/skills")
-    skill = resolve_pipeline_skill(root, skill_name)
-    validator = skill / "scripts" / "validate_output.py"
+def test_validator_accepts_valid_output_in_process(skill_name, tmp_path):
     job_dir = tmp_path / "job"
     job_dir.mkdir()
 
     _setup_skill_inputs(skill_name, job_dir)
     _setup_skill_valid_outputs(skill_name, job_dir)
 
-    result = subprocess.run(
-        ["python", str(validator), str(job_dir)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 0, result.stderr
+    errors = _run_validator(skill_name, job_dir)
+    assert errors == []
 
 
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
-def test_validator_rejects_missing_output(skill_name, tmp_path):
-    root = Path("server/app/pipelines/skills")
-    skill = resolve_pipeline_skill(root, skill_name)
-    validator = skill / "scripts" / "validate_output.py"
+def test_validator_rejects_missing_output_in_process(skill_name, tmp_path):
     job_dir = tmp_path / "job"
     job_dir.mkdir()
 
     _setup_skill_inputs(skill_name, job_dir)
 
-    result = subprocess.run(
-        ["python", str(validator), str(job_dir)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
+    try:
+        errors = _run_validator(skill_name, job_dir)
+    except FileNotFoundError as exc:
+        # Review validators that call validate_review_result directly raise
+        # FileNotFoundError when the report file is absent.
+        assert any(name in str(exc) for name in ("review_report.json", "reviewed.json")), str(exc)
+    else:
+        assert errors
+        assert any("Missing output file" in e for e in errors)
 
 
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
-def test_validator_rejects_malformed_json(skill_name, tmp_path):
-    root = Path("server/app/pipelines/skills")
-    skill = resolve_pipeline_skill(root, skill_name)
-    validator = skill / "scripts" / "validate_output.py"
+def test_validator_rejects_malformed_json_in_process(skill_name, tmp_path):
     job_dir = tmp_path / "job"
     job_dir.mkdir()
 
@@ -375,19 +382,12 @@ def test_validator_rejects_malformed_json(skill_name, tmp_path):
         if path.name.endswith(".json") and path.name != "questions_parsed.json":
             path.write_text("not json", encoding="utf-8")
 
-    result = subprocess.run(
-        ["python", str(validator), str(job_dir)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
+    with pytest.raises(json.JSONDecodeError):
+        _run_validator(skill_name, job_dir)
 
 
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
-def test_validator_rejects_schema_violation(skill_name, tmp_path):
-    root = Path("server/app/pipelines/skills")
-    skill = resolve_pipeline_skill(root, skill_name)
-    validator = skill / "scripts" / "validate_output.py"
+def test_validator_rejects_schema_violation_in_process(skill_name, tmp_path):
     job_dir = tmp_path / "job"
     job_dir.mkdir()
 
@@ -414,19 +414,12 @@ def test_validator_rejects_schema_violation(skill_name, tmp_path):
             '{"status": "passed", "question_id": "Q100"}', encoding="utf-8"
         )
 
-    result = subprocess.run(
-        ["python", str(validator), str(job_dir)],
-        capture_output=True,
-        text=True,
-    )
-    assert result.returncode == 1
+    errors = _run_validator(skill_name, job_dir)
+    assert errors
 
 
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
-def test_validator_rejects_invalid_report(skill_name, tmp_path):
-    root = Path("server/app/pipelines/skills")
-    skill = resolve_pipeline_skill(root, skill_name)
-    validator = skill / "scripts" / "validate_output.py"
+def test_validator_rejects_invalid_report_in_process(skill_name, tmp_path):
     job_dir = tmp_path / "job"
     job_dir.mkdir()
 
@@ -455,12 +448,28 @@ def test_validator_rejects_invalid_report(skill_name, tmp_path):
             '{"status": "passed", "question_id": "Q100"}', encoding="utf-8"
         )
 
+    errors = _run_validator(skill_name, job_dir)
+    assert errors
+
+
+@pytest.mark.parametrize("skill_name", SKILL_NAMES)
+def test_validator_cli_smoke_accepts_valid_output(skill_name, tmp_path):
+    """Keep one subprocess smoke per skill to verify the CLI entry point."""
+    root = Path("server/app/pipelines/skills")
+    skill = resolve_pipeline_skill(root, skill_name)
+    validator = skill / "scripts" / "validate_output.py"
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+
+    _setup_skill_inputs(skill_name, job_dir)
+    _setup_skill_valid_outputs(skill_name, job_dir)
+
     result = subprocess.run(
-        ["python", str(validator), str(job_dir)],
+        [sys.executable, str(validator), str(job_dir)],
         capture_output=True,
         text=True,
     )
-    assert result.returncode == 1
+    assert result.returncode == 0, result.stderr
 
 
 def test_validator_usage_requires_directory_argument():
@@ -468,7 +477,7 @@ def test_validator_usage_requires_directory_argument():
         "server/app/pipelines/skills/reading_analysis/extract_keywords/scripts/validate_output.py"
     )
     result = subprocess.run(
-        ["python", str(validator)],
+        [sys.executable, str(validator)],
         capture_output=True,
         text=True,
     )

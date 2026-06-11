@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useDetailStore } from './detailStore'
+import { makeVideo } from '../testing/fixtures'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
@@ -60,25 +61,38 @@ describe('detailStore', () => {
 
   it('clears stale data when loadVideo fails after switching videos', async () => {
     useDetailStore.setState({
-      currentVideo: {
+      currentVideo: makeVideo({
         id: 'old',
         title: 'Old',
         content_type: 'question',
         status: 'queued',
-      } as unknown as ReturnType<
-        typeof useDetailStore.getState
-      >['currentVideo'],
+      }),
       phaseRuns: [
         {
           id: 1,
           video_id: 'old',
-          phase: 'download',
+          phase_key: 'download',
           status: 'completed',
-          created_at: '',
+          started_at: '',
+          finished_at: null,
+          command_json: '',
+          exit_code: null,
+          log_path: '',
+          error_message: '',
         },
       ],
       transcriptionRuns: [
-        { id: 1, video_id: 'old', provider: 'whisper', created_at: '' },
+        {
+          id: 1,
+          video_id: 'old',
+          provider: 'whisper',
+          status: 'completed',
+          started_at: '',
+          finished_at: null,
+          srt_entry_count: 0,
+          validation_summary: '',
+          fallback_reason: '',
+        },
       ],
     })
     mockApi.mockRejectedValueOnce(new Error('not found'))

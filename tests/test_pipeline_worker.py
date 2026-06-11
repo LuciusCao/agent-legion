@@ -1,18 +1,31 @@
 import json
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from server.app.cms.question import CmsQuestionDetail
 from server.app.jobs import JobQueries
-from server.app.pipeline_worker_thread import process_ready_pipeline_node
-from server.app.pipelines.definition import load_pipeline_definition
+from server.app.pipeline_worker_thread import (
+    PipelineWorkerThread,
+    _execute_node_wrapped,
+    process_ready_pipeline_node,
+)
+from server.app.pipelines.definition import (
+    PipelineAgent,
+    PipelineConcurrency,
+    PipelineDefinition,
+    PipelineIntake,
+    PipelineNode,
+    load_pipeline_definition,
+)
 from server.app.pipelines.executor import (
     execute_agent_node_once,
     execute_node_once,
 )
 from server.app.pipelines.pi_runner import PiRunner
+from tests.helpers import make_pipeline_worker
 
 
 def test_execute_fetch_question_context_writes_artifact(tmp_path):
@@ -417,12 +430,8 @@ def test_pipeline_worker_does_not_start_when_app_worker_disabled(tmp_path, monke
 
 
 def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkeypatch):
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(tmp_path, queries)
     job = queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -431,22 +440,6 @@ def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkey
         title="Question Q100",
         node_keys=list(definition.nodes),
     )
-
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True, "pi": {"binary": "echo", "timeout_seconds": 1}}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._ensure_workspace_executors("default")
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
 
     processed = worker._poll()
 
@@ -467,12 +460,8 @@ def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkey
 
 
 def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(tmp_path, queries)
     queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -481,22 +470,6 @@ def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
         title="Question Q100",
         node_keys=list(definition.nodes),
     )
-
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True, "pi": {"binary": "echo", "timeout_seconds": 1}}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._ensure_workspace_executors("default")
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
 
     # Block the wrapped execution so the future stays in-flight across polls.
     import threading as _threading
@@ -523,12 +496,8 @@ def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
 
 
 def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatch):
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, _definition = make_pipeline_worker(tmp_path, queries)
     queries.create_job(
         pipeline_key="question_content",
         source_type="question_id",
@@ -537,22 +506,6 @@ def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatc
         title="Question Q100",
         node_keys=["fetch_question_context"],
     )
-
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True, "pi": {"binary": "echo", "timeout_seconds": 1}}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._ensure_workspace_executors("default")
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
 
     processed = worker._poll()
 
@@ -564,12 +517,8 @@ def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatc
 
 
 def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(tmp_path, queries)
     queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -578,22 +527,6 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
         title="Question Q100",
         node_keys=list(definition.nodes),
     )
-
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True, "pi": {"binary": "echo", "timeout_seconds": 1}}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._ensure_workspace_executors("default")
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
 
     worker._poll()
     assert len(worker._futures) == 1
@@ -608,12 +541,10 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
 
 
 def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(
+        tmp_path, queries, pi_binary=None, with_executors=False
+    )
     queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -623,17 +554,6 @@ def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
         node_keys=list(definition.nodes),
     )
 
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
     # start() should not raise even though pi config is missing
     worker.start()
     assert worker._pi_runner is None
@@ -642,12 +562,8 @@ def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
 
 
 def test_pipeline_worker_fails_agent_node_when_pi_runner_missing(tmp_path, monkeypatch):
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(tmp_path, queries, pi_binary=None)
     job = queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -661,32 +577,19 @@ def test_pipeline_worker_fails_agent_node_when_pi_runner_missing(tmp_path, monke
         json.dumps({"questions": [{"question_id": "Q100"}]}), encoding="utf-8"
     )
 
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True}},
-    )
+    # Run fetch_questions (local) and wait for it to finish.
+    processed = worker._poll()
+    assert processed is True
+    worker._futures[(job["id"], "fetch_questions")].result(timeout=5)
 
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._ensure_workspace_executors("default")
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
+    # Run clean_and_parse (local) and wait for it to finish.
+    processed = worker._poll()
+    assert processed is True
+    worker._futures[(job["id"], "clean_and_parse")].result(timeout=5)
 
-    # Poll should process fetch_questions (local) and clean_and_parse (local)
-    # Then extract_keywords (agent) should be marked failed because pi runner is missing
-    for _ in range(10):
-        worker._poll()
-        import time
-
-        time.sleep(0.5)
-        job_state = queries.get_job(job["id"])
-        if job_state["status"] == "failed":
-            break
+    # extract_keywords (agent) fails synchronously because pi runner is missing.
+    processed = worker._poll()
+    assert processed is True
 
     node = queries.get_job_node(job["id"], "extract_keywords")
     assert node["status"] == "failed"
@@ -694,3 +597,256 @@ def test_pipeline_worker_fails_agent_node_when_pi_runner_missing(tmp_path, monke
     assert queries.get_job(job["id"])["status"] == "failed"
 
     worker.stop()
+
+
+def _make_test_definition(nodes: list[PipelineNode]) -> PipelineDefinition:
+    return PipelineDefinition(
+        key="test",
+        label="Test",
+        concurrency=PipelineConcurrency(local=1, agent=1),
+        intake=PipelineIntake(),
+        nodes={n.key: n for n in nodes},
+    )
+
+
+def test_execute_node_wrapped_falls_back_to_direct_update_when_no_run_exists():
+    job_db = MagicMock()
+    job_db.list_node_runs.return_value = []
+    definition = MagicMock()
+    job = {"id": "job_1"}
+
+    with patch(
+        "server.app.pipeline_worker_thread.execute_node_once",
+        side_effect=RuntimeError("boom"),
+    ):
+        result = _execute_node_wrapped(
+            job_db,
+            definition,
+            job,
+            "node_a",
+            Path("/tmp/logs"),
+            None,
+            None,
+            None,
+        )
+
+    assert result is False
+    job_db.finish_node_run.assert_not_called()
+    job_db.update_job_node.assert_called_once_with(
+        "job_1", "node_a", status="failed", error_message="boom"
+    )
+    job_db.update_job_status.assert_called_once_with("job_1", "failed", "boom")
+
+
+def test_execute_node_wrapped_finishes_latest_running_run_when_one_exists():
+    job_db = MagicMock()
+    job_db.list_node_runs.return_value = [
+        {"id": 1, "node_key": "node_a", "status": "completed"},
+        {"id": 2, "node_key": "node_a", "status": "running"},
+        {"id": 3, "node_key": "node_b", "status": "running"},
+    ]
+    definition = MagicMock()
+    job = {"id": "job_1"}
+
+    with patch(
+        "server.app.pipeline_worker_thread.execute_node_once",
+        side_effect=RuntimeError("boom"),
+    ):
+        result = _execute_node_wrapped(
+            job_db,
+            definition,
+            job,
+            "node_a",
+            Path("/tmp/logs"),
+            None,
+            None,
+            None,
+        )
+
+    assert result is False
+    job_db.finish_node_run.assert_called_once_with(2, "failed", 1, "boom")
+    job_db.update_job_node.assert_not_called()
+    job_db.update_job_status.assert_called_once_with("job_1", "failed", "boom")
+
+
+def test_process_ready_pipeline_node_refreshes_job_status_when_no_local_nodes_ready():
+    definition = _make_test_definition(
+        [
+            PipelineNode(
+                key="agent_node",
+                label="Agent",
+                runner="agent",
+                agent=PipelineAgent(engine="pi", skill="test/skill"),
+            ),
+        ]
+    )
+    job_db = MagicMock()
+    job = {"id": "job_1", "storage_dir": "/tmp/job_1"}
+    job_db.list_jobs.return_value = [job]
+
+    ready_node = MagicMock()
+    ready_node.runner = "agent"
+
+    with (
+        patch(
+            "server.app.pipeline_worker_thread.find_ready_nodes",
+            return_value=[ready_node],
+        ) as mock_find,
+        patch("server.app.pipeline_worker_thread._refresh_job_status") as mock_refresh,
+        patch(
+            "server.app.pipeline_worker_thread._node_statuses",
+            return_value={"agent_node": "pending"},
+        ),
+    ):
+        result = process_ready_pipeline_node(job_db, definition, Path("/tmp/logs"))
+
+    assert result is False
+    mock_find.assert_called_once()
+    mock_refresh.assert_called_once_with(job_db, "job_1")
+
+
+def test_pipeline_worker_cancels_pending_futures_for_paused_workspace(tmp_path):
+    from concurrent.futures import Future
+
+    from server.app.settings import Settings
+
+    settings = Settings(
+        root_dir=Path("."),
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={},
+    )
+    job_db = MagicMock()
+    job_db.list_jobs.return_value = []
+    worker = PipelineWorkerThread(job_db, settings)
+    worker._definitions = [MagicMock()]
+
+    control = MagicMock()
+    control.is_paused.return_value = True
+    worker.workspace_worker_control = control
+
+    future = Future()
+    worker._futures[("job_1", "node_a")] = future
+    worker._ws_local_futures[("ws_1", "node_a")] = {("job_1", "node_a")}
+    worker._job_workspace_ids["job_1"] = "ws_1"
+
+    worker._poll()
+
+    assert future.cancelled()
+    assert ("job_1", "node_a") not in worker._futures
+    assert ("ws_1", "node_a") not in worker._ws_local_futures
+    assert "job_1" not in worker._job_workspace_ids
+    control.is_paused.assert_called_with("ws_1")
+
+
+def test_pipeline_worker_reconciles_orphaned_agent_futures(tmp_path):
+    from server.app.settings import Settings
+
+    settings = Settings(
+        root_dir=Path("."),
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={},
+    )
+    agent_manager = MagicMock()
+    job_db = MagicMock()
+    job_db.list_jobs.return_value = []
+    worker = PipelineWorkerThread(job_db, settings, agent_manager=agent_manager)
+    worker._definitions = [MagicMock()]
+    worker._agent_futures = {("job_1", "node_a")}
+
+    worker._poll()
+
+    assert ("job_1", "node_a") not in worker._agent_futures
+    agent_manager.set_idle.assert_called_once_with("pi")
+
+
+def test_pipeline_worker_fails_pi_node_when_pi_runner_not_configured(tmp_path):
+    from server.app.settings import Settings
+
+    definition = _make_test_definition(
+        [
+            PipelineNode(
+                key="pi_node",
+                label="Pi Node",
+                runner="agent",
+                agent=PipelineAgent(engine="pi", skill="test/skill"),
+            ),
+        ]
+    )
+
+    settings = Settings(
+        root_dir=Path("."),
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={},
+    )
+    job_db = MagicMock()
+    job = {"id": "job_1", "storage_dir": str(tmp_path / "job_1")}
+    job_db.list_jobs.return_value = [job]
+    job_db.start_node_run.return_value = {"id": 42}
+
+    worker = PipelineWorkerThread(job_db, settings)
+    worker._definitions = [definition]
+    worker._pi_runner = None
+    worker._skill_root = None
+
+    with patch(
+        "server.app.pipeline_worker_thread._node_statuses",
+        return_value={"pi_node": "pending"},
+    ):
+        worker._poll()
+
+    job_db.start_node_run.assert_called_once()
+    job_db.finish_node_run.assert_called_once_with(42, "failed", 1, "Pi runner is not configured")
+
+
+def test_pipeline_worker_fails_generic_agent_node_when_no_runner_available(tmp_path):
+    from server.app.settings import Settings
+
+    definition = _make_test_definition(
+        [
+            PipelineNode(
+                key="generic_agent",
+                label="Generic Agent",
+                runner="agent",
+            ),
+        ]
+    )
+
+    settings = Settings(
+        root_dir=Path("."),
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={},
+    )
+    job_db = MagicMock()
+    job = {"id": "job_1", "storage_dir": str(tmp_path / "job_1")}
+    job_db.list_jobs.return_value = [job]
+    job_db.start_node_run.return_value = {"id": 99}
+
+    worker = PipelineWorkerThread(job_db, settings)
+    worker._definitions = [definition]
+    worker._pi_runner = None
+    worker._skill_root = None
+
+    with patch(
+        "server.app.pipeline_worker_thread._node_statuses",
+        return_value={"generic_agent": "pending"},
+    ):
+        worker._poll()
+
+    job_db.start_node_run.assert_called_once()
+    job_db.finish_node_run.assert_called_once_with(99, "failed", 1, "Pi runner is not configured")
