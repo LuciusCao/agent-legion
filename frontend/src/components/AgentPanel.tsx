@@ -11,6 +11,7 @@ export interface AgentPanelProps {
   bare?: boolean
   compact?: boolean
   allowedAgentIds?: string[]
+  workspaceId?: string
 }
 
 export function AgentPanel({
@@ -21,6 +22,7 @@ export function AgentPanel({
   bare = false,
   compact = false,
   allowedAgentIds,
+  workspaceId,
 }: AgentPanelProps) {
   const storeAgents = useUiStore((state) => state.agents)
   const storePaused = useUiStore((state) => state.workerPaused)
@@ -37,11 +39,11 @@ export function AgentPanel({
 
   useEffect(() => {
     if (!autoFetch) return
-    fetchWorkerStatus().catch((err) => {
+    fetchWorkerStatus(workspaceId).catch((err) => {
       const message = err instanceof Error ? err.message : String(err)
       showToast(`加载自动调度状态失败: ${message}`, 'error')
     })
-  }, [autoFetch, fetchWorkerStatus, showToast])
+  }, [autoFetch, fetchWorkerStatus, showToast, workspaceId])
 
   const handlePausedChange = async () => {
     if (onTogglePause) {
@@ -50,7 +52,7 @@ export function AgentPanel({
     }
     const paused = !workerPaused
     try {
-      await setWorkerPaused(paused)
+      await setWorkerPaused(paused, workspaceId)
       showToast(paused ? '已关闭自动调度' : '已开启自动调度', 'success')
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)

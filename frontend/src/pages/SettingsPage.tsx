@@ -5,12 +5,8 @@ import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { AgentAllocationList } from '../components/AgentAllocationList'
 import { VIDEO_HIVE_ID } from '../layouts/WorkspaceLayout'
+import { fetchPipelines } from '../api'
 import styles from './SettingsPage.module.css'
-
-const PIPELINE_OPTIONS = [
-  { key: 'question_content', label: 'question_content' },
-  { key: 'reading_analysis', label: 'reading_analysis' },
-]
 
 type ConnectionState = 'idle' | 'testing' | 'success' | 'failed'
 
@@ -77,6 +73,9 @@ export function SettingsPage() {
   )
 
   const [activeSection, setActiveSection] = useState('basic-info')
+  const [pipelineOptions, setPipelineOptions] = useState<
+    Array<{ key: string; label: string }>
+  >([])
 
   useEffect(() => {
     if (!workspaceId) return
@@ -95,6 +94,18 @@ export function SettingsPage() {
     fetchPipelineDefinition,
     fetchAgentAssignments,
   ])
+
+  useEffect(() => {
+    fetchPipelines()
+      .then((data) => {
+        setPipelineOptions(
+          data.pipelines.map((p) => ({ key: p.key, label: p.label }))
+        )
+      })
+      .catch(() => {
+        setPipelineOptions([])
+      })
+  }, [])
 
   useEffect(() => {
     if (!workspaceId) return
@@ -417,7 +428,7 @@ export function SettingsPage() {
                 <md-select-option value="">
                   <div slot="headline">请选择</div>
                 </md-select-option>
-                {PIPELINE_OPTIONS.map((p) => (
+                {pipelineOptions.map((p) => (
                   <md-select-option key={p.key} value={p.key}>
                     <div slot="headline">{p.label}</div>
                   </md-select-option>

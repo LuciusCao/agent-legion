@@ -155,9 +155,7 @@ export function QuestionContentPanel({
           <h2 className={styles.sectionTitle}>选项</h2>
           <ul className={styles.optionList}>
             {detail.normalized.options.map((opt, idx) => {
-              const label = String(
-                opt.label || String.fromCharCode(65 + idx)
-              )
+              const label = String(opt.label || String.fromCharCode(65 + idx))
               const content = String(opt.content || '')
               const isCorrect =
                 answerItems != null && answerItems.includes(label)
@@ -169,10 +167,7 @@ export function QuestionContentPanel({
                   }`}
                 >
                   {isCorrect && (
-                    <md-icon
-                      className={styles.checkIcon}
-                      aria-hidden="true"
-                    >
+                    <md-icon className={styles.checkIcon} aria-hidden="true">
                       check
                     </md-icon>
                   )}

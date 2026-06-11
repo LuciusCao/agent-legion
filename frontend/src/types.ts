@@ -229,6 +229,14 @@ export type PipelineResponse = {
   pipeline: PipelineDefinitionRecord
 }
 
+export type PipelinesListResponse = {
+  pipelines: Array<{
+    key: string
+    label: string
+    concurrency: { local: number; agent: number }
+  }>
+}
+
 export type JobBatchResponse = {
   batch: Record<string, unknown>
   created_count: number

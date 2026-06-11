@@ -143,6 +143,7 @@ export default function WorkspaceLayout() {
                   bare
                   compact
                   allowedAgentIds={allowedAgentIds}
+                  workspaceId={workspaceId}
                 />
                 <md-icon-button
                   aria-label={WORKSPACE_LABELS.settings}

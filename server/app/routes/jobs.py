@@ -16,7 +16,7 @@ from server.app.db import Database
 from server.app.jobs import JobQueries
 from server.app.pipelines.artifacts import clear_rerun_outputs
 from server.app.pipelines.definition import PipelineDefinition
-from server.app.pipelines.registry import load_registered_pipeline
+from server.app.pipelines.registry import list_registered_pipelines, load_registered_pipeline
 from server.app.pipelines.resources import (
     RESOURCE_PARAM_KEYS,
     RESOURCE_PROVIDERS,
@@ -75,6 +75,10 @@ class JobsResponse(BaseModel):
 
 class PipelineResponse(BaseModel):
     pipeline: dict[str, Any]
+
+
+class PipelinesListResponse(BaseModel):
+    pipelines: list[dict[str, Any]]
 
 
 class WorkspaceCreateRequest(BaseModel):
@@ -640,6 +644,23 @@ def create_jobs_router(
     @router.get("/global-services", response_model=GlobalServicesResponse)
     def get_global_services() -> GlobalServicesResponse:
         return GlobalServicesResponse(**_global_services_payload(settings))
+
+    @router.get("/pipelines", response_model=PipelinesListResponse)
+    def list_pipelines() -> PipelinesListResponse:
+        _require_enabled(settings)
+        pipelines = []
+        for definition in list_registered_pipelines(settings.root_dir):
+            pipelines.append(
+                {
+                    "key": definition.key,
+                    "label": definition.label,
+                    "concurrency": {
+                        "local": definition.concurrency.local,
+                        "agent": definition.concurrency.agent,
+                    },
+                }
+            )
+        return PipelinesListResponse(pipelines=pipelines)
 
     @router.get("/pipelines/{pipeline_key}", response_model=PipelineResponse)
     def get_pipeline(pipeline_key: str) -> PipelineResponse:

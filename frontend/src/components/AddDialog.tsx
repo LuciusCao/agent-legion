@@ -41,9 +41,12 @@ export function AddDialog({
     if (!pipeline?.intake?.modes) return []
     const enabledModes = workspace?.intake_config?.enabled_modes || []
     if (enabledModes.length === 0) return pipeline.intake.modes
-    return pipeline.intake.modes.filter((mode) =>
+    const filtered = pipeline.intake.modes.filter((mode) =>
       enabledModes.includes(mode.key)
     )
+    // If enabled_modes doesn't match any pipeline modes (e.g. after pipeline
+    // switch), fall back to all pipeline modes rather than showing nothing.
+    return filtered.length > 0 ? filtered : pipeline.intake.modes
   }, [pipeline, workspace])
 
   const getEffectiveLabel = useCallback(
