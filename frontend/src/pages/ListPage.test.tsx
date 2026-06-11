@@ -3,10 +3,11 @@ import { render, screen, act, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ListPage } from './ListPage'
 import { useVideoStore } from '../stores/videoStore'
+import { api } from '../api'
 
 const mockApi = vi.fn()
 vi.mock('../api', () => ({
-  api: (...args: any[]) => mockApi(...args),
+  api: (...args: Parameters<typeof api>) => mockApi(...args),
 }))
 
 vi.mock('../layouts/AppShell', () => ({

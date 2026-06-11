@@ -101,7 +101,7 @@ describe('AgentAllocationList', () => {
       expect(screen.getByLabelText('并发限制')).toBeInTheDocument()
     })
 
-    const input = screen.getByLabelText('并发限制') as any
+    const input = screen.getByLabelText('并发限制') as HTMLInputElement
     input.value = '3'
     fireEvent.input(input)
     fireEvent.click(screen.getByText('确认'))
@@ -211,7 +211,7 @@ describe('AgentAllocationList', () => {
     })
 
     const assignedSection = screen.getByTestId('assigned-agents')
-    const input = within(assignedSection).getByLabelText('并发限制') as any
+    const input = within(assignedSection).getByLabelText('并发限制') as HTMLInputElement
     input.value = '5'
     fireEvent.input(input)
 
@@ -238,7 +238,7 @@ describe('AgentAllocationList', () => {
     })
 
     const assignedSection = screen.getByTestId('assigned-agents')
-    const input = within(assignedSection).getByLabelText('并发限制') as any
+    const input = within(assignedSection).getByLabelText('并发限制') as HTMLInputElement
     input.value = '0'
     fireEvent.input(input)
 
