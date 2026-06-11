@@ -16,6 +16,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "freezegun>=1.5.5",
   "httpx",
   "mypy>=2.1.0",
   "pytest",
