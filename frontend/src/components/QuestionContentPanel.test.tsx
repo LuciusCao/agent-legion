@@ -117,4 +117,44 @@ describe('QuestionContentPanel', () => {
     const listItems = screen.getAllByRole('listitem')
     expect(listItems[1].querySelector('md-icon')).toHaveTextContent('check')
   })
+
+  it('renders structured answer blanks with alternatives', async () => {
+    mockFetchQuestionDetail.mockResolvedValue({
+      question_id: 'Q6',
+      title: 'Test',
+      normalized: {
+        stem: '<p>Fill blanks</p>',
+        answerBlanks: [
+          { alternatives: ['\\[68\\]', '36'], isLatex: true },
+          { alternatives: ['52'], isLatex: false },
+        ],
+      },
+      cms_payload: null,
+      jobs: [],
+    })
+
+    render(<QuestionContentPanel workspaceId="ws1" questionId="Q6" />)
+    await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
+    expect(screen.getByText(/第1空/)).toBeInTheDocument()
+    expect(screen.getByText(/第2空/)).toBeInTheDocument()
+    expect(screen.getAllByText('68').length).toBeGreaterThan(0)
+    expect(screen.getByText('52')).toBeInTheDocument()
+  })
+
+  it('falls back to old extractAnswerItems when answerBlanks missing', async () => {
+    mockFetchQuestionDetail.mockResolvedValue({
+      question_id: 'Q7',
+      title: 'Test',
+      normalized: {
+        stem: '<p>Simple</p>',
+        answer: ['B'],
+      },
+      cms_payload: null,
+      jobs: [],
+    })
+
+    render(<QuestionContentPanel workspaceId="ws1" questionId="Q7" />)
+    await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
+    expect(screen.getByText('B')).toBeInTheDocument()
+  })
 })
