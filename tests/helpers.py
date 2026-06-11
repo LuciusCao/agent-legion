@@ -1,15 +1,73 @@
-import json
-from pathlib import Path
+from __future__ import annotations
 
+import json
+import time
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
+
+from server.app.jobs import JobQueries
 from server.app.pipeline.transcribe import TranscriptionProvider
+from server.app.pipeline_worker_thread import PipelineWorkerThread
+from server.app.pipelines.definition import PipelineDefinition
+from server.app.pipelines.registry import load_registered_pipeline
 from server.app.settings import Settings
+
+
+def wait_until(
+    condition: Callable[[], bool],
+    *,
+    timeout: float = 5.0,
+    interval: float = 0.05,
+) -> None:
+    """Wait until *condition* returns True, raising TimeoutError on expiry."""
+    end = time.monotonic() + timeout
+    while time.monotonic() < end:
+        if condition():
+            return
+        time.sleep(interval)
+    raise TimeoutError(f"Condition not met within {timeout}s")
+
+
+def make_pipeline_worker(
+    tmp_path: Path,
+    queries: JobQueries,
+    *,
+    pi_binary: str | None = "echo",
+    pi_timeout: int = 1,
+) -> tuple[PipelineWorkerThread, PipelineDefinition]:
+    """Build a configured PipelineWorkerThread for the reading_analysis pipeline."""
+    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    pipelines_config: dict[str, object] = {"enabled": True}
+    if pi_binary is not None:
+        pipelines_config["pi"] = {"binary": pi_binary, "timeout_seconds": pi_timeout}
+
+    settings = Settings(
+        root_dir=Path("."),
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={"pipelines": pipelines_config},
+    )
+
+    worker = PipelineWorkerThread(queries, settings)
+    worker._definitions = [definition]
+    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
+    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
+    worker._skill_root = tmp_path / "skills"
+    worker._skill_root.mkdir(parents=True)
+
+    return worker, definition
 
 
 class BadProvider(TranscriptionProvider):
     name = "whisper"
 
     def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
-        output_path.write_text("", encoding="utf-8")
+        raise RuntimeError("forced failure")
 
 
 class GoodProvider(TranscriptionProvider):
@@ -31,11 +89,14 @@ class TestProvider(TranscriptionProvider):
 
 
 class ChapterRunner:
-    def __init__(self):
+    def __init__(self) -> None:
         self.calls = 0
 
-    def run(self, phase, video_id, video_dir, prompt_dir, log_path):
+    def run(
+        self, phase: Any, video_id: str, video_dir: Path, prompt_dir: Path, log_path: Path
+    ) -> Any:
         self.calls += 1
+        phase_key = getattr(phase, "key", str(phase))
         (video_dir / "chapters_raw.json").write_text(
             json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
             encoding="utf-8",
@@ -50,7 +111,7 @@ class ChapterRunner:
             {
                 "status": "completed",
                 "error_message": "",
-                "command": ["openclaw", "chapter_generate", video_id],
+                "command": ["openclaw", phase_key, video_id],
             },
         )()
 
@@ -62,29 +123,27 @@ class InputItem:
         title: str = "",
         content_type: str = "knowledge",
         external_id: str = "",
+        source_uuid: str = "",
     ):
         self.url = url
         self.title = title
         self.content_type = content_type
         self.external_id = external_id
+        self.source_uuid = source_uuid
 
 
-def setup_spa_app(
-    tmp_path, monkeypatch, *, root_dir_name="project", data_dir_name="data", config=None
-):
-    """Create a minimal filesystem layout and patch load_settings so create_app mounts the SPA."""
-    from server.app import main
+def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
+    """Create a temporary project root/data dir and patch create_app to use them."""
+    root_dir = tmp_path / "root"
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(parents=True)
 
-    root_dir = tmp_path / root_dir_name
-    data_dir = tmp_path / data_dir_name
-    for sub in ("videos", "logs", "packages", "jobs"):
-        (data_dir / sub).mkdir(parents=True, exist_ok=True)
+    from server.app import main as app_main
 
-    cfg = config if config is not None else {}
-    default_data_dir = data_dir
-
-    def fake_load_settings(data_dir=None):
-        resolved = data_dir if data_dir is not None else default_data_dir
+    def fake_load_settings(
+        data_dir: Path | None = None, config_path: Path | None = None
+    ) -> Settings:
+        resolved = data_dir or tmp_path / "data"
         return Settings(
             root_dir=root_dir,
             data_dir=resolved,
@@ -92,8 +151,8 @@ def setup_spa_app(
             logs_dir=resolved / "logs",
             packages_dir=resolved / "packages",
             jobs_dir=resolved / "jobs",
-            config=cfg,
+            config={},
         )
 
-    monkeypatch.setattr(main, "load_settings", fake_load_settings)
+    monkeypatch.setattr(app_main, "load_settings", fake_load_settings)
     return root_dir, data_dir

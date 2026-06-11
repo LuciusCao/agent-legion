@@ -25,6 +25,7 @@ from server.app.pipelines.executor import (
     execute_node_once,
 )
 from server.app.pipelines.pi_runner import PiRunner
+from tests.helpers import make_pipeline_worker, wait_until
 
 
 def test_execute_fetch_question_context_writes_artifact(tmp_path):
@@ -429,14 +430,8 @@ def test_pipeline_worker_does_not_start_when_app_worker_disabled(tmp_path, monke
 
 
 def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(tmp_path, queries)
     job = queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -445,23 +440,6 @@ def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkey
         title="Question Q100",
         node_keys=list(definition.nodes),
     )
-
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True, "pi": {"binary": "echo", "timeout_seconds": 1}}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
 
     processed = worker._poll()
 
@@ -482,14 +460,8 @@ def test_pipeline_worker_schedules_reading_analysis_local_nodes(tmp_path, monkey
 
 
 def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(tmp_path, queries)
     queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -498,23 +470,6 @@ def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
         title="Question Q100",
         node_keys=list(definition.nodes),
     )
-
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True, "pi": {"binary": "echo", "timeout_seconds": 1}}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
 
     # Block the wrapped execution so the future stays in-flight across polls.
     import threading as _threading
@@ -541,14 +496,8 @@ def test_pipeline_worker_skips_duplicate_submissions(tmp_path, monkeypatch):
 
 
 def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, _definition = make_pipeline_worker(tmp_path, queries)
     queries.create_job(
         pipeline_key="question_content",
         source_type="question_id",
@@ -557,23 +506,6 @@ def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatc
         title="Question Q100",
         node_keys=["fetch_question_context"],
     )
-
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True, "pi": {"binary": "echo", "timeout_seconds": 1}}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
 
     processed = worker._poll()
 
@@ -585,14 +517,8 @@ def test_pipeline_worker_does_not_schedule_question_content(tmp_path, monkeypatc
 
 
 def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(tmp_path, queries)
     queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -601,23 +527,6 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
         title="Question Q100",
         node_keys=list(definition.nodes),
     )
-
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True, "pi": {"binary": "echo", "timeout_seconds": 1}}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
 
     worker._poll()
     assert len(worker._futures) == 1
@@ -629,12 +538,8 @@ def test_pipeline_worker_graceful_shutdown(tmp_path, monkeypatch):
 
 
 def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(tmp_path, queries, pi_binary=None)
     queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -644,17 +549,6 @@ def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
         node_keys=list(definition.nodes),
     )
 
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
     # start() should not raise even though pi config is missing
     worker.start()
     assert worker._pi_runner is None
@@ -663,14 +557,8 @@ def test_pipeline_worker_start_handles_missing_pi_config(tmp_path, monkeypatch):
 
 
 def test_pipeline_worker_fails_agent_node_when_pi_runner_missing(tmp_path, monkeypatch):
-    from concurrent.futures import ThreadPoolExecutor
-
-    from server.app.pipeline_worker_thread import PipelineWorkerThread
-    from server.app.pipelines.registry import load_registered_pipeline
-    from server.app.settings import Settings
-
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_registered_pipeline(Path("."), "reading_analysis")
+    worker, definition = make_pipeline_worker(tmp_path, queries, pi_binary=None)
     job = queries.create_job(
         pipeline_key="reading_analysis",
         source_type="question",
@@ -684,33 +572,13 @@ def test_pipeline_worker_fails_agent_node_when_pi_runner_missing(tmp_path, monke
         json.dumps({"questions": [{"question_id": "Q100"}]}), encoding="utf-8"
     )
 
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True}},
-    )
-
-    worker = PipelineWorkerThread(queries, settings)
-    worker._definitions = [definition]
-    worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-    worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
-
     # Poll should process fetch_questions (local) and clean_and_parse (local)
     # Then extract_keywords (agent) should be marked failed because pi runner is missing
-    for _ in range(10):
+    def _extract_keywords_failed() -> bool:
         worker._poll()
-        import time
+        return queries.get_job_node(job["id"], "extract_keywords")["status"] == "failed"
 
-        time.sleep(0.5)
-        job_state = queries.get_job(job["id"])
-        if job_state["status"] == "failed":
-            break
+    wait_until(_extract_keywords_failed, timeout=5.0)
 
     node = queries.get_job_node(job["id"], "extract_keywords")
     assert node["status"] == "failed"
