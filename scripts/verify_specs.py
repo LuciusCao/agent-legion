@@ -233,7 +233,7 @@ def main() -> int:
     for c in classifications:
         target = root / "docs" / "superpowers" / c["target_dir"]
         new_path = move_spec(c["path"], target, args.dry_run)
-        if new_path:
+        if new_path and not args.dry_run:
             c["path"] = new_path
 
     for c in classifications:
