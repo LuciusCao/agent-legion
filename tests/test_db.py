@@ -4,6 +4,7 @@ import threading
 from pathlib import Path
 
 import pytest
+from freezegun import freeze_time
 
 from server.app.db import Database
 from server.app.db.notifications import NotificationHub
@@ -468,11 +469,9 @@ def test_notify_safe_under_concurrent_threads(db):
     assert not errors, f"Concurrent _notify raised: {errors}"
 
 
+@freeze_time("2024-01-01T00:00:00", auto_tick_seconds=0.01)
 def test_insert_and_list_packages(db):
-    import time
-
     db.insert_package("/tmp/packages/test-a.zip")
-    time.sleep(0.01)
     db.insert_package("/tmp/packages/test-b.zip")
 
     packages = db.list_packages(limit=10)
