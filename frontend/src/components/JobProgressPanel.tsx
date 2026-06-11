@@ -44,20 +44,9 @@ function formatTime(iso?: string | null): string {
 interface JobProgressPanelProps {
   nodes: JobNodeRecord[]
   runs: NodeRunRecord[]
-  artifacts: string[]
-  activeArtifact: string | null
-  activeArtifactContent: string
-  onArtifactClick: (name: string) => void
 }
 
-export function JobProgressPanel({
-  nodes,
-  runs,
-  artifacts,
-  activeArtifact,
-  activeArtifactContent,
-  onArtifactClick,
-}: JobProgressPanelProps) {
+export function JobProgressPanel({ nodes, runs }: JobProgressPanelProps) {
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
   const [logDialog, setLogDialog] = useState<{
     nodeKey: string
@@ -184,31 +173,6 @@ export function JobProgressPanel({
           })}
         </div>
       </div>
-
-      {artifacts.length > 0 && (
-        <div className={styles.artifactsSection}>
-          <h3 className={styles.panelTitle}>产物文件</h3>
-          <ul className={styles.artifactList}>
-            {artifacts.map((name) => (
-              <li key={name}>
-                <button
-                  type="button"
-                  className={`${styles.artifactBtn} ${activeArtifact === name ? styles.artifactBtnActive : ''}`}
-                  onClick={() => onArtifactClick(name)}
-                >
-                  {name}
-                </button>
-              </li>
-            ))}
-          </ul>
-          {activeArtifact && activeArtifactContent && (
-            <div className={styles.artifactPreview}>
-              <h4 className={styles.artifactName}>{activeArtifact}</h4>
-              <pre className={styles.artifactPre}>{activeArtifactContent}</pre>
-            </div>
-          )}
-        </div>
-      )}
 
       {logDialog && (
         <md-dialog open onClosed={() => setLogDialog(null)} style={dialogStyle}>
