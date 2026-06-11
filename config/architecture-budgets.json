@@ -1,4 +1,5 @@
 {
+  "_comment": "Architecture budgets are measured in source lines, not bytes. Lowering a budget requires splitting the module first.",
   "route_exemptions": [
     "server/app/routes/artifacts.py:artifacts",
     "server/app/routes/common.py:worker_tick",
@@ -95,5 +96,18 @@
   "scheduler_threadpool_exemption_reasons": {
     "server/app/pipeline_worker_thread.py": "Legacy per-Workspace pools pending Phase 3 removal"
   },
-  "files": {}
+  "files": {
+    "server/app/routes/jobs.py": 1242,
+    "server/app/jobs/queries.py": 745,
+    "server/app/pipeline_worker_thread.py": 437,
+    "frontend/src/api.ts": 292,
+    "frontend/src/types.ts": 350,
+    "scripts/check_architecture.py": 205,
+    "tests/test_check_architecture.py": 292
+  },
+  "defaults": {
+    "server/app/routes": 300,
+    "server/app/services": 400,
+    "server/app/executors": 400
+  }
 }

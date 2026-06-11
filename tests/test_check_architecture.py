@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from scripts.check_architecture import check_repository, forbidden_imports, is_scheduler_path
@@ -233,3 +234,59 @@ def test_forbidden_imports_submodule_match():
 
 def test_is_scheduler_path_pipeline_worker_thread():
     assert is_scheduler_path("server/app/pipeline_worker_thread.py")
+
+
+def test_rejects_file_growth_above_recorded_budget(tmp_path):
+    write(tmp_path / "server/app/routes/jobs.py", "\n".join(["pass"] * 11) + "\n")
+    write(
+        tmp_path / "config/architecture-budgets.json",
+        json.dumps(
+            {
+                "route_exemptions": [],
+                "files": {"server/app/routes/jobs.py": 10},
+            }
+        ),
+    )
+
+    errors = check_repository(tmp_path)
+
+    assert any("11 lines exceeds budget 10" in error for error in errors)
+
+
+def test_allows_file_to_shrink_below_recorded_budget(tmp_path):
+    write(tmp_path / "server/app/routes/jobs.py", "\n".join(["pass"] * 9) + "\n")
+    write(
+        tmp_path / "config/architecture-budgets.json",
+        json.dumps(
+            {
+                "route_exemptions": [],
+                "files": {"server/app/routes/jobs.py": 10},
+            }
+        ),
+    )
+
+    assert check_repository(tmp_path) == []
+
+
+def test_default_budget_enforced_for_new_files(tmp_path):
+    write(
+        tmp_path / "server/app/services/big_service.py",
+        "\n".join(["pass"] * 401) + "\n",
+    )
+    write(
+        tmp_path / "config/architecture-budgets.json",
+        json.dumps(
+            {
+                "route_exemptions": [],
+                "files": {},
+                "defaults": {"server/app/services": 400},
+            }
+        ),
+    )
+
+    errors = check_repository(tmp_path)
+
+    assert any(
+        "server/app/services/big_service.py" in error and "401 lines exceeds budget 400" in error
+        for error in errors
+    )
