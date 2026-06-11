@@ -648,3 +648,22 @@ class JobQueries:
         return [
             {"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows
         ]
+
+    def upsert_workspace_agent_assignment(
+        self, workspace_id: str, agent_id: str, concurrency_limit: int
+    ) -> dict[str, Any]:
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into workspace_agent_assignments(workspace_id, agent_id, concurrency_limit)
+                values (?, ?, ?)
+                on conflict(workspace_id, agent_id) do update set
+                  concurrency_limit=excluded.concurrency_limit
+                """,
+                (workspace_id, agent_id, max(1, concurrency_limit)),
+            )
+            row = conn.execute(
+                "select * from workspace_agent_assignments where workspace_id=? and agent_id=?",
+                (workspace_id, agent_id),
+            ).fetchone()
+        return dict(row)
