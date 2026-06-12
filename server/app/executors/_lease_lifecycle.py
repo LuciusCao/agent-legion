@@ -1,0 +1,200 @@
+from __future__ import annotations
+
+import json
+import sqlite3
+from datetime import UTC, datetime, timedelta
+
+from server.app.executors._lease_transactions import _sqlite_timestamp, _sync_job_status
+from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
+
+
+def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -> bool:
+    now = datetime.now(UTC)
+    lease = conn.execute(
+        "select status from executor_leases where id=?",
+        (lease_id,),
+    ).fetchone()
+    if lease is None or lease["status"] != "active":
+        return False
+    expires_at = now + timedelta(seconds=ttl_seconds)
+    conn.execute(
+        """
+        update executor_leases
+        set heartbeat_at=?, expires_at=?
+        where id=? and status='active'
+        """,
+        (_sqlite_timestamp(now), _sqlite_timestamp(expires_at), lease_id),
+    )
+    return True
+
+
+def finish_lease(conn: sqlite3.Connection, lease_id: str, result: ExecutionResult) -> bool:
+    now = datetime.now(UTC)
+    now_str = _sqlite_timestamp(now)
+    lease = conn.execute(
+        """
+        select *
+        from executor_leases
+        where id=?
+        """,
+        (lease_id,),
+    ).fetchone()
+    if lease is None or lease["status"] != "active":
+        return False
+
+    conn.execute(
+        """
+        update executor_leases
+        set status='released'
+        where id=?
+        """,
+        (lease_id,),
+    )
+
+    node_run = conn.execute(
+        "select log_path from node_runs where id=?", (lease["node_run_id"],)
+    ).fetchone()
+    effective_log_path = result.log_path or (node_run["log_path"] if node_run is not None else "")
+    conn.execute(
+        """
+        update node_runs
+        set status=?, exit_code=?, error_message=?,
+            command_json=?, log_path=?, session_dir=?, finished_at=?
+        where id=?
+        """,
+        (
+            result.status,
+            result.exit_code,
+            result.error_message,
+            json.dumps(list(result.command)),
+            effective_log_path,
+            result.session_reference,
+            now_str,
+            lease["node_run_id"],
+        ),
+    )
+
+    node_status = "completed" if result.status == "completed" else "failed"
+    conn.execute(
+        """
+        update job_nodes
+        set status=?, error_message=?, finished_at=?
+        where job_id=? and node_key=?
+        """,
+        (node_status, result.error_message, now_str, lease["job_id"], lease["node_key"]),
+    )
+
+    _sync_job_status(conn, lease["job_id"])
+    return True
+
+
+def fail_without_lease(
+    conn: sqlite3.Connection,
+    request: ConfigurationFailureRequest,
+    error_message: str,
+) -> int | None:
+    now = datetime.now(UTC)
+    now_str = _sqlite_timestamp(now)
+    cursor = conn.execute(
+        """
+        insert into node_runs(
+            job_id, node_key, status, command_json, log_path,
+            run_dir, session_dir, started_at, finished_at, error_message
+        )
+        values (?, ?, 'failed', ?, ?, '', '', ?, ?, ?)
+        """,
+        (
+            request.job_id,
+            request.node_key,
+            json.dumps([]),
+            request.log_path,
+            now_str,
+            now_str,
+            error_message,
+        ),
+    )
+    node_run_id = cursor.lastrowid
+
+    conn.execute(
+        """
+        update job_nodes
+        set status='failed', error_message=?, finished_at=?
+        where job_id=? and node_key=?
+        """,
+        (error_message, now_str, request.job_id, request.node_key),
+    )
+
+    _sync_job_status(conn, request.job_id)
+    return node_run_id
+
+
+def expire_stale_leases(conn: sqlite3.Connection, now: datetime) -> list[str]:
+    now_str = _sqlite_timestamp(now)
+    rows = conn.execute(
+        """
+        select id, job_id, node_key, node_run_id
+        from executor_leases
+        where status='active' and expires_at<=?
+        """,
+        (now_str,),
+    ).fetchall()
+    expired: list[str] = []
+    for row in rows:
+        expired.append(row["id"])
+        conn.execute(
+            "update executor_leases set status='expired' where id=?",
+            (row["id"],),
+        )
+        conn.execute(
+            """
+            update node_runs
+            set status='failed', error_message='lease expired', finished_at=?
+            where id=?
+            """,
+            (now_str, row["node_run_id"]),
+        )
+        conn.execute(
+            """
+            update job_nodes
+            set status='stale', stale_reason='lease expired', finished_at=?
+            where job_id=? and node_key=?
+            """,
+            (now_str, row["job_id"], row["node_key"]),
+        )
+        _sync_job_status(conn, row["job_id"])
+    return expired
+
+
+def active_lease_counts(conn: sqlite3.Connection, executor_id: str) -> dict[str, int]:
+    now_str = _sqlite_timestamp(datetime.now(UTC))
+    counts: dict[str, int] = {"global": 0}
+
+    allocated = conn.execute(
+        "select workspace_id from workspace_executor_allocations where executor_id=?",
+        (executor_id,),
+    ).fetchall()
+    for row in allocated:
+        counts[row["workspace_id"]] = 0
+
+    global_row = conn.execute(
+        """
+        select count(*) as cnt
+        from executor_leases
+        where executor_id=? and status='active' and expires_at>?
+        """,
+        (executor_id, now_str),
+    ).fetchone()
+    counts["global"] = global_row["cnt"]
+
+    rows = conn.execute(
+        """
+        select workspace_id, count(*) as cnt
+        from executor_leases
+        where executor_id=? and status='active' and expires_at>?
+        group by workspace_id
+        """,
+        (executor_id, now_str),
+    ).fetchall()
+    for row in rows:
+        counts[row["workspace_id"]] = row["cnt"]
+    return counts
