@@ -85,14 +85,8 @@
   "route_import_baseline_reasons": {
     "server/app/routes/questions.py": "Legacy Workspace route importing CMS helpers"
   },
-  "scheduler_import_baselines": {
-    "server/app/pipeline_worker_thread.py": [
-      "server.app.pipelines.pi_runner"
-    ]
-  },
-  "scheduler_import_baseline_reasons": {
-    "server/app/pipeline_worker_thread.py": "Legacy scheduler thread importing agent runner"
-  },
+  "scheduler_import_baselines": {},
+  "scheduler_import_baseline_reasons": {},
   "scheduler_threadpool_baselines": {
     "server/app/pipeline_worker_thread.py": {
       "self._pools[executor_id]": 1
