@@ -39,6 +39,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/executors': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Executors */
+    get: operations['get_executors_api_executors_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/global-services': {
     parameters: {
       query?: never
@@ -694,6 +711,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/executor-configuration': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workspace Executor Configuration */
+    get: operations['get_workspace_executor_configuration_api_workspaces__workspace_id__executor_configuration_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/job-batches': {
     parameters: {
       query?: never
@@ -1063,6 +1097,41 @@ export interface components {
       /** Deleted */
       deleted: string
     }
+    /** ExecutorAllocationRequest */
+    ExecutorAllocationRequest: {
+      /** Concurrency Limit */
+      concurrency_limit: number
+      /** Executor Id */
+      executor_id: string
+    }
+    /** ExecutorAllocationResponse */
+    ExecutorAllocationResponse: {
+      /** Concurrency Limit */
+      concurrency_limit: number
+      /** Executor Id */
+      executor_id: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** ExecutorCatalogResponse */
+    ExecutorCatalogResponse: {
+      /** Executors */
+      executors: components['schemas']['ExecutorDefinitionResponse'][]
+    }
+    /** ExecutorDefinitionResponse */
+    ExecutorDefinitionResponse: {
+      /** Capabilities */
+      capabilities: string[]
+      /** Global Capacity */
+      global_capacity: number
+      /** Id */
+      id: string
+      /**
+       * Kind
+       * @enum {string}
+       */
+      kind: 'local' | 'pi' | 'openclaw'
+    }
     /** GlobalServicesResponse */
     GlobalServicesResponse: {
       /** Cms */
@@ -1132,6 +1201,24 @@ export interface components {
       jobs: {
         [key: string]: unknown
       }[]
+    }
+    /** NodeBindingRequest */
+    NodeBindingRequest: {
+      /** Executor Id */
+      executor_id: string
+      /** Node Key */
+      node_key: string
+      /** Pipeline Key */
+      pipeline_key: string
+    }
+    /** NodeLimitRequest */
+    NodeLimitRequest: {
+      /** Concurrency Limit */
+      concurrency_limit: number
+      /** Node Key */
+      node_key: string
+      /** Pipeline Key */
+      pipeline_key: string
     }
     /** OpenclawConfigResponse */
     OpenclawConfigResponse: {
@@ -1345,24 +1432,22 @@ export interface components {
     WorkspaceAgentListResponse: components['schemas']['WorkspaceAgentAssignmentResponse'][]
     /** WorkspaceConfigurationRequest */
     WorkspaceConfigurationRequest: {
-      /** Agents */
-      agents?: components['schemas']['WorkspaceAgentConfig'][]
       /** Description */
       description?: string | null
+      /** Executor Allocations */
+      executor_allocations?: components['schemas']['ExecutorAllocationRequest'][]
       /** Name */
       name?: string | null
+      /** Node Bindings */
+      node_bindings?: components['schemas']['NodeBindingRequest'][]
+      /** Node Limits */
+      node_limits?: components['schemas']['NodeLimitRequest'][]
       settings: components['schemas']['WorkspaceConfigurationSettingsRequest']
     }
     /** WorkspaceConfigurationResponse */
     WorkspaceConfigurationResponse: {
-      /** Agents */
-      agents: {
-        [key: string]: unknown
-      }[]
-      /** Settings */
-      settings: {
-        [key: string]: unknown
-      }
+      executor_configuration: components['schemas']['WorkspaceExecutorConfigurationResponse']
+      settings: components['schemas']['WorkspaceSettingsPayload']
       /** Workspace */
       workspace: {
         [key: string]: unknown
@@ -1435,6 +1520,17 @@ export interface components {
         [key: string]: unknown
       }
     }
+    /** WorkspaceExecutorConfigurationResponse */
+    WorkspaceExecutorConfigurationResponse: {
+      /** Allocations */
+      allocations: components['schemas']['ExecutorAllocationResponse'][]
+      /** Bindings */
+      bindings: components['schemas']['NodeBindingRequest'][]
+      /** Migration Warnings */
+      migration_warnings: string[]
+      /** Node Limits */
+      node_limits: components['schemas']['NodeLimitRequest'][]
+    }
     /** WorkspaceResponse */
     WorkspaceResponse: {
       /** Workspace */
@@ -1448,6 +1544,23 @@ export interface components {
       runs: {
         [key: string]: unknown
       }[]
+    }
+    /** WorkspaceSettingsPayload */
+    WorkspaceSettingsPayload: {
+      /** Entitytype */
+      entityType: string
+      /** Intakemodes */
+      intakeModes: string[]
+      /** Labeloverrides */
+      labelOverrides: {
+        [key: string]: string
+      }
+      /** Pipelinekey */
+      pipelineKey: string
+      /** Resources */
+      resources: {
+        [key: string]: unknown
+      }
     }
     /** WorkspaceSettingsResponse */
     WorkspaceSettingsResponse: {
@@ -1641,6 +1754,26 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_executors_api_executors_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ExecutorCatalogResponse']
         }
       }
     }
@@ -3046,6 +3179,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceDagResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_workspace_executor_configuration_api_workspaces__workspace_id__executor_configuration_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceExecutorConfigurationResponse']
         }
       }
       /** @description Validation Error */

@@ -4,6 +4,9 @@ from server.app.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workspace_executor_validation import (
+    validate_workspace_executor_configuration,
+)
 from server.app.settings import Settings
 
 
@@ -46,24 +49,12 @@ class WorkspaceConfigurationService:
         resources = resource_config.get("resources")
         if not isinstance(resources, dict):
             resources = {}
-        pipeline_config = workspace.get("pipeline_config")
-        if not isinstance(pipeline_config, dict):
-            pipeline_config = {}
-        definition = self.pipelines.definition(
-            str(workspace.get("default_pipeline_key") or "question_content")
-        )
-        assignments = self.job_db.list_workspace_agents(str(workspace.get("id") or ""))
         return {
             "entityType": str(workspace.get("default_entity") or "question"),
             "intakeModes": enabled_modes if isinstance(enabled_modes, list) else [],
             "labelOverrides": label_overrides if isinstance(label_overrides, dict) else {},
             "pipelineKey": str(workspace.get("default_pipeline_key") or "question_content"),
-            "agentIds": [a["agent_id"] for a in assignments],
-            "concurrencyLimit": max((a["concurrency_limit"] for a in assignments), default=1),
             "resources": resources,
-            "localConcurrency": pipeline_config.get("local", definition.concurrency.local),
-            "agentConcurrency": pipeline_config.get("agent", definition.concurrency.agent),
-            "nodeLocalConcurrency": pipeline_config.get("nodes", {}),
         }
 
     def list_workspaces(self) -> list[dict[str, Any]]:
@@ -123,12 +114,14 @@ class WorkspaceConfigurationService:
         workspace_id: str,
         workspace_patch: dict[str, Any],
         settings_patch: dict[str, Any],
-        agents: list[dict[str, Any]],
+        executor_allocations: list[dict[str, Any]],
+        node_bindings: list[dict[str, Any]],
+        node_limits: list[dict[str, Any]],
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         current = self._settings_payload(workspace)
         pipeline_key = settings_patch.get("pipelineKey") or str(current["pipelineKey"])
-        self.pipelines.definition(pipeline_key)
+        pipeline = self.pipelines.definition(pipeline_key)
 
         local_concurrency = settings_patch.get("localConcurrency")
         agent_concurrency = settings_patch.get("agentConcurrency")
@@ -143,14 +136,21 @@ class WorkspaceConfigurationService:
         pipeline_config = {
             "local": local_concurrency
             if local_concurrency is not None
-            else current["localConcurrency"],
+            else pipeline.concurrency.local,
             "agent": agent_concurrency
             if agent_concurrency is not None
-            else current["agentConcurrency"],
+            else pipeline.concurrency.agent,
             "nodes": node_concurrency
             if node_concurrency is not None
-            else current["nodeLocalConcurrency"],
+            else (pipeline.concurrency.nodes or {}),
         }
+        validate_workspace_executor_configuration(
+            pipeline=pipeline,
+            executor_definitions=self.settings.executor_definitions,
+            allocations=executor_allocations,
+            bindings=node_bindings,
+            node_limits=node_limits,
+        )
         name_value = workspace_patch.get("name")
         name: str = name_value if name_value is not None else str(workspace["name"])
         description_value = workspace_patch.get("description")
@@ -160,7 +160,7 @@ class WorkspaceConfigurationService:
             else str(workspace.get("description") or "")
         )
         try:
-            saved_workspace, assignments = self.job_db.update_workspace_configuration(
+            saved_workspace = self.job_db.update_workspace_configuration(
                 workspace_id,
                 name=name,
                 description=description,
@@ -180,14 +180,20 @@ class WorkspaceConfigurationService:
                     else current["labelOverrides"],
                 },
                 pipeline_config=pipeline_config,
-                agent_assignments=agents,
+                executor_allocations=executor_allocations,
+                node_bindings=node_bindings,
+                node_limits=node_limits,
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
+        executor_configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
         return {
             "workspace": saved_workspace,
             "settings": self._settings_payload(saved_workspace),
-            "agents": assignments,
+            "executor_configuration": {
+                **executor_configuration,
+                "migration_warnings": [],
+            },
         }
 
     def update_section(
