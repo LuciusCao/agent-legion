@@ -282,7 +282,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
 
 
 def test_v004_creates_required_indexes_and_foreign_keys(tmp_path: Path) -> None:
-    """The V004 rebuild installs the four required FK relationships and indexes."""
+    """The V004 rebuild installs the required FK relationships and indexes."""
     path = tmp_path / "v004_fks.sqlite"
     init_db(path)
 
@@ -300,10 +300,13 @@ def test_v004_creates_required_indexes_and_foreign_keys(tmp_path: Path) -> None:
         assert "idx_jobs_workspace_source" in indexes
         assert "idx_job_nodes_job_status" in indexes
         assert "idx_node_runs_job_id" in indexes
+        assert "idx_executor_leases_global_active" in indexes
+        assert "idx_executor_leases_workspace_active" in indexes
+        assert "idx_executor_leases_node_active" in indexes
 
         relationships = {
             (table, row["from"], row["table"])
-            for table in ("job_batches", "jobs", "job_nodes", "node_runs")
+            for table in ("job_batches", "jobs", "job_nodes", "node_runs", "executor_leases")
             for row in conn.execute(f"pragma foreign_key_list('{table}')").fetchall()
         }
         assert relationships == {
@@ -311,11 +314,14 @@ def test_v004_creates_required_indexes_and_foreign_keys(tmp_path: Path) -> None:
             ("jobs", "workspace_id", "workspaces"),
             ("job_nodes", "job_id", "jobs"),
             ("node_runs", "job_id", "jobs"),
+            ("executor_leases", "workspace_id", "workspaces"),
+            ("executor_leases", "job_id", "jobs"),
+            ("executor_leases", "node_run_id", "node_runs"),
         }
 
 
 def test_v004_foreign_key_cascades(tmp_path: Path) -> None:
-    """Deleting a workspace cascades to batches/jobs; deleting a job cascades to nodes/runs."""
+    """Deleting a workspace cascades to batches/jobs/leases; deleting a node_run cascades to its lease."""
     path = tmp_path / "v004_cascade.sqlite"
     init_db(path)
 
@@ -335,6 +341,16 @@ def test_v004_foreign_key_cascades(tmp_path: Path) -> None:
         conn.execute(
             "insert into node_runs(job_id, node_key, status) values ('job1', 'node_a', 'pending')"
         )
+        conn.execute(
+            "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
+            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "values ('lease1', 'exec1', 'exec_a', 'ws1', 'job1', 'question_content', "
+            "'node_a', 1, 'active', '2024-01-01 10:00:00', '2024-01-01 10:00:00', "
+            "'2024-01-01 11:00:00')"
+        )
+
+        conn.execute("delete from node_runs where id = 1")
+        assert conn.execute("select count(*) from executor_leases").fetchone()[0] == 0
 
         conn.execute("delete from workspaces where id = 'ws1'")
         assert conn.execute("select count(*) from job_batches").fetchone()[0] == 0

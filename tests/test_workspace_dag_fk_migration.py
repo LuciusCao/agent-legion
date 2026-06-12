@@ -81,6 +81,31 @@ def _create_pre_v004_database(path: Path) -> None:
               run_dir text not null default '',
               session_dir text not null default ''
             );
+            create table executor_leases (
+              id text primary key,
+              execution_id text not null unique,
+              executor_id text not null,
+              workspace_id text not null,
+              job_id text not null,
+              pipeline_key text not null,
+              node_key text not null,
+              node_run_id integer not null,
+              status text not null check(status in ('active', 'released', 'expired')),
+              acquired_at text not null,
+              heartbeat_at text not null,
+              expires_at text not null,
+              foreign key(workspace_id) references workspaces(id) on delete cascade,
+              foreign key(job_id) references jobs(id) on delete cascade,
+              foreign key(node_run_id) references node_runs(id) on delete cascade
+            );
+            create table schema_migrations (
+              version integer primary key,
+              name text not null,
+              applied_at text not null default current_timestamp
+            );
+            insert into schema_migrations(version, name) values (1, 'executor_core');
+            insert into schema_migrations(version, name) values (2, 'executor_bootstrap_state');
+            insert into schema_migrations(version, name) values (3, 'legacy_columns');
             insert into workspaces(id, name) values ('ws1', 'Workspace One');
             """
         )
@@ -89,7 +114,7 @@ def _create_pre_v004_database(path: Path) -> None:
 
 def _foreign_key_relationships(conn) -> set[tuple[str, str, str]]:
     relationships: set[tuple[str, str, str]] = set()
-    for table in ("job_batches", "jobs", "job_nodes", "node_runs"):
+    for table in ("job_batches", "jobs", "job_nodes", "node_runs", "executor_leases"):
         for row in conn.execute(f"pragma foreign_key_list('{table}')").fetchall():
             relationships.add((table, row["from"], row["table"]))
     return relationships
@@ -101,6 +126,8 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
 
     conn = connect_sqlite(path)
     with conn:
+        # Disable FK enforcement so we can insert intentional orphan rows.
+        conn.execute("pragma foreign_keys = off")
         conn.execute(
             "insert into job_batches(id, workspace_id, pipeline_key, source_kind) "
             "values ('batch1', 'missing_ws', 'question_content', 'mixed')"
@@ -119,6 +146,35 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
         conn.execute(
             "insert into node_runs(job_id, node_key, status) values ('job2', 'node_a', 'pending')"
         )
+        conn.execute(
+            "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
+            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "values ('lease1', 'exec1', 'exec_a', 'ws1', 'job2', 'question_content', 'node_a', "
+            "1, 'active', '2024-01-01 10:00:00', '2024-01-01 10:00:00', '2024-01-01 11:00:00')"
+        )
+        # Intentional orphans on executor_leases.
+        conn.execute(
+            "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
+            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "values ('lease_bad_ws', 'exec_bad_ws', 'exec_a', 'missing_ws', 'job2', "
+            "'question_content', 'node_a', 1, 'active', '2024-01-01 10:00:00', "
+            "'2024-01-01 10:00:00', '2024-01-01 11:00:00')"
+        )
+        conn.execute(
+            "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
+            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "values ('lease_bad_job', 'exec_bad_job', 'exec_a', 'ws1', 'missing_job', "
+            "'question_content', 'node_a', 1, 'active', '2024-01-01 10:00:00', "
+            "'2024-01-01 10:00:00', '2024-01-01 11:00:00')"
+        )
+        conn.execute(
+            "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
+            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "values ('lease_bad_run', 'exec_bad_run', 'exec_a', 'ws1', 'job2', "
+            "'question_content', 'node_a', 999, 'active', '2024-01-01 10:00:00', "
+            "'2024-01-01 10:00:00', '2024-01-01 11:00:00')"
+        )
+        conn.execute("pragma foreign_keys = on")
     conn.close()
 
     from server.app.db.migrations.report import MigrationBlockedError
@@ -129,11 +185,33 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
     report = exc_info.value.report
     assert report.migration_version == _MIGRATION_VERSION
     assert report.migration_name == _MIGRATION_NAME
-    assert {issue.table for issue in report.issues} == {"job_batches", "jobs"}
+    assert {issue.table for issue in report.issues} == {
+        "job_batches",
+        "jobs",
+        "executor_leases",
+    }
     assert any(
         issue.table == "job_batches" and issue.row_key == "batch1" for issue in report.issues
     )
     assert any(issue.table == "jobs" and issue.row_key == "job1" for issue in report.issues)
+    assert any(
+        issue.table == "executor_leases"
+        and issue.row_key == "lease_bad_ws"
+        and issue.constraint == "fk_executor_leases_workspace_id"
+        for issue in report.issues
+    )
+    assert any(
+        issue.table == "executor_leases"
+        and issue.row_key == "lease_bad_job"
+        and issue.constraint == "fk_executor_leases_job_id"
+        for issue in report.issues
+    )
+    assert any(
+        issue.table == "executor_leases"
+        and issue.row_key == "lease_bad_run"
+        and issue.constraint == "fk_executor_leases_node_run_id"
+        for issue in report.issues
+    )
 
     # Deterministic serialization: sorted by table/key/constraint, no JSON payloads.
     data = json.loads(report.to_json())
@@ -151,6 +229,7 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
         assert conn.execute("select count(*) from jobs").fetchone()[0] == 2
         assert conn.execute("select count(*) from job_nodes").fetchone()[0] == 1
         assert conn.execute("select count(*) from node_runs").fetchone()[0] == 1
+        assert conn.execute("select count(*) from executor_leases").fetchone()[0] == 4
         versions = conn.execute("select version from schema_migrations").fetchall()
         assert 4 not in {row["version"] for row in versions}
 
@@ -184,6 +263,13 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
             "values ('job1', 'extract', 'completed', '2024-01-01 10:05:00', "
             "'2024-01-01 10:10:00', '[]', 0, '/tmp/log', '', '/tmp/run', '/tmp/session')"
         )
+        conn.execute(
+            "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
+            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "values ('lease1', 'exec1', 'exec_a', 'ws1', 'job1', 'question_content', "
+            "'extract', 1, 'active', '2024-01-01 10:00:00', '2024-01-01 10:00:00', "
+            "'2024-01-01 11:00:00')"
+        )
     conn.close()
 
     init_db(path)
@@ -214,6 +300,14 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
         assert run["log_path"] == "/tmp/log"
         assert run["session_dir"] == "/tmp/session"
 
+        lease = conn.execute("select * from executor_leases where id = 'lease1'").fetchone()
+        assert lease is not None
+        assert lease["workspace_id"] == "ws1"
+        assert lease["job_id"] == "job1"
+        assert lease["node_run_id"] == 1
+        assert lease["status"] == "active"
+        assert lease["expires_at"] == "2024-01-01 11:00:00"
+
         # Expected indexes exist.
         indexes = {
             row["name"]
@@ -228,6 +322,9 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
         assert "idx_jobs_workspace_source" in indexes
         assert "idx_job_nodes_job_status" in indexes
         assert "idx_node_runs_job_id" in indexes
+        assert "idx_executor_leases_global_active" in indexes
+        assert "idx_executor_leases_workspace_active" in indexes
+        assert "idx_executor_leases_node_active" in indexes
 
         # Required FK relationships.
         assert _foreign_key_relationships(conn) == {
@@ -235,9 +332,15 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
             ("jobs", "workspace_id", "workspaces"),
             ("job_nodes", "job_id", "jobs"),
             ("node_runs", "job_id", "jobs"),
+            ("executor_leases", "workspace_id", "workspaces"),
+            ("executor_leases", "job_id", "jobs"),
+            ("executor_leases", "node_run_id", "node_runs"),
         }
 
         # Cascades work.
+        conn.execute("delete from node_runs where id = 1")
+        assert conn.execute("select count(*) from executor_leases").fetchone()[0] == 0
+
         conn.execute("delete from workspaces where id = 'ws1'")
         assert conn.execute("select count(*) from job_batches").fetchone()[0] == 0
         assert conn.execute("select count(*) from jobs").fetchone()[0] == 0
@@ -261,6 +364,9 @@ def test_v004_is_idempotent(tmp_path: Path) -> None:
             ("jobs", "workspace_id", "workspaces"),
             ("job_nodes", "job_id", "jobs"),
             ("node_runs", "job_id", "jobs"),
+            ("executor_leases", "workspace_id", "workspaces"),
+            ("executor_leases", "job_id", "jobs"),
+            ("executor_leases", "node_run_id", "node_runs"),
         }
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
