@@ -1,0 +1,16 @@
+from server.app.db.migrations.runner import Migration
+from server.app.db.migrations.v001_executor_core import MIGRATION as V001_EXECUTOR_CORE
+from server.app.db.migrations.v002_executor_bootstrap_state import (
+    MIGRATION as V002_EXECUTOR_BOOTSTRAP_STATE,
+)
+from server.app.db.migrations.v003_legacy_columns import MIGRATION as V003_LEGACY_COLUMNS
+from server.app.db.migrations.v004_workspace_dag_foreign_keys import (
+    MIGRATION as V004_WORKSPACE_DAG_FOREIGN_KEYS,
+)
+
+MIGRATIONS: tuple[Migration, ...] = (
+    V001_EXECUTOR_CORE,
+    V002_EXECUTOR_BOOTSTRAP_STATE,
+    V003_LEGACY_COLUMNS,
+    V004_WORKSPACE_DAG_FOREIGN_KEYS,
+)
