@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pytest
+from fastapi.testclient import TestClient
 
 from server.app.executors.config import (
     ExecutorConfig,
@@ -10,6 +11,7 @@ from server.app.executors.config import (
     PiExecutorConfig,
 )
 from server.app.jobs.queries import JobQueries
+from server.app.main import create_app
 from server.app.pipelines.definition import (
     PipelineAgent,
     PipelineConcurrency,
@@ -333,3 +335,66 @@ def test_bootstrap_does_not_bind_pi_node_without_workspace_allocation(
     ]
     assert {row["node_key"] for row in bindings} == {"local_a", "local_b"}
     assert all(row["executor_id"] == "local-default" for row in bindings)
+
+
+def _executor_config_by_id(response_json: dict) -> dict[str, int]:
+    return {row["executor_id"]: row["concurrency_limit"] for row in response_json["allocations"]}
+
+
+def _seed_default_workspace_assignment(tmp_path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    JobQueries(db_path, jobs_dir=jobs_dir).upsert_workspace_agent_assignment("default", "pi", 3)
+
+
+def test_app_startup_materializes_executor_configuration_without_worker(tmp_path) -> None:
+    _seed_default_workspace_assignment(tmp_path)
+    app = create_app(data_dir=tmp_path, start_worker=False)
+
+    with TestClient(app) as client:
+        response = client.get("/api/workspaces/default/executor-configuration")
+
+    assert response.status_code == 200
+    assert {row["executor_id"] for row in response.json()["allocations"]} == {
+        "local-default",
+        "pi-default",
+    }
+
+
+def test_app_startup_materialization_is_idempotent(tmp_path) -> None:
+    _seed_default_workspace_assignment(tmp_path)
+    app = create_app(data_dir=tmp_path, start_worker=False)
+
+    with TestClient(app) as client:
+        first = client.get("/api/workspaces/default/executor-configuration").json()
+
+    # Simulate a second startup against the same database.
+    app2 = create_app(data_dir=tmp_path, start_worker=False)
+    with TestClient(app2) as client:
+        second = client.get("/api/workspaces/default/executor-configuration").json()
+
+    assert first == second
+
+
+def test_app_startup_preserves_user_modified_executor_configuration(tmp_path) -> None:
+    _seed_default_workspace_assignment(tmp_path)
+    app = create_app(data_dir=tmp_path, start_worker=False)
+
+    with TestClient(app) as client:
+        client.get("/api/workspaces/default/executor-configuration")
+
+    with app.state.job_db.connect() as conn:
+        conn.execute(
+            "update workspace_executor_allocations set concurrency_limit = ? "
+            "where workspace_id = ? and executor_id = ?",
+            (999, "default", "local-default"),
+        )
+
+    app2 = create_app(data_dir=tmp_path, start_worker=False)
+    with TestClient(app2) as client:
+        config = client.get("/api/workspaces/default/executor-configuration").json()
+
+    allocations = _executor_config_by_id(config)
+    assert allocations["local-default"] == 999
+    assert allocations["pi-default"] == 3

@@ -269,9 +269,45 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
     assert response.status_code == 400
     assert persisted["name"] == original["name"]
     config = app.state.job_db.get_workspace_executor_configuration("default")
-    assert config["allocations"] == []
-    assert config["bindings"] == []
-    assert config["node_limits"] == []
+    # Startup bootstrap materialized reading_analysis defaults for the default
+    # workspace; the failed PUT rolls back to that state.
+    assert config["allocations"] == [
+        {"workspace_id": "default", "executor_id": "local-default", "concurrency_limit": 4}
+    ]
+    assert config["bindings"] == [
+        {
+            "pipeline_key": "reading_analysis",
+            "node_key": "clean_and_parse",
+            "executor_id": "local-default",
+        },
+        {
+            "pipeline_key": "reading_analysis",
+            "node_key": "fetch_questions",
+            "executor_id": "local-default",
+        },
+        {
+            "pipeline_key": "reading_analysis",
+            "node_key": "mark_question",
+            "executor_id": "local-default",
+        },
+    ]
+    assert config["node_limits"] == [
+        {
+            "pipeline_key": "reading_analysis",
+            "node_key": "clean_and_parse",
+            "concurrency_limit": 2,
+        },
+        {
+            "pipeline_key": "reading_analysis",
+            "node_key": "fetch_questions",
+            "concurrency_limit": 10,
+        },
+        {
+            "pipeline_key": "reading_analysis",
+            "node_key": "mark_question",
+            "concurrency_limit": 10,
+        },
+    ]
 
 
 def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
@@ -2200,3 +2236,25 @@ def test_job_detail_includes_node_inputs_outputs(tmp_path):
         assert "outputs" in node
         assert isinstance(node["inputs"], list)
         assert isinstance(node["outputs"], list)
+
+
+def test_app_startup_materializes_executor_configuration_for_default_workspace(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.jobs import JobQueries
+    from server.app.main import create_app
+
+    db_path = tmp_path / "video_hive.sqlite"
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    JobQueries(db_path, jobs_dir=jobs_dir).upsert_workspace_agent_assignment("default", "pi", 3)
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    with TestClient(app) as c:
+        response = c.get("/api/workspaces/default/executor-configuration")
+
+    assert response.status_code == 200
+    assert {row["executor_id"] for row in response.json()["allocations"]} == {
+        "local-default",
+        "pi-default",
+    }

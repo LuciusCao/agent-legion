@@ -14,6 +14,7 @@ from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.db.notifications import NotificationHub
 from server.app.events import VideoEventManager
+from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
 from server.app.executors.config import LocalExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.local import LocalHandler
@@ -25,6 +26,7 @@ from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool
 from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.pipelines.pi_runner import PiConfig
+from server.app.pipelines.registry import list_registered_pipelines
 from server.app.routes import create_router
 from server.app.settings import Settings, load_settings
 from server.app.worker_control import WorkerControl, WorkspaceWorkerControl
@@ -137,6 +139,9 @@ def create_app(
     db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
     executor_registry = build_executor_registry(settings, job_db)
+
+    definitions = list_registered_pipelines(settings.root_dir)
+    bootstrap_workspace_executor_defaults(job_db, definitions, settings.executor_definitions)
 
     worker_thread: WorkerThread | None = None
     pipeline_worker_thread: PipelineWorkerThread | None = None
