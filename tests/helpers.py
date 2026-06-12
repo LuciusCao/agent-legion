@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 import time
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Any
 
@@ -22,31 +21,38 @@ def make_pipeline_worker(
     pipeline_key: str = "reading_analysis",
     pi_binary: str | None = "echo",
     pi_timeout: int = 1,
-    with_executors: bool = True,
 ) -> tuple[PipelineWorkerThread, PipelineDefinition]:
     """Build a configured PipelineWorkerThread for *pipeline_key*."""
+    from server.app import main as app_main
+    from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
+    from server.app.executors.leases import ExecutorLeaseRepository
+    from server.app.executors.runtime import ExecutionRuntime
+
     definition = load_registered_pipeline(Path("."), pipeline_key)
+    settings = app_main.load_settings(data_dir=tmp_path)
     pipelines_config: dict[str, object] = {"enabled": True}
     if pi_binary is not None:
         pipelines_config["pi"] = {"binary": pi_binary, "timeout_seconds": pi_timeout}
+    settings.config["pipelines"] = pipelines_config
 
-    settings = Settings(
-        root_dir=Path("."),
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={"pipelines": pipelines_config},
+    registry = app_main.build_executor_registry(settings, queries)
+    leases = ExecutorLeaseRepository(queries.path)
+    runtime = ExecutionRuntime(
+        leases=leases,
+        registry=registry,
+        heartbeat_interval_seconds=1,
+        lease_ttl_seconds=5,
     )
 
-    worker = PipelineWorkerThread(queries, settings)
+    worker = PipelineWorkerThread(
+        job_db=queries,
+        leases=leases,
+        registry=registry,
+        runtime=runtime,
+        settings=settings,
+    )
     worker._definitions = [definition]
-    if with_executors:
-        worker._local_executor = ThreadPoolExecutor(max_workers=definition.concurrency.local)
-        worker._agent_executor = ThreadPoolExecutor(max_workers=definition.concurrency.agent)
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
+    bootstrap_workspace_executor_defaults(queries, [definition], settings.executor_definitions)
 
     return worker, definition
 

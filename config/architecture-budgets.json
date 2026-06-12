@@ -95,12 +95,11 @@
   },
   "scheduler_threadpool_baselines": {
     "server/app/pipeline_worker_thread.py": {
-      "self._ws_agent_executors[workspace_id]": 1,
-      "self._ws_local_executors[workspace_id]": 1
+      "self._pools[executor_id]": 1
     }
   },
   "scheduler_threadpool_baseline_reasons": {
-    "server/app/pipeline_worker_thread.py": "Legacy per-Workspace pools pending Phase 3 removal"
+    "server/app/pipeline_worker_thread.py": "Shared per-Executor pool created once from registry definitions"
   },
   "files": {
     "server/app/routes/jobs.py": 101,

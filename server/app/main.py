@@ -15,8 +15,10 @@ from server.app.db import Database
 from server.app.db.notifications import NotificationHub
 from server.app.events import VideoEventManager
 from server.app.executors.config import LocalExecutorConfig
+from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.local import LocalHandler
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
+from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
 from server.app.pipeline.openclaw import SkillSafetyConfig
 from server.app.pipeline.recovery import recover_interrupted_videos
@@ -162,12 +164,16 @@ def create_app(
             worker_thread.start()
             pipelines_config = settings.config.get("pipelines", {})
             if isinstance(pipelines_config, dict) and pipelines_config.get("enabled"):
+                executor_leases = ExecutorLeaseRepository(job_db.path)
+                execution_runtime = ExecutionRuntime(executor_leases, executor_registry)
                 pipeline_worker_thread = PipelineWorkerThread(
-                    job_db,
-                    settings,
-                    workspace_worker_control,
-                    agent_manager,
-                    executor_registry=executor_registry,
+                    job_db=job_db,
+                    leases=executor_leases,
+                    registry=executor_registry,
+                    runtime=execution_runtime,
+                    settings=settings,
+                    workspace_worker_control=workspace_worker_control,
+                    agent_manager=agent_manager,
                 )
                 try:
                     pipeline_worker_thread.start()
