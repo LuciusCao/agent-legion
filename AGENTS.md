@@ -424,6 +424,15 @@ binding = get_binding(...)
 executor_id = binding["executor_id"] if binding else "local-default"
 ```
 
+Workspace Executor configuration extensions must:
+
+- add typed Pydantic transport fields;
+- validate bindings by capability;
+- replace allocations, bindings, and local limits in one transaction;
+- derive frontend transport types from generated OpenAPI;
+- never add Node limits to agent-backed Executors;
+- never reintroduce Workspace-specific thread pools or runner-based binding logic.
+
 Recovery behavior: on startup and before every scheduling pass the worker expires stale
 executor leases. A stale lease marks its `node_run` as failed, its `job_node` as stale (so an
 explicit user rerun can recover it), and the job as failed. It never resets failed Nodes or

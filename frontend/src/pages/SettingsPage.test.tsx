@@ -1,9 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import { SettingsPage } from './SettingsPage'
 import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'
+import type { WorkspaceSettings } from '../types'
 import { useUiStore } from '../stores/uiStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { api, fetchPipelines } from '../api'
@@ -16,6 +17,9 @@ vi.mock('../api', () => ({
 
 const mockApi = vi.mocked(api)
 const mockFetchPipelines = vi.mocked(fetchPipelines)
+
+// Capture the real store actions before beforeEach replaces them with mocks.
+const originalActions = { ...useSettingStore.getState() }
 
 const defaultState: SettingState = {
   workspaceId: 'ws1',
@@ -433,5 +437,297 @@ describe('SettingsPage', () => {
     expect(labels.indexOf('本地节点并发')).toBeGreaterThan(
       labels.indexOf('节点绑定')
     )
+  })
+
+  it('saves the complete executor aggregate in one PUT request', async () => {
+    const settings: WorkspaceSettings = {
+      entityType: 'question',
+      intakeModes: [],
+      labelOverrides: {},
+      pipelineKey: 'reading_analysis',
+      agentIds: [],
+      concurrencyLimit: 1,
+      resources: {},
+    }
+    useSettingStore.setState({
+      ...defaultState,
+      workspaceName: 'Flow Workspace',
+      originalWorkspaceName: 'Flow Workspace',
+      workspaceDescription: '',
+      originalWorkspaceDescription: '',
+      settings,
+      originalSettings: settings,
+      executorCatalog: [
+        {
+          id: 'local-default',
+          kind: 'local' as const,
+          capabilities: ['fetch_questions'],
+          global_capacity: 4,
+        },
+      ],
+      pipelineDefinition: {
+        key: 'reading_analysis',
+        label: '阅读分析',
+        concurrency: { local: 4, agent: 2, nodes: {} },
+        intake: { modes: [] },
+        nodes: [
+          {
+            key: 'fetch_questions',
+            label: '获取题目',
+            capability: 'fetch_questions',
+            runner: 'local' as const,
+            after: [],
+            inputs: [],
+            outputs: ['questions.json'],
+          },
+        ],
+      },
+      executorConfiguration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+      },
+      originalExecutorConfiguration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+      },
+      setExecutorAllocation: originalActions.setExecutorAllocation,
+      setNodeBinding: originalActions.setNodeBinding,
+      setNodeLimit: originalActions.setNodeLimit,
+      saveAll: originalActions.saveAll,
+    })
+
+    mockApi.mockResolvedValueOnce({
+      workspace: { name: 'Flow Workspace', description: '' },
+      settings,
+      executor_configuration: {
+        allocations: [
+          {
+            executor_id: 'local-default',
+            workspace_id: 'ws1',
+            concurrency_limit: 1,
+          },
+        ],
+        bindings: [
+          {
+            pipeline_key: 'reading_analysis',
+            node_key: 'fetch_questions',
+            executor_id: 'local-default',
+          },
+        ],
+        node_limits: [
+          {
+            pipeline_key: 'reading_analysis',
+            node_key: 'fetch_questions',
+            concurrency_limit: 2,
+          },
+        ],
+        migration_warnings: [],
+      },
+    })
+
+    renderPage()
+
+    await waitFor(() => {
+      expect(
+        document.querySelector('md-switch[aria-label="分配 local-default"]')
+      ).toBeTruthy()
+    })
+
+    const switchEl = document.querySelector(
+      'md-switch[aria-label="分配 local-default"]'
+    ) as HTMLElement
+    fireEvent.click(switchEl)
+
+    await waitFor(() => {
+      expect(
+        useSettingStore.getState().executorConfiguration.allocations
+      ).toHaveLength(1)
+    })
+
+    const select = document.querySelector(
+      'md-outlined-select[aria-label="绑定 fetch_questions"]'
+    ) as HTMLElement
+    await act(async () => {
+      select.dispatchEvent(
+        new CustomEvent('change', {
+          detail: { value: 'local-default' },
+          bubbles: true,
+        })
+      )
+    })
+
+    await waitFor(() => {
+      expect(
+        useSettingStore.getState().executorConfiguration.bindings
+      ).toHaveLength(1)
+    })
+
+    const limitInput = document.querySelector(
+      'md-outlined-text-field[label="获取题目 并发上限"]'
+    ) as HTMLInputElement
+    limitInput.value = '2'
+    fireEvent.input(limitInput)
+
+    await waitFor(() => {
+      expect(
+        useSettingStore.getState().executorConfiguration.node_limits
+      ).toEqual([
+        {
+          pipeline_key: 'reading_analysis',
+          node_key: 'fetch_questions',
+          concurrency_limit: 2,
+        },
+      ])
+    })
+
+    const saveBtn = screen.getByLabelText('保存')
+    fireEvent.click(saveBtn)
+
+    await waitFor(() => {
+      expect(mockApi).toHaveBeenCalledTimes(1)
+    })
+
+    const call = mockApi.mock.calls[0]
+    expect(call[0]).toBe('/api/workspaces/ws1/configuration')
+    expect(call[1]).toMatchObject({ method: 'PUT' })
+    const body = JSON.parse(call[1]!.body as string)
+    expect(body).toMatchObject({
+      name: 'Flow Workspace',
+      description: '',
+      executor_allocations: [
+        { executor_id: 'local-default', concurrency_limit: 1 },
+      ],
+      node_bindings: [
+        {
+          pipeline_key: 'reading_analysis',
+          node_key: 'fetch_questions',
+          executor_id: 'local-default',
+        },
+      ],
+      node_limits: [
+        {
+          pipeline_key: 'reading_analysis',
+          node_key: 'fetch_questions',
+          concurrency_limit: 2,
+        },
+      ],
+    })
+  })
+
+  it('confirms executor allocation removal from SettingsPage', async () => {
+    useSettingStore.setState({
+      ...defaultState,
+      executorCatalog: [
+        {
+          id: 'local-default',
+          kind: 'local' as const,
+          capabilities: ['fetch_questions'],
+          global_capacity: 4,
+        },
+      ],
+      pipelineDefinition: {
+        key: 'reading_analysis',
+        label: '阅读分析',
+        concurrency: { local: 4, agent: 2, nodes: {} },
+        intake: { modes: [] },
+        nodes: [
+          {
+            key: 'fetch_questions',
+            label: '获取题目',
+            capability: 'fetch_questions',
+            runner: 'local' as const,
+            after: [],
+            inputs: [],
+            outputs: ['questions.json'],
+          },
+        ],
+      },
+      executorConfiguration: {
+        allocations: [
+          {
+            executor_id: 'local-default',
+            workspace_id: 'ws1',
+            concurrency_limit: 2,
+          },
+        ],
+        bindings: [
+          {
+            pipeline_key: 'reading_analysis',
+            node_key: 'fetch_questions',
+            executor_id: 'local-default',
+          },
+        ],
+        node_limits: [],
+        migration_warnings: [],
+      },
+      originalExecutorConfiguration: {
+        allocations: [
+          {
+            executor_id: 'local-default',
+            workspace_id: 'ws1',
+            concurrency_limit: 2,
+          },
+        ],
+        bindings: [
+          {
+            pipeline_key: 'reading_analysis',
+            node_key: 'fetch_questions',
+            executor_id: 'local-default',
+          },
+        ],
+        node_limits: [],
+        migration_warnings: [],
+      },
+      requestExecutorRemoval: originalActions.requestExecutorRemoval,
+      confirmExecutorRemoval: originalActions.confirmExecutorRemoval,
+      cancelExecutorRemoval: originalActions.cancelExecutorRemoval,
+    })
+
+    renderPage()
+
+    const switchEl = document.querySelector(
+      'md-switch[aria-label="分配 local-default"]'
+    ) as HTMLElement
+    fireEvent.click(switchEl)
+
+    await waitFor(() => {
+      expect(
+        screen.getByText('移除执行器会同时清除以下节点绑定')
+      ).toBeInTheDocument()
+      expect(
+        screen.getByText('reading_analysis / fetch_questions')
+      ).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('取消'))
+    await waitFor(() => {
+      expect(
+        useSettingStore.getState().executorConfiguration.allocations
+      ).toHaveLength(1)
+      expect(
+        useSettingStore.getState().executorConfiguration.bindings
+      ).toHaveLength(1)
+      expect(useSettingStore.getState().pendingAllocationRemoval).toBeNull()
+    })
+
+    fireEvent.click(switchEl)
+    await waitFor(() => {
+      expect(screen.getByText('确认')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('确认'))
+    await waitFor(() => {
+      expect(
+        useSettingStore.getState().executorConfiguration.allocations
+      ).toEqual([])
+      expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
+        []
+      )
+      expect(useSettingStore.getState().pendingAllocationRemoval).toBeNull()
+    })
   })
 })
