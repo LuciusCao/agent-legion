@@ -8,6 +8,7 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
+from server.app.executors.models import ExecutionStatus
 from server.app.pipeline.agent_workspace import cleanup_agent_workspace_files
 
 logger = logging.getLogger(__name__)
@@ -23,7 +24,7 @@ class AgentPhase:
 
 @dataclass
 class AgentRunResult:
-    status: str
+    status: ExecutionStatus
     exit_code: int
     command: list[str]
     error_message: str = ""
@@ -138,37 +139,33 @@ class OpenClawRunner:
             rendered.append(part)
         return rendered
 
-    def run(
+    def run_prompt(
         self,
-        phase: AgentPhase,
-        video_id: str,
-        video_dir: Path,
-        prompt_dir: Path,
+        *,
+        execution_id: str,
+        work_dir: Path,
+        prompt_text: str,
+        expected_outputs: tuple[str, ...] | list[str],
         log_path: Path,
+        json_outputs: tuple[str, ...] | list[str] | None = None,
     ) -> AgentRunResult:
+        """Run one Workspace prompt through this configured OpenClaw agent."""
         if self.skill_safety is not None and self.skill_safety.enabled:
             restore_skill_repos(self.skill_safety.repos)
 
-        video_dir.mkdir(parents=True, exist_ok=True)
+        work_dir.mkdir(parents=True, exist_ok=True)
+        prompt_dir = work_dir / "prompts"
         prompt_dir.mkdir(parents=True, exist_ok=True)
         log_path.parent.mkdir(parents=True, exist_ok=True)
-        reference = (
-            phase.reference_path.read_text(encoding="utf-8")
-            if phase.reference_path.exists()
-            else ""
-        )
-        prompt_file = prompt_dir / f"{video_id}-{phase.key}.md"
-        prompt_file.write_text(
-            f"{reference}\n\nVideo ID: {video_id}\nVideo directory: {video_dir}\n",
-            encoding="utf-8",
-        )
-        command = self.render_command(video_id, video_dir, prompt_file)
+
+        prompt_file = prompt_dir / f"{execution_id}.md"
+        prompt_file.write_text(prompt_text, encoding="utf-8")
+        command = self.render_command(execution_id, work_dir, prompt_file)
         run_cwd = self.cwd
         isolated_cwd: Path | None = None
         if self.isolated_workspace_root is not None:
-            safe_video_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", video_id)
-            safe_phase = re.sub(r"[^A-Za-z0-9_.-]+", "_", phase.key)
-            isolated_cwd = self.isolated_workspace_root / f"{safe_video_id}-{safe_phase}"
+            safe_execution_id = re.sub(r"[^A-Za-z0-9_.-]+", "_", execution_id)
+            isolated_cwd = self.isolated_workspace_root / safe_execution_id
             isolated_cwd.mkdir(parents=True, exist_ok=True)
             run_cwd = isolated_cwd
 
@@ -184,12 +181,12 @@ class OpenClawRunner:
                     timeout=self.timeout_seconds,
                 )
             except subprocess.TimeoutExpired:
-                cleanup_agent_workspace_files(video_dir)
+                cleanup_agent_workspace_files(work_dir)
                 if isolated_cwd is not None:
                     shutil.rmtree(isolated_cwd, ignore_errors=True)
                 return AgentRunResult("failed", -1, command, "openclaw command timed out")
             finally:
-                cleanup_agent_workspace_files(video_dir)
+                cleanup_agent_workspace_files(work_dir)
                 if isolated_cwd is not None:
                     shutil.rmtree(isolated_cwd, ignore_errors=True)
 
@@ -198,18 +195,42 @@ class OpenClawRunner:
                 "failed", completed.returncode, command, "openclaw command failed"
             )
 
-        missing = [name for name in phase.expected_outputs if not (video_dir / name).exists()]
+        missing = [name for name in expected_outputs if not (work_dir / name).exists()]
         if missing:
             return AgentRunResult(
                 "failed", completed.returncode, command, f"missing outputs: {', '.join(missing)}"
             )
 
-        for name in phase.json_outputs:
+        json_outputs = json_outputs or ()
+        for name in json_outputs:
             try:
-                json.loads((video_dir / name).read_text(encoding="utf-8"))
+                json.loads((work_dir / name).read_text(encoding="utf-8"))
             except Exception as exc:
                 return AgentRunResult(
                     "failed", completed.returncode, command, f"invalid json {name}: {exc}"
                 )
 
         return AgentRunResult("completed", completed.returncode, command)
+
+    def run(
+        self,
+        phase: AgentPhase,
+        video_id: str,
+        video_dir: Path,
+        prompt_dir: Path,
+        log_path: Path,
+    ) -> AgentRunResult:
+        reference = (
+            phase.reference_path.read_text(encoding="utf-8")
+            if phase.reference_path.exists()
+            else ""
+        )
+        prompt_text = f"{reference}\n\nVideo ID: {video_id}\nVideo directory: {video_dir}\n"
+        return self.run_prompt(
+            execution_id=f"{video_id}-{phase.key}",
+            work_dir=video_dir,
+            prompt_text=prompt_text,
+            expected_outputs=phase.expected_outputs,
+            log_path=log_path,
+            json_outputs=phase.json_outputs,
+        )

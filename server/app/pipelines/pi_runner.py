@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from server.app.executors.models import ExecutionStatus
 from server.app.jobs import JobQueries
 
 logger = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ class PiConfig:
 
 @dataclass(frozen=True)
 class PiRunResult:
-    status: str
+    status: ExecutionStatus
     exit_code: int
     command: list[str]
     run_dir: Path
@@ -108,6 +109,7 @@ class PiRunner:
         outputs: list[str],
         tools: list[str] | None = None,
         job_db: JobQueries | None = None,
+        persist_run: bool = True,
     ) -> PiRunResult:
         job_dir = Path(str(job["storage_dir"]))
         run_token = str(uuid.uuid4())
@@ -146,7 +148,7 @@ class PiRunner:
         error_message = ""
 
         try:
-            if job_db is not None:
+            if job_db is not None and persist_run:
                 run_record = job_db.start_node_run(
                     job["id"],
                     node_key,
@@ -157,11 +159,12 @@ class PiRunner:
                 )
                 if run_record is None:
                     return PiRunResult(
-                        status="skipped",
-                        exit_code=0,
+                        status="cancelled",
+                        exit_code=-1,
                         command=command,
                         run_dir=run_dir,
                         session_dir=session_dir,
+                        error_message="node run not in a startable state",
                     )
 
             env = dict(os.environ)
@@ -240,8 +243,8 @@ class PiRunner:
         }
         (run_dir / "run.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2))
 
-        status = "completed" if exit_code == 0 else "failed"
-        if job_db is not None and run_record is not None:
+        status: ExecutionStatus = "completed" if exit_code == 0 else "failed"
+        if job_db is not None and persist_run and run_record is not None:
             job_db.finish_node_run(run_record["id"], status, exit_code, error_message)
 
         return PiRunResult(
