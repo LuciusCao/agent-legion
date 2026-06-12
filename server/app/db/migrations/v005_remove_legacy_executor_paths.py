@@ -59,6 +59,9 @@ def _drop_pipeline_config_json(conn: sqlite3.Connection) -> None:
 
         conn.execute("drop table workspaces__v005_old")
         conn.execute("alter table workspaces__v005_new rename to workspaces")
+        conn.execute(
+            "create index if not exists idx_workspaces_created_at on workspaces(created_at)"
+        )
     finally:
         conn.execute("pragma foreign_keys=ON")
 

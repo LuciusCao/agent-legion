@@ -14,22 +14,17 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
-from server.app.db.connection import connect_sqlite
 from server.app.db.migrations.report import MigrationBlockedError
 from server.app.executors.config import ExecutorConfig
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.jobs import JobQueries
+from server.app.pipelines.definition import PipelineDefinition
 from server.app.pipelines.registry import list_registered_pipelines
 from server.app.settings import load_settings
 
 
 def _timestamp() -> str:
     return datetime.now(UTC).strftime("%Y%m%d%H%M%S")
-
-
-def _load_executor_definitions(data_dir: Path | None) -> dict[str, ExecutorConfig]:
-    settings = load_settings(data_dir=data_dir)
-    return settings.executor_definitions
 
 
 _EMPTY_REPORT_JSON = json.dumps(
@@ -43,25 +38,30 @@ _EMPTY_REPORT_JSON = json.dumps(
 )
 
 
-def _check(db_path: Path, definitions: list, executors: dict[str, ExecutorConfig]) -> int:
+def _check(
+    db_path: Path, definitions: list[PipelineDefinition], executors: dict[str, ExecutorConfig]
+) -> int:
     if not db_path.exists():
         print(_EMPTY_REPORT_JSON)
         return 0
 
-    conn = connect_sqlite(db_path)
-    try:
+    jobs_dir = db_path.parent / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    job_db = JobQueries(db_path, jobs_dir)
+
+    with job_db.connect() as conn:
         try:
             finalize_legacy_executor_schema(conn, definitions, executors, dry_run=True)
         except MigrationBlockedError as exc:
             print(exc.report.to_json())
             return 1
-        print(_EMPTY_REPORT_JSON)
-        return 0
-    finally:
-        conn.close()
+    print(_EMPTY_REPORT_JSON)
+    return 0
 
 
-def _apply(db_path: Path, definitions: list, executors: dict[str, ExecutorConfig]) -> int:
+def _apply(
+    db_path: Path, definitions: list[PipelineDefinition], executors: dict[str, ExecutorConfig]
+) -> int:
     if not db_path.exists():
         print(f"Database not found: {db_path}", file=sys.stderr)
         return 1
