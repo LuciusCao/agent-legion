@@ -9,11 +9,12 @@ EXPECTED_TABLES = {
     "workspace_executor_allocations",
     "workspace_node_bindings",
     "workspace_node_limits",
+    "workspace_executor_bootstrap_state",
     "executor_leases",
 }
 
 
-def test_empty_database_migrates_to_version_1(tmp_path: Path) -> None:
+def test_empty_database_migrates_to_latest_version(tmp_path: Path) -> None:
     path = tmp_path / "empty.sqlite"
     init_db(path)
 
@@ -24,11 +25,11 @@ def test_empty_database_migrates_to_version_1(tmp_path: Path) -> None:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
 
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1]
+        assert [row["version"] for row in versions] == [1, 2]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 
-def test_legacy_database_migrates_to_version_1(tmp_path: Path) -> None:
+def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
     """A pre-Phase-3 database with workspace_agent_assignments is upgraded cleanly."""
     path = tmp_path / "legacy.sqlite"
     conn = connect_sqlite(path)
@@ -123,7 +124,7 @@ def test_legacy_database_migrates_to_version_1(tmp_path: Path) -> None:
         ).fetchone()
 
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1]
+        assert [row["version"] for row in versions] == [1, 2]
         assert legacy_row is not None
         assert legacy_row["agent_id"] == "agent_a"
         assert conn.execute("pragma foreign_key_check").fetchall() == []
@@ -139,7 +140,7 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
         }
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1]
+        assert [row["version"] for row in versions] == [1, 2]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 

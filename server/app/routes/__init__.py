@@ -18,6 +18,8 @@ from .questions import create_questions_router
 from .video_hive import create_video_hive_router
 from .videos import create_videos_router
 from .worker import create_worker_router
+from .workspace_agents import create_workspace_agents_router
+from .workspace_configuration import create_workspace_configuration_router
 from .workspace_executors import create_workspace_executors_router
 from .workspace_runs import create_workspace_runs_router
 from .workspace_settings import create_workspace_settings_router
@@ -41,10 +43,14 @@ def create_router(
     from ..services.job_queries import JobQueryService
     from ..services.job_rerun import JobRerunService
     from ..services.pipeline_catalog import PipelineCatalogService
+    from ..services.workspace_agent_assignments import WorkspaceAgentAssignmentService
     from ..services.workspace_configuration import WorkspaceConfigurationService
+    from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
 
     pipeline_catalog = PipelineCatalogService(settings)
-    executor_catalog = ExecutorCatalogService(job_db, settings, agent_manager)
+    executor_catalog = ExecutorCatalogService(settings)
+    workspace_agents = WorkspaceAgentAssignmentService(job_db)
+    workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db)
     workspace_configuration = WorkspaceConfigurationService(
         job_db, settings, agent_manager, pipeline_catalog
     )
@@ -62,7 +68,13 @@ def create_router(
     router.include_router(create_pipeline_catalog_router(pipeline_catalog, settings))
     router.include_router(create_workspaces_router(workspace_configuration, settings))
     router.include_router(create_workspace_settings_router(workspace_configuration, settings))
-    router.include_router(create_workspace_executors_router(executor_catalog, settings))
+    router.include_router(create_workspace_configuration_router(workspace_configuration, settings))
+    router.include_router(
+        create_workspace_executors_router(
+            executor_catalog, workspace_executor_configuration, settings
+        )
+    )
+    router.include_router(create_workspace_agents_router(workspace_agents, settings))
     router.include_router(create_job_batches_router(job_intake, settings))
     router.include_router(create_jobs_router(job_queries, job_rerun, settings))
     router.include_router(create_job_artifacts_router(job_artifacts, settings))

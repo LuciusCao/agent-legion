@@ -7,7 +7,7 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
 import { api, fetchJobs } from '../api'
-import type { WorkspaceStats } from '../types'
+import type { WorkspaceStats } from '../workspaceTypes'
 import { makeJob } from '../testing/fixtures'
 
 const mockApi = vi.fn()

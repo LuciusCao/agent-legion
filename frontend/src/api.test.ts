@@ -7,12 +7,14 @@ import {
   createWorkspace,
   fetchJobArtifact,
   fetchJobDetail,
-  getExecutorCatalog,
   getWorkspaceAgents,
-  getWorkspaceExecutorConfiguration,
   setWorkspaceAgent,
   updateWorkspace,
 } from './api'
+import {
+  getExecutorCatalog,
+  getWorkspaceExecutorConfiguration,
+} from './executorApi'
 
 const originalFetch = global.fetch
 

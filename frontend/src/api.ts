@@ -7,17 +7,15 @@ import type {
   AgentStatus,
   ArtifactResponse,
   CreateJobBatchInput,
-  ExecutorCatalogResponse,
   JobBatchResponse,
   JobDetailResponse,
   JobsResponse,
   PipelineResponse,
   QuestionDetailResponse,
-  WorkspaceExecutorConfiguration,
   WorkspaceRecord,
-  WorkspaceStats,
   WorkspacesResponse,
 } from './types'
+import type { WorkspaceStats } from './workspaceTypes'
 
 export async function fetchPackages(): Promise<{
   packages: Array<{
@@ -270,14 +268,6 @@ export async function unassignAgent(
     { method: 'DELETE' }
   )
 }
-
-export const getExecutorCatalog = () =>
-  api<ExecutorCatalogResponse>('/api/executors')
-
-export const getWorkspaceExecutorConfiguration = (workspaceId: string) =>
-  api<WorkspaceExecutorConfiguration>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/executor-configuration`
-  )
 
 export async function api<T>(path: string, init?: RequestInit): Promise<T> {
   const isGet = !init || !init.method || init.method === 'GET'

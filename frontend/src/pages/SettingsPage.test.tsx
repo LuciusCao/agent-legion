@@ -730,4 +730,10 @@ describe('SettingsPage', () => {
       expect(useSettingStore.getState().pendingAllocationRemoval).toBeNull()
     })
   })
+
+  it('does not expose the legacy pipeline local concurrency control', () => {
+    renderPage()
+
+    expect(screen.queryByText('本地并发限制')).not.toBeInTheDocument()
+  })
 })

@@ -7,6 +7,7 @@ from server.app.services.pipeline_catalog import PipelineCatalogService
 from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
+from server.app.services.workspace_executor_warnings import configuration_with_warnings
 from server.app.settings import Settings
 
 
@@ -190,10 +191,9 @@ class WorkspaceConfigurationService:
         return {
             "workspace": saved_workspace,
             "settings": self._settings_payload(saved_workspace),
-            "executor_configuration": {
-                **executor_configuration,
-                "migration_warnings": [],
-            },
+            "executor_configuration": configuration_with_warnings(
+                self.job_db, workspace_id, executor_configuration
+            ),
         }
 
     def update_section(

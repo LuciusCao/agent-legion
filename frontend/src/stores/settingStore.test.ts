@@ -3,19 +3,22 @@ import { useSettingStore } from './settingStore'
 import type { SettingState } from './settingStore'
 import { useUiStore } from './uiStore'
 import { createMockUiState } from '../testing/fixtures'
+import { api } from '../api'
 import {
-  api,
   getExecutorCatalog,
   getWorkspaceExecutorConfiguration,
-} from '../api'
+} from '../executorApi'
+import type { WorkspaceSettings } from '../types'
 import type {
   ExecutorDefinition,
   WorkspaceExecutorConfiguration,
-  WorkspaceSettings,
-} from '../types'
+} from '../executorTypes'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
+}))
+
+vi.mock('../executorApi', () => ({
   getExecutorCatalog: vi.fn(),
   getWorkspaceExecutorConfiguration: vi.fn(),
 }))
@@ -111,6 +114,31 @@ describe('settingStore', () => {
     expect(useSettingStore.getState().settings.pipelineKey).toBe(
       'knowledge_content'
     )
+  })
+
+  it('clears stale node configuration when the pipeline changes', () => {
+    useSettingStore.setState({
+      pipelineDefinition: {
+        key: 'question_content',
+        label: 'Question Content',
+        concurrency: { local: 1, agent: 1, nodes: {} },
+        intake: { modes: [] },
+        nodes: [],
+      },
+      executorConfiguration: initialExecutorConfiguration,
+      originalSettings: defaultSettings,
+      originalExecutorConfiguration: initialExecutorConfiguration,
+    })
+
+    useSettingStore.getState().setSettings({ pipelineKey: 'reading_analysis' })
+
+    const state = useSettingStore.getState()
+    expect(state.pipelineDefinition).toBeNull()
+    expect(state.executorConfiguration.allocations).toEqual(
+      initialExecutorConfiguration.allocations
+    )
+    expect(state.executorConfiguration.bindings).toEqual([])
+    expect(state.executorConfiguration.node_limits).toEqual([])
   })
 
   it('updates labelOverrides via setSettings', () => {

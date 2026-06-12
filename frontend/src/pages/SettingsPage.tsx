@@ -109,9 +109,7 @@ export function SettingsPage() {
     if (!workspaceId) return
     setWorkspaceId(workspaceId)
     resetTestStatus()
-    void fetchSettings(workspaceId).then(() => {
-      void fetchPipelineDefinition()
-    })
+    void fetchSettings(workspaceId)
   }, [
     workspaceId,
     setWorkspaceId,
@@ -137,6 +135,11 @@ export function SettingsPage() {
     void fetchGlobalServices()
     void fetchResourceProviders()
   }, [workspaceId, fetchGlobalServices, fetchResourceProviders])
+
+  useEffect(() => {
+    if (!settings.pipelineKey) return
+    void fetchPipelineDefinition()
+  }, [settings.pipelineKey, fetchPipelineDefinition])
 
   const scrollToSection = useCallback((id: string) => {
     setActiveSection(id)
@@ -459,35 +462,6 @@ export function SettingsPage() {
                   </md-select-option>
                 ))}
               </md-outlined-select>
-            </div>
-            <div className={styles.field}>
-              <label htmlFor="local-concurrency">本地并发限制</label>
-              <md-outlined-text-field
-                id="local-concurrency"
-                type="number"
-                min={1}
-                value={settings.localConcurrency ?? ''}
-                onInput={(event: Event) => {
-                  const value = Number((event.target as HTMLInputElement).value)
-                  setSettings({
-                    localConcurrency: Number.isNaN(value) ? undefined : value,
-                  })
-                }}
-                style={{ width: '100%' }}
-              />
-              {pipelineDefinition && (
-                <span
-                  style={{
-                    fontSize: 12,
-                    color: 'var(--md-sys-color-on-surface-variant)',
-                    marginTop: 4,
-                    display: 'block',
-                  }}
-                >
-                  Pipeline 默认值: 本地 {pipelineDefinition.concurrency.local} /
-                  智能体 {pipelineDefinition.concurrency.agent}
-                </span>
-              )}
             </div>
           </section>
 

@@ -4,6 +4,9 @@ from pathlib import Path
 from server.app.db.connection import connect_sqlite
 from server.app.db.migrations import run_migrations
 from server.app.db.migrations.v001_executor_core import MIGRATION as V001_EXECUTOR_CORE
+from server.app.db.migrations.v002_executor_bootstrap_state import (
+    MIGRATION as V002_EXECUTOR_BOOTSTRAP_STATE,
+)
 
 
 def _execute_statements(conn: sqlite3.Connection, sql: str) -> None:
@@ -273,6 +276,6 @@ def init_db(path: Path) -> None:
                 """,
             )
 
-            run_migrations(conn, [V001_EXECUTOR_CORE])
+            run_migrations(conn, [V001_EXECUTOR_CORE, V002_EXECUTOR_BOOTSTRAP_STATE])
     finally:
         conn.close()

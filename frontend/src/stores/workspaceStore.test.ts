@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useWorkspaceStore } from './workspaceStore'
-import type { WorkspaceRecord, WorkspaceStats } from '../types'
+import type { WorkspaceRecord } from '../types'
+import type { WorkspaceStats } from '../workspaceTypes'
 
 vi.mock('../api', () => ({
   fetchWorkspaces: vi.fn(),
