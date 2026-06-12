@@ -1,7 +1,7 @@
 import sqlite3
 
 from server.app.db.migrations.errors import MigrationError
-from server.app.db.migrations.runner import Migration
+from server.app.db.migrations.models import Migration
 
 _JOBS_TABLE_SQL = """
 create table jobs (
@@ -150,7 +150,9 @@ def _rebuild_table(
     conn.execute(f"alter table {table} rename to {old}")
     _drop_indexes_for_table(conn, old)
     conn.execute(create_sql)
-    conn.execute(f"insert into {table} select * from {old}")
+    cols = [row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()]
+    col_list = ", ".join(cols)
+    conn.execute(f"insert into {table} ({col_list}) select {col_list} from {old}")
 
     old_count = conn.execute(f"select count(*) from {old}").fetchone()[0]
     new_count = conn.execute(f"select count(*) from {table}").fetchone()[0]
@@ -218,4 +220,9 @@ def _apply(conn: sqlite3.Connection) -> None:
     conn.execute(f"drop table {jobs_old}")
 
 
-MIGRATION = Migration(version=4, name="workspace_dag_foreign_keys", apply=_apply, rebuilds_fk=True)
+MIGRATION = Migration(
+    version=4,
+    name="workspace_dag_foreign_keys",
+    apply=_apply,
+    rebuilds_fk=True,
+)
