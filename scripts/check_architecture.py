@@ -93,6 +93,10 @@ def is_scheduler_path(relative_path: str) -> bool:
     )
 
 
+def is_service_path(relative_path: str) -> bool:
+    return relative_path.startswith("server/app/services/")
+
+
 def _assignment_target(call: ast.Call, parent_map: dict[ast.AST, ast.AST]) -> str:
     parent = parent_map.get(call)
     if isinstance(parent, ast.Assign):
@@ -143,6 +147,22 @@ def check_repository(root: Path) -> list[str]:
                     errors.append(
                         f"{relative_path}:{call.lineno}: scheduler boundary forbids "
                         f"ThreadPoolExecutor construction assigned to {target}"
+                    )
+
+        if is_service_path(relative_path):
+            for module, lineno in modules.items():
+                if module == "fastapi" or module.startswith("fastapi."):
+                    errors.append(
+                        f"{relative_path}:{lineno}: service boundary forbids import {module}"
+                    )
+
+        if relative_path == "server/app/routes/jobs.py":
+            for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+                name = ast.unparse(call.func)
+                if name.endswith("include_router"):
+                    errors.append(
+                        f"{relative_path}: include_router forbidden; "
+                        "compose focused routers in routes/__init__.py"
                     )
 
         if not relative_path.startswith("server/app/routes/"):

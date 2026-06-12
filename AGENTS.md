@@ -359,6 +359,14 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 - The SQLite database and video storage are local; there is no authentication layer. Do not expose the dev server to untrusted networks.
 - `data/` is gitignored; never commit runtime data or secrets.
 
+## Workspace API Extension Rules
+
+1. Add or update a Pydantic model in `routes/job_contracts.py`.
+2. Add orchestration to the owning service; services never import FastAPI.
+3. Add a thin handler to the owning focused router.
+4. Do not add CMS, artifact mutation, multi-write coordination, or router composition to `routes/jobs.py`.
+5. Run route-manifest, architecture, generated-contract, and full quality gates.
+
 ## Workspace Executor Extension Rules
 
 The required extension order is:
