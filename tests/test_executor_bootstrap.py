@@ -245,6 +245,70 @@ def test_bootstrap_is_idempotent(queries: JobQueries) -> None:
     ] == first_limits
 
 
+def test_bootstrap_materializes_legacy_assignment_added_before_authoritative_save(
+    queries: JobQueries,
+) -> None:
+    from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
+
+    workspace = queries.create_workspace(
+        name="Legacy Workspace",
+        default_pipeline_key="reading_analysis",
+    )
+    workspace_id = str(workspace["id"])
+    executors = _sample_executors()
+    pipeline = _sample_pipeline()
+
+    bootstrap_workspace_executor_defaults(queries, [pipeline], executors)
+    queries.upsert_workspace_agent_assignment(workspace_id, "pi", 3)
+    bootstrap_workspace_executor_defaults(queries, [pipeline], executors)
+
+    allocations = {
+        row["executor_id"]: row["concurrency_limit"]
+        for row in _fetch_all_allocations(queries)
+        if row["workspace_id"] == workspace_id
+    }
+    assert allocations["pi-default"] == 3
+    bindings = [row for row in _fetch_all_bindings(queries) if row["workspace_id"] == workspace_id]
+    assert any(row["node_key"] == "pi_a" for row in bindings)
+
+
+def test_bootstrap_does_not_restore_configuration_removed_after_materialization(
+    queries: JobQueries,
+) -> None:
+    from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
+
+    workspace_id = _create_legacy_workspace(queries)
+    executors = _sample_executors()
+    pipeline = _sample_pipeline()
+
+    bootstrap_workspace_executor_defaults(queries, [pipeline], executors)
+    queries.update_workspace_configuration(
+        workspace_id,
+        name="Legacy Workspace",
+        description="",
+        default_pipeline_key="reading_analysis",
+        default_entity="question",
+        resource_config={},
+        intake_config={},
+        pipeline_config={},
+        executor_allocations=[],
+        node_bindings=[],
+        node_limits=[],
+    )
+
+    bootstrap_workspace_executor_defaults(queries, [pipeline], executors)
+
+    assert [
+        row for row in _fetch_all_allocations(queries) if row["workspace_id"] == workspace_id
+    ] == []
+    assert [
+        row for row in _fetch_all_bindings(queries) if row["workspace_id"] == workspace_id
+    ] == []
+    assert [
+        row for row in _fetch_all_node_limits(queries) if row["workspace_id"] == workspace_id
+    ] == []
+
+
 def test_bootstrap_preserves_user_modified_rows(queries: JobQueries) -> None:
     from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
 

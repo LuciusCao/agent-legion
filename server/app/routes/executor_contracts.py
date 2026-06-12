@@ -48,3 +48,29 @@ class WorkspaceSettingsPayload(BaseModel):
     labelOverrides: dict[str, str]
     pipelineKey: str
     resources: dict[str, Any]
+
+
+class WorkspaceConfigurationSettingsRequest(BaseModel):
+    entityType: str | None = None
+    intakeModes: list[str] | None = None
+    labelOverrides: dict[str, str] | None = None
+    pipelineKey: str | None = None
+    resources: dict[str, Any] | None = None
+    localConcurrency: int | None = None
+    agentConcurrency: int | None = None
+    nodeLocalConcurrency: dict[str, int] | None = None
+
+
+class WorkspaceConfigurationRequest(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    settings: WorkspaceConfigurationSettingsRequest
+    executor_allocations: list[ExecutorAllocationRequest] = Field(default_factory=list)
+    node_bindings: list[NodeBindingRequest] = Field(default_factory=list)
+    node_limits: list[NodeLimitRequest] = Field(default_factory=list)
+
+
+class WorkspaceConfigurationResponse(BaseModel):
+    workspace: dict[str, Any]
+    settings: WorkspaceSettingsPayload
+    executor_configuration: WorkspaceExecutorConfigurationResponse

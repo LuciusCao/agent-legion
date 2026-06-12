@@ -194,6 +194,12 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "Legacy agent assignment unknown-legacy-agent has no Executor mapping"
     ]
 
+    saved = _put_config(client, workspace_id, remove_pi_payload)
+    assert saved["status_code"] == 200
+    assert saved["json"]["executor_configuration"]["migration_warnings"] == [
+        "Legacy agent assignment unknown-legacy-agent has no Executor mapping"
+    ]
+
     # The legacy assignment row itself must still be persisted.
     agents_response = client.get(f"/api/workspaces/{workspace_id}/agents")
     assert agents_response.status_code == 200

@@ -5,6 +5,7 @@ import logging
 from typing import Any
 
 from server.app.executors.config import ExecutorConfig
+from server.app.jobs import executor_configuration
 from server.app.jobs.queries import JobQueries
 from server.app.pipelines.definition import PipelineDefinition
 
@@ -30,16 +31,17 @@ def bootstrap_workspace_executor_defaults(
     definitions: list[PipelineDefinition],
     executors: dict[str, ExecutorConfig],
 ) -> None:
-    """Materialize insert-only compatibility defaults for existing workspaces."""
     definitions_by_key = {definition.key: definition for definition in definitions}
-
     with job_db.connect() as conn:
         workspaces = conn.execute(
             "select id, default_pipeline_key, pipeline_config_json from workspaces"
         ).fetchall()
-
         for workspace_row in workspaces:
             workspace_id = workspace_row["id"]
+            if executor_configuration.workspace_executor_configuration_is_authoritative(
+                conn, workspace_id
+            ):
+                continue
             pipeline_key = workspace_row["default_pipeline_key"]
             pipeline_config = _decode_json_object(workspace_row["pipeline_config_json"])
 

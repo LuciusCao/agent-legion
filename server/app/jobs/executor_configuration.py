@@ -5,6 +5,26 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 
+def workspace_executor_configuration_is_authoritative(
+    conn: sqlite3.Connection, workspace_id: str
+) -> bool:
+    row = conn.execute(
+        "select 1 from workspace_executor_bootstrap_state where workspace_id=?",
+        (workspace_id,),
+    ).fetchone()
+    return row is not None
+
+
+def mark_workspace_executor_configuration_authoritative(
+    conn: sqlite3.Connection, workspace_id: str
+) -> None:
+    conn.execute(
+        "insert into workspace_executor_bootstrap_state(workspace_id) values (?) "
+        "on conflict(workspace_id) do nothing",
+        (workspace_id,),
+    )
+
+
 def get_workspace_executor_configuration(
     conn: sqlite3.Connection, workspace_id: str
 ) -> dict[str, list[dict[str, Any]]]:
@@ -61,3 +81,4 @@ def replace_workspace_executor_configuration(
             for row in node_limits
         ],
     )
+    mark_workspace_executor_configuration_authoritative(conn, workspace_id)

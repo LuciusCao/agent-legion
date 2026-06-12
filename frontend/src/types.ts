@@ -1,13 +1,4 @@
 import type { WorkspaceAgentDraft } from './api-contract'
-import type { components } from './generated/api'
-
-type ApiSchemas = components['schemas']
-
-export type ExecutorDefinition = ApiSchemas['ExecutorDefinitionResponse']
-export type ExecutorAllocation = ApiSchemas['ExecutorAllocationResponse']
-export type ExecutorCatalogResponse = ApiSchemas['ExecutorCatalogResponse']
-export type WorkspaceExecutorConfiguration =
-  ApiSchemas['WorkspaceExecutorConfigurationResponse']
 
 export type ContentType = 'knowledge' | 'question'
 export type DetailTab = 'nodes' | 'subtitles' | 'logs' | 'metadata'
@@ -338,23 +329,4 @@ export type QuestionDetailResponse = {
 
 export type WorkspacesResponse = {
   workspaces: WorkspaceRecord[]
-}
-
-export type WorkspaceStats = {
-  workspace_id: string
-  name: string
-  pipeline_key: string
-  pipeline_label: string
-  job_stats: Record<string, number>
-  agent_status: {
-    total: number
-    busy: number
-    idle: number
-    agents?: Array<{ id: string; name: string; busy: boolean }>
-  }
-  latest_run: {
-    node_key: string
-    status: string
-    started_at: string
-  } | null
 }

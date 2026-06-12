@@ -4,14 +4,16 @@ import type {
   GlobalServiceStatus,
   ResourceProviderDefinition,
   PipelineDefinitionRecord,
+} from '../types'
+import type {
   ExecutorDefinition,
   WorkspaceExecutorConfiguration,
-} from '../types'
+} from '../executorTypes'
+import { api } from '../api'
 import {
-  api,
   getExecutorCatalog,
   getWorkspaceExecutorConfiguration,
-} from '../api'
+} from '../executorApi'
 import { useUiStore } from './uiStore'
 
 type TestStatus = {
@@ -149,7 +151,22 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   setSettings(s) {
     set((state) => {
       const nextSettings = { ...state.settings, ...s }
-      const nextState = { ...state, settings: nextSettings }
+      const pipelineChanged =
+        s.pipelineKey !== undefined &&
+        s.pipelineKey !== state.settings.pipelineKey
+      const nextExecutorConfiguration = pipelineChanged
+        ? {
+            ...state.executorConfiguration,
+            bindings: [],
+            node_limits: [],
+          }
+        : state.executorConfiguration
+      const nextState = {
+        ...state,
+        settings: nextSettings,
+        pipelineDefinition: pipelineChanged ? null : state.pipelineDefinition,
+        executorConfiguration: nextExecutorConfiguration,
+      }
       return { ...nextState, isDirty: computeDirty(nextState) }
     })
   },
@@ -357,7 +374,12 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       const result = await api<{ pipeline: PipelineDefinitionRecord }>(
         `/api/pipelines/${encodeURIComponent(pipelineKey)}`
       )
-      if (result && typeof result === 'object' && 'pipeline' in result) {
+      if (
+        result &&
+        typeof result === 'object' &&
+        'pipeline' in result &&
+        get().settings.pipelineKey === pipelineKey
+      ) {
         set({ pipelineDefinition: result.pipeline })
       }
     } catch {
