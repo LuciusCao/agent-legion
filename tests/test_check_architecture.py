@@ -245,3 +245,161 @@ def test_default_budget_enforced_for_new_files(tmp_path):
         "server/app/services/big_service.py" in error and "401 lines exceeds budget 400" in error
         for error in errors
     )
+
+
+def test_rejects_pipeline_worker_importing_openclaw_runner(tmp_path):
+    write(
+        tmp_path / "server/app/pipeline_worker_thread.py",
+        "from server.app.pipeline.openclaw import OpenClawRunner\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("scheduler boundary" in error and "openclaw" in error for error in errors)
+
+
+def test_rejects_pipeline_worker_importing_pi_runner(tmp_path):
+    write(
+        tmp_path / "server/app/pipeline_worker_thread.py",
+        "from server.app.pipelines.pi_runner import PiRunner\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("scheduler boundary" in error and "pi_runner" in error for error in errors)
+
+
+def test_rejects_pipeline_worker_importing_skills(tmp_path):
+    write(
+        tmp_path / "server/app/pipeline_worker_thread.py",
+        "from server.app.pipelines.skills import resolve_pipeline_skill\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("scheduler boundary" in error and "skills" in error for error in errors)
+
+
+def test_rejects_pipeline_worker_importing_local_handlers(tmp_path):
+    write(
+        tmp_path / "server/app/pipeline_worker_thread.py",
+        "from server.app.pipelines.reading_analysis import fetch_questions\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("scheduler boundary" in error and "reading_analysis" in error for error in errors)
+
+
+def test_rejects_pipeline_worker_importing_subprocess(tmp_path):
+    write(
+        tmp_path / "server/app/pipeline_worker_thread.py",
+        "import subprocess\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("scheduler boundary" in error and "subprocess" in error for error in errors)
+
+
+def test_rejects_pipeline_worker_accessing_runner_attribute(tmp_path):
+    write(
+        tmp_path / "server/app/pipeline_worker_thread.py",
+        "class Worker:\n    def run(self, node):\n        if node.runner == 'local':\n            pass\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any(".runner or .agent" in error for error in errors)
+
+
+def test_rejects_pipeline_worker_accessing_agent_attribute(tmp_path):
+    write(
+        tmp_path / "server/app/pipeline_worker_thread.py",
+        "class Worker:\n    def run(self, node):\n        if node.agent is not None:\n            pass\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any(".runner or .agent" in error for error in errors)
+
+
+def test_rejects_scheduler_using_futures_length_for_capacity(tmp_path):
+    write(
+        tmp_path / "server/app/pipelines/scheduler.py",
+        "class Worker:\n    def has_capacity(self):\n        return len(self._futures) < 10\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("_futures length" in error for error in errors)
+
+
+def test_rejects_scheduler_threadpool_keyed_by_workspace(tmp_path):
+    write(
+        tmp_path / "server/app/pipeline_worker_thread.py",
+        "from concurrent.futures import ThreadPoolExecutor\n"
+        "class Worker:\n"
+        "    def build(self, workspace_id):\n"
+        "        self._pools[workspace_id] = ThreadPoolExecutor(max_workers=1)\n",
+    )
+    write(
+        tmp_path / "config/architecture-budgets.json",
+        '{"route_exemptions": [], "scheduler_threadpool_baselines": '
+        '{"server/app/pipeline_worker_thread.py": {"self._pools[workspace_id]": 1}}, "files": {}}',
+    )
+
+    errors = check_repository(tmp_path)
+
+    assert any("ThreadPoolExecutor construction keyed by workspace" in error for error in errors)
+
+
+def test_rejects_executor_module_reading_raw_executors_config(tmp_path):
+    write(
+        tmp_path / "server/app/executors/local.py",
+        "class LocalExecutor:\n"
+        "    def __init__(self, settings):\n"
+        "        self.config = settings.config['executors']\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("raw settings.config['executors']" in error for error in errors)
+
+
+def test_rejects_pipeline_yaml_node_without_capability(tmp_path):
+    (tmp_path / "server/app").mkdir(parents=True)
+    (tmp_path / "config/pipelines").mkdir(parents=True)
+    write(
+        tmp_path / "config/pipelines/example.yaml",
+        "key: example\nlabel: Example\nnodes:\n  fetch:\n    runner: local\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("non-empty capability" in error for error in errors)
+
+
+def test_rejects_agent_node_with_workspace_node_limit(tmp_path):
+    (tmp_path / "server/app").mkdir(parents=True)
+    (tmp_path / "config/pipelines").mkdir(parents=True)
+    write(
+        tmp_path / "config/pipelines/example.yaml",
+        "key: example\nlabel: Example\nconcurrency:\n  nodes:\n    review: 2\n"
+        "nodes:\n  review:\n    capability: review\n    runner: agent\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("agent-bound node" in error and "workspace_node_limits" in error for error in errors)

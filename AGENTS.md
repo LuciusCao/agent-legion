@@ -372,9 +372,10 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 The required extension order is:
 
 1. Add or reuse a business `capability` on the Pipeline Node.
-2. Implement that capability in an Executor definition or adapter.
+2. Add an implementation under a typed Executor definition.
 3. Allocate the Executor to the Workspace with a Workspace upper limit.
 4. Bind the Node to one compatible allocated Executor.
+5. Add a local Node limit only when the bound Executor kind is local.
 
 Do not put OpenClaw skill names, Pi skill directories, command templates, or Agent kinds in a
 Pipeline Node. Do not read `_futures` or create per-Workspace pools to make capacity decisions.
@@ -394,10 +395,56 @@ review_keywords:
   capability: review_keywords
 ```
 
+Other wrong patterns the architecture gate rejects:
+
+```python
+# Wrong: Scheduler imports a concrete agent runner.
+from server.app.pipelines.pi_runner import PiRunner
+```
+
+```yaml
+# Wrong: Agent-bound Node has a workspace_node_limits entry.
+concurrency:
+  nodes:
+    review_keywords: 2
+nodes:
+  review_keywords:
+    runner: agent
+```
+
+```python
+# Wrong: Capacity decision based on future count.
+if len(self._futures) < self.capacity:
+    ...
+```
+
+```python
+# Wrong: Implicit fallback when binding is absent.
+binding = get_binding(...)
+executor_id = binding["executor_id"] if binding else "local-default"
+```
+
+Recovery behavior: on startup and before every scheduling pass the worker expires stale
+executor leases. A stale lease marks its `node_run` as failed, its `job_node` as stale (so an
+explicit user rerun can recover it), and the job as failed. It never resets failed Nodes or
+automatically reruns them.
+
+Run the focused Phase 3 executor governance tests:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run pytest -q tests/test_executor_recovery.py tests/test_check_architecture.py tests/test_architecture_baselines.py
+```
+
 Run the architecture contract and generated API checks:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python scripts/check_architecture.py
 cd frontend && npm run api:check
 ./scripts/check-quick.sh
+```
+
+Before committing or handing off work, run the full gate:
+
+```bash
+./scripts/check.sh
 ```

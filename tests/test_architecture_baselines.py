@@ -158,3 +158,60 @@ def test_jobs_router_is_not_a_router_aggregator(tmp_path):
     errors = check_repository(tmp_path)
 
     assert any("server/app/routes/jobs.py: include_router forbidden" in error for error in errors)
+
+
+def test_scheduler_executor_id_indexed_pool_is_allowed(tmp_path):
+    write(
+        tmp_path / "server/app/pipeline_worker_thread.py",
+        "from concurrent.futures import ThreadPoolExecutor\n"
+        "class Worker:\n"
+        "    def build(self, executor_id):\n"
+        "        self._pools[executor_id] = ThreadPoolExecutor(max_workers=1)\n",
+    )
+    write(
+        tmp_path / "config/architecture-budgets.json",
+        json.dumps(
+            {
+                "route_exemptions": [],
+                "scheduler_threadpool_baselines": {
+                    "server/app/pipeline_worker_thread.py": {"self._pools[executor_id]": 1}
+                },
+                "files": {},
+            }
+        ),
+    )
+
+    errors = check_repository(tmp_path)
+
+    assert not any("ThreadPoolExecutor" in error for error in errors)
+
+
+def test_pipeline_yaml_agent_node_without_limit_is_allowed(tmp_path):
+    (tmp_path / "server/app").mkdir(parents=True)
+    (tmp_path / "config/pipelines").mkdir(parents=True)
+    write(
+        tmp_path / "config/pipelines/example.yaml",
+        "key: example\nlabel: Example\nnodes:\n"
+        "  review:\n    capability: review\n    runner: agent\n",
+    )
+    write(
+        tmp_path / "config/architecture-budgets.json",
+        '{"route_exemptions": [], "files": {}}',
+    )
+
+    assert check_repository(tmp_path) == []
+
+
+def test_executor_module_config_subscript_not_named_executors_is_allowed(tmp_path):
+    write(
+        tmp_path / "server/app/executors/local.py",
+        "class LocalExecutor:\n"
+        "    def __init__(self, settings):\n"
+        "        self.value = settings.config['other']\n",
+    )
+    write(
+        tmp_path / "config/architecture-budgets.json",
+        '{"route_exemptions": [], "files": {}}',
+    )
+
+    assert check_repository(tmp_path) == []

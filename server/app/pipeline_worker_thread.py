@@ -72,7 +72,9 @@ class PipelineWorkerThread:
         self._ensure_pools()
         self._local_executor = self._pools.get("local-default")
         self._agent_executor = self._pools.get("pi-default")
-        self.leases.expire_stale(datetime.now(UTC))
+        expired = self.leases.expire_stale(datetime.now(UTC))
+        if expired:
+            logger.warning("expired stale pipeline executions on startup: %s", ", ".join(expired))
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -94,7 +96,9 @@ class PipelineWorkerThread:
             self._ensure_pools()
 
         self._reap_futures()
-        self.leases.expire_stale(datetime.now(UTC))
+        expired = self.leases.expire_stale(datetime.now(UTC))
+        if expired:
+            logger.warning("expired stale pipeline executions: %s", ", ".join(expired))
 
         claimed_any = False
         while True:
@@ -116,7 +120,9 @@ class PipelineWorkerThread:
                 break
         return claimed_any
 
-    def _runnable_workspaces(self) -> tuple[list[str], dict[str, list[tuple[PipelineDefinition, dict[str, Any]]]]]:
+    def _runnable_workspaces(
+        self,
+    ) -> tuple[list[str], dict[str, list[tuple[PipelineDefinition, dict[str, Any]]]]]:
         workspace_ids: list[str] = []
         jobs_by_workspace: dict[str, list[tuple[PipelineDefinition, dict[str, Any]]]] = {}
         for definition in self._definitions:

@@ -162,6 +162,17 @@ def expire_stale_leases(conn: sqlite3.Connection, now: datetime) -> list[str]:
             (now_str, row["job_id"], row["node_key"]),
         )
         _sync_job_status(conn, row["job_id"])
+        # Lease expiration is an external execution failure. The node is left
+        # stale so an explicit user rerun can recover it, but the aggregate job
+        # status must reflect the failure immediately.
+        conn.execute(
+            """
+            update jobs
+            set status='failed', updated_at=?
+            where id=? and status != 'failed'
+            """,
+            (now_str, row["job_id"]),
+        )
     return expired
 
 
