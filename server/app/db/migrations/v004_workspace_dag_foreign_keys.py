@@ -70,12 +70,33 @@ create table node_runs__v004 (
 )
 """
 
-_TABLES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+_EXECUTOR_LEASES_TABLE_SQL = """
+create table executor_leases__v004 (
+  id text primary key,
+  execution_id text not null unique,
+  executor_id text not null,
+  workspace_id text not null,
+  job_id text not null,
+  pipeline_key text not null,
+  node_key text not null,
+  node_run_id integer not null,
+  status text not null check(status in ('active', 'released', 'expired')),
+  acquired_at text not null,
+  heartbeat_at text not null,
+  expires_at text not null,
+  foreign key(workspace_id) references workspaces(id) on delete cascade,
+  foreign key(job_id) references jobs(id) on delete cascade,
+  foreign key(node_run_id) references node_runs(id) on delete cascade
+)
+"""
+
+_TABLES: tuple[tuple[str, str, str, tuple[str, ...], bool], ...] = (
     (
         "job_batches",
         _JOB_BATCHES_TABLE_SQL,
         "job_batches__v004",
         ("create index idx_job_batches_workspace on job_batches(workspace_id, created_at)",),
+        True,
     ),
     (
         "jobs",
@@ -87,18 +108,32 @@ _TABLES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
             "create index idx_jobs_workspace_pipeline_status on jobs(workspace_id, pipeline_key, status)",
             "create index idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id)",
         ),
+        False,
     ),
     (
         "job_nodes",
         _JOB_NODES_TABLE_SQL,
         "job_nodes__v004",
         ("create index idx_job_nodes_job_status on job_nodes(job_id, status)",),
+        True,
     ),
     (
         "node_runs",
         _NODE_RUNS_TABLE_SQL,
         "node_runs__v004",
         ("create index idx_node_runs_job_id on node_runs(job_id)",),
+        False,
+    ),
+)
+
+_EXECUTOR_LEASES = (
+    "executor_leases",
+    _EXECUTOR_LEASES_TABLE_SQL,
+    "executor_leases__v004",
+    (
+        "create index idx_executor_leases_global_active on executor_leases(executor_id, status, expires_at)",
+        "create index idx_executor_leases_workspace_active on executor_leases(workspace_id, executor_id, status, expires_at)",
+        "create index idx_executor_leases_node_active on executor_leases(workspace_id, pipeline_key, node_key, status, expires_at)",
     ),
 )
 
@@ -159,6 +194,42 @@ def _preflight_orphans(conn: sqlite3.Connection) -> None:
             )
         )
 
+    for row in conn.execute(
+        "select id, workspace_id from executor_leases where workspace_id not in (select id from workspaces)"
+    ).fetchall():
+        issues.append(
+            MigrationIssue(
+                table="executor_leases",
+                row_key=row["id"],
+                constraint="fk_executor_leases_workspace_id",
+                message=f"workspace_id '{row['workspace_id']}' does not exist",
+            )
+        )
+
+    for row in conn.execute(
+        "select id, job_id from executor_leases where job_id not in (select id from jobs)"
+    ).fetchall():
+        issues.append(
+            MigrationIssue(
+                table="executor_leases",
+                row_key=row["id"],
+                constraint="fk_executor_leases_job_id",
+                message=f"job_id '{row['job_id']}' does not exist",
+            )
+        )
+
+    for row in conn.execute(
+        "select id, node_run_id from executor_leases where node_run_id not in (select id from node_runs)"
+    ).fetchall():
+        issues.append(
+            MigrationIssue(
+                table="executor_leases",
+                row_key=row["id"],
+                constraint="fk_executor_leases_node_run_id",
+                message=f"node_run_id '{row['node_run_id']}' does not exist",
+            )
+        )
+
     if issues:
         raise_blocked(
             MigrationReport(
@@ -185,6 +256,7 @@ def _copy_table(
     replacement_table: str,
     create_sql: str,
     index_sqls: tuple[str, ...],
+    drop_source: bool = True,
 ) -> None:
     """Copy ``source_table`` into a replacement table, validate, then swap.
 
@@ -193,7 +265,8 @@ def _copy_table(
     2. Copy every column explicitly from ``source_table``.
     3. Compare source and replacement row counts.
     4. Run ``pragma foreign_key_check('<replacement>')``.
-    5. Drop ``source_table`` only after all checks pass.
+    5. Drop ``source_table`` only after all checks pass (unless ``drop_source=False``,
+       in which case it is renamed to ``<source_table>__v004_old``).
     6. Rename ``replacement_table`` to ``source_table``.
     7. Recreate explicit indexes and unique constraints.
     """
@@ -226,7 +299,10 @@ def _copy_table(
             f"{'; '.join(str(row) for row in fk_violations)}"
         )
 
-    conn.execute(f"drop table {source_table}")
+    if drop_source:
+        conn.execute(f"drop table {source_table}")
+    else:
+        conn.execute(f"alter table {source_table} rename to {source_table}__v004_old")
     conn.execute(f"alter table {replacement_table} rename to {source_table}")
 
     for idx_sql in index_sqls:
@@ -236,10 +312,22 @@ def _copy_table(
 def _apply(conn: sqlite3.Connection) -> None:
     _preflight_orphans(conn)
 
-    # Rebuild child-most tables first so we can drop parents after their
-    # dependents have been replaced.
-    for source_table, create_sql, replacement_table, index_sqls in _TABLES:
-        _copy_table(conn, source_table, replacement_table, create_sql, index_sqls)
+    # Rebuild tables.  jobs and node_runs keep their old copies because
+    # executor_leases references them and must be rebuilt while the old
+    # rows are still addressable.
+    for source_table, create_sql, replacement_table, index_sqls, drop_source in _TABLES:
+        _copy_table(
+            conn, source_table, replacement_table, create_sql, index_sqls, drop_source=drop_source
+        )
+
+    # Rebuild executor_leases against the new jobs/node_runs tables, then
+    # drop its old copy immediately.
+    source_table, create_sql, replacement_table, index_sqls = _EXECUTOR_LEASES
+    _copy_table(conn, source_table, replacement_table, create_sql, index_sqls)
+
+    # Now safe to drop the kept old copies of jobs and node_runs.
+    conn.execute("drop table if exists jobs__v004_old")
+    conn.execute("drop table if exists node_runs__v004_old")
 
 
 MIGRATION = Migration(
