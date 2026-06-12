@@ -675,6 +675,7 @@ def test_process_ready_pipeline_node_refreshes_job_status_when_no_local_nodes_re
             PipelineNode(
                 key="agent_node",
                 label="Agent",
+                capability="agent_node",
                 runner="agent",
                 agent=PipelineAgent(engine="pi", skill="test/skill"),
             ),
@@ -775,6 +776,7 @@ def test_pipeline_worker_fails_pi_node_when_pi_runner_not_configured(tmp_path):
             PipelineNode(
                 key="pi_node",
                 label="Pi Node",
+                capability="pi_node",
                 runner="agent",
                 agent=PipelineAgent(engine="pi", skill="test/skill"),
             ),
@@ -818,6 +820,7 @@ def test_pipeline_worker_fails_generic_agent_node_when_no_runner_available(tmp_p
             PipelineNode(
                 key="generic_agent",
                 label="Generic Agent",
+                capability="generic_agent",
                 runner="agent",
             ),
         ]

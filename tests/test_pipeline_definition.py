@@ -5,6 +5,35 @@ import pytest
 from server.app.pipelines.definition import PipelineDefinitionError, load_pipeline_definition
 
 
+def write_pipeline(tmp_path: Path, node_body: str) -> Path:
+    config = tmp_path / "pipeline.yaml"
+    indented_body = node_body.replace("\n", "\n    ")
+    config.write_text(
+        f"""key: test
+label: Test
+nodes:
+  one:
+    {indented_body}
+""",
+        encoding="utf-8",
+    )
+    return config
+
+
+def test_pipeline_node_requires_non_empty_capability(tmp_path: Path) -> None:
+    path = write_pipeline(tmp_path, node_body="label: Fetch\nrunner: local\noutputs: [out.json]")
+    with pytest.raises(PipelineDefinitionError, match="capability"):
+        load_pipeline_definition(path)
+
+
+def test_pipeline_node_loads_capability(tmp_path: Path) -> None:
+    path = write_pipeline(
+        tmp_path,
+        node_body="label: Fetch\ncapability: fetch_questions\nrunner: local\noutputs: [out.json]",
+    )
+    assert load_pipeline_definition(path).nodes["one"].capability == "fetch_questions"
+
+
 def test_load_question_content_definition():
     definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
 
@@ -64,6 +93,7 @@ key: bad
 label: Bad
 nodes:
   second:
+    capability: second
     runner: local
     after: [missing]
 """,
@@ -82,9 +112,11 @@ key: cycle
 label: Cycle
 nodes:
   a:
+    capability: a
     runner: local
     after: [b]
   b:
+    capability: b
     runner: local
     after: [a]
 """,
@@ -103,6 +135,7 @@ key: bad_runner
 label: Bad Runner
 nodes:
   one:
+    capability: one
     runner: remote
 """,
         encoding="utf-8",
@@ -120,6 +153,7 @@ key: bad
 label: Bad
 nodes:
   one:
+    capability: one
     runner: local
     agent:
       engine: pi
@@ -140,6 +174,7 @@ key: bad
 label: Bad
 nodes:
   one:
+    capability: one
     runner: agent
     agent:
       engine: other
@@ -160,6 +195,7 @@ key: bad
 label: Bad
 nodes:
   one:
+    capability: one
     runner: agent
     agent:
       engine: pi
@@ -180,6 +216,7 @@ key: bad
 label: Bad
 nodes:
   one:
+    capability: one
     runner: agent
     agent:
       engine: pi
@@ -200,6 +237,7 @@ key: bad
 label: Bad
 nodes:
   one:
+    capability: one
     runner: agent
     agent:
       engine: pi
@@ -220,6 +258,7 @@ key: bad
 label: Bad
 nodes:
   one:
+    capability: one
     runner: agent
     agent:
       engine: pi
@@ -241,6 +280,7 @@ key: legacy
 label: Legacy
 nodes:
   one:
+    capability: one
     runner: agent
 """,
         encoding="utf-8",
@@ -259,6 +299,7 @@ key: no_label
 label: No Label
 nodes:
   one:
+    capability: one
     runner: local
 """,
         encoding="utf-8",
@@ -276,6 +317,7 @@ label: With Label
 nodes:
   one:
     label: 步骤一
+    capability: one
     runner: local
 """,
         encoding="utf-8",
@@ -299,11 +341,14 @@ concurrency:
     mark_question: 10
 nodes:
   fetch_questions:
+    capability: fetch_questions
     runner: local
   clean_and_parse:
+    capability: clean_and_parse
     runner: local
     after: [fetch_questions]
   mark_question:
+    capability: mark_question
     runner: local
     after: [clean_and_parse]
 """,
@@ -328,6 +373,7 @@ concurrency:
   agent: 2
 nodes:
   one:
+    capability: one
     runner: local
 """,
         encoding="utf-8",
@@ -349,6 +395,7 @@ concurrency:
     one: invalid
 nodes:
   one:
+    capability: one
     runner: local
 """,
         encoding="utf-8",

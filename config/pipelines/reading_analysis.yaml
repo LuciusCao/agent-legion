@@ -18,18 +18,21 @@ intake:
 nodes:
   fetch_questions:
     label: 获取题目
+    capability: fetch_questions
     runner: local
     after: []
     inputs: []
     outputs: [questions.json]
   clean_and_parse:
     label: 清洗与解析
+    capability: clean_and_parse
     runner: local
     after: [fetch_questions]
     inputs: [questions.json]
     outputs: [questions_parsed.json]
   extract_keywords:
     label: 提取关键词
+    capability: extract_keywords
     runner: agent
     agent:
       engine: pi
@@ -40,6 +43,7 @@ nodes:
     outputs: [keywords_raw.json, keywords_report.json]
   review_keywords:
     label: 审核关键词
+    capability: review_keywords
     runner: agent
     agent:
       engine: pi
@@ -50,6 +54,7 @@ nodes:
     outputs: [keywords_reviewed.json, keywords_review_report.json]
   assess_difficulty:
     label: 评估难度
+    capability: assess_difficulty
     runner: agent
     agent:
       engine: pi
@@ -60,6 +65,7 @@ nodes:
     outputs: [difficulty_raw.json, difficulty_report.json]
   review_difficulty:
     label: 审核难度
+    capability: review_difficulty
     runner: agent
     agent:
       engine: pi
@@ -70,6 +76,7 @@ nodes:
     outputs: [difficulty_reviewed.json, difficulty_review_report.json]
   generate_distractors:
     label: 生成干扰项
+    capability: generate_distractors
     runner: agent
     agent:
       engine: pi
@@ -80,6 +87,7 @@ nodes:
     outputs: [distractors_raw.json, distractors_report.json]
   review_distractors:
     label: 审核干扰项
+    capability: review_distractors
     runner: agent
     agent:
       engine: pi
@@ -90,6 +98,7 @@ nodes:
     outputs: [distractors_reviewed.json, distractors_review_report.json]
   mark_question:
     label: 标记题目
+    capability: mark_question
     runner: local
     after: [review_difficulty, review_distractors]
     inputs: [keywords_reviewed.json, difficulty_reviewed.json, distractors_reviewed.json]

@@ -34,6 +34,9 @@ class PipelineAgent:
 class PipelineNode:
     key: str
     label: str
+    capability: str
+    # Legacy runner/agent fields are retained for compatibility. Scheduler code must
+    # branch on capability, not on runner or agent.
     runner: RunnerKind
     after: list[str] = field(default_factory=list)
     inputs: list[str] = field(default_factory=list)
@@ -241,11 +244,16 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
         if not isinstance(node_label, str) or not node_label:
             raise PipelineDefinitionError(f"Node {node_key} label must be a non-empty string")
 
+        capability = raw_node.get("capability", "")
+        if not isinstance(capability, str) or not capability:
+            raise PipelineDefinitionError(f"Node {node_key} capability must be a non-empty string")
+
         agent = _load_agent(raw_node, node_key, runner)
 
         nodes[node_key] = PipelineNode(
             key=node_key,
             label=node_label,
+            capability=capability,
             runner=runner,
             after=_string_list(raw_node.get("after"), "after", node_key),
             inputs=_string_list(raw_node.get("inputs"), "inputs", node_key),

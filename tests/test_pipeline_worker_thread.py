@@ -18,10 +18,13 @@ def _make_def():
         concurrency=PipelineConcurrency(local=2, agent=1, nodes={"n1": 2}),
         intake=MagicMock(),
         nodes={
-            "n1": PipelineNode(key="n1", label="N1", runner="local", outputs=["o.json"]),
+            "n1": PipelineNode(
+                key="n1", label="N1", capability="n1", runner="local", outputs=["o.json"]
+            ),
             "n2": PipelineNode(
                 key="n2",
                 label="N2",
+                capability="n2",
                 runner="agent",
                 outputs=["o.json"],
                 agent=PipelineAgent(engine="pi", skill="test_skill"),
@@ -73,6 +76,7 @@ def test_poll_respects_per_workspace_agent_limits(tmp_path, monkeypatch):
                 "n2": PipelineNode(
                     key="n2",
                     label="N2",
+                    capability="n2",
                     runner="agent",
                     outputs=["o.json"],
                     agent=PipelineAgent(engine="pi", skill="test_skill"),
@@ -202,6 +206,7 @@ def test_two_workspaces_with_limit_one_each_can_submit_simultaneously(tmp_path, 
                 "n2": PipelineNode(
                     key="n2",
                     label="N2",
+                    capability="n2",
                     runner="agent",
                     outputs=["o.json"],
                     agent=PipelineAgent(engine="pi", skill="test_skill"),
@@ -269,7 +274,9 @@ def test_poll_respects_per_node_local_limit(tmp_path, monkeypatch):
             concurrency=PipelineConcurrency(local=4, agent=1, nodes={"n1": 1}),
             intake=MagicMock(),
             nodes={
-                "n1": PipelineNode(key="n1", label="N1", runner="local", outputs=["o.json"]),
+                "n1": PipelineNode(
+                    key="n1", label="N1", capability="n1", runner="local", outputs=["o.json"]
+                ),
             },
         )
     ]
@@ -321,8 +328,12 @@ def test_poll_respects_total_local_executor_limit(tmp_path, monkeypatch):
             concurrency=PipelineConcurrency(local=1, agent=1, nodes={}),
             intake=MagicMock(),
             nodes={
-                "n1": PipelineNode(key="n1", label="N1", runner="local", outputs=["o.json"]),
-                "n2": PipelineNode(key="n2", label="N2", runner="local", outputs=["o2.json"]),
+                "n1": PipelineNode(
+                    key="n1", label="N1", capability="n1", runner="local", outputs=["o.json"]
+                ),
+                "n2": PipelineNode(
+                    key="n2", label="N2", capability="n2", runner="local", outputs=["o2.json"]
+                ),
             },
         )
     ]
@@ -388,7 +399,9 @@ def test_poll_skips_paused_workspace(tmp_path, monkeypatch):
             concurrency=PipelineConcurrency(local=2, agent=1, nodes={}),
             intake=MagicMock(),
             nodes={
-                "n1": PipelineNode(key="n1", label="N1", runner="local", outputs=["o.json"]),
+                "n1": PipelineNode(
+                    key="n1", label="N1", capability="n1", runner="local", outputs=["o.json"]
+                ),
             },
         )
     ]
@@ -466,6 +479,7 @@ def test_poll_calls_agent_manager_busy_and_idle(tmp_path, monkeypatch):
                 "n2": PipelineNode(
                     key="n2",
                     label="N2",
+                    capability="n2",
                     runner="agent",
                     outputs=["o.json"],
                     agent=PipelineAgent(engine="pi", skill="test_skill"),

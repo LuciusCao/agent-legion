@@ -33,6 +33,9 @@ class JobQueryService:
                 "label": definition.nodes[node["node_key"]].label
                 if node["node_key"] in definition.nodes
                 else node["node_key"],
+                "capability": definition.nodes[node["node_key"]].capability
+                if node["node_key"] in definition.nodes
+                else node["node_key"],
                 "after": definition.nodes[node["node_key"]].after
                 if node["node_key"] in definition.nodes
                 else [],
@@ -110,6 +113,7 @@ class JobQueryService:
                 {
                     "key": node.key,
                     "label": node.label,
+                    "capability": node.capability,
                     "runner": node.runner,
                     "after": node.after,
                     "inputs": node.inputs,
