@@ -184,7 +184,7 @@ Before committing or handing off work, run the full gate:
 ./scripts/check.sh
 ```
 
-The quick gate (`./scripts/check-quick.sh`) runs Ruff, pytest with coverage (`fail_under = 75`), mypy, architecture contract checks (`scripts/check_architecture.py`), generated API type drift check (`npm run api:check`), frontend lint/typecheck/Vitest, and the spec health check (`scripts/verify_specs.py --check`). The full gate adds the production build.
+The quick gate (`./scripts/check-quick.sh`) runs Ruff, pytest with coverage (`fail_under = 85`), mypy, architecture contract checks (`scripts/check_architecture.py`), generated API type drift check (`npm run api:check`), frontend lint/typecheck/Vitest, and the spec health check (`scripts/verify_specs.py --check`). The full gate adds the production build.
 
 Install the optional pre-commit hook:
 
@@ -335,7 +335,7 @@ Question explanation videos do not produce interaction nodes. Their `metadata.js
 
 - Tests live in `tests/` and use pytest.
 - `pythonpath = ["."]` is configured in `pyproject.toml` so imports like `server.app.db` resolve.
-- Coverage is enforced in `check-quick.sh` with `fail_under = 75` (configured in `pyproject.toml`).
+- Coverage is enforced in `check-quick.sh` with `fail_under = 85` (configured in `pyproject.toml`).
 - API tests use `fastapi.testclient.TestClient` with a temporary `data_dir`. The `client` fixture must use `with TestClient(app) as c:` to ensure lifespan resources are properly closed.
 - Worker tests inject mock `TranscriptionProvider` implementations to avoid requiring real ASR binaries.
 - Core tests validate SRT parsing, artifact cleanup, openclaw runner behavior, ZIP packaging, type-specific pipeline routing, pipeline definition loading, DAG scheduling, and job API endpoints.

@@ -123,7 +123,7 @@ Quick gate (for daily development):
 ./scripts/check-quick.sh
 ```
 
-Runs Ruff lint + format check, Python tests with coverage (`fail_under = 75`), mypy, architecture
+Runs Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy, architecture
 contract checks (`scripts/check_architecture.py`), generated API type drift check
 (`npm run api:check`), frontend Prettier + ESLint + typecheck + Vitest, and the spec health check
 (`scripts/verify_specs.py --check`).

@@ -58,7 +58,8 @@ def test_rejects_scheduler_threadpool_construction(tmp_path):
     )
     write(
         tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": [], "scheduler_threadpool_exemptions": [], "files": {}}',
+        '{"route_exemptions": [], "scheduler_threadpool_baselines": '
+        '{"server/app/pipelines/scheduler.py": {"self._local_executor": 1}}, "files": {}}',
     )
 
     errors = check_repository(tmp_path)
@@ -80,7 +81,8 @@ def test_accepts_scheduler_legacy_executor_assignment(tmp_path):
     )
     write(
         tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": [], "scheduler_threadpool_exemptions": [], "files": {}}',
+        '{"route_exemptions": [], "scheduler_threadpool_baselines": '
+        '{"server/app/pipelines/scheduler.py": {"self._local_executor": 1}}, "files": {}}',
     )
 
     errors = check_repository(tmp_path)
@@ -121,9 +123,12 @@ def test_route_annotation_exemptions(tmp_path):
 def test_accepts_compliant_route(tmp_path):
     write(
         tmp_path / "server/app/routes/example.py",
+        "from pydantic import BaseModel\n"
         "from fastapi import APIRouter\n"
+        "class ExampleResponse(BaseModel):\n"
+        "    value: str\n"
         "router = APIRouter()\n"
-        "@router.get('/example', response_model=dict[str, str])\n"
+        "@router.get('/example', response_model=ExampleResponse)\n"
         "def example() -> dict[str, str]:\n"
         "    return {}\n",
     )
@@ -144,7 +149,8 @@ def test_accepts_scheduler_legacy_executor_assignment_with_annotation(tmp_path):
     )
     write(
         tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": [], "scheduler_threadpool_exemptions": [], "files": {}}',
+        '{"route_exemptions": [], "scheduler_threadpool_baselines": '
+        '{"server/app/pipelines/scheduler.py": {"self._local_executor": 1}}, "files": {}}',
     )
 
     errors = check_repository(tmp_path)
@@ -173,57 +179,6 @@ def test_route_imported_submodule_is_forbidden(tmp_path):
     errors = check_repository(tmp_path)
 
     assert any("route boundary forbids import server.app.cms" in error for error in errors)
-
-
-def test_route_import_exemptions(tmp_path):
-    write(
-        tmp_path / "server/app/routes/example.py",
-        "from server.app.cms.client import CmsClient\n",
-    )
-    write(
-        tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
-
-    errors = check_repository(tmp_path)
-
-    assert any("route boundary forbids import server.app.cms.client" in error for error in errors)
-
-    write(
-        tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": [], "route_import_exemptions": ["server/app/routes/example.py"], "files": {}}',
-    )
-
-    errors = check_repository(tmp_path)
-
-    assert not any("route boundary" in error for error in errors)
-
-
-def test_scheduler_import_exemptions(tmp_path):
-    write(
-        tmp_path / "server/app/pipelines/scheduler.py",
-        "from server.app.pipelines.pi_runner import PiRunner\n",
-    )
-    write(
-        tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
-
-    errors = check_repository(tmp_path)
-
-    assert any(
-        "scheduler boundary forbids import server.app.pipelines.pi_runner" in error
-        for error in errors
-    )
-
-    write(
-        tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": [], "scheduler_import_exemptions": ["server/app/pipelines/scheduler.py"], "files": {}}',
-    )
-
-    errors = check_repository(tmp_path)
-
-    assert not any("scheduler boundary" in error for error in errors)
 
 
 def test_forbidden_imports_submodule_match():

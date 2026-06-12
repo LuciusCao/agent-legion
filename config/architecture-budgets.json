@@ -76,24 +76,36 @@
     "server/app/routes/videos.py:rerun_video": "Broad dict[str, Any] annotation pending Phase 2 transport models",
     "server/app/routes/videos.py:delete_video": "Broad dict[str, Any] annotation pending Phase 2 transport models"
   },
-  "route_import_exemptions": [
-    "server/app/routes/jobs.py",
-    "server/app/routes/questions.py"
-  ],
-  "route_import_exemption_reasons": {
+  "route_import_baselines": {
+    "server/app/routes/jobs.py": [
+      "server.app.cms.client",
+      "server.app.cms.question",
+      "server.app.pipelines.artifacts"
+    ],
+    "server/app/routes/questions.py": [
+      "server.app.cms.client",
+      "server.app.cms.question"
+    ]
+  },
+  "route_import_baseline_reasons": {
     "server/app/routes/jobs.py": "Legacy Workspace route importing CMS and pipeline artifact helpers",
     "server/app/routes/questions.py": "Legacy Workspace route importing CMS helpers"
   },
-  "scheduler_import_exemptions": [
-    "server/app/pipeline_worker_thread.py"
-  ],
-  "scheduler_import_exemption_reasons": {
+  "scheduler_import_baselines": {
+    "server/app/pipeline_worker_thread.py": [
+      "server.app.pipelines.pi_runner"
+    ]
+  },
+  "scheduler_import_baseline_reasons": {
     "server/app/pipeline_worker_thread.py": "Legacy scheduler thread importing agent runner"
   },
-  "scheduler_threadpool_exemptions": [
-    "server/app/pipeline_worker_thread.py"
-  ],
-  "scheduler_threadpool_exemption_reasons": {
+  "scheduler_threadpool_baselines": {
+    "server/app/pipeline_worker_thread.py": {
+      "self._ws_agent_executors[workspace_id]": 1,
+      "self._ws_local_executors[workspace_id]": 1
+    }
+  },
+  "scheduler_threadpool_baseline_reasons": {
     "server/app/pipeline_worker_thread.py": "Legacy per-Workspace pools pending Phase 3 removal"
   },
   "files": {
@@ -102,8 +114,9 @@
     "server/app/pipeline_worker_thread.py": 437,
     "frontend/src/api.ts": 292,
     "frontend/src/types.ts": 350,
-    "scripts/check_architecture.py": 205,
-    "tests/test_check_architecture.py": 292
+    "scripts/check_architecture.py": 213,
+    "tests/test_architecture_baselines.py": 130,
+    "tests/test_check_architecture.py": 247
   },
   "defaults": {
     "server/app/routes": 300,
