@@ -1,530 +1,349 @@
 import threading
+from pathlib import Path
 from unittest.mock import MagicMock
 
+from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+from server.app.executors.leases import ExecutorLeaseRepository
+from server.app.executors.models import ExecutionContext, ExecutionResult
+from server.app.executors.registry import ExecutorRegistry
+from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
 from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.pipelines.definition import (
-    PipelineAgent,
     PipelineConcurrency,
     PipelineDefinition,
+    PipelineIntake,
     PipelineNode,
 )
+from server.app.settings import Settings
+from tests.helpers import make_pipeline_worker
 
 
-def _make_def():
+def _make_definition(nodes: list[PipelineNode]) -> PipelineDefinition:
     return PipelineDefinition(
         key="test",
         label="Test",
-        concurrency=PipelineConcurrency(local=2, agent=1, nodes={"n1": 2}),
-        intake=MagicMock(),
-        nodes={
-            "n1": PipelineNode(
-                key="n1", label="N1", capability="n1", runner="local", outputs=["o.json"]
-            ),
-            "n2": PipelineNode(
-                key="n2",
-                label="N2",
-                capability="n2",
-                runner="agent",
-                outputs=["o.json"],
-                agent=PipelineAgent(engine="pi", skill="test_skill"),
-            ),
-        },
+        concurrency=PipelineConcurrency(local=1, agent=1),
+        intake=PipelineIntake(),
+        nodes={n.key: n for n in nodes},
     )
 
 
-def test_ensure_workspace_executors_creates_executors_and_sets_limits(tmp_path):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    worker = PipelineWorkerThread(job_db, settings)
-    worker._definitions = [_make_def()]
-    worker._ensure_workspace_executors(ws["id"])
-
-    assert ws["id"] in worker._ws_local_executors
-    assert ws["id"] in worker._ws_agent_executors
-    assert worker._ws_agent_limits[ws["id"]] == 1
-    assert worker._ws_local_executors[ws["id"]]._max_workers >= 2
-    assert worker._ws_agent_executors[ws["id"]]._max_workers == 1
-
-    agents = job_db.list_workspace_agents(ws["id"])
-    assert any(a["agent_id"] == "pi" and a["concurrency_limit"] == 1 for a in agents)
-
-    worker.stop()
+def _local_node(key: str, outputs: list[str] | None = None) -> PipelineNode:
+    return PipelineNode(
+        key=key,
+        label=key,
+        capability=key,
+        runner="local",
+        outputs=outputs or ["output.json"],
+    )
 
 
-def test_poll_respects_per_workspace_agent_limits(tmp_path, monkeypatch):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+class RecordingExecutor:
+    kind = "local"
 
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
+    def __init__(self, executor_id: str, block_event: threading.Event | None = None):
+        self.id = executor_id
+        self.kind = "local"
+        self.block_event = block_event or threading.Event()
+        self.contexts: list[ExecutionContext] = []
+        self._cancelled: set[str] = set()
 
-    worker = PipelineWorkerThread(job_db, settings)
-    worker._definitions = [
-        PipelineDefinition(
-            key="test",
-            label="Test",
-            concurrency=PipelineConcurrency(local=2, agent=1, nodes={}),
-            intake=MagicMock(),
-            nodes={
-                "n2": PipelineNode(
-                    key="n2",
-                    label="N2",
-                    capability="n2",
-                    runner="agent",
-                    outputs=["o.json"],
-                    agent=PipelineAgent(engine="pi", skill="test_skill"),
-                ),
-            },
-        )
-    ]
-    worker._pi_runner = MagicMock()
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
-
-    for i in range(2):
-        job_db.create_job(
-            pipeline_key="test",
-            source_type="question",
-            source_id=f"Q{i}",
-            batch_id="",
-            title=f"Question Q{i}",
-            node_keys=["n2"],
-            workspace_id=ws["id"],
-        )
-
-    blocker = threading.Event()
-
-    def _slow_execute(
-        job_db, definition, job, node_key, logs_dir, settings_config, pi_runner, skill_root
-    ):
-        if pi_runner is not None:
-            blocker.wait(timeout=10)
+    def supports(self, capability: str) -> bool:
         return True
 
-    monkeypatch.setattr("server.app.pipeline_worker_thread._execute_node_wrapped", _slow_execute)
+    def execute(self, context: ExecutionContext) -> ExecutionResult:
+        self.contexts.append(context)
+        self.block_event.wait(timeout=10)
+        for output in context.expected_outputs:
+            (context.job_dir / output).write_text('{"done": true}', encoding="utf-8")
+        return ExecutionResult(
+            status="completed",
+            exit_code=0,
+            produced_artifacts=tuple(context.expected_outputs),
+        )
+
+    def cancel(self, execution_id: str) -> None:
+        self._cancelled.add(execution_id)
+
+
+def _make_worker(
+    tmp_path: Path,
+    db_path: Path,
+    executor: RecordingExecutor,
+    definitions: list[PipelineDefinition],
+) -> PipelineWorkerThread:
+    executor_def = LocalExecutorConfig(
+        kind="local",
+        global_capacity=2,
+        capabilities={"fetch": LocalCapabilityConfig(handler="dummy.handler")},
+    )
+    registry = ExecutorRegistry(
+        executors={"local-default": executor},
+        global_capacities={"local-default": 2},
+        definitions={"local-default": executor_def},
+    )
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    leases = ExecutorLeaseRepository(db_path)
+    runtime = ExecutionRuntime(
+        leases=leases,
+        registry=registry,
+        heartbeat_interval_seconds=1,
+        lease_ttl_seconds=5,
+    )
+    settings = Settings(
+        root_dir=tmp_path,
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={"pipelines": {"enabled": True}},
+        executor_definitions=registry.definitions(),
+    )
+    worker = PipelineWorkerThread(
+        job_db=job_db,
+        leases=leases,
+        registry=registry,
+        runtime=runtime,
+        settings=settings,
+    )
+    worker._definitions = definitions
+    return worker
+
+
+def test_worker_creates_shared_pool_per_executor_id(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    executor = RecordingExecutor("local-default")
+    worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
 
     worker._poll()
 
-    assert len(worker._futures) == 1
-    assert len(worker._ws_agent_futures.get(ws["id"], set())) == 1
+    assert "local-default" in worker._pools
+    assert worker._pools["local-default"]._max_workers == 2
+    # No per-workspace pools should exist
+    assert not hasattr(worker, "_ws_local_executors") or not worker._ws_local_executors
+    assert not hasattr(worker, "_ws_agent_executors") or not worker._ws_agent_executors
 
-    blocker.set()
     worker.stop()
 
 
-def test_ensure_workspace_executors_uses_pipeline_config_overrides(tmp_path):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS", pipeline_config={"local": 5, "nodes": {"n1": 3}})
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    worker = PipelineWorkerThread(job_db, settings)
-    worker._definitions = [_make_def()]
-    worker._ensure_workspace_executors(ws["id"])
-
-    # local_default=5, node_limit_sum=3, local_limit=max(5, 3)=5
-    assert worker._ws_local_executors[ws["id"]]._max_workers == 5
-    assert worker._ws_agent_executors[ws["id"]]._max_workers == 1
-    worker.stop()
-
-
-def test_ensure_workspace_executors_recreates_on_local_limit_change(tmp_path):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS")
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    worker = PipelineWorkerThread(job_db, settings)
-    worker._definitions = [_make_def()]
-    worker._ensure_workspace_executors(ws["id"])
-
-    old_local = worker._ws_local_executors[ws["id"]]
-    old_agent = worker._ws_agent_executors[ws["id"]]
-
-    # Update pipeline_config to change local limit
-    job_db.update_workspace(ws["id"], pipeline_config={"local": 10})
-    worker._ensure_workspace_executors(ws["id"])
-
-    # local_default=10, node_limit_sum=2, local_limit=max(10, 2)=10
-    assert worker._ws_local_executors[ws["id"]]._max_workers == 10
-    assert worker._ws_local_executors[ws["id"]] is not old_local
-    assert worker._ws_agent_executors[ws["id"]] is not old_agent
-    worker.stop()
-
-
-def test_ensure_workspace_executors_skips_recreation_when_limits_unchanged(tmp_path):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    worker = PipelineWorkerThread(job_db, settings)
-    worker._definitions = [_make_def()]
-    worker._ensure_workspace_executors(ws["id"])
-
-    old_local = worker._ws_local_executors[ws["id"]]
-    old_agent = worker._ws_agent_executors[ws["id"]]
-
-    # Call again without changing config
-    worker._ensure_workspace_executors(ws["id"])
-
-    assert worker._ws_local_executors[ws["id"]] is old_local
-    assert worker._ws_agent_executors[ws["id"]] is old_agent
-    worker.stop()
-
-
-def test_two_workspaces_with_limit_one_each_can_submit_simultaneously(tmp_path, monkeypatch):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    ws1 = job_db.create_workspace("Workspace One")
-    ws2 = job_db.create_workspace("Workspace Two")
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    worker = PipelineWorkerThread(job_db, settings)
-    worker._definitions = [
-        PipelineDefinition(
-            key="test",
-            label="Test",
-            concurrency=PipelineConcurrency(local=2, agent=1, nodes={}),
-            intake=MagicMock(),
-            nodes={
-                "n2": PipelineNode(
-                    key="n2",
-                    label="N2",
-                    capability="n2",
-                    runner="agent",
-                    outputs=["o.json"],
-                    agent=PipelineAgent(engine="pi", skill="test_skill"),
-                ),
-            },
-        )
-    ]
-    worker._pi_runner = MagicMock()
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
+    executor = RecordingExecutor("local-default")
+    definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
         pipeline_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
-        title="Question Q1",
-        node_keys=["n2"],
-        workspace_id=ws1["id"],
+        title="Q1",
+        node_keys=["fetch"],
+        workspace_id=ws["id"],
     )
-    job_db.create_job(
-        pipeline_key="test",
-        source_type="question",
-        source_id="Q2",
-        batch_id="",
-        title="Question Q2",
-        node_keys=["n2"],
-        workspace_id=ws2["id"],
-    )
-
-    blocker = threading.Event()
-
-    def _slow_execute(
-        job_db, definition, job, node_key, logs_dir, settings_config, pi_runner, skill_root
-    ):
-        if pi_runner is not None:
-            blocker.wait(timeout=10)
-        return True
-
-    monkeypatch.setattr("server.app.pipeline_worker_thread._execute_node_wrapped", _slow_execute)
-
-    worker._poll()
-
-    assert len(worker._futures) == 2
-    assert len(worker._ws_agent_futures.get(ws1["id"], set())) == 1
-    assert len(worker._ws_agent_futures.get(ws2["id"], set())) == 1
-
-    blocker.set()
-    worker.stop()
-
-
-def test_poll_respects_per_node_local_limit(tmp_path, monkeypatch):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    worker = PipelineWorkerThread(job_db, settings)
-    worker._definitions = [
-        PipelineDefinition(
-            key="test",
-            label="Test",
-            concurrency=PipelineConcurrency(local=4, agent=1, nodes={"n1": 1}),
-            intake=MagicMock(),
-            nodes={
-                "n1": PipelineNode(
-                    key="n1", label="N1", capability="n1", runner="local", outputs=["o.json"]
-                ),
-            },
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            (ws["id"], "test", "fetch", "local-default"),
         )
-    ]
-
-    for i in range(3):
-        job_db.create_job(
-            pipeline_key="test",
-            source_type="question",
-            source_id=f"Q{i}",
-            batch_id="",
-            title=f"Question Q{i}",
-            node_keys=["n1"],
-            workspace_id=ws["id"],
+        conn.execute(
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            (ws["id"], "local-default", 2),
         )
 
-    blocker = threading.Event()
+    worker = _make_worker(tmp_path, db_path, executor, [definition])
+    processed = worker._poll()
 
-    def _slow_execute(
-        job_db, definition, job, node_key, logs_dir, settings_config, pi_runner, skill_root
-    ):
-        blocker.wait(timeout=10)
-        return True
-
-    monkeypatch.setattr("server.app.pipeline_worker_thread._execute_node_wrapped", _slow_execute)
-
-    worker._poll()
-
-    # per-node limit is 1, so only 1 job should be submitted despite local=4
+    assert processed is True
+    assert worker.leases.active_counts("local-default").get("global", 0) == 1
     assert len(worker._futures) == 1
-    assert len(worker._ws_local_futures.get((ws["id"], "n1"), set())) == 1
 
-    blocker.set()
+    executor.block_event.set()
     worker.stop()
 
 
-def test_poll_respects_total_local_executor_limit(tmp_path, monkeypatch):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS")
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    worker = PipelineWorkerThread(job_db, settings)
-    worker._definitions = [
-        PipelineDefinition(
-            key="test",
-            label="Test",
-            concurrency=PipelineConcurrency(local=1, agent=1, nodes={}),
-            intake=MagicMock(),
-            nodes={
-                "n1": PipelineNode(
-                    key="n1", label="N1", capability="n1", runner="local", outputs=["o.json"]
-                ),
-                "n2": PipelineNode(
-                    key="n2", label="N2", capability="n2", runner="local", outputs=["o2.json"]
-                ),
-            },
-        )
-    ]
+    block_event = threading.Event()
+    executor = RecordingExecutor("local-default", block_event=block_event)
+    definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
         pipeline_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
-        title="Question Q1",
-        node_keys=["n1", "n2"],
+        title="Q1",
+        node_keys=["fetch"],
         workspace_id=ws["id"],
     )
-    job_db.create_job(
-        pipeline_key="test",
-        source_type="question",
-        source_id="Q2",
-        batch_id="",
-        title="Question Q2",
-        node_keys=["n1", "n2"],
-        workspace_id=ws["id"],
-    )
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            (ws["id"], "test", "fetch", "local-default"),
+        )
+        conn.execute(
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            (ws["id"], "local-default", 2),
+        )
 
-    blocker = threading.Event()
-
-    def _slow_execute(
-        job_db, definition, job, node_key, logs_dir, settings_config, pi_runner, skill_root
-    ):
-        blocker.wait(timeout=10)
-        return True
-
-    monkeypatch.setattr("server.app.pipeline_worker_thread._execute_node_wrapped", _slow_execute)
+    worker = _make_worker(tmp_path, db_path, executor, [definition])
+    worker._poll()
+    assert worker.leases.active_counts("local-default").get("global", 0) == 1
 
     worker._poll()
+    assert worker.leases.active_counts("local-default").get("global", 0) == 1
 
-    # local executor max_workers=2 (max of local_default=1 and node_limit_sum=2)
-    # but per-node limit is 1, so each node only gets 1 future
-    assert len(worker._futures) == 2
-    assert len(worker._ws_local_futures.get((ws["id"], "n1"), set())) == 1
-    assert len(worker._ws_local_futures.get((ws["id"], "n2"), set())) == 1
-
-    blocker.set()
+    block_event.set()
     worker.stop()
 
 
-def test_poll_skips_paused_workspace(tmp_path, monkeypatch):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS")
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    paused_ws = {ws["id"]: True}
-    worker_control = MagicMock()
-    worker_control.is_paused = lambda ws_id: paused_ws.get(ws_id, False)
-
-    worker = PipelineWorkerThread(job_db, settings, workspace_worker_control=worker_control)
-    worker._definitions = [
-        PipelineDefinition(
-            key="test",
-            label="Test",
-            concurrency=PipelineConcurrency(local=2, agent=1, nodes={}),
-            intake=MagicMock(),
-            nodes={
-                "n1": PipelineNode(
-                    key="n1", label="N1", capability="n1", runner="local", outputs=["o.json"]
-                ),
-            },
-        )
-    ]
+    executor = RecordingExecutor("local-default")
+    definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
         pipeline_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
-        title="Question Q1",
-        node_keys=["n1"],
+        title="Q1",
+        node_keys=["fetch"],
         workspace_id=ws["id"],
     )
-
-    executed = []
-
-    def _fast_execute(
-        job_db, definition, job, node_key, logs_dir, settings_config, pi_runner, skill_root
-    ):
-        executed.append(job["source_id"])
-        return True
-
-    monkeypatch.setattr("server.app.pipeline_worker_thread._execute_node_wrapped", _fast_execute)
-
-    worker._poll()
-
-    # workspace is paused, no jobs should be submitted
-    assert len(worker._futures) == 0
-    assert len(executed) == 0
-
-    # unpause and poll again
-    paused_ws[ws["id"]] = False
-    worker._poll()
-
-    assert len(worker._futures) == 1
-    assert len(executed) == 1
-
-    worker.stop()
-
-
-def test_ensure_workspace_executors_calls_agent_manager(tmp_path):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    agent_manager = MagicMock()
-    worker = PipelineWorkerThread(job_db, settings, agent_manager=agent_manager)
-    worker._definitions = [_make_def()]
-    worker._ensure_workspace_executors(ws["id"])
-
-    agent_manager.add_pi_agent_for_workspace.assert_called_once_with(ws["id"], 1)
-    worker.stop()
-
-
-def test_poll_calls_agent_manager_busy_and_idle(tmp_path, monkeypatch):
-    job_db = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
-
-    settings = MagicMock()
-    settings.logs_dir = tmp_path / "logs"
-    settings.config = {}
-
-    agent_manager = MagicMock()
-    worker = PipelineWorkerThread(job_db, settings, agent_manager=agent_manager)
-    worker._definitions = [
-        PipelineDefinition(
-            key="test",
-            label="Test",
-            concurrency=PipelineConcurrency(local=2, agent=1, nodes={}),
-            intake=MagicMock(),
-            nodes={
-                "n2": PipelineNode(
-                    key="n2",
-                    label="N2",
-                    capability="n2",
-                    runner="agent",
-                    outputs=["o.json"],
-                    agent=PipelineAgent(engine="pi", skill="test_skill"),
-                ),
-            },
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            (ws["id"], "test", "fetch", "local-default"),
         )
-    ]
-    worker._pi_runner = MagicMock()
-    worker._skill_root = tmp_path / "skills"
-    worker._skill_root.mkdir(parents=True)
+        conn.execute(
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            (ws["id"], "local-default", 2),
+        )
 
-    job_db.create_job(
+    worker = _make_worker(tmp_path, db_path, executor, [definition])
+    control = MagicMock()
+    control.is_paused = lambda ws_id: ws_id == ws["id"]
+    worker.workspace_worker_control = control
+
+    processed = worker._poll()
+
+    assert processed is False
+    assert worker.leases.active_counts("local-default").get("global", 0) == 0
+
+    worker.stop()
+
+
+def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS")
+    executor = RecordingExecutor("local-default")
+    definition = _make_definition([_local_node("fetch")])
+
+    job = job_db.create_job(
         pipeline_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
-        title="Question Q1",
-        node_keys=["n2"],
+        title="Q1",
+        node_keys=["fetch"],
         workspace_id=ws["id"],
     )
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            (ws["id"], "local-default", 2),
+        )
 
-    blocker = threading.Event()
-
-    def _slow_execute(
-        job_db, definition, job, node_key, logs_dir, settings_config, pi_runner, skill_root
-    ):
-        if pi_runner is not None:
-            blocker.wait(timeout=10)
-        return True
-
-    monkeypatch.setattr("server.app.pipeline_worker_thread._execute_node_wrapped", _slow_execute)
-
+    worker = _make_worker(tmp_path, db_path, executor, [definition])
     worker._poll()
 
-    assert len(worker._futures) == 1
-    agent_manager.set_busy.assert_called_once_with(
-        "pi", job_db.get_job(job_id="test_ws_test_Q1"), workspace_id=ws["id"]
+    node = job_db.get_job_node(job["id"], "fetch")
+    assert node["status"] == "failed"
+    assert "No Executor binding" in node["error_message"]
+
+    worker.stop()
+
+
+def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS")
+    executor = RecordingExecutor("local-default")
+    executor.supports = lambda capability: capability == "other"  # type: ignore[method-assign]
+    definition = _make_definition([_local_node("fetch")])
+
+    job = job_db.create_job(
+        pipeline_key="test",
+        source_type="question",
+        source_id="Q1",
+        batch_id="",
+        title="Q1",
+        node_keys=["fetch"],
+        workspace_id=ws["id"],
+    )
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            (ws["id"], "test", "fetch", "local-default"),
+        )
+        conn.execute(
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            (ws["id"], "local-default", 2),
+        )
+
+    worker = _make_worker(tmp_path, db_path, executor, [definition])
+    worker._poll()
+
+    node = job_db.get_job_node(job["id"], "fetch")
+    assert node["status"] == "failed"
+    assert "does not support capability" in node["error_message"]
+
+    worker.stop()
+
+
+def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    executor = RecordingExecutor("local-default")
+    worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
+
+    worker._poll()
+    pool = worker._pools["local-default"]
+    worker.stop()
+
+    assert pool._shutdown is True
+
+
+def test_make_pipeline_worker_runs_reading_analysis_local_node(tmp_path: Path) -> None:
+    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    worker, definition = make_pipeline_worker(tmp_path, queries)
+    job = queries.create_job(
+        pipeline_key="reading_analysis",
+        source_type="question",
+        source_id="Q100",
+        batch_id="",
+        title="Question Q100",
+        node_keys=list(definition.nodes),
     )
 
-    blocker.set()
-    # Allow future to complete and be reaped
-    import time
+    processed = worker._poll()
 
-    time.sleep(0.1)
-    worker._poll()
+    assert processed is True
+    assert len(worker._futures) == 1
+    future = next(iter(worker._futures.values()))
+    future.result(timeout=5)
 
-    agent_manager.set_idle.assert_called_once_with("pi", workspace_id=ws["id"])
+    node = queries.get_job_node(job["id"], "fetch_questions")
+    assert node["status"] == "completed"
+    assert (Path(job["storage_dir"]) / "questions.json").exists()
+
     worker.stop()

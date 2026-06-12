@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 from server.app.pipelines.definition import PipelineDefinition, PipelineNode
 
@@ -9,6 +10,22 @@ RUNNABLE_STATUSES = {"pending", "ready", "stale"}
 
 def _inputs_exist(node: PipelineNode, artifact_dir: Path) -> bool:
     return all((artifact_dir / name).exists() for name in node.inputs)
+
+
+def _node_statuses(job_db: Any, job_id: str) -> dict[str, str]:
+    return {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job_id)}
+
+
+def _refresh_job_status(job_db: Any, job_id: str) -> None:
+    nodes = job_db.list_job_nodes(job_id)
+    status = summarize_job_status([node["status"] for node in nodes])
+    error_message = ""
+    if status == "failed":
+        error_message = next(
+            (str(node["error_message"]) for node in nodes if node.get("error_message")),
+            "",
+        )
+    job_db.update_job_status(job_id, status, error_message)
 
 
 def find_ready_nodes(

@@ -13,6 +13,11 @@ from server.app.pipelines.reading_analysis import (
     fetch_questions,
     mark_question,
 )
+from server.app.pipelines.scheduler import (
+    _node_statuses,
+    _refresh_job_status,
+    find_ready_nodes,
+)
 from server.app.pipelines.skills import resolve_pipeline_skill
 
 LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
@@ -128,3 +133,86 @@ def execute_node_once(
             skill_root,
         )
     raise ValueError(f"Unsupported runner for {definition.key}.{node_key}")
+
+
+def _execute_node_wrapped(
+    job_db: JobQueries,
+    definition: PipelineDefinition,
+    job: dict[str, Any],
+    node_key: str,
+    logs_dir: Path,
+    settings_config: dict[str, Any] | None = None,
+    pi_runner: PiRunner | None = None,
+    skill_root: Path | None = None,
+) -> bool:
+    """Backward-compatible synchronous wrapper used by routes and tests."""
+    try:
+        return execute_node_once(
+            job_db,
+            definition,
+            job,
+            node_key,
+            logs_dir,
+            settings_config=settings_config,
+            pi_runner=pi_runner,
+            skill_root=skill_root,
+        )
+    except Exception as exc:
+        error_message = str(exc)
+        runs = job_db.list_node_runs(job["id"])
+        latest_run = next(
+            (
+                run
+                for run in reversed(runs)
+                if run["node_key"] == node_key and run["status"] == "running"
+            ),
+            None,
+        )
+        if latest_run is not None:
+            job_db.finish_node_run(latest_run["id"], "failed", 1, error_message)
+        else:
+            job_db.update_job_node(
+                job["id"], node_key, status="failed", error_message=error_message
+            )
+        job_db.update_job_status(job["id"], "failed", error_message)
+        return False
+
+
+def process_ready_pipeline_node(
+    job_db: JobQueries,
+    definition: PipelineDefinition,
+    logs_dir: Path,
+    settings_config: dict[str, Any] | None = None,
+) -> bool:
+    """Backward-compatible helper that runs one ready local node synchronously."""
+    for job in job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
+        statuses = _node_statuses(job_db, job["id"])
+        ready_nodes = find_ready_nodes(definition, statuses, Path(str(job["storage_dir"])))
+        local_ready_nodes = [node for node in ready_nodes if node.runner == "local"]
+        if not local_ready_nodes:
+            _refresh_job_status(job_db, job["id"])
+            continue
+
+        node = local_ready_nodes[0]
+        try:
+            processed = execute_node_once(
+                job_db,
+                definition,
+                job,
+                node.key,
+                logs_dir,
+                settings_config=settings_config,
+            )
+        except Exception as exc:
+            error_message = str(exc)
+            job_db.update_job_node(
+                job["id"],
+                node.key,
+                status="failed",
+                error_message=error_message,
+            )
+            job_db.update_job_status(job["id"], "failed", error_message)
+            return True
+        _refresh_job_status(job_db, job["id"])
+        return processed
+    return False

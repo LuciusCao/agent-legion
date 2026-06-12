@@ -2,224 +2,77 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from concurrent.futures import Future, ThreadPoolExecutor
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
+from server.app.executors.leases import ExecutorLeaseRepository
+from server.app.executors.models import (
+    ClaimedExecution,
+    ConfigurationFailureRequest,
+    ExecutionContext,
+    ExecutionResult,
+    LeaseClaimRequest,
+)
+from server.app.executors.registry import ExecutorRegistry
+from server.app.executors.runtime import ExecutionRuntime
+from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
-from server.app.pipelines.definition import PipelineDefinition
-from server.app.pipelines.executor import execute_node_once
-from server.app.pipelines.pi_runner import PiRunner
+from server.app.pipelines.definition import PipelineDefinition, PipelineNode
 from server.app.pipelines.registry import list_registered_pipelines
-from server.app.pipelines.scheduler import find_ready_nodes, summarize_job_status
+from server.app.pipelines.scheduler import _node_statuses, find_ready_nodes
 from server.app.settings import Settings
 
 logger = logging.getLogger(__name__)
-
-
-def _node_statuses(job_db: JobQueries, job_id: str) -> dict[str, str]:
-    return {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job_id)}
-
-
-def _refresh_job_status(job_db: JobQueries, job_id: str) -> None:
-    nodes = job_db.list_job_nodes(job_id)
-    status = summarize_job_status([node["status"] for node in nodes])
-    error_message = ""
-    if status == "failed":
-        error_message = next(
-            (str(node["error_message"]) for node in nodes if node.get("error_message")),
-            "",
-        )
-    job_db.update_job_status(job_id, status, error_message)
-
-
-def _execute_node_wrapped(
-    job_db: JobQueries,
-    definition: PipelineDefinition,
-    job: dict[str, Any],
-    node_key: str,
-    logs_dir: Path,
-    settings_config: dict[str, Any] | None,
-    pi_runner: PiRunner | None,
-    skill_root: Path | None,
-) -> bool:
-    try:
-        return execute_node_once(
-            job_db,
-            definition,
-            job,
-            node_key,
-            logs_dir,
-            settings_config=settings_config,
-            pi_runner=pi_runner,
-            skill_root=skill_root,
-        )
-    except Exception as exc:
-        error_message = str(exc)
-        logger.exception("pipeline node %s.%s failed", job["id"], node_key)
-        # If a run exists for this node, finish it; otherwise update the node directly.
-        runs = job_db.list_node_runs(job["id"])
-        latest_run = None
-        for run in reversed(runs):
-            if run["node_key"] == node_key and run["status"] == "running":
-                latest_run = run
-                break
-        if latest_run is not None:
-            job_db.finish_node_run(latest_run["id"], "failed", 1, error_message)
-        else:
-            job_db.update_job_node(
-                job["id"], node_key, status="failed", error_message=error_message
-            )
-        job_db.update_job_status(job["id"], "failed", error_message)
-        return False
-
-
-def process_ready_pipeline_node(
-    job_db: JobQueries,
-    definition: PipelineDefinition,
-    logs_dir: Path,
-    settings_config: dict[str, Any] | None = None,
-) -> bool:
-    for job in job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
-        statuses = _node_statuses(job_db, job["id"])
-        ready_nodes = find_ready_nodes(definition, statuses, Path(str(job["storage_dir"])))
-        local_ready_nodes = [node for node in ready_nodes if node.runner == "local"]
-        if not local_ready_nodes:
-            _refresh_job_status(job_db, job["id"])
-            continue
-
-        node = local_ready_nodes[0]
-        try:
-            processed = execute_node_once(
-                job_db,
-                definition,
-                job,
-                node.key,
-                logs_dir,
-                settings_config=settings_config,
-            )
-        except Exception as exc:
-            error_message = str(exc)
-            job_db.update_job_node(
-                job["id"],
-                node.key,
-                status="failed",
-                error_message=error_message,
-            )
-            job_db.update_job_status(job["id"], "failed", error_message)
-            return True
-        _refresh_job_status(job_db, job["id"])
-        return processed
-    return False
 
 
 class PipelineWorkerThread:
     def __init__(
         self,
         job_db: JobQueries,
+        leases: ExecutorLeaseRepository,
+        registry: ExecutorRegistry,
+        runtime: ExecutionRuntime,
         settings: Settings,
         workspace_worker_control: Any | None = None,
         agent_manager: Any | None = None,
-        executor_registry: Any | None = None,
     ):
         self.job_db = job_db
+        self.leases = leases
+        self.registry = registry
+        self.executor_registry = registry  # compatibility alias for tests/lifespan
+        self.runtime = runtime
         self.settings = settings
         self.workspace_worker_control = workspace_worker_control
         self.agent_manager = agent_manager
-        self.executor_registry = executor_registry
         self.stop_event = threading.Event()
         self._thread: threading.Thread | None = None
+        self._definitions: list[PipelineDefinition] = []
+        self._pools: dict[str, ThreadPoolExecutor] = {}
+        self._futures: dict[str, Future[ExecutionResult]] = {}
+        self._round_robin = WorkspaceRoundRobin()
         # Compat aliases — old code/tests may reference these fields
         self._local_executor: ThreadPoolExecutor | None = None
         self._agent_executor: ThreadPoolExecutor | None = None
-        self._futures: dict[tuple[str, str], Future[bool]] = {}
-        self._local_futures: set[tuple[str, str]] = set()
-        self._agent_futures: set[tuple[str, str]] = set()
-        self._job_workspace_ids: dict[str, str] = {}
-        self._definitions: list[PipelineDefinition] = []
-        self._pi_runner: PiRunner | None = None
-        self._skill_root: Path | None = None
-        self._max_local: int = 1
-        self._max_agent: int = 1
-        # NEW per-workspace fields
-        self._ws_agent_executors: dict[str, ThreadPoolExecutor] = {}
-        self._ws_local_executors: dict[str, ThreadPoolExecutor] = {}
-        self._ws_agent_futures: dict[str, set[tuple[str, str]]] = {}
-        self._ws_local_futures: dict[tuple[str, str], set[tuple[str, str]]] = {}
-        self._ws_agent_limits: dict[str, int] = {}
 
-    def _ensure_workspace_executors(self, workspace_id: str) -> None:
-        agents = self.job_db.list_workspace_agents(workspace_id)
-        pi_agent = next((a for a in agents if a["agent_id"] == "pi"), None)
-
-        if pi_agent is None:
-            pi_limit = max((d.concurrency.agent for d in self._definitions), default=1)
-            self.job_db.upsert_workspace_agent_assignment(workspace_id, "pi", pi_limit)
-        else:
-            pi_limit = pi_agent["concurrency_limit"]
-
-        workspace = self.job_db.get_workspace(workspace_id)
-        pipeline_config: dict[str, Any] = {}
-        if workspace is not None:
-            raw_config = workspace.get("pipeline_config")
-            if isinstance(raw_config, dict):
-                pipeline_config = raw_config
-
-        local_override = pipeline_config.get("local")
-        nodes_override = pipeline_config.get("nodes")
-        if not isinstance(nodes_override, dict):
-            nodes_override = {}
-
-        local_default = max((d.concurrency.local for d in self._definitions), default=1)
-        if isinstance(local_override, int) and local_override >= 1:
-            local_default = local_override
-
-        node_limit_sum = sum(
-            nodes_override.get(node.key, d.concurrency.nodes.get(node.key, d.concurrency.local))
-            for d in self._definitions
-            for node in d.nodes.values()
-            if node.runner == "local"
-        )
-        local_limit = max(local_default, node_limit_sum)
-
-        current_local_limit: int | None = None
-        if workspace_id in self._ws_local_executors:
-            current_local_limit = self._ws_local_executors[workspace_id]._max_workers
-
-        if (
-            workspace_id in self._ws_local_executors
-            and current_local_limit == local_limit
-            and self._ws_agent_limits.get(workspace_id) == pi_limit
-        ):
-            return
-
-        # If recreating (config changed or old executor shut down), clean up first
-        if workspace_id in self._ws_local_executors:
-            self._ws_local_executors[workspace_id].shutdown(wait=False, cancel_futures=True)
-            self._ws_agent_executors[workspace_id].shutdown(wait=False, cancel_futures=True)
-
-        self._ws_agent_limits[workspace_id] = pi_limit
-
-        self._ws_local_executors[workspace_id] = ThreadPoolExecutor(max_workers=local_limit)
-        self._ws_agent_executors[workspace_id] = ThreadPoolExecutor(max_workers=pi_limit)
-
-        if self.agent_manager is not None:
-            self.agent_manager.add_pi_agent_for_workspace(workspace_id, pi_limit)
+    def _ensure_pools(self) -> None:
+        for executor_id in self.registry.definitions():
+            if executor_id not in self._pools:
+                capacity = self.registry.global_capacity(executor_id) or 1
+                self._pools[executor_id] = ThreadPoolExecutor(max_workers=capacity)
 
     def start(self) -> None:
         self._definitions = list_registered_pipelines(self.settings.root_dir)
-        self._max_local = max((d.concurrency.local for d in self._definitions), default=1)
-        self._max_agent = max((d.concurrency.agent for d in self._definitions), default=1)
-        pi_raw = self.settings.config.get("pipelines", {}).get("pi", {})
-        if isinstance(pi_raw, dict):
-            self._skill_root = self.settings.root_dir / "server" / "app" / "pipelines" / "skills"
-            try:
-                self._pi_runner = PiRunner.from_config(pi_raw, self._skill_root)
-            except Exception:
-                logger.exception("failed to initialise pi runner")
-
-        for ws in self.job_db.list_workspaces():
-            self._ensure_workspace_executors(ws["id"])
+        bootstrap_workspace_executor_defaults(
+            self.job_db, self._definitions, self.settings.executor_definitions
+        )
+        self._ensure_pools()
+        self._local_executor = self._pools.get("local-default")
+        self._agent_executor = self._pools.get("pi-default")
+        self.leases.expire_stale(datetime.now(UTC))
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -237,202 +90,267 @@ class PipelineWorkerThread:
         if not self._definitions:
             return False
 
-        # Reap completed futures and cancel pending ones for paused workspaces
-        for key in list(self._futures):
-            future = self._futures[key]
-            job_id, node_key = key
-            should_clean = False
+        if not self._pools:
+            self._ensure_pools()
+
+        self._reap_futures()
+        self.leases.expire_stale(datetime.now(UTC))
+
+        claimed_any = False
+        while True:
+            runnable_workspaces, jobs_by_workspace = self._runnable_workspaces()
+            ordered_workspace_ids = self._round_robin.order(runnable_workspaces)
+            round_claimed = False
+            for workspace_id in ordered_workspace_ids:
+                if (
+                    self.workspace_worker_control is not None
+                    and self.workspace_worker_control.is_paused(workspace_id)
+                ):
+                    continue
+                claimed = self._schedule_workspace(workspace_id, jobs_by_workspace[workspace_id])
+                if claimed:
+                    round_claimed = True
+                    claimed_any = True
+                    self._round_robin.complete_pass(workspace_id)
+            if not round_claimed:
+                break
+        return claimed_any
+
+    def _runnable_workspaces(self) -> tuple[list[str], dict[str, list[tuple[PipelineDefinition, dict[str, Any]]]]]:
+        workspace_ids: list[str] = []
+        jobs_by_workspace: dict[str, list[tuple[PipelineDefinition, dict[str, Any]]]] = {}
+        for definition in self._definitions:
+            for job in self.job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
+                if job.get("status") in ("completed", "failed"):
+                    continue
+                workspace_id = str(job.get("workspace_id") or "default")
+                if workspace_id not in jobs_by_workspace:
+                    workspace_ids.append(workspace_id)
+                    jobs_by_workspace[workspace_id] = []
+                jobs_by_workspace[workspace_id].append((definition, job))
+        return workspace_ids, jobs_by_workspace
+
+    def _schedule_workspace(
+        self,
+        workspace_id: str,
+        jobs: list[tuple[PipelineDefinition, dict[str, Any]]],
+    ) -> bool:
+        workspace = self.job_db.get_workspace(workspace_id)
+        if workspace is None:
+            return False
+
+        for definition, job in jobs:
+            if job.get("status") in ("completed", "failed"):
+                continue
+            job_dir = Path(str(job["storage_dir"]))
+            statuses = _node_statuses(self.job_db, job["id"])
+            ready_nodes = find_ready_nodes(definition, statuses, job_dir)
+            for node in ready_nodes:
+                if self._try_claim_and_submit(workspace, definition, job, node, job_dir):
+                    return True
+        return False
+
+    def _try_claim_and_submit(
+        self,
+        workspace: dict[str, Any],
+        definition: PipelineDefinition,
+        job: dict[str, Any],
+        node: PipelineNode,
+        job_dir: Path,
+    ) -> bool:
+        workspace_id = workspace["id"]
+        pipeline_key = definition.key
+        node_key = node.key
+        log_path = self._log_path(job_dir, f"{job['id']}-{node_key}")
+
+        binding = self._get_binding(workspace_id, pipeline_key, node_key)
+        if binding is None:
+            self.leases.fail_without_lease(
+                ConfigurationFailureRequest(
+                    workspace_id=workspace_id,
+                    job_id=job["id"],
+                    pipeline_key=pipeline_key,
+                    node_key=node_key,
+                    capability=node.capability,
+                    log_path=str(log_path),
+                ),
+                "No Executor binding",
+            )
+            return True
+
+        executor_id = binding["executor_id"]
+        try:
+            executor = self.registry.require(executor_id, node.capability)
+        except Exception as exc:
+            self.leases.fail_without_lease(
+                ConfigurationFailureRequest(
+                    workspace_id=workspace_id,
+                    job_id=job["id"],
+                    pipeline_key=pipeline_key,
+                    node_key=node_key,
+                    capability=node.capability,
+                    log_path=str(log_path),
+                ),
+                str(exc),
+            )
+            return True
+
+        local_node_limit: int | None = None
+        if executor.kind == "local":
+            local_node_limit = self._get_local_node_limit(workspace_id, pipeline_key, node_key)
+        elif self._has_local_node_limit(workspace_id, pipeline_key, node_key):
+            self.leases.fail_without_lease(
+                ConfigurationFailureRequest(
+                    workspace_id=workspace_id,
+                    job_id=job["id"],
+                    pipeline_key=pipeline_key,
+                    node_key=node_key,
+                    capability=node.capability,
+                    log_path=str(log_path),
+                ),
+                "Node limits are not supported for agent executors",
+            )
+            return True
+
+        global_capacity = self.registry.global_capacity(executor_id)
+        if global_capacity is None:
+            return False
+
+        claim = self.leases.try_claim(
+            LeaseClaimRequest(
+                executor_id=executor_id,
+                global_capacity=global_capacity,
+                workspace_id=workspace_id,
+                job_id=job["id"],
+                pipeline_key=pipeline_key,
+                node_key=node_key,
+                capability=node.capability,
+                local_node_limit=local_node_limit,
+                lease_ttl_seconds=self.runtime.lease_ttl_seconds,
+                log_path=str(log_path),
+            )
+        )
+        if claim is None:
+            return False
+
+        context = ExecutionContext(
+            execution_id=claim.execution_id,
+            lease_id=claim.lease_id,
+            node_run_id=claim.node_run_id,
+            executor_id=claim.executor_id,
+            workspace_id=claim.workspace_id,
+            job_id=claim.job_id,
+            pipeline_key=claim.pipeline_key,
+            node_key=claim.node_key,
+            capability=claim.capability,
+            workspace=dict(workspace),
+            job=dict(job),
+            job_dir=job_dir,
+            log_path=log_path,
+            inputs=tuple(node.inputs),
+            expected_outputs=tuple(node.outputs),
+        )
+
+        pool = self._pools[executor_id]
+        future = pool.submit(self._run_claim, claim, context)
+        self._futures[claim.execution_id] = future
+        return True
+
+    def _run_claim(
+        self,
+        claim: ClaimedExecution,
+        context: ExecutionContext,
+    ) -> ExecutionResult:
+        try:
+            return self.runtime.run(claim, context)
+        except Exception as exc:
+            logger.exception("pipeline execution %s failed", claim.execution_id)
+            result = ExecutionResult(
+                status="failed",
+                exit_code=1,
+                error_message=str(exc),
+                log_path=str(context.log_path),
+            )
+            self.leases.finish(claim.lease_id, result)
+            return result
+
+    def _reap_futures(self) -> None:
+        for execution_id in list(self._futures):
+            future = self._futures[execution_id]
             if future.done():
                 try:
                     future.result()
                 except Exception:
-                    logger.exception("pipeline future %s.%s failed", job_id, node_key)
-                try:
-                    _refresh_job_status(self.job_db, job_id)
-                except Exception:
-                    logger.exception("failed to refresh job status for %s", job_id)
-                should_clean = True
-            elif not future.running() and self.workspace_worker_control is not None:
-                ws_id = self._job_workspace_ids.get(job_id)
-                if ws_id is not None and self.workspace_worker_control.is_paused(ws_id):
-                    future.cancel()
-                    logger.info(
-                        "cancelled pending future %s.%s for paused workspace %s",
-                        job_id,
-                        node_key,
-                        ws_id,
-                    )
-                    should_clean = True
-            if should_clean:
-                ws_id = self._job_workspace_ids.get(job_id)
-                if ws_id is not None:
-                    node_local_key = (ws_id, node_key)
-                    if (
-                        node_local_key in self._ws_local_futures
-                        and key in self._ws_local_futures[node_local_key]
-                    ):
-                        self._ws_local_futures[node_local_key].discard(key)
-                        if not self._ws_local_futures[node_local_key]:
-                            self._ws_local_futures.pop(node_local_key, None)
-                    if ws_id in self._ws_agent_futures and key in self._ws_agent_futures[ws_id]:
-                        self._ws_agent_futures[ws_id].discard(key)
-                        if self.agent_manager is not None:
-                            try:
-                                self.agent_manager.set_idle("pi", workspace_id=ws_id)
-                            except Exception:
-                                logger.exception("failed to set pi idle")
-                else:
-                    # Fallback to global compat sets
-                    if key in self._local_futures:
-                        self._local_futures.discard(key)
-                    if key in self._agent_futures:
-                        self._agent_futures.discard(key)
-                        if self.agent_manager is not None:
-                            try:
-                                self.agent_manager.set_idle("pi")
-                            except Exception:
-                                logger.exception("failed to set pi idle")
-                self._futures.pop(key, None)
-                if not any(k[0] == job_id for k in self._futures):
-                    self._job_workspace_ids.pop(job_id, None)
+                    logger.exception("pipeline future %s failed", execution_id)
+                self._futures.pop(execution_id, None)
 
-        # Defensive: reconcile orphaned agent-future keys (e.g. after a crash)
-        for ws_id, keys in list(self._ws_agent_futures.items()):
-            for key in list(keys):
-                if key not in self._futures:
-                    self._ws_agent_futures[ws_id].discard(key)
-                    logger.warning("reconciled orphaned agent future %s.%s", key[0], key[1])
-                    if self.agent_manager is not None:
-                        try:
-                            self.agent_manager.set_idle("pi", workspace_id=ws_id)
-                        except Exception:
-                            logger.exception("failed to set pi idle during reconciliation")
-        for key in list(self._agent_futures):
-            if key not in self._futures:
-                self._agent_futures.discard(key)
-                logger.warning("reconciled orphaned agent future %s.%s", key[0], key[1])
-                if self.agent_manager is not None:
-                    try:
-                        self.agent_manager.set_idle("pi")
-                    except Exception:
-                        logger.exception("failed to set pi idle during reconciliation")
+    def _get_binding(
+        self,
+        workspace_id: str,
+        pipeline_key: str,
+        node_key: str,
+    ) -> dict[str, Any] | None:
+        with self.job_db._connect_read() as conn:
+            row = conn.execute(
+                """
+                select executor_id from workspace_node_bindings
+                where workspace_id=? and pipeline_key=? and node_key=?
+                """,
+                (workspace_id, pipeline_key, node_key),
+            ).fetchone()
+        return dict(row) if row else None
 
-        # Submit new ready nodes across all registered pipelines
-        processed = False
-        workspace_paused_cache: dict[str, bool] = {}
-        for definition in self._definitions:
-            for job in self.job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
-                workspace_id = str(job.get("workspace_id") or "default")
-                self._job_workspace_ids[job["id"]] = workspace_id
-                self._ensure_workspace_executors(workspace_id)
-                if workspace_id not in workspace_paused_cache:
-                    if self.workspace_worker_control is not None:
-                        workspace_paused_cache[workspace_id] = (
-                            self.workspace_worker_control.is_paused(workspace_id)
-                        )
-                    else:
-                        workspace_paused_cache[workspace_id] = False
-                if workspace_paused_cache[workspace_id]:
-                    continue
+    def _get_local_node_limit(
+        self,
+        workspace_id: str,
+        pipeline_key: str,
+        node_key: str,
+    ) -> int | None:
+        with self.job_db._connect_read() as conn:
+            row = conn.execute(
+                """
+                select concurrency_limit from workspace_node_limits
+                where workspace_id=? and pipeline_key=? and node_key=?
+                """,
+                (workspace_id, pipeline_key, node_key),
+            ).fetchone()
+        return int(row["concurrency_limit"]) if row else None
 
-                statuses = _node_statuses(self.job_db, job["id"])
-                ready_nodes = find_ready_nodes(definition, statuses, Path(str(job["storage_dir"])))
-                for node in ready_nodes:
-                    key = (job["id"], node.key)
-                    if key in self._futures:
-                        continue
+    def _has_local_node_limit(
+        self,
+        workspace_id: str,
+        pipeline_key: str,
+        node_key: str,
+    ) -> bool:
+        with self.job_db._connect_read() as conn:
+            row = conn.execute(
+                """
+                select 1 from workspace_node_limits
+                where workspace_id=? and pipeline_key=? and node_key=?
+                """,
+                (workspace_id, pipeline_key, node_key),
+            ).fetchone()
+        return row is not None
 
-                    if node.runner == "local":
-                        node_limit = definition.concurrency.nodes.get(
-                            node.key, definition.concurrency.local
-                        )
-                        local_futures_for_node = self._ws_local_futures.get(
-                            (workspace_id, node.key), set()
-                        )
-                        if len(local_futures_for_node) >= node_limit:
-                            continue
-                        total_ws_local = sum(
-                            len(s)
-                            for (ws, _), s in self._ws_local_futures.items()
-                            if ws == workspace_id
-                        )
-                        if total_ws_local >= self._ws_local_executors[workspace_id]._max_workers:
-                            continue
-                        self._futures[key] = self._ws_local_executors[workspace_id].submit(
-                            _execute_node_wrapped,
-                            self.job_db,
-                            definition,
-                            job,
-                            node.key,
-                            self.settings.logs_dir,
-                            self.settings.config,
-                            None,
-                            None,
-                        )
-                        self._ws_local_futures.setdefault((workspace_id, node.key), set()).add(key)
-                        processed = True
-                    elif (
-                        node.agent is not None
-                        and node.agent.engine == "pi"
-                        and self._pi_runner is not None
-                        and self._skill_root is not None
-                    ):
-                        limit = self._ws_agent_limits.get(workspace_id, 1)
-                        agent_futures_for_ws = self._ws_agent_futures.get(workspace_id, set())
-                        if len(agent_futures_for_ws) >= limit:
-                            continue
-                        self._futures[key] = self._ws_agent_executors[workspace_id].submit(
-                            _execute_node_wrapped,
-                            self.job_db,
-                            definition,
-                            job,
-                            node.key,
-                            self.settings.logs_dir,
-                            self.settings.config,
-                            self._pi_runner,
-                            self._skill_root,
-                        )
-                        self._ws_agent_futures.setdefault(workspace_id, set()).add(key)
-                        if self.agent_manager is not None:
-                            self.agent_manager.set_busy("pi", job, workspace_id=workspace_id)
-                        processed = True
-                    elif node.runner == "agent":
-                        error_message = "Pi runner is not configured"
-                        log_path = self.settings.logs_dir / "jobs" / f"{job['id']}-{node.key}.log"
-                        log_path.parent.mkdir(parents=True, exist_ok=True)
-                        log_path.write_text(error_message, encoding="utf-8")
-                        run = self.job_db.start_node_run(
-                            job["id"],
-                            node.key,
-                            ["agent", node.key],
-                            str(log_path),
-                        )
-                        if run is not None:
-                            self.job_db.finish_node_run(run["id"], "failed", 1, error_message)
-                        _refresh_job_status(self.job_db, job["id"])
-                        processed = True
-
-                # Always refresh job status so that a job whose active nodes have
-                # finished (but which still has pending ready nodes that could not
-                # be launched due to full concurrency slots) correctly reverts to
-                # queued instead of staying stale at running.
-                _refresh_job_status(self.job_db, job["id"])
-        return processed
+    def _log_path(self, job_dir: Path, name: str) -> Path:
+        log_path = self.settings.logs_dir / "jobs" / f"{name}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        return log_path
 
     def stop(self, timeout: float = 3) -> None:
         self.stop_event.set()
-        if self._thread:
+        if self._thread is not None:
             self._thread.join(timeout=timeout)
-        if self._local_executor is not None:
-            self._local_executor.shutdown(wait=True, cancel_futures=False)
-        if self._agent_executor is not None:
-            self._agent_executor.shutdown(wait=True, cancel_futures=False)
-        for executor in self._ws_local_executors.values():
-            executor.shutdown(wait=False, cancel_futures=True)
-        for executor in self._ws_agent_executors.values():
-            executor.shutdown(wait=False, cancel_futures=True)
-        self._ws_local_executors.clear()
-        self._ws_agent_executors.clear()
-        self._ws_agent_futures.clear()
-        self._ws_local_futures.clear()
-        self._ws_agent_limits.clear()
+        deadline = time.monotonic() + timeout
+        for future in list(self._futures.values()):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            try:
+                future.result(timeout=remaining)
+            except Exception:
+                logger.exception("pipeline future failed during shutdown")
+        self._futures.clear()
+        for pool in self._pools.values():
+            pool.shutdown(wait=False, cancel_futures=True)
+        self._pools.clear()
