@@ -46,6 +46,44 @@ resource_providers:
 # Playback will fall back to source_url via redirect. Default is false.
 cleanup_video_after_assemble: false
 
+executors:
+  local-default:
+    kind: local
+    global_capacity: 16
+    capabilities:
+      fetch_questions:
+        handler: reading_analysis.fetch_questions
+      clean_and_parse:
+        handler: reading_analysis.clean_and_parse
+      mark_question:
+        handler: reading_analysis.mark_question
+      fetch_question_context:
+        handler: question_content.fetch_question_context
+      assemble_package:
+        handler: question_content.assemble_package
+  pi-default:
+    kind: pi
+    global_capacity: 20
+    capabilities:
+      extract_keywords:
+        skill: reading_analysis/extract_keywords
+        tools: [read, write, bash]
+      review_keywords:
+        skill: reading_analysis/review_keywords
+        tools: [read, write, bash]
+      assess_difficulty:
+        skill: reading_analysis/assess_difficulty
+        tools: [read, write, bash]
+      review_difficulty:
+        skill: reading_analysis/review_difficulty
+        tools: [read, write, bash]
+      generate_distractors:
+        skill: reading_analysis/generate_distractors
+        tools: [read, write, bash]
+      review_distractors:
+        skill: reading_analysis/review_distractors
+        tools: [read, write, bash]
+
 pipelines:
   # Enables the new workspace/job DAG surface. This is independent from the
   # existing Video Hive video queue and keeps the old pipeline behavior intact.
