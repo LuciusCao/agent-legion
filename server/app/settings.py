@@ -1,10 +1,15 @@
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
 import yaml
+
+from server.app.executors.config import (
+    ExecutorConfig,
+    load_executor_definitions,
+)
 
 
 @dataclass
@@ -16,6 +21,7 @@ class Settings:
     packages_dir: Path
     jobs_dir: Path
     config: dict[str, Any]
+    executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
 
 
 def load_env_file(path: Path) -> None:
@@ -81,6 +87,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     jobs_dir = resolved_data_dir / "jobs"
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
+    executor_definitions = load_executor_definitions(config.get("executors", {}))
     return Settings(
         root_dir=root_dir,
         data_dir=resolved_data_dir,
@@ -89,4 +96,5 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         packages_dir=packages_dir,
         jobs_dir=jobs_dir,
         config=config,
+        executor_definitions=executor_definitions,
     )
