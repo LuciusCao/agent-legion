@@ -1,6 +1,17 @@
+import sqlite3
 from pathlib import Path
 
 from server.app.db.connection import connect_sqlite
+from server.app.db.migrations import run_migrations
+from server.app.db.migrations.v001_executor_core import MIGRATION as V001_EXECUTOR_CORE
+
+
+def _execute_statements(conn: sqlite3.Connection, sql: str) -> None:
+    """Split and execute a multi-statement SQL script within the current transaction."""
+    for statement in sql.split(";"):
+        statement = statement.strip()
+        if statement:
+            conn.execute(statement)
 
 
 def init_db(path: Path) -> None:
@@ -9,7 +20,8 @@ def init_db(path: Path) -> None:
     conn = connect_sqlite(path)
     try:
         with conn:
-            conn.executescript(
+            _execute_statements(
+                conn,
                 """
                 create table if not exists videos (
                   id text primary key,
@@ -131,7 +143,7 @@ def init_db(path: Path) -> None:
                   concurrency_limit integer not null default 1,
                   primary key (workspace_id, agent_id)
                 );
-                """
+                """,
             )
             existing_columns = {
                 row["name"] for row in conn.execute("pragma table_info(videos)").fetchall()
@@ -240,7 +252,8 @@ def init_db(path: Path) -> None:
                     conn.execute(statement)
 
             # Performance indexes for issue 012
-            conn.executescript(
+            _execute_statements(
+                conn,
                 """
                 create index if not exists idx_videos_status on videos(status);
                 create index if not exists idx_videos_content_type_external_id on videos(content_type, external_id);
@@ -257,7 +270,9 @@ def init_db(path: Path) -> None:
                 create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
                 create index if not exists idx_node_runs_job_id on node_runs(job_id);
                 create index if not exists idx_workspace_agent_assignments on workspace_agent_assignments(workspace_id, agent_id);
-                """
+                """,
             )
+
+            run_migrations(conn, [V001_EXECUTOR_CORE])
     finally:
         conn.close()
