@@ -1,4 +1,13 @@
 import type { WorkspaceAgentDraft } from './api-contract'
+import type { components } from './generated/api'
+
+type ApiSchemas = components['schemas']
+
+export type ExecutorDefinition = ApiSchemas['ExecutorDefinitionResponse']
+export type ExecutorAllocation = ApiSchemas['ExecutorAllocationResponse']
+export type ExecutorCatalogResponse = ApiSchemas['ExecutorCatalogResponse']
+export type WorkspaceExecutorConfiguration =
+  ApiSchemas['WorkspaceExecutorConfigurationResponse']
 
 export type ContentType = 'knowledge' | 'question'
 export type DetailTab = 'nodes' | 'subtitles' | 'logs' | 'metadata'

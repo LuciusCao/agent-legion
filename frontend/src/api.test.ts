@@ -7,7 +7,9 @@ import {
   createWorkspace,
   fetchJobArtifact,
   fetchJobDetail,
+  getExecutorCatalog,
   getWorkspaceAgents,
+  getWorkspaceExecutorConfiguration,
   setWorkspaceAgent,
   updateWorkspace,
 } from './api'
@@ -327,6 +329,44 @@ describe('job helpers', () => {
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/jobs/j1/artifacts/log.txt',
       expect.any(Object)
+    )
+  })
+})
+
+describe('executor configuration api', () => {
+  function mockFetchJson(response: unknown) {
+    return vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve(response),
+    } as Response)
+  }
+
+  it('loads normalized executor catalog', async () => {
+    const fetchMock = mockFetchJson({ executors: [] })
+    global.fetch = fetchMock
+
+    await getExecutorCatalog()
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/executors',
+      expect.objectContaining({ cache: 'no-store' })
+    )
+  })
+
+  it('loads workspace executor configuration', async () => {
+    const fetchMock = mockFetchJson({
+      allocations: [],
+      bindings: [],
+      node_limits: [],
+      migration_warnings: [],
+    })
+    global.fetch = fetchMock
+
+    await getWorkspaceExecutorConfiguration('reading team')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/reading%20team/executor-configuration',
+      expect.objectContaining({ cache: 'no-store' })
     )
   })
 })
