@@ -15,3 +15,16 @@ class Executor(Protocol):
 
     def cancel(self, execution_id: str) -> None:
         """Request cancellation for one execution when the adapter supports it."""
+
+
+class LeaseRepository(Protocol):
+    def heartbeat(self, lease_id: str, ttl_seconds: int) -> bool:
+        """Renew a lease and return whether it is still active."""
+
+    def finish(self, lease_id: str, result: ExecutionResult) -> bool:
+        """Persist the final result for a lease and return success."""
+
+
+class ExecutorResolver(Protocol):
+    def require(self, executor_id: str, capability: str) -> Executor:
+        """Return an executor that implements *capability* for the given ID."""
