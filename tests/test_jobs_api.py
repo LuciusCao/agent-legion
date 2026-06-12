@@ -166,8 +166,9 @@ def test_workspace_settings_round_trip(tmp_path):
     assert settings["intakeModes"] == ["direct_ids"]
     assert settings["labelOverrides"] == {"direct_ids": "输入 ID"}
     assert settings["pipelineKey"] == "question_content"
-    assert settings["localConcurrency"] == 5
-    assert settings["nodeLocalConcurrency"] == {"fetch_question_context": 3}
+    workspace = app.state.job_db.get_workspace("default")
+    assert workspace["pipeline_config"]["local"] == 5
+    assert workspace["pipeline_config"]["nodes"] == {"fetch_question_context": 3}
 
 
 def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
@@ -193,9 +194,22 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                     "agentConcurrency": 2,
                     "nodeLocalConcurrency": {"fetch_question_context": 3},
                 },
-                "agents": [
-                    {"agent_id": "pi", "concurrency_limit": 2},
-                    {"agent_id": "reviewer", "concurrency_limit": 1},
+                "executor_allocations": [
+                    {"executor_id": "local-default", "concurrency_limit": 4},
+                ],
+                "node_bindings": [
+                    {
+                        "pipeline_key": "question_content",
+                        "node_key": "fetch_question_context",
+                        "executor_id": "local-default",
+                    },
+                ],
+                "node_limits": [
+                    {
+                        "pipeline_key": "question_content",
+                        "node_key": "fetch_question_context",
+                        "concurrency_limit": 3,
+                    },
                 ],
             },
         )
@@ -204,14 +218,26 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     body = response.json()
     assert body["workspace"]["name"] == "Updated Workspace"
     assert body["settings"]["entityType"] == "video"
-    assert body["settings"]["localConcurrency"] == 4
-    assert body["agents"] == [
-        {"agent_id": "pi", "concurrency_limit": 2},
-        {"agent_id": "reviewer", "concurrency_limit": 1},
+    assert body["executor_configuration"]["allocations"] == [
+        {"executor_id": "local-default", "workspace_id": "default", "concurrency_limit": 4},
+    ]
+    assert body["executor_configuration"]["bindings"] == [
+        {
+            "pipeline_key": "question_content",
+            "node_key": "fetch_question_context",
+            "executor_id": "local-default",
+        },
+    ]
+    assert body["executor_configuration"]["node_limits"] == [
+        {
+            "pipeline_key": "question_content",
+            "node_key": "fetch_question_context",
+            "concurrency_limit": 3,
+        },
     ]
 
 
-def test_workspace_configuration_rejects_duplicate_agents_without_partial_update(tmp_path):
+def test_workspace_configuration_rejects_invalid_binding_without_partial_update(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -225,16 +251,27 @@ def test_workspace_configuration_rejects_duplicate_agents_without_partial_update
             json={
                 "name": "Must Roll Back",
                 "settings": {"pipelineKey": "question_content"},
-                "agents": [
-                    {"agent_id": "pi", "concurrency_limit": 1},
-                    {"agent_id": "pi", "concurrency_limit": 2},
+                "executor_allocations": [
+                    {"executor_id": "local-default", "concurrency_limit": 4},
                 ],
+                "node_bindings": [
+                    {
+                        "pipeline_key": "question_content",
+                        "node_key": "unknown_node",
+                        "executor_id": "local-default",
+                    },
+                ],
+                "node_limits": [],
             },
         )
         persisted = c.get("/api/workspaces/default").json()["workspace"]
 
     assert response.status_code == 400
     assert persisted["name"] == original["name"]
+    config = app.state.job_db.get_workspace_executor_configuration("default")
+    assert config["allocations"] == []
+    assert config["bindings"] == []
+    assert config["node_limits"] == []
 
 
 def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
@@ -1821,8 +1858,11 @@ def test_workspace_settings_returns_agent_assignments(tmp_path):
 
     assert response.status_code == 200
     settings = response.json()["settings"]
-    assert settings["agentIds"] == ["agent-1", "agent-2"]
-    assert settings["concurrencyLimit"] == 2
+    assert "agentIds" not in settings
+    assert "concurrencyLimit" not in settings
+    assignments = app.state.job_db.list_workspace_agents("default")
+    assert [a["agent_id"] for a in assignments] == ["agent-1", "agent-2"]
+    assert max(a["concurrency_limit"] for a in assignments) == 2
 
 
 def test_get_and_set_workspace_agent(client):

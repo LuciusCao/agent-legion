@@ -226,19 +226,13 @@ class JobQueries:
         resource_config: dict[str, Any],
         intake_config: dict[str, Any],
         pipeline_config: dict[str, Any],
-        agent_assignments: list[dict[str, Any]],
-    ) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+        executor_allocations: Sequence[Mapping[str, Any]] | None = None,
+        node_bindings: Sequence[Mapping[str, Any]] | None = None,
+        node_limits: Sequence[Mapping[str, Any]] | None = None,
+    ) -> dict[str, Any]:
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
-        agent_ids = [str(item.get("agent_id") or "").strip() for item in agent_assignments]
-        if any(not agent_id for agent_id in agent_ids):
-            raise ValueError("Agent ID is required")
-        if len(agent_ids) != len(set(agent_ids)):
-            raise ValueError("Duplicate agent IDs are not allowed")
-        if any(int(item.get("concurrency_limit") or 0) < 1 for item in agent_assignments):
-            raise ValueError("Agent concurrency must be at least 1")
-
         with self.connect() as conn:
             exists = conn.execute("select 1 from workspaces where id=?", (workspace_id,)).fetchone()
             if exists is None:
@@ -262,29 +256,15 @@ class JobQueries:
                     workspace_id,
                 ),
             )
-            conn.execute(
-                "delete from workspace_agent_assignments where workspace_id=?",
-                (workspace_id,),
+            replace_workspace_executor_configuration(
+                conn,
+                workspace_id,
+                executor_allocations or [],
+                node_bindings or [],
+                node_limits or [],
             )
-            for item, agent_id in zip(agent_assignments, agent_ids, strict=True):
-                conn.execute(
-                    """
-                    insert into workspace_agent_assignments(
-                      workspace_id, agent_id, concurrency_limit
-                    ) values (?, ?, ?)
-                    """,
-                    (workspace_id, agent_id, int(item["concurrency_limit"])),
-                )
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
-            assignments = conn.execute(
-                """
-                select agent_id, concurrency_limit
-                from workspace_agent_assignments
-                where workspace_id=? order by rowid
-                """,
-                (workspace_id,),
-            ).fetchall()
-        return _workspace_record(row), [dict(item) for item in assignments]
+        return _workspace_record(row)
 
     def create_batch(
         self,
@@ -755,12 +735,8 @@ class JobQueries:
             return get_workspace_executor_configuration(conn, workspace_id)
 
     def replace_workspace_executor_configuration(
-        self,
-        workspace_id: str,
-        allocations: Sequence[Mapping[str, Any]],
-        bindings: Sequence[Mapping[str, Any]],
-        node_limits: Sequence[Mapping[str, Any]],
-    ) -> None:
+        self, workspace_id, allocations, bindings, node_limits
+    ):
         with self.connect() as conn:
             replace_workspace_executor_configuration(
                 conn, workspace_id, allocations, bindings, node_limits
