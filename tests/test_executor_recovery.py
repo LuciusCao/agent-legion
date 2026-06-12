@@ -223,8 +223,9 @@ def test_fresh_repo_expire_stale_marks_recovery_state(
     assert lease["status"] == "expired"
     assert run["status"] == "failed"
     assert "lease expired" in run["error_message"]
-    assert node["status"] == "stale"
-    assert "lease expired" in node["stale_reason"]
+    assert node["status"] == "failed"
+    assert "lease expired" in node["error_message"]
+    assert node["stale_reason"] == ""
     assert job["status"] == "failed"
 
 
@@ -254,7 +255,7 @@ def test_fresh_worker_start_expires_stale_leases(
         ).fetchone()
         job = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
     assert lease["status"] == "expired"
-    assert node["status"] == "stale"
+    assert node["status"] == "failed"
     assert job["status"] == "failed"
 
 
@@ -305,7 +306,7 @@ def test_recovery_frees_global_and_workspace_capacity(
     assert claim_b.job_id == job_id_b
 
 
-def test_recovery_does_not_resubmit_stale_node(
+def test_recovery_does_not_resubmit_failed_node(
     tmp_path: Path, queries: JobQueries, repo: ExecutorLeaseRepository
 ) -> None:
     workspace_id, job_id = _setup_workspace(queries, "no-resubmit")
@@ -331,7 +332,7 @@ def test_recovery_does_not_resubmit_stale_node(
             "select * from job_nodes where job_id=? and node_key=?",
             (job_id, "fetch"),
         ).fetchone()
-    assert node["status"] == "stale"
+    assert node["status"] == "failed"
 
 
 def test_recovery_is_idempotent(
@@ -359,8 +360,7 @@ def test_recovery_is_idempotent(
 
     assert first == [lease_id]
     assert second == []
-    lease, run, node, job = _fetch_recovery_state(queries, job_id, lease_id, node_run_id)
+    lease, _, node, job = _fetch_recovery_state(queries, job_id, lease_id, node_run_id)
     assert lease["status"] == "expired"
-    assert run["status"] == "failed"
-    assert node["status"] == "stale"
+    assert node["status"] == "failed"
     assert job["status"] == "failed"

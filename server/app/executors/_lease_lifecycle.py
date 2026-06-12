@@ -97,6 +97,17 @@ def fail_without_lease(
     now_str = _sqlite_timestamp(now)
     cursor = conn.execute(
         """
+        update job_nodes
+        set status='failed', stale_reason='', error_message=?, finished_at=?
+        where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
+        """,
+        (error_message, now_str, request.job_id, request.node_key),
+    )
+    if cursor.rowcount == 0:
+        return None
+
+    cursor = conn.execute(
+        """
         insert into node_runs(
             job_id, node_key, status, command_json, log_path,
             run_dir, session_dir, started_at, finished_at, error_message
@@ -114,15 +125,6 @@ def fail_without_lease(
         ),
     )
     node_run_id = cursor.lastrowid
-
-    conn.execute(
-        """
-        update job_nodes
-        set status='failed', error_message=?, finished_at=?
-        where job_id=? and node_key=?
-        """,
-        (error_message, now_str, request.job_id, request.node_key),
-    )
 
     _sync_job_status(conn, request.job_id)
     return node_run_id
@@ -156,15 +158,12 @@ def expire_stale_leases(conn: sqlite3.Connection, now: datetime) -> list[str]:
         conn.execute(
             """
             update job_nodes
-            set status='stale', stale_reason='lease expired', finished_at=?
+            set status='failed', stale_reason='', error_message='lease expired', finished_at=?
             where job_id=? and node_key=?
             """,
             (now_str, row["job_id"], row["node_key"]),
         )
         _sync_job_status(conn, row["job_id"])
-        # Lease expiration is an external execution failure. The node is left
-        # stale so an explicit user rerun can recover it, but the aggregate job
-        # status must reflect the failure immediately.
         conn.execute(
             """
             update jobs

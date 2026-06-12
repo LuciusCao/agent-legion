@@ -527,6 +527,34 @@ def test_fail_without_lease_creates_failed_run_and_updates_job_status(
     assert job["status"] == "failed"
 
 
+def test_fail_without_lease_is_idempotent_for_the_same_node(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-fail-no-lease-idempotent", "local-default", workspace_limit=2
+    )
+    request = ConfigurationFailureRequest(
+        workspace_id=workspace_id,
+        job_id=job_id,
+        pipeline_key="reading_analysis",
+        node_key="review_keywords",
+        capability="review_keywords",
+        log_path="/tmp/error.log",
+    )
+
+    first_run_id = repo_a.fail_without_lease(request, "missing binding")
+    second_run_id = repo_a.fail_without_lease(request, "missing binding")
+
+    assert first_run_id is not None
+    assert second_run_id is None
+    with queries.connect() as conn:
+        run_count = conn.execute(
+            "select count(*) from node_runs where job_id=? and node_key=?",
+            (job_id, "review_keywords"),
+        ).fetchone()[0]
+    assert run_count == 1
+
+
 def test_heartbeat_extends_lease_expiry(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
@@ -569,7 +597,9 @@ def test_expire_stale_releases_expired_leases(
         ).fetchone()
         run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
     assert lease["status"] == "expired"
-    assert node["status"] == "stale"
+    assert node["status"] == "failed"
+    assert node["error_message"] == "lease expired"
+    assert node["stale_reason"] == ""
     assert run["status"] == "failed"
 
 

@@ -1,5 +1,6 @@
 import threading
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
@@ -323,7 +324,20 @@ def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
     assert pool._shutdown is True
 
 
-def test_make_pipeline_worker_runs_reading_analysis_local_node(tmp_path: Path) -> None:
+def test_make_pipeline_worker_runs_reading_analysis_local_node(tmp_path: Path, monkeypatch) -> None:
+    monkeypatch.setattr(
+        "server.app.pipelines.reading_analysis.get_token",
+        lambda env, config: "test-token",
+    )
+    monkeypatch.setattr(
+        "server.app.pipelines.reading_analysis.fetch_question_detail",
+        lambda question_id, api_url, token: SimpleNamespace(
+            question_id=question_id,
+            title="Question Q100",
+            normalized={},
+            payload={"uuid": question_id},
+        ),
+    )
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     worker, definition = make_pipeline_worker(tmp_path, queries)
     job = queries.create_job(
@@ -338,9 +352,9 @@ def test_make_pipeline_worker_runs_reading_analysis_local_node(tmp_path: Path) -
     processed = worker._poll()
 
     assert processed is True
-    assert len(worker._futures) == 1
-    future = next(iter(worker._futures.values()))
-    future.result(timeout=5)
+    assert worker._futures
+    for future in worker._futures.values():
+        future.result(timeout=5)
 
     node = queries.get_job_node(job["id"], "fetch_questions")
     assert node["status"] == "completed"

@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import ast
 import json
 from collections import Counter
@@ -245,9 +244,10 @@ def check_repository(root: Path) -> list[str]:
         parent_map = {
             child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)
         }
-
         if is_scheduler_path(relative_path):
             allowed_imports = set(scheduler_import_baselines.get(relative_path, []))
+            for module in sorted(allowed_imports - modules.keys()):
+                errors.append(f"{relative_path}: unused scheduler import baseline {module}")
             for module, lineno in forbidden_imports(modules, SCHEDULER_FORBIDDEN):
                 if module not in allowed_imports:
                     errors.append(

@@ -88,6 +88,29 @@ def _sample_pipeline() -> PipelineDefinition:
     )
 
 
+def _legacy_unconfigured_agent_pipeline() -> PipelineDefinition:
+    return PipelineDefinition(
+        key="question_content",
+        label="Question Content",
+        concurrency=PipelineConcurrency(local=2, agent=1),
+        intake=PipelineIntake(),
+        nodes={
+            "fetch": PipelineNode(
+                key="fetch",
+                label="Fetch",
+                capability="fetch",
+                runner="local",
+            ),
+            "understand": PipelineNode(
+                key="understand",
+                label="Understand",
+                capability="understand",
+                runner="agent",
+            ),
+        },
+    )
+
+
 def _create_legacy_workspace(queries: JobQueries) -> str:
     workspace = queries.create_workspace(
         name="Legacy Workspace",
@@ -267,3 +290,46 @@ def test_bootstrap_raises_when_pi_default_executor_missing(queries: JobQueries) 
 
     with pytest.raises(RuntimeError):
         bootstrap_workspace_executor_defaults(queries, [pipeline], executors)
+
+
+def test_bootstrap_does_not_bind_unconfigured_agent_node_to_local(queries: JobQueries) -> None:
+    from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
+
+    workspace = queries.create_workspace(
+        "Question Workspace",
+        default_pipeline_key="question_content",
+    )
+    pipeline = _legacy_unconfigured_agent_pipeline()
+
+    bootstrap_workspace_executor_defaults(queries, [pipeline], _sample_executors())
+
+    bindings = [
+        row for row in _fetch_all_bindings(queries) if row["workspace_id"] == workspace["id"]
+    ]
+    assert bindings == [
+        {
+            "workspace_id": workspace["id"],
+            "pipeline_key": "question_content",
+            "node_key": "fetch",
+            "executor_id": "local-default",
+        }
+    ]
+
+
+def test_bootstrap_does_not_bind_pi_node_without_workspace_allocation(
+    queries: JobQueries,
+) -> None:
+    from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
+
+    workspace = queries.create_workspace(
+        "Unallocated Pi Workspace",
+        default_pipeline_key="reading_analysis",
+    )
+
+    bootstrap_workspace_executor_defaults(queries, [_sample_pipeline()], _sample_executors())
+
+    bindings = [
+        row for row in _fetch_all_bindings(queries) if row["workspace_id"] == workspace["id"]
+    ]
+    assert {row["node_key"] for row in bindings} == {"local_a", "local_b"}
+    assert all(row["executor_id"] == "local-default" for row in bindings)

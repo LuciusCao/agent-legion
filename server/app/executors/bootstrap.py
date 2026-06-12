@@ -30,13 +30,7 @@ def bootstrap_workspace_executor_defaults(
     definitions: list[PipelineDefinition],
     executors: dict[str, ExecutorConfig],
 ) -> None:
-    """Materialize default executor allocations, bindings, and node limits for workspaces.
-
-    The bootstrap is insert-only and idempotent: existing rows are never overwritten.
-    Legacy workspace ``pipeline_config`` and ``workspace_agent_assignments`` are mapped
-    to the new Phase 3 tables, with local nodes bound to ``local-default`` and Pi agent
-    nodes bound to ``pi-default``.
-    """
+    """Materialize insert-only compatibility defaults for existing workspaces."""
     definitions_by_key = {definition.key: definition for definition in definitions}
 
     with job_db.connect() as conn:
@@ -58,14 +52,7 @@ def bootstrap_workspace_executor_defaults(
                 )
                 continue
 
-            has_local_nodes = any(
-                node.runner == "local" or node.agent is None for node in definition.nodes.values()
-            )
-            has_pi_nodes = any(
-                node.agent is not None and node.agent.engine == "pi"
-                for node in definition.nodes.values()
-            )
-
+            has_local_nodes = any(node.runner == "local" for node in definition.nodes.values())
             agent_assignments = conn.execute(
                 "select agent_id, concurrency_limit from workspace_agent_assignments "
                 "where workspace_id = ?",
@@ -81,7 +68,7 @@ def bootstrap_workspace_executor_defaults(
                 raise RuntimeError(
                     f"Workspace {workspace_id} requires {_DEFAULT_LOCAL_EXECUTOR_ID} executor"
                 )
-            if (has_pi_nodes or has_pi_assignment) and _DEFAULT_PI_EXECUTOR_ID not in executors:
+            if has_pi_assignment and _DEFAULT_PI_EXECUTOR_ID not in executors:
                 raise RuntimeError(
                     f"Workspace {workspace_id} requires {_DEFAULT_PI_EXECUTOR_ID} executor"
                 )
@@ -111,7 +98,7 @@ def bootstrap_workspace_executor_defaults(
                 )
 
             for node in definition.nodes.values():
-                if node.runner == "local" or node.agent is None:
+                if node.runner == "local":
                     conn.execute(
                         """
                         insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id)
@@ -143,14 +130,25 @@ def bootstrap_workspace_executor_defaults(
                             (workspace_id, pipeline_key, node.key, node_limit),
                         )
                 elif node.agent is not None and node.agent.engine == "pi":
-                    conn.execute(
-                        """
-                        insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id)
-                        values (?, ?, ?, ?)
-                        on conflict(workspace_id, pipeline_key, node_key) do nothing
-                        """,
-                        (workspace_id, pipeline_key, node.key, _DEFAULT_PI_EXECUTOR_ID),
-                    )
+                    if has_pi_assignment:
+                        conn.execute(
+                            """
+                            insert into workspace_node_bindings (
+                                workspace_id, pipeline_key, node_key, executor_id
+                            )
+                            values (?, ?, ?, ?)
+                            on conflict(workspace_id, pipeline_key, node_key) do nothing
+                            """,
+                            (workspace_id, pipeline_key, node.key, _DEFAULT_PI_EXECUTOR_ID),
+                        )
+                    else:
+                        logger.warning(
+                            "Workspace %s pipeline %s node %s has no Pi allocation; "
+                            "skipping binding",
+                            workspace_id,
+                            pipeline_key,
+                            node.key,
+                        )
                 else:
                     logger.warning(
                         "Workspace %s pipeline %s node %s uses unknown agent engine %s; skipping binding",
