@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import (
     ClaimedExecution,
@@ -66,9 +65,6 @@ class PipelineWorkerThread:
 
     def start(self) -> None:
         self._definitions = list_registered_pipelines(self.settings.root_dir)
-        bootstrap_workspace_executor_defaults(
-            self.job_db, self._definitions, self.settings.executor_definitions
-        )
         self._ensure_pools()
         self._local_executor = self._pools.get("local-default")
         self._agent_executor = self._pools.get("pi-default")
