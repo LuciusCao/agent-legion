@@ -1,4 +1,4 @@
-from server.app.db.migrations.runner import Migration
+from server.app.db.migrations.models import Migration
 from server.app.db.migrations.v001_executor_core import MIGRATION as V001_EXECUTOR_CORE
 from server.app.db.migrations.v002_executor_bootstrap_state import (
     MIGRATION as V002_EXECUTOR_BOOTSTRAP_STATE,

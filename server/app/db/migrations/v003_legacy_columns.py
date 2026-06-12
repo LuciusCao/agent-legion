@@ -1,7 +1,7 @@
 import sqlite3
 
 from server.app.db.migrations.helpers import add_column_if_missing
-from server.app.db.migrations.runner import Migration
+from server.app.db.migrations.models import Migration
 
 
 def _apply(conn: sqlite3.Connection) -> None:

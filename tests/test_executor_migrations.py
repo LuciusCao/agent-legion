@@ -130,6 +130,157 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 
+def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
+    """A pre-V004 database with data survives the rebuild with no column misalignment."""
+    path = tmp_path / "v004_preserve.sqlite"
+    conn = connect_sqlite(path)
+    with conn:
+        conn.executescript(
+            """
+            create table workspaces (
+              id text primary key,
+              name text not null,
+              description text not null default '',
+              default_pipeline_key text not null default 'question_content',
+              cms_config_json text not null default '{}',
+              resource_config_json text not null default '{}',
+              created_at text not null default current_timestamp,
+              updated_at text not null default current_timestamp,
+              default_entity text not null default 'question',
+              intake_config_json text not null default '{}',
+              pipeline_config_json text not null default '{}'
+            );
+            create table job_batches (
+              id text primary key,
+              workspace_id text not null default 'default',
+              pipeline_key text not null,
+              source_kind text not null,
+              source_payload_json text not null default '{}',
+              status text not null default 'created',
+              created_count integer not null default 0,
+              error_message text not null default '',
+              created_at text not null default current_timestamp
+            );
+            create table jobs (
+              id text primary key,
+              workspace_id text not null default 'default',
+              pipeline_key text not null,
+              source_type text not null,
+              source_id text not null,
+              batch_id text not null default '',
+              title text not null default '',
+              status text not null default 'queued',
+              storage_dir text not null default '',
+              error_message text not null default '',
+              created_at text not null default current_timestamp,
+              updated_at text not null default current_timestamp,
+              stem text not null default ''
+            );
+            create table job_nodes (
+              id integer primary key autoincrement,
+              job_id text not null,
+              node_key text not null,
+              status text not null default 'pending',
+              stale_reason text not null default '',
+              error_message text not null default '',
+              started_at text,
+              finished_at text,
+              unique(job_id, node_key)
+            );
+            create table node_runs (
+              id integer primary key autoincrement,
+              job_id text not null,
+              node_key text not null,
+              status text not null,
+              started_at text not null default current_timestamp,
+              finished_at text,
+              command_json text not null default '[]',
+              exit_code integer,
+              log_path text not null default '',
+              error_message text not null default '',
+              run_dir text not null default '',
+              session_dir text not null default ''
+            );
+            insert into workspaces(id, name) values ('ws1', 'Legacy Workspace');
+            insert into job_batches(
+              id, workspace_id, pipeline_key, source_kind, source_payload_json,
+              status, created_count, error_message, created_at
+            ) values (
+              'batch1', 'ws1', 'reading_analysis', 'question', '{}',
+              'created', 5, '', '2024-01-01 09:00:00'
+            );
+            insert into jobs(
+              id, workspace_id, pipeline_key, source_type, source_id, batch_id,
+              title, status, storage_dir, error_message, created_at, updated_at, stem
+            ) values (
+              'job1', 'ws1', 'reading_analysis', 'question', 'q1', 'batch1',
+              'Test Job', 'running', '/tmp/job1', '',
+              '2024-01-01 10:00:00', '2024-01-01 12:00:00', 'job-stem-value'
+            );
+            insert into job_nodes(
+              job_id, node_key, status, stale_reason, error_message,
+              started_at, finished_at
+            ) values (
+              'job1', 'extract_keywords', 'completed', '', '',
+              '2024-01-01 10:05:00', '2024-01-01 10:10:00'
+            );
+            insert into node_runs(
+              job_id, node_key, status, started_at, finished_at, command_json,
+              exit_code, log_path, error_message, run_dir, session_dir
+            ) values (
+              'job1', 'extract_keywords', 'completed',
+              '2024-01-01 10:05:00', '2024-01-01 10:10:00', '[]', 0,
+              '/tmp/log', '', '/tmp/run', '/tmp/session'
+            );
+            """
+        )
+    conn.close()
+
+    init_db(path)
+
+    with connect_sqlite(path) as conn:
+        batch = conn.execute("select * from job_batches where id = 'batch1'").fetchone()
+        assert batch is not None
+        assert batch["workspace_id"] == "ws1"
+        assert batch["pipeline_key"] == "reading_analysis"
+        assert batch["source_kind"] == "question"
+        assert batch["created_count"] == 5
+        assert batch["created_at"] == "2024-01-01 09:00:00"
+
+        job = conn.execute("select * from jobs where id = 'job1'").fetchone()
+        assert job is not None
+        assert job["workspace_id"] == "ws1"
+        assert job["pipeline_key"] == "reading_analysis"
+        assert job["source_type"] == "question"
+        assert job["source_id"] == "q1"
+        assert job["batch_id"] == "batch1"
+        assert job["title"] == "Test Job"
+        assert job["status"] == "running"
+        assert job["storage_dir"] == "/tmp/job1"
+        assert job["error_message"] == ""
+        assert job["created_at"] == "2024-01-01 10:00:00"
+        assert job["updated_at"] == "2024-01-01 12:00:00"
+        assert job["stem"] == "job-stem-value"
+
+        node = conn.execute("select * from job_nodes where job_id = 'job1'").fetchone()
+        assert node is not None
+        assert node["node_key"] == "extract_keywords"
+        assert node["status"] == "completed"
+        assert node["started_at"] == "2024-01-01 10:05:00"
+        assert node["finished_at"] == "2024-01-01 10:10:00"
+
+        run = conn.execute("select * from node_runs where job_id = 'job1'").fetchone()
+        assert run is not None
+        assert run["node_key"] == "extract_keywords"
+        assert run["status"] == "completed"
+        assert run["exit_code"] == 0
+        assert run["log_path"] == "/tmp/log"
+        assert run["run_dir"] == "/tmp/run"
+        assert run["session_dir"] == "/tmp/session"
+
+        assert conn.execute("pragma foreign_key_check").fetchall() == []
+
+
 def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
     path = tmp_path / "app.sqlite"
     init_db(path)
