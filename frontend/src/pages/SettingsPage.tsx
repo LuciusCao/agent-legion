@@ -3,8 +3,7 @@ import { useParams } from 'react-router-dom'
 import { useSettingStore } from '../stores/settingStore'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
-import { AgentAllocationList } from '../components/AgentAllocationList'
-import { VIDEO_HIVE_ID } from '../layouts/WorkspaceLayout'
+import { ExecutorAllocationSection } from '../components/ExecutorAllocationSection'
 import { fetchPipelines } from '../api'
 import styles from './SettingsPage.module.css'
 
@@ -35,7 +34,6 @@ function ConnectionStatusPill({
 
 export function SettingsPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
-  const isVideoHive = workspaceId === VIDEO_HIVE_ID
   const {
     setWorkspaceId,
     workspaceName,
@@ -44,10 +42,6 @@ export function SettingsPage() {
     setWorkspaceName,
     setWorkspaceDescription,
     setSettings,
-    agentAssignments,
-    setAgentAssignments,
-    piAgentConcurrency,
-    setPiAgentConcurrency,
     isDirty,
     isSaving,
     saveError,
@@ -58,20 +52,26 @@ export function SettingsPage() {
     testConnection,
     resetTestStatus,
     fetchSettings,
-    fetchAgentAssignments,
     fetchGlobalServices,
     fetchResourceProviders,
     fetchPipelineDefinition,
   } = useSettingStore()
 
+  const hasLocalNodes =
+    pipelineDefinition !== null &&
+    pipelineDefinition.nodes.some((n) => n.runner === 'local')
+
   const navItems = useMemo(
     () => [
-      { id: 'basic-info', label: '基本信息' },
-      { id: 'intake-config', label: '接入配置' },
+      { id: 'basic-info', label: '基础信息' },
+      { id: 'intake-config', label: '接入与资源' },
       { id: 'pipeline', label: 'Pipeline' },
-      { id: 'agents', label: '智能体' },
+      { id: 'executor-allocation', label: '执行器分配' },
+      ...(hasLocalNodes
+        ? [{ id: 'local-node-concurrency', label: '本地节点并发' }]
+        : []),
     ],
-    []
+    [hasLocalNodes]
   )
 
   const [activeSection, setActiveSection] = useState('basic-info')
@@ -86,15 +86,12 @@ export function SettingsPage() {
     void fetchSettings(workspaceId).then(() => {
       void fetchPipelineDefinition()
     })
-    void fetchAgentAssignments(workspaceId)
   }, [
     workspaceId,
-    isVideoHive,
     setWorkspaceId,
     resetTestStatus,
     fetchSettings,
     fetchPipelineDefinition,
-    fetchAgentAssignments,
   ])
 
   useEffect(() => {
@@ -224,7 +221,7 @@ export function SettingsPage() {
           </section>
 
           <section id="intake-config" className={styles.section}>
-            <h2 className={styles.sectionTitle}>接入配置</h2>
+            <h2 className={styles.sectionTitle}>接入与资源</h2>
             <hr className={styles.sectionDivider} />
             <div className={styles.field}>
               <md-outlined-select
@@ -466,25 +463,26 @@ export function SettingsPage() {
                 </span>
               )}
             </div>
+          </section>
 
-            {pipelineDefinition &&
-              pipelineDefinition.nodes.filter((n) => n.runner === 'local')
-                .length > 0 && (
+          <section id="executor-allocation" className={styles.section}>
+            <h2 className={styles.sectionTitle}>执行器分配</h2>
+            <hr className={styles.sectionDivider} />
+            <ExecutorAllocationSection />
+          </section>
+
+          {pipelineDefinition &&
+            pipelineDefinition.nodes.filter((n) => n.runner === 'local')
+              .length > 0 && (
+              <section id="local-node-concurrency" className={styles.section}>
+                <h2 className={styles.sectionTitle}>本地节点并发</h2>
+                <hr className={styles.sectionDivider} />
                 <div className={styles.field}>
-                  <span
-                    style={{
-                      fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
-                    }}
-                  >
-                    节点本地并发
-                  </span>
                   <div
                     style={{
                       display: 'flex',
                       flexDirection: 'column',
                       gap: 8,
-                      marginTop: 8,
                     }}
                   >
                     {pipelineDefinition.nodes
@@ -545,33 +543,8 @@ export function SettingsPage() {
                       })}
                   </div>
                 </div>
-              )}
-          </section>
-
-          <section id="agents" className={styles.section}>
-            <h2 className={styles.sectionTitle}>智能体</h2>
-            <hr className={styles.sectionDivider} />
-            <div className={styles.field}>
-              <label htmlFor="pi-agent-concurrency">Pi Agent 并发数</label>
-              <md-outlined-text-field
-                id="pi-agent-concurrency"
-                type="number"
-                min={1}
-                max={10}
-                value={piAgentConcurrency ?? ''}
-                onInput={(event: Event) => {
-                  const value = Number((event.target as HTMLInputElement).value)
-                  setPiAgentConcurrency(Number.isNaN(value) ? undefined : value)
-                }}
-                style={{ width: '100%' }}
-              />
-            </div>
-            <AgentAllocationList
-              workspaceId={workspaceId}
-              assignments={agentAssignments}
-              onAssignmentsChange={setAgentAssignments}
-            />
-          </section>
+              </section>
+            )}
         </div>
       </div>
     </AppShell>
