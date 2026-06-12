@@ -60,3 +60,79 @@ def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
     assert "local-default" in settings.executor_definitions
     assert settings.executor_definitions["local-default"].kind == "local"
     assert settings.executor_definitions["local-default"].global_capacity == 4
+
+
+def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
+    config_path = tmp_path / "pipeline.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "pipelines:\n"
+        "  enabled: true\n"
+        "  pi:\n"
+        "    binary: pi\n"
+        "    provider: \"\"\n"
+        "    model: \"\"\n"
+        "    thinking: low\n"
+        "    timeout_seconds: 600\n"
+        "    environment:\n"
+        "      PI_SKIP_VERSION_CHECK: \"1\"\n"
+        "openclaw:\n"
+        "  cwd: .\n"
+        "  timeout_seconds: 600\n"
+        "  skill_safety:\n"
+        "    enabled: true\n"
+        "    repos:\n"
+        "      - path: ~/.openclaw/workspace/skills/s1\n"
+        "        ref: v1.0.0\n"
+        "  command_template:\n"
+        "    - openclaw\n"
+        "    - agent\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.executor_runtime.pipelines.enabled is True
+    assert settings.executor_runtime.pipelines.pi.binary == "pi"
+    assert settings.executor_runtime.pipelines.pi.thinking == "low"
+    assert settings.executor_runtime.openclaw.cwd == "."
+    assert settings.executor_runtime.openclaw.timeout_seconds == 600
+    assert settings.executor_runtime.openclaw.command_template == ("openclaw", "agent")
+    assert settings.executor_runtime.openclaw.skill_safety.enabled is True
+    assert settings.executor_runtime.openclaw.skill_safety.repos == [
+        {"path": "~/.openclaw/workspace/skills/s1", "ref": "v1.0.0"}
+    ]
+    assert settings.config["pipelines"]["pi"]["thinking"] == "low"
+
+
+def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeypatch):
+    config_path = tmp_path / "pipeline.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "openclaw:\n"
+        "  command_template: []\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert "command_template" in str(exc_info.value)
+
+
+def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
+    config_path = tmp_path / "pipeline.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "executors:\n"
+        "  weird-exec:\n"
+        "    kind: unknown\n"
+        "    global_capacity: 1\n"
+        "    capabilities: {}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert "weird-exec" in str(exc_info.value)

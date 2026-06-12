@@ -101,6 +101,7 @@ pipelines:
 openclaw:
   cwd: .
   timeout_seconds: 600
+  isolated_workspace_root: ""
   # 调用 openclaw agent 前，强制把指定技能目录 checkout 到干净的 ref/tag，
   # 防止 agent 自我修改技能或在技能里写入脏数据。
   skill_safety:

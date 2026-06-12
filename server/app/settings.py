@@ -10,6 +10,11 @@ from server.app.executors.config import (
     ExecutorConfig,
     load_executor_definitions,
 )
+from server.app.executors.runtime_config import (
+    ExecutorRuntimeConfig,
+    OpenClawRuntimeConfig,
+    PipelinesRuntimeConfig,
+)
 
 
 @dataclass
@@ -22,6 +27,12 @@ class Settings:
     jobs_dir: Path
     config: dict[str, Any]
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
+    executor_runtime: ExecutorRuntimeConfig = field(
+        default_factory=lambda: ExecutorRuntimeConfig(
+            pipelines=PipelinesRuntimeConfig(),
+            openclaw=OpenClawRuntimeConfig(command_template=("openclaw",)),
+        )
+    )
 
 
 def load_env_file(path: Path) -> None:
@@ -88,6 +99,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
     executor_definitions = load_executor_definitions(config.get("executors", {}))
+    executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     return Settings(
         root_dir=root_dir,
         data_dir=resolved_data_dir,
@@ -97,4 +109,5 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         jobs_dir=jobs_dir,
         config=config,
         executor_definitions=executor_definitions,
+        executor_runtime=executor_runtime,
     )
