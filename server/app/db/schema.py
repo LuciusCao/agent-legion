@@ -144,63 +144,6 @@ def init_db(path: Path) -> None:
                 );
                 """,
             )
-            existing_columns = {
-                row["name"] for row in conn.execute("pragma table_info(videos)").fetchall()
-            }
-            migrations = {
-                "content_type": "alter table videos add column content_type text not null default 'knowledge'",
-                "external_id": "alter table videos add column external_id text not null default ''",
-                "knowledge_code": "alter table videos add column knowledge_code text not null default ''",
-                "question_id": "alter table videos add column question_id text not null default ''",
-                "source_uuid": "alter table videos add column source_uuid text not null default ''",
-                "packed": "alter table videos add column packed integer not null default 0",
-                "interaction_stats_json": "alter table videos add column interaction_stats_json text not null default ''",
-                "interaction_review_status": "alter table videos add column interaction_review_status text not null default ''",
-            }
-            for column, statement in migrations.items():
-                if column not in existing_columns:
-                    conn.execute(statement)
-
-            existing_workspace_columns = {
-                row["name"] for row in conn.execute("pragma table_info(workspaces)").fetchall()
-            }
-            workspace_migrations = {
-                "cms_config_json": (
-                    "alter table workspaces add column cms_config_json text not null default '{}'"
-                ),
-                "resource_config_json": (
-                    "alter table workspaces add column resource_config_json text not null default '{}'"
-                ),
-                "default_entity": (
-                    "alter table workspaces add column default_entity text not null default 'question'"
-                ),
-                "intake_config_json": (
-                    "alter table workspaces add column intake_config_json text not null default '{}'"
-                ),
-                "description": (
-                    "alter table workspaces add column description text not null default ''"
-                ),
-                "pipeline_config_json": (
-                    "alter table workspaces add column pipeline_config_json text not null default '{}'"
-                ),
-            }
-            for column, statement in workspace_migrations.items():
-                if column not in existing_workspace_columns:
-                    conn.execute(statement)
-
-            existing_package_columns = {
-                row["name"] for row in conn.execute("pragma table_info(packages)").fetchall()
-            }
-            package_migrations = {
-                "video_count": "alter table packages add column video_count integer not null default 0",
-                "size_bytes": "alter table packages add column size_bytes integer not null default 0",
-                "name": "alter table packages add column name text not null default ''",
-                "locked": "alter table packages add column locked integer not null default 0",
-            }
-            for column, statement in package_migrations.items():
-                if column not in existing_package_columns:
-                    conn.execute(statement)
-
             conn.execute(
                 """
                 insert into workspaces(id, name, default_pipeline_key)
@@ -216,62 +159,29 @@ def init_db(path: Path) -> None:
                 """
             )
 
-            existing_job_batch_columns = {
-                row["name"] for row in conn.execute("pragma table_info(job_batches)").fetchall()
-            }
-            job_batch_migrations = {
-                "workspace_id": (
-                    "alter table job_batches add column workspace_id text not null default 'default'"
-                ),
-            }
-            for column, statement in job_batch_migrations.items():
-                if column not in existing_job_batch_columns:
-                    conn.execute(statement)
-
-            existing_job_columns = {
-                row["name"] for row in conn.execute("pragma table_info(jobs)").fetchall()
-            }
-            job_migrations = {
-                "workspace_id": "alter table jobs add column workspace_id text not null default 'default'",
-                "stem": "alter table jobs add column stem text not null default ''",
-            }
-            for column, statement in job_migrations.items():
-                if column not in existing_job_columns:
-                    conn.execute(statement)
-
-            existing_node_run_columns = {
-                row["name"] for row in conn.execute("pragma table_info(node_runs)").fetchall()
-            }
-            node_run_migrations = {
-                "run_dir": "alter table node_runs add column run_dir text not null default ''",
-                "session_dir": "alter table node_runs add column session_dir text not null default ''",
-            }
-            for column, statement in node_run_migrations.items():
-                if column not in existing_node_run_columns:
-                    conn.execute(statement)
-
-            # Performance indexes for issue 012
-            _execute_statements(
-                conn,
-                """
-                create index if not exists idx_videos_status on videos(status);
-                create index if not exists idx_videos_content_type_external_id on videos(content_type, external_id);
-                create index if not exists idx_videos_created_at on videos(created_at);
-                create index if not exists idx_phase_runs_video_id on phase_runs(video_id);
-                create index if not exists idx_phase_runs_video_id_status on phase_runs(video_id, status);
-                create index if not exists idx_transcription_runs_video_id on transcription_runs(video_id);
-                create index if not exists idx_jobs_pipeline_status on jobs(pipeline_key, status);
-                create index if not exists idx_jobs_source on jobs(pipeline_key, source_type, source_id);
-                create index if not exists idx_workspaces_created_at on workspaces(created_at);
-                create index if not exists idx_job_batches_workspace on job_batches(workspace_id, created_at);
-                create index if not exists idx_jobs_workspace_pipeline_status on jobs(workspace_id, pipeline_key, status);
-                create index if not exists idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id);
-                create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
-                create index if not exists idx_node_runs_job_id on node_runs(job_id);
-                create index if not exists idx_workspace_agent_assignments on workspace_agent_assignments(workspace_id, agent_id);
-                """,
-            )
-
         run_migrations(conn, MIGRATIONS)
+
+        # Performance indexes for issue 012. These are created after migrations
+        # so that columns added by V003 (e.g. videos.content_type) are present.
+        _execute_statements(
+            conn,
+            """
+            create index if not exists idx_videos_status on videos(status);
+            create index if not exists idx_videos_content_type_external_id on videos(content_type, external_id);
+            create index if not exists idx_videos_created_at on videos(created_at);
+            create index if not exists idx_phase_runs_video_id on phase_runs(video_id);
+            create index if not exists idx_phase_runs_video_id_status on phase_runs(video_id, status);
+            create index if not exists idx_transcription_runs_video_id on transcription_runs(video_id);
+            create index if not exists idx_jobs_pipeline_status on jobs(pipeline_key, status);
+            create index if not exists idx_jobs_source on jobs(pipeline_key, source_type, source_id);
+            create index if not exists idx_workspaces_created_at on workspaces(created_at);
+            create index if not exists idx_job_batches_workspace on job_batches(workspace_id, created_at);
+            create index if not exists idx_jobs_workspace_pipeline_status on jobs(workspace_id, pipeline_key, status);
+            create index if not exists idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id);
+            create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
+            create index if not exists idx_node_runs_job_id on node_runs(job_id);
+            create index if not exists idx_workspace_agent_assignments on workspace_agent_assignments(workspace_id, agent_id);
+            """,
+        )
     finally:
         conn.close()

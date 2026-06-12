@@ -515,3 +515,13 @@ def test_update_package_name(db):
     pkg = db.list_packages(limit=1)[0]
     db.update_package_name(pkg["id"], "新名称")
     assert db.list_packages(limit=1)[0]["name"] == "新名称"
+
+
+def test_database_initialization_runs_migrations(db):
+    """Database construction must run migrations and record V003 legacy columns."""
+    with db.connect() as conn:
+        versions = {
+            row["version"]
+            for row in conn.execute("select version from schema_migrations").fetchall()
+        }
+    assert 3 in versions, "V003 legacy column migration should be recorded"
