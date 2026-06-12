@@ -12,11 +12,12 @@ from fastapi.staticfiles import StaticFiles
 
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
+from server.app.db.migrations.report import MigrationBlockedError
 from server.app.db.notifications import NotificationHub
 from server.app.events import VideoEventManager
-from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
 from server.app.executors.config import LocalExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
+from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.local import LocalHandler
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.runtime import ExecutionRuntime
@@ -141,7 +142,23 @@ def create_app(
     executor_registry = build_executor_registry(settings, job_db)
 
     definitions = list_registered_pipelines(settings.root_dir)
-    bootstrap_workspace_executor_defaults(job_db, definitions, settings.executor_definitions)
+    with job_db.connect() as conn:
+        try:
+            finalize_legacy_executor_schema(conn, definitions, settings.executor_definitions)
+        except MigrationBlockedError as exc:
+            check_cmd = (
+                "UV_CACHE_DIR=.uv-cache uv run python "
+                "scripts/finalize-workspace-executor-migration.py --check"
+            )
+            logging.getLogger(__name__).error(
+                "Workspace executor finalization blocked:\n%s\n\nRun: %s",
+                exc.report.to_json(),
+                check_cmd,
+            )
+            raise RuntimeError(
+                f"Workspace executor finalization blocked: {exc.report.to_json()}. "
+                f"Run `{check_cmd}` for details."
+            ) from exc
 
     worker_thread: WorkerThread | None = None
     pipeline_worker_thread: PipelineWorkerThread | None = None

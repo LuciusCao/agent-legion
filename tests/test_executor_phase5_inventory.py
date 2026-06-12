@@ -13,16 +13,12 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 LEGACY_PATHS: dict[str, tuple[str, str]] = {
-    "workspace agent table": ("server/app/db/schema.py", "workspace_agent_assignments"),
-    "pipeline config column": ("server/app/db/schema.py", "pipeline_config_json"),
     "pipeline runner": ("server/app/pipelines/definition.py", "RunnerKind"),
     "pipeline concurrency": ("server/app/pipelines/definition.py", "PipelineConcurrency"),
     "agent route": ("server/app/routes/workspace_agents.py", "/agents"),
 }
 
 REPLACEMENTS: dict[str, str] = {
-    "workspace agent table": "workspace_executor_allocations + workspace_executor_bindings",
-    "pipeline config column": "workspace_executor_allocations / workspace_executor_bindings / workspace_node_limits",
     "pipeline runner": "Node capability + Executor binding kind",
     "pipeline concurrency": "Workspace-level Executor allocation limits + local Node limits",
     "agent route": "Workspace Executor configuration routes",

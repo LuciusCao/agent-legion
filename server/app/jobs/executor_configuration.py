@@ -5,9 +5,20 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 
+def _bootstrap_state_table_exists(conn: sqlite3.Connection) -> bool:
+    row = conn.execute(
+        "select 1 from sqlite_master where type='table' and name='workspace_executor_bootstrap_state'"
+    ).fetchone()
+    return row is not None
+
+
 def workspace_executor_configuration_is_authoritative(
     conn: sqlite3.Connection, workspace_id: str
 ) -> bool:
+    if not _bootstrap_state_table_exists(conn):
+        # After V005 the bootstrap state table is dropped and every configuration
+        # is considered authoritative.
+        return True
     row = conn.execute(
         "select 1 from workspace_executor_bootstrap_state where workspace_id=?",
         (workspace_id,),
@@ -18,6 +29,8 @@ def workspace_executor_configuration_is_authoritative(
 def mark_workspace_executor_configuration_authoritative(
     conn: sqlite3.Connection, workspace_id: str
 ) -> None:
+    if not _bootstrap_state_table_exists(conn):
+        return
     conn.execute(
         "insert into workspace_executor_bootstrap_state(workspace_id) values (?) "
         "on conflict(workspace_id) do nothing",

@@ -296,6 +296,7 @@ def test_init_db_records_all_migrations(tmp_path: Path) -> None:
     versions = {
         row["version"] for row in conn.execute("select version from schema_migrations").fetchall()
     }
-    expected = {m.version for m in MIGRATIONS}
+    # V005 is applied by the one-time legacy finalizer, not by init_db.
+    expected = {m.version for m in MIGRATIONS if m.version < 5}
     assert versions == expected, f"Missing migrations: {expected - versions}"
     conn.close()

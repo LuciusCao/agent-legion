@@ -5,7 +5,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from pathlib import Path
 from typing import Any
 
@@ -110,26 +110,50 @@ class JobQueries:
                 workspace_id = f"{base_id}_{suffix}"
                 suffix += 1
 
-            conn.execute(
-                """
-                insert into workspaces(
-                  id, name, description, default_pipeline_key, cms_config_json, resource_config_json,
-                  default_entity, intake_config_json, pipeline_config_json
+            col_exists = conn.execute(
+                "select 1 from pragma_table_info('workspaces') where name='pipeline_config_json'"
+            ).fetchone()
+            if col_exists is not None:
+                conn.execute(
+                    """
+                    insert into workspaces(
+                      id, name, description, default_pipeline_key, cms_config_json, resource_config_json,
+                      default_entity, intake_config_json, pipeline_config_json
+                    )
+                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        workspace_id,
+                        clean_name,
+                        clean_description,
+                        default_pipeline_key,
+                        cms_config_json,
+                        resource_config_json,
+                        clean_entity,
+                        intake_config_json,
+                        pipeline_config_json,
+                    ),
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    workspace_id,
-                    clean_name,
-                    clean_description,
-                    default_pipeline_key,
-                    cms_config_json,
-                    resource_config_json,
-                    clean_entity,
-                    intake_config_json,
-                    pipeline_config_json,
-                ),
-            )
+            else:
+                conn.execute(
+                    """
+                    insert into workspaces(
+                      id, name, description, default_pipeline_key, cms_config_json, resource_config_json,
+                      default_entity, intake_config_json
+                    )
+                    values (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        workspace_id,
+                        clean_name,
+                        clean_description,
+                        default_pipeline_key,
+                        cms_config_json,
+                        resource_config_json,
+                        clean_entity,
+                        intake_config_json,
+                    ),
+                )
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
         return _workspace_record(row)
 
@@ -202,6 +226,21 @@ class JobQueries:
         assignments = ", ".join(f"{key}=?" for key in fields)
         params = list(fields.values()) + [workspace_id]
         with self.connect() as conn:
+            if "pipeline_config_json" in fields:
+                col_exists = conn.execute(
+                    "select 1 from pragma_table_info('workspaces') where name='pipeline_config_json'"
+                ).fetchone()
+                if col_exists is None:
+                    fields.pop("pipeline_config_json")
+                    if not fields:
+                        row = conn.execute(
+                            "select * from workspaces where id=?", (workspace_id,)
+                        ).fetchone()
+                        if row is None:
+                            raise ValueError("Workspace not found")
+                        return _workspace_record(row)
+                    assignments = ", ".join(f"{key}=?" for key in fields)
+                    params = list(fields.values()) + [workspace_id]
             cursor = conn.execute(
                 f"""
                 update workspaces
@@ -237,25 +276,48 @@ class JobQueries:
             exists = conn.execute("select 1 from workspaces where id=?", (workspace_id,)).fetchone()
             if exists is None:
                 raise ValueError("Workspace not found")
-            conn.execute(
-                """
-                update workspaces
-                set name=?, description=?, default_pipeline_key=?, default_entity=?,
-                    resource_config_json=?, intake_config_json=?, pipeline_config_json=?,
-                    updated_at=current_timestamp
-                where id=?
-                """,
-                (
-                    clean_name,
-                    description.strip(),
-                    default_pipeline_key,
-                    default_entity,
-                    json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
-                    json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
-                    json.dumps(pipeline_config, ensure_ascii=False, sort_keys=True),
-                    workspace_id,
-                ),
-            )
+            col_exists = conn.execute(
+                "select 1 from pragma_table_info('workspaces') where name='pipeline_config_json'"
+            ).fetchone()
+            if col_exists is not None:
+                conn.execute(
+                    """
+                    update workspaces
+                    set name=?, description=?, default_pipeline_key=?, default_entity=?,
+                        resource_config_json=?, intake_config_json=?, pipeline_config_json=?,
+                        updated_at=current_timestamp
+                    where id=?
+                    """,
+                    (
+                        clean_name,
+                        description.strip(),
+                        default_pipeline_key,
+                        default_entity,
+                        json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
+                        json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
+                        json.dumps(pipeline_config, ensure_ascii=False, sort_keys=True),
+                        workspace_id,
+                    ),
+                )
+            else:
+                conn.execute(
+                    """
+                    update workspaces
+                    set name=?, description=?, default_pipeline_key=?, default_entity=?,
+                        resource_config_json=?, intake_config_json=?,
+                        updated_at=current_timestamp
+                    where id=?
+                    """,
+                    (
+                        clean_name,
+                        description.strip(),
+                        default_pipeline_key,
+                        default_entity,
+                        json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
+                        json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
+                        workspace_id,
+                    ),
+                )
             replace_workspace_executor_configuration(
                 conn,
                 workspace_id,
@@ -701,10 +763,13 @@ class JobQueries:
 
     def list_workspace_agents(self, workspace_id: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
-            rows = conn.execute(
-                "select agent_id, concurrency_limit from workspace_agent_assignments where workspace_id = ?",
-                (workspace_id,),
-            ).fetchall()
+            try:
+                rows = conn.execute(
+                    "select agent_id, concurrency_limit from workspace_agent_assignments where workspace_id = ?",
+                    (workspace_id,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
         return [
             {"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows
         ]
@@ -712,7 +777,12 @@ class JobQueries:
     def upsert_workspace_agent_assignment(
         self, workspace_id: str, agent_id: str, concurrency_limit: int
     ) -> dict[str, Any]:
-        with self.connect() as conn:
+        fallback = {
+            "workspace_id": workspace_id,
+            "agent_id": agent_id,
+            "concurrency_limit": max(1, concurrency_limit),
+        }
+        with self.connect() as conn, suppress(sqlite3.OperationalError):
             conn.execute(
                 """
                 insert into workspace_agent_assignments(workspace_id, agent_id, concurrency_limit)
@@ -720,13 +790,15 @@ class JobQueries:
                 on conflict(workspace_id, agent_id) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
-                (workspace_id, agent_id, max(1, concurrency_limit)),
+                (workspace_id, agent_id, fallback["concurrency_limit"]),
             )
             row = conn.execute(
                 "select * from workspace_agent_assignments where workspace_id=? and agent_id=?",
                 (workspace_id, agent_id),
             ).fetchone()
-        return dict(row)
+            if row is not None:
+                return dict(row)
+        return fallback
 
     def get_workspace_executor_configuration(
         self, workspace_id: str

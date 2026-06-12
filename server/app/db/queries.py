@@ -1,6 +1,6 @@
 import json
 import sqlite3
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
@@ -610,19 +610,25 @@ class VideoQueries:
 
     def list_workspace_agents(self, workspace_id: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
-            rows = conn.execute(
-                "select agent_id, concurrency_limit from workspace_agent_assignments where workspace_id = ?",
-                (workspace_id,),
-            ).fetchall()
+            try:
+                rows = conn.execute(
+                    "select agent_id, concurrency_limit from workspace_agent_assignments where workspace_id = ?",
+                    (workspace_id,),
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
         return [
             {"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows
         ]
 
     def list_all_workspace_agents(self) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
-            rows = conn.execute(
-                "select workspace_id, agent_id, concurrency_limit from workspace_agent_assignments"
-            ).fetchall()
+            try:
+                rows = conn.execute(
+                    "select workspace_id, agent_id, concurrency_limit from workspace_agent_assignments"
+                ).fetchall()
+            except sqlite3.OperationalError:
+                return []
         return [
             {
                 "workspace_id": r["workspace_id"],
@@ -635,7 +641,7 @@ class VideoQueries:
     def set_workspace_agent_assignment(
         self, workspace_id: str, agent_id: str, concurrency_limit: int = 1
     ) -> None:
-        with self.connect() as conn:
+        with self.connect() as conn, suppress(sqlite3.OperationalError):
             conn.execute(
                 """insert into workspace_agent_assignments(workspace_id, agent_id, concurrency_limit)
                    values (?, ?, ?)
@@ -645,7 +651,7 @@ class VideoQueries:
             )
 
     def remove_workspace_agent_assignment(self, workspace_id: str, agent_id: str) -> None:
-        with self.connect() as conn:
+        with self.connect() as conn, suppress(sqlite3.OperationalError):
             conn.execute(
                 "delete from workspace_agent_assignments where workspace_id = ? and agent_id = ?",
                 (workspace_id, agent_id),

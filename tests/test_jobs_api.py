@@ -167,8 +167,9 @@ def test_workspace_settings_round_trip(tmp_path):
     assert settings["labelOverrides"] == {"direct_ids": "输入 ID"}
     assert settings["pipelineKey"] == "question_content"
     workspace = app.state.job_db.get_workspace("default")
-    assert workspace["pipeline_config"]["local"] == 5
-    assert workspace["pipeline_config"]["nodes"] == {"fetch_question_context": 3}
+    # V005 removes pipeline_config_json from workspaces; the settings endpoint
+    # exposes the patched values directly without persisting them in the column.
+    assert workspace.get("pipeline_config", {}) == {}
 
 
 def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
@@ -1880,7 +1881,7 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
     assert all(job["pipeline_key"] == "reading_analysis" for job in body["jobs"])
 
 
-def test_workspace_settings_returns_agent_assignments(tmp_path):
+def test_workspace_settings_returns_no_agent_assignments_after_v005(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -1896,12 +1897,12 @@ def test_workspace_settings_returns_agent_assignments(tmp_path):
     settings = response.json()["settings"]
     assert "agentIds" not in settings
     assert "concurrencyLimit" not in settings
+    # The legacy workspace_agent_assignments table is dropped by V005.
     assignments = app.state.job_db.list_workspace_agents("default")
-    assert [a["agent_id"] for a in assignments] == ["agent-1", "agent-2"]
-    assert max(a["concurrency_limit"] for a in assignments) == 2
+    assert assignments == []
 
 
-def test_get_and_set_workspace_agent(client):
+def test_get_and_set_workspace_agent_is_no_op_after_v005(client):
     # 先创建 workspace
     resp = client.post("/api/workspaces", json={"name": "Test WS"})
     assert resp.status_code == 200
@@ -1923,8 +1924,8 @@ def test_get_and_set_workspace_agent(client):
     # get
     resp = client.get(f"/api/workspaces/{ws_id}/agents")
     assert resp.status_code == 200
-    agents = resp.json()
-    assert agents == [assignment]
+    # The legacy workspace_agent_assignments table is dropped by V005.
+    assert resp.json() == []
 
 
 def test_workspace_settings_pipeline_rejects_invalid_concurrency(tmp_path):

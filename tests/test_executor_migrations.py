@@ -13,6 +13,9 @@ EXPECTED_TABLES = {
     "executor_leases",
 }
 
+# V005 is applied by the one-time legacy finalizer, not by init_db/run_migrations.
+# Tests for the destructive V005 cleanup live in test_executor_legacy_finalization.py.
+
 
 def test_empty_database_migrates_to_latest_version(tmp_path: Path) -> None:
     path = tmp_path / "empty.sqlite"
