@@ -1,12 +1,60 @@
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 
-from server.app.executors.config import OpenClawCapabilityConfig
+from server.app.executors.config import OpenClawCapabilityConfig, OpenClawExecutorConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
-from server.app.pipeline.openclaw import OpenClawRunner
+from server.app.executors.runtime_config import OpenClawRuntimeConfig
+from server.app.pipeline.openclaw import OpenClawRunner, SkillSafetyConfig
 
 logger = logging.getLogger(__name__)
+
+
+def build_openclaw_executor(
+    executor_id: str,
+    runtime: OpenClawRuntimeConfig,
+    config: OpenClawExecutorConfig,
+) -> OpenClawExecutor:
+    """Build an OpenClawExecutor with the executor's agent_id injected into the runner."""
+    command_template = _inject_agent_id(list(runtime.command_template), config.agent_id)
+    skill_safety = (
+        SkillSafetyConfig(
+            enabled=runtime.skill_safety.enabled,
+            repos=list(runtime.skill_safety.repos),
+        )
+        if runtime.skill_safety is not None
+        else None
+    )
+    isolated_root = (
+        Path(runtime.isolated_workspace_root) if runtime.isolated_workspace_root else None
+    )
+    runner = OpenClawRunner(
+        command_template=command_template,
+        cwd=Path(runtime.cwd),
+        timeout_seconds=runtime.timeout_seconds,
+        skill_safety=skill_safety,
+        isolated_workspace_root=isolated_root,
+        agent_id=config.agent_id,
+    )
+    return OpenClawExecutor(
+        id=executor_id,
+        runner=runner,
+        capabilities=config.capabilities,
+    )
+
+
+def _inject_agent_id(command_template: list[str], agent_id: str) -> list[str]:
+    """Return a copy of *command_template* with the agent id set to *agent_id*."""
+    template = list(command_template)
+    for i, part in enumerate(template):
+        if part == "{agent_id}":
+            template[i] = agent_id
+    for i, part in enumerate(template):
+        if part == "--agent" and i + 1 < len(template):
+            template[i + 1] = agent_id
+            break
+    return template
 
 
 class OpenClawExecutor:

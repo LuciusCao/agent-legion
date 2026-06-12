@@ -127,7 +127,7 @@
     "server/app/executors/registry.py": 197,
     "server/app/executors/local.py": 109,
     "server/app/executors/pi.py": 98,
-    "server/app/executors/openclaw.py": 101,
+    "server/app/executors/openclaw.py": 150,
     "server/app/executors/runtime.py": 105,
     "server/app/executors/leases.py": 112,
     "server/app/executors/_lease_claims.py": 184,
