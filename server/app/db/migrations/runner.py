@@ -1,45 +1,30 @@
 import logging
 import sqlite3
-from collections.abc import Callable
+
+from server.app.db.migrations.execution import apply_migration
+from server.app.db.migrations.history import check_history, load_applied
+from server.app.db.migrations.models import Migration
+from server.app.db.migrations.registry_validation import ensure_foreign_keys, validate_registry
 
 logger = logging.getLogger(__name__)
 
-MigrationApply = Callable[[sqlite3.Connection], None]
 
-
-class Migration:
-    def __init__(self, version: int, name: str, apply: MigrationApply) -> None:
-        self.version = version
-        self.name = name
-        self.apply = apply
-
-
-def run_migrations(conn: sqlite3.Connection, migrations: list[Migration] | None = None) -> None:
-    """Run pending migrations in ascending order inside the caller's transaction."""
-    conn.execute(
-        """
-        create table if not exists schema_migrations (
-          version integer primary key,
-          name text not null,
-          applied_at text not null default current_timestamp
-        )
-        """
-    )
-
-    if not conn.in_transaction:
-        conn.execute("BEGIN")
-
-    applied = {
-        row["version"] for row in conn.execute("select version from schema_migrations").fetchall()
-    }
-
-    for migration in migrations or []:
-        if migration.version in applied:
-            continue
-        logger.info("Applying migration %d: %s", migration.version, migration.name)
-        migration.apply(conn)
-        conn.execute(
-            "insert into schema_migrations(version, name) values (?, ?)",
-            (migration.version, migration.name),
-        )
-        applied.add(migration.version)
+def run_migrations(
+    conn: sqlite3.Connection,
+    migrations: tuple[Migration, ...] | list[Migration] | None = None,
+) -> None:
+    """Run pending migrations in ascending order, owning one transaction each."""
+    migration_tuple: tuple[Migration, ...] = tuple(migrations or ())
+    registry = validate_registry(migration_tuple)
+    sorted_migrations = tuple(sorted(migration_tuple, key=lambda m: m.version))
+    try:
+        ensure_foreign_keys(conn)
+        applied = load_applied(conn)
+        check_history(applied, registry)
+        for migration in sorted_migrations:
+            if migration.version in applied:
+                continue
+            logger.info("Applying migration %d: %s", migration.version, migration.name)
+            apply_migration(conn, migration)
+    finally:
+        ensure_foreign_keys(conn)

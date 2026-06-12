@@ -25,7 +25,7 @@ def test_empty_database_migrates_to_latest_version(tmp_path: Path) -> None:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
 
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1, 2]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 
@@ -124,7 +124,7 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
         ).fetchone()
 
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1, 2]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4]
         assert legacy_row is not None
         assert legacy_row["agent_id"] == "agent_a"
         assert conn.execute("pragma foreign_key_check").fetchall() == []
@@ -140,7 +140,7 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
         }
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1, 2]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 
@@ -156,8 +156,7 @@ def test_failed_migration_is_fully_rolled_back(tmp_path: Path) -> None:
     failing = Migration(version=2, name="failing", apply=_failing_apply)
 
     try:
-        with conn:
-            run_migrations(conn, [failing])
+        run_migrations(conn, [failing])
     except Exception:
         pass
     finally:
