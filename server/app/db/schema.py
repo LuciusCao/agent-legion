@@ -3,9 +3,6 @@ from pathlib import Path
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.migrations import MIGRATIONS, run_migrations
-from server.app.db.migrations.v005_remove_legacy_executor_paths import (
-    MIGRATION as V005_MIGRATION,
-)
 
 
 def _execute_statements(conn: sqlite3.Connection, sql: str) -> None:
@@ -167,9 +164,7 @@ def init_db(path: Path) -> None:
                 """
             )
 
-        # V005 is applied by the one-time legacy finalizer after it has read
-        # legacy Workspace Agent assignments and Pipeline concurrency settings.
-        run_migrations(conn, [m for m in MIGRATIONS if m.version < V005_MIGRATION.version])
+        run_migrations(conn, MIGRATIONS)
 
         # Performance indexes for issue 012. These are created after migrations
         # so that columns added by V003 (e.g. videos.content_type) are present.
