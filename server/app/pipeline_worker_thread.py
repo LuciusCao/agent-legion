@@ -120,11 +120,13 @@ class PipelineWorkerThread:
         settings: Settings,
         workspace_worker_control: Any | None = None,
         agent_manager: Any | None = None,
+        executor_registry: Any | None = None,
     ):
         self.job_db = job_db
         self.settings = settings
         self.workspace_worker_control = workspace_worker_control
         self.agent_manager = agent_manager
+        self.executor_registry = executor_registry
         self.stop_event = threading.Event()
         self._thread: threading.Thread | None = None
         # Compat aliases — old code/tests may reference these fields
@@ -415,7 +417,6 @@ class PipelineWorkerThread:
                 # be launched due to full concurrency slots) correctly reverts to
                 # queued instead of staying stale at running.
                 _refresh_job_status(self.job_db, job["id"])
-
         return processed
 
     def stop(self, timeout: float = 3) -> None:

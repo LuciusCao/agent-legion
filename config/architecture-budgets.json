@@ -122,7 +122,7 @@
     "server/app/services/executor_catalog.py": 37,
     "server/app/services/workspace_configuration.py": 295,
     "server/app/jobs/queries.py": 745,
-    "server/app/pipeline_worker_thread.py": 437,
+    "server/app/pipeline_worker_thread.py": 438,
     "frontend/src/api.ts": 292,
     "frontend/src/types.ts": 350,
     "scripts/check_architecture.py": 240,
