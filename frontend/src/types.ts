@@ -209,6 +209,7 @@ export type WorkspaceSettings = {
 export type PipelineNodeRecord = {
   key: string
   label: string
+  capability: string
   runner: 'local' | 'agent'
   after: string[]
   inputs: string[]

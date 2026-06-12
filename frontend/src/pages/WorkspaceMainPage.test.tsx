@@ -111,7 +111,6 @@ describe('WorkspaceMainPage', () => {
         concurrencyLimit: 2,
         resources: {},
       },
-      agentAssignments: null,
       originalWorkspaceName: 'WS One',
       originalWorkspaceDescription: '',
       originalSettings: {
@@ -125,11 +124,19 @@ describe('WorkspaceMainPage', () => {
         concurrencyLimit: 2,
         resources: {},
       },
-      originalAgentAssignments: null,
       isDirty: false,
       testStatus: { state: 'idle' },
       isSaving: false,
       saveError: null,
+      executorCatalog: [],
+      executorConfiguration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+      },
+      originalExecutorConfiguration: null,
+      pendingAllocationRemoval: null,
     })
   })
 

@@ -6,37 +6,16 @@ import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'
 import { useUiStore } from '../stores/uiStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
-import {
-  api,
-  assignAgent,
-  fetchAgents,
-  fetchPipelines,
-  getWorkspaceAgents,
-  setWorkspaceAgent,
-  unassignAgent,
-  updateWorkspace,
-} from '../api'
+import { api, fetchPipelines } from '../api'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
-  fetchAgents: vi.fn(),
   fetchPipelines: vi.fn(),
-  getWorkspaceAgents: vi.fn(),
-  setWorkspaceAgent: vi.fn(),
-  assignAgent: vi.fn(),
-  unassignAgent: vi.fn(),
   fetchWorkspaces: vi.fn(),
-  updateWorkspace: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)
-const mockFetchAgents = vi.mocked(fetchAgents)
 const mockFetchPipelines = vi.mocked(fetchPipelines)
-const mockGetWorkspaceAgents = vi.mocked(getWorkspaceAgents)
-const mockSetWorkspaceAgent = vi.mocked(setWorkspaceAgent)
-const mockUpdateWorkspace = vi.mocked(updateWorkspace)
-const mockAssignAgent = vi.mocked(assignAgent)
-const mockUnassignAgent = vi.mocked(unassignAgent)
 
 const defaultState: SettingState = {
   workspaceId: 'ws1',
@@ -51,13 +30,9 @@ const defaultState: SettingState = {
     concurrencyLimit: 1,
     resources: {},
   },
-  agentAssignments: null,
   originalWorkspaceName: '测试空间',
   originalWorkspaceDescription: '测试描述',
   originalSettings: null,
-  originalAgentAssignments: null,
-  piAgentConcurrency: undefined,
-  originalPiAgentConcurrency: undefined,
   isDirty: false,
   globalServices: {
     cms: {
@@ -73,6 +48,15 @@ const defaultState: SettingState = {
   testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
+  executorCatalog: [],
+  executorConfiguration: {
+    allocations: [],
+    bindings: [],
+    node_limits: [],
+    migration_warnings: [],
+  },
+  originalExecutorConfiguration: null,
+  pendingAllocationRemoval: null,
   setWorkspaceId: vi.fn(),
   setWorkspaceName: vi.fn((name: string) => {
     useSettingStore.setState({ workspaceName: name, isDirty: true })
@@ -86,12 +70,13 @@ const defaultState: SettingState = {
       isDirty: true,
     }))
   }),
-  setAgentAssignments: vi.fn(),
-  setPiAgentConcurrency: vi.fn((value: number | undefined) => {
-    useSettingStore.setState({ piAgentConcurrency: value, isDirty: true })
-  }),
+  setExecutorAllocation: vi.fn(),
+  requestExecutorRemoval: vi.fn(),
+  confirmExecutorRemoval: vi.fn(),
+  cancelExecutorRemoval: vi.fn(),
+  setNodeBinding: vi.fn(),
+  setNodeLimit: vi.fn(),
   fetchSettings: vi.fn().mockResolvedValue(undefined),
-  fetchAgentAssignments: vi.fn().mockResolvedValue(undefined),
   fetchGlobalServices: vi.fn().mockResolvedValue(undefined),
   fetchResourceProviders: vi.fn().mockResolvedValue(undefined),
   fetchPipelineDefinition: vi.fn().mockResolvedValue(undefined),
@@ -141,41 +126,11 @@ describe('SettingsPage', () => {
     })
     mockApi.mockReset()
     mockApi.mockResolvedValue({})
-    mockFetchAgents.mockReset()
-    mockFetchAgents.mockResolvedValue({ agents: [] })
     mockFetchPipelines.mockReset()
     mockFetchPipelines.mockResolvedValue({ pipelines: [] })
-    mockGetWorkspaceAgents.mockReset()
-    mockGetWorkspaceAgents.mockResolvedValue([])
-    mockSetWorkspaceAgent.mockReset()
-    mockSetWorkspaceAgent.mockResolvedValue({
-      agent_id: 'agent-1',
-      workspace_id: 'ws1',
-      concurrency_limit: 1,
-    })
-    mockUpdateWorkspace.mockReset()
-    mockUpdateWorkspace.mockResolvedValue({
-      id: 'ws1',
-      name: '新名称',
-      description: '新描述',
-      default_pipeline_key: 'question_content',
-      default_entity: 'question',
-    })
-    mockAssignAgent.mockReset()
-    mockAssignAgent.mockResolvedValue({
-      agent_id: 'agent-1',
-      workspace_id: 'ws1',
-      concurrency_limit: 1,
-    })
-    mockUnassignAgent.mockReset()
-    mockUnassignAgent.mockResolvedValue({
-      agent_id: 'agent-1',
-      workspace_id: 'ws1',
-      removed: true,
-    })
   })
 
-  it('renders 4 sections with nav sidebar for non-video-hive workspace', () => {
+  it('renders all six sections in order', () => {
     useSettingStore.setState({
       pipelineDefinition: {
         key: 'question_content',
@@ -189,46 +144,58 @@ describe('SettingsPage', () => {
               input_field: 'question_ids',
               resource: '',
             },
-            {
-              key: 'by_knowledge',
-              label: '按知识点',
-              input_field: 'knowledge_codes',
-              resource: 'by_knowledge',
-            },
           ],
         },
-        nodes: [],
+        nodes: [
+          {
+            key: 'fetch_questions',
+            label: '获取题目',
+            capability: 'fetch_questions',
+            runner: 'local',
+            after: [],
+            inputs: [],
+            outputs: [],
+          },
+        ],
+      },
+      executorCatalog: [
+        {
+          id: 'local-default',
+          kind: 'local',
+          capabilities: ['fetch_questions'],
+          global_capacity: 4,
+        },
+      ],
+      executorConfiguration: {
+        allocations: [
+          {
+            executor_id: 'local-default',
+            workspace_id: 'ws1',
+            concurrency_limit: 4,
+          },
+        ],
+        bindings: [
+          {
+            pipeline_key: 'question_content',
+            node_key: 'fetch_questions',
+            executor_id: 'local-default',
+          },
+        ],
+        node_limits: [],
+        migration_warnings: [],
       },
     })
     renderPage()
-    // Nav items and section headings both contain these texts
-    expect(screen.getAllByText('基本信息').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('接入配置').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('Pipeline').length).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('智能体').length).toBeGreaterThanOrEqual(1)
-  })
 
-  it('renders agents section for video-hive workspace', () => {
-    useSettingStore.setState({
-      pipelineDefinition: {
-        key: 'question_content',
-        label: '题目内容生成',
-        concurrency: { local: 8, agent: 2, nodes: {} },
-        intake: {
-          modes: [
-            {
-              key: 'direct_ids',
-              label: '直接输入 ID',
-              input_field: 'question_ids',
-              resource: '',
-            },
-          ],
-        },
-        nodes: [],
-      },
-    })
-    renderPage(['/workspaces/video-hive/settings'])
-    expect(screen.getAllByText('智能体').length).toBeGreaterThanOrEqual(1)
+    const headings = screen.getAllByRole('heading', { level: 2 })
+    expect(headings.map((h) => h.textContent)).toEqual([
+      '基本信息',
+      '接入与资源',
+      'Pipeline',
+      '执行器分配',
+      '节点绑定',
+      '本地节点并发',
+    ])
   })
 
   it('renders workspace name in header', () => {
@@ -363,36 +330,6 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('renders AgentAllocationList for non-video-hive workspace', async () => {
-    renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('可用智能体')).toBeInTheDocument()
-    })
-    expect(screen.getByText('当前工作空间未分配智能体')).toBeInTheDocument()
-  })
-
-  it('renders Pi Agent concurrency input', async () => {
-    useSettingStore.setState({
-      pipelineDefinition: {
-        key: 'question_content',
-        label: '题目内容生成',
-        concurrency: { local: 8, agent: 2, nodes: {} },
-        intake: { modes: [] },
-        nodes: [],
-      },
-      piAgentConcurrency: 3,
-    })
-    renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('Pi Agent 并发数')).toBeInTheDocument()
-    })
-    const input = document.querySelector(
-      'md-outlined-text-field#pi-agent-concurrency'
-    )
-    expect(input).toBeTruthy()
-    expect(input!.getAttribute('value')).toBe('3')
-  })
-
   it('renders resource provider params when intake mode is checked', async () => {
     useSettingStore.setState({
       pipelineDefinition: {
@@ -438,5 +375,63 @@ describe('SettingsPage', () => {
     expect(
       document.querySelector('md-outlined-text-field[label="country_id"]')
     ).toBeTruthy()
+  })
+
+  it('renders executor binding section between allocation and local limit sections', () => {
+    useSettingStore.setState({
+      pipelineDefinition: {
+        key: 'question_content',
+        label: '题目内容生成',
+        concurrency: { local: 8, agent: 2, nodes: {} },
+        intake: { modes: [] },
+        nodes: [
+          {
+            key: 'fetch_questions',
+            label: '获取题目',
+            capability: 'fetch_questions',
+            runner: 'local',
+            after: [],
+            inputs: [],
+            outputs: [],
+          },
+        ],
+      },
+      executorCatalog: [
+        {
+          id: 'local-default',
+          kind: 'local',
+          capabilities: ['fetch_questions'],
+          global_capacity: 4,
+        },
+      ],
+      executorConfiguration: {
+        allocations: [
+          {
+            executor_id: 'local-default',
+            workspace_id: 'ws1',
+            concurrency_limit: 4,
+          },
+        ],
+        bindings: [
+          {
+            pipeline_key: 'question_content',
+            node_key: 'fetch_questions',
+            executor_id: 'local-default',
+          },
+        ],
+        node_limits: [],
+        migration_warnings: [],
+      },
+    })
+    renderPage()
+
+    const headings = screen.getAllByRole('heading', { level: 2 })
+    const labels = headings.map((h) => h.textContent)
+    expect(labels.indexOf('节点绑定')).toBeGreaterThan(
+      labels.indexOf('执行器分配')
+    )
+    expect(labels.indexOf('本地节点并发')).toBeGreaterThan(
+      labels.indexOf('节点绑定')
+    )
   })
 })
