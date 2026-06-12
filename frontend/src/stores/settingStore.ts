@@ -4,9 +4,14 @@ import type {
   GlobalServiceStatus,
   ResourceProviderDefinition,
   PipelineDefinitionRecord,
-  WorkspaceAgentAssignment,
+  ExecutorDefinition,
+  WorkspaceExecutorConfiguration,
 } from '../types'
-import { api, getWorkspaceAgents } from '../api'
+import {
+  api,
+  getExecutorCatalog,
+  getWorkspaceExecutorConfiguration,
+} from '../api'
 import { useUiStore } from './uiStore'
 
 type TestStatus = {
@@ -19,13 +24,9 @@ export type SettingState = {
   workspaceName: string
   workspaceDescription: string
   settings: WorkspaceSettings
-  agentAssignments: WorkspaceAgentAssignment[] | null
   originalWorkspaceName: string
   originalWorkspaceDescription: string
   originalSettings: WorkspaceSettings | null
-  originalAgentAssignments: WorkspaceAgentAssignment[] | null
-  piAgentConcurrency: number | undefined
-  originalPiAgentConcurrency: number | undefined
   isDirty: boolean
   isSaving: boolean
   saveError: string | null
@@ -33,14 +34,29 @@ export type SettingState = {
   resourceProviders: ResourceProviderDefinition[]
   pipelineDefinition: PipelineDefinitionRecord | null
   testStatus: TestStatus
+  executorCatalog: ExecutorDefinition[]
+  executorConfiguration: WorkspaceExecutorConfiguration
+  originalExecutorConfiguration: WorkspaceExecutorConfiguration | null
+  pendingAllocationRemoval: string | null
   setWorkspaceId: (id: string) => void
   setWorkspaceName: (name: string) => void
   setWorkspaceDescription: (description: string) => void
   setSettings: (s: Partial<WorkspaceSettings>) => void
-  setAgentAssignments: (assignments: WorkspaceAgentAssignment[] | null) => void
-  setPiAgentConcurrency: (value: number | undefined) => void
+  setExecutorAllocation: (executorId: string, limit: number) => void
+  requestExecutorRemoval: (executorId: string) => void
+  confirmExecutorRemoval: () => void
+  cancelExecutorRemoval: () => void
+  setNodeBinding: (
+    pipelineKey: string,
+    nodeKey: string,
+    executorId: string | null
+  ) => void
+  setNodeLimit: (
+    pipelineKey: string,
+    nodeKey: string,
+    limit: number | null
+  ) => void
   fetchSettings: (workspaceId: string) => Promise<void>
-  fetchAgentAssignments: (workspaceId: string) => Promise<void>
   fetchGlobalServices: () => Promise<void>
   fetchResourceProviders: () => Promise<void>
   fetchPipelineDefinition: () => Promise<void>
@@ -59,6 +75,24 @@ const defaultSettings: WorkspaceSettings = {
   resources: {},
 }
 
+const defaultExecutorConfiguration: WorkspaceExecutorConfiguration = {
+  allocations: [],
+  bindings: [],
+  node_limits: [],
+  migration_warnings: [],
+}
+
+function normalizeExecutorConfiguration(
+  config: Partial<WorkspaceExecutorConfiguration> | undefined
+): WorkspaceExecutorConfiguration {
+  return {
+    allocations: config?.allocations ?? [],
+    bindings: config?.bindings ?? [],
+    node_limits: config?.node_limits ?? [],
+    migration_warnings: config?.migration_warnings ?? [],
+  }
+}
+
 function computeDirty(state: Omit<SettingState, 'isDirty'>): boolean {
   if (state.originalSettings === null) return false
   if (state.workspaceName !== state.originalWorkspaceName) return true
@@ -67,11 +101,10 @@ function computeDirty(state: Omit<SettingState, 'isDirty'>): boolean {
   if (JSON.stringify(state.settings) !== JSON.stringify(state.originalSettings))
     return true
   if (
-    JSON.stringify(state.agentAssignments) !==
-    JSON.stringify(state.originalAgentAssignments)
+    JSON.stringify(state.executorConfiguration) !==
+    JSON.stringify(state.originalExecutorConfiguration)
   )
     return true
-  if (state.piAgentConcurrency !== state.originalPiAgentConcurrency) return true
   return false
 }
 
@@ -80,13 +113,9 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   workspaceName: '',
   workspaceDescription: '',
   settings: defaultSettings,
-  agentAssignments: null,
   originalWorkspaceName: '',
   originalWorkspaceDescription: '',
   originalSettings: null,
-  originalAgentAssignments: null,
-  piAgentConcurrency: undefined,
-  originalPiAgentConcurrency: undefined,
   isDirty: false,
   globalServices: null,
   resourceProviders: [],
@@ -94,6 +123,10 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
+  executorCatalog: [],
+  executorConfiguration: defaultExecutorConfiguration,
+  originalExecutorConfiguration: null,
+  pendingAllocationRemoval: null,
 
   setWorkspaceId(id) {
     set({ workspaceId: id })
@@ -121,29 +154,131 @@ export const useSettingStore = create<SettingState>((set, get) => ({
     })
   },
 
-  setAgentAssignments(assignments) {
+  setExecutorAllocation(executorId, limit) {
     set((state) => {
-      const nextState = { ...state, agentAssignments: assignments }
+      const allocations = state.executorConfiguration.allocations.filter(
+        (a) => a.executor_id !== executorId
+      )
+      allocations.push({
+        executor_id: executorId,
+        workspace_id: state.workspaceId ?? '',
+        concurrency_limit: limit,
+      })
+      const nextConfiguration = {
+        ...state.executorConfiguration,
+        allocations,
+      }
+      const nextState = { ...state, executorConfiguration: nextConfiguration }
       return { ...nextState, isDirty: computeDirty(nextState) }
     })
   },
 
-  setPiAgentConcurrency(value) {
+  requestExecutorRemoval(executorId) {
+    set({ pendingAllocationRemoval: executorId })
+  },
+
+  confirmExecutorRemoval() {
     set((state) => {
-      const nextState = { ...state, piAgentConcurrency: value }
+      const executorId = state.pendingAllocationRemoval
+      if (!executorId) return state
+      const allocations = state.executorConfiguration.allocations.filter(
+        (a) => a.executor_id !== executorId
+      )
+      const bindings = state.executorConfiguration.bindings.filter(
+        (b) => b.executor_id !== executorId
+      )
+      const removedBindingKeys = new Set(
+        state.executorConfiguration.bindings
+          .filter((b) => b.executor_id === executorId)
+          .map((b) => `${b.pipeline_key}:${b.node_key}`)
+      )
+      const node_limits = state.executorConfiguration.node_limits.filter(
+        (l) => !removedBindingKeys.has(`${l.pipeline_key}:${l.node_key}`)
+      )
+      const nextConfiguration = {
+        ...state.executorConfiguration,
+        allocations,
+        bindings,
+        node_limits,
+      }
+      const nextState = {
+        ...state,
+        executorConfiguration: nextConfiguration,
+        pendingAllocationRemoval: null,
+      }
+      return { ...nextState, isDirty: computeDirty(nextState) }
+    })
+  },
+
+  cancelExecutorRemoval() {
+    set({ pendingAllocationRemoval: null })
+  },
+
+  setNodeBinding(pipelineKey, nodeKey, executorId) {
+    set((state) => {
+      const bindings = state.executorConfiguration.bindings.filter(
+        (b) => !(b.pipeline_key === pipelineKey && b.node_key === nodeKey)
+      )
+      let node_limits = state.executorConfiguration.node_limits
+      if (executorId === null) {
+        node_limits = node_limits.filter(
+          (l) => !(l.pipeline_key === pipelineKey && l.node_key === nodeKey)
+        )
+      }
+      if (executorId !== null) {
+        bindings.push({
+          pipeline_key: pipelineKey,
+          node_key: nodeKey,
+          executor_id: executorId,
+        })
+      }
+      const nextConfiguration = {
+        ...state.executorConfiguration,
+        bindings,
+        node_limits,
+      }
+      const nextState = { ...state, executorConfiguration: nextConfiguration }
+      return { ...nextState, isDirty: computeDirty(nextState) }
+    })
+  },
+
+  setNodeLimit(pipelineKey, nodeKey, limit) {
+    set((state) => {
+      const node_limits = state.executorConfiguration.node_limits.filter(
+        (l) => !(l.pipeline_key === pipelineKey && l.node_key === nodeKey)
+      )
+      if (limit !== null) {
+        node_limits.push({
+          pipeline_key: pipelineKey,
+          node_key: nodeKey,
+          concurrency_limit: limit,
+        })
+      }
+      const nextConfiguration = {
+        ...state.executorConfiguration,
+        node_limits,
+      }
+      const nextState = { ...state, executorConfiguration: nextConfiguration }
       return { ...nextState, isDirty: computeDirty(nextState) }
     })
   },
 
   async fetchSettings(workspaceId) {
     try {
-      const [workspaceResult, settingsResult] = await Promise.all([
+      const [
+        workspaceResult,
+        settingsResult,
+        catalogResult,
+        executorConfigurationResult,
+      ] = await Promise.all([
         api<{ workspace: { name: string; description?: string } }>(
           `/api/workspaces/${encodeURIComponent(workspaceId)}`
         ),
         api<
           Partial<WorkspaceSettings> | { settings: Partial<WorkspaceSettings> }
         >(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
+        getExecutorCatalog(),
+        getWorkspaceExecutorConfiguration(workspaceId),
       ])
       const workspaceData = workspaceResult?.workspace
       const data =
@@ -152,8 +287,12 @@ export const useSettingStore = create<SettingState>((set, get) => ({
         'settings' in settingsResult
           ? (settingsResult.settings as Partial<WorkspaceSettings>)
           : (settingsResult as Partial<WorkspaceSettings>)
+      const nextSettings = { ...defaultSettings, ...get().settings, ...data }
+      const nextCatalog = catalogResult?.executors ?? []
+      const nextExecutorConfiguration = normalizeExecutorConfiguration(
+        executorConfigurationResult
+      )
       set((state) => {
-        const nextSettings = { ...defaultSettings, ...state.settings, ...data }
         const nextState = {
           ...state,
           workspaceName: workspaceData?.name || '',
@@ -162,6 +301,9 @@ export const useSettingStore = create<SettingState>((set, get) => ({
           originalWorkspaceDescription: workspaceData?.description || '',
           settings: nextSettings,
           originalSettings: nextSettings,
+          executorCatalog: nextCatalog,
+          executorConfiguration: nextExecutorConfiguration,
+          originalExecutorConfiguration: nextExecutorConfiguration,
         }
         return { ...nextState, isDirty: computeDirty(nextState) }
       })
@@ -175,26 +317,6 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       }
       const message = err instanceof Error ? err.message : '加载设置失败'
       set({ saveError: message })
-    }
-  },
-
-  async fetchAgentAssignments(workspaceId) {
-    try {
-      const assignments = await getWorkspaceAgents(workspaceId)
-      const piAssignment = assignments.find((a) => a.agent_id === 'pi')
-      const piConcurrency = piAssignment?.concurrency_limit
-      set((state) => {
-        const nextState = {
-          ...state,
-          agentAssignments: assignments,
-          originalAgentAssignments: assignments,
-          piAgentConcurrency: piConcurrency,
-          originalPiAgentConcurrency: piConcurrency,
-        }
-        return { ...nextState, isDirty: computeDirty(nextState) }
-      })
-    } catch {
-      // Silently fail
     }
   },
 
@@ -249,51 +371,43 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       workspaceName,
       workspaceDescription,
       settings,
-      agentAssignments,
-      piAgentConcurrency,
+      executorConfiguration,
     } = get()
     if (!workspaceId) return
     set({ isSaving: true, saveError: null })
     try {
-      const assignments = new Map(
-        (agentAssignments || []).map((assignment) => [
-          assignment.agent_id,
-          assignment,
-        ])
-      )
-      if (piAgentConcurrency !== undefined) {
-        assignments.set('pi', {
-          agent_id: 'pi',
-          concurrency_limit: piAgentConcurrency,
-        })
-      }
       const result = await api<{
         workspace: { name: string; description?: string }
         settings: WorkspaceSettings
-        agents: WorkspaceAgentAssignment[]
+        executor_configuration: WorkspaceExecutorConfiguration
       }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/configuration`, {
         method: 'PUT',
         body: JSON.stringify({
           name: workspaceName,
           description: workspaceDescription,
           settings,
-          agents: Array.from(assignments.values()),
+          executor_allocations: executorConfiguration.allocations.map(
+            (allocation) => ({
+              executor_id: allocation.executor_id,
+              concurrency_limit: allocation.concurrency_limit,
+            })
+          ),
+          node_bindings: executorConfiguration.bindings,
+          node_limits: executorConfiguration.node_limits,
         }),
       })
-      const savedPi = result.agents.find(
-        (assignment) => assignment.agent_id === 'pi'
-      )?.concurrency_limit
+      const savedExecutorConfiguration = normalizeExecutorConfiguration(
+        result.executor_configuration
+      )
       set({
         workspaceName: result.workspace.name,
         workspaceDescription: result.workspace.description || '',
         settings: result.settings,
-        agentAssignments: result.agents,
-        piAgentConcurrency: savedPi,
         originalWorkspaceName: result.workspace.name,
         originalWorkspaceDescription: result.workspace.description || '',
         originalSettings: result.settings,
-        originalAgentAssignments: result.agents,
-        originalPiAgentConcurrency: savedPi,
+        executorConfiguration: savedExecutorConfiguration,
+        originalExecutorConfiguration: savedExecutorConfiguration,
         isDirty: false,
       })
       useUiStore.getState().showToast('设置已保存', 'success')
