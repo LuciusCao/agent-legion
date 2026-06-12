@@ -4,6 +4,8 @@ import { useSettingStore } from '../stores/settingStore'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { ExecutorAllocationSection } from '../components/ExecutorAllocationSection'
+import { ExecutorBindingSection } from '../components/ExecutorBindingSection'
+import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { fetchPipelines } from '../api'
 import styles from './SettingsPage.module.css'
 
@@ -47,6 +49,8 @@ export function SettingsPage() {
     saveError,
     resourceProviders,
     pipelineDefinition,
+    executorCatalog,
+    executorConfiguration,
     testStatus,
     saveAll,
     testConnection,
@@ -57,9 +61,30 @@ export function SettingsPage() {
     fetchPipelineDefinition,
   } = useSettingStore()
 
-  const hasLocalNodes =
-    pipelineDefinition !== null &&
-    pipelineDefinition.nodes.some((n) => n.runner === 'local')
+  const localBoundNodeKeys = useMemo(() => {
+    if (!pipelineDefinition) return new Set<string>()
+    const allocatedIds = new Set(
+      executorConfiguration.allocations.map((a) => a.executor_id)
+    )
+    return new Set(
+      pipelineDefinition.nodes
+        .filter((node) => {
+          const binding = executorConfiguration.bindings.find(
+            (b) =>
+              b.pipeline_key === pipelineDefinition.key &&
+              b.node_key === node.key
+          )
+          if (!binding || !allocatedIds.has(binding.executor_id)) return false
+          const executor = executorCatalog.find(
+            (e) => e.id === binding.executor_id
+          )
+          return executor?.kind === 'local'
+        })
+        .map((node) => node.key)
+    )
+  }, [pipelineDefinition, executorConfiguration, executorCatalog])
+
+  const hasLocalNodes = localBoundNodeKeys.size > 0
 
   const navItems = useMemo(
     () => [
@@ -67,6 +92,7 @@ export function SettingsPage() {
       { id: 'intake-config', label: '接入与资源' },
       { id: 'pipeline', label: 'Pipeline' },
       { id: 'executor-allocation', label: '执行器分配' },
+      { id: 'executor-binding', label: '节点绑定' },
       ...(hasLocalNodes
         ? [{ id: 'local-node-concurrency', label: '本地节点并发' }]
         : []),
@@ -471,80 +497,19 @@ export function SettingsPage() {
             <ExecutorAllocationSection />
           </section>
 
-          {pipelineDefinition &&
-            pipelineDefinition.nodes.filter((n) => n.runner === 'local')
-              .length > 0 && (
-              <section id="local-node-concurrency" className={styles.section}>
-                <h2 className={styles.sectionTitle}>本地节点并发</h2>
-                <hr className={styles.sectionDivider} />
-                <div className={styles.field}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      flexDirection: 'column',
-                      gap: 8,
-                    }}
-                  >
-                    {pipelineDefinition.nodes
-                      .filter((n) => n.runner === 'local')
-                      .map((node) => {
-                        const defaultLimit =
-                          pipelineDefinition.concurrency.nodes[node.key] ??
-                          pipelineDefinition.concurrency.local
-                        const currentLimit =
-                          settings.nodeLocalConcurrency?.[node.key]
-                        return (
-                          <div
-                            key={node.key}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: 12,
-                            }}
-                          >
-                            <span style={{ fontSize: 14, minWidth: 120 }}>
-                              {node.label}
-                            </span>
-                            <md-outlined-text-field
-                              type="number"
-                              min={1}
-                              value={currentLimit ?? ''}
-                              onInput={(event: Event) => {
-                                const value = Number(
-                                  (event.target as HTMLInputElement).value
-                                )
-                                const nextNodes = {
-                                  ...settings.nodeLocalConcurrency,
-                                }
-                                if (Number.isNaN(value)) {
-                                  delete nextNodes[node.key]
-                                } else {
-                                  nextNodes[node.key] = value
-                                }
-                                setSettings({
-                                  nodeLocalConcurrency: Object.keys(nextNodes)
-                                    .length
-                                    ? nextNodes
-                                    : undefined,
-                                })
-                              }}
-                              style={{ width: 120 }}
-                            />
-                            <span
-                              style={{
-                                fontSize: 12,
-                                color: 'var(--md-sys-color-on-surface-variant)',
-                              }}
-                            >
-                              默认: {defaultLimit}
-                            </span>
-                          </div>
-                        )
-                      })}
-                  </div>
-                </div>
-              </section>
-            )}
+          <section id="executor-binding" className={styles.section}>
+            <h2 className={styles.sectionTitle}>节点绑定</h2>
+            <hr className={styles.sectionDivider} />
+            <ExecutorBindingSection />
+          </section>
+
+          {hasLocalNodes && (
+            <section id="local-node-concurrency" className={styles.section}>
+              <h2 className={styles.sectionTitle}>本地节点并发</h2>
+              <hr className={styles.sectionDivider} />
+              <LocalNodeLimitSection />
+            </section>
+          )}
         </div>
       </div>
     </AppShell>
