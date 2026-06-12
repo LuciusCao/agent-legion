@@ -128,3 +128,33 @@ def test_scheduler_threadpool_baseline_allows_only_recorded_targets_and_counts(t
     )
 
     assert any("self._agent_executor" in error for error in check_repository(tmp_path))
+
+
+def test_services_do_not_import_fastapi_regardless_of_filename(tmp_path):
+    write(
+        tmp_path / "server/app/services/catalog.py",
+        "from fastapi import HTTPException\n",
+    )
+    write(
+        tmp_path / "config/architecture-budgets.json",
+        '{"route_exemptions": [], "files": {}}',
+    )
+
+    errors = check_repository(tmp_path)
+
+    assert any("service boundary forbids import fastapi" in error for error in errors)
+
+
+def test_jobs_router_is_not_a_router_aggregator(tmp_path):
+    write(
+        tmp_path / "server/app/routes/jobs.py",
+        "from fastapi import APIRouter\nrouter = APIRouter()\nrouter.include_router(other)\n",
+    )
+    write(
+        tmp_path / "config/architecture-budgets.json",
+        '{"route_exemptions": [], "files": {}}',
+    )
+
+    errors = check_repository(tmp_path)
+
+    assert any("server/app/routes/jobs.py: include_router forbidden" in error for error in errors)

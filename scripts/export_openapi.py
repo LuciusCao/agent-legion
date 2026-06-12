@@ -30,11 +30,30 @@ def validate_response_contracts(schema: dict[str, Any], exempt_operation_names: 
         raise ValueError("; ".join(errors))
 
 
+def validate_unique_api_routes(app: Any) -> None:
+    seen: set[tuple[str, str]] = set()
+    duplicates: list[str] = []
+    for route in app.routes:
+        path = getattr(route, "path", "")
+        if not path.startswith("/api"):
+            continue
+        for method in getattr(route, "methods", set()):
+            key = (method, path)
+            if key in seen:
+                duplicates.append(f"{method} {path}")
+            seen.add(key)
+    if duplicates:
+        raise ValueError(
+            "; ".join(f"duplicate API route {operation}" for operation in sorted(duplicates))
+        )
+
+
 def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
     data_dir.mkdir(parents=True, exist_ok=True)
     app = create_app(data_dir=data_dir, start_worker=False)
     pipelines = app.state.settings.config.setdefault("pipelines", {})
     pipelines["enabled"] = True
+    validate_unique_api_routes(app)
     schema = deepcopy(app.openapi())
     schema["paths"] = {
         path: definition

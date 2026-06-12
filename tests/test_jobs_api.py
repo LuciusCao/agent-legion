@@ -279,10 +279,10 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
         ]
 
     monkeypatch.setattr(
-        "server.app.routes.jobs.list_questions_by_knowledge",
+        "server.app.services.job_intake.list_questions_by_knowledge",
         fake_list_questions_by_knowledge,
     )
-    monkeypatch.setattr("server.app.routes.jobs.get_token", lambda env, config: "token")
+    monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
@@ -327,10 +327,10 @@ def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch)
         return [CmsQuestionSummary("Q101", "资源绑定题目", {"uuid": "Q101"})]
 
     monkeypatch.setattr(
-        "server.app.routes.jobs.list_questions_by_knowledge",
+        "server.app.services.job_intake.list_questions_by_knowledge",
         fake_list_questions_by_knowledge,
     )
-    monkeypatch.setattr("server.app.routes.jobs.get_token", lambda env, config: "token")
+    monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
@@ -1773,10 +1773,10 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
         ]
 
     monkeypatch.setattr(
-        "server.app.routes.jobs.list_questions_by_knowledge",
+        "server.app.services.job_intake.list_questions_by_knowledge",
         fake_list_questions_by_knowledge,
     )
-    monkeypatch.setattr("server.app.routes.jobs.get_token", lambda env, config: "token")
+    monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
@@ -2096,7 +2096,7 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
         def _fail_cleanup(*args, **kwargs):
             raise ValueError("cannot remove artifact")
 
-        monkeypatch.setattr("server.app.routes.jobs.clear_rerun_outputs", _fail_cleanup)
+        monkeypatch.setattr("server.app.services.job_rerun.clear_rerun_outputs", _fail_cleanup)
         resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_question_context/rerun")
     assert resp.status_code == 400
     assert "cleanup failed" in resp.json()["detail"].lower()
