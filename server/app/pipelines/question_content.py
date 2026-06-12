@@ -73,3 +73,58 @@ def fetch_question_context(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def assemble_package(
+    job: dict[str, Any],
+    artifact_dir: Path,
+    context: dict[str, Any] | None = None,
+) -> None:
+    """Assemble final upload_params.json and manifest.json for a question content job."""
+    inputs = [
+        "question_context.json",
+        "understanding.json",
+        "natural_reading.md",
+        "misconceptions.json",
+        "solution_steps.json",
+        "faq.json",
+        "content_graph.json",
+        "interactive_template.json",
+        "review_result.json",
+    ]
+
+    manifest: dict[str, Any] = {
+        "question_id": job.get("source_id"),
+        "source_type": job.get("source_type"),
+        "title": job.get("title"),
+        "artifacts": {},
+    }
+    upload_params: dict[str, Any] = {
+        "question_id": job.get("source_id"),
+        "source_type": job.get("source_type"),
+        "title": job.get("title"),
+        "artifacts": {},
+    }
+
+    for name in inputs:
+        path = artifact_dir / name
+        if path.is_file():
+            if name.endswith(".md"):
+                content = path.read_text(encoding="utf-8")
+            else:
+                content = json.loads(path.read_text(encoding="utf-8"))
+            manifest["artifacts"][name] = {"present": True, "size": path.stat().st_size}
+            upload_params["artifacts"][name] = content
+        else:
+            manifest["artifacts"][name] = {"present": False}
+            upload_params["artifacts"][name] = None
+
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "upload_params.json").write_text(
+        json.dumps(upload_params, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (artifact_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
