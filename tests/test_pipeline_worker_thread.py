@@ -8,6 +8,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
+from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.pipelines.definition import (
@@ -99,8 +100,14 @@ def _make_worker(
         logs_dir=tmp_path / "logs",
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True}},
+        config={},
         executor_definitions=registry.definitions(),
+    )
+    settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
+        {
+            "pipelines": {"enabled": True},
+            "openclaw": {"command_template": ["openclaw"]},
+        }
     )
     worker = PipelineWorkerThread(
         job_db=job_db,

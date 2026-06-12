@@ -6,6 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
+from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.pipeline_worker_thread import PipelineWorkerThread
@@ -30,10 +31,17 @@ def make_pipeline_worker(
 
     definition = load_registered_pipeline(Path("."), pipeline_key)
     settings = app_main.load_settings(data_dir=tmp_path)
-    pipelines_config: dict[str, object] = {"enabled": True}
-    if pi_binary is not None:
-        pipelines_config["pi"] = {"binary": pi_binary, "timeout_seconds": pi_timeout}
-    settings.config["pipelines"] = pipelines_config
+    settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
+        {
+            "pipelines": {
+                "enabled": True,
+                "pi": {"binary": pi_binary, "timeout_seconds": pi_timeout}
+                if pi_binary is not None
+                else {},
+            },
+            "openclaw": {"command_template": ["openclaw", "agent"]},
+        }
+    )
 
     registry = app_main.build_executor_registry(settings, queries)
     leases = ExecutorLeaseRepository(queries.path)

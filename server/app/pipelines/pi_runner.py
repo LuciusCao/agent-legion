@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.executors.models import ExecutionStatus
+from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.jobs import JobQueries
 
 logger = logging.getLogger(__name__)
@@ -25,6 +26,18 @@ class PiConfig:
     thinking: str = "low"
     timeout_seconds: int = 600
     environment: dict[str, str] = field(default_factory=dict)
+
+    @classmethod
+    def from_runtime(cls, config: PiRuntimeConfig) -> PiConfig:
+        """Build an immutable PiConfig from a validated PiRuntimeConfig."""
+        return cls(
+            binary=config.binary,
+            provider=config.provider,
+            model=config.model,
+            thinking=config.thinking or "low",
+            timeout_seconds=config.timeout_seconds,
+            environment=dict(config.environment),
+        )
 
 
 @dataclass(frozen=True)

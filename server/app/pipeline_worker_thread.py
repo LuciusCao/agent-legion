@@ -57,6 +57,10 @@ class PipelineWorkerThread:
         self._local_executor: ThreadPoolExecutor | None = None
         self._agent_executor: ThreadPoolExecutor | None = None
 
+    @staticmethod
+    def is_enabled(settings: Settings) -> bool:
+        return settings.executor_runtime.pipelines.enabled
+
     def _ensure_pools(self) -> None:
         for executor_id in self.registry.definitions():
             if executor_id not in self._pools:

@@ -17,8 +17,8 @@ from server.app.executors.local import LocalExecutor, LocalHandler
 from server.app.executors.openclaw import OpenClawExecutor
 from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
+from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
 from server.app.pipeline.openclaw import OpenClawRunner, SkillSafetyConfig
-from server.app.pipelines.pi_runner import PiConfig
 
 logger = logging.getLogger(__name__)
 
@@ -44,13 +44,11 @@ class RuntimeDependencies:
     """
 
     local_handlers: Mapping[str, LocalHandler] = field(default_factory=dict)
-    pi_config: PiConfig = field(default_factory=PiConfig)
+    pi_runtime: PiRuntimeConfig = field(default_factory=PiRuntimeConfig)
     pi_skill_root: Path = field(default_factory=lambda: Path("."))
-    openclaw_command_template: list[str] = field(default_factory=list)
-    openclaw_cwd: Path = field(default_factory=lambda: Path("."))
-    openclaw_timeout_seconds: int = 600
-    openclaw_skill_safety: SkillSafetyConfig | None = None
-    openclaw_isolated_workspace_root: Path | None = None
+    openclaw_runtime: OpenClawRuntimeConfig = field(
+        default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
+    )
     settings_config: Mapping[str, Any] | None = None
     job_db: Any | None = None
 
@@ -96,7 +94,7 @@ class ExecutorRegistry:
             elif isinstance(config, PiExecutorConfig):
                 executor = PiExecutor(
                     id=executor_id,
-                    config=runtime.pi_config,
+                    config=runtime.pi_runtime,
                     skill_root=runtime.pi_skill_root,
                     capabilities=config.capabilities,
                 )
@@ -168,16 +166,20 @@ def _build_openclaw_runner(
     runtime: RuntimeDependencies,
 ) -> OpenClawRunner:
     """Build an OpenClawRunner with the executor's agent_id injected."""
-    command_template = _inject_agent_id(
-        list(runtime.openclaw_command_template),
-        config.agent_id,
+    oc = runtime.openclaw_runtime
+    command_template = _inject_agent_id(list(oc.command_template), config.agent_id)
+    skill_safety = (
+        SkillSafetyConfig(enabled=oc.skill_safety.enabled, repos=list(oc.skill_safety.repos))
+        if oc.skill_safety is not None
+        else None
     )
+    isolated_root = Path(oc.isolated_workspace_root) if oc.isolated_workspace_root else None
     return OpenClawRunner(
         command_template=command_template,
-        cwd=runtime.openclaw_cwd,
-        timeout_seconds=runtime.openclaw_timeout_seconds,
-        skill_safety=runtime.openclaw_skill_safety,
-        isolated_workspace_root=runtime.openclaw_isolated_workspace_root,
+        cwd=Path(oc.cwd),
+        timeout_seconds=oc.timeout_seconds,
+        skill_safety=skill_safety,
+        isolated_workspace_root=isolated_root,
         agent_id=config.agent_id,
     )
 

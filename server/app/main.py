@@ -1,7 +1,6 @@
 import asyncio
 import importlib
 import logging
-from collections.abc import Mapping
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
@@ -22,11 +21,9 @@ from server.app.executors.local import LocalHandler
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
-from server.app.pipeline.openclaw import SkillSafetyConfig
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool
 from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.pi_runner import PiConfig
 from server.app.pipelines.registry import list_registered_pipelines
 from server.app.routes import create_router
 from server.app.settings import Settings, load_settings
@@ -60,40 +57,6 @@ def _build_local_handlers(settings: Settings) -> dict[str, LocalHandler]:
     return handlers
 
 
-def _build_pi_config(settings: Settings) -> PiConfig:
-    """Build Pi runtime configuration from settings."""
-    pipelines_config = settings.config.get("pipelines", {})
-    pi_raw: Mapping[str, Any] = (
-        pipelines_config.get("pi", {}) if isinstance(pipelines_config, dict) else {}
-    )
-    return PiConfig(
-        binary=str(pi_raw.get("binary", "pi")),
-        provider=str(pi_raw.get("provider", "")),
-        model=str(pi_raw.get("model", "")),
-        thinking=str(pi_raw.get("thinking", "low")),
-        timeout_seconds=int(pi_raw.get("timeout_seconds", 600)),
-        environment={str(k): str(v) for k, v in pi_raw.get("environment", {}).items()}
-        if isinstance(pi_raw.get("environment"), dict)
-        else {},
-    )
-
-
-def _build_openclaw_skill_safety(settings: Settings) -> SkillSafetyConfig | None:
-    """Build OpenClaw skill safety configuration from settings."""
-    openclaw_config = settings.config.get("openclaw", {})
-    raw_safety = openclaw_config.get("skill_safety") if isinstance(openclaw_config, dict) else None
-    if not isinstance(raw_safety, dict):
-        return None
-    repos: list[dict[str, str]] = []
-    for repo in raw_safety.get("repos", []):
-        if isinstance(repo, dict):
-            repos.append({str(k): str(v) for k, v in repo.items()})
-    return SkillSafetyConfig(
-        enabled=bool(raw_safety.get("enabled", False)),
-        repos=repos,
-    )
-
-
 def build_executor_registry(
     settings: Settings,
     job_db: Any | None = None,
@@ -104,18 +67,11 @@ def build_executor_registry(
     all workspaces. Runtime dependencies (Pi binary, OpenClaw template, local
     handlers) are injected here so adapters remain environment-agnostic.
     """
-    openclaw_config = settings.config.get("openclaw", {})
-    if not isinstance(openclaw_config, dict):
-        openclaw_config = {}
-
     runtime = RuntimeDependencies(
         local_handlers=_build_local_handlers(settings),
-        pi_config=_build_pi_config(settings),
+        pi_runtime=settings.executor_runtime.pipelines.pi,
         pi_skill_root=settings.root_dir / "server" / "app" / "pipelines" / "skills",
-        openclaw_command_template=list(openclaw_config.get("command_template", [])),
-        openclaw_cwd=Path(openclaw_config.get("cwd", ".")),
-        openclaw_timeout_seconds=int(openclaw_config.get("timeout_seconds", 600)),
-        openclaw_skill_safety=_build_openclaw_skill_safety(settings),
+        openclaw_runtime=settings.executor_runtime.openclaw,
         settings_config=settings.config,
         job_db=job_db,
     )
@@ -184,8 +140,7 @@ def create_app(
                 db, settings, runner_pool, agent_manager, worker_control, max_workers
             )
             worker_thread.start()
-            pipelines_config = settings.config.get("pipelines", {})
-            if isinstance(pipelines_config, dict) and pipelines_config.get("enabled"):
+            if PipelineWorkerThread.is_enabled(settings):
                 executor_leases = ExecutorLeaseRepository(job_db.path)
                 execution_runtime = ExecutionRuntime(executor_leases, executor_registry)
                 pipeline_worker_thread = PipelineWorkerThread(
