@@ -22,14 +22,17 @@ def load_applied(conn: sqlite3.Connection) -> dict[int, str]:
 
 
 def check_history(applied: dict[int, str], registry: dict[int, Migration]) -> None:
-    """Ensure recorded history matches the registered migrations."""
+    """Ensure recorded history matches the registered migrations.
+
+    Versions recorded in ``schema_migrations`` that are not present in the
+    registry are ignored.  This allows one-time finalizers to apply
+    destructive migrations manually while still recording their version for
+    idempotency.
+    """
     for version, name in applied.items():
         migration = registry.get(version)
         if migration is None:
-            raise MigrationHistoryError(
-                f"schema_migrations contains version {version} but no migration "
-                "is registered with that version"
-            )
+            continue
         if migration.name != name:
             raise MigrationHistoryError(
                 f"schema_migrations version {version} is recorded as {name!r}, "

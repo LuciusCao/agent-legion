@@ -24,8 +24,8 @@ def make_pipeline_worker(
 ) -> tuple[PipelineWorkerThread, PipelineDefinition]:
     """Build a configured PipelineWorkerThread for *pipeline_key*."""
     from server.app import main as app_main
-    from server.app.executors.bootstrap import bootstrap_workspace_executor_defaults
     from server.app.executors.leases import ExecutorLeaseRepository
+    from server.app.executors.legacy_migration import finalize_legacy_executor_schema
     from server.app.executors.runtime import ExecutionRuntime
 
     definition = load_registered_pipeline(Path("."), pipeline_key)
@@ -52,7 +52,8 @@ def make_pipeline_worker(
         settings=settings,
     )
     worker._definitions = [definition]
-    bootstrap_workspace_executor_defaults(queries, [definition], settings.executor_definitions)
+    with queries.connect() as conn:
+        finalize_legacy_executor_schema(conn, [definition], settings.executor_definitions)
 
     return worker, definition
 
@@ -131,6 +132,18 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     root_dir = tmp_path / "root"
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True)
+
+    # Copy pipeline definitions so the legacy finalizer can resolve the default
+    # workspace pipeline during app construction.
+    import shutil
+
+    real_root = Path(__file__).resolve().parents[1]
+    pipelines_src = real_root / "config" / "pipelines"
+    pipelines_dst = root_dir / "config" / "pipelines"
+    pipelines_dst.mkdir(parents=True, exist_ok=True)
+    for src_file in pipelines_src.iterdir():
+        if src_file.is_file():
+            shutil.copy2(src_file, pipelines_dst / src_file.name)
 
     from server.app import main as app_main
 
