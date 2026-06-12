@@ -1,5 +1,9 @@
 from fastapi import APIRouter
 
+from server.app.routes.executor_contracts import (
+    ExecutorCatalogResponse,
+    WorkspaceExecutorConfigurationResponse,
+)
 from server.app.routes.job_contracts import (
     WorkspaceAgentAssignmentResponse,
     WorkspaceAgentConfig,
@@ -16,6 +20,27 @@ def create_workspace_executors_router(
 ) -> APIRouter:
     router = APIRouter()
 
+    @router.get("/executors", response_model=ExecutorCatalogResponse)
+    def get_executors() -> ExecutorCatalogResponse:
+        require_pipelines_enabled(settings)
+        return ExecutorCatalogResponse(**service.catalog())
+
+    @router.get(
+        "/workspaces/{workspace_id}/executor-configuration",
+        response_model=WorkspaceExecutorConfigurationResponse,
+    )
+    def get_workspace_executor_configuration(
+        workspace_id: str,
+    ) -> WorkspaceExecutorConfigurationResponse:
+        require_pipelines_enabled(settings)
+        try:
+            return WorkspaceExecutorConfigurationResponse(
+                **service.workspace_configuration(workspace_id)
+            )
+        except JobServiceError as exc:
+            raise_job_http_error(exc)
+
+    # Compatibility-only legacy /agents routes retained during migration to Executors.
     @router.get(
         "/workspaces/{workspace_id}/agents",
         response_model=WorkspaceAgentListResponse,
