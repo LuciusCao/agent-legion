@@ -5,9 +5,11 @@ from server.app.db.migrations.models import Migration
 
 
 def apply_migration(conn: sqlite3.Connection, migration: Migration) -> None:
-    """Run a single migration inside an explicit transaction and commit it."""
-    conn.execute("BEGIN")
-    try:
+    """Run a single migration inside a SQLite-managed implicit transaction."""
+    with conn:
+        # SQLite only opens an implicit transaction on the first DML statement.
+        # Ensure one is active before any DDL so schema changes roll back on failure.
+        conn.execute("update schema_migrations set version = version where 0=1")
         migration.apply(conn)
         if migration.rebuilds_fk:
             violations = conn.execute("pragma foreign_key_check").fetchall()
@@ -20,7 +22,3 @@ def apply_migration(conn: sqlite3.Connection, migration: Migration) -> None:
             "insert into schema_migrations(version, name) values (?, ?)",
             (migration.version, migration.name),
         )
-        conn.commit()
-    except Exception:
-        conn.rollback()
-        raise
