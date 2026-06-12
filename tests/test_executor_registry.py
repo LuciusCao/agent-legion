@@ -23,8 +23,11 @@ from server.app.executors.registry import (
     UnknownExecutorError,
     UnsupportedCapabilityError,
 )
-from server.app.pipeline.openclaw import SkillSafetyConfig
-from server.app.pipelines.pi_runner import PiConfig
+from server.app.executors.runtime_config import (
+    OpenClawRuntimeConfig,
+    OpenClawSkillSafetyRuntimeConfig,
+    PiRuntimeConfig,
+)
 
 
 def _make_local_handler(name: str) -> LocalHandler:
@@ -34,8 +37,8 @@ def _make_local_handler(name: str) -> LocalHandler:
     return handler
 
 
-def _sample_pi_config() -> PiConfig:
-    return PiConfig(
+def _sample_pi_runtime() -> PiRuntimeConfig:
+    return PiRuntimeConfig(
         binary="pi",
         provider="",
         model="",
@@ -92,20 +95,20 @@ def runtime_dependencies() -> RuntimeDependencies:
             "reading_analysis.fetch_questions": _make_local_handler("fetch_questions"),
             "reading_analysis.clean_and_parse": _make_local_handler("clean_and_parse"),
         },
-        pi_config=_sample_pi_config(),
+        pi_runtime=_sample_pi_runtime(),
         pi_skill_root=Path("."),
-        openclaw_command_template=[
-            "openclaw",
-            "agent",
-            "--local",
-            "--agent",
-            "{agent_id}",
-            "--message",
-            "{prompt_text}",
-        ],
-        openclaw_cwd=Path("."),
-        openclaw_timeout_seconds=600,
-        openclaw_skill_safety=SkillSafetyConfig(enabled=False, repos=[]),
+        openclaw_runtime=OpenClawRuntimeConfig(
+            command_template=(
+                "openclaw",
+                "agent",
+                "--local",
+                "--agent",
+                "{agent_id}",
+                "--message",
+                "{prompt_text}",
+            ),
+            skill_safety=OpenClawSkillSafetyRuntimeConfig(enabled=False, repos=[]),
+        ),
     )
 
 
@@ -192,11 +195,9 @@ def test_registry_skips_unavailable_local_handlers(
     }
     runtime = RuntimeDependencies(
         local_handlers={"reading_analysis.available": _make_local_handler("available")},
-        pi_config=runtime_dependencies.pi_config,
+        pi_runtime=runtime_dependencies.pi_runtime,
         pi_skill_root=runtime_dependencies.pi_skill_root,
-        openclaw_command_template=runtime_dependencies.openclaw_command_template,
-        openclaw_cwd=runtime_dependencies.openclaw_cwd,
-        openclaw_timeout_seconds=runtime_dependencies.openclaw_timeout_seconds,
+        openclaw_runtime=runtime_dependencies.openclaw_runtime,
     )
 
     registry = ExecutorRegistry.build(definitions, runtime)
@@ -226,11 +227,9 @@ def test_registry_builds_local_executor_with_settings_and_job_db(
     job_db = object()
     runtime = RuntimeDependencies(
         local_handlers=runtime_dependencies.local_handlers,
-        pi_config=runtime_dependencies.pi_config,
+        pi_runtime=runtime_dependencies.pi_runtime,
         pi_skill_root=runtime_dependencies.pi_skill_root,
-        openclaw_command_template=runtime_dependencies.openclaw_command_template,
-        openclaw_cwd=runtime_dependencies.openclaw_cwd,
-        openclaw_timeout_seconds=runtime_dependencies.openclaw_timeout_seconds,
+        openclaw_runtime=runtime_dependencies.openclaw_runtime,
         settings_config=settings_config,
         job_db=job_db,
     )

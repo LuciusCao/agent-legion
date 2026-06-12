@@ -13,8 +13,7 @@ from server.app.settings import Settings
 
 
 def require_pipelines_enabled(settings: Settings) -> None:
-    pipelines = settings.config.get("pipelines", {})
-    if not isinstance(pipelines, dict) or not pipelines.get("enabled"):
+    if not settings.executor_runtime.pipelines.enabled:
         raise HTTPException(status_code=404, detail="Pipelines are disabled")
 
 

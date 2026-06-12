@@ -5,6 +5,7 @@ from pathlib import Path
 
 from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
+from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.pipelines.pi_runner import PiConfig, PiRunner
 from server.app.pipelines.skills import resolve_pipeline_skill
 
@@ -19,15 +20,15 @@ class PiExecutor:
     def __init__(
         self,
         id: str,
-        config: PiConfig,
+        config: PiRuntimeConfig,
         skill_root: Path,
         capabilities: dict[str, PiCapabilityConfig],
     ) -> None:
         self.id = id
-        self.config = config
+        self.config = PiConfig.from_runtime(config)
         self.skill_root = skill_root
         self.capabilities = capabilities
-        self._runner = PiRunner(config, skill_root)
+        self._runner = PiRunner(self.config, skill_root)
         self._cancelled: set[str] = set()
 
     def supports(self, capability: str) -> bool:

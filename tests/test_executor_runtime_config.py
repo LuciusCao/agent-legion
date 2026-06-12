@@ -7,8 +7,8 @@ from server.app.executors.runtime_config import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
     OpenClawSkillSafetyRuntimeConfig,
-    PiRuntimeConfig,
     PipelinesRuntimeConfig,
+    PiRuntimeConfig,
 )
 
 

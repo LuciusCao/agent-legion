@@ -70,12 +70,12 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
         "  enabled: true\n"
         "  pi:\n"
         "    binary: pi\n"
-        "    provider: \"\"\n"
-        "    model: \"\"\n"
+        '    provider: ""\n'
+        '    model: ""\n'
         "    thinking: low\n"
         "    timeout_seconds: 600\n"
         "    environment:\n"
-        "      PI_SKIP_VERSION_CHECK: \"1\"\n"
+        '      PI_SKIP_VERSION_CHECK: "1"\n'
         "openclaw:\n"
         "  cwd: .\n"
         "  timeout_seconds: 600\n"
@@ -108,9 +108,7 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
 def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeypatch):
     config_path = tmp_path / "pipeline.yaml"
     config_path.write_text(
-        "data_dir: data\n"
-        "openclaw:\n"
-        "  command_template: []\n",
+        "data_dir: data\nopenclaw:\n  command_template: []\n",
         encoding="utf-8",
     )
 

@@ -51,7 +51,7 @@ def test_job_routes_are_hidden_when_pipelines_disabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = False
+    app.state.settings.executor_runtime.pipelines.enabled = False
     with TestClient(app) as c:
         response = c.get("/api/jobs")
         workspaces = c.get("/api/workspaces")
@@ -66,7 +66,7 @@ def test_create_question_jobs_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/job-batches",
@@ -92,7 +92,7 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         workspace_response = c.post("/api/workspaces", json={"name": "Math Sprint"})
         workspace_id = workspace_response.json()["workspace"]["id"]
@@ -125,7 +125,7 @@ def test_workspace_settings_round_trip(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         connection = c.patch(
             "/api/workspaces/default/settings/connection",
@@ -178,7 +178,7 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.put(
             "/api/workspaces/default/configuration",
@@ -244,7 +244,7 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         original = c.get("/api/workspaces/default").json()["workspace"]
         response = c.put(
@@ -317,7 +317,7 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces/default/job-batches",
@@ -359,7 +359,7 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
     monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
@@ -407,7 +407,7 @@ def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch)
     monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["cms"] = {"env": "prod"}
     app.state.settings.config["resource_providers"] = {
         "cms.question.list_by_knowledge": {
@@ -463,7 +463,7 @@ def test_create_workspace_stores_cms_config_override(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces",
@@ -491,7 +491,7 @@ def test_update_workspace_cms_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post("/api/workspaces", json={"name": "Math V5"}).json()
         workspace_id = created["workspace"]["id"]
@@ -524,7 +524,7 @@ def test_update_workspace_resource_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post("/api/workspaces", json={"name": "Math Resources"}).json()
         workspace_id = created["workspace"]["id"]
@@ -565,7 +565,7 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/job-batches",
@@ -597,7 +597,7 @@ def test_job_detail_includes_pi_run_trace(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/job-batches",
@@ -636,7 +636,7 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.get("/api/pipelines/question_content")
 
@@ -680,7 +680,7 @@ def test_list_pipelines_includes_nodes_concurrency(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.get("/api/pipelines")
 
@@ -695,7 +695,7 @@ def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces/default/job-batches",
@@ -717,7 +717,7 @@ def test_rerun_node_marks_downstream_stale(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/job-batches",
@@ -758,7 +758,7 @@ def test_job_detail_includes_node_dependencies(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/job-batches",
@@ -784,7 +784,7 @@ def test_workspace_stats_hidden_when_pipelines_disabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = False
+    app.state.settings.executor_runtime.pipelines.enabled = False
     with TestClient(app) as c:
         response = c.get("/api/workspaces/default/stats")
     assert response.status_code == 404
@@ -796,7 +796,7 @@ def test_workspace_stats_returns_counts_and_agent_status(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
         ws_id = ws["workspace"]["id"]
@@ -832,7 +832,7 @@ def test_workspace_stats_filters_agents_by_assignment(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
 
     manager = app.state.agent_manager
     manager.agents = [
@@ -868,7 +868,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/job-batches",
@@ -899,7 +899,7 @@ def test_delete_workspace_hidden_when_pipelines_disabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = False
+    app.state.settings.executor_runtime.pipelines.enabled = False
     with TestClient(app) as c:
         response = c.delete("/api/workspaces/some_ws")
     assert response.status_code == 404
@@ -911,7 +911,7 @@ def test_delete_workspace_rejects_default(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.delete("/api/workspaces/default")
     assert response.status_code == 400
@@ -924,7 +924,7 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         ws = c.post("/api/workspaces", json={"name": "Running WS"}).json()
         ws_id = ws["workspace"]["id"]
@@ -952,7 +952,7 @@ def test_delete_job_returns_404_for_unknown_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         resp = c.delete("/api/jobs/nonexistent")
     assert resp.status_code == 404
@@ -966,7 +966,7 @@ def test_delete_job_rejects_running_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post(
             "/api/workspaces/default/job-batches",
@@ -1004,7 +1004,7 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post(
             "/api/workspaces/default/job-batches",
@@ -1036,7 +1036,7 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/workspaces/default/job-batches",
@@ -1075,7 +1075,7 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/workspaces/default/job-batches",
@@ -1105,7 +1105,7 @@ def test_workspace_stats_returns_404_for_unknown_workspace(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         resp = c.get("/api/workspaces/nonexistent/stats")
     assert resp.status_code == 404
@@ -1117,7 +1117,7 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         ws = c.post("/api/workspaces", json={"name": "Delete Me"}).json()
         ws_id = ws["workspace"]["id"]
@@ -1166,7 +1166,7 @@ def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.delete("/api/workspaces/nonexistent")
     assert response.status_code == 404
@@ -1224,7 +1224,7 @@ def test_create_workspace_with_intake_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces",
@@ -1247,7 +1247,7 @@ def test_update_workspace_intake_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         created = c.post("/api/workspaces", json={"name": "Update Intake"}).json()
         workspace_id = created["workspace"]["id"]
@@ -1274,7 +1274,7 @@ def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         workspace_response = c.post(
             "/api/workspaces",
@@ -1308,7 +1308,7 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         workspace_response = c.post(
             "/api/workspaces",
@@ -1345,7 +1345,7 @@ def test_batch_with_entity_question(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/job-batches",
@@ -1374,7 +1374,7 @@ def test_batch_unsupported_entity_mode(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/job-batches",
@@ -1397,7 +1397,7 @@ def test_batch_video_resolver_not_implemented(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/job-batches",
@@ -1420,7 +1420,7 @@ def test_batch_with_entity_video_direct_ids(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces/default/job-batches",
@@ -1452,7 +1452,7 @@ def test_pipeline_response_no_task_entity(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.get("/api/pipelines/question_content")
 
@@ -1473,7 +1473,7 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         batch = c.post(
             "/api/workspaces/default/job-batches",
@@ -1513,7 +1513,7 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         batch = c.post(
             "/api/workspaces/default/job-batches",
@@ -1546,7 +1546,7 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post(
             "/api/workspaces/default/job-batches",
@@ -1575,7 +1575,7 @@ def test_get_resource_providers_returns_provider_list(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["resource_providers"] = {
         "cms.question.detail": {"path": "/question/detail"},
         "cms.question.list_by_knowledge": {"path": "/question/list"},
@@ -1617,7 +1617,7 @@ def test_get_global_services_returns_cms_status(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "base_url": "http://cms.example.com/v2",
@@ -1648,7 +1648,7 @@ def test_get_global_services_unconfigured_token(tmp_path, monkeypatch):
         "BASECMS_TOKEN",
     ):
         monkeypatch.delenv(key, raising=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["cms"] = {"env": "dev"}
     with TestClient(app) as c:
         response = c.get("/api/global-services")
@@ -1664,7 +1664,7 @@ def test_get_global_services_token_gen_configured(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "base_url": "http://cms.example/v2",
@@ -1689,7 +1689,7 @@ def test_workspace_settings_without_cms_fields(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.get("/api/workspaces/default/settings")
 
@@ -1706,7 +1706,7 @@ def test_workspace_settings_returns_resource_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.patch(
             "/api/workspaces/default",
@@ -1735,7 +1735,7 @@ def test_patch_settings_connection_saves_resource_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         response = c.patch(
             "/api/workspaces/default/settings/connection",
@@ -1753,7 +1753,7 @@ def test_test_connection_uses_global_cms_url(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["cms"] = {
         "question_detail_url": "http://cms.example/detail",
         "token": "global_token",
@@ -1771,7 +1771,7 @@ def test_test_connection_fails_when_global_url_missing(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["cms"] = {}
     with TestClient(app) as c:
         response = c.post("/api/workspaces/default/settings/test-connection")
@@ -1786,7 +1786,7 @@ def test_job_batch_rejects_disabled_resource_provider(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["resource_providers"] = {
         "cms.question.list_by_knowledge": {"api_url": "http://cms.example/list"},
     }
@@ -1853,7 +1853,7 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
     monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
@@ -1887,7 +1887,7 @@ def test_workspace_settings_returns_no_agent_assignments_after_v005(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post("/api/agents/agent-1/assign?workspace_id=default&concurrency_limit=2")
         c.post("/api/agents/agent-2/assign?workspace_id=default&concurrency_limit=1")
@@ -1934,7 +1934,7 @@ def test_workspace_settings_pipeline_rejects_invalid_concurrency(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         resp_local = c.patch(
             "/api/workspaces/default/settings/pipeline",
@@ -1957,7 +1957,7 @@ def test_update_workspace_rejects_invalid_pipeline_key(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         create_resp = c.post("/api/workspaces", json={"name": "Test"})
         assert create_resp.status_code == 200, create_resp.text
@@ -1977,7 +1977,7 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -2006,7 +2006,7 @@ def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -2036,7 +2036,7 @@ def test_get_artifact_returns_404(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         # Job not found
         resp = c.get("/api/jobs/nonexistent/artifacts/test.json")
@@ -2049,7 +2049,7 @@ def test_rerun_node_errors(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -2079,7 +2079,7 @@ def test_rerun_node_rejects_running_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -2109,7 +2109,7 @@ def test_batch_delete_skips_running_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -2143,7 +2143,7 @@ def test_reject_invalid_job_subpath(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         # Job not found
         resp = c.get("/api/jobs/nonexistent/invalid/path")
@@ -2156,7 +2156,7 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -2185,7 +2185,7 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -2214,7 +2214,7 @@ def test_job_detail_includes_node_inputs_outputs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.executor_runtime.pipelines.enabled = True
 
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "WS"})
