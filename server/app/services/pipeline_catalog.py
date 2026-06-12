@@ -45,6 +45,7 @@ class PipelineCatalogService:
             node_payload: dict[str, Any] = {
                 "key": node.key,
                 "label": node.label,
+                "capability": node.capability,
                 "runner": node.runner,
                 "after": node.after,
                 "inputs": node.inputs,
