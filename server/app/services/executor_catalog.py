@@ -23,6 +23,30 @@ class ExecutorCatalogService:
             raise NotFoundError("Workspace not found")
         return workspace
 
+    def catalog(self) -> dict[str, Any]:
+        return {
+            "executors": [
+                {
+                    "id": executor_id,
+                    "kind": definition.kind,
+                    "global_capacity": definition.global_capacity,
+                    "capabilities": sorted(definition.capabilities),
+                }
+                for executor_id, definition in sorted(self.settings.executor_definitions.items())
+            ]
+        }
+
+    def workspace_configuration(self, workspace_id: str) -> dict[str, Any]:
+        self._workspace(workspace_id)
+        configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
+        known_legacy_ids = {"pi"}
+        warnings = [
+            f"Legacy agent assignment {row['agent_id']} has no Executor mapping"
+            for row in self.job_db.list_workspace_agents(workspace_id)
+            if row["agent_id"] not in known_legacy_ids
+        ]
+        return {**configuration, "migration_warnings": warnings}
+
     def list_assignments(self, workspace_id: str) -> list[dict[str, Any]]:
         self._workspace(workspace_id)
         return [
