@@ -2,6 +2,14 @@ from typing import Any
 
 from pydantic import BaseModel, Field, RootModel
 
+from server.app.routes.executor_contracts import (
+    ExecutorAllocationRequest,
+    NodeBindingRequest,
+    NodeLimitRequest,
+    WorkspaceExecutorConfigurationResponse,
+    WorkspaceSettingsPayload,
+)
+
 
 class JobBatchRequest(BaseModel):
     pipeline_key: str = "reading_analysis"
@@ -153,13 +161,15 @@ class WorkspaceConfigurationRequest(BaseModel):
     name: str | None = None
     description: str | None = None
     settings: WorkspaceConfigurationSettingsRequest
-    agents: list[WorkspaceAgentConfig] = Field(default_factory=list)
+    executor_allocations: list[ExecutorAllocationRequest] = Field(default_factory=list)
+    node_bindings: list[NodeBindingRequest] = Field(default_factory=list)
+    node_limits: list[NodeLimitRequest] = Field(default_factory=list)
 
 
 class WorkspaceConfigurationResponse(BaseModel):
     workspace: dict[str, Any]
-    settings: dict[str, Any]
-    agents: list[dict[str, Any]]
+    settings: WorkspaceSettingsPayload
+    executor_configuration: WorkspaceExecutorConfigurationResponse
 
 
 class WorkspaceAgentStatus(BaseModel):
