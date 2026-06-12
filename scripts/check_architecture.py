@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import ast
 import json
+from collections import Counter
 from pathlib import Path
 
 HTTP_DECORATORS = {"get", "post", "put", "patch", "delete"}
@@ -52,8 +53,11 @@ def route_operations(
     return operations
 
 
-def has_response_model(decorator: ast.Call) -> bool:
-    return any(keyword.arg == "response_model" for keyword in decorator.keywords)
+def has_named_response_model(decorator: ast.Call) -> bool:
+    for keyword in decorator.keywords:
+        if keyword.arg == "response_model":
+            return isinstance(keyword.value, (ast.Name, ast.Attribute))
+    return False
 
 
 def annotation_contains_any(node: ast.FunctionDef | ast.AsyncFunctionDef) -> bool:
@@ -68,11 +72,17 @@ def annotation_contains_any(node: ast.FunctionDef | ast.AsyncFunctionDef) -> boo
 
 
 def forbidden_imports(modules: dict[str, int], prefixes: tuple[str, ...]) -> list[tuple[str, int]]:
-    return sorted(
+    matches = [
         (module, lineno)
         for module, lineno in modules.items()
         if any(module == prefix or module.startswith(f"{prefix}.") for prefix in prefixes)
-    )
+    ]
+    shortest_by_line: dict[int, str] = {}
+    for module, lineno in matches:
+        current = shortest_by_line.get(lineno)
+        if current is None or len(module) < len(current):
+            shortest_by_line[lineno] = module
+    return sorted((module, lineno) for lineno, module in shortest_by_line.items())
 
 
 def is_scheduler_path(relative_path: str) -> bool:
@@ -83,29 +93,22 @@ def is_scheduler_path(relative_path: str) -> bool:
     )
 
 
-def _is_legacy_executor_assignment(call: ast.Call, parent_map: dict[ast.AST, ast.AST]) -> bool:
+def _assignment_target(call: ast.Call, parent_map: dict[ast.AST, ast.AST]) -> str:
     parent = parent_map.get(call)
     if isinstance(parent, ast.Assign):
-        return any(
-            isinstance(target, ast.Attribute)
-            and target.attr in {"_local_executor", "_agent_executor"}
-            for target in parent.targets
-        )
+        return ", ".join(ast.unparse(target) for target in parent.targets)
     if isinstance(parent, ast.AnnAssign):
-        return isinstance(parent.target, ast.Attribute) and parent.target.attr in {
-            "_local_executor",
-            "_agent_executor",
-        }
-    return False
+        return ast.unparse(parent.target)
+    return "<unassigned>"
 
 
 def check_repository(root: Path) -> list[str]:
     config = json.loads((root / "config/architecture-budgets.json").read_text(encoding="utf-8"))
     exemptions = set(config.get("route_exemptions", []))
     annotation_exemptions = set(config.get("route_annotation_exemptions", []))
-    route_import_exemptions = set(config.get("route_import_exemptions", []))
-    scheduler_import_exemptions = set(config.get("scheduler_import_exemptions", []))
-    scheduler_threadpool_exemptions = set(config.get("scheduler_threadpool_exemptions", []))
+    route_import_baselines = config.get("route_import_baselines", {})
+    scheduler_import_baselines = config.get("scheduler_import_baselines", {})
+    scheduler_threadpool_baselines = config.get("scheduler_threadpool_baselines", {})
     errors: list[str] = []
 
     server_root = root / "server/app"
@@ -122,35 +125,40 @@ def check_repository(root: Path) -> list[str]:
         }
 
         if is_scheduler_path(relative_path):
-            if relative_path not in scheduler_import_exemptions:
-                for module, lineno in forbidden_imports(modules, SCHEDULER_FORBIDDEN):
+            allowed_imports = set(scheduler_import_baselines.get(relative_path, []))
+            for module, lineno in forbidden_imports(modules, SCHEDULER_FORBIDDEN):
+                if module not in allowed_imports:
                     errors.append(
                         f"{relative_path}:{lineno}: scheduler boundary forbids import {module}"
                     )
-            if relative_path not in scheduler_threadpool_exemptions:
-                for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
-                    name = ast.unparse(call.func)
-                    if name.endswith("ThreadPoolExecutor") and not _is_legacy_executor_assignment(
-                        call, parent_map
-                    ):
-                        errors.append(
-                            f"{relative_path}:{call.lineno}: scheduler boundary forbids "
-                            "ThreadPoolExecutor construction"
-                        )
+            allowed_targets = scheduler_threadpool_baselines.get(relative_path, {})
+            observed_targets: Counter[str] = Counter()
+            for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
+                name = ast.unparse(call.func)
+                if not name.endswith("ThreadPoolExecutor"):
+                    continue
+                target = _assignment_target(call, parent_map)
+                observed_targets[target] += 1
+                if observed_targets[target] > int(allowed_targets.get(target, 0)):
+                    errors.append(
+                        f"{relative_path}:{call.lineno}: scheduler boundary forbids "
+                        f"ThreadPoolExecutor construction assigned to {target}"
+                    )
 
         if not relative_path.startswith("server/app/routes/"):
             continue
 
-        if relative_path not in route_import_exemptions:
-            for module, lineno in forbidden_imports(modules, ROUTE_FORBIDDEN):
+        allowed_imports = set(route_import_baselines.get(relative_path, []))
+        for module, lineno in forbidden_imports(modules, ROUTE_FORBIDDEN):
+            if module not in allowed_imports:
                 errors.append(f"{relative_path}:{lineno}: route boundary forbids import {module}")
 
         for function, decorator in route_operations(tree):
             key = f"{relative_path}:{function.name}"
-            if key not in exemptions and not has_response_model(decorator):
+            if key not in exemptions and not has_named_response_model(decorator):
                 errors.append(
                     f"{relative_path}:{decorator.lineno}: route {function.name} "
-                    "requires response_model"
+                    "requires named response_model"
                 )
             if key not in annotation_exemptions and annotation_contains_any(function):
                 errors.append(
