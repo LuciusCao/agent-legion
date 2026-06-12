@@ -14,11 +14,10 @@ from server.app.executors.config import (
     PiExecutorConfig,
 )
 from server.app.executors.local import LocalExecutor, LocalHandler
-from server.app.executors.openclaw import OpenClawExecutor
+from server.app.executors.openclaw import build_openclaw_executor
 from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
-from server.app.pipeline.openclaw import OpenClawRunner, SkillSafetyConfig
 
 logger = logging.getLogger(__name__)
 
@@ -99,12 +98,7 @@ class ExecutorRegistry:
                     capabilities=config.capabilities,
                 )
             elif isinstance(config, OpenClawExecutorConfig):
-                runner = _build_openclaw_runner(config, runtime)
-                executor = OpenClawExecutor(
-                    id=executor_id,
-                    runner=runner,
-                    capabilities=config.capabilities,
-                )
+                executor = build_openclaw_executor(executor_id, runtime.openclaw_runtime, config)
             else:
                 raise ExecutorRegistryError(
                     f"Executor {executor_id!r}: unsupported kind {getattr(config, 'kind', '?')!r}"
@@ -159,39 +153,3 @@ def _resolve_local_handlers(
             continue
         handlers[capability] = handler
     return handlers
-
-
-def _build_openclaw_runner(
-    config: OpenClawExecutorConfig,
-    runtime: RuntimeDependencies,
-) -> OpenClawRunner:
-    """Build an OpenClawRunner with the executor's agent_id injected."""
-    oc = runtime.openclaw_runtime
-    command_template = _inject_agent_id(list(oc.command_template), config.agent_id)
-    skill_safety = (
-        SkillSafetyConfig(enabled=oc.skill_safety.enabled, repos=list(oc.skill_safety.repos))
-        if oc.skill_safety is not None
-        else None
-    )
-    isolated_root = Path(oc.isolated_workspace_root) if oc.isolated_workspace_root else None
-    return OpenClawRunner(
-        command_template=command_template,
-        cwd=Path(oc.cwd),
-        timeout_seconds=oc.timeout_seconds,
-        skill_safety=skill_safety,
-        isolated_workspace_root=isolated_root,
-        agent_id=config.agent_id,
-    )
-
-
-def _inject_agent_id(command_template: list[str], agent_id: str) -> list[str]:
-    """Return a copy of *command_template* with the agent id set to *agent_id*."""
-    template = list(command_template)
-    for i, part in enumerate(template):
-        if part == "{agent_id}":
-            template[i] = agent_id
-    for i, part in enumerate(template):
-        if part == "--agent" and i + 1 < len(template):
-            template[i + 1] = agent_id
-            break
-    return template
