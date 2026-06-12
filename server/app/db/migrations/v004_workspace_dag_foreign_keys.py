@@ -1,10 +1,25 @@
 import sqlite3
 
-from server.app.db.migrations.errors import MigrationError
 from server.app.db.migrations.models import Migration
+from server.app.db.migrations.report import MigrationIssue, MigrationReport, raise_blocked
+
+_JOB_BATCHES_TABLE_SQL = """
+create table job_batches__v004 (
+  id text primary key,
+  workspace_id text not null default 'default',
+  pipeline_key text not null,
+  source_kind text not null,
+  source_payload_json text not null default '{}',
+  status text not null default 'created',
+  created_count integer not null default 0,
+  error_message text not null default '',
+  created_at text not null default current_timestamp,
+  foreign key(workspace_id) references workspaces(id) on delete cascade
+)
+"""
 
 _JOBS_TABLE_SQL = """
-create table jobs (
+create table jobs__v004 (
   id text primary key,
   workspace_id text not null default 'default',
   pipeline_key text not null,
@@ -22,23 +37,8 @@ create table jobs (
 )
 """
 
-_JOB_BATCHES_TABLE_SQL = """
-create table job_batches (
-  id text primary key,
-  workspace_id text not null default 'default',
-  pipeline_key text not null,
-  source_kind text not null,
-  source_payload_json text not null default '{}',
-  status text not null default 'created',
-  created_count integer not null default 0,
-  error_message text not null default '',
-  created_at text not null default current_timestamp,
-  foreign key(workspace_id) references workspaces(id) on delete cascade
-)
-"""
-
 _JOB_NODES_TABLE_SQL = """
-create table job_nodes (
+create table job_nodes__v004 (
   id integer primary key autoincrement,
   job_id text not null,
   node_key text not null,
@@ -53,7 +53,7 @@ create table job_nodes (
 """
 
 _NODE_RUNS_TABLE_SQL = """
-create table node_runs (
+create table node_runs__v004 (
   id integer primary key autoincrement,
   job_id text not null,
   node_key text not null,
@@ -70,159 +70,181 @@ create table node_runs (
 )
 """
 
-_EXECUTOR_LEASES_TABLE_SQL = """
-create table executor_leases (
-  id text primary key,
-  execution_id text not null unique,
-  executor_id text not null,
-  workspace_id text not null,
-  job_id text not null,
-  pipeline_key text not null,
-  node_key text not null,
-  node_run_id integer not null,
-  status text not null check(status in ('active', 'released', 'expired')),
-  acquired_at text not null,
-  heartbeat_at text not null,
-  expires_at text not null,
-  foreign key(workspace_id) references workspaces(id) on delete cascade,
-  foreign key(job_id) references jobs(id) on delete cascade,
-  foreign key(node_run_id) references node_runs(id) on delete cascade
-)
-"""
-
-
-def _preflight_orphans(conn: sqlite3.Connection) -> None:
-    """Raise before any destructive work if FK targets would be violated."""
-    bad_batches = conn.execute(
-        "select id from job_batches where workspace_id not in (select id from workspaces)"
-    ).fetchall()
-    bad_jobs = conn.execute(
-        "select id from jobs where workspace_id not in (select id from workspaces)"
-    ).fetchall()
-    bad_nodes = conn.execute(
-        "select id from job_nodes where job_id not in (select id from jobs)"
-    ).fetchall()
-    bad_runs = conn.execute(
-        "select id from node_runs where job_id not in (select id from jobs)"
-    ).fetchall()
-
-    if bad_batches or bad_jobs or bad_nodes or bad_runs:
-        details = []
-        if bad_batches:
-            details.append(f"job_batches: {','.join(sorted(r['id'] for r in bad_batches))}")
-        if bad_jobs:
-            details.append(f"jobs: {','.join(sorted(r['id'] for r in bad_jobs))}")
-        if bad_nodes:
-            details.append(f"job_nodes: {','.join(str(r['id']) for r in bad_nodes)}")
-        if bad_runs:
-            details.append(f"node_runs: {','.join(str(r['id']) for r in bad_runs)}")
-        raise MigrationError(
-            f"workspace DAG foreign key migration blocked by orphan rows: {'; '.join(details)}"
-        )
-
-
-def _drop_indexes_for_table(conn: sqlite3.Connection, table: str) -> None:
-    """Drop non-automatic indexes attached to ``table`` before it is replaced."""
-    rows = conn.execute(
-        """
-        select name from sqlite_master
-        where type = 'index' and tbl_name = ? and name not like 'sqlite_autoindex_%'
-        """,
-        (table,),
-    ).fetchall()
-    for row in rows:
-        conn.execute(f"drop index {row['name']}")
-
-
-def _rebuild_table(
-    conn: sqlite3.Connection,
-    table: str,
-    create_sql: str,
-    index_sqls: tuple[str, ...],
-    drop_old: bool = True,
-) -> str:
-    """Rebuild ``table`` with the schema in ``create_sql``.
-
-    Returns the name of the old (renamed) table so callers can drop it after
-    dependent tables have been rebuilt.
-    """
-    old = f"{table}__v004_old"
-    conn.execute(f"alter table {table} rename to {old}")
-    _drop_indexes_for_table(conn, old)
-    conn.execute(create_sql)
-    cols = [row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()]
-    col_list = ", ".join(cols)
-    conn.execute(f"insert into {table} ({col_list}) select {col_list} from {old}")
-
-    old_count = conn.execute(f"select count(*) from {old}").fetchone()[0]
-    new_count = conn.execute(f"select count(*) from {table}").fetchone()[0]
-    if old_count != new_count:
-        raise MigrationError(
-            f"{table} row count mismatch after rebuild: {new_count} vs {old_count}"
-        )
-
-    for idx_sql in index_sqls:
-        conn.execute(idx_sql)
-
-    if drop_old:
-        conn.execute(f"drop table {old}")
-    return old
-
-
-def _apply(conn: sqlite3.Connection) -> None:
-    _preflight_orphans(conn)
-
-    # Rebuild job_batches first; it has no dependent children.
-    _rebuild_table(
-        conn,
+_TABLES: tuple[tuple[str, str, str, tuple[str, ...]], ...] = (
+    (
         "job_batches",
         _JOB_BATCHES_TABLE_SQL,
+        "job_batches__v004",
         ("create index idx_job_batches_workspace on job_batches(workspace_id, created_at)",),
-    )
-
-    # Rebuild jobs but keep the old copy until its children are rebuilt.
-    jobs_old = _rebuild_table(
-        conn,
+    ),
+    (
         "jobs",
         _JOBS_TABLE_SQL,
+        "jobs__v004",
         (
             "create index idx_jobs_pipeline_status on jobs(pipeline_key, status)",
             "create index idx_jobs_source on jobs(pipeline_key, source_type, source_id)",
             "create index idx_jobs_workspace_pipeline_status on jobs(workspace_id, pipeline_key, status)",
             "create index idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id)",
         ),
-        drop_old=False,
-    )
-
-    # Rebuild children so they reference the new jobs table, then drop the old jobs table.
-    _rebuild_table(
-        conn,
+    ),
+    (
         "job_nodes",
         _JOB_NODES_TABLE_SQL,
+        "job_nodes__v004",
         ("create index idx_job_nodes_job_status on job_nodes(job_id, status)",),
-    )
-    _rebuild_table(
-        conn,
+    ),
+    (
         "node_runs",
         _NODE_RUNS_TABLE_SQL,
+        "node_runs__v004",
         ("create index idx_node_runs_job_id on node_runs(job_id)",),
+    ),
+)
+
+
+_MIGRATION_VERSION = 4
+_MIGRATION_NAME = "workspace_dag_foreign_keys"
+
+
+def _preflight_orphans(conn: sqlite3.Connection) -> None:
+    """Raise before any destructive work if FK targets would be violated."""
+    issues: list[MigrationIssue] = []
+
+    for row in conn.execute(
+        "select id, workspace_id from job_batches where workspace_id not in (select id from workspaces)"
+    ).fetchall():
+        issues.append(
+            MigrationIssue(
+                table="job_batches",
+                row_key=row["id"],
+                constraint="fk_job_batches_workspace_id",
+                message=f"workspace_id '{row['workspace_id']}' does not exist",
+            )
+        )
+
+    for row in conn.execute(
+        "select id, workspace_id from jobs where workspace_id not in (select id from workspaces)"
+    ).fetchall():
+        issues.append(
+            MigrationIssue(
+                table="jobs",
+                row_key=row["id"],
+                constraint="fk_jobs_workspace_id",
+                message=f"workspace_id '{row['workspace_id']}' does not exist",
+            )
+        )
+
+    for row in conn.execute(
+        "select id, job_id from job_nodes where job_id not in (select id from jobs)"
+    ).fetchall():
+        issues.append(
+            MigrationIssue(
+                table="job_nodes",
+                row_key=str(row["id"]),
+                constraint="fk_job_nodes_job_id",
+                message=f"job_id '{row['job_id']}' does not exist",
+            )
+        )
+
+    for row in conn.execute(
+        "select id, job_id from node_runs where job_id not in (select id from jobs)"
+    ).fetchall():
+        issues.append(
+            MigrationIssue(
+                table="node_runs",
+                row_key=str(row["id"]),
+                constraint="fk_node_runs_job_id",
+                message=f"job_id '{row['job_id']}' does not exist",
+            )
+        )
+
+    if issues:
+        raise_blocked(
+            MigrationReport(
+                migration_version=_MIGRATION_VERSION,
+                migration_name=_MIGRATION_NAME,
+                issues=tuple(
+                    sorted(
+                        issues,
+                        key=lambda issue: (issue.table, issue.row_key, issue.constraint),
+                    )
+                ),
+            )
+        )
+
+
+def _column_names(conn: sqlite3.Connection, table: str) -> list[str]:
+    """Return column names in table declaration order."""
+    return [row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()]
+
+
+def _copy_table(
+    conn: sqlite3.Connection,
+    source_table: str,
+    replacement_table: str,
+    create_sql: str,
+    index_sqls: tuple[str, ...],
+) -> None:
+    """Copy ``source_table`` into a replacement table, validate, then swap.
+
+    Steps:
+    1. Create ``replacement_table`` with the supplied schema and real FKs.
+    2. Copy every column explicitly from ``source_table``.
+    3. Compare source and replacement row counts.
+    4. Run ``pragma foreign_key_check('<replacement>')``.
+    5. Drop ``source_table`` only after all checks pass.
+    6. Rename ``replacement_table`` to ``source_table``.
+    7. Recreate explicit indexes and unique constraints.
+    """
+    conn.execute(create_sql)
+
+    source_cols = _column_names(conn, source_table)
+    replacement_cols = _column_names(conn, replacement_table)
+    if set(source_cols) != set(replacement_cols):
+        raise RuntimeError(
+            f"{replacement_table} column mismatch with {source_table}: "
+            f"{replacement_cols} vs {source_cols}"
+        )
+
+    col_list = ", ".join(source_cols)
+    conn.execute(
+        f"insert into {replacement_table} ({col_list}) select {col_list} from {source_table}"
     )
-    _rebuild_table(
-        conn,
-        "executor_leases",
-        _EXECUTOR_LEASES_TABLE_SQL,
-        (
-            "create index idx_executor_leases_global_active on executor_leases(executor_id, status, expires_at)",
-            "create index idx_executor_leases_workspace_active on executor_leases(workspace_id, executor_id, status, expires_at)",
-            "create index idx_executor_leases_node_active on executor_leases(workspace_id, pipeline_key, node_key, status, expires_at)",
-        ),
-    )
-    conn.execute(f"drop table {jobs_old}")
+
+    source_count = conn.execute(f"select count(*) from {source_table}").fetchone()[0]
+    replacement_count = conn.execute(f"select count(*) from {replacement_table}").fetchone()[0]
+    if source_count != replacement_count:
+        raise RuntimeError(
+            f"{source_table} row count mismatch after copy: {replacement_count} vs {source_count}"
+        )
+
+    fk_violations = conn.execute(f"pragma foreign_key_check('{replacement_table}')").fetchall()
+    if fk_violations:
+        raise RuntimeError(
+            f"foreign key check failed for {replacement_table}: "
+            f"{'; '.join(str(row) for row in fk_violations)}"
+        )
+
+    conn.execute(f"drop table {source_table}")
+    conn.execute(f"alter table {replacement_table} rename to {source_table}")
+
+    for idx_sql in index_sqls:
+        conn.execute(idx_sql)
+
+
+def _apply(conn: sqlite3.Connection) -> None:
+    _preflight_orphans(conn)
+
+    # Rebuild child-most tables first so we can drop parents after their
+    # dependents have been replaced.
+    for source_table, create_sql, replacement_table, index_sqls in _TABLES:
+        _copy_table(conn, source_table, replacement_table, create_sql, index_sqls)
 
 
 MIGRATION = Migration(
-    version=4,
-    name="workspace_dag_foreign_keys",
+    version=_MIGRATION_VERSION,
+    name=_MIGRATION_NAME,
     apply=_apply,
     rebuilds_fk=True,
 )

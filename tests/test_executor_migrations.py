@@ -281,6 +281,69 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 
+def test_v004_creates_required_indexes_and_foreign_keys(tmp_path: Path) -> None:
+    """The V004 rebuild installs the four required FK relationships and indexes."""
+    path = tmp_path / "v004_fks.sqlite"
+    init_db(path)
+
+    with connect_sqlite(path) as conn:
+        indexes = {
+            row["name"]
+            for row in conn.execute(
+                "select name from sqlite_master where type = 'index'"
+            ).fetchall()
+        }
+        assert "idx_job_batches_workspace" in indexes
+        assert "idx_jobs_pipeline_status" in indexes
+        assert "idx_jobs_source" in indexes
+        assert "idx_jobs_workspace_pipeline_status" in indexes
+        assert "idx_jobs_workspace_source" in indexes
+        assert "idx_job_nodes_job_status" in indexes
+        assert "idx_node_runs_job_id" in indexes
+
+        relationships = {
+            (table, row["from"], row["table"])
+            for table in ("job_batches", "jobs", "job_nodes", "node_runs")
+            for row in conn.execute(f"pragma foreign_key_list('{table}')").fetchall()
+        }
+        assert relationships == {
+            ("job_batches", "workspace_id", "workspaces"),
+            ("jobs", "workspace_id", "workspaces"),
+            ("job_nodes", "job_id", "jobs"),
+            ("node_runs", "job_id", "jobs"),
+        }
+
+
+def test_v004_foreign_key_cascades(tmp_path: Path) -> None:
+    """Deleting a workspace cascades to batches/jobs; deleting a job cascades to nodes/runs."""
+    path = tmp_path / "v004_cascade.sqlite"
+    init_db(path)
+
+    with connect_sqlite(path) as conn:
+        conn.execute("insert into workspaces(id, name) values ('ws1', 'Workspace One')")
+        conn.execute(
+            "insert into job_batches(id, workspace_id, pipeline_key, source_kind) "
+            "values ('batch1', 'ws1', 'question_content', 'mixed')"
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id) "
+            "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
+        )
+        conn.execute(
+            "insert into job_nodes(job_id, node_key, status) values ('job1', 'node_a', 'pending')"
+        )
+        conn.execute(
+            "insert into node_runs(job_id, node_key, status) values ('job1', 'node_a', 'pending')"
+        )
+
+        conn.execute("delete from workspaces where id = 'ws1'")
+        assert conn.execute("select count(*) from job_batches").fetchone()[0] == 0
+        assert conn.execute("select count(*) from jobs").fetchone()[0] == 0
+        assert conn.execute("select count(*) from job_nodes").fetchone()[0] == 0
+        assert conn.execute("select count(*) from node_runs").fetchone()[0] == 0
+        assert conn.execute("pragma foreign_key_check").fetchall() == []
+
+
 def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
     path = tmp_path / "app.sqlite"
     init_db(path)
