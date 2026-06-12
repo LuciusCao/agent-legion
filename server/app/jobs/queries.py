@@ -4,13 +4,17 @@ import hashlib
 import json
 import re
 import sqlite3
-from collections.abc import Iterator, Sequence
+from collections.abc import Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.schema import init_db
+from server.app.jobs.executor_configuration import (
+    get_workspace_executor_configuration,
+    replace_workspace_executor_configuration,
+)
 
 
 def _safe_identifier(value: str, fallback: str) -> str:
@@ -743,3 +747,21 @@ class JobQueries:
                 (workspace_id, agent_id),
             ).fetchone()
         return dict(row)
+
+    def get_workspace_executor_configuration(
+        self, workspace_id: str
+    ) -> dict[str, list[dict[str, Any]]]:
+        with self.connect() as conn:
+            return get_workspace_executor_configuration(conn, workspace_id)
+
+    def replace_workspace_executor_configuration(
+        self,
+        workspace_id: str,
+        allocations: Sequence[Mapping[str, Any]],
+        bindings: Sequence[Mapping[str, Any]],
+        node_limits: Sequence[Mapping[str, Any]],
+    ) -> None:
+        with self.connect() as conn:
+            replace_workspace_executor_configuration(
+                conn, workspace_id, allocations, bindings, node_limits
+            )
