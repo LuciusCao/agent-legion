@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
 from server.app.agents import AgentStatusManager
+from server.app.executors.registry import ExecutorRegistry
 from server.app.pipeline.runners import RunnerPool
 from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.worker_thread import WorkerThread
@@ -11,12 +12,15 @@ def test_lifespan_with_start_worker_initializes_worker_threads(tmp_path, monkeyp
     from server.app import main
 
     calls = []
+    received_registry = None
 
     def patched_worker_start(self):
         calls.append("worker")
 
     def patched_pipeline_start(self):
         calls.append("pipeline")
+        nonlocal received_registry
+        received_registry = self.executor_registry
 
     monkeypatch.setattr(WorkerThread, "start", patched_worker_start)
     monkeypatch.setattr(PipelineWorkerThread, "start", patched_pipeline_start)
@@ -43,6 +47,8 @@ def test_lifespan_with_start_worker_initializes_worker_threads(tmp_path, monkeyp
 
     assert "worker" in calls
     assert "pipeline" in calls
+    assert isinstance(app.state.executor_registry, ExecutorRegistry)
+    assert app.state.executor_registry is received_registry
 
 
 def test_spa_catch_all_serves_static_files_and_fallback(tmp_path, monkeypatch):
