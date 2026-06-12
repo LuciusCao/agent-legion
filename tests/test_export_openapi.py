@@ -18,7 +18,16 @@ def test_build_openapi_schema_is_deterministic_and_portable(tmp_path):
     assert "/{path}" not in paths
     assert "/{path:path}" not in paths
     assert "/api/workspaces/{workspace_id}/settings" in paths
-    assert "WorkspaceSettingsResponse" in first["components"]["schemas"]
+    schemas = first["components"]["schemas"]
+    assert "WorkspaceSettingsResponse" in schemas
+    assert "ExecutorCatalogResponse" in schemas
+    assert "WorkspaceExecutorConfigurationResponse" in schemas
+    workspace_config = schemas["WorkspaceConfigurationRequest"]
+    workspace_config_props = workspace_config.get("properties", {})
+    assert "executor_allocations" in workspace_config_props
+    assert "node_bindings" in workspace_config_props
+    assert "node_limits" in workspace_config_props
+    assert "agents" not in workspace_config_props
     assert str(tmp_path) not in json.dumps(first, sort_keys=True)
 
 
