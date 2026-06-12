@@ -67,6 +67,12 @@ def _apply(conn: sqlite3.Connection) -> None:
     conn.execute("drop table if exists workspace_agent_assignments")
     conn.execute("drop table if exists workspace_executor_bootstrap_state")
     _drop_pipeline_config_json(conn)
+    # _drop_pipeline_config_json restores pragma foreign_keys=ON in its finally block,
+    # so the explicit FK check runs with enforcement enabled.
+    violations = conn.execute("pragma foreign_key_check").fetchall()
+    if violations:
+        details = "; ".join(str(row) for row in violations)
+        raise RuntimeError(f"foreign key check failed for V005: {details}")
 
 
 MIGRATION = Migration(
