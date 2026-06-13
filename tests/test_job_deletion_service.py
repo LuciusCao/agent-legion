@@ -7,7 +7,7 @@ from typing import Any
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
-from server.app.services.job_deletion import JobDeletionService
+from server.app.services.job_deletion import JobDeleteResult, JobDeletionService
 from server.app.settings import Settings
 
 
@@ -95,7 +95,7 @@ def test_delete_rejects_active_lease_despite_stale_ui(job_db: JobQueries, tmp_pa
     # Stale UI still shows queued, but an active non-expired lease exists.
     _insert_active_lease(job_db, job["id"])
 
-    result = service.delete(job["workspace_id"], job["id"])
+    result: JobDeleteResult = service.delete(job["workspace_id"], job["id"])
 
     assert result["job_id"] == job["id"]
     assert result["operation"] == "delete"
@@ -116,7 +116,7 @@ def test_delete_succeeds_for_inactive_job(job_db: JobQueries, tmp_path: Path) ->
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "artifact.json").write_text("{}", encoding="utf-8")
 
-    result = service.delete(job["workspace_id"], job["id"])
+    result: JobDeleteResult = service.delete(job["workspace_id"], job["id"])
 
     assert result["job_id"] == job["id"]
     assert result["operation"] == "delete"
@@ -132,7 +132,7 @@ def test_delete_rejects_wrong_workspace(job_db: JobQueries, tmp_path: Path) -> N
 
     job = _create_job(job_db, "ws3", "Q003", status="completed")
 
-    result = service.delete("other-workspace", job["id"])
+    result: JobDeleteResult = service.delete("other-workspace", job["id"])
 
     assert result["job_id"] == job["id"]
     assert result["operation"] == "delete"
@@ -145,7 +145,7 @@ def test_delete_rejects_missing_job(job_db: JobQueries, tmp_path: Path) -> None:
     lease_repo = ExecutorLeaseRepository(job_db.path)
     service = JobDeletionService(job_db, lease_repo, settings)
 
-    result = service.delete("ws-missing", "missing-job-id")
+    result: JobDeleteResult = service.delete("ws-missing", "missing-job-id")
 
     assert result["job_id"] == "missing-job-id"
     assert result["operation"] == "delete"
@@ -163,7 +163,7 @@ def test_batch_delete_returns_ordered_results(job_db: JobQueries, tmp_path: Path
     job_c = _create_job(job_db, "ws5", "Q006", status="completed")
     _insert_active_lease(job_db, job_b["id"])
 
-    results = service.batch_delete(
+    results: list[JobDeleteResult] = service.batch_delete(
         job_a["workspace_id"], [job_a["id"], job_b["id"], job_c["id"], "missing"]
     )
 

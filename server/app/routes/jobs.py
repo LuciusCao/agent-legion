@@ -72,7 +72,7 @@ def create_jobs_router(
         require_pipelines_enabled(settings)
         results = job_deletion.batch_delete(workspace_id, payload.job_ids)
         return BatchJobMutationResponse(
-            results=[JobMutationResultResponse(**result) for result in results]
+            results=[JobMutationResultResponse.model_validate(result) for result in results]
         )
 
     @router.get("/jobs", response_model=JobsResponse)

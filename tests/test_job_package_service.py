@@ -4,7 +4,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.services.job_packages import JobPackageService
+from server.app.services.job_packages import JobPackageResult, JobPackageService
 from server.app.settings import Settings
 
 
@@ -72,7 +72,7 @@ def test_package_returns_ordered_results_with_reason_codes(
         incomplete["id"],
         completed_b["id"],
     ]
-    response = service.package(workspace_id, job_ids)
+    response: JobPackageResult = service.package(workspace_id, job_ids)
 
     results = response["results"]
     assert [r["job_id"] for r in results] == job_ids
@@ -112,7 +112,7 @@ def test_package_requires_at_least_one_eligible_job(job_db: JobQueries, tmp_path
     incomplete = _create_job(job_db, workspace_id, "Q200", status="queued")
     _write_artifact(incomplete)
 
-    response = service.package(workspace_id, [incomplete["id"]])
+    response: JobPackageResult = service.package(workspace_id, [incomplete["id"]])
 
     assert response["results"][0]["status"] == "failed"
     assert response["results"][0]["reason_code"] == "not_completed"
