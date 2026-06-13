@@ -3,14 +3,19 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from server.app.db.migrations.report import MigrationIssue, MigrationReport, raise_blocked
 from server.app.db.migrations.v005_remove_legacy_executor_paths import (
     MIGRATION as V005_MIGRATION,
 )
+from server.app.executors.backup import backup_sqlite_connection
 from server.app.executors.config import ExecutorConfig
+from server.app.executors.legacy_configuration import (
+    ExistingConfiguration,
+    collect_existing_configuration,
+)
 from server.app.jobs import executor_configuration
 from server.app.pipelines.definition import PipelineDefinition
 
@@ -22,14 +27,16 @@ _MIGRATION_VERSION = 5
 _MIGRATION_NAME = "remove_legacy_executor_paths"
 
 
-def _decode_json_object(value: Any) -> dict[str, Any]:
+def _decode_json_object(value: Any) -> tuple[dict[str, Any], str | None]:
     if not value:
-        return {}
+        return {}, None
     try:
         loaded = json.loads(str(value))
-    except json.JSONDecodeError:
-        return {}
-    return loaded if isinstance(loaded, dict) else {}
+    except json.JSONDecodeError as exc:
+        return {}, f"invalid JSON at character {exc.pos}"
+    if not isinstance(loaded, dict):
+        return {}, f"expected a JSON object, got {type(loaded).__name__}"
+    return loaded, None
 
 
 def _is_positive_int(value: Any) -> bool:
@@ -72,9 +79,13 @@ def _collect_legacy_data(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
             "select id, default_pipeline_key, pipeline_config_json from workspaces"
         ).fetchall()
         for row in rows:
+            pipeline_config, pipeline_config_error = _decode_json_object(
+                row["pipeline_config_json"]
+            )
             workspaces[row["id"]] = {
                 "default_pipeline_key": row["default_pipeline_key"],
-                "pipeline_config": _decode_json_object(row["pipeline_config_json"]),
+                "pipeline_config": pipeline_config,
+                "pipeline_config_error": pipeline_config_error,
                 "agent_assignments": [],
                 "authoritative": False,
             }
@@ -105,36 +116,6 @@ def _collect_legacy_data(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     return workspaces
 
 
-@dataclass
-class _ExistingConfiguration:
-    allocations: set[str] = field(default_factory=set)
-    bindings: set[tuple[str, str]] = field(default_factory=set)
-    node_limits: set[tuple[str, str]] = field(default_factory=set)
-
-
-def _collect_existing_configuration(
-    conn: sqlite3.Connection, workspace_id: str
-) -> _ExistingConfiguration:
-    """Return existing allocation executor IDs, binding (pipeline_key,node_key) tuples, and node limit keys."""
-    result = _ExistingConfiguration()
-    for row in conn.execute(
-        "select executor_id from workspace_executor_allocations where workspace_id = ?",
-        (workspace_id,),
-    ).fetchall():
-        result.allocations.add(row["executor_id"])
-    for row in conn.execute(
-        "select pipeline_key, node_key from workspace_node_bindings where workspace_id = ?",
-        (workspace_id,),
-    ).fetchall():
-        result.bindings.add((row["pipeline_key"], row["node_key"]))
-    for row in conn.execute(
-        "select pipeline_key, node_key from workspace_node_limits where workspace_id = ?",
-        (workspace_id,),
-    ).fetchall():
-        result.node_limits.add((row["pipeline_key"], row["node_key"]))
-    return result
-
-
 def _preflight_workspace(
     workspace_id: str,
     workspace: dict[str, Any],
@@ -144,6 +125,18 @@ def _preflight_workspace(
     issues: list[MigrationIssue] = []
 
     if workspace["authoritative"]:
+        return issues
+
+    pipeline_config_error = workspace.get("pipeline_config_error")
+    if pipeline_config_error:
+        issues.append(
+            MigrationIssue(
+                table="workspaces",
+                row_key=workspace_id,
+                constraint="pipeline_config_json",
+                message=str(pipeline_config_error),
+            )
+        )
         return issues
 
     pipeline_key = workspace["default_pipeline_key"]
@@ -266,7 +259,7 @@ def _materialize_workspace(
     workspace: dict[str, Any],
     definition: PipelineDefinition,
     executors: dict[str, ExecutorConfig],
-    existing: _ExistingConfiguration,
+    existing: ExistingConfiguration,
 ) -> None:
     if workspace["authoritative"]:
         return
@@ -356,6 +349,7 @@ def finalize_legacy_executor_schema(
     executors: dict[str, ExecutorConfig],
     *,
     dry_run: bool = False,
+    backup_path: Path | None = None,
 ) -> MigrationReport:
     """One-time finalizer that translates legacy Workspace Agent/Pipeline config into Executor allocations.
 
@@ -394,11 +388,14 @@ def finalize_legacy_executor_schema(
             issues=(),
         )
 
+    if backup_path is not None:
+        backup_sqlite_connection(conn, backup_path)
+
     for workspace_id, workspace in workspaces.items():
         definition = definitions_by_key.get(workspace["default_pipeline_key"])
         if definition is None:
             continue
-        existing = _collect_existing_configuration(conn, workspace_id)
+        existing = collect_existing_configuration(conn, workspace_id)
         _materialize_workspace(conn, workspace_id, workspace, definition, executors, existing)
 
     V005_MIGRATION.apply(conn)

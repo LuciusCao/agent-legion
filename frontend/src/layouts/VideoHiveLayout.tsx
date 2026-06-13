@@ -1,6 +1,7 @@
 import { useNavigate, Outlet } from 'react-router-dom'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
+import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 
 export default function VideoHiveLayout() {
   const navigate = useNavigate()
@@ -14,6 +15,7 @@ export default function VideoHiveLayout() {
           scrolled={scrolled}
           rightActions={
             <>
+              <AgentStatusIndicator />
               <md-icon-button
                 aria-label="设置"
                 onClick={() => navigate('/video-hive/settings')}

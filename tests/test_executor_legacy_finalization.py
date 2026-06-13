@@ -1,10 +1,12 @@
 import json
+import sqlite3
 from pathlib import Path
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
 
+from server.app.db.migrations.errors import MigrationError
 from server.app.db.migrations.report import MigrationBlockedError
 from server.app.executors.config import (
     ExecutorConfig,
@@ -317,6 +319,34 @@ def test_finalizer_blocks_on_invalid_legacy_limit(queries: JobQueries) -> None:
     assert "pipeline_config_json.local" in issues
 
 
+@pytest.mark.parametrize("raw_value", ["{broken", "[]", "null"])
+def test_finalizer_blocks_on_invalid_pipeline_config_json(
+    queries: JobQueries, raw_value: str
+) -> None:
+    workspace_id = queries.create_workspace(
+        name=f"Invalid JSON {raw_value}",
+        default_pipeline_key="reading_analysis",
+    )["id"]
+    with queries.connect() as conn:
+        conn.execute(
+            "update workspaces set pipeline_config_json = ? where id = ?",
+            (raw_value, workspace_id),
+        )
+
+    with pytest.raises(MigrationBlockedError) as exc_info, queries.connect() as conn:
+        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+
+    assert any(
+        issue.row_key == workspace_id and issue.constraint == "pipeline_config_json"
+        for issue in exc_info.value.report.issues
+    )
+    with queries._connect_read() as conn:
+        stored = conn.execute(
+            "select pipeline_config_json from workspaces where id = ?", (workspace_id,)
+        ).fetchone()[0]
+    assert stored == raw_value
+
+
 def test_finalizer_blocks_on_missing_pipeline_definition(queries: JobQueries) -> None:
     queries.create_workspace(
         name="Missing Pipeline",
@@ -397,6 +427,39 @@ def test_finalizer_applies_v005_and_removes_pipeline_config_json(queries: JobQue
     assert 5 in versions
 
 
+def test_v005_rolls_back_when_drop_column_is_not_supported(queries: JobQueries) -> None:
+    workspace_id = queries.create_workspace(
+        name="Unsupported SQLite",
+        default_pipeline_key="reading_analysis",
+    )["id"]
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workspace_executor_bootstrap_state(workspace_id) values (?)",
+            (workspace_id,),
+        )
+
+    with pytest.raises(MigrationError), queries.connect() as conn:
+        conn.set_authorizer(
+            lambda action, *_args: (
+                sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_ALTER_TABLE else sqlite3.SQLITE_OK
+            )
+        )
+        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+
+    assert _table_exists(queries, "workspace_agent_assignments")
+    assert _table_exists(queries, "workspace_executor_bootstrap_state")
+    with queries._connect_read() as conn:
+        columns = {row["name"] for row in conn.execute("pragma table_info(workspaces)")}
+        version = conn.execute("select 1 from schema_migrations where version = 5").fetchone()
+        allocation = conn.execute(
+            "select 1 from workspace_executor_allocations where workspace_id = ?",
+            (workspace_id,),
+        ).fetchone()
+    assert "pipeline_config_json" in columns
+    assert version is None
+    assert allocation is None
+
+
 def _table_exists(queries: JobQueries, table: str) -> bool:
     with queries._connect_read() as conn:
         row = conn.execute(
@@ -460,6 +523,8 @@ def test_app_startup_materializes_executor_configuration_without_worker(tmp_path
         "local-default",
         "pi-default",
     }
+    backups = list(tmp_path.glob("video_hive-before-v005-*.sqlite"))
+    assert len(backups) == 1
 
 
 def test_app_startup_materialization_is_idempotent(tmp_path: Path) -> None:

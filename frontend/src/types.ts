@@ -1,3 +1,7 @@
+import type { components } from './generated/api'
+
+type ApiSchemas = components['schemas']
+
 export type ContentType = 'knowledge' | 'question'
 export type DetailTab = 'nodes' | 'subtitles' | 'logs' | 'metadata'
 export type RunToMode = 'continue' | 'rerun'
@@ -188,48 +192,11 @@ export type WorkspaceSettings = {
   cmsToken?: string
 }
 
-export type PipelineNodeRecord = {
-  key: string
-  label: string
-  capability: string
-  runner: 'local' | 'agent'
-  after: string[]
-  inputs: string[]
-  outputs: string[]
-}
-
-export type PipelineIntakeModeRecord = {
-  key: string
-  label: string
-  input_field: string
-  resource: string
-}
-
-export type PipelineDefinitionRecord = {
-  key: string
-  label: string
-  concurrency: {
-    local: number
-    agent: number
-    nodes: Record<string, number>
-  }
-  intake?: {
-    modes: PipelineIntakeModeRecord[]
-  }
-  nodes: PipelineNodeRecord[]
-}
-
-export type PipelineResponse = {
-  pipeline: PipelineDefinitionRecord
-}
-
-export type PipelinesListResponse = {
-  pipelines: Array<{
-    key: string
-    label: string
-    concurrency: { local: number; agent: number; nodes: Record<string, number> }
-  }>
-}
+export type PipelineNodeRecord = ApiSchemas['PipelineNodeResponse']
+export type PipelineIntakeModeRecord = ApiSchemas['PipelineIntakeModeResponse']
+export type PipelineDefinitionRecord = ApiSchemas['PipelineDefinitionResponse']
+export type PipelineResponse = ApiSchemas['PipelineResponse']
+export type PipelinesListResponse = ApiSchemas['PipelinesListResponse']
 
 export type JobBatchResponse = {
   batch: Record<string, unknown>

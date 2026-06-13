@@ -88,6 +88,27 @@ def test_check_returns_clean_report_without_writing(tmp_path: Path) -> None:
     assert not _migration_version(db_path, 5)
 
 
+def test_check_does_not_apply_pending_structural_migrations(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    db_path = _legacy_database(data_dir)
+    import sqlite3
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute("delete from schema_migrations where version in (3, 4)")
+        before = conn.execute(
+            "select version, name from schema_migrations order by version"
+        ).fetchall()
+
+    result = _run_cli(["--check"], data_dir)
+
+    assert result.returncode == 0, result.stderr
+    with sqlite3.connect(str(db_path)) as conn:
+        after = conn.execute(
+            "select version, name from schema_migrations order by version"
+        ).fetchall()
+    assert after == before
+
+
 def test_apply_creates_backup_and_finalizes(tmp_path: Path) -> None:
     data_dir = tmp_path / "data"
     db_path = _legacy_database(data_dir)
@@ -103,6 +124,30 @@ def test_apply_creates_backup_and_finalizes(tmp_path: Path) -> None:
     assert not _table_exists(db_path, "workspace_agent_assignments")
     assert not _table_exists(db_path, "workspace_executor_bootstrap_state")
     assert _migration_version(db_path, 5)
+
+
+def test_apply_backup_contains_committed_wal_data(tmp_path: Path) -> None:
+    data_dir = tmp_path / "data"
+    db_path = _legacy_database(data_dir)
+    import sqlite3
+
+    writer = sqlite3.connect(str(db_path))
+    try:
+        writer.execute("pragma journal_mode=WAL")
+        writer.execute("pragma wal_autocheckpoint=0")
+        writer.execute("update workspaces set name = 'WAL Workspace' where id != 'default'")
+        writer.commit()
+
+        result = _run_cli(["--apply"], data_dir)
+        assert result.returncode == 0, result.stderr
+        backup = next(data_dir.glob("video_hive-before-v005-*.sqlite"))
+        with sqlite3.connect(str(backup)) as backup_conn:
+            stored = backup_conn.execute(
+                "select name from workspaces where id != 'default'"
+            ).fetchone()[0]
+        assert stored == "WAL Workspace"
+    finally:
+        writer.close()
 
 
 def test_check_is_idempotent_after_finalization(tmp_path: Path) -> None:

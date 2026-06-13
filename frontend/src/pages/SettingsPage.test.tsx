@@ -137,7 +137,6 @@ describe('SettingsPage', () => {
       pipelineDefinition: {
         key: 'question_content',
         label: '题目内容生成',
-        concurrency: { local: 8, agent: 2, nodes: {} },
         intake: {
           modes: [
             {
@@ -153,7 +152,6 @@ describe('SettingsPage', () => {
             key: 'fetch_questions',
             label: '获取题目',
             capability: 'fetch_questions',
-            runner: 'local',
             after: [],
             inputs: [],
             outputs: [],
@@ -337,7 +335,6 @@ describe('SettingsPage', () => {
       pipelineDefinition: {
         key: 'question_content',
         label: '题目内容生成',
-        concurrency: { local: 8, agent: 2, nodes: {} },
         intake: {
           modes: [
             {
@@ -384,14 +381,12 @@ describe('SettingsPage', () => {
       pipelineDefinition: {
         key: 'question_content',
         label: '题目内容生成',
-        concurrency: { local: 8, agent: 2, nodes: {} },
         intake: { modes: [] },
         nodes: [
           {
             key: 'fetch_questions',
             label: '获取题目',
             capability: 'fetch_questions',
-            runner: 'local',
             after: [],
             inputs: [],
             outputs: [],
@@ -464,14 +459,12 @@ describe('SettingsPage', () => {
       pipelineDefinition: {
         key: 'reading_analysis',
         label: '阅读分析',
-        concurrency: { local: 4, agent: 2, nodes: {} },
         intake: { modes: [] },
         nodes: [
           {
             key: 'fetch_questions',
             label: '获取题目',
             capability: 'fetch_questions',
-            runner: 'local' as const,
             after: [],
             inputs: [],
             outputs: ['questions.json'],
@@ -628,14 +621,12 @@ describe('SettingsPage', () => {
       pipelineDefinition: {
         key: 'reading_analysis',
         label: '阅读分析',
-        concurrency: { local: 4, agent: 2, nodes: {} },
         intake: { modes: [] },
         nodes: [
           {
             key: 'fetch_questions',
             label: '获取题目',
             capability: 'fetch_questions',
-            runner: 'local' as const,
             after: [],
             inputs: [],
             outputs: ['questions.json'],
