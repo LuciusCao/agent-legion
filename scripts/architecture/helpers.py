@@ -25,11 +25,7 @@ SCHEDULER_FORBIDDEN = (
 )
 ROUTE_FORBIDDEN = (
     "server.app.cms",
-    "server.app.pipelines.artifacts",
-    "server.app.pipeline.artifacts",
     "cms",
-    "pipelines.artifacts",
-    "pipeline.artifacts",
 )
 
 

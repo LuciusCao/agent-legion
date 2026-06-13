@@ -1,96 +1,5 @@
 {
   "_comment": "Architecture budgets are measured in source lines, not bytes. Lowering a budget requires splitting the module first.",
-  "route_exemptions": [
-    "server/app/routes/artifacts.py:artifacts",
-    "server/app/routes/common.py:worker_tick",
-    "server/app/routes/packages.py:list_packages",
-    "server/app/routes/packages.py:delete_package",
-    "server/app/routes/packages.py:update_package",
-    "server/app/routes/packages.py:download_package",
-    "server/app/routes/packages.py:list_workspace_packages",
-    "server/app/routes/packages.py:download_workspace_package",
-    "server/app/routes/videos.py:videos_events",
-    "server/app/routes/videos.py:video_detail_events",
-    "server/app/routes/videos.py:add_videos",
-    "server/app/routes/videos.py:list_videos",
-    "server/app/routes/videos.py:get_video",
-    "server/app/routes/videos.py:rerun_video",
-    "server/app/routes/videos.py:delete_video",
-    "server/app/routes/videos.py:logs",
-    "server/app/routes/videos.py:phase_run_session",
-    "server/app/routes/videos.py:video_file"
-  ],
-  "route_exemption_reasons": {
-    "server/app/routes/artifacts.py:artifacts": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/common.py:worker_tick": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/packages.py:list_packages": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/packages.py:delete_package": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/packages.py:update_package": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/packages.py:download_package": "File download response",
-    "server/app/routes/packages.py:list_workspace_packages": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/packages.py:download_workspace_package": "File download response",
-    "server/app/routes/videos.py:videos_events": "SSE streaming response",
-    "server/app/routes/videos.py:video_detail_events": "SSE streaming response",
-    "server/app/routes/videos.py:add_videos": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/videos.py:list_videos": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/videos.py:get_video": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/videos.py:rerun_video": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/videos.py:delete_video": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/videos.py:logs": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/videos.py:phase_run_session": "Legacy JSON route pending Phase 2 transport models",
-    "server/app/routes/videos.py:video_file": "File download / redirect response"
-  },
-  "route_annotation_exemptions": [
-    "server/app/routes/agents.py:list_agents",
-    "server/app/routes/artifacts.py:artifacts",
-    "server/app/routes/packages.py:list_packages",
-    "server/app/routes/packages.py:update_package",
-    "server/app/routes/packages.py:list_workspace_packages",
-    "server/app/routes/videos.py:add_videos",
-    "server/app/routes/videos.py:list_videos",
-    "server/app/routes/videos.py:get_video",
-    "server/app/routes/videos.py:batch_delete_videos",
-    "server/app/routes/videos.py:batch_rerun_videos",
-    "server/app/routes/videos.py:batch_run_to_videos",
-    "server/app/routes/videos.py:run_video_to_phase",
-    "server/app/routes/videos.py:rerun_video",
-    "server/app/routes/videos.py:delete_video"
-  ],
-  "route_annotation_exemption_reasons": {
-    "server/app/routes/agents.py:list_agents": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/artifacts.py:artifacts": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/packages.py:list_packages": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/packages.py:update_package": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/packages.py:list_workspace_packages": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/videos.py:add_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/videos.py:list_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/videos.py:get_video": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/videos.py:batch_delete_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/videos.py:batch_rerun_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/videos.py:batch_run_to_videos": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/videos.py:run_video_to_phase": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/videos.py:rerun_video": "Broad dict[str, Any] annotation pending Phase 2 transport models",
-    "server/app/routes/videos.py:delete_video": "Broad dict[str, Any] annotation pending Phase 2 transport models"
-  },
-  "route_import_baselines": {
-    "server/app/routes/questions.py": [
-      "server.app.cms.client",
-      "server.app.cms.question"
-    ]
-  },
-  "route_import_baseline_reasons": {
-    "server/app/routes/questions.py": "Legacy Workspace route importing CMS helpers"
-  },
-  "scheduler_import_baselines": {},
-  "scheduler_import_baseline_reasons": {},
-  "scheduler_threadpool_baselines": {
-    "server/app/pipeline_worker_thread.py": {
-      "self._pools[executor_id]": 1
-    }
-  },
-  "scheduler_threadpool_baseline_reasons": {
-    "server/app/pipeline_worker_thread.py": "Shared per-Executor pool created once from registry definitions"
-  },
   "files": {
     "server/app/routes/jobs.py": 250,
     "server/app/routes/job_contracts.py": 167,
@@ -102,9 +11,10 @@
     "server/app/routes/workspace_configuration.py": 42,
     "server/app/routes/workspace_executors.py": 43,
     "server/app/routes/workspace_settings.py": 57,
-    "server/app/pipelines/definition.py": 180,
     "server/app/routes/workspace_runs.py": 37,
     "server/app/routes/workspaces.py": 73,
+    "server/app/pipelines/definition.py": 180,
+    "server/app/pipelines/executor.py": 218,
     "server/app/services/job_errors.py": 18,
     "server/app/services/job_intake.py": 248,
     "server/app/services/job_logs.py": 99,
@@ -136,7 +46,6 @@
     "server/app/db/migrations/v001_executor_core.py": 83,
     "server/app/db/migrations/v002_executor_bootstrap_state.py": 18,
     "server/app/pipeline_worker_thread.py": 395,
-    "server/app/pipelines/executor.py": 218,
     "server/app/pipelines/scheduler.py": 78,
     "frontend/src/api.ts": 228,
     "frontend/src/executorApi.ts": 13,
@@ -149,15 +58,15 @@
     "scripts/architecture/main.py": 15,
     "scripts/architecture/phase4.py": 151,
     "scripts/architecture/pipeline.py": 49,
-    "scripts/architecture/repository.py": 220,
+    "scripts/architecture/repository.py": 280,
     "scripts/architecture/phase5.py": 77,
     "scripts/architecture/phase6.py": 350,
-    "tests/test_architecture_baselines.py": 217,
+    "tests/test_architecture_baselines.py": 250,
     "tests/test_architecture_phase6.py": 300,
     "tests/test_workspace_job_control_flow.py": 450,
     "tests/test_architecture_executor_governance.py": 110,
     "tests/test_architecture_phase4.py": 103,
-    "tests/test_check_architecture.py": 457,
+    "tests/test_check_architecture.py": 520,
     "tests/test_executor_phase5_inventory.py": 81,
     "tests/test_executor_recovery.py": 366
   },

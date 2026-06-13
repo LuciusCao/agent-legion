@@ -5,6 +5,8 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from typing import Any
 
+import yaml
+
 from server.app.main import create_app
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -60,11 +62,13 @@ def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
         for path, definition in schema.get("paths", {}).items()
         if path.startswith("/api")
     }
-    architecture_config = json.loads(
-        (PROJECT_ROOT / "config/architecture-budgets.json").read_text(encoding="utf-8")
-    )
+    exemptions = yaml.safe_load(
+        (PROJECT_ROOT / "config/architecture-exemptions.yaml").read_text(encoding="utf-8")
+    ) or {"exemptions": []}
     exempt_operation_names = {
-        key.rsplit(":", 1)[-1] for key in architecture_config.get("route_exemptions", [])
+        ex["path"].rsplit(":", 1)[-1]
+        for ex in exemptions.get("exemptions", [])
+        if ex.get("check") == "architecture.route_response_model"
     }
     validate_response_contracts(schema, exempt_operation_names)
     return schema

@@ -9,6 +9,14 @@ def write(path: Path, content: str) -> None:
     path.write_text(content, encoding="utf-8")
 
 
+def write_exemptions(path: Path, exemptions: list[dict]) -> None:
+    import yaml
+
+    exemption_path = path / "config/architecture-exemptions.yaml"
+    exemption_path.parent.mkdir(parents=True, exist_ok=True)
+    exemption_path.write_text(yaml.safe_dump({"exemptions": exemptions}), encoding="utf-8")
+
+
 def test_rejects_new_route_without_response_model(tmp_path):
     write(
         tmp_path / "server/app/routes/example.py",
@@ -81,8 +89,19 @@ def test_accepts_scheduler_legacy_executor_assignment(tmp_path):
     )
     write(
         tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": [], "scheduler_threadpool_baselines": '
-        '{"server/app/pipelines/scheduler.py": {"self._local_executor": 1}}, "files": {}}',
+        '{"files": {}}',
+    )
+    write_exemptions(
+        tmp_path,
+        [
+            {
+                "check": "architecture.scheduler_threadpool",
+                "path": "server/app/pipelines/scheduler.py:self._local_executor",
+                "reason": "Single shared executor pool bounded by capacity.",
+                "owner": "test",
+                "remove_when": "issues/open/032-P2-event-driven-worker.md",
+            }
+        ],
     )
 
     errors = check_repository(tmp_path)
@@ -102,17 +121,43 @@ def test_route_annotation_exemptions(tmp_path):
     )
     write(
         tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": ["server/app/routes/example.py:example"], "files": {}}',
+        '{"files": {}}',
+    )
+    write_exemptions(
+        tmp_path,
+        [
+            {
+                "check": "architecture.route_response_model",
+                "path": "server/app/routes/example.py:example",
+                "reason": "Dynamic response pending typed models.",
+                "owner": "test",
+                "remove_when": "issues/open/036-P3-type-sync-automation.md",
+            }
+        ],
     )
 
     errors = check_repository(tmp_path)
 
     assert any("return annotation may not contain Any" in error for error in errors)
 
-    write(
-        tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": ["server/app/routes/example.py:example"], '
-        '"route_annotation_exemptions": ["server/app/routes/example.py:example"], "files": {}}',
+    write_exemptions(
+        tmp_path,
+        [
+            {
+                "check": "architecture.route_response_model",
+                "path": "server/app/routes/example.py:example",
+                "reason": "Dynamic response pending typed models.",
+                "owner": "test",
+                "remove_when": "issues/open/036-P3-type-sync-automation.md",
+            },
+            {
+                "check": "architecture.route_annotation_any",
+                "path": "server/app/routes/example.py:example",
+                "reason": "Dynamic response pending typed models.",
+                "owner": "test",
+                "remove_when": "issues/open/036-P3-type-sync-automation.md",
+            },
+        ],
     )
 
     errors = check_repository(tmp_path)
@@ -149,8 +194,19 @@ def test_accepts_scheduler_legacy_executor_assignment_with_annotation(tmp_path):
     )
     write(
         tmp_path / "config/architecture-budgets.json",
-        '{"route_exemptions": [], "scheduler_threadpool_baselines": '
-        '{"server/app/pipelines/scheduler.py": {"self._local_executor": 1}}, "files": {}}',
+        '{"files": {}}',
+    )
+    write_exemptions(
+        tmp_path,
+        [
+            {
+                "check": "architecture.scheduler_threadpool",
+                "path": "server/app/pipelines/scheduler.py:self._local_executor",
+                "reason": "Single shared executor pool bounded by capacity.",
+                "owner": "test",
+                "remove_when": "issues/open/032-P2-event-driven-worker.md",
+            }
+        ],
     )
 
     errors = check_repository(tmp_path)
