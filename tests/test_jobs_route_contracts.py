@@ -53,8 +53,10 @@ EXPECTED_OPERATIONS = {
 
 def _response_component(schema: dict[str, Any]) -> str:
     if "$ref" in schema:
-        return schema["$ref"].rsplit("/", 1)[-1]
-    return schema.get("title", "")
+        ref: str = schema["$ref"]
+        return ref.rsplit("/", 1)[-1]
+    title: str = schema.get("title", "")
+    return title
 
 
 def test_workspace_job_route_manifest(tmp_path: Path):
