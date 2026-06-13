@@ -147,27 +147,27 @@ def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
 
     time.sleep(1.1)
     db.set_job_execution_target(job["id"], "node_b")
-    job = db.get_job(job["id"])
-    assert job is not None
-    assert job["updated_at"] > original_updated_at
+    updated_job = db.get_job(job["id"])
+    assert updated_job is not None
+    assert updated_job["updated_at"] > original_updated_at
 
     time.sleep(1.1)
     db.clear_job_execution_target(job["id"])
-    job = db.get_job(job["id"])
-    assert job is not None
-    assert job["updated_at"] > original_updated_at
+    updated_job = db.get_job(job["id"])
+    assert updated_job is not None
+    assert updated_job["updated_at"] > original_updated_at
 
     time.sleep(1.1)
     db.pause_job(job["id"], "testing")
-    job = db.get_job(job["id"])
-    assert job is not None
-    assert job["updated_at"] > original_updated_at
+    updated_job = db.get_job(job["id"])
+    assert updated_job is not None
+    assert updated_job["updated_at"] > original_updated_at
 
     time.sleep(1.1)
     db.resume_job(job["id"])
-    job = db.get_job(job["id"])
-    assert job is not None
-    assert job["updated_at"] > original_updated_at
+    updated_job = db.get_job(job["id"])
+    assert updated_job is not None
+    assert updated_job["updated_at"] > original_updated_at
 
 
 def test_get_job_execution_control_returns_none_for_missing_job(tmp_path: Path) -> None:
