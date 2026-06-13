@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import cast
+from typing import Any, cast
 
 from fastapi import APIRouter, HTTPException
 
@@ -11,8 +11,11 @@ from server.app.routes.job_http import raise_job_http_error, require_pipelines_e
 from server.app.routes.job_operation_contracts import (
     BatchJobIdsRequest,
     BatchJobMutationResponse,
+    BatchRunToRequest,
+    ContinueJobRequest,
     JobBatchRerunRequest,
     JobMutationResultResponse,
+    RunToRequest,
 )
 from server.app.routes.job_view_contracts import (
     JobDetailResponse,
@@ -21,6 +24,7 @@ from server.app.routes.job_view_contracts import (
 )
 from server.app.services.job_deletion import JobDeletionService
 from server.app.services.job_errors import JobServiceError
+from server.app.services.job_execution import JobExecutionService
 from server.app.services.job_queries import JobQueryService
 from server.app.services.job_rerun import JobRerunService
 from server.app.settings import Settings
@@ -30,6 +34,7 @@ def create_jobs_router(
     job_queries: JobQueryService,
     job_rerun: JobRerunService,
     job_deletion: JobDeletionService,
+    job_execution: JobExecutionService,
     settings: Settings,
 ) -> APIRouter:
     router = APIRouter()
@@ -131,5 +136,71 @@ def create_jobs_router(
                 detail=result.get("message") or result.get("reason_code") or "Delete failed",
             )
         return DeleteJobResponse(deleted=job_id)
+
+    def _raise_for_run_to_result(result: dict[str, Any]) -> None:
+        if result["status"] == "succeeded":
+            return
+        status_code = 400
+        reason_code = result.get("reason_code")
+        if reason_code in ("not_found", "node_not_found"):
+            status_code = 404
+        raise HTTPException(
+            status_code=status_code,
+            detail=result.get("message") or reason_code or "Run-to failed",
+        )
+
+    @router.post("/jobs/{job_id}/run-to", response_model=JobMutationResultResponse)
+    def run_to(job_id: str, payload: RunToRequest) -> JobMutationResultResponse:
+        require_pipelines_enabled(settings)
+        job = job_queries.job_db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        result = job_execution.run_to(
+            job["workspace_id"],
+            job_id,
+            payload.target_node_key,
+            payload.start_node_key,
+        )
+        _raise_for_run_to_result(result)
+        return JobMutationResultResponse.model_validate(result)
+
+    @router.post("/jobs/{job_id}/continue", response_model=JobMutationResultResponse)
+    def continue_job(
+        job_id: str,
+        payload: ContinueJobRequest,
+    ) -> JobMutationResultResponse:
+        require_pipelines_enabled(settings)
+        job = job_queries.job_db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        result = job_execution.continue_job(job["workspace_id"], job_id)
+        if result["status"] != "succeeded":
+            status_code = 400
+            if result.get("reason_code") == "not_found":
+                status_code = 404
+            raise HTTPException(
+                status_code=status_code,
+                detail=result.get("message") or result.get("reason_code") or "Continue failed",
+            )
+        return JobMutationResultResponse.model_validate(result)
+
+    @router.post(
+        "/workspaces/{workspace_id}/jobs/batch-run-to",
+        response_model=BatchJobMutationResponse,
+    )
+    def batch_run_to(
+        workspace_id: str,
+        payload: BatchRunToRequest,
+    ) -> BatchJobMutationResponse:
+        require_pipelines_enabled(settings)
+        results = job_execution.batch_run_to(
+            workspace_id,
+            payload.job_ids,
+            payload.target_node_key,
+            payload.start_node_key,
+        )
+        return BatchJobMutationResponse(
+            results=[JobMutationResultResponse.model_validate(result) for result in results]
+        )
 
     return router

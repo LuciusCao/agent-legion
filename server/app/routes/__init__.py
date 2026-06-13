@@ -38,8 +38,10 @@ def create_router(
 
     from ..executors.leases import ExecutorLeaseRepository
     from ..services.executor_catalog import ExecutorCatalogService
+    from ..services.job_artifact_mutation import JobArtifactMutationService
     from ..services.job_artifacts import JobArtifactService
     from ..services.job_deletion import JobDeletionService
+    from ..services.job_execution import JobExecutionService
     from ..services.job_intake import JobIntakeService
     from ..services.job_logs import JobLogService
     from ..services.job_packages import JobPackageService
@@ -61,6 +63,9 @@ def create_router(
     job_logs = JobLogService(settings, job_db)
     executor_leases = ExecutorLeaseRepository(job_db.path)
     job_rerun = JobRerunService(job_db, executor_leases, settings, pipeline_catalog)
+    job_execution = JobExecutionService(
+        job_db, JobArtifactMutationService(), executor_leases, pipeline_catalog
+    )
     job_deletion = JobDeletionService(job_db, executor_leases, settings)
     job_packages = JobPackageService(job_db, settings)
 
@@ -82,7 +87,9 @@ def create_router(
         )
     )
     router.include_router(create_job_batches_router(job_intake, settings))
-    router.include_router(create_jobs_router(job_queries, job_rerun, job_deletion, settings))
+    router.include_router(
+        create_jobs_router(job_queries, job_rerun, job_deletion, job_execution, settings)
+    )
     router.include_router(create_job_artifacts_router(job_artifacts, settings, job_logs))
     router.include_router(create_workspace_runs_router(job_queries, settings))
     router.include_router(create_video_hive_router(settings))

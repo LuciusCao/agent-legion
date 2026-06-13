@@ -45,3 +45,18 @@ class WorkspacePackageResponse(BaseModel):
     failed_count: int
     package_filename: str | None = None
     download_url: str | None = None
+
+
+class RunToRequest(BaseModel):
+    target_node_key: str
+    start_node_key: str | None = None
+
+
+class ContinueJobRequest(BaseModel):
+    pass
+
+
+class BatchRunToRequest(BaseModel):
+    job_ids: list[str]
+    target_node_key: str
+    start_node_key: str | None = None

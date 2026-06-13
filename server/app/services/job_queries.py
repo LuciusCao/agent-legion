@@ -100,6 +100,7 @@ class JobQueryService:
             if active_summary is not None:
                 error_summary = active_summary["error_message"][:240]
 
+        control = self.job_db.get_job_execution_control(job["id"])
         return {
             **job,
             "node_summaries": summaries,
@@ -108,10 +109,10 @@ class JobQueryService:
             "active_node_key": active_node_key,
             "error_summary": error_summary,
             "execution_control": {
-                "mode": "full",
-                "target_node_key": None,
-                "paused": False,
-                "pause_reason": "",
+                "mode": control["execution_mode"] if control else "full",
+                "target_node_key": control["target_node_key"] if control else None,
+                "paused": control["execution_paused"] if control else False,
+                "pause_reason": control["pause_reason"] if control else "",
             },
         }
 
