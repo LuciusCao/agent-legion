@@ -191,6 +191,26 @@ Install the optional pre-commit hook:
 ./scripts/install-git-hooks.sh
 ```
 
+### Phase 5 Workspace Executor Migration
+
+When opening a pre-Phase-5 database, run the one-time finalizer before starting the server:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --check
+UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --apply
+```
+
+- `--check` is read-only and emits a deterministic JSON report. An empty `issues` list means the
+  destructive cleanup migration can proceed safely.
+- `--apply` creates a timestamped SQLite backup beside `data/video_hive.sqlite` and then migrates
+  legacy Workspace Agent/Pipeline settings into Executor allocations, bindings, and local Node
+  limits.
+
+If the report lists unknown legacy Agent IDs, either configure an equivalent Executor in
+`config/pipeline.yaml` or manually remediate the `workspace_agent_assignments` rows before
+retrying. The app aborts startup with the report and the exact `--check` command when finalization
+is blocked.
+
 ## Code Style Guidelines
 
 ### Python
