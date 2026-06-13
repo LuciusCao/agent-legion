@@ -193,13 +193,59 @@ Before committing or handing off work, run the full gate:
 ./scripts/check.sh
 ```
 
-The quick gate (`./scripts/check-quick.sh`) runs Ruff, pytest with coverage (`fail_under = 85`), mypy, architecture contract checks (`scripts/check_architecture.py`), generated API type drift check (`npm run api:check`), frontend lint/typecheck/Vitest, and the spec health check (`scripts/verify_specs.py --check`). The full gate adds the production build.
+The quick gate (`./scripts/check-quick.sh`) runs Ruff, validates the architecture invariant
+and exemption registries (`scripts/check_invariants.py`), pytest with coverage
+(`fail_under = 85`) ignoring the higher-fidelity directories, mypy, architecture contract
+checks (`scripts/check_architecture.py`), generated API type drift check
+(`npm run api:check`), frontend lint/typecheck/Vitest, and the spec health check
+(`scripts/verify_specs.py --check`). The full gate adds `pytest -q tests/full -m full_gate`
+and the production build. The CI gate (`./scripts/check-ci.sh`) runs the full gate and then
+`pytest -q tests/ci -m ci_extended`.
 
 Install the optional pre-commit hook:
 
 ```bash
 ./scripts/install-git-hooks.sh
 ```
+
+### Architecture Quality Workflow
+
+The project maintains three layers of architecture evidence. Every spec or plan that changes
+boundaries, concurrency, security, or long-lived data must include a `Quality Impact` section
+that names the affected architecture invariant IDs and any new exemptions.
+
+- **Registry impact**: Before adding code that crosses a layer boundary or increases a module
+  budget, update `config/architecture-invariants.yaml` with the new invariant and its owner.
+  If the change needs a temporary allowance, add a governed exemption to
+  `config/architecture-exemptions.yaml` instead of editing `config/architecture-budgets.json`
+  directly.
+
+- **Required `Quality Impact` section**: Specs and plans under `docs/superpowers/` must include
+  a `Quality Impact` subsection that lists:
+  - Invariant IDs created, changed, or risked by the work.
+  - The gate layer (`quick`, `full`, or `ci_extended`) that will carry the evidence.
+  - Any new exemption with `check`, `path`, `reason`, `owner`, and `remove_when`.
+
+- **Evidence placement**:
+  - `quick`: Static analysis, unit tests, and contract checks under `tests/` and `scripts/`.
+  - `full`: Deterministic higher-fidelity scenarios under `tests/full/` marked with
+    `@pytest.mark.full_gate`. Run by `scripts/check.sh`.
+  - `ci_extended`: Repeated stress or failure-injection scenarios under `tests/ci/` marked with
+    `@pytest.mark.ci_extended`. Run by `scripts/check-ci.sh` after the full gate.
+
+- **Critical evidence rules**: `critical` risk invariants require at least one local runtime
+  evidence target in the `quick` gate and one full runtime evidence target in the `full` gate.
+  `ci_extended` evidence alone never satisfies a critical invariant.
+
+- **Exemption lifecycle**: Each exemption must contain `check`, `path`, `reason`, `owner`, and
+  `remove_when`. Wildcard-only paths, vague reasons (`legacy`, `temporary`, `follow up`), missing
+  owners, and untracked removal conditions are rejected by `scripts/check_invariants.py`. The
+  `remove_when` field must reference either a tracked plan section
+  (`docs/superpowers/plans/...`) or an issue file (`issues/open/...` or `issues/closed/...`).
+
+- **Two-stage review**: The author runs `./scripts/check-quick.sh` before requesting review.
+  The reviewer verifies the `Quality Impact` section and runs `./scripts/check.sh` before
+  approval. CI runs `./scripts/check-ci.sh`.
 
 ### Phase 5 Workspace Executor Migration
 

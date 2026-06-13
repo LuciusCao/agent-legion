@@ -15,17 +15,25 @@ if str(project_root) not in sys.path:
 
 import yaml  # noqa: E402
 
+from server.app.quality.exemptions import load_exemptions, validate_exemptions  # noqa: E402
 from server.app.quality.invariants import load_registry, validate_registry  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Validate the architecture invariant registry.")
+    parser = argparse.ArgumentParser(
+        description="Validate the architecture invariant and exemption registries."
+    )
     parser.add_argument(
         "--registry",
         default="config/architecture-invariants.yaml",
         help="Path to the invariant registry YAML file.",
+    )
+    parser.add_argument(
+        "--exemptions",
+        default="config/architecture-exemptions.yaml",
+        help="Path to the exemption registry YAML file.",
     )
     args = parser.parse_args(argv)
 
@@ -36,20 +44,36 @@ def main(argv: list[str] | None = None) -> int:
         logger.error("registry file not found: %s", registry_path)
         return 1
 
+    exemptions_path = Path(args.exemptions)
+    if not exemptions_path.exists():
+        logger.error("exemptions file not found: %s", exemptions_path)
+        return 1
+
     try:
         invariants = load_registry(registry_path)
     except yaml.YAMLError as exc:
         logger.error("YAML parse error: %s", exc)
         return 1
 
+    try:
+        exemptions = load_exemptions(exemptions_path)
+    except yaml.YAMLError as exc:
+        logger.error("YAML parse error: %s", exc)
+        return 1
+
     errors = validate_registry(invariants, base_path=project_root)
+    errors.extend(validate_exemptions(exemptions, base_path=project_root))
 
     if errors:
         for error in errors:
             logger.error("%s", error)
         return 1
 
-    logger.info("OK: %s architecture invariant(s) validated", len(invariants))
+    logger.info(
+        "OK: %s architecture invariant(s) and %s exemption(s) validated",
+        len(invariants),
+        len(exemptions),
+    )
     return 0
 
 
