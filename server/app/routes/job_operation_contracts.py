@@ -18,7 +18,7 @@ class BatchJobMutationResponse(BaseModel):
     results: list[JobMutationResultResponse]
 
 
-class BatchRerunRequest(BaseModel):
+class JobBatchRerunRequest(BaseModel):
     job_ids: list[str] = Field(default_factory=list)
     node_key: str
 

@@ -8,7 +8,6 @@ from typing import Any
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
-from server.app.pipelines.artifacts import clear_rerun_outputs
 from server.app.pipelines.scheduler import downstream_nodes
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
@@ -145,24 +144,6 @@ class JobRerunService:
         for job_id in self._normalize_values(job_ids):
             results.append(self.rerun(workspace_id, job_id, node_key))
         return results
-
-    def rerun_node(self, job_id: str, node_key: str) -> dict[str, Any]:
-        job = self._job_or_404(job_id)
-        definition = self.pipelines.definition(str(job["pipeline_key"]))
-        if node_key not in definition.nodes:
-            raise NotFoundError("Node not found")
-        if self._job_has_running_nodes(job_id):
-            raise InvalidOperationError("Cannot rerun a running job")
-        stale_nodes = downstream_nodes(definition, node_key)
-        try:
-            clear_rerun_outputs(definition, node_key, Path(str(job["storage_dir"])))
-        except ValueError as exc:
-            raise InvalidOperationError(f"Cleanup failed: {exc}") from exc
-        try:
-            self.job_db.mark_node_for_rerun(job_id, node_key, stale_nodes)
-        except ValueError as exc:
-            raise NotFoundError(str(exc)) from exc
-        return {"job_id": job_id, "node_key": node_key, "stale_nodes": stale_nodes}
 
     def delete(self, job_id: str) -> str:
         job = self._job_or_404(job_id)
