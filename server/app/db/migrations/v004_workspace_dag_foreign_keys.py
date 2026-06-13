@@ -1,6 +1,7 @@
 import sqlite3
 
 from server.app.db.migrations.helpers import add_column_if_missing
+from server.app.db.migrations.hooks import _call_phase_hook
 from server.app.db.migrations.models import Migration
 from server.app.db.migrations.report import MigrationIssue, MigrationReport, raise_blocked
 
@@ -316,10 +317,15 @@ def _copy_table(
             f"{'; '.join(str(row) for row in fk_violations)}"
         )
 
+    _call_phase_hook(f"v004:copy:{source_table}")
+
     if drop_source:
+        _call_phase_hook(f"v004:drop:{source_table}")
         conn.execute(f"drop table {source_table}")
     else:
         conn.execute(f"alter table {source_table} rename to {source_table}__v004_old")
+
+    _call_phase_hook(f"v004:rename:{replacement_table}")
     conn.execute(f"alter table {replacement_table} rename to {source_table}")
 
     for idx_sql in index_sqls:

@@ -246,3 +246,72 @@ def test_rebuilds_fk_runs_foreign_key_check_before_commit(tmp_path: Path) -> Non
     conn.close()
 
     assert versions == [1]
+
+
+def test_phase_hook_is_invoked_at_migration_boundaries(tmp_path: Path) -> None:
+    """The internal _phase_hook is called around every applied migration."""
+    path = tmp_path / "hook.sqlite"
+    conn = connect_sqlite(path)
+
+    def apply_one(conn: sqlite3.Connection) -> None:
+        conn.execute("create table t_one (id integer primary key)")
+
+    def apply_two(conn: sqlite3.Connection) -> None:
+        conn.execute("create table t_two (id integer primary key)")
+
+    phases: list[str] = []
+
+    def hook(phase: str) -> None:
+        phases.append(phase)
+
+    run_migrations(
+        conn,
+        (
+            Migration(version=1, name="one", apply=apply_one),
+            Migration(version=2, name="two", apply=apply_two),
+        ),
+        _phase_hook=hook,
+    )
+    conn.close()
+
+    assert phases == ["pre:one", "post:one", "pre:two", "post:two"]
+
+
+def test_phase_hook_interruption_rolls_back_and_restores_foreign_keys(
+    tmp_path: Path,
+) -> None:
+    """Raising inside a phase hook aborts the active migration and leaves FKs ON."""
+    path = tmp_path / "hook_interrupt.sqlite"
+    conn = connect_sqlite(path)
+
+    def apply_ok(conn: sqlite3.Connection) -> None:
+        conn.execute("create table ok_table (id integer primary key)")
+
+    def apply_bad(conn: sqlite3.Connection) -> None:
+        conn.execute("create table partial_table (id integer primary key)")
+
+    def hook(phase: str) -> None:
+        if phase == "pre:bad":
+            raise RuntimeError("interrupted by hook")
+
+    migrations = (
+        Migration(version=1, name="ok", apply=apply_ok),
+        Migration(version=2, name="bad", apply=apply_bad),
+    )
+
+    with pytest.raises(RuntimeError, match="interrupted by hook"):
+        run_migrations(conn, migrations, _phase_hook=hook)
+
+    assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
+    tables = {
+        row["name"] for row in conn.execute("select name from sqlite_master where type='table'")
+    }
+    versions = [
+        row["version"]
+        for row in conn.execute("select version from schema_migrations order by version").fetchall()
+    ]
+    conn.close()
+
+    assert "ok_table" in tables
+    assert "partial_table" not in tables
+    assert versions == [1]

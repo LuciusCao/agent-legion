@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from server.app.db.connection import connect_sqlite
+from server.app.db.migrations import MIGRATIONS, run_migrations
 from server.app.db.migrations.report import MigrationIssue, MigrationReport
 from server.app.db.migrations.v004_workspace_dag_foreign_keys import (
     _MIGRATION_NAME,
@@ -405,3 +406,53 @@ def test_migration_report_str_and_json_are_deterministic() -> None:
         (issue["table"], issue["row_key"], issue["constraint"]) for issue in data["issues"]
     ]
     assert serialized_keys == sorted(serialized_keys)
+
+
+def test_v004_interruption_after_copy_recovers_on_reopen(tmp_path: Path) -> None:
+    """A hook-raised failure mid-V004 rolls back; reopening completes cleanly."""
+    path = tmp_path / "v004_interrupt.sqlite"
+    _create_pre_v004_database(path)
+
+    conn = connect_sqlite(path)
+    with conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id) "
+            "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
+        )
+        conn.execute(
+            "insert into job_nodes(job_id, node_key, status) values ('job1', 'extract', 'pending')"
+        )
+    conn.close()
+
+    def hook(phase: str) -> None:
+        if phase == "v004:copy:job_batches":
+            raise RuntimeError("interrupted after copy")
+
+    conn = connect_sqlite(path)
+    with pytest.raises(RuntimeError, match="interrupted after copy"):
+        run_migrations(conn, MIGRATIONS, _phase_hook=hook)
+    conn.close()
+
+    init_db(path)
+
+    with closing(connect_sqlite(path)) as conn, conn:
+        assert conn.execute("select count(*) from jobs").fetchone()[0] == 1
+        assert conn.execute("select count(*) from job_nodes").fetchone()[0] == 1
+        versions = [
+            row["version"]
+            for row in conn.execute(
+                "select version from schema_migrations order by version"
+            ).fetchall()
+        ]
+        assert versions == [1, 2, 3, 4, 6]
+        assert _foreign_key_relationships(conn) == {
+            ("job_batches", "workspace_id", "workspaces"),
+            ("jobs", "workspace_id", "workspaces"),
+            ("job_nodes", "job_id", "jobs"),
+            ("node_runs", "job_id", "jobs"),
+            ("executor_leases", "workspace_id", "workspaces"),
+            ("executor_leases", "job_id", "jobs"),
+            ("executor_leases", "node_run_id", "node_runs"),
+        }
+        assert conn.execute("pragma integrity_check").fetchone()[0] == "ok"
+        assert conn.execute("pragma foreign_key_check").fetchall() == []

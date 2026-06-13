@@ -574,3 +574,46 @@ def test_app_startup_aborts_when_finalization_blocked(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="finalize-workspace-executor-migration.py --check"):
         create_app(data_dir=tmp_path, start_worker=False)
+
+
+def test_finalizer_interruption_before_commit_retains_backup_and_reruns(
+    queries: JobQueries,
+) -> None:
+    """A crash before the finalizer commits leaves the backup and allows a safe rerun."""
+    workspace_id = queries.create_workspace(name="Legacy", default_pipeline_key="reading_analysis")[
+        "id"
+    ]
+    _set_pipeline_config(queries, workspace_id, {"local": 3})
+    _insert_legacy_agent_assignment(queries, workspace_id, "pi", 2)
+
+    backup_path = queries.path.parent / "v005-backup.sqlite"
+
+    def block_schema_history_insert(action: int, *args: object) -> int:
+        if action == sqlite3.SQLITE_INSERT and args[0] == "schema_migrations":
+            return sqlite3.SQLITE_DENY
+        return sqlite3.SQLITE_OK
+
+    with pytest.raises(sqlite3.DatabaseError), queries.connect() as conn:
+        conn.set_authorizer(block_schema_history_insert)
+        finalize_legacy_executor_schema(
+            conn, [_sample_pipeline()], _sample_executors(), backup_path=backup_path
+        )
+
+    assert backup_path.is_file()
+    assert _table_exists(queries, "workspace_agent_assignments")
+
+    with queries.connect() as conn:
+        report = finalize_legacy_executor_schema(
+            conn, [_sample_pipeline()], _sample_executors(), backup_path=backup_path
+        )
+
+    assert report.issues == ()
+    assert not _table_exists(queries, "workspace_agent_assignments")
+
+    allocations = {
+        row["executor_id"]: row["concurrency_limit"]
+        for row in _fetch_all_allocations(queries)
+        if row["workspace_id"] == workspace_id
+    }
+    assert allocations == {"local-default": 3, "pi-default": 2}
+    assert backup_path.is_file()

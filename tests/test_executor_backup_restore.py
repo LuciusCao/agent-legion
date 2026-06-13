@@ -1,0 +1,150 @@
+"""Focused tests for SQLite backup creation and restore."""
+
+from __future__ import annotations
+
+import sqlite3
+from pathlib import Path
+
+import pytest
+
+from server.app.executors.backup import (
+    RestoreError,
+    quiesce_sqlite_database,
+    restore_sqlite_database,
+)
+from server.app.jobs import JobQueries
+
+
+def test_restore_rejects_missing_backup(tmp_path: Path) -> None:
+    db_path = tmp_path / "db.sqlite"
+    db_path.write_text("not a database")
+    with pytest.raises(RestoreError, match="backup not found"):
+        restore_sqlite_database(tmp_path / "missing.sqlite", db_path)
+
+
+def test_restore_rejects_missing_target(tmp_path: Path) -> None:
+    backup_path = tmp_path / "backup.sqlite"
+    conn = sqlite3.connect(backup_path)
+    conn.execute("create table t (id integer primary key)")
+    conn.close()
+    with pytest.raises(RestoreError, match="target database not found"):
+        restore_sqlite_database(backup_path, tmp_path / "missing.sqlite")
+
+
+def test_restore_rejects_active_wal(tmp_path: Path) -> None:
+    db_path = tmp_path / "db.sqlite"
+    conn = sqlite3.connect(db_path)
+    conn.execute("pragma journal_mode=WAL")
+    conn.execute("create table t (id integer primary key)")
+    conn.execute("insert into t(id) values (1)")
+    conn.commit()
+    # Deliberately leave the connection open so the WAL is active.
+
+    backup_path = tmp_path / "backup.sqlite"
+    backup = sqlite3.connect(backup_path)
+    conn.backup(backup)
+    backup.close()
+
+    with pytest.raises(RestoreError, match="active WAL"):
+        restore_sqlite_database(backup_path, db_path)
+
+    conn.close()
+
+
+def _seed_database(db_path: Path) -> tuple[Path, str, str]:
+    jobs_dir = db_path.parent / "jobs"
+    jobs_dir.mkdir(parents=True, exist_ok=True)
+    queries = JobQueries(db_path, jobs_dir)
+    workspace = queries.create_workspace(name="Original", default_pipeline_key="question_content")
+    workspace_id = str(workspace["id"])
+    batch = queries.create_batch(
+        pipeline_key="question_content",
+        source_kind="mixed",
+        source_payload={"ids": [1]},
+        workspace_id=workspace_id,
+    )
+    job = queries.create_job(
+        pipeline_key="question_content",
+        source_type="question_id",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Original Job",
+        node_keys=["fetch"],
+        workspace_id=workspace_id,
+    )
+    return db_path, workspace_id, str(job["id"])
+
+
+def test_restore_preserves_current_database_and_returns_rows(tmp_path: Path) -> None:
+    db_path, workspace_id, job_id = _seed_database(tmp_path / "original.sqlite")
+
+    # Make a backup via the production helper.
+    backup_path = tmp_path / "backup.sqlite"
+    conn = sqlite3.connect(db_path)
+    try:
+        backup_conn = sqlite3.connect(backup_path)
+        conn.backup(backup_conn)
+        backup_conn.close()
+    finally:
+        conn.close()
+
+    # Quiesce so restore does not reject the active WAL.
+    quiesce_sqlite_database(db_path)
+
+    preserved, history = restore_sqlite_database(backup_path, db_path)
+
+    assert preserved.is_file()
+    assert preserved != db_path
+
+    # Reopen and verify the restored database.
+    restored = sqlite3.connect(db_path)
+    restored.row_factory = sqlite3.Row
+    try:
+        assert restored.execute("pragma integrity_check").fetchone()[0] == "ok"
+        assert restored.execute("pragma foreign_key_check").fetchall() == []
+        row = restored.execute("select id from workspaces where id = ?", (workspace_id,)).fetchone()
+        assert row is not None
+        row = restored.execute(
+            "select id from jobs where workspace_id = ?", (workspace_id,)
+        ).fetchone()
+        assert row is not None
+        assert (
+            restored.execute("select 1 from job_nodes where job_id = ?", (job_id,)).fetchone()
+            is not None
+        )
+        assert history
+        assert any(row["version"] == 1 for row in history)
+    finally:
+        restored.close()
+
+
+def test_restore_uses_same_directory_atomic_replace(tmp_path: Path) -> None:
+    db_path, workspace_id, _job_id = _seed_database(tmp_path / "atomic.sqlite")
+    backup_path = tmp_path / "backup.sqlite"
+
+    conn = sqlite3.connect(db_path)
+    try:
+        backup_conn = sqlite3.connect(backup_path)
+        conn.backup(backup_conn)
+        backup_conn.close()
+    finally:
+        conn.close()
+
+    quiesce_sqlite_database(db_path)
+
+    preserved, _history = restore_sqlite_database(backup_path, db_path)
+
+    # The restored database lives at the original path.
+    assert db_path.is_file()
+    check = sqlite3.connect(db_path)
+    check.row_factory = sqlite3.Row
+    try:
+        row = check.execute("select id from workspaces where id = ?", (workspace_id,)).fetchone()
+        assert row is not None
+    finally:
+        check.close()
+
+    # The preserved original is a separate file in the same directory.
+    assert preserved.parent == db_path.parent
+    assert preserved.name != db_path.name
+    assert preserved.is_file()
