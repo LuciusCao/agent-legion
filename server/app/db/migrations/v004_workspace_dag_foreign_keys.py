@@ -1,5 +1,6 @@
 import sqlite3
 
+from server.app.db.migrations.helpers import add_column_if_missing
 from server.app.db.migrations.models import Migration
 from server.app.db.migrations.report import MigrationIssue, MigrationReport, raise_blocked
 
@@ -33,6 +34,10 @@ create table jobs__v004 (
   stem text not null default '',
   created_at text not null default current_timestamp,
   updated_at text not null default current_timestamp,
+  execution_mode text not null default 'full' check(execution_mode in ('full', 'targeted')),
+  target_node_key text,
+  execution_paused integer not null default 0 check(execution_paused in (0, 1)),
+  pause_reason text not null default '',
   foreign key(workspace_id) references workspaces(id) on delete cascade
 )
 """
@@ -140,6 +145,18 @@ _EXECUTOR_LEASES = (
 
 _MIGRATION_VERSION = 4
 _MIGRATION_NAME = "workspace_dag_foreign_keys"
+
+# V006 adds execution-control columns to jobs.  Ensure they are present on
+# legacy tables before the V004 rebuild so source/replacement column sets match.
+_JOB_EXECUTION_CONTROL_COLUMNS: tuple[tuple[str, str], ...] = (
+    (
+        "execution_mode",
+        "text not null default 'full' check(execution_mode in ('full', 'targeted'))",
+    ),
+    ("target_node_key", "text"),
+    ("execution_paused", "integer not null default 0 check(execution_paused in (0, 1))"),
+    ("pause_reason", "text not null default ''"),
+)
 
 
 def _preflight_orphans(conn: sqlite3.Connection) -> None:
@@ -311,6 +328,15 @@ def _copy_table(
 
 def _apply(conn: sqlite3.Connection) -> None:
     _preflight_orphans(conn)
+
+    # Ensure V006 columns exist on legacy jobs tables before the rebuild.
+    for column, ddl_fragment in _JOB_EXECUTION_CONTROL_COLUMNS:
+        add_column_if_missing(
+            conn,
+            "jobs",
+            column,
+            f"alter table jobs add column {column} {ddl_fragment}",
+        )
 
     # Rebuild tables.  jobs and node_runs keep their old copies because
     # executor_leases references them and must be rebuilt while the old

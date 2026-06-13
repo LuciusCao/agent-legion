@@ -358,7 +358,7 @@ def test_v004_is_idempotent(tmp_path: Path) -> None:
 
     with connect_sqlite(path) as conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
-        assert [row["version"] for row in versions] == [1, 2, 3, 4]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6]
         assert _foreign_key_relationships(conn) == {
             ("job_batches", "workspace_id", "workspaces"),
             ("jobs", "workspace_id", "workspaces"),

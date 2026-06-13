@@ -1,4 +1,7 @@
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from server.app.jobs.queries import JobQueries
 
@@ -38,3 +41,83 @@ def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
         assert (
             conn.execute("select 1 from node_runs where job_id=?", (job["id"],)).fetchone() is None
         )
+
+
+def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = db.create_workspace("Target Workspace")
+    job = db.create_job(
+        pipeline_key="reading_analysis",
+        source_type="question_id",
+        source_id="Q-TARGET",
+        batch_id="",
+        title="Target Job",
+        node_keys=["node_a", "node_b"],
+        workspace_id=workspace["id"],
+    )
+
+    control = db.get_job_execution_control(job["id"])
+    assert control is not None
+    assert control["execution_mode"] == "full"
+    assert control["target_node_key"] is None
+    assert control["execution_paused"] is False
+    assert control["pause_reason"] == ""
+
+    db.set_job_execution_target(job["id"], "node_b")
+    control = db.get_job_execution_control(job["id"])
+    assert control is not None
+    assert control["execution_mode"] == "targeted"
+    assert control["target_node_key"] == "node_b"
+
+    db.clear_job_execution_target(job["id"])
+    control = db.get_job_execution_control(job["id"])
+    assert control is not None
+    assert control["execution_mode"] == "full"
+    assert control["target_node_key"] is None
+
+
+def test_pause_and_resume_job(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = db.create_workspace("Pause Workspace")
+    job = db.create_job(
+        pipeline_key="reading_analysis",
+        source_type="question_id",
+        source_id="Q-PAUSE",
+        batch_id="",
+        title="Pause Job",
+        node_keys=["node_a"],
+        workspace_id=workspace["id"],
+    )
+
+    db.pause_job(job["id"], "awaiting_resources")
+    control = db.get_job_execution_control(job["id"])
+    assert control is not None
+    assert control["execution_paused"] is True
+    assert control["pause_reason"] == "awaiting_resources"
+
+    db.resume_job(job["id"])
+    control = db.get_job_execution_control(job["id"])
+    assert control is not None
+    assert control["execution_paused"] is False
+    assert control["pause_reason"] == ""
+
+
+def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = db.create_workspace("Validation Workspace")
+    job = db.create_job(
+        pipeline_key="reading_analysis",
+        source_type="question_id",
+        source_id="Q-VALID",
+        batch_id="",
+        title="Validation Job",
+        node_keys=["node_a"],
+        workspace_id=workspace["id"],
+    )
+
+    with __import__("pytest").raises(ValueError):
+        db.set_job_execution_target(job["id"], "")
+
+    # paused is stored as an integer but exposed as a boolean.
+    with db.connect() as conn, pytest.raises(sqlite3.IntegrityError):
+        conn.execute("update jobs set execution_paused = 2 where id=?", (job["id"],))

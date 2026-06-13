@@ -117,7 +117,7 @@
     "server/app/services/workspace_configuration.py": 253,
     "server/app/services/workspace_executor_configuration.py": 16,
     "server/app/services/workspace_executor_warnings.py": 16,
-    "server/app/jobs/queries.py": 775,
+    "server/app/jobs/queries.py": 800,
     "server/app/executors/models.py": 74,
     "server/app/executors/protocol.py": 30,
     "server/app/executors/config.py": 118,
