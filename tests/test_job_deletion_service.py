@@ -5,10 +5,16 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
-from server.app.services.job_deletion import JobDeleteResult, JobDeletionService
+from server.app.services.job_deletion import (
+    DeletionRollbackConflict,
+    JobDeleteResult,
+    JobDeletionService,
+)
 from server.app.settings import Settings
 
 
@@ -218,3 +224,52 @@ def test_batch_delete_returns_ordered_results(job_db: JobQueries, tmp_path: Path
     assert results[2]["reason_code"] == "wrong_workspace"
     assert results[3]["status"] == "failed"
     assert results[3]["reason_code"] == "not_found"
+
+
+def test_delete_rollback_preserves_recreated_destination(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    """Rollback must not overwrite a destination recreated after staging."""
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+    job = _create_job(job_db, "ws-rollback", "Q007", status="completed")
+    storage_dir = Path(str(job["storage_dir"]))
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "original.json").write_text("original", encoding="utf-8")
+
+    captured_paths: list[tuple[Path, Path]] = []
+    original_restore = JobDeletionService._restore_paths
+
+    def _capture_and_skip(restore_paths: list[tuple[Path, Path]]) -> None:
+        captured_paths.extend(restore_paths)
+
+    monkeypatch.setattr(JobDeletionService, "_restore_paths", staticmethod(_capture_and_skip))
+
+    def _fail_once(*args, **kwargs):
+        raise RuntimeError("db down")
+
+    monkeypatch.setattr(job_db, "delete_job_in_transaction", _fail_once)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "failed"
+    assert captured_paths
+    staged_storage, original_storage = captured_paths[0]
+    assert staged_storage.exists()
+    assert staged_storage != original_storage
+    assert not original_storage.exists()
+
+    # Simulate a concurrent recreation of the destination with different content.
+    original_storage.mkdir(parents=True, exist_ok=True)
+    (original_storage / "sentinel.json").write_text("recreated", encoding="utf-8")
+
+    with pytest.raises(DeletionRollbackConflict) as exc_info:
+        original_restore(captured_paths)
+
+    assert exc_info.value.original_path == original_storage
+    assert exc_info.value.staged_path == staged_storage
+    assert (original_storage / "sentinel.json").exists()
+    assert (original_storage / "sentinel.json").read_text(encoding="utf-8") == "recreated"
+    assert staged_storage.exists()
+    assert (staged_storage / "original.json").read_text(encoding="utf-8") == "original"

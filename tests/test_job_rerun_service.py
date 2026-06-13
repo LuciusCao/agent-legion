@@ -9,7 +9,6 @@ from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService, StagedOutputs
-from server.app.services.job_errors import NotFoundError
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.pipeline_catalog import PipelineCatalogService
 
@@ -384,21 +383,3 @@ def test_batch_rerun_mixed_pipelines(rerun_service, job_db):
     assert results[0]["status"] == "succeeded"
     assert results[1]["status"] == "failed"
     assert results[1]["reason_code"] == "node_not_found"
-
-
-def test_job_delete_removes_storage_and_logs(rerun_service, job, settings):
-    storage = Path(job["storage_dir"])
-    storage.mkdir(parents=True, exist_ok=True)
-    log = settings.logs_dir / "jobs" / f"{job['id']}-node.log"
-    log.parent.mkdir(parents=True, exist_ok=True)
-    log.write_text("log", encoding="utf-8")
-
-    rerun_service.delete(job["id"])
-
-    assert not storage.exists()
-    assert not log.exists()
-
-
-def test_job_delete_rejects_missing_job(rerun_service):
-    with pytest.raises(NotFoundError, match="Job not found"):
-        rerun_service.delete("missing")
