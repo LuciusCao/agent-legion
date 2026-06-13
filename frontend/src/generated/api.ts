@@ -1008,25 +1008,6 @@ export interface components {
       /** Results */
       results: components['schemas']['JobMutationResultResponse'][]
     }
-    /** BatchJobRequest */
-    BatchJobRequest: {
-      /** Job Ids */
-      job_ids?: string[]
-    }
-    /** BatchJobResponse */
-    BatchJobResponse: {
-      /** Results */
-      results: {
-        [key: string]: unknown
-      }[]
-    }
-    /** BatchRerunRequest */
-    BatchRerunRequest: {
-      /** Phase */
-      phase: string
-      /** Video Ids */
-      video_ids: string[]
-    }
     /** BatchRerunResponse */
     BatchRerunResponse: {
       /** Results */
@@ -1475,15 +1456,6 @@ export interface components {
       /** Stem */
       stem?: string | null
     }
-    /** RerunNodeResponse */
-    RerunNodeResponse: {
-      /** Job Id */
-      job_id: string
-      /** Node Key */
-      node_key: string
-      /** Stale Nodes */
-      stale_nodes: string[]
-    }
     /** RerunRequest */
     RerunRequest: {
       /** Phase */
@@ -1824,6 +1796,20 @@ export interface components {
         [key: string]: unknown
       }[]
     }
+    /** BatchRerunRequest */
+    server__app__routes__job_operation_contracts__BatchRerunRequest: {
+      /** Job Ids */
+      job_ids?: string[]
+      /** Node Key */
+      node_key: string
+    }
+    /** BatchRerunRequest */
+    server__app__routes__videos__BatchRerunRequest: {
+      /** Phase */
+      phase: string
+      /** Video Ids */
+      video_ids: string[]
+    }
   }
   responses: never
   parameters: never
@@ -2090,7 +2076,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['RerunNodeResponse']
+          'application/json': components['schemas']['JobMutationResultResponse']
         }
       }
       /** @description Validation Error */
@@ -2514,7 +2500,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchRerunRequest']
+        'application/json': components['schemas']['server__app__routes__videos__BatchRerunRequest']
       }
     }
     responses: {
@@ -3399,7 +3385,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchJobRequest']
+        'application/json': components['schemas']['server__app__routes__job_operation_contracts__BatchRerunRequest']
       }
     }
     responses: {
@@ -3409,7 +3395,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['BatchJobResponse']
+          'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
       /** @description Validation Error */

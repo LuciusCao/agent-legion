@@ -458,6 +458,62 @@ class JobQueries:
                 (job_id,),
             )
 
+    def mark_nodes_for_rerun_atomic(
+        self,
+        job_id: str,
+        node_keys: Sequence[str],
+        downstream_map: dict[str, list[str]],
+    ) -> None:
+        """Atomically mark ``node_keys`` pending and their descendants stale.
+
+        Ancestors are left untouched. Raises ``ValueError`` if any selected node
+        is unknown.
+        """
+        with self.connect() as conn:
+            for node_key in node_keys:
+                cursor = conn.execute(
+                    """
+                    update job_nodes
+                    set status='pending',
+                        stale_reason='',
+                        error_message='',
+                        started_at=null,
+                        finished_at=null
+                    where job_id=? and node_key=?
+                    """,
+                    (job_id, node_key),
+                )
+                if cursor.rowcount == 0:
+                    raise ValueError(f"Unknown job node: {job_id}.{node_key}")
+
+            all_descendants: set[str] = set()
+            for node_key in node_keys:
+                all_descendants.update(downstream_map.get(node_key, []))
+            all_descendants -= set(node_keys)
+
+            for downstream_key in all_descendants:
+                conn.execute(
+                    """
+                    update job_nodes
+                    set status='stale',
+                        stale_reason=?,
+                        error_message=''
+                    where job_id=? and node_key=?
+                    """,
+                    ("upstream rerun", job_id, downstream_key),
+                )
+
+            conn.execute(
+                """
+                update jobs
+                set status='queued',
+                    error_message='',
+                    updated_at=current_timestamp
+                where id=?
+                """,
+                (job_id,),
+            )
+
     def start_node_run(
         self,
         job_id: str,
