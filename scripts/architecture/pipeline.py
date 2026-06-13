@@ -18,8 +18,12 @@ def check_pipeline_definitions(root: Path) -> list[str]:
         if not isinstance(raw, dict):
             errors.append(f"{relative_path}: pipeline definition must be a mapping")
             continue
+        if "concurrency" in raw:
+            errors.append(
+                f"{relative_path}: top-level 'concurrency' was removed; "
+                "configure Executor limits at Workspace level"
+            )
         nodes = raw.get("nodes")
-        node_limits = raw.get("concurrency", {}).get("nodes", {}) or {}
         if not isinstance(nodes, dict):
             errors.append(f"{relative_path}: pipeline nodes must be a mapping")
             continue
@@ -27,15 +31,19 @@ def check_pipeline_definitions(root: Path) -> list[str]:
             if not isinstance(node, dict):
                 errors.append(f"{relative_path}: node {node_key} must be a mapping")
                 continue
+            if "runner" in node:
+                errors.append(
+                    f"{relative_path}: node {node_key}: field 'runner' was removed; "
+                    "bind a compatible Executor in Workspace settings"
+                )
+            if "agent" in node:
+                errors.append(
+                    f"{relative_path}: node {node_key}: field 'agent' was removed; "
+                    "invocation details belong to Executor capabilities"
+                )
             capability = node.get("capability", "")
             if not isinstance(capability, str) or not capability:
                 errors.append(
                     f"{relative_path}: node {node_key} must declare a non-empty capability"
-                )
-            runner = node.get("runner", "local")
-            if runner == "agent" and node_key in node_limits:
-                errors.append(
-                    f"{relative_path}: agent-bound node {node_key} "
-                    "must not have a workspace_node_limits entry in concurrency.nodes"
                 )
     return errors

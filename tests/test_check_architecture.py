@@ -381,7 +381,7 @@ def test_rejects_pipeline_yaml_node_without_capability(tmp_path):
     (tmp_path / "config/pipelines").mkdir(parents=True)
     write(
         tmp_path / "config/pipelines/example.yaml",
-        "key: example\nlabel: Example\nnodes:\n  fetch:\n    runner: local\n",
+        "key: example\nlabel: Example\nnodes:\n  fetch:\n    label: Fetch\n",
     )
     write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
@@ -390,16 +390,68 @@ def test_rejects_pipeline_yaml_node_without_capability(tmp_path):
     assert any("non-empty capability" in error for error in errors)
 
 
-def test_rejects_agent_node_with_workspace_node_limit(tmp_path):
+def test_rejects_pipeline_yaml_node_with_runner(tmp_path):
     (tmp_path / "server/app").mkdir(parents=True)
     (tmp_path / "config/pipelines").mkdir(parents=True)
     write(
         tmp_path / "config/pipelines/example.yaml",
-        "key: example\nlabel: Example\nconcurrency:\n  nodes:\n    review: 2\n"
-        "nodes:\n  review:\n    capability: review\n    runner: agent\n",
+        "key: example\nlabel: Example\nnodes:\n  fetch:\n    capability: fetch\n    runner: local\n",
     )
     write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     errors = check_repository(tmp_path)
 
-    assert any("agent-bound node" in error and "workspace_node_limits" in error for error in errors)
+    assert any("field 'runner' was removed" in error for error in errors)
+
+
+def test_rejects_pipeline_yaml_node_with_agent(tmp_path):
+    (tmp_path / "server/app").mkdir(parents=True)
+    (tmp_path / "config/pipelines").mkdir(parents=True)
+    write(
+        tmp_path / "config/pipelines/example.yaml",
+        "key: example\nlabel: Example\nnodes:\n  review:\n    capability: review\n    agent:\n      engine: pi\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("field 'agent' was removed" in error for error in errors)
+
+
+def test_rejects_pipeline_yaml_with_concurrency(tmp_path):
+    (tmp_path / "server/app").mkdir(parents=True)
+    (tmp_path / "config/pipelines").mkdir(parents=True)
+    write(
+        tmp_path / "config/pipelines/example.yaml",
+        "key: example\nlabel: Example\nconcurrency:\n  nodes:\n    review: 2\n"
+        "nodes:\n  review:\n    capability: review\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("top-level 'concurrency' was removed" in error for error in errors)
+
+
+def test_rejects_legacy_module_present(tmp_path):
+    write(
+        tmp_path / "server/app/routes/workspace_agents.py",
+        "from fastapi import APIRouter\nrouter = APIRouter()\n",
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("legacy module must be removed" in error for error in errors)
+
+
+def test_rejects_forbidden_pattern_in_source(tmp_path):
+    write(
+        tmp_path / "server/app/pipelines/example.py",
+        'node["runner"]\n',
+    )
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("forbidden pattern" in error and "node.runner literal" in error for error in errors)

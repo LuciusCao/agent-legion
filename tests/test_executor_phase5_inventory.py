@@ -48,6 +48,27 @@ def test_inventory_includes_replacement_for_every_legacy_path() -> None:
     assert set(LEGACY_PATHS) == set(REPLACEMENTS)
 
 
+# Concrete replacement tokens that demonstrate the legacy concepts were replaced.
+REPLACEMENT_TOKENS: dict[str, list[tuple[str, str]]] = {
+    "pipeline runner": [
+        ("server/app/pipelines/definition.py", "capability"),
+        ("server/app/pipeline_worker_thread.py", "workspace_node_bindings"),
+    ],
+    "pipeline concurrency": [
+        ("server/app/db/migrations/v001_executor_core.py", "workspace_executor_allocations"),
+        ("server/app/db/migrations/v001_executor_core.py", "workspace_node_limits"),
+    ],
+}
+
+
+@pytest.mark.parametrize("name", sorted(REPLACEMENT_TOKENS))
+def test_replacement_tokens_are_present(name: str) -> None:
+    """Each legacy path's replacement mechanism exists in the codebase."""
+    for rel_path, token in REPLACEMENT_TOKENS[name]:
+        source = _read_source(rel_path)
+        assert token in source, f"Replacement token {token!r} missing from {rel_path}"
+
+
 def test_workspace_agent_assignment_modules_are_removed() -> None:
     """Legacy workspace agent assignment route and service are gone."""
     assert not (ROOT / "server/app/routes/workspace_agents.py").exists()

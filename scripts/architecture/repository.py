@@ -24,6 +24,10 @@ from scripts.architecture.phase4 import (
     check_settings_store_legacy_agents,
     check_workspace_save_outside_transaction,
 )
+from scripts.architecture.phase5 import (
+    check_forbidden_patterns,
+    check_legacy_modules_absent,
+)
 from scripts.architecture.pipeline import check_pipeline_definitions
 
 
@@ -143,6 +147,8 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_settings_store_legacy_agents(root))
     errors.extend(check_workspace_save_outside_transaction(root))
     errors.extend(check_frontend_executor_types(root))
+    errors.extend(check_legacy_modules_absent(root))
+    errors.extend(check_forbidden_patterns(root))
 
     file_budgets = config.get("files", {})
     for relative_path, budget in file_budgets.items():
