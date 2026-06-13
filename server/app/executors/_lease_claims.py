@@ -5,6 +5,10 @@ import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
 
+from server.app.executors._lease_control import (
+    _execution_control_rejects_claim,
+    _read_job_execution_control,
+)
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
 
@@ -19,6 +23,10 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
     lease_id = str(uuid.uuid4())
     execution_id = str(uuid.uuid4())
     now = datetime.now(UTC)
+
+    current_control = _read_job_execution_control(conn, request.job_id)
+    if _execution_control_rejects_claim(request, current_control):
+        return None
 
     allocation = conn.execute(
         """

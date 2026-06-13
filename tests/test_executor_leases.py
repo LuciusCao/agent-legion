@@ -133,6 +133,9 @@ def _claim_request(
     ttl: int = 60,
     log_path: str = "/tmp/run.log",
     pipeline_key: str = "reading_analysis",
+    execution_mode: str = "full",
+    target_node_key: str | None = None,
+    allowed_node_keys: tuple[str, ...] = (),
 ) -> LeaseClaimRequest:
     return LeaseClaimRequest(
         executor_id=executor_id,
@@ -145,6 +148,9 @@ def _claim_request(
         local_node_limit=local_node_limit,
         lease_ttl_seconds=ttl,
         log_path=log_path,
+        execution_mode=execution_mode,  # type: ignore[arg-type]
+        target_node_key=target_node_key,
+        allowed_node_keys=allowed_node_keys,
     )
 
 
@@ -623,6 +629,80 @@ def test_active_counts_reflects_released_leases(
     counts_after = repo_a.active_counts(executor_id)
     assert counts_after["global"] == 0
     assert counts_after[workspace_id] == 0
+
+
+def test_claim_rejected_when_job_paused(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-paused", "local-default", workspace_limit=2
+    )
+    queries.pause_job(job_id, "awaiting_resources")
+
+    claim = repo_a.try_claim(
+        _claim_request(
+            workspace_id,
+            job_id,
+            execution_mode="until_node",
+            target_node_key="review_keywords",
+            allowed_node_keys=("review_keywords",),
+        )
+    )
+    assert claim is None
+
+    with queries.connect() as conn:
+        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+    assert len(runs) == 0
+    assert len(leases) == 0
+
+
+def test_claim_rejected_when_target_snapshot_stale(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(queries, "ws-stale", "local-default", workspace_limit=2)
+    queries.set_job_execution_target(job_id, "review_keywords")
+
+    # Snapshot computed before the user changed the target.
+    stale_request = _claim_request(
+        workspace_id,
+        job_id,
+        execution_mode="until_node",
+        target_node_key="review_keywords",
+        allowed_node_keys=("review_keywords",),
+    )
+
+    queries.set_job_execution_target(job_id, "extract_entities")
+
+    claim = repo_a.try_claim(stale_request)
+    assert claim is None
+
+    with queries.connect() as conn:
+        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+    assert len(runs) == 0
+    assert len(leases) == 0
+
+
+def test_claim_with_full_mode_ignores_target_fields(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-full-ignore", "local-default", workspace_limit=2
+    )
+    queries.set_job_execution_target(job_id, "review_keywords")
+
+    # full mode should succeed even though target differs from node.
+    claim = repo_a.try_claim(
+        _claim_request(
+            workspace_id,
+            job_id,
+            execution_mode="full",
+            target_node_key="other",
+            allowed_node_keys=("review_keywords",),
+        )
+    )
+    assert isinstance(claim, ClaimedExecution)
 
 
 def test_sqlite_timestamp_is_utc_without_t_separator() -> None:
