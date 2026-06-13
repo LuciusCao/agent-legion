@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import type { DagEdge, DagNode } from '../components/DagGraph'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
-import { fetchJobArtifact, fetchJobDetail } from '../api'
+import { fetchJobArtifact, fetchJobDetail, deleteJob } from '../api'
+import { rerunJob, packageJobs } from '../jobApi'
 import { durationSeconds } from '../helpers'
 import { useUiStore } from '../stores/uiStore'
-import type { JobDetailResponse, JobNodeRecord } from '../types'
+import type {
+  JobDetailResponse,
+  JobNodeRecord,
+  PipelineDefinitionRecord,
+} from '../types'
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
+import { JobActionBar } from '../components/JobActionBar'
 
 const VALID_STATUSES = new Set<DagNode['status']>([
   'pending',
@@ -51,11 +57,31 @@ function toDagEdges(nodes: JobNodeRecord[]): DagEdge[] {
   return edges
 }
 
+function toPipelineDefinition(
+  detail: JobDetailResponse | null
+): PipelineDefinitionRecord | null {
+  if (!detail) return null
+  return {
+    key: detail.job.pipeline_key,
+    label: detail.job.pipeline_key,
+    intake: { modes: [] },
+    nodes: detail.nodes.map((n) => ({
+      key: n.node_key,
+      label: n.label,
+      after: n.after,
+      capability: n.capability,
+      inputs: n.inputs,
+      outputs: n.outputs,
+    })),
+  }
+}
+
 export default function JobDetailPage() {
   const { workspaceId, jobId } = useParams<{
     workspaceId: string
     jobId: string
   }>()
+  const navigate = useNavigate()
   const { setPageTitle, setDetailPageActions } = useUiStore()
   const [detail, setDetail] = useState<JobDetailResponse | null>(null)
   const [error, setError] = useState('')
@@ -153,6 +179,56 @@ export default function JobDetailPage() {
     () => (detail ? toDagEdges(detail.nodes) : []),
     [detail]
   )
+  const pipelineDefinition = useMemo(
+    () => toPipelineDefinition(detail),
+    [detail]
+  )
+
+  const [actionLoading, setActionLoading] = useState(false)
+
+  const handleRerun = useCallback(
+    async (nodeKey: string) => {
+      if (!jobId) return
+      setActionLoading(true)
+      try {
+        await rerunJob(jobId, nodeKey)
+        await refreshDetail()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setActionLoading(false)
+      }
+    },
+    [jobId, refreshDetail]
+  )
+
+  const handlePackage = useCallback(async () => {
+    if (!workspaceId || !jobId) return
+    setActionLoading(true)
+    try {
+      const result = await packageJobs(workspaceId, [jobId])
+      if (result.download_url) {
+        window.open(result.download_url, '_blank')
+      }
+      await refreshDetail()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionLoading(false)
+    }
+  }, [workspaceId, jobId, refreshDetail])
+
+  const handleDelete = useCallback(async () => {
+    if (!jobId || !workspaceId) return
+    setActionLoading(true)
+    try {
+      await deleteJob(jobId)
+      navigate(`/workspaces/${encodeURIComponent(workspaceId)}/jobs`)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+      setActionLoading(false)
+    }
+  }, [jobId, workspaceId, navigate])
 
   async function openArtifact(name: string) {
     if (!jobId) return
@@ -184,6 +260,20 @@ export default function JobDetailPage() {
   return (
     <div className={styles.page}>
       {error ? <p className={styles.error}>{error}</p> : null}
+
+      {detail && (
+        <div className={styles.actionBarRow}>
+          <JobActionBar
+            jobs={[detail.job]}
+            pipelineDefinition={pipelineDefinition}
+            mode="single"
+            loading={actionLoading}
+            onRerun={handleRerun}
+            onPackage={handlePackage}
+            onDelete={handleDelete}
+          />
+        </div>
+      )}
 
       <div className={styles.columns}>
         <div className={styles.left}>

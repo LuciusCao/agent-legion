@@ -1,21 +1,38 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import WorkspaceMainPage from './WorkspaceMainPage'
 import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
-import { api, fetchJobs } from '../api'
+import { api, fetchJobs, fetchPipelineDefinition } from '../api'
+import { batchRerunJobs, batchDeleteJobs, packageJobs } from '../jobApi'
 import type { WorkspaceStats } from '../workspaceTypes'
 import { makeJob } from '../testing/fixtures'
 
 const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
+const mockFetchPipelineDefinition = vi.fn()
+const mockBatchRerunJobs = vi.fn()
+const mockBatchDeleteJobs = vi.fn()
+const mockPackageJobs = vi.fn()
 
 vi.mock('../api', () => ({
   api: (...args: Parameters<typeof api>) => mockApi(...args),
   fetchJobs: (...args: Parameters<typeof fetchJobs>) => mockFetchJobs(...args),
+  fetchPipelineDefinition: (
+    ...args: Parameters<typeof fetchPipelineDefinition>
+  ) => mockFetchPipelineDefinition(...args),
+}))
+
+vi.mock('../jobApi', () => ({
+  batchRerunJobs: (...args: Parameters<typeof batchRerunJobs>) =>
+    mockBatchRerunJobs(...args),
+  batchDeleteJobs: (...args: Parameters<typeof batchDeleteJobs>) =>
+    mockBatchDeleteJobs(...args),
+  packageJobs: (...args: Parameters<typeof packageJobs>) =>
+    mockPackageJobs(...args),
 }))
 
 function renderPage(workspaceId = 'ws1') {
@@ -49,11 +66,50 @@ const baseStats: WorkspaceStats = {
   latest_run: null,
 }
 
+const pipelineDefinition = {
+  key: 'question_content',
+  label: 'Question Content',
+  nodes: [
+    {
+      key: 'extract',
+      label: '提取',
+      after: [],
+      capability: 'extract',
+      inputs: [],
+      outputs: [],
+    },
+    {
+      key: 'generate',
+      label: '生成',
+      after: ['extract'],
+      capability: 'generate',
+      inputs: [],
+      outputs: [],
+    },
+    {
+      key: 'review',
+      label: '审核',
+      after: ['generate'],
+      capability: 'review',
+      inputs: [],
+      outputs: [],
+    },
+  ],
+}
+
 describe('WorkspaceMainPage', () => {
   beforeEach(() => {
     mockApi.mockReset()
     mockFetchJobs.mockReset()
+    mockFetchPipelineDefinition.mockReset()
+    mockBatchRerunJobs.mockReset()
+    mockBatchDeleteJobs.mockReset()
+    mockPackageJobs.mockReset()
+
     mockFetchJobs.mockResolvedValue({ jobs: [] })
+    mockFetchPipelineDefinition.mockResolvedValue({
+      pipeline: pipelineDefinition,
+    })
     mockApi.mockImplementation((path: string) => {
       if (path === '/api/workspaces/ws1/stats') {
         return Promise.resolve(baseStats)
@@ -69,6 +125,9 @@ describe('WorkspaceMainPage', () => {
       expandedId: null,
       statusFilter: 'all',
       searchQuery: '',
+      batchRerunLoading: false,
+      batchPackageLoading: false,
+      batchDeleteLoading: false,
     })
     useWorkspaceStore.setState({
       workspaces: [],
@@ -133,6 +192,7 @@ describe('WorkspaceMainPage', () => {
       },
       originalExecutorConfiguration: null,
       pendingAllocationRemoval: null,
+      pipelineDefinition: null,
     })
   })
 
@@ -193,6 +253,10 @@ describe('WorkspaceMainPage', () => {
 
   it('batch toolbar appears when items selected', async () => {
     useJobStore.setState({
+      jobs: [
+        makeJob({ id: 'j1', status: 'failed' }),
+        makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
+      ],
       selectedIds: new Set(['j1', 'j2']),
       selectMode: true,
     })
@@ -201,8 +265,9 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
-    expect(screen.getByText('已选择 2 项')).toBeInTheDocument()
+    expect(screen.getByText(/已选择 2 项/)).toBeInTheDocument()
     expect(screen.getByText('重跑')).toBeInTheDocument()
+    expect(screen.getByText('打包')).toBeInTheDocument()
     expect(screen.getByText('删除')).toBeInTheDocument()
     expect(screen.getByText('全选')).toBeInTheDocument()
     expect(screen.getByText('仅失败')).toBeInTheDocument()
@@ -249,5 +314,118 @@ describe('WorkspaceMainPage', () => {
     })
 
     expect(useJobStore.getState().searchQuery).toBe('algebra')
+  })
+
+  it('submits batch rerun with selected node key', async () => {
+    mockBatchRerunJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'rerun', status: 'succeeded' }],
+    })
+    mockFetchJobs.mockResolvedValue({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'failed',
+          pipeline_key: 'question_content',
+        }),
+      ],
+    })
+    useJobStore.setState({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'failed',
+          pipeline_key: 'question_content',
+        }),
+      ],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    await waitFor(() =>
+      expect(mockFetchPipelineDefinition).toHaveBeenCalledWith(
+        'question_content'
+      )
+    )
+
+    await act(async () => {
+      screen.getByText('重跑').click()
+    })
+
+    expect(screen.getByText('选择重跑节点')).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('确认重跑').click()
+    })
+
+    expect(mockBatchRerunJobs).toHaveBeenCalledWith('ws1', 'extract', ['j1'])
+  })
+
+  it('opens package download URL after batch package', async () => {
+    mockPackageJobs.mockResolvedValueOnce({
+      download_url: '/api/workspaces/ws1/packages/pkg.zip',
+      package_filename: 'pkg.zip',
+      succeeded_count: 1,
+      failed_count: 0,
+      results: [{ job_id: 'j1', status: 'succeeded' }],
+    })
+    const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
+    mockFetchJobs.mockResolvedValue({
+      jobs: [makeJob({ id: 'j1', status: 'completed' })],
+    })
+    useJobStore.setState({
+      jobs: [makeJob({ id: 'j1', status: 'completed' })],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    await act(async () => {
+      screen.getByText('打包').click()
+    })
+
+    expect(mockPackageJobs).toHaveBeenCalledWith('ws1', ['j1'])
+    expect(openSpy).toHaveBeenCalledWith(
+      '/api/workspaces/ws1/packages/pkg.zip',
+      '_blank'
+    )
+    openSpy.mockRestore()
+  })
+
+  it('confirms and submits batch delete', async () => {
+    mockBatchDeleteJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'delete', status: 'succeeded' }],
+    })
+    mockFetchJobs.mockResolvedValue({
+      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+    })
+    useJobStore.setState({
+      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    await act(async () => {
+      screen.getByText('删除').click()
+    })
+
+    expect(screen.getByText('确认删除')).toBeInTheDocument()
+
+    const deleteButtons = screen.getAllByText('删除')
+    await act(async () => {
+      fireEvent.click(deleteButtons[deleteButtons.length - 1])
+    })
+
+    expect(mockBatchDeleteJobs).toHaveBeenCalledWith('ws1', ['j1'])
   })
 })
