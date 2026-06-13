@@ -58,14 +58,6 @@ class JobExecutionService:
             "message": message,
         }
 
-    def _get_job(self, workspace_id: str, job_id: str) -> dict[str, Any] | None:
-        job = self.job_db.get_job(job_id)
-        if job is None:
-            return None
-        if job["workspace_id"] != workspace_id:
-            return None
-        return job
-
     def _has_active_lease(self, job_id: str) -> bool:
         return self.lease_repo.has_active_for_job(job_id, self._now())
 

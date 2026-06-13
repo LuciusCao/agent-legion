@@ -99,7 +99,7 @@ class JobDeletionService:
             for log_path in glob.glob(str(self.settings.logs_dir / "jobs" / f"{job_id}-*.log"))
         ]
 
-        operation_id = f"{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
+        operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
         staged_storage: Path | None = None
         staged_logs: list[Path] = []
         restore_paths: list[tuple[Path, Path]] = []
@@ -144,8 +144,7 @@ class JobDeletionService:
                     "rollback_conflict",
                     str(rollback_exc),
                 )
-            reason_code = "active_lease" if "lease" in str(exc).lower() else "delete_failed"
-            return self._result(job_id, "failed", reason_code, str(exc))
+            return self._result(job_id, "failed", exc.reason_code, str(exc))
         except Exception as exc:
             logger.exception("Unexpected error deleting job %s", job_id)
             try:

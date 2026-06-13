@@ -150,7 +150,7 @@ def test_delete_atomic_guard_catches_lease_created_after_precheck(
     result = service.delete(job["workspace_id"], job["id"])
 
     assert result["status"] == "failed"
-    assert result["reason_code"] == "active_lease"
+    assert result["reason_code"] == "busy"
     assert job_db.get_job(job["id"]) is not None
     assert (storage_dir / "artifact.json").exists()
 

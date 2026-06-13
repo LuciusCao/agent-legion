@@ -87,13 +87,27 @@ class WorkspaceDagResponse(BaseModel):
     nodes: list[dict[str, Any]]
 
 
+class ExecutorRuntimeStatus(BaseModel):
+    executor_id: str
+    kind: str
+    global_capacity: int
+    workspace_limit: int
+    running: int
+    available: int
+    binding_count: int
+
+
+class ExecutorStatusSummary(BaseModel):
+    executors: list[ExecutorRuntimeStatus]
+
+
 class WorkspaceStatsResponse(BaseModel):
     workspace_id: str
     name: str
     pipeline_key: str
     pipeline_label: str
     job_stats: dict[str, int]
-    agent_status: dict[str, Any]
+    executor_status: ExecutorStatusSummary
     latest_run: dict[str, Any] | None
 
 

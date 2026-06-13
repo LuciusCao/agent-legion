@@ -1058,6 +1058,53 @@ def test_database_broadcast_on_create_and_delete(client):
     asyncio.run(_test())
 
 
+def test_video_detail_read_only_does_not_update_video(tmp_path, client, monkeypatch):
+    import json
+
+    created = client.post(
+        "/api/videos",
+        json={
+            "items": [
+                {
+                    "url": "https://example.com/course/v1.mp4",
+                    "title": "V1",
+                    "content_type": "knowledge",
+                    "external_id": "V001",
+                }
+            ]
+        },
+    )
+    assert created.status_code == 200
+    video_id = created.json()["videos"][0]["id"]
+
+    video_dir = tmp_path / "videos" / video_id
+    video_dir.mkdir(parents=True, exist_ok=True)
+    (video_dir / "interactions.json").write_text(
+        json.dumps({"interactions": [{"id": "n1", "type": "example_practice"}]}),
+        encoding="utf-8",
+    )
+    (video_dir / "review_result.json").write_text(
+        json.dumps({"status": "published", "reviews": []}),
+        encoding="utf-8",
+    )
+
+    app_db = client.app.state.db
+    original_update_video = app_db.update_video
+    calls = []
+
+    def instrumented_update_video(video_id_arg, **fields):
+        calls.append((video_id_arg, fields))
+        return original_update_video(video_id_arg, **fields)
+
+    monkeypatch.setattr(app_db, "update_video", instrumented_update_video)
+
+    response = client.get(f"/api/videos/{video_id}")
+    assert response.status_code == 200
+    detail = response.json()
+    assert detail["video"]["interaction_stats"] is not None
+    assert not calls, f"GET /api/videos/{video_id} should not call db.update_video"
+
+
 def test_list_and_detail_return_interaction_review_status(tmp_path, client, db):
     import json
 

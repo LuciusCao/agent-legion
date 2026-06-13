@@ -718,7 +718,7 @@ def test_workspace_stats_hidden_when_pipelines_disabled(tmp_path):
     assert response.status_code == 404
 
 
-def test_workspace_stats_returns_counts_and_agent_status(tmp_path):
+def test_workspace_stats_returns_counts_and_executor_status(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -747,47 +747,56 @@ def test_workspace_stats_returns_counts_and_agent_status(tmp_path):
     assert body["pipeline_label"] == "题目审题分析 Pipeline"
     assert body["job_stats"]["pending"] == 2
     assert "queued" not in body["job_stats"]
-    assert body["agent_status"]["total"] == 0
-    assert body["agent_status"]["busy"] == 0
-    assert body["agent_status"]["idle"] == 0
+    assert body["executor_status"]["executors"] == []
     assert body["latest_run"] is None
 
 
-def test_workspace_stats_filters_agents_by_assignment(tmp_path):
+def test_workspace_stats_executor_status_reflects_allocations_and_leases(tmp_path):
     from fastapi.testclient import TestClient
 
-    from server.app.agents import AgentStatus
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.pipelines.enabled = True
+    job_db = app.state.job_db
 
-    manager = app.state.agent_manager
-    manager.agents = [
-        AgentStatus(id="agent-1", name="Agent One", busy=False, max_tasks=1),
-        AgentStatus(id="agent-2", name="Agent Two", busy=True, max_tasks=1),
-        AgentStatus(id="agent-3", name="Agent Three", busy=False, max_tasks=1),
-    ]
     with TestClient(app) as c:
         ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
         ws_id = ws["workspace"]["id"]
-        manager.set_workspace_assignment(ws_id, "agent-1", 1)
-        manager.set_workspace_assignment(ws_id, "agent-2", 1)
+        job_db.replace_workspace_executor_configuration(
+            ws_id,
+            allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
+            bindings=[
+                {
+                    "pipeline_key": "reading_analysis",
+                    "node_key": "review_keywords",
+                    "executor_id": "local-default",
+                }
+            ],
+            node_limits=[],
+        )
+        c.post(
+            f"/api/workspaces/{ws_id}/job-batches",
+            json={
+                "pipeline_key": "reading_analysis",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q301"],
+                "knowledge_codes": [],
+            },
+        )
         stats = c.get(f"/api/workspaces/{ws_id}/stats")
 
     assert stats.status_code == 200
     body = stats.json()
-    assert body["agent_status"]["total"] == 2
-    assert body["agent_status"]["busy"] == 1
-    assert body["agent_status"]["idle"] == 1
-    assert len(body["agent_status"]["agents"]) == 2
-    agent_ids = {a["id"] for a in body["agent_status"]["agents"]}
-    assert agent_ids == {"agent-1", "agent-2"}
-    agent_1 = next(a for a in body["agent_status"]["agents"] if a["id"] == "agent-1")
-    assert agent_1["name"] == "Agent One"
-    assert agent_1["busy"] is False
-    agent_2 = next(a for a in body["agent_status"]["agents"] if a["id"] == "agent-2")
-    assert agent_2["busy"] is True
+    executors = body["executor_status"]["executors"]
+    assert len(executors) == 1
+    assert executors[0]["executor_id"] == "local-default"
+    assert executors[0]["kind"] == "local"
+    assert executors[0]["global_capacity"] == 16
+    assert executors[0]["workspace_limit"] == 4
+    assert executors[0]["running"] == 0
+    assert executors[0]["available"] == 4
+    assert executors[0]["binding_count"] == 1
 
 
 def test_workspace_stats_latest_run_reflects_node_runs(tmp_path):
@@ -2090,7 +2099,7 @@ def test_batch_delete_skips_running_job(tmp_path):
     results = resp.json()["results"]
     assert any(
         r["status"] == "failed"
-        and r["reason_code"] == "delete_failed"
+        and r["reason_code"] == "busy"
         and "running" in (r.get("message") or "").lower()
         for r in results
     )

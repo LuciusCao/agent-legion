@@ -1,4 +1,3 @@
-import json
 import re
 from pathlib import Path
 from typing import Any
@@ -13,10 +12,6 @@ from ..events import VideoEventManager
 from ..pipeline.common import resolve_video_dir
 from ..pipeline.openclaw_sessions import render_openclaw_session, resolve_openclaw_session_path
 from ..services.intake import add_video_items
-from ..services.interaction_stats import (
-    _backfill_interaction_stats,
-    _enrich_video,
-)
 from ..services.manual_run import (
     batch_submit_run_to_phase,
     submit_run_to_phase,
@@ -27,6 +22,7 @@ from ..services.video_actions import (
     delete_video_record,
     rerun_video_record,
 )
+from ..services.video_read import VideoReadService
 from ..settings import Settings
 
 
@@ -115,35 +111,20 @@ def create_videos_router(
     def add_videos(request: AddVideosRequest) -> dict[str, Any]:
         return add_video_items(db, settings, request.items)
 
+    read_service = VideoReadService(db, settings)
+
     @router.get("")
     def list_videos() -> dict[str, Any]:
-        videos = db.list_videos()
+        videos = read_service.list_videos()
         for video in videos:
             video["packed"] = bool(video.get("packed", 0))
-            _enrich_video(video)
-            if video.get("content_type") == "knowledge" and "interaction_stats" not in video:
-                video_dir = resolve_video_dir(video, settings.videos_dir)
-                _backfill_interaction_stats(video, video_dir)
         return {"videos": videos}
 
     @router.get("/{video_id}")
     def get_video(video_id: str) -> dict[str, Any]:
-        video = db.get_video(video_id)
+        video = read_service.get_video_detail(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
-        _enrich_video(video)
-        if video.get("content_type") == "knowledge" and "interaction_stats" not in video:
-            video_dir = resolve_video_dir(video, settings.videos_dir)
-            _backfill_interaction_stats(video, video_dir)
-            db.update_video(
-                video_id,
-                interaction_stats_json=json.dumps(
-                    video.get("interaction_stats"), ensure_ascii=False
-                )
-                if video.get("interaction_stats")
-                else "",
-                interaction_review_status=video.get("interaction_review_status") or "",
-            )
         return {
             "video": {**video, "packed": bool(video.get("packed", 0))},
             "phase_runs": db.list_phase_runs(video_id),

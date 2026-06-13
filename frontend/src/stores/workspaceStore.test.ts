@@ -190,7 +190,7 @@ describe('workspaceStore', () => {
         completed: 4,
         failed: 1,
       },
-      agent_status: { total: 0, busy: 0, idle: 0 },
+      executor_status: { executors: [] },
       latest_run: null,
     }
     mockFetchWorkspaceStats.mockResolvedValueOnce(stats)

@@ -86,7 +86,7 @@ export const WORKSPACE_LABELS = {
   jobs: '任务',
   runs: '运行记录',
   settings: '设置',
-  agents: '智能体',
+  executors: '执行器',
   resources: '资源接口',
   intake: '接入模式',
   pipeline: '流水线',

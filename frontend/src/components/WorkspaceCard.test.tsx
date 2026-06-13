@@ -8,7 +8,17 @@ function createProps(overrides = {}) {
     name: 'Test Workspace',
     pipelineLabel: 'Test Pipeline',
     jobStats: { running: 2, completed: 5, failed: 1 },
-    agentStatus: { total: 3, busy: 2, idle: 1 },
+    executorStatus: [
+      {
+        executor_id: 'local-default',
+        kind: 'local',
+        global_capacity: 16,
+        workspace_limit: 4,
+        running: 2,
+        available: 1,
+        binding_count: 1,
+      },
+    ],
     onClick: vi.fn(),
     ...overrides,
   }
@@ -34,10 +44,10 @@ describe('WorkspaceCard', () => {
     expect(jobsSection.textContent).toContain('1')
   })
 
-  it('renders agent status correctly', () => {
+  it('renders executor status correctly', () => {
     render(<WorkspaceCard {...createProps()} />)
-    const agentsSection = screen.getByText('智能体').parentElement!
-    expect(agentsSection.textContent).toContain('2/3')
+    const executorsSection = screen.getByText('执行器').parentElement!
+    expect(executorsSection.textContent).toContain('2/1')
   })
 
   it('calls onClick when clicked', () => {
