@@ -19,7 +19,11 @@ from ..security import validate_package_filename
 from ..services.job_packages import JobPackageService
 from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
-from .job_operation_contracts import WorkspacePackageRequest, WorkspacePackageResponse
+from .job_operation_contracts import (
+    WorkspacePackageRequest,
+    WorkspacePackageResponse,
+    WorkspacePackageResultResponse,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -192,7 +196,17 @@ def create_packages_router(
     ) -> WorkspacePackageResponse:
         if not request.job_ids:
             raise HTTPException(status_code=400, detail="No job_ids provided")
-        return WorkspacePackageResponse(**job_packages.package(workspace_id, request.job_ids))
+        package_result = job_packages.package(workspace_id, request.job_ids)
+        return WorkspacePackageResponse(
+            results=[
+                WorkspacePackageResultResponse.model_validate(result)
+                for result in package_result["results"]
+            ],
+            succeeded_count=package_result["succeeded_count"],
+            failed_count=package_result["failed_count"],
+            package_filename=package_result["package_filename"],
+            download_url=package_result["download_url"],
+        )
 
     @router.get("/workspaces/{workspace_id}/packages/{filename:path}")
     def download_workspace_package(workspace_id: str, filename: str):

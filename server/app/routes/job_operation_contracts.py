@@ -18,6 +18,9 @@ class BatchJobMutationResponse(BaseModel):
     results: list[JobMutationResultResponse]
 
 
+# Intentionally separate from BatchJobRequest: deletion is a distinct mutation
+# contract and may diverge in validation rules even though it currently shares
+# the same `job_ids` shape.
 class BatchJobIdsRequest(BaseModel):
     job_ids: list[str] = Field(default_factory=list)
 

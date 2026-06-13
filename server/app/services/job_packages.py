@@ -1,13 +1,28 @@
 from __future__ import annotations
 
 import logging
-from typing import Any
+from typing import Any, TypedDict
 
 from server.app.jobs import JobQueries
 from server.app.pipeline.package import create_workspace_package
 from server.app.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+
+class JobPackageItemResult(TypedDict):
+    job_id: str
+    status: str
+    reason_code: str | None
+    message: str | None
+
+
+class JobPackageResult(TypedDict):
+    results: list[JobPackageItemResult]
+    succeeded_count: int
+    failed_count: int
+    package_filename: str | None
+    download_url: str | None
 
 
 class JobPackageService:
@@ -21,7 +36,7 @@ class JobPackageService:
         status: str,
         reason_code: str | None = None,
         message: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JobPackageItemResult:
         return {
             "job_id": job_id,
             "status": status,
@@ -29,8 +44,8 @@ class JobPackageService:
             "message": message,
         }
 
-    def package(self, workspace_id: str, job_ids: list[str]) -> dict[str, Any]:
-        results: list[dict[str, Any]] = []
+    def package(self, workspace_id: str, job_ids: list[str]) -> JobPackageResult:
+        results: list[JobPackageItemResult] = []
         eligible_jobs: list[dict[str, Any]] = []
         seen: set[str] = set()
 
@@ -70,15 +85,15 @@ class JobPackageService:
         succeeded_count = sum(1 for r in results if r["status"] == "succeeded")
         failed_count = len(results) - succeeded_count
 
-        response: dict[str, Any] = {
+        response: JobPackageResult = {
             "results": results,
             "succeeded_count": succeeded_count,
             "failed_count": failed_count,
+            "package_filename": None,
+            "download_url": None,
         }
 
         if not eligible_jobs:
-            response["package_filename"] = None
-            response["download_url"] = None
             return response
 
         workspace_packages_dir = self.settings.packages_dir / f"workspace-{workspace_id}"

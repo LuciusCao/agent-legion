@@ -7,13 +7,21 @@ import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import TypedDict
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+
+class JobDeleteResult(TypedDict):
+    job_id: str
+    operation: str
+    status: str
+    reason_code: str | None
+    message: str | None
 
 
 class JobDeletionService:
@@ -40,7 +48,7 @@ class JobDeletionService:
         status: str,
         reason_code: str | None = None,
         message: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> JobDeleteResult:
         return {
             "job_id": job_id,
             "operation": "delete",
@@ -49,7 +57,7 @@ class JobDeletionService:
             "message": message,
         }
 
-    def delete(self, workspace_id: str, job_id: str) -> dict[str, Any]:
+    def delete(self, workspace_id: str, job_id: str) -> JobDeleteResult:
         job = self.job_db.get_job(job_id)
         if job is None:
             return self._result(job_id, "failed", "not_found", "Job not found")
@@ -128,8 +136,8 @@ class JobDeletionService:
             logger.exception("Unexpected error deleting job %s", job_id)
             return self._result(job_id, "failed", "delete_failed", str(exc))
 
-    def batch_delete(self, workspace_id: str, job_ids: list[str]) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
+    def batch_delete(self, workspace_id: str, job_ids: list[str]) -> list[JobDeleteResult]:
+        results: list[JobDeleteResult] = []
         seen: set[str] = set()
         for job_id in job_ids:
             normalized = job_id.strip()
