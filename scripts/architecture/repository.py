@@ -1,6 +1,6 @@
 import ast
 import json
-from collections import Counter
+from collections import Counter, defaultdict
 from pathlib import Path
 
 from scripts.architecture.helpers import (
@@ -39,14 +39,73 @@ from scripts.architecture.phase6 import (
 from scripts.architecture.pipeline import check_pipeline_definitions
 
 
+def _load_exemptions(root: Path) -> tuple:
+    """Load governed architecture exemptions from the YAML registry."""
+    from server.app.quality.exemptions import load_exemptions
+
+    path = root / "config/architecture-exemptions.yaml"
+    if not path.exists():
+        return ()
+    return load_exemptions(path)
+
+
+def _categorize_exemptions(exemptions: tuple):
+    """Group exemptions by check name for efficient lookup."""
+    response_model_exemptions: set[str] = set()
+    annotation_exemptions: set[str] = set()
+    route_import_exempt_files: set[str] = set()
+    route_import_exempt_modules: dict[str, set[str]] = defaultdict(set)
+    scheduler_import_exempt_files: set[str] = set()
+    scheduler_import_exempt_modules: dict[str, set[str]] = defaultdict(set)
+    scheduler_threadpool_exempt_targets: dict[str, set[str]] = defaultdict(set)
+
+    for ex in exemptions:
+        if ex.check == "architecture.route_response_model":
+            response_model_exemptions.add(ex.path)
+        elif ex.check == "architecture.route_annotation_any":
+            annotation_exemptions.add(ex.path)
+        elif ex.check == "architecture.route_import_boundary":
+            file_part, _, module_part = ex.path.partition(":")
+            if module_part:
+                route_import_exempt_modules[file_part].add(module_part)
+            else:
+                route_import_exempt_files.add(file_part)
+        elif ex.check == "architecture.scheduler_import_boundary":
+            file_part, _, module_part = ex.path.partition(":")
+            if module_part:
+                scheduler_import_exempt_modules[file_part].add(module_part)
+            else:
+                scheduler_import_exempt_files.add(file_part)
+        elif ex.check == "architecture.scheduler_threadpool":
+            file_part, _, target = ex.path.partition(":")
+            if target:
+                scheduler_threadpool_exempt_targets[file_part].add(target)
+
+    return (
+        response_model_exemptions,
+        annotation_exemptions,
+        route_import_exempt_files,
+        route_import_exempt_modules,
+        scheduler_import_exempt_files,
+        scheduler_import_exempt_modules,
+        scheduler_threadpool_exempt_targets,
+    )
+
+
 def check_repository(root: Path) -> list[str]:
     config = json.loads((root / "config/architecture-budgets.json").read_text(encoding="utf-8"))
-    exemptions = set(config.get("route_exemptions", []))
-    annotation_exemptions = set(config.get("route_annotation_exemptions", []))
-    route_import_baselines = config.get("route_import_baselines", {})
-    scheduler_import_baselines = config.get("scheduler_import_baselines", {})
-    scheduler_threadpool_baselines = config.get("scheduler_threadpool_baselines", {})
     errors: list[str] = []
+
+    exemptions = _load_exemptions(root)
+    (
+        response_model_exemptions,
+        annotation_exemptions,
+        route_import_exempt_files,
+        route_import_exempt_modules,
+        scheduler_import_exempt_files,
+        scheduler_import_exempt_modules,
+        scheduler_threadpool_exempt_targets,
+    ) = _categorize_exemptions(exemptions)
 
     server_root = root / "server/app"
 
@@ -60,15 +119,17 @@ def check_repository(root: Path) -> list[str]:
                 child: parent for parent in ast.walk(tree) for child in ast.iter_child_nodes(parent)
             }
             if is_scheduler_path(relative_path):
-                allowed_imports = set(scheduler_import_baselines.get(relative_path, []))
-                for module in sorted(allowed_imports - modules.keys()):
-                    errors.append(f"{relative_path}: unused scheduler import baseline {module}")
-                for module, lineno in forbidden_imports(modules, SCHEDULER_FORBIDDEN):
-                    if module not in allowed_imports:
+                scheduler_import_exempt = relative_path in scheduler_import_exempt_files
+                exempt_scheduler_modules = scheduler_import_exempt_modules.get(relative_path, set())
+                if not scheduler_import_exempt:
+                    for module, lineno in forbidden_imports(modules, SCHEDULER_FORBIDDEN):
+                        if module in exempt_scheduler_modules:
+                            continue
                         errors.append(
                             f"{relative_path}:{lineno}: scheduler boundary forbids import {module}"
                         )
-                allowed_targets = scheduler_threadpool_baselines.get(relative_path, {})
+
+                allowed_targets = scheduler_threadpool_exempt_targets.get(relative_path, set())
                 observed_targets: Counter[str] = Counter()
                 for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
                     name = ast.unparse(call.func)
@@ -76,7 +137,7 @@ def check_repository(root: Path) -> list[str]:
                         continue
                     target = _assignment_target(call, parent_map)
                     observed_targets[target] += 1
-                    if observed_targets[target] > int(allowed_targets.get(target, 0)):
+                    if observed_targets[target] > (1 if target in allowed_targets else 0):
                         errors.append(
                             f"{relative_path}:{call.lineno}: scheduler boundary forbids "
                             f"ThreadPoolExecutor construction assigned to {target}"
@@ -130,16 +191,16 @@ def check_repository(root: Path) -> list[str]:
             if not relative_path.startswith("server/app/routes/"):
                 continue
 
-            allowed_imports = set(route_import_baselines.get(relative_path, []))
+            route_import_exempt = relative_path in route_import_exempt_files
+            exempt_route_modules = route_import_exempt_modules.get(relative_path, set())
             for module, lineno in forbidden_imports(modules, ROUTE_FORBIDDEN):
-                if module not in allowed_imports:
-                    errors.append(
-                        f"{relative_path}:{lineno}: route boundary forbids import {module}"
-                    )
+                if route_import_exempt or module in exempt_route_modules:
+                    continue
+                errors.append(f"{relative_path}:{lineno}: route boundary forbids import {module}")
 
             for function, decorator in route_operations(tree):
                 key = f"{relative_path}:{function.name}"
-                if key not in exemptions and not has_named_response_model(decorator):
+                if key not in response_model_exemptions and not has_named_response_model(decorator):
                     errors.append(
                         f"{relative_path}:{decorator.lineno}: route {function.name} "
                         "requires named response_model"
