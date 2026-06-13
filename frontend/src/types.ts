@@ -150,23 +150,34 @@ export type TranscriptionRun = {
   fallback_reason: string
 }
 
-export type JobRecord = {
-  id: string
-  workspace_id: string
-  pipeline_key: string
-  source_id: string
-  source_type?: string
-  title: string
-  stem: string
-  status: string
-  created_at?: string
-  completed_nodes?: number
-  total_nodes?: number
+import type {
+  JobSummary,
+  JobNodeSummary,
+  JobDetail,
+  JobNode,
+  NodeRun,
+  JobsResponse,
+  JobBatchResponse,
+} from './jobTypes'
+
+export type {
+  JobSummary,
+  JobNodeSummary,
+  JobDetail,
+  JobNode,
+  NodeRun,
+  JobsResponse,
+  JobBatchResponse,
 }
 
-export type JobsResponse = {
-  jobs: JobRecord[]
-}
+/** @deprecated use {@link JobSummary} directly */
+export type JobRecord = JobSummary
+/** @deprecated use {@link JobNode} directly */
+export type JobNodeRecord = JobNode
+/** @deprecated use {@link NodeRun} directly */
+export type NodeRunRecord = NodeRun
+/** @deprecated use {@link JobDetail} directly */
+export type JobDetailResponse = JobDetail
 
 export type WorkspaceRecord = {
   id: string
@@ -197,49 +208,6 @@ export type PipelineIntakeModeRecord = ApiSchemas['PipelineIntakeModeResponse']
 export type PipelineDefinitionRecord = ApiSchemas['PipelineDefinitionResponse']
 export type PipelineResponse = ApiSchemas['PipelineResponse']
 export type PipelinesListResponse = ApiSchemas['PipelinesListResponse']
-
-export type JobBatchResponse = {
-  batch: Record<string, unknown>
-  created_count: number
-  jobs: JobRecord[]
-}
-
-export type JobNodeRecord = {
-  id: number
-  job_id: string
-  node_key: string
-  label: string
-  status: string
-  after?: string[]
-  stale_reason?: string
-  error_message?: string
-  started_at?: string | null
-  finished_at?: string | null
-  inputs?: string[]
-  outputs?: string[]
-}
-
-export type NodeRunRecord = {
-  id: number
-  job_id: string
-  node_key: string
-  status: string
-  command_json: string
-  exit_code: number | null
-  log_path: string
-  error_message: string
-  started_at: string
-  finished_at: string | null
-  run_dir: string
-  session_dir: string
-}
-
-export type JobDetailResponse = {
-  job: JobRecord
-  nodes: JobNodeRecord[]
-  runs: NodeRunRecord[]
-  artifacts: string[]
-}
 
 export type ArtifactResponse = {
   name: string

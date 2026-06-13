@@ -59,9 +59,17 @@ export function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
     workspace_id: 'ws1',
     pipeline_key: 'p1',
     source_id: 'Q1',
+    source_type: 'question',
     title: '',
-    stem: '',
     status: 'pending',
+    batch_id: 'b1',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+    storage_dir: '/tmp/j1',
+    error_message: '',
+    error_summary: '',
+    completed_nodes: 0,
+    total_nodes: 0,
     ...overrides,
   }
 }

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { DagStepper } from './DagStepper'
+import type { JobNodeRecord } from '../types'
 
 describe('DagStepper', () => {
   const makeNodes = (count: number) =>
@@ -11,7 +12,7 @@ describe('DagStepper', () => {
       label: `节点 ${i}`,
       status: i === 0 ? 'completed' : i === 1 ? 'running' : 'pending',
       after: i > 0 ? [`node-${i - 1}`] : [],
-    }))
+    })) as JobNodeRecord[]
 
   it('shows labels when node count <= 8', () => {
     render(<DagStepper nodes={makeNodes(8)} />)

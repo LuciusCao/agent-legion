@@ -1,0 +1,89 @@
+import { describe, it, expect } from 'vitest'
+import { render, screen } from '@testing-library/react'
+import { JobNodeStepper } from './JobNodeStepper'
+import type { JobNodeSummary } from '../jobTypes'
+
+const summaries: JobNodeSummary[] = [
+  {
+    node_key: 'question_understanding',
+    label: '题目理解',
+    status: 'completed',
+    error_message: '',
+  },
+  {
+    node_key: 'natural_language_reading',
+    label: '自然语言阅读',
+    status: 'running',
+    error_message: '',
+  },
+  {
+    node_key: 'assemble_package',
+    label: '打包组装',
+    status: 'failed',
+    error_message: 'assemble failed',
+  },
+  {
+    node_key: 'faq_generation',
+    label: 'FAQ 生成',
+    status: 'pending',
+    error_message: '',
+  },
+  {
+    node_key: 'content_review',
+    label: '内容审核',
+    status: 'stale',
+    error_message: '',
+  },
+]
+
+describe('JobNodeStepper', () => {
+  it('renders one segment per persisted node with data-status', () => {
+    render(<JobNodeStepper nodeSummaries={summaries} />)
+
+    expect(screen.getByTitle('题目理解')).toHaveAttribute(
+      'data-status',
+      'completed'
+    )
+    expect(screen.getByTitle('自然语言阅读')).toHaveAttribute(
+      'data-status',
+      'running'
+    )
+    expect(screen.getByTitle('打包组装')).toHaveAttribute(
+      'data-status',
+      'failed'
+    )
+    expect(screen.getByTitle('FAQ 生成')).toHaveAttribute(
+      'data-status',
+      'pending'
+    )
+    expect(screen.getByTitle('内容审核')).toHaveAttribute(
+      'data-status',
+      'stale'
+    )
+  })
+
+  it('shows failed node label and error message', () => {
+    render(<JobNodeStepper nodeSummaries={summaries} />)
+
+    expect(screen.getByText('打包组装')).toBeInTheDocument()
+    expect(screen.getByText('assemble failed')).toBeInTheDocument()
+  })
+
+  it('shows active node label from summary instead of a percentage', () => {
+    render(
+      <JobNodeStepper
+        nodeSummaries={summaries}
+        activeNodeKey="natural_language_reading"
+      />
+    )
+
+    expect(screen.getByText('当前：自然语言阅读')).toBeInTheDocument()
+    expect(screen.queryByText('%')).not.toBeInTheDocument()
+  })
+
+  it('renders placeholder when no summaries are provided', () => {
+    render(<JobNodeStepper nodeSummaries={[]} />)
+
+    expect(screen.getByText('—')).toBeInTheDocument()
+  })
+})
