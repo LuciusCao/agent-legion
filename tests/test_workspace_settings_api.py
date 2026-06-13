@@ -46,7 +46,7 @@ def test_workspace_settings_round_trip(tmp_path):
     assert "pipeline_config" not in workspace
 
 
-def test_workspace_settings_pipeline_ignores_legacy_concurrency_fields(tmp_path):
+def test_workspace_settings_pipeline_rejects_legacy_concurrency_fields(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.pipelines.enabled = True
     with TestClient(app) as c:
@@ -59,13 +59,13 @@ def test_workspace_settings_pipeline_ignores_legacy_concurrency_fields(tmp_path)
                 "nodeLocalConcurrency": {"fetch_question_context": 2},
             },
         )
-        fetched = c.get("/api/workspaces/default/settings")
 
-    assert response.status_code == 200
-    settings = fetched.json()["settings"]
-    assert settings["pipelineKey"] == "question_content"
-    assert "localConcurrency" not in settings
-    assert "agentConcurrency" not in settings
-    assert "nodeLocalConcurrency" not in settings
+    assert response.status_code == 422
+    detail = response.json()["detail"]
+    legacy_fields = {"localConcurrency", "agentConcurrency", "nodeLocalConcurrency"}
+    extra_fields = {
+        e["loc"][-1] for e in detail if e.get("type") == "extra_forbidden" and e.get("loc")
+    }
+    assert extra_fields == legacy_fields
     workspace = app.state.job_db.get_workspace("default")
     assert "pipeline_config" not in workspace

@@ -97,8 +97,8 @@
   },
   "files": {
     "server/app/routes/jobs.py": 101,
-    "server/app/routes/job_contracts.py": 166,
-    "server/app/routes/executor_contracts.py": 76,
+    "server/app/routes/job_contracts.py": 167,
+    "server/app/routes/executor_contracts.py": 77,
     "server/app/routes/job_http.py": 30,
     "server/app/routes/job_batches.py": 30,
     "server/app/routes/job_artifacts.py": 29,
