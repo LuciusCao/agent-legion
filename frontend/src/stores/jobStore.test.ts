@@ -279,4 +279,56 @@ describe('jobStore', () => {
     expect(mockBatchDeleteJobs).not.toHaveBeenCalled()
     expect(mockPackageJobs).not.toHaveBeenCalled()
   })
+
+  it('exits select mode when batch rerun succeeds for all selected jobs', async () => {
+    useJobStore.setState({
+      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+    mockBatchRerunJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'rerun', status: 'succeeded' }],
+    })
+
+    await useJobStore.getState().batchRerun('ws1', 'extract')
+
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
+    expect(useJobStore.getState().selectMode).toBe(false)
+  })
+
+  it('exits select mode when batch delete succeeds for all selected jobs', async () => {
+    useJobStore.setState({
+      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+    mockBatchDeleteJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'delete', status: 'succeeded' }],
+    })
+
+    await useJobStore.getState().batchDelete('ws1')
+
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
+    expect(useJobStore.getState().selectMode).toBe(false)
+  })
+
+  it('exits select mode when batch package succeeds for all selected jobs', async () => {
+    useJobStore.setState({
+      jobs: [makeJob({ id: 'j1', status: 'completed' })],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+    mockPackageJobs.mockResolvedValueOnce({
+      download_url: '/api/workspaces/ws1/packages/pkg.zip',
+      package_filename: 'pkg.zip',
+      succeeded_count: 1,
+      failed_count: 0,
+      results: [{ job_id: 'j1', status: 'succeeded' }],
+    })
+
+    await useJobStore.getState().batchPackage('ws1')
+
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
+    expect(useJobStore.getState().selectMode).toBe(false)
+  })
 })

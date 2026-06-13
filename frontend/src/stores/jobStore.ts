@@ -193,7 +193,10 @@ export const useJobStore = create<JobState>((set, get) => ({
         for (const id of succeededIds) {
           nextSelected.delete(id)
         }
-        return { selectedIds: nextSelected }
+        return {
+          selectedIds: nextSelected,
+          selectMode: nextSelected.size === 0 ? false : state.selectMode,
+        }
       })
       const counts = countMutationResults(results)
       useUiStore
@@ -233,7 +236,11 @@ export const useJobStore = create<JobState>((set, get) => ({
           }
           return true
         })
-        return { jobs: nextJobs, selectedIds: nextSelected }
+        return {
+          jobs: nextJobs,
+          selectedIds: nextSelected,
+          selectMode: nextSelected.size === 0 ? false : state.selectMode,
+        }
       })
       const counts = countMutationResults(results)
       useUiStore
@@ -276,7 +283,10 @@ export const useJobStore = create<JobState>((set, get) => ({
         for (const id of succeededIds) {
           nextSelected.delete(id)
         }
-        return { selectedIds: nextSelected }
+        return {
+          selectedIds: nextSelected,
+          selectMode: nextSelected.size === 0 ? false : state.selectMode,
+        }
       })
       useUiStore
         .getState()
