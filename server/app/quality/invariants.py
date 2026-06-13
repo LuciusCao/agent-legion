@@ -6,7 +6,7 @@ import ast
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import yaml
 
@@ -55,10 +55,15 @@ class ArchitectureInvariant:
 
 def _parse_evidence(raw: dict[str, Any]) -> InvariantEvidence:
     """Parse a single evidence entry from the registry YAML."""
+    kind = cast(
+        Literal["static", "contract", "integration", "multiprocess", "failure_injection"],
+        raw.get("kind", ""),
+    )
+    gate = cast(Literal["quick", "full", "ci_extended"], raw.get("gate", ""))
     return InvariantEvidence(
-        kind=raw.get("kind", ""),  # type: ignore[arg-type]
+        kind=kind,
         target=raw.get("target", ""),
-        gate=raw.get("gate", ""),  # type: ignore[arg-type]
+        gate=gate,
     )
 
 
@@ -72,7 +77,7 @@ def _parse_invariant(raw: dict[str, Any]) -> ArchitectureInvariant:
         id=invariant_id,
         statement=raw.get("statement", ""),
         owner=raw.get("owner", ""),
-        risk=raw.get("risk", ""),
+        risk=cast(Literal["high", "critical"], raw.get("risk", "")),
         evidence=evidence,
     )
 
@@ -91,6 +96,11 @@ def _target_exists(target: str, base_path: Path) -> tuple[bool, str | None]:
     Returns (ok, error_message). For targets containing ``::symbol_name`` the file
     must exist and the symbol must be present in the module's AST. Relative targets
     are resolved against ``base_path``.
+
+    .. note::
+        Symbol lookups only inspect top-level function, async function, and class
+        definitions. Nested methods, module-level variables, imports, and other
+        AST nodes are not considered evidence targets.
     """
     if "::" in target:
         file_part, symbol = target.split("::", 1)
@@ -101,7 +111,7 @@ def _target_exists(target: str, base_path: Path) -> tuple[bool, str | None]:
             tree = ast.parse(file_path.read_text(encoding="utf-8"))
         except SyntaxError:
             return False, f"target '{target}' contains a syntax error"
-        for node in ast.walk(tree):
+        for node in tree.body:
             if (
                 isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))
                 and node.name == symbol
