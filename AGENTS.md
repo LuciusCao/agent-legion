@@ -27,7 +27,14 @@ video-hive/
 │   ├── app/
 │   │   ├── main.py             # FastAPI app factory + lifespan worker threads
 │   │   ├── routes/             # REST API routes (videos, agents, worker, artifacts, packages, jobs, workspaces)
+│   │   │   ├── workspace_configuration.py # Executor allocations, bindings, and local node limits
+│   │   │   ├── workspace_executors.py     # Executor registry and workspace allocations
+│   │   │   ├── workspace_runs.py          # Node run lifecycle and rerun
+│   │   │   └── workspace_settings.py      # Workspace resource/intake settings
 │   │   ├── db/                 # SQLite database wrapper (schema, queries, notifications)
+│   │   │   └── migrations/     # Versioned schema migrations (v001–v005, registry, runner, report)
+│   │   ├── executors/          # Phase 5 executor runtime (registry, runtime, config, pi, openclaw, local, leases, scheduling, legacy_migration)
+│   │   │   ├── runtime_config.py # Executor runtime configuration loader
 │   │   ├── cms/                # CMS API integration (auth, client, knowledge, question)
 │   │   ├── jobs/               # Job queries for Agent Legion pipeline
 │   │   ├── services/           # Business logic services
@@ -132,6 +139,9 @@ video-hive/
 │           ├── packageStore.ts
 │           ├── uiStore.ts
 │           └── videoStore.ts
+├── scripts/                    # Quality gates, migration finalizers, and git hooks
+│   ├── check_architecture.py
+│   └── finalize-workspace-executor-migration.py
 ├── tests/
 │   ├── test_core.py            # Pipeline utility unit tests
 │   ├── test_api.py             # FastAPI endpoint tests with TestClient
@@ -332,9 +342,10 @@ Edit `config/pipeline.yaml`:
 
 Pipeline definitions live in `config/pipelines/` (e.g., `question_content.yaml`). Each definition specifies:
 - `key` and `label`
-- `concurrency` (`local`, `agent`) — runner pool limits
-- `nodes` — DAG nodes with `runner` (`local` or `agent`), `after` (dependencies), `inputs`, and `outputs`
+- `nodes` — DAG nodes declaring only `capability`, `after` (dependencies), `inputs`, `outputs`, and optional `label`. They never declare a `runner`, `agent`, `skill`, or command template.
 - `intake` — optional intake configuration with `modes` mapping. Each mode has `label`, `input_field`, and optional `resource` (for CMS resolver lookups). The backend resolves `(entity, mode_key)` to a resolver at runtime via `RESOLVER_MAP`.
+
+Executor allocations, bindings, and local node limits are configured at the Workspace level through the workspace executor routes (`workspace_executors.py`, `workspace_configuration.py`) and the `executors` runtime configuration. See `server/app/executors/` for the registry, runtime, lease management, and typed Executor implementations (`local`, `pi`, `openclaw`).
 
 In `auto` ASR mode, the pipeline tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
 
@@ -457,10 +468,15 @@ executor leases. A stale lease marks its `node_run` as failed, its `job_node` as
 explicit user rerun can recover it), and the job as failed. It never resets failed Nodes or
 automatically reruns them.
 
-Run the focused Phase 3 executor governance tests:
+Run the focused Phase 3/5 executor governance tests:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run pytest -q tests/test_executor_recovery.py tests/test_check_architecture.py tests/test_architecture_baselines.py
+UV_CACHE_DIR=.uv-cache uv run pytest -q \
+  tests/test_executor_recovery.py \
+  tests/test_check_architecture.py \
+  tests/test_architecture_baselines.py \
+  tests/test_architecture_executor_governance.py \
+  tests/test_executor_phase5_inventory.py
 ```
 
 Run the architecture contract and generated API checks:
