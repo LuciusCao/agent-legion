@@ -8,6 +8,13 @@ from pydantic import BaseModel
 
 from scripts import export_openapi
 from scripts.export_openapi import build_openapi_schema
+from server.app.routes.job_view_contracts import (
+    ExecutionControlSummaryResponse,
+    JobDetailResponse,
+    JobNodeSummaryResponse,
+    JobsResponse,
+    JobSummaryResponse,
+)
 
 EXPECTED_OPERATIONS = {
     ("get", "/api/resource-providers"): "ResourceProvidersResponse",
@@ -100,3 +107,62 @@ def test_workspace_job_error_contract(client, method, path, expected_status, exp
     response = client.request(method, path)
     assert response.status_code == expected_status
     assert response.json() == {"detail": expected_detail}
+
+
+def _create_test_job(client):
+    response = client.post(
+        "/api/job-batches",
+        json={
+            "pipeline_key": "question_content",
+            "source_kind": "direct_ids",
+            "question_ids": ["Q001"],
+            "knowledge_codes": [],
+        },
+    )
+    assert response.status_code == 200
+    return response.json()["jobs"][0]["id"]
+
+
+def _assert_job_summary(summary: JobSummaryResponse) -> None:
+    assert isinstance(summary.completed_nodes, int)
+    assert isinstance(summary.total_nodes, int)
+    assert summary.active_node_key is None or isinstance(summary.active_node_key, str)
+    assert isinstance(summary.error_summary, str)
+    assert isinstance(summary.execution_control, ExecutionControlSummaryResponse)
+    assert isinstance(summary.node_summaries, list)
+    for node_summary in summary.node_summaries:
+        assert isinstance(node_summary, JobNodeSummaryResponse)
+        assert isinstance(node_summary.node_key, str)
+        assert isinstance(node_summary.label, str)
+        assert isinstance(node_summary.status, str)
+        assert isinstance(node_summary.error_message, str)
+
+
+def test_get_jobs_returns_typed_job_summaries(client):
+    job_id = _create_test_job(client)
+    response = client.get("/api/jobs")
+    assert response.status_code == 200
+    body = JobsResponse.model_validate(response.json())
+    summary = next(job for job in body.jobs if job.id == job_id)
+    _assert_job_summary(summary)
+
+
+def test_get_workspace_jobs_returns_typed_job_summaries(client):
+    job_id = _create_test_job(client)
+    response = client.get("/api/workspaces/default/jobs")
+    assert response.status_code == 200
+    body = JobsResponse.model_validate(response.json())
+    summary = next(job for job in body.jobs if job.id == job_id)
+    _assert_job_summary(summary)
+
+
+def test_get_job_detail_returns_typed_job_summary(client):
+    job_id = _create_test_job(client)
+    response = client.get(f"/api/jobs/{job_id}")
+    assert response.status_code == 200
+    body = JobDetailResponse.model_validate(response.json())
+    assert body.job.id == job_id
+    _assert_job_summary(body.job)
+    assert isinstance(body.nodes, list)
+    assert isinstance(body.runs, list)
+    assert isinstance(body.artifacts, list)
