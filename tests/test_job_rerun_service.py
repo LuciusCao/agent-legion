@@ -21,7 +21,7 @@ def rerun_service(job_db, settings):
         ExecutorLeaseRepository(job_db.path),
         settings,
         PipelineCatalogService(settings),
-        JobArtifactMutationService(),
+        JobArtifactMutationService(settings.jobs_dir),
     )
 
 

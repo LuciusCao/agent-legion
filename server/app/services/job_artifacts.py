@@ -3,6 +3,7 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.storage_paths import resolve_job_dir
 
 
 class JobArtifactService:
@@ -19,7 +20,7 @@ class JobArtifactService:
         if "/" in artifact_name or "\\" in artifact_name or artifact_name in {"", ".", ".."}:
             raise InvalidOperationError("Invalid artifact name")
 
-        base = Path(str(job["storage_dir"])).resolve()
+        base = resolve_job_dir(job, self.job_db.jobs_dir)
         path = (base / artifact_name).resolve()
         if path.parent != base:
             raise InvalidOperationError("Invalid artifact path")

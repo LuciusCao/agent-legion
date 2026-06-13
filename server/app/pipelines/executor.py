@@ -19,6 +19,7 @@ from server.app.pipelines.scheduler import (
     find_ready_nodes,
 )
 from server.app.pipelines.skills import resolve_pipeline_skill
+from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
 LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
 
@@ -34,6 +35,16 @@ LOCAL_HANDLERS: dict[str, dict[str, LocalHandler]] = {
 }
 
 
+def _resolve_job_dir(job: dict[str, Any], jobs_dir: Path | None) -> Path:
+    if jobs_dir is None:
+        raise ManagedPathError(
+            "jobs_dir managed root is required",
+            record_id=str(job["id"]),
+            root_kind="job",
+        )
+    return resolve_job_dir(job, jobs_dir)
+
+
 def execute_local_node_once(
     job_db: JobQueries,
     definition: PipelineDefinition,
@@ -41,6 +52,7 @@ def execute_local_node_once(
     node_key: str,
     logs_dir: Path,
     settings_config: dict[str, Any] | None = None,
+    jobs_dir: Path | None = None,
 ) -> bool:
     handler = LOCAL_HANDLERS.get(definition.key, {}).get(node_key)
     if handler is None:
@@ -55,11 +67,8 @@ def execute_local_node_once(
     try:
         handler(
             job,
-            Path(str(job["storage_dir"])),
-            {
-                "job_db": job_db,
-                "settings_config": settings_config or {},
-            },
+            _resolve_job_dir(job, jobs_dir),
+            {"job_db": job_db, "settings_config": settings_config or {}},
         )
     except Exception as exc:
         error_message = str(exc)
@@ -72,29 +81,6 @@ def execute_local_node_once(
     return True
 
 
-def execute_agent_node_once(
-    job_db: JobQueries,
-    definition: PipelineDefinition,
-    job: dict[str, Any],
-    node_key: str,
-    pi_runner: PiRunner,
-    skill_root: Path,
-) -> bool:
-    node = definition.nodes[node_key]
-    skill = f"{definition.key}/{node.capability}"
-    skill_dir = resolve_pipeline_skill(skill_root, skill)
-    result = pi_runner.run(
-        job=job,
-        node_key=node_key,
-        skill_dir=skill_dir,
-        inputs=node.inputs,
-        outputs=node.outputs,
-        tools=["read", "write", "bash"],
-        job_db=job_db,
-    )
-    return result.status == "completed"
-
-
 def execute_node_once(
     job_db: JobQueries,
     definition: PipelineDefinition,
@@ -104,6 +90,7 @@ def execute_node_once(
     settings_config: dict[str, Any] | None = None,
     pi_runner: PiRunner | None = None,
     skill_root: Path | None = None,
+    jobs_dir: Path | None = None,
 ) -> bool:
     has_local_handler = LOCAL_HANDLERS.get(definition.key, {}).get(node_key) is not None
     if has_local_handler:
@@ -114,17 +101,23 @@ def execute_node_once(
             node_key,
             logs_dir,
             settings_config=settings_config,
+            jobs_dir=jobs_dir,
         )
     if pi_runner is None or skill_root is None:
         raise ValueError("Pi runner is not configured")
-    return execute_agent_node_once(
-        job_db,
-        definition,
-        job,
-        node_key,
-        pi_runner,
-        skill_root,
+    node = definition.nodes[node_key]
+    skill_dir = resolve_pipeline_skill(skill_root, f"{definition.key}/{node.capability}")
+    result = pi_runner.run(
+        job=job,
+        node_key=node_key,
+        skill_dir=skill_dir,
+        inputs=node.inputs,
+        outputs=node.outputs,
+        tools=["read", "write", "bash"],
+        job_db=job_db,
+        job_dir=_resolve_job_dir(job, jobs_dir),
     )
+    return result.status == "completed"
 
 
 def _execute_node_wrapped(
@@ -136,6 +129,7 @@ def _execute_node_wrapped(
     settings_config: dict[str, Any] | None = None,
     pi_runner: PiRunner | None = None,
     skill_root: Path | None = None,
+    jobs_dir: Path | None = None,
 ) -> bool:
     """Run a single pipeline node and mark the job/node failed on unhandled exceptions."""
     try:
@@ -148,6 +142,7 @@ def _execute_node_wrapped(
             settings_config=settings_config,
             pi_runner=pi_runner,
             skill_root=skill_root,
+            jobs_dir=jobs_dir,
         )
     except Exception as exc:
         error_message = str(exc)
@@ -175,13 +170,14 @@ def process_ready_pipeline_node(
     definition: PipelineDefinition,
     logs_dir: Path,
     settings_config: dict[str, Any] | None = None,
+    jobs_dir: Path | None = None,
 ) -> bool:
     local_handler_keys = set(LOCAL_HANDLERS.get(definition.key, {}))
     for job in job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
         if job.get("status") in ("completed", "failed"):
             continue
         statuses = _node_statuses(job_db, job["id"])
-        ready_nodes = find_ready_nodes(definition, statuses, Path(str(job["storage_dir"])))
+        ready_nodes = find_ready_nodes(definition, statuses, _resolve_job_dir(job, jobs_dir))
         local_ready_nodes = [node for node in ready_nodes if node.key in local_handler_keys]
         if not local_ready_nodes:
             _refresh_job_status(job_db, job["id"])
@@ -196,6 +192,7 @@ def process_ready_pipeline_node(
                 node.key,
                 logs_dir,
                 settings_config=settings_config,
+                jobs_dir=jobs_dir,
             )
         except Exception as exc:
             error_message = str(exc)

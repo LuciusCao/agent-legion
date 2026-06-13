@@ -13,6 +13,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_managed_path
 
 logger = logging.getLogger(__name__)
 
@@ -77,7 +78,6 @@ class JobDeletionService:
                 "Cannot delete a job with an active executor lease",
             )
 
-        storage_dir = Path(str(job["storage_dir"]))
         log_paths = [
             Path(log_path)
             for log_path in glob.glob(str(self.settings.logs_dir / "jobs" / f"{job_id}-*.log"))
@@ -89,6 +89,13 @@ class JobDeletionService:
         restore_paths: list[tuple[Path, Path]] = []
 
         try:
+            storage_dir = resolve_managed_path(
+                self.settings.jobs_dir,
+                job["storage_dir"],
+                allow_missing=True,
+                record_id=job_id,
+                root_kind="job",
+            )
             with self.job_db.lease_guarded_mutation(
                 job_id,
                 self._now(),

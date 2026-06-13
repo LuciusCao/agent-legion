@@ -25,6 +25,7 @@ from server.app.pipelines.execution_control import allowed_nodes
 from server.app.pipelines.registry import list_registered_pipelines
 from server.app.pipelines.scheduler import _node_statuses, find_ready_nodes
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -150,7 +151,7 @@ class PipelineWorkerThread:
                 continue
             if job.get("execution_paused"):
                 continue
-            job_dir = Path(str(job["storage_dir"]))
+            job_dir = resolve_job_dir(job, self.settings.jobs_dir)
             statuses = _node_statuses(self.job_db, job["id"])
             control_snapshot = {
                 "execution_mode": job.get("execution_mode", "full"),

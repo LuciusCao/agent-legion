@@ -15,6 +15,7 @@ from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.pipeline_catalog import PipelineCatalogService
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +34,7 @@ class JobRerunService:
         self.lease_repo = lease_repo
         self.settings = settings
         self.pipelines = pipelines
-        self.artifact_service = artifact_service or JobArtifactMutationService()
+        self.artifact_service = artifact_service or JobArtifactMutationService(settings.jobs_dir)
         self.clock = clock
 
     def _now(self) -> datetime:
@@ -158,7 +159,7 @@ class JobRerunService:
         job = self._job_or_404(job_id)
         if self._job_has_running_nodes(job_id):
             raise InvalidOperationError("Cannot delete a running job")
-        storage_dir = Path(str(job["storage_dir"]))
+        storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
         try:
             self.job_db.delete_job(job_id)
         except ValueError as exc:
@@ -179,7 +180,7 @@ class JobRerunService:
             if self._job_has_running_nodes(job_id):
                 results.append({"job_id": job_id, "status": "skipped", "reason": "running"})
                 continue
-            storage_dir = Path(str(job["storage_dir"]))
+            storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
             self.job_db.delete_job(job_id)
             if storage_dir.exists() and storage_dir.is_dir():
                 shutil.rmtree(storage_dir)

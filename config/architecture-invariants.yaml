@@ -16,3 +16,15 @@ invariants:
       - kind: contract
         target: scripts/check_architecture.py
         gate: quick
+
+  - id: SECURITY-PATH-001
+    statement: Video and job filesystem operations stay inside managed roots and reject symlink escapes.
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_storage_paths.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_storage_path_corruption.py
+        gate: full

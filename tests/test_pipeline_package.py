@@ -31,6 +31,7 @@ def test_package_completed_videos(tmp_path):
             }
         ],
         packages_dir=tmp_path / "packages",
+        videos_base_dir=tmp_path / "videos",
     )
 
     with zipfile.ZipFile(package_path) as zf:
@@ -53,6 +54,7 @@ def test_package_excludes_agent_workspace_pollution(tmp_path):
     package_path, _ = create_package(
         videos=[{"id": "a", "title": "A", "source_url": "", "storage_dir": str(video_dir)}],
         packages_dir=tmp_path / "packages",
+        videos_base_dir=tmp_path / "videos",
     )
 
     with zipfile.ZipFile(package_path) as zf:
@@ -72,6 +74,7 @@ def test_package_includes_reviewed_subtitles_when_available(tmp_path):
     package_path, _ = create_package(
         videos=[{"id": "a", "title": "A", "source_url": "", "storage_dir": str(video_dir)}],
         packages_dir=tmp_path / "packages",
+        videos_base_dir=tmp_path / "videos",
     )
 
     with zipfile.ZipFile(package_path) as zf:
@@ -85,6 +88,7 @@ def test_package_falls_back_to_original_subtitles_when_reviewed_missing(tmp_path
     package_path, _ = create_package(
         videos=[{"id": "b", "title": "B", "source_url": "", "storage_dir": str(video_dir)}],
         packages_dir=tmp_path / "packages",
+        videos_base_dir=tmp_path / "videos",
     )
 
     with zipfile.ZipFile(package_path) as zf:

@@ -5,12 +5,10 @@ from urllib.parse import urlparse
 
 
 def resolve_video_dir(video: Any, videos_dir: Path) -> Path:
-    """Return the video directory, preferring storage_dir when set."""
-    storage_dir: str = video.get("storage_dir", "")
-    if storage_dir:
-        return Path(storage_dir)
-    video_id: str = video["id"]
-    return videos_dir / video_id
+    """Return the video directory, resolving storage_dir safely against videos_dir."""
+    from server.app.storage_paths import resolve_video_dir as _resolve_video_dir
+
+    return _resolve_video_dir(video, videos_dir)
 
 
 def get_video_id(url: str) -> str:

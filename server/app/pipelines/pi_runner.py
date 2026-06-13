@@ -14,6 +14,7 @@ from typing import Any
 from server.app.executors.models import ExecutionStatus
 from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.jobs import JobQueries
+from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -123,8 +124,17 @@ class PiRunner:
         tools: list[str] | None = None,
         job_db: JobQueries | None = None,
         persist_run: bool = True,
+        job_dir: Path | None = None,
+        jobs_dir: Path | None = None,
     ) -> PiRunResult:
-        job_dir = Path(str(job["storage_dir"]))
+        if job_dir is None:
+            if jobs_dir is None:
+                raise ManagedPathError(
+                    "jobs_dir managed root is required",
+                    record_id=str(job["id"]),
+                    root_kind="job",
+                )
+            job_dir = resolve_job_dir(job, jobs_dir)
         run_token = str(uuid.uuid4())
         run_dir = job_dir / "runs" / node_key / run_token
         session_dir = run_dir / "session"

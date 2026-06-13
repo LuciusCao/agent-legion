@@ -39,13 +39,17 @@ def test_extract_knowledge_url_accepts_source_v2():
     assert _extract_knowledge_video_url(data) == ("https://example.com/k001.mp4", "")
 
 
-def test_resolve_video_dir_prefers_storage_dir():
-    videos_dir = Path("/data/videos")
-    assert resolve_video_dir({"id": "v1", "storage_dir": "/custom/dir"}, videos_dir) == Path(
-        "/custom/dir"
+def test_resolve_video_dir_prefers_storage_dir(tmp_path: Path) -> None:
+    videos_dir = tmp_path / "videos"
+    videos_dir.mkdir()
+    custom_dir = videos_dir / "custom" / "dir"
+    custom_dir.mkdir(parents=True)
+
+    assert resolve_video_dir({"id": "v1", "storage_dir": str(custom_dir)}, videos_dir) == (
+        custom_dir.resolve()
     )
-    assert resolve_video_dir({"id": "v1", "storage_dir": ""}, videos_dir) == Path("/data/videos/v1")
-    assert resolve_video_dir({"id": "v1"}, videos_dir) == Path("/data/videos/v1")
+    assert resolve_video_dir({"id": "v1", "storage_dir": ""}, videos_dir) == (videos_dir / "v1")
+    assert resolve_video_dir({"id": "v1"}, videos_dir) == (videos_dir / "v1")
 
 
 def test_parse_time_unknown_format():

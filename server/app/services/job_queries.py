@@ -1,4 +1,3 @@
-from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
@@ -6,6 +5,7 @@ from server.app.pipelines.definition import PipelineDefinition
 from server.app.services.job_errors import NotFoundError
 from server.app.services.pipeline_catalog import PipelineCatalogService
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_job_dir
 
 
 class JobQueryService:
@@ -117,7 +117,7 @@ class JobQueryService:
         }
 
     def _artifact_names(self, job: dict[str, Any]) -> list[str]:
-        base = Path(str(job["storage_dir"]))
+        base = resolve_job_dir(job, self.settings.jobs_dir)
         if not base.exists():
             return []
         return sorted(path.name for path in base.iterdir() if path.is_file())

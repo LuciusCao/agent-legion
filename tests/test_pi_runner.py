@@ -148,6 +148,7 @@ def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
         inputs=["questions_parsed.json"],
         outputs=["keywords_raw.json", "keywords_report.json"],
         job_db=None,
+        job_dir=job_dir,
     )
 
     assert result.status == "completed"
@@ -214,6 +215,7 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
         inputs=["questions_parsed.json"],
         outputs=["keywords_raw.json"],
         job_db=job_db,
+        job_dir=job_dir,
     )
 
     assert result.status == "completed"
@@ -256,6 +258,7 @@ def test_run_fails_when_output_missing(tmp_path, monkeypatch):
         inputs=["questions_parsed.json"],
         outputs=["keywords_raw.json", "keywords_report.json"],
         job_db=None,
+        job_dir=job_dir,
     )
 
     assert result.status == "failed"
@@ -285,6 +288,7 @@ def test_run_fails_when_binary_missing(tmp_path):
         inputs=["questions_parsed.json"],
         outputs=["keywords_raw.json", "keywords_report.json"],
         job_db=None,
+        job_dir=job_dir,
     )
 
     assert result.status == "failed"
@@ -322,6 +326,7 @@ def test_run_fails_when_validator_rejects_output(tmp_path, monkeypatch):
         inputs=["questions_parsed.json"],
         outputs=["keywords_raw.json"],
         job_db=None,
+        job_dir=job_dir,
     )
 
     assert result.status == "failed"

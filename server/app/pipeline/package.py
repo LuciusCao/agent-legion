@@ -4,6 +4,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from server.app.storage_paths import (
+    ManagedPathError,
+    resolve_job_dir,
+    resolve_video_dir,
+)
+
 PACKAGE_FILES = [
     "metadata.json",
     "chapters.json",
@@ -37,8 +43,7 @@ def create_workspace_package(
     with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         for job in jobs:
-            storage_dir = job.get("storage_dir", "")
-            job_dir = Path(storage_dir) if storage_dir else jobs_base_dir / job["id"]
+            job_dir = resolve_job_dir(job, jobs_base_dir)
             if job_dir.exists():
                 for f in job_dir.rglob("*"):
                     if f.is_file():
@@ -74,12 +79,11 @@ def create_package(
     with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         for video in videos:
-            storage_dir = video.get("storage_dir", "")
-            if storage_dir:
-                video_dir = Path(storage_dir)
-            elif videos_base_dir is not None:
-                video_dir = videos_base_dir / video["id"]
-            else:
+            if videos_base_dir is None:
+                continue
+            try:
+                video_dir = resolve_video_dir(video, videos_base_dir)
+            except ManagedPathError:
                 continue
             for name in PACKAGE_FILES:
                 path = video_dir / name

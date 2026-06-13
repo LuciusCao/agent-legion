@@ -17,7 +17,7 @@ from server.app.services.pipeline_catalog import PipelineCatalogService
 def execution_service(job_db: JobQueries, settings):
     return JobExecutionService(
         job_db,
-        JobArtifactMutationService(),
+        JobArtifactMutationService(settings.jobs_dir),
         ExecutorLeaseRepository(job_db.path),
         PipelineCatalogService(settings),
     )

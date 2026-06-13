@@ -8,6 +8,7 @@ from typing import Any
 
 from server.app.pipelines.definition import PipelineDefinition
 from server.app.pipelines.scheduler import downstream_nodes
+from server.app.storage_paths import resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -65,6 +66,9 @@ class StagedOutputs:
 class JobArtifactMutationService:
     """Service for reversible artifact mutations during job operations."""
 
+    def __init__(self, jobs_dir: Path | None = None) -> None:
+        self.jobs_dir = jobs_dir
+
     def stage_outputs(
         self,
         job: dict[str, Any],
@@ -83,7 +87,9 @@ class JobArtifactMutationService:
         ``commit()`` after a successful database transaction, or ``rollback()``
         if the transaction fails.
         """
-        storage_dir = Path(str(job["storage_dir"])).resolve()
+        if self.jobs_dir is None:
+            raise RuntimeError("JobArtifactMutationService requires jobs_dir")
+        storage_dir = resolve_job_dir(job, self.jobs_dir)
         if not storage_dir.exists():
             storage_dir.mkdir(parents=True, exist_ok=True)
 
