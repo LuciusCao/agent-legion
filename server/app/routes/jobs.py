@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+from typing import cast
+
 from fastapi import APIRouter
 
 from server.app.routes.job_contracts import (
     BatchJobRequest,
     BatchJobResponse,
     DeleteJobResponse,
-    JobDetailResponse,
-    JobsResponse,
     RerunNodeResponse,
 )
 from server.app.routes.job_http import raise_job_http_error, require_pipelines_enabled
+from server.app.routes.job_view_contracts import (
+    JobDetailResponse,
+    JobsResponse,
+    JobSummaryResponse,
+)
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_queries import JobQueryService
 from server.app.services.job_rerun import JobRerunService
@@ -33,7 +38,10 @@ def create_jobs_router(
         require_pipelines_enabled(settings)
         try:
             return JobsResponse(
-                jobs=job_queries.list_jobs(workspace_id, pipeline_key=pipeline_key, status=status)
+                jobs=cast(
+                    list[JobSummaryResponse],
+                    job_queries.list_jobs(workspace_id, pipeline_key=pipeline_key, status=status),
+                )
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)
@@ -65,7 +73,10 @@ def create_jobs_router(
         require_pipelines_enabled(settings)
         try:
             return JobsResponse(
-                jobs=job_queries.list_jobs("default", pipeline_key=pipeline_key, status=status)
+                jobs=cast(
+                    list[JobSummaryResponse],
+                    job_queries.list_jobs("default", pipeline_key=pipeline_key, status=status),
+                )
             )
         except JobServiceError as exc:
             raise_job_http_error(exc)

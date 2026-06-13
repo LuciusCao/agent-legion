@@ -384,6 +384,20 @@ class JobQueries:
             rows = conn.execute("select * from job_nodes where job_id=? order by id", (job_id,))
             return [dict(row) for row in rows]
 
+    def list_job_nodes_for_jobs(self, job_ids: Sequence[str]) -> dict[str, list[dict[str, Any]]]:
+        if not job_ids:
+            return {}
+        placeholders = ",".join("?" for _ in job_ids)
+        grouped: dict[str, list[dict[str, Any]]] = {job_id: [] for job_id in job_ids}
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                f"select * from job_nodes where job_id in ({placeholders}) order by job_id, id",
+                list(job_ids),
+            ).fetchall()
+        for row in rows:
+            grouped[str(row["job_id"])].append(dict(row))
+        return grouped
+
     def get_job_node(self, job_id: str, node_key: str) -> dict[str, Any] | None:
         with self._connect_read() as conn:
             row = conn.execute(

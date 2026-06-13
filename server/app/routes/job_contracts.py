@@ -17,10 +17,6 @@ class JobBatchResponse(BaseModel):
     jobs: list[dict[str, Any]]
 
 
-class JobsResponse(BaseModel):
-    jobs: list[dict[str, Any]]
-
-
 class WorkspaceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -75,13 +71,6 @@ class WorkspacesResponse(BaseModel):
 
 class DeleteJobResponse(BaseModel):
     deleted: str
-
-
-class JobDetailResponse(BaseModel):
-    job: dict[str, Any]
-    nodes: list[dict[str, Any]]
-    runs: list[dict[str, Any]]
-    artifacts: list[str]
 
 
 class ArtifactResponse(BaseModel):

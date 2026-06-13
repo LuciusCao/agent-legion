@@ -1,3 +1,6 @@
+from contextlib import contextmanager
+from typing import Any
+
 import pytest
 
 from server.app.services.job_queries import JobQueryService
@@ -9,10 +12,74 @@ def query_service(job_db, settings):
     return JobQueryService(job_db, settings, PipelineCatalogService(settings))
 
 
+def create_question_job(job_db, source_id: str) -> dict[str, Any]:
+    workspace = job_db.get_workspace("default") or job_db.create_workspace("default")
+    batch = job_db.create_batch(
+        "question_content",
+        "direct_ids",
+        {"question_ids": [source_id]},
+        workspace_id=workspace["id"],
+    )
+    job: dict[str, Any] = job_db.create_job(
+        pipeline_key="question_content",
+        source_type="question",
+        source_id=source_id,
+        batch_id=batch["id"],
+        title=f"Question {source_id}",
+        node_keys=["question_understanding", "assemble_package"],
+        workspace_id=workspace["id"],
+    )
+    return job
+
+
 def test_job_query_service_lists_jobs(query_service, job_db):
     job_db.create_workspace("default")
     job = query_service.list_jobs("default")
     assert isinstance(job, list)
+
+
+def test_list_jobs_returns_typed_node_summaries(query_service, job_db):
+    job = create_question_job(job_db, source_id="Q1")
+    job_db.update_job_node(job["id"], "question_understanding", status="completed")
+    job_db.update_job_node(
+        job["id"], "assemble_package", status="failed", error_message="assemble failed"
+    )
+
+    listed = query_service.list_jobs(job["workspace_id"])
+
+    assert [node["node_key"] for node in listed[0]["node_summaries"]] == [
+        "question_understanding",
+        "assemble_package",
+    ]
+    assert listed[0]["completed_nodes"] == 1
+    assert listed[0]["total_nodes"] == 2
+    assert listed[0]["active_node_key"] == "assemble_package"
+    assert listed[0]["error_summary"] == "assemble failed"
+    assert listed[0]["execution_control"] == {
+        "mode": "full",
+        "target_node_key": None,
+        "paused": False,
+        "pause_reason": "",
+    }
+
+
+def test_list_jobs_loads_nodes_in_one_query(query_service, job_db, monkeypatch):
+    for source_id in ("Q1", "Q2", "Q3"):
+        create_question_job(job_db, source_id=source_id)
+    statements: list[str] = []
+    original = job_db._connect_read
+
+    @contextmanager
+    def traced():
+        with original() as conn:
+            conn.set_trace_callback(statements.append)
+            yield conn
+
+    monkeypatch.setattr(job_db, "_connect_read", traced)
+    query_service.list_jobs("default")
+
+    node_selects = [sql for sql in statements if "from job_nodes" in sql.lower()]
+    assert len(node_selects) == 1
 
 
 def test_job_query_service_detail_enriches_nodes(query_service, job_db):
