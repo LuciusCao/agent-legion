@@ -243,4 +243,110 @@ describe('JobActionBar', () => {
     expect(screen.getByText('打包')).toHaveAttribute('disabled')
     expect(screen.getByText('删除')).toHaveAttribute('disabled')
   })
+
+  it('opens run-to dialog when the run-to button is clicked', async () => {
+    const onRunTo = vi.fn()
+    const { container } = render(
+      <JobActionBar
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'failed',
+            pipeline_key: 'question_content',
+          }),
+        ]}
+        pipelineDefinition={pipeline}
+        pipelineNodesByKey={pipelineNodesByKey}
+        mode="single"
+        onRerun={vi.fn()}
+        onRunTo={onRunTo}
+        onPackage={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    )
+
+    await act(async () => {
+      screen.getByText('运行到').click()
+    })
+
+    expect(screen.getByText('选择运行到节点')).toBeInTheDocument()
+    expect(
+      container.querySelector('[data-testid="target-chip-extract"]')
+    ).toBeInTheDocument()
+  })
+
+  it('shows the continue button for a target-reached paused job', () => {
+    render(
+      <JobActionBar
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'paused',
+            execution_control: {
+              paused: true,
+              pause_reason: 'target_reached',
+              mode: 'until_node',
+              target_node_key: 'review',
+            },
+          }),
+        ]}
+        pipelineDefinition={pipeline}
+        mode="single"
+        onRerun={vi.fn()}
+        onPackage={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    )
+
+    const continueBtn = screen.getByText('继续完整流程')
+    expect(continueBtn).toBeInTheDocument()
+    expect(continueBtn).not.toHaveAttribute('disabled')
+  })
+
+  it('calls onContinue when the continue button is clicked', async () => {
+    const onContinue = vi.fn()
+    render(
+      <JobActionBar
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'paused',
+            execution_control: {
+              paused: true,
+              pause_reason: 'target_reached',
+              mode: 'until_node',
+              target_node_key: 'review',
+            },
+          }),
+        ]}
+        pipelineDefinition={pipeline}
+        mode="single"
+        onRerun={vi.fn()}
+        onContinue={onContinue}
+        onPackage={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    )
+
+    await act(async () => {
+      screen.getByText('继续完整流程').click()
+    })
+
+    expect(onContinue).toHaveBeenCalledTimes(1)
+  })
+
+  it('hides the continue button when the job is not paused for target_reached', () => {
+    render(
+      <JobActionBar
+        jobs={[makeJob({ id: 'j1', status: 'paused' })]}
+        pipelineDefinition={pipeline}
+        mode="single"
+        onRerun={vi.fn()}
+        onPackage={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByText('继续完整流程')).not.toBeInTheDocument()
+  })
 })

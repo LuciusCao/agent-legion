@@ -4,9 +4,10 @@ import type { DagEdge, DagNode } from '../components/DagGraph'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact, fetchJobDetail, deleteJob } from '../api'
-import { rerunJob, runToJob, continueJob, packageJobs } from '../jobApi'
+import { rerunJob, runToJob, packageJobs } from '../jobApi'
 import { durationSeconds } from '../helpers'
 import { useUiStore } from '../stores/uiStore'
+import { useJobStore } from '../stores/jobStore'
 import type {
   JobDetailResponse,
   JobNodeRecord,
@@ -222,7 +223,7 @@ export default function JobDetailPage() {
     if (!jobId) return
     setActionLoading(true)
     try {
-      await continueJob(jobId)
+      await useJobStore.getState().continueJob(jobId)
       await refreshDetail()
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
