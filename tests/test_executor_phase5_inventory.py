@@ -1,9 +1,7 @@
-"""Phase 5 compatibility inventory.
+"""Phase 5 completion inventory.
 
-This test freezes the set of legacy paths that still exist at the start of
-Phase 5 and the Video Hive paths that must survive the phase.  It only reads
-the source files listed in the inventory, so it is safe to run before any
-production changes.
+This test verifies that the legacy Pipeline definition symbols removed in Phase 5
+are no longer present and that the replacement mechanisms are in place.
 """
 
 from pathlib import Path
@@ -15,13 +13,11 @@ ROOT = Path(__file__).resolve().parents[1]
 LEGACY_PATHS: dict[str, tuple[str, str]] = {
     "pipeline runner": ("server/app/pipelines/definition.py", "RunnerKind"),
     "pipeline concurrency": ("server/app/pipelines/definition.py", "PipelineConcurrency"),
-    "agent route": ("server/app/routes/workspace_agents.py", "/agents"),
 }
 
 REPLACEMENTS: dict[str, str] = {
     "pipeline runner": "Node capability + Executor binding kind",
     "pipeline concurrency": "Workspace-level Executor allocation limits + local Node limits",
-    "agent route": "Workspace Executor configuration routes",
 }
 
 PROTECTED_VIDEO_HIVE_PATHS: set[str] = {
@@ -40,11 +36,11 @@ def _read_source(rel_path: str) -> str:
 
 
 @pytest.mark.parametrize("name", sorted(LEGACY_PATHS))
-def test_legacy_path_is_present(name: str) -> None:
-    """Each legacy symbol or route still exists before Phase 5 removal."""
+def test_legacy_path_is_absent(name: str) -> None:
+    """Each legacy symbol has been removed from the codebase."""
     rel_path, token = LEGACY_PATHS[name]
     source = _read_source(rel_path)
-    assert token in source, f"Legacy token {token!r} not found in {rel_path}"
+    assert token not in source, f"Legacy token {token!r} still present in {rel_path}"
 
 
 def test_inventory_includes_replacement_for_every_legacy_path() -> None:

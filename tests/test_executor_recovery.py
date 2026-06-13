@@ -14,7 +14,6 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs.queries import JobQueries
 from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.pipelines.definition import (
-    PipelineConcurrency,
     PipelineDefinition,
     PipelineIntake,
     PipelineNode,
@@ -46,7 +45,6 @@ def _local_node(key: str) -> PipelineNode:
         key=key,
         label=key,
         capability=key,
-        runner="local",
         outputs=[f"{key}.json"],
     )
 
@@ -55,7 +53,6 @@ def _make_definition() -> PipelineDefinition:
     return PipelineDefinition(
         key="recovery_test",
         label="Recovery Test",
-        concurrency=PipelineConcurrency(local=1, agent=1),
         intake=PipelineIntake(),
         nodes={"fetch": _local_node("fetch")},
     )

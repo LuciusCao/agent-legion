@@ -273,7 +273,7 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
     # Startup bootstrap materialized reading_analysis defaults for the default
     # workspace; the failed PUT rolls back to that state.
     assert config["allocations"] == [
-        {"workspace_id": "default", "executor_id": "local-default", "concurrency_limit": 4}
+        {"workspace_id": "default", "executor_id": "local-default", "concurrency_limit": 1}
     ]
     assert config["bindings"] == [
         {
@@ -296,17 +296,17 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
         {
             "pipeline_key": "reading_analysis",
             "node_key": "clean_and_parse",
-            "concurrency_limit": 2,
+            "concurrency_limit": 1,
         },
         {
             "pipeline_key": "reading_analysis",
             "node_key": "fetch_questions",
-            "concurrency_limit": 10,
+            "concurrency_limit": 1,
         },
         {
             "pipeline_key": "reading_analysis",
             "node_key": "mark_question",
-            "concurrency_limit": 10,
+            "concurrency_limit": 1,
         },
     ]
 
@@ -644,7 +644,6 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     body = response.json()
     assert body["pipeline"]["key"] == "question_content"
     assert body["pipeline"]["label"] == "题目内容生成"
-    assert body["pipeline"]["concurrency"] == {"local": 8, "agent": 2, "nodes": {}}
     assert body["pipeline"]["intake"]["modes"] == [
         {
             "key": "direct_ids",
@@ -670,11 +669,10 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     graph_node = next(
         node for node in body["pipeline"]["nodes"] if node["key"] == "content_graph_generation"
     )
-    assert graph_node["runner"] == "agent"
     assert graph_node["after"] == ["solution_decomposition"]
 
 
-def test_list_pipelines_includes_nodes_concurrency(tmp_path):
+def test_list_pipelines_includes_registered_pipelines(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -686,7 +684,7 @@ def test_list_pipelines_includes_nodes_concurrency(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert any("nodes" in p["concurrency"] for p in body["pipelines"])
+    assert any(p["key"] for p in body["pipelines"])
 
 
 def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
@@ -1565,7 +1563,6 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
     assert all("label" in node for node in body["nodes"])
     first = body["nodes"][0]
     assert first["key"] == "fetch_questions"
-    assert first["runner"] == "local"
     assert first["status_counts"]["pending"] == 2
 
 

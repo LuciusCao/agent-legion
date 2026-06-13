@@ -79,23 +79,18 @@ def execute_agent_node_once(
     node_key: str,
     pi_runner: PiRunner,
     skill_root: Path,
+    skill_relative: str | None = None,
 ) -> bool:
     node = definition.nodes[node_key]
-    if node.agent is None:
-        raise ValueError(f"Node {definition.key}.{node_key} has no agent configuration")
-    if node.agent.engine != "pi":
-        raise ValueError(
-            f"Unsupported agent engine {node.agent.engine!r} for {definition.key}.{node_key}"
-        )
-
-    skill_dir = resolve_pipeline_skill(skill_root, node.agent.skill)
+    skill = skill_relative or f"{definition.key}/{node.capability}"
+    skill_dir = resolve_pipeline_skill(skill_root, skill)
     result = pi_runner.run(
         job=job,
         node_key=node_key,
         skill_dir=skill_dir,
         inputs=node.inputs,
         outputs=node.outputs,
-        tools=node.agent.tools,
+        tools=["read", "write", "bash"],
         job_db=job_db,
     )
     return result.status == "completed"
@@ -111,8 +106,8 @@ def execute_node_once(
     pi_runner: PiRunner | None = None,
     skill_root: Path | None = None,
 ) -> bool:
-    node = definition.nodes[node_key]
-    if node.runner == "local":
+    has_local_handler = LOCAL_HANDLERS.get(definition.key, {}).get(node_key) is not None
+    if has_local_handler:
         return execute_local_node_once(
             job_db,
             definition,
@@ -121,18 +116,16 @@ def execute_node_once(
             logs_dir,
             settings_config=settings_config,
         )
-    if node.agent is not None and node.agent.engine == "pi":
-        if pi_runner is None or skill_root is None:
-            raise ValueError("Pi runner is not configured")
-        return execute_agent_node_once(
-            job_db,
-            definition,
-            job,
-            node_key,
-            pi_runner,
-            skill_root,
-        )
-    raise ValueError(f"Unsupported runner for {definition.key}.{node_key}")
+    if pi_runner is None or skill_root is None:
+        raise ValueError("Pi runner is not configured")
+    return execute_agent_node_once(
+        job_db,
+        definition,
+        job,
+        node_key,
+        pi_runner,
+        skill_root,
+    )
 
 
 def _execute_node_wrapped(
@@ -145,7 +138,6 @@ def _execute_node_wrapped(
     pi_runner: PiRunner | None = None,
     skill_root: Path | None = None,
 ) -> bool:
-    """Backward-compatible synchronous wrapper used by routes and tests."""
     try:
         return execute_node_once(
             job_db,
@@ -184,11 +176,13 @@ def process_ready_pipeline_node(
     logs_dir: Path,
     settings_config: dict[str, Any] | None = None,
 ) -> bool:
-    """Backward-compatible helper that runs one ready local node synchronously."""
+    local_handler_keys = set(LOCAL_HANDLERS.get(definition.key, {}))
     for job in job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
+        if job.get("status") in ("completed", "failed"):
+            continue
         statuses = _node_statuses(job_db, job["id"])
         ready_nodes = find_ready_nodes(definition, statuses, Path(str(job["storage_dir"])))
-        local_ready_nodes = [node for node in ready_nodes if node.runner == "local"]
+        local_ready_nodes = [node for node in ready_nodes if node.key in local_handler_keys]
         if not local_ready_nodes:
             _refresh_job_status(job_db, job["id"])
             continue

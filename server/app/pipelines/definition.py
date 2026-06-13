@@ -2,14 +2,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 import yaml
-
-RunnerKind = Literal["local", "agent"]
-AgentEngine = Literal["pi"]
-
-PI_TOOLS = {"read", "write", "edit", "bash", "grep", "find", "ls"}
 
 
 class PipelineDefinitionError(ValueError):
@@ -17,31 +12,13 @@ class PipelineDefinitionError(ValueError):
 
 
 @dataclass(frozen=True)
-class PipelineConcurrency:
-    local: int = 1
-    agent: int = 1
-    nodes: dict[str, int] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class PipelineAgent:
-    engine: AgentEngine
-    skill: str
-    tools: list[str] = field(default_factory=lambda: ["read", "write", "bash"])
-
-
-@dataclass(frozen=True)
 class PipelineNode:
     key: str
     label: str
     capability: str
-    # Legacy runner/agent fields are retained for compatibility. Scheduler code must
-    # branch on capability, not on runner or agent.
-    runner: RunnerKind
     after: list[str] = field(default_factory=list)
     inputs: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
-    agent: PipelineAgent | None = None
 
 
 @dataclass(frozen=True)
@@ -61,7 +38,6 @@ class PipelineIntake:
 class PipelineDefinition:
     key: str
     label: str
-    concurrency: PipelineConcurrency
     intake: PipelineIntake
     nodes: dict[str, PipelineNode]
 
@@ -77,31 +53,6 @@ def _string_list(value: Any, field_name: str, node_key: str) -> list[str]:
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
         raise PipelineDefinitionError(f"{node_key}.{field_name} must be a list of strings")
     return list(value)
-
-
-def _positive_int(value: Any, field_name: str) -> int:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
-        raise PipelineDefinitionError(f"concurrency.{field_name} must be a positive integer")
-    return value
-
-
-def _node_concurrency(raw: Any) -> dict[str, int]:
-    if raw is None:
-        return {}
-    if not isinstance(raw, dict):
-        raise PipelineDefinitionError("concurrency.nodes must be a mapping")
-    result: dict[str, int] = {}
-    for node_key, limit in raw.items():
-        if not isinstance(node_key, str) or not node_key:
-            raise PipelineDefinitionError("concurrency.nodes keys must be non-empty strings")
-        try:
-            limit_int = int(limit)
-        except (TypeError, ValueError):
-            raise PipelineDefinitionError(
-                f"concurrency.nodes[{node_key!r}] must be an integer, got {limit!r}"
-            ) from None
-        result[node_key] = max(1, limit_int)
-    return result
 
 
 def _validate_acyclic(nodes: dict[str, PipelineNode]) -> None:
@@ -159,47 +110,6 @@ def _load_intake(raw: dict[str, Any]) -> PipelineIntake:
     return PipelineIntake(modes=modes)
 
 
-def _load_agent(
-    raw_node: dict[str, Any], node_key: str, runner: RunnerKind
-) -> PipelineAgent | None:
-    raw_agent = raw_node.get("agent")
-    if raw_agent is None:
-        return None
-    if not isinstance(raw_agent, dict):
-        raise PipelineDefinitionError(f"Node {node_key} agent block must be a mapping")
-    if runner == "local":
-        raise PipelineDefinitionError(f"Node {node_key} has agent block but runner is local")
-
-    engine = raw_agent.get("engine")
-    if engine != "pi":
-        raise PipelineDefinitionError(f"Node {node_key} agent.engine must be 'pi', got {engine!r}")
-
-    skill = raw_agent.get("skill", "")
-    if not isinstance(skill, str) or not skill:
-        raise PipelineDefinitionError(f"Node {node_key} agent.skill must be a non-empty string")
-    if skill.startswith("/"):
-        raise PipelineDefinitionError(
-            f"Node {node_key} agent.skill must be a relative path, got {skill!r}"
-        )
-    if ".." in skill.split("/"):
-        raise PipelineDefinitionError(
-            f"Node {node_key} agent.skill must not contain '..' components, got {skill!r}"
-        )
-
-    raw_tools = raw_agent.get("tools", ["read", "write", "bash"])
-    if not isinstance(raw_tools, list) or not raw_tools:
-        raise PipelineDefinitionError(f"Node {node_key} agent.tools must be a non-empty list")
-    tools: list[str] = []
-    for tool in raw_tools:
-        if not isinstance(tool, str) or tool not in PI_TOOLS:
-            raise PipelineDefinitionError(
-                f"Node {node_key} agent.tools contains invalid tool {tool!r}"
-            )
-        tools.append(tool)
-
-    return PipelineAgent(engine="pi", skill=skill, tools=tools)
-
-
 def load_pipeline_definition(path: Path) -> PipelineDefinition:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
@@ -216,17 +126,11 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
     if not isinstance(raw_nodes, dict) or not raw_nodes:
         raise PipelineDefinitionError("Pipeline nodes are required")
 
-    raw_concurrency = raw.get("concurrency", {})
-    if raw_concurrency is None:
-        raw_concurrency = {}
-    if not isinstance(raw_concurrency, dict):
-        raise PipelineDefinitionError("Pipeline concurrency must be a mapping")
+    if "concurrency" in raw:
+        raise PipelineDefinitionError(
+            "Pipeline field 'concurrency' was removed; configure Executor limits at Workspace level."
+        )
 
-    concurrency = PipelineConcurrency(
-        local=_positive_int(raw_concurrency.get("local", 1), "local"),
-        agent=_positive_int(raw_concurrency.get("agent", 1), "agent"),
-        nodes=_node_concurrency(raw_concurrency.get("nodes")),
-    )
     intake = _load_intake(raw)
 
     nodes: dict[str, PipelineNode] = {}
@@ -236,9 +140,14 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
         if not isinstance(raw_node, dict):
             raise PipelineDefinitionError(f"Node {node_key} must be a mapping")
 
-        runner = raw_node.get("runner", "local")
-        if runner not in {"local", "agent"}:
-            raise PipelineDefinitionError(f"Node {node_key} has invalid runner {runner!r}")
+        if "runner" in raw_node:
+            raise PipelineDefinitionError(
+                "Node field 'runner' was removed; bind a compatible Executor in Workspace settings."
+            )
+        if "agent" in raw_node:
+            raise PipelineDefinitionError(
+                "Node field 'agent' was removed; invocation details belong to Executor capabilities."
+            )
 
         node_label = raw_node.get("label", node_key)
         if not isinstance(node_label, str) or not node_label:
@@ -248,17 +157,13 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
         if not isinstance(capability, str) or not capability:
             raise PipelineDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
-        agent = _load_agent(raw_node, node_key, runner)
-
         nodes[node_key] = PipelineNode(
             key=node_key,
             label=node_label,
             capability=capability,
-            runner=runner,
             after=_string_list(raw_node.get("after"), "after", node_key),
             inputs=_string_list(raw_node.get("inputs"), "inputs", node_key),
             outputs=_string_list(raw_node.get("outputs"), "outputs", node_key),
-            agent=agent,
         )
 
     for node in nodes.values():
@@ -270,7 +175,6 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
     return PipelineDefinition(
         key=key,
         label=label,
-        concurrency=concurrency,
         intake=intake,
         nodes=nodes,
     )

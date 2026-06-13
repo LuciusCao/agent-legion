@@ -1,8 +1,5 @@
 key: question_content
 label: 题目内容生成
-concurrency:
-  local: 8
-  agent: 2
 intake:
   modes:
     direct_ids:
@@ -16,13 +13,11 @@ nodes:
   fetch_question_context:
     label: 获取题目上下文
     capability: fetch_question_context
-    runner: local
     outputs:
       - question_context.json
   question_understanding:
     label: 题目理解
     capability: question_understanding
-    runner: agent
     after:
       - fetch_question_context
     inputs:
@@ -32,7 +27,6 @@ nodes:
   misconception_analysis:
     label: 易错点分析
     capability: misconception_analysis
-    runner: agent
     after:
       - question_understanding
     inputs:
@@ -43,7 +37,6 @@ nodes:
   natural_language_reading:
     label: 自然语言阅读
     capability: natural_language_reading
-    runner: agent
     after:
       - question_understanding
     inputs:
@@ -54,7 +47,6 @@ nodes:
   solution_decomposition:
     label: 解题步骤分解
     capability: solution_decomposition
-    runner: agent
     after:
       - question_understanding
     inputs:
@@ -65,7 +57,6 @@ nodes:
   faq_generation:
     label: FAQ 生成
     capability: faq_generation
-    runner: agent
     after:
       - solution_decomposition
     inputs:
@@ -75,7 +66,6 @@ nodes:
   content_graph_generation:
     label: 内容图谱生成
     capability: content_graph_generation
-    runner: agent
     after:
       - solution_decomposition
     inputs:
@@ -87,7 +77,6 @@ nodes:
   interactive_template_generation:
     label: 交互模板生成
     capability: interactive_template_generation
-    runner: agent
     after:
       - misconception_analysis
       - solution_decomposition
@@ -99,7 +88,6 @@ nodes:
   content_review:
     label: 内容审核
     capability: content_review
-    runner: agent
     after:
       - faq_generation
       - content_graph_generation
@@ -113,7 +101,6 @@ nodes:
   assemble_package:
     label: 打包组装
     capability: assemble_package
-    runner: local
     after:
       - content_review
     inputs:

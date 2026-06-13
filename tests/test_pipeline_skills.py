@@ -309,14 +309,21 @@ def _setup_skill_valid_outputs(skill_name: str, job_dir: Path) -> None:
         )
 
 
+LOCAL_CAPABILITIES = {"fetch_questions", "clean_and_parse", "mark_question"}
+
+
+def _agent_skill_path(capability: str) -> str:
+    return f"reading_analysis/{capability}"
+
+
 def test_all_agent_nodes_have_complete_repository_skills():
     definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
     root = Path("server/app/pipelines/skills")
 
     for node in definition.nodes.values():
-        if node.agent is None:
+        if node.capability in LOCAL_CAPABILITIES:
             continue
-        skill = resolve_pipeline_skill(root, node.agent.skill)
+        skill = resolve_pipeline_skill(root, _agent_skill_path(node.capability))
         assert (skill / "SKILL.md").is_file()
         assert (skill / "references" / "output-contract.md").is_file()
         assert (skill / "scripts" / "validate_output.py").is_file()
@@ -490,9 +497,9 @@ def test_all_skill_validators_are_executable():
     root = Path("server/app/pipelines/skills")
 
     for node in definition.nodes.values():
-        if node.agent is None:
+        if node.capability in LOCAL_CAPABILITIES:
             continue
-        skill = resolve_pipeline_skill(root, node.agent.skill)
+        skill = resolve_pipeline_skill(root, _agent_skill_path(node.capability))
         validator = skill / "scripts" / "validate_output.py"
         assert validator.stat().st_mode & 0o111, f"{validator} is not executable"
 
@@ -509,5 +516,9 @@ EXPECTED_SKILLS = {
 
 def test_reading_analysis_has_six_complete_skills():
     definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
-    actual = {node.key for node in definition.nodes.values() if node.agent is not None}
+    actual = {
+        node.capability
+        for node in definition.nodes.values()
+        if node.capability not in LOCAL_CAPABILITIES
+    }
     assert actual == EXPECTED_SKILLS

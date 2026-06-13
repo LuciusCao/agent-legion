@@ -15,7 +15,6 @@ from server.app.executors.legacy_migration import finalize_legacy_executor_schem
 from server.app.jobs.queries import JobQueries
 from server.app.main import create_app
 from server.app.pipelines.definition import (
-    PipelineConcurrency,
     PipelineDefinition,
     PipelineIntake,
     PipelineNode,
@@ -61,30 +60,22 @@ def _sample_pipeline() -> PipelineDefinition:
     return PipelineDefinition(
         key="reading_analysis",
         label="Reading Analysis",
-        concurrency=PipelineConcurrency(
-            local=2,
-            agent=1,
-            nodes={"local_a": 3, "local_b": 5},
-        ),
         intake=PipelineIntake(),
         nodes={
             "local_a": PipelineNode(
                 key="local_a",
                 label="Local A",
                 capability="local_a",
-                runner="local",
             ),
             "local_b": PipelineNode(
                 key="local_b",
                 label="Local B",
                 capability="local_b",
-                runner="local",
             ),
             "pi_a": PipelineNode(
                 key="pi_a",
                 label="Pi A",
                 capability="pi_a",
-                runner="agent",
             ),
         },
     )
@@ -94,20 +85,17 @@ def _legacy_unconfigured_agent_pipeline() -> PipelineDefinition:
     return PipelineDefinition(
         key="question_content",
         label="Question Content",
-        concurrency=PipelineConcurrency(local=2, agent=1),
         intake=PipelineIntake(),
         nodes={
             "fetch": PipelineNode(
                 key="fetch",
                 label="Fetch",
                 capability="local_a",
-                runner="local",
             ),
             "understand": PipelineNode(
                 key="understand",
                 label="Understand",
                 capability="understand",
-                runner="agent",
             ),
         },
     )
@@ -184,13 +172,13 @@ def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> Non
             "workspace_id": workspace_id,
             "pipeline_key": "reading_analysis",
             "node_key": "local_a",
-            "concurrency_limit": 3,
+            "concurrency_limit": 1,
         },
         {
             "workspace_id": workspace_id,
             "pipeline_key": "reading_analysis",
             "node_key": "local_b",
-            "concurrency_limit": 5,
+            "concurrency_limit": 1,
         },
     ]
 
@@ -212,7 +200,7 @@ def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None
         for row in _fetch_all_allocations(queries)
         if row["workspace_id"] == workspace_id
     }
-    assert allocations == {"local-default": 2, "pi-default": 3}
+    assert allocations == {"local-default": 1, "pi-default": 3}
 
     bindings = {
         row["node_key"]: row["executor_id"]
@@ -230,7 +218,7 @@ def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None
         for row in _fetch_all_node_limits(queries)
         if row["workspace_id"] == workspace_id
     }
-    assert limits == {"local_a": 1, "local_b": 5}
+    assert limits == {"local_a": 1, "local_b": 1}
 
 
 def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) -> None:

@@ -15,8 +15,6 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
 from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.pipelines.definition import (
-    PipelineAgent,
-    PipelineConcurrency,
     PipelineDefinition,
     PipelineIntake,
     PipelineNode,
@@ -100,7 +98,6 @@ def _make_definition(nodes: list[PipelineNode]) -> PipelineDefinition:
     return PipelineDefinition(
         key="test",
         label="Test",
-        concurrency=PipelineConcurrency(local=1, agent=1),
         intake=PipelineIntake(),
         nodes={n.key: n for n in nodes},
     )
@@ -111,7 +108,6 @@ def _local_node(key: str, outputs: list[str] | None = None) -> PipelineNode:
         key=key,
         label=key,
         capability=key,
-        runner="local",
         outputs=outputs or ["output.json"],
     )
 
@@ -121,8 +117,6 @@ def _agent_node(key: str, outputs: list[str] | None = None) -> PipelineNode:
         key=key,
         label=key,
         capability=key,
-        runner="agent",
-        agent=PipelineAgent(engine="pi", skill="dummy/skill"),
         outputs=outputs or ["output.json"],
     )
 
