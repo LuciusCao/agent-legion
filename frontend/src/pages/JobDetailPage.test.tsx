@@ -48,6 +48,18 @@ const mockDetail = {
       started_at: '2026-06-09T08:00:13Z',
       error_message: '',
     },
+    {
+      id: 3,
+      job_id: 'j1',
+      node_key: 'review',
+      label: '审核',
+      status: 'pending',
+      capability: 'review',
+      after: ['generate'],
+      inputs: [],
+      outputs: [],
+      error_message: '',
+    },
   ],
   runs: [
     {
@@ -87,6 +99,7 @@ function createFetchMock(
   overrides: {
     detailStatus?: string
     packageUrl?: string | null
+    pauseReason?: string | null
   } = {}
 ) {
   return vi.fn().mockImplementation((url: string, init?: RequestInit) => {
@@ -99,6 +112,15 @@ function createFetchMock(
           job: {
             ...mockDetail.job,
             status: overrides.detailStatus ?? 'running',
+            execution_control:
+              overrides.pauseReason != null
+                ? {
+                    paused: true,
+                    pause_reason: overrides.pauseReason,
+                    target_node_key: 'review',
+                    mode: 'until_node',
+                  }
+                : undefined,
           },
         }),
       })
@@ -119,6 +141,26 @@ function createFetchMock(
         json: async () => ({
           job_id: 'j1',
           operation: 'rerun',
+          status: 'succeeded',
+        }),
+      })
+    }
+    if (url === '/api/jobs/j1/run-to' && method === 'POST') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          job_id: 'j1',
+          operation: 'run_to',
+          status: 'succeeded',
+        }),
+      })
+    }
+    if (url === '/api/jobs/j1/continue' && method === 'POST') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          job_id: 'j1',
+          operation: 'continue',
           status: 'succeeded',
         }),
       })
@@ -170,9 +212,9 @@ describe('JobDetailPage', () => {
     })
     fireEvent.click(screen.getByLabelText('查看 DAG'))
     expect(await screen.findByLabelText('关闭')).toBeInTheDocument()
-    expect(container.querySelectorAll('[data-node]')).toHaveLength(2)
+    expect(container.querySelectorAll('[data-node]')).toHaveLength(3)
     expect(container.querySelectorAll('path[data-testid="edge"]')).toHaveLength(
-      1
+      2
     )
   })
 
@@ -303,5 +345,111 @@ describe('JobDetailPage', () => {
       )
     })
     expect(screen.getByTestId('job-list-page')).toBeInTheDocument()
+  })
+
+  it('runs to a selected target and refreshes detail', async () => {
+    const fetchMock = createFetchMock({ detailStatus: 'failed' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('节点进度')).toBeInTheDocument()
+    })
+
+    await act(async () => {
+      screen.getByText('运行到').click()
+    })
+
+    expect(screen.getByText('选择运行到节点')).toBeInTheDocument()
+
+    await act(async () => {
+      const chip = document.querySelector(
+        '[data-testid="target-chip-review"]'
+      ) as HTMLElement | null
+      if (chip) fireEvent.click(chip)
+    })
+
+    await act(async () => {
+      screen.getByText('确认运行到').click()
+    })
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/jobs/j1/run-to',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ target_node_key: 'review' }),
+        })
+      )
+    })
+  })
+
+  it('runs to a target from a selected start node', async () => {
+    const fetchMock = createFetchMock({ detailStatus: 'failed' })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('节点进度')).toBeInTheDocument()
+    })
+
+    await act(async () => {
+      screen.getByText('运行到').click()
+    })
+
+    await act(async () => {
+      const chip = document.querySelector(
+        '[data-testid="target-chip-review"]'
+      ) as HTMLElement | null
+      if (chip) fireEvent.click(chip)
+    })
+
+    await act(async () => {
+      const chip = document.querySelector(
+        '[data-testid="start-chip-generate"]'
+      ) as HTMLElement | null
+      if (chip) fireEvent.click(chip)
+    })
+
+    await act(async () => {
+      screen.getByText('确认运行到').click()
+    })
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/jobs/j1/run-to',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            target_node_key: 'review',
+            start_node_key: 'generate',
+          }),
+        })
+      )
+    })
+  })
+
+  it('shows continue full flow when paused with target_reached reason', async () => {
+    const fetchMock = createFetchMock({
+      detailStatus: 'paused',
+      pauseReason: 'target_reached',
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('继续完整流程')).toBeInTheDocument()
+    })
+
+    await act(async () => {
+      screen.getByText('继续完整流程').click()
+    })
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/jobs/j1/continue',
+        expect.objectContaining({ method: 'POST' })
+      )
+    })
   })
 })

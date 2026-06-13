@@ -4,7 +4,7 @@ import type { DagEdge, DagNode } from '../components/DagGraph'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact, fetchJobDetail, deleteJob } from '../api'
-import { rerunJob, packageJobs } from '../jobApi'
+import { rerunJob, runToJob, continueJob, packageJobs } from '../jobApi'
 import { durationSeconds } from '../helpers'
 import { useUiStore } from '../stores/uiStore'
 import type {
@@ -202,6 +202,35 @@ export default function JobDetailPage() {
     [jobId, refreshDetail]
   )
 
+  const handleRunTo = useCallback(
+    async (targetKey: string, startKey?: string) => {
+      if (!jobId) return
+      setActionLoading(true)
+      try {
+        await runToJob(jobId, targetKey, startKey)
+        await refreshDetail()
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+      } finally {
+        setActionLoading(false)
+      }
+    },
+    [jobId, refreshDetail]
+  )
+
+  const handleContinue = useCallback(async () => {
+    if (!jobId) return
+    setActionLoading(true)
+    try {
+      await continueJob(jobId)
+      await refreshDetail()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err))
+    } finally {
+      setActionLoading(false)
+    }
+  }, [jobId, refreshDetail])
+
   const handlePackage = useCallback(async () => {
     if (!workspaceId || !jobId) return
     setActionLoading(true)
@@ -269,6 +298,8 @@ export default function JobDetailPage() {
             mode="single"
             loading={actionLoading}
             onRerun={handleRerun}
+            onRunTo={handleRunTo}
+            onContinue={handleContinue}
             onPackage={handlePackage}
             onDelete={handleDelete}
           />

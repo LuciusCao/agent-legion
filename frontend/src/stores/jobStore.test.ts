@@ -11,6 +11,9 @@ vi.mock('../jobApi', () => ({
   batchRerunJobs: vi.fn(),
   batchDeleteJobs: vi.fn(),
   packageJobs: vi.fn(),
+  runToJob: vi.fn(),
+  continueJob: vi.fn(),
+  batchRunToJobs: vi.fn(),
 }))
 
 vi.mock('./uiStore', () => ({
@@ -21,13 +24,23 @@ vi.mock('./uiStore', () => ({
 }))
 
 import { fetchJobs } from '../api'
-import { batchRerunJobs, batchDeleteJobs, packageJobs } from '../jobApi'
+import {
+  batchRerunJobs,
+  batchDeleteJobs,
+  packageJobs,
+  runToJob,
+  continueJob,
+  batchRunToJobs,
+} from '../jobApi'
 import { useUiStore } from './uiStore'
 
 const mockFetchJobs = vi.mocked(fetchJobs)
 const mockBatchRerunJobs = vi.mocked(batchRerunJobs)
 const mockBatchDeleteJobs = vi.mocked(batchDeleteJobs)
 const mockPackageJobs = vi.mocked(packageJobs)
+const mockRunToJob = vi.mocked(runToJob)
+const mockContinueJob = vi.mocked(continueJob)
+const mockBatchRunToJobs = vi.mocked(batchRunToJobs)
 const mockShowToast = vi.fn()
 const mockGetState = vi.mocked(useUiStore.getState)
 
@@ -41,11 +54,16 @@ describe('jobStore', () => {
       expandedId: null,
       statusFilter: 'all',
       searchQuery: '',
+      batchRunToLoading: false,
+      continueLoading: false,
     })
     mockFetchJobs.mockReset()
     mockBatchRerunJobs.mockReset()
     mockBatchDeleteJobs.mockReset()
     mockPackageJobs.mockReset()
+    mockRunToJob.mockReset()
+    mockContinueJob.mockReset()
+    mockBatchRunToJobs.mockReset()
     mockShowToast.mockReset()
     mockGetState.mockReturnValue(
       createMockUiState({ showToast: mockShowToast })
@@ -336,5 +354,116 @@ describe('jobStore', () => {
 
     expect(useJobStore.getState().selectedIds.size).toBe(0)
     expect(useJobStore.getState().selectMode).toBe(false)
+  })
+
+  it('calls batch run-to endpoint and clears succeeded jobs from selection', async () => {
+    useJobStore.setState({
+      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+    mockBatchRunToJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'run_to', status: 'succeeded' }],
+    })
+
+    await useJobStore.getState().batchRunTo('ws1', 'review', 'extract')
+
+    expect(mockBatchRunToJobs).toHaveBeenCalledWith(
+      'ws1',
+      'review',
+      ['j1'],
+      'extract'
+    )
+    expect(useJobStore.getState().selectedIds.size).toBe(0)
+    expect(useJobStore.getState().selectMode).toBe(false)
+    expect(mockShowToast).toHaveBeenCalledWith(
+      '运行到完成：成功 1 项',
+      'success'
+    )
+  })
+
+  it('preserves skipped selections after batch run-to', async () => {
+    useJobStore.setState({
+      jobs: [
+        makeJob({ id: 'j1', status: 'failed' }),
+        makeJob({ id: 'j2', status: 'failed', source_id: 'Q2' }),
+      ],
+      selectedIds: new Set(['j1', 'j2']),
+      selectMode: true,
+    })
+    mockBatchRunToJobs.mockResolvedValueOnce({
+      results: [
+        { job_id: 'j1', operation: 'run_to', status: 'succeeded' },
+        { job_id: 'j2', operation: 'run_to', status: 'skipped' },
+      ],
+    })
+
+    await useJobStore.getState().batchRunTo('ws1', 'review')
+
+    expect(useJobStore.getState().selectedIds.size).toBe(1)
+    expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
+    expect(useJobStore.getState().selectMode).toBe(true)
+  })
+
+  it('shows accurate toast counts on batch run-to failure', async () => {
+    useJobStore.setState({
+      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+    mockBatchRunToJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'run_to', status: 'failed' }],
+    })
+
+    await useJobStore.getState().batchRunTo('ws1', 'review')
+
+    expect(mockShowToast).toHaveBeenCalledWith(
+      '运行到完成：成功 0 项，跳过 0 项，失败 1 项',
+      'error'
+    )
+  })
+
+  it('refreshes jobs immediately after batch run-to', async () => {
+    useJobStore.setState({
+      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+    mockBatchRunToJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'run_to', status: 'succeeded' }],
+    })
+
+    await useJobStore.getState().batchRunTo('ws1', 'review')
+
+    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+  })
+
+  it('does nothing when batch run-to is invoked with empty selection', async () => {
+    await useJobStore.getState().batchRunTo('ws1', 'review')
+    expect(mockBatchRunToJobs).not.toHaveBeenCalled()
+  })
+
+  it('calls continue endpoint for a paused target-reached job', async () => {
+    mockContinueJob.mockResolvedValueOnce({
+      job_id: 'j1',
+      operation: 'continue',
+      status: 'succeeded',
+    })
+
+    const result = await useJobStore.getState().continueJob('j1')
+
+    expect(mockContinueJob).toHaveBeenCalledWith('j1')
+    expect(result.status).toBe('succeeded')
+    expect(mockShowToast).toHaveBeenCalledWith('继续完整流程成功', 'success')
+  })
+
+  it('surfaces continue endpoint errors', async () => {
+    mockContinueJob.mockRejectedValueOnce(new Error('not paused'))
+
+    await expect(useJobStore.getState().continueJob('j1')).rejects.toThrow(
+      'not paused'
+    )
+
+    expect(mockShowToast).toHaveBeenCalledWith('not paused', 'error')
   })
 })
