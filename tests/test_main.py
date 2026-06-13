@@ -36,6 +36,8 @@ def test_lifespan_with_start_worker_initializes_worker_threads(tmp_path, monkeyp
             )
         ),
     )
+    # Startup validation is about real runtime dependencies, not lifespan wiring.
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
 
     # Ensure required data dirs exist.
     for path_name in ["videos", "logs", "packages", "jobs"]:

@@ -15,15 +15,16 @@ asr:
   provider: auto
   timeout_seconds: 900
   whisper:
-    binary: /opt/homebrew/Cellar/whisper-cpp/1.8.4/bin/whisper-cli
+    binary: whisper-cli
     model: ~/.cache/whisper.cpp/ggml-medium.bin
     # VAD model path for voice activity detection (silero-v6.2.0)
     vad_model: ~/.cache/whisper.cpp/ggml-silero-v6.2.0.bin
   sensevoice:
     script: server/app/pipeline/transcribe_sensevoice.py
-    model_dir: /Users/user/CatPuru/projects/cms-extensions/models/SenseVoiceSmall
+    model_dir: ~/.cache/SenseVoiceSmall
 cms:
-  base_url: "http://cms.internal.example.com/v2"
+  # Set CMS token and token_gen secret via environment overrides; do not commit credentials.
+  base_url: "https://cms.example.com/v2"
   env: prod
   bank_version: "v5"
   country_id: "1"

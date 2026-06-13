@@ -33,7 +33,7 @@ RUNTIME_EVIDENCE_KINDS: set[str] = {
 RISK_LEVELS: set[str] = {"high", "critical"}
 
 ID_PATTERN: re.Pattern[str] = re.compile(
-    r"^(API|DB|EXEC|RECOVERY|BOUNDARY|SECURITY)-[A-Z]+-[0-9]{3}$"
+    r"^(API|DB|EXEC|RECOVERY|BOUNDARY|SECURITY|CONFIG)-[A-Z]+-[0-9]{3}$"
 )
 
 
