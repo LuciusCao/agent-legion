@@ -31,6 +31,9 @@ markers = [
   "full_gate: deterministic higher-fidelity architecture scenarios",
   "ci_extended: repeated stress scenarios for CI",
 ]
+filterwarnings = [
+  "error::ResourceWarning:sqlite3",
+]
 
 [tool.ruff]
 line-length = 100

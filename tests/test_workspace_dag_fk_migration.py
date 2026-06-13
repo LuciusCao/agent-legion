@@ -1,4 +1,5 @@
 import json
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -224,7 +225,7 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
         assert "command_json" not in issue["message"]
 
     # Source rows and version 4 must remain absent.
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         assert conn.execute("select count(*) from job_batches").fetchone()[0] == 1
         assert conn.execute("select count(*) from jobs").fetchone()[0] == 2
         assert conn.execute("select count(*) from job_nodes").fetchone()[0] == 1
@@ -274,7 +275,7 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
 
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         # Data preserved exactly.
         batch = conn.execute("select * from job_batches where id = 'batch1'").fetchone()
         assert batch is not None
@@ -356,7 +357,7 @@ def test_v004_is_idempotent(tmp_path: Path) -> None:
     init_db(path)
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
         assert [row["version"] for row in versions] == [1, 2, 3, 4, 6]
         assert _foreign_key_relationships(conn) == {

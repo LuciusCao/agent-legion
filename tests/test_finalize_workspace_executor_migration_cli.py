@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 
 from server.app.jobs.queries import JobQueries
@@ -55,7 +56,7 @@ def _legacy_database(data_dir: Path, *, agent_id: str = "pi") -> Path:
 def _table_exists(db_path: Path, table: str) -> bool:
     import sqlite3
 
-    with sqlite3.connect(str(db_path)) as conn:
+    with closing(sqlite3.connect(str(db_path))) as conn, conn:
         row = conn.execute(
             "select 1 from sqlite_master where type = 'table' and name = ?", (table,)
         ).fetchone()
@@ -65,7 +66,7 @@ def _table_exists(db_path: Path, table: str) -> bool:
 def _migration_version(db_path: Path, version: int) -> bool:
     import sqlite3
 
-    with sqlite3.connect(str(db_path)) as conn:
+    with closing(sqlite3.connect(str(db_path))) as conn, conn:
         row = conn.execute(
             "select 1 from schema_migrations where version = ?", (version,)
         ).fetchone()
@@ -93,7 +94,7 @@ def test_check_does_not_apply_pending_structural_migrations(tmp_path: Path) -> N
     db_path = _legacy_database(data_dir)
     import sqlite3
 
-    with sqlite3.connect(str(db_path)) as conn:
+    with closing(sqlite3.connect(str(db_path))) as conn, conn:
         conn.execute("delete from schema_migrations where version in (3, 4)")
         before = conn.execute(
             "select version, name from schema_migrations order by version"
@@ -102,7 +103,7 @@ def test_check_does_not_apply_pending_structural_migrations(tmp_path: Path) -> N
     result = _run_cli(["--check"], data_dir)
 
     assert result.returncode == 0, result.stderr
-    with sqlite3.connect(str(db_path)) as conn:
+    with closing(sqlite3.connect(str(db_path))) as conn, conn:
         after = conn.execute(
             "select version, name from schema_migrations order by version"
         ).fetchall()
@@ -141,7 +142,7 @@ def test_apply_backup_contains_committed_wal_data(tmp_path: Path) -> None:
         result = _run_cli(["--apply"], data_dir)
         assert result.returncode == 0, result.stderr
         backup = next(data_dir.glob("video_hive-before-v005-*.sqlite"))
-        with sqlite3.connect(str(backup)) as backup_conn:
+        with closing(sqlite3.connect(str(backup))) as backup_conn, backup_conn:
             stored = backup_conn.execute(
                 "select name from workspaces where id != 'default'"
             ).fetchone()[0]

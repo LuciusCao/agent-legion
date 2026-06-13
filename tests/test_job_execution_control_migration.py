@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -15,7 +16,7 @@ def test_empty_database_applies_v006_job_execution_control(tmp_path: Path) -> No
     path = tmp_path / "empty.sqlite"
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         columns = _job_columns(conn)
         assert "execution_mode" in columns
         assert "target_node_key" in columns
@@ -84,7 +85,7 @@ def test_legacy_database_gains_execution_control_defaults(tmp_path: Path) -> Non
 
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         job = conn.execute("select * from jobs where id = 'job1'").fetchone()
         assert job is not None
         assert job["execution_mode"] == "full"
@@ -105,7 +106,7 @@ def test_v006_migration_is_idempotent(tmp_path: Path) -> None:
     init_db(path)
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         columns = _job_columns(conn)
         assert "execution_mode" in columns
         assert "target_node_key" in columns
@@ -143,7 +144,7 @@ def test_v006_execution_mode_check_constraint(tmp_path: Path) -> None:
 
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.execute(
             "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, execution_mode) "
             "values ('job1', 'ws1', 'reading_analysis', 'question_id', 'Q1', 'until_node')"
