@@ -275,6 +275,36 @@ def check_frontend_handwritten_job_transports(root: Path) -> list[str]:
     return errors
 
 
+def check_job_deletion_service_is_singular(root: Path) -> list[str]:
+    """Job deletion must be owned by JobDeletionService, not JobRerunService."""
+    errors: list[str] = []
+    routes_path = root / "server/app/routes/jobs.py"
+    if routes_path.exists():
+        source = routes_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(routes_path.relative_to(root)))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            call_name = ast.unparse(node.func)
+            if call_name in ("job_rerun.delete", "job_rerun.batch_delete"):
+                errors.append(
+                    f"server/app/routes/jobs.py:{node.lineno}: "
+                    "job deletion must use JobDeletionService, not JobRerunService"
+                )
+
+    service_path = root / "server/app/services/job_rerun.py"
+    if service_path.exists():
+        source = service_path.read_text(encoding="utf-8")
+        tree = ast.parse(source, filename=str(service_path.relative_to(root)))
+        for node in ast.walk(tree):
+            if isinstance(node, ast.FunctionDef) and node.name in ("delete", "batch_delete"):
+                errors.append(
+                    f"server/app/services/job_rerun.py:{node.lineno}: "
+                    f"{node.name} belongs in JobDeletionService"
+                )
+    return errors
+
+
 def check_schema_mutation_locations(root: Path) -> list[str]:
     errors: list[str] = []
     allowed_prefix = "server/app/db/migrations/"

@@ -4,6 +4,8 @@ import sqlite3
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
+from server.app.jobs import atomic_mutations
+
 
 class _JobQueries(Protocol):
     """Minimal shape of ``JobQueries`` required by this mixin."""
@@ -113,40 +115,7 @@ class JobExecutionControlMixin:
 
     def resume_job(self: _JobQueries, job_id: str) -> None:
         with self.connect() as conn:
-            job = conn.execute(
-                "select pause_reason from jobs where id=?",
-                (job_id,),
-            ).fetchone()
-            if job is None:
-                raise ValueError("Job not found")
-            if job["pause_reason"] == "target_reached":
-                cursor = conn.execute(
-                    """
-                    update jobs
-                    set status='running',
-                        execution_paused=0,
-                        execution_mode='full',
-                        target_node_key=null,
-                        pause_reason='',
-                        updated_at=current_timestamp
-                    where id=?
-                    """,
-                    (job_id,),
-                )
-            else:
-                cursor = conn.execute(
-                    """
-                    update jobs
-                    set status='running',
-                        execution_paused=0,
-                        pause_reason='',
-                        updated_at=current_timestamp
-                    where id=?
-                    """,
-                    (job_id,),
-                )
-            if cursor.rowcount == 0:
-                raise ValueError("Job not found")
+            atomic_mutations.resume_job(conn, job_id)
 
     def get_job_execution_control(self: _JobQueries, job_id: str) -> dict[str, Any] | None:
         row = self.get_job(job_id)

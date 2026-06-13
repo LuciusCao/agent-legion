@@ -28,3 +28,27 @@ invariants:
       - kind: integration
         target: tests/full/test_storage_path_corruption.py
         gate: full
+
+  - id: DB-MUTATION-001
+    statement: "Job deletion rollback is conflict-safe: it restores only when the destination is absent, uses atomic same-filesystem rename, and preserves the staged recovery path when a concurrent recreation exists."
+    owner: jobs
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_job_deletion_service.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_job_deletion_races.py
+        gate: full
+
+  - id: EXEC-STATE-001
+    statement: "Continue/resume operations for workspace jobs reject terminal states (completed, failed, cancelled) and only transition explicitly paused jobs, validating state inside the same transaction."
+    owner: jobs
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_workspace_job_control_flow.py
+        gate: quick
+      - kind: contract
+        target: scripts/check_architecture.py
+        gate: quick

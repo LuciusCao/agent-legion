@@ -90,6 +90,8 @@ def test_pause_and_resume_job(tmp_path: Path) -> None:
     )
 
     db.pause_job(job["id"], "awaiting_resources")
+    with db.connect() as conn:
+        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
     control = db.get_job_execution_control(job["id"])
     assert control is not None
     assert control["execution_paused"] is True
@@ -196,6 +198,8 @@ def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
 
     time.sleep(1.1)
     db.pause_job(job["id"], "testing")
+    with db.connect() as conn:
+        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
     updated_job = db.get_job(job["id"])
     assert updated_job is not None
     assert updated_job["updated_at"] > original_updated_at

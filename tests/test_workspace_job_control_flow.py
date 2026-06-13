@@ -12,6 +12,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
@@ -338,3 +339,106 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         assert app.state.job_db.list_node_runs(job_id) == []
 
         worker.stop()
+
+
+def test_continue_job_rejects_terminal_states(tmp_path):
+    pipeline_path = _write_test_pipeline(tmp_path)
+    _original_definition = PipelineCatalogService.definition
+
+    def _patched_definition(self, pipeline_key: str):
+        if pipeline_key == PIPELINE_KEY:
+            return load_pipeline_definition(pipeline_path)
+        return _original_definition(self, pipeline_key)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "server.app.services.pipeline_catalog.PipelineCatalogService.definition",
+        _patched_definition,
+    )
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.pipelines.enabled = True
+
+    with TestClient(app) as client:
+        ws_response = client.post("/api/workspaces", json={"name": "Terminal State"})
+        assert ws_response.status_code == 200
+        workspace_id = ws_response.json()["workspace"]["id"]
+        _configure_workspace(app.state.job_db, workspace_id, PIPELINE_KEY)
+
+        batch_response = client.post(
+            f"/api/workspaces/{workspace_id}/job-batches",
+            json={
+                "pipeline_key": PIPELINE_KEY,
+                "source_kind": "direct_ids",
+                "question_ids": ["T1"],
+                "knowledge_codes": [],
+            },
+        )
+        assert batch_response.status_code == 200
+        job_id = batch_response.json()["jobs"][0]["id"]
+
+        for terminal_status in ("completed", "failed", "cancelled"):
+            app.state.job_db.update_job_status(job_id, terminal_status)
+            app.state.job_db.pause_job(job_id, "test")
+            detail_before = client.get(f"/api/jobs/{job_id}").json()
+
+            response = client.post(f"/api/jobs/{job_id}/continue", json={})
+
+            assert response.status_code == 400, terminal_status
+            assert response.json()["detail"]
+            detail_after = client.get(f"/api/jobs/{job_id}").json()
+            assert detail_after["job"]["status"] == terminal_status
+            assert detail_after["job"]["execution_control"]["paused"] is True
+            assert detail_after["nodes"] == detail_before["nodes"]
+
+    monkeypatch.undo()
+
+
+def test_continue_job_resumes_paused_state(tmp_path):
+    pipeline_path = _write_test_pipeline(tmp_path)
+    _original_definition = PipelineCatalogService.definition
+
+    def _patched_definition(self, pipeline_key: str):
+        if pipeline_key == PIPELINE_KEY:
+            return load_pipeline_definition(pipeline_path)
+        return _original_definition(self, pipeline_key)
+
+    monkeypatch = pytest.MonkeyPatch()
+    monkeypatch.setattr(
+        "server.app.services.pipeline_catalog.PipelineCatalogService.definition",
+        _patched_definition,
+    )
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.pipelines.enabled = True
+
+    with TestClient(app) as client:
+        ws_response = client.post("/api/workspaces", json={"name": "Paused State"})
+        assert ws_response.status_code == 200
+        workspace_id = ws_response.json()["workspace"]["id"]
+        _configure_workspace(app.state.job_db, workspace_id, PIPELINE_KEY)
+
+        batch_response = client.post(
+            f"/api/workspaces/{workspace_id}/job-batches",
+            json={
+                "pipeline_key": PIPELINE_KEY,
+                "source_kind": "direct_ids",
+                "question_ids": ["P1"],
+                "knowledge_codes": [],
+            },
+        )
+        assert batch_response.status_code == 200
+        job_id = batch_response.json()["jobs"][0]["id"]
+        app.state.job_db.update_job_status(job_id, "paused")
+        app.state.job_db.pause_job(job_id, "target_reached")
+
+        response = client.post(f"/api/jobs/{job_id}/continue", json={})
+        detail = client.get(f"/api/jobs/{job_id}").json()
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "succeeded"
+    assert detail["job"]["status"] == "running"
+    assert detail["job"]["execution_control"]["paused"] is False
+    assert detail["job"]["execution_control"]["mode"] == "full"
+
+    monkeypatch.undo()

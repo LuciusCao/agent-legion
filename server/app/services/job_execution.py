@@ -264,6 +264,15 @@ class JobExecutionService:
 
         try:
             self.job_db.resume_job(job_id)
+        except JobMutationConflict as exc:
+            return self._result(
+                job_id,
+                "continue",
+                "skipped",
+                None,
+                exc.reason_code,
+                str(exc),
+            )
         except ValueError as exc:
             return self._result(
                 job_id,

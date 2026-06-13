@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import glob
 import logging
+import os
 import shutil
 import uuid
 from collections.abc import Callable
@@ -16,6 +17,21 @@ from server.app.settings import Settings
 from server.app.storage_paths import resolve_managed_path
 
 logger = logging.getLogger(__name__)
+
+
+class DeletionRollbackConflict(RuntimeError):
+    """Raised when a deletion rollback cannot safely restore the staged path.
+
+    The staged recovery path is preserved so an operator can reconcile the
+    conflict manually.
+    """
+
+    def __init__(self, staged_path: Path, original_path: Path) -> None:
+        super().__init__(
+            f"Cannot restore {staged_path}: destination {original_path} already exists"
+        )
+        self.staged_path = staged_path
+        self.original_path = original_path
 
 
 class JobDeleteResult(TypedDict):
@@ -119,12 +135,28 @@ class JobDeletionService:
 
                 self.job_db.delete_job_in_transaction(conn, job_id)
         except JobMutationConflict as exc:
-            self._restore_paths(restore_paths)
+            try:
+                self._restore_paths(restore_paths)
+            except DeletionRollbackConflict as rollback_exc:
+                return self._result(
+                    job_id,
+                    "failed",
+                    "rollback_conflict",
+                    str(rollback_exc),
+                )
             reason_code = "active_lease" if "lease" in str(exc).lower() else "delete_failed"
             return self._result(job_id, "failed", reason_code, str(exc))
         except Exception as exc:
             logger.exception("Unexpected error deleting job %s", job_id)
-            self._restore_paths(restore_paths)
+            try:
+                self._restore_paths(restore_paths)
+            except DeletionRollbackConflict as rollback_exc:
+                return self._result(
+                    job_id,
+                    "failed",
+                    "rollback_conflict",
+                    str(rollback_exc),
+                )
             return self._result(job_id, "failed", "delete_failed", str(exc))
 
         self._cleanup_staged_paths(job_id, staged_storage, staged_logs)
@@ -156,16 +188,19 @@ class JobDeletionService:
 
     @staticmethod
     def _restore_paths(restore_paths: list[tuple[Path, Path]]) -> None:
+        """Restore staged paths atomically when the destination is absent.
+
+        If the destination already exists (e.g., a concurrent recreation), raise
+        ``DeletionRollbackConflict`` and leave both the destination and the staged
+        recovery path untouched.
+        """
         for staged, original in reversed(restore_paths):
             if not staged.exists():
                 continue
             original.parent.mkdir(parents=True, exist_ok=True)
             if original.exists():
-                if original.is_dir():
-                    shutil.rmtree(original)
-                else:
-                    original.unlink()
-            shutil.move(str(staged), str(original))
+                raise DeletionRollbackConflict(staged, original)
+            os.replace(str(staged), str(original))
 
     @staticmethod
     def _cleanup_staged_paths(

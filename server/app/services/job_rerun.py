@@ -1,9 +1,6 @@
-import glob
 import logging
-import shutil
 from collections.abc import Callable
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -11,11 +8,9 @@ from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.pipelines.scheduler import downstream_nodes
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.pipeline_catalog import PipelineCatalogService
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -154,46 +149,6 @@ class JobRerunService:
         for job_id in self._normalize_values(job_ids):
             results.append(self.rerun(workspace_id, job_id, node_key))
         return results
-
-    def delete(self, job_id: str) -> str:
-        job = self._job_or_404(job_id)
-        if self._job_has_running_nodes(job_id):
-            raise InvalidOperationError("Cannot delete a running job")
-        storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
-        try:
-            self.job_db.delete_job(job_id)
-        except ValueError as exc:
-            raise InvalidOperationError(str(exc)) from exc
-        if storage_dir.exists() and storage_dir.is_dir():
-            shutil.rmtree(storage_dir)
-        for log_path in glob.glob(str(self.settings.logs_dir / "jobs" / f"{job_id}-*.log")):
-            Path(log_path).unlink(missing_ok=True)
-        return job_id
-
-    def batch_delete(self, workspace_id: str, job_ids: list[str]) -> list[dict[str, Any]]:
-        results: list[dict[str, Any]] = []
-        for job_id in self._normalize_values(job_ids):
-            job = self.job_db.get_job(job_id)
-            if job is None or job["workspace_id"] != workspace_id:
-                results.append({"job_id": job_id, "status": "not_found"})
-                continue
-            if self._job_has_running_nodes(job_id):
-                results.append({"job_id": job_id, "status": "skipped", "reason": "running"})
-                continue
-            storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
-            self.job_db.delete_job(job_id)
-            if storage_dir.exists() and storage_dir.is_dir():
-                shutil.rmtree(storage_dir)
-            for log_path in glob.glob(str(self.settings.logs_dir / "jobs" / f"{job_id}-*.log")):
-                Path(log_path).unlink(missing_ok=True)
-            results.append({"job_id": job_id, "status": "deleted"})
-        return results
-
-    def _job_or_404(self, job_id: str) -> dict[str, Any]:
-        job = self.job_db.get_job(job_id)
-        if job is None:
-            raise NotFoundError("Job not found")
-        return job
 
     @staticmethod
     def _normalize_values(values: list[str]) -> list[str]:

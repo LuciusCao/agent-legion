@@ -163,6 +163,56 @@ def delete_job(conn: sqlite3.Connection, job_id: str) -> None:
         raise ValueError("Job not found")
 
 
+_RESUMABLE_JOB_STATUSES = {"paused"}
+
+
+def resume_job(conn: sqlite3.Connection, job_id: str) -> None:
+    """Resume a job inside an active transaction.
+
+    Only ``paused`` jobs may be resumed. The status check and the state
+    transition happen in the same transaction.
+    """
+    job = conn.execute(
+        "select status, pause_reason from jobs where id=?",
+        (job_id,),
+    ).fetchone()
+    if job is None:
+        raise ValueError("Job not found")
+    if job["status"] not in _RESUMABLE_JOB_STATUSES:
+        raise JobMutationConflict(
+            "not_resumable",
+            f"Job is {job['status']}, only paused jobs can be resumed",
+        )
+    if job["pause_reason"] == "target_reached":
+        cursor = conn.execute(
+            """
+            update jobs
+            set status='running',
+                execution_paused=0,
+                execution_mode='full',
+                target_node_key=null,
+                pause_reason='',
+                updated_at=current_timestamp
+            where id=?
+            """,
+            (job_id,),
+        )
+    else:
+        cursor = conn.execute(
+            """
+            update jobs
+            set status='running',
+                execution_paused=0,
+                pause_reason='',
+                updated_at=current_timestamp
+            where id=?
+            """,
+            (job_id,),
+        )
+    if cursor.rowcount == 0:
+        raise ValueError("Job not found")
+
+
 class AtomicJobMutationsMixin:
     def lease_guarded_mutation(
         self: _AtomicMutationQueries,
@@ -223,3 +273,7 @@ class AtomicJobMutationsMixin:
     @staticmethod
     def delete_job_in_transaction(conn: sqlite3.Connection, job_id: str) -> None:
         delete_job(conn, job_id)
+
+    @staticmethod
+    def resume_job_in_transaction(conn: sqlite3.Connection, job_id: str) -> None:
+        resume_job(conn, job_id)
