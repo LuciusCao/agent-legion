@@ -7,14 +7,46 @@ import type { JobRecord } from '../types'
 const mockJob: JobRecord = {
   id: 'j1',
   workspace_id: 'ws1',
-  pipeline_key: 'p1',
+  pipeline_key: 'question_content',
   source_id: 'Q100',
+  source_type: 'question',
   title: 'Algebra Problem',
-  stem: '',
   status: 'running',
+  batch_id: 'b1',
   created_at: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+  updated_at: new Date().toISOString(),
+  storage_dir: '/tmp/j1',
+  error_message: '',
+  error_summary: '',
   completed_nodes: 2,
   total_nodes: 5,
+  active_node_key: 'natural_language_reading',
+  node_summaries: [
+    {
+      node_key: 'question_understanding',
+      label: '题目理解',
+      status: 'completed',
+      error_message: '',
+    },
+    {
+      node_key: 'natural_language_reading',
+      label: '自然语言阅读',
+      status: 'running',
+      error_message: '',
+    },
+    {
+      node_key: 'assemble_package',
+      label: '打包组装',
+      status: 'failed',
+      error_message: 'assemble failed',
+    },
+    {
+      node_key: 'faq_generation',
+      label: 'FAQ 生成',
+      status: 'pending',
+      error_message: '',
+    },
+  ],
 }
 
 describe('JobListItem', () => {
@@ -78,8 +110,8 @@ describe('JobListItem', () => {
     expect(checkbox.checked).toBe(true)
   })
 
-  it('progress bar width is correct', () => {
-    const { container } = render(
+  it('renders persisted node stepper with statuses', () => {
+    render(
       <MemoryRouter>
         <JobListItem
           job={mockJob}
@@ -90,8 +122,37 @@ describe('JobListItem', () => {
       </MemoryRouter>
     )
 
-    const fill = container.querySelector('[data-progress="40"]')
-    expect(fill).toHaveStyle({ width: '40%' })
+    expect(screen.getByTitle('题目理解')).toHaveAttribute(
+      'data-status',
+      'completed'
+    )
+    expect(screen.getByTitle('自然语言阅读')).toHaveAttribute(
+      'data-status',
+      'running'
+    )
+    expect(screen.getByTitle('打包组装')).toHaveAttribute(
+      'data-status',
+      'failed'
+    )
+  })
+
+  it('shows completed/total count, active node label, and error summary', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            error_summary: 'assemble failed',
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
     expect(screen.getByText('2/5')).toBeInTheDocument()
+    expect(screen.getByText('当前：自然语言阅读')).toBeInTheDocument()
+    expect(screen.getAllByText('assemble failed')).toHaveLength(2)
   })
 })

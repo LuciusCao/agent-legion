@@ -1,12 +1,12 @@
 import { create } from 'zustand'
-import type { JobRecord } from '../types'
+import type { JobSummary } from '../jobTypes'
 import { fetchJobs as apiFetchJobs, api } from '../api'
 import { useUiStore } from './uiStore'
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
 
 interface JobState {
-  jobs: JobRecord[]
+  jobs: JobSummary[]
   isLoading: boolean
   error: string | null
   selectedIds: Set<string>
@@ -27,7 +27,7 @@ interface JobState {
   selectFailed: () => void
   clearSelection: () => void
   toggleExpand: (id: string) => void
-  getFilteredJobs: () => JobRecord[]
+  getFilteredJobs: () => JobSummary[]
   batchRerun: (workspaceId: string) => Promise<void>
   batchDelete: (workspaceId: string) => Promise<void>
   batchPackage: (workspaceId: string) => Promise<void>
@@ -45,7 +45,7 @@ function normalizeJobStatus(status: string): JobStatus {
   }
 }
 
-function getVisibleJobs(state: JobState): JobRecord[] {
+function getVisibleJobs(state: JobState): JobSummary[] {
   const query = state.searchQuery.trim().toLowerCase()
   return state.jobs.filter((job) => {
     if (state.statusFilter !== 'all') {

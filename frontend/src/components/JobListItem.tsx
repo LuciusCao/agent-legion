@@ -2,10 +2,11 @@ import { useNavigate } from 'react-router-dom'
 import { JOB_STATUS_LABELS } from '../labels'
 import { formatRelativeTime } from '../helpers'
 import type { JobRecord } from '../types'
+import type { JobNodeSummary } from '../jobTypes'
+import { JobNodeStepper } from './JobNodeStepper'
 import styles from './JobListItem.module.css'
 
 const TITLE_MAX_LEN = 30
-const STEM_MAX_LEN = 60
 
 export interface JobListItemProps {
   job: JobRecord
@@ -37,11 +38,12 @@ function progressText(job: JobRecord): string {
   return `${completed}/${total}`
 }
 
-function progressPercent(job: JobRecord): number {
-  const completed = job.completed_nodes ?? 0
-  const total = job.total_nodes ?? 0
-  if (total <= 0) return 0
-  return Math.min(100, Math.max(0, (completed / total) * 100))
+function activeNodeKey(job: JobRecord): string | null {
+  if (job.active_node_key) return job.active_node_key
+  const running = job.node_summaries?.find(
+    (n: JobNodeSummary) => n.status === 'running'
+  )
+  return running?.node_key ?? null
 }
 
 export function JobListItem({
@@ -72,6 +74,7 @@ export function JobListItem({
           handleRowClick()
         }
       }}
+      title={`${job.title || job.source_id} · ${progressText(job)}`}
     >
       {selectMode && (
         <input
@@ -92,13 +95,18 @@ export function JobListItem({
             ? `${job.title.length > TITLE_MAX_LEN ? job.title.slice(0, TITLE_MAX_LEN) + '…' : job.title} - ${job.source_id}`
             : job.source_id}
         </div>
-        {job.stem && (
-          <div className={styles.stem}>
-            {job.stem.length > STEM_MAX_LEN
-              ? job.stem.slice(0, STEM_MAX_LEN) + '…'
-              : job.stem}
-          </div>
-        )}
+      </div>
+      <div className={styles.nodeProgress}>
+        <div className={styles.nodeProgressHeader}>
+          <span className={styles.nodeProgressCount}>{progressText(job)}</span>
+        </div>
+        <JobNodeStepper
+          nodeSummaries={job.node_summaries ?? []}
+          activeNodeKey={activeNodeKey(job)}
+        />
+        {job.error_summary ? (
+          <div className={styles.errorSummary}>{job.error_summary}</div>
+        ) : null}
       </div>
       <span className={`${styles.badge} ${statusClass(job.status)}`}>
         {JOB_STATUS_LABELS[job.status] || job.status}
@@ -106,16 +114,6 @@ export function JobListItem({
       <span className={styles.time}>
         {job.created_at ? formatRelativeTime(job.created_at) : '—'}
       </span>
-      <div className={styles.progress}>
-        <div className={styles.progressTrack}>
-          <div
-            className={styles.progressFill}
-            style={{ width: `${progressPercent(job)}%` }}
-            data-progress={progressPercent(job)}
-          />
-        </div>
-        <span className={styles.progressLabel}>{progressText(job)}</span>
-      </div>
     </div>
   )
 }
