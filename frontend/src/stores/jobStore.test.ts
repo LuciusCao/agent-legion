@@ -143,6 +143,7 @@ describe('jobStore', () => {
         makeJob({ id: 'j2', status: 'failed' }),
       ],
       selectedIds: new Set(['j1', 'j2']),
+      selectMode: true,
     })
     mockBatchRerunJobs.mockResolvedValueOnce({
       results: [
@@ -159,6 +160,7 @@ describe('jobStore', () => {
     ])
     expect(useJobStore.getState().selectedIds.size).toBe(1)
     expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
+    expect(useJobStore.getState().selectMode).toBe(true)
     expect(mockShowToast).toHaveBeenCalledWith(
       '重跑完成：成功 1 项，跳过 1 项',
       'success'
@@ -204,6 +206,7 @@ describe('jobStore', () => {
         makeJob({ id: 'j3', status: 'completed', source_id: 'Q3' }),
       ],
       selectedIds: new Set(['j1', 'j2', 'j3']),
+      selectMode: true,
     })
     mockBatchDeleteJobs.mockResolvedValueOnce({
       results: [
@@ -220,6 +223,7 @@ describe('jobStore', () => {
     expect(useJobStore.getState().jobs.some((j) => j.id === 'j1')).toBe(false)
     expect(useJobStore.getState().selectedIds.size).toBe(2)
     expect(useJobStore.getState().selectedIds.has('j1')).toBe(false)
+    expect(useJobStore.getState().selectMode).toBe(true)
     expect(mockShowToast).toHaveBeenCalledWith(
       '删除完成：成功 1 项，跳过 1 项，失败 1 项',
       'error'
@@ -247,6 +251,7 @@ describe('jobStore', () => {
         makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
       ],
       selectedIds: new Set(['j1', 'j2']),
+      selectMode: true,
     })
     mockPackageJobs.mockResolvedValueOnce({
       download_url: '/api/workspaces/ws1/packages/pkg.zip',
@@ -265,6 +270,7 @@ describe('jobStore', () => {
     expect(result.download_url).toBe('/api/workspaces/ws1/packages/pkg.zip')
     expect(useJobStore.getState().selectedIds.size).toBe(1)
     expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
+    expect(useJobStore.getState().selectMode).toBe(true)
     expect(mockShowToast).toHaveBeenCalledWith(
       '打包完成：成功 1 项，失败 1 项',
       'error'
