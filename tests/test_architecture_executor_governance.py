@@ -45,7 +45,6 @@ FORBIDDEN_PATTERNS = {
     "pipeline_config_json column": "pipeline_config_json",
     "workspace_agent_assignments table": "workspace_agent_assignments",
     "workspace_executor_bootstrap_state table": "workspace_executor_bootstrap_state",
-    "legacy agent assignment service": "workspace_agent_assignments",
     "PipelineNode.agent attribute": r"\.agent\b",
     "PipelineDefinition.concurrency attribute": r"\.concurrency\b",
 }

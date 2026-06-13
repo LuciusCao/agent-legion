@@ -13,7 +13,6 @@ _FORBIDDEN_PATTERNS = {
     "pipeline_config_json column": re.compile("pipeline_config_json"),
     "workspace_agent_assignments table": re.compile("workspace_agent_assignments"),
     "workspace_executor_bootstrap_state table": re.compile("workspace_executor_bootstrap_state"),
-    "legacy agent assignment service": re.compile("workspace_agent_assignments"),
     "PipelineNode.agent attribute": re.compile(r"\.agent\b"),
     "PipelineDefinition.concurrency attribute": re.compile(r"\.concurrency\b"),
 }
