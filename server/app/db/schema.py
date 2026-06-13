@@ -106,6 +106,10 @@ def init_db(path: Path) -> None:
                   error_message text not null default '',
                   created_at text not null default current_timestamp,
                   updated_at text not null default current_timestamp,
+                  execution_mode text not null default 'full' check(execution_mode in ('full', 'targeted')),
+                  target_node_key text,
+                  execution_paused integer not null default 0 check(execution_paused in (0, 1)),
+                  pause_reason text not null default '',
                   foreign key(workspace_id) references workspaces(id) on delete cascade
                 );
                 create table if not exists job_nodes (

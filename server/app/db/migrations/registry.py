@@ -7,10 +7,14 @@ from server.app.db.migrations.v003_legacy_columns import MIGRATION as V003_LEGAC
 from server.app.db.migrations.v004_workspace_dag_foreign_keys import (
     MIGRATION as V004_WORKSPACE_DAG_FOREIGN_KEYS,
 )
+from server.app.db.migrations.v006_job_execution_control import (
+    MIGRATION as V006_JOB_EXECUTION_CONTROL,
+)
 
 MIGRATIONS: tuple[Migration, ...] = (
     V001_EXECUTOR_CORE,
     V002_EXECUTOR_BOOTSTRAP_STATE,
     V003_LEGACY_COLUMNS,
     V004_WORKSPACE_DAG_FOREIGN_KEYS,
+    V006_JOB_EXECUTION_CONTROL,
 )

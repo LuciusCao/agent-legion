@@ -11,6 +11,7 @@ from typing import Any
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.schema import init_db
+from server.app.jobs.execution_control import JobExecutionControlMixin
 from server.app.jobs.executor_configuration import (
     get_workspace_executor_configuration,
     replace_workspace_executor_configuration,
@@ -49,7 +50,7 @@ def _workspace_record(row: sqlite3.Row) -> dict[str, Any]:
     return record
 
 
-class JobQueries:
+class JobQueries(JobExecutionControlMixin):
     def __init__(self, path: Path, jobs_dir: Path):
         self.path = path
         self.jobs_dir = jobs_dir
