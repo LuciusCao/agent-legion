@@ -39,12 +39,14 @@ export default function WorkspaceMainPage() {
     batchDelete,
     batchPackage,
     batchRerun,
+    batchRunTo,
     getFilteredJobs,
     selectMode,
     toggleSelectMode,
     batchRerunLoading,
     batchPackageLoading,
     batchDeleteLoading,
+    batchRunToLoading,
   } = useJobStore()
 
   const [pipelineDefinition, setPipelineDefinition] =
@@ -127,6 +129,11 @@ export default function WorkspaceMainPage() {
     await batchRerun(workspaceId, nodeKey)
   }
 
+  const handleRunTo = async (targetKey: string, startKey?: string) => {
+    if (!workspaceId) return
+    await batchRunTo(workspaceId, targetKey, startKey)
+  }
+
   const handlePackage = async () => {
     if (!workspaceId) return
     const result = await batchPackage(workspaceId)
@@ -177,11 +184,15 @@ export default function WorkspaceMainPage() {
             pipelineNodesByKey={pipelineNodesByKey}
             mode="batch"
             loading={
-              batchRerunLoading || batchPackageLoading || batchDeleteLoading
+              batchRerunLoading ||
+              batchPackageLoading ||
+              batchDeleteLoading ||
+              batchRunToLoading
             }
             filters={filters}
             onExitSelectMode={toggleSelectMode}
             onRerun={handleRerun}
+            onRunTo={handleRunTo}
             onPackage={handlePackage}
             onDelete={handleDelete}
           />

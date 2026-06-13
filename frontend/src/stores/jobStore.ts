@@ -5,7 +5,13 @@ import type {
   WorkspacePackageResult,
 } from '../jobTypes'
 import { fetchJobs as apiFetchJobs } from '../api'
-import { batchRerunJobs, batchDeleteJobs, packageJobs } from '../jobApi'
+import {
+  batchRerunJobs,
+  batchDeleteJobs,
+  packageJobs,
+  batchRunToJobs,
+  continueJob as apiContinueJob,
+} from '../jobApi'
 import { useUiStore } from './uiStore'
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -22,6 +28,8 @@ interface JobState {
   batchDeleteLoading: boolean
   batchPackageLoading: boolean
   batchRerunLoading: boolean
+  batchRunToLoading: boolean
+  continueLoading: boolean
 
   fetchJobs: (workspaceId: string) => Promise<void>
   setStatusFilter: (filter: JobStatus | 'all') => void
@@ -39,6 +47,19 @@ interface JobState {
   ) => Promise<BatchJobMutationResult>
   batchDelete: (workspaceId: string) => Promise<BatchJobMutationResult>
   batchPackage: (workspaceId: string) => Promise<WorkspacePackageResult>
+  batchRunTo: (
+    workspaceId: string,
+    targetNodeKey: string,
+    startNodeKey?: string
+  ) => Promise<BatchJobMutationResult>
+  continueJob: (jobId: string) => Promise<{
+    job_id: string
+    operation: string
+    status: string
+    message?: string | null
+    node_key?: string | null
+    reason_code?: string | null
+  }>
 }
 
 type MutationCounts = {
@@ -114,6 +135,8 @@ export const useJobStore = create<JobState>((set, get) => ({
   batchDeleteLoading: false,
   batchPackageLoading: false,
   batchRerunLoading: false,
+  batchRunToLoading: false,
+  continueLoading: false,
 
   async fetchJobs(workspaceId: string) {
     set({ isLoading: true, error: null })
@@ -304,6 +327,76 @@ export const useJobStore = create<JobState>((set, get) => ({
       throw err
     } finally {
       set({ batchPackageLoading: false })
+    }
+  },
+
+  async batchRunTo(
+    workspaceId: string,
+    targetNodeKey: string,
+    startNodeKey?: string
+  ) {
+    const ids = Array.from(get().selectedIds)
+    if (ids.length === 0) return { results: [] }
+    set({ batchRunToLoading: true })
+    try {
+      const data = await batchRunToJobs(
+        workspaceId,
+        targetNodeKey,
+        ids,
+        startNodeKey
+      )
+      const results = data.results ?? []
+      const succeededIds = new Set(
+        results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
+      )
+      set((state) => {
+        const nextSelected = new Set(state.selectedIds)
+        for (const id of succeededIds) {
+          nextSelected.delete(id)
+        }
+        return {
+          selectedIds: nextSelected,
+          selectMode: nextSelected.size === 0 ? false : state.selectMode,
+        }
+      })
+      const counts = countMutationResults(results)
+      useUiStore
+        .getState()
+        .showToast(
+          makeMutationToast('运行到', counts),
+          counts.failed > 0 ? 'error' : 'success'
+        )
+      await get().fetchJobs(workspaceId)
+      return data
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Batch run-to failed'
+      set({ error: message })
+      useUiStore.getState().showToast(message, 'error')
+      throw err
+    } finally {
+      set({ batchRunToLoading: false })
+    }
+  },
+
+  async continueJob(jobId: string) {
+    set({ continueLoading: true })
+    try {
+      const data = await apiContinueJob(jobId)
+      useUiStore
+        .getState()
+        .showToast(
+          data.status === 'succeeded' ? '继续完整流程成功' : '继续完整流程失败',
+          data.status === 'succeeded' ? 'success' : 'error'
+        )
+      return data
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : 'Continue full flow failed'
+      set({ error: message })
+      useUiStore.getState().showToast(message, 'error')
+      throw err
+    } finally {
+      set({ continueLoading: false })
     }
   },
 }))

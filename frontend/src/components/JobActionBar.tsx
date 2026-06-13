@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import type { JobSummary, PipelineDefinitionRecord } from '../types'
 import { JobRerunDialog, type PipelineNodesByKey } from './JobRerunDialog'
+import { JobRunToDialog } from './JobRunToDialog'
 import styles from './JobActionBar.module.css'
 
 export type JobActionBarFilter = {
@@ -19,6 +20,8 @@ export type JobActionBarProps = {
   filters?: JobActionBarFilter[]
   onExitSelectMode?: () => void
   onRerun: (nodeKey: string) => void | Promise<void>
+  onRunTo?: (targetKey: string, startKey?: string) => void | Promise<void>
+  onContinue?: () => void | Promise<void>
   onPackage: () => void | Promise<void>
   onDelete: () => void | Promise<void>
   itemLabel?: string
@@ -36,6 +39,13 @@ export function canDeleteJob(): boolean {
   return true
 }
 
+export function canContinueJob(job: JobSummary): boolean {
+  return (
+    job.status === 'paused' &&
+    job.execution_control?.pause_reason === 'target_reached'
+  )
+}
+
 export function JobActionBar({
   jobs,
   selectedCount,
@@ -46,11 +56,14 @@ export function JobActionBar({
   filters,
   onExitSelectMode,
   onRerun,
+  onRunTo,
+  onContinue,
   onPackage,
   onDelete,
   itemLabel = '任务',
 }: JobActionBarProps) {
   const [rerunOpen, setRerunOpen] = useState(false)
+  const [runToOpen, setRunToOpen] = useState(false)
   const isBatch = mode === 'batch'
   const count = selectedCount ?? jobs.length
 
@@ -58,6 +71,14 @@ export function JobActionBar({
     jobs.length === 0 ||
     loading ||
     jobs.every((job) => !canRerunJob(job.status))
+
+  const runToDisabled =
+    jobs.length === 0 ||
+    loading ||
+    jobs.every((job) => !canRerunJob(job.status))
+
+  const continueDisabled =
+    jobs.length === 0 || loading || !jobs.some((job) => canContinueJob(job))
 
   const packageDisabled =
     jobs.length === 0 ||
@@ -68,6 +89,14 @@ export function JobActionBar({
 
   const handleRerun = async (nodeKey: string) => {
     await onRerun(nodeKey)
+  }
+
+  const handleRunTo = async (targetKey: string, startKey?: string) => {
+    await onRunTo?.(targetKey, startKey)
+  }
+
+  const handleContinue = async () => {
+    await onContinue?.()
   }
 
   return (
@@ -94,6 +123,20 @@ export function JobActionBar({
         >
           重跑
         </md-outlined-button>
+        <md-outlined-button
+          onClick={() => setRunToOpen(true)}
+          disabled={runToDisabled || undefined}
+        >
+          运行到
+        </md-outlined-button>
+        {!isBatch && (
+          <md-outlined-button
+            onClick={handleContinue}
+            disabled={continueDisabled || undefined}
+          >
+            继续完整流程
+          </md-outlined-button>
+        )}
         <md-outlined-button
           onClick={onPackage}
           disabled={packageDisabled || undefined}
@@ -122,6 +165,15 @@ export function JobActionBar({
         itemLabel={itemLabel}
         onClose={() => setRerunOpen(false)}
         onConfirm={handleRerun}
+      />
+      <JobRunToDialog
+        open={runToOpen}
+        jobs={jobs}
+        pipelineDefinition={pipelineDefinition}
+        pipelineNodesByKey={pipelineNodesByKey}
+        itemLabel={itemLabel}
+        onClose={() => setRunToOpen(false)}
+        onConfirm={handleRunTo}
       />
     </div>
   )

@@ -7,7 +7,12 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
 import { api, fetchJobs, fetchPipelineDefinition } from '../api'
-import { batchRerunJobs, batchDeleteJobs, packageJobs } from '../jobApi'
+import {
+  batchRerunJobs,
+  batchDeleteJobs,
+  packageJobs,
+  batchRunToJobs,
+} from '../jobApi'
 import type { WorkspaceStats } from '../workspaceTypes'
 import { makeJob } from '../testing/fixtures'
 
@@ -17,6 +22,7 @@ const mockFetchPipelineDefinition = vi.fn()
 const mockBatchRerunJobs = vi.fn()
 const mockBatchDeleteJobs = vi.fn()
 const mockPackageJobs = vi.fn()
+const mockBatchRunToJobs = vi.fn()
 
 vi.mock('../api', () => ({
   api: (...args: Parameters<typeof api>) => mockApi(...args),
@@ -33,6 +39,8 @@ vi.mock('../jobApi', () => ({
     mockBatchDeleteJobs(...args),
   packageJobs: (...args: Parameters<typeof packageJobs>) =>
     mockPackageJobs(...args),
+  batchRunToJobs: (...args: Parameters<typeof batchRunToJobs>) =>
+    mockBatchRunToJobs(...args),
 }))
 
 function renderPage(workspaceId = 'ws1') {
@@ -105,6 +113,7 @@ describe('WorkspaceMainPage', () => {
     mockBatchRerunJobs.mockReset()
     mockBatchDeleteJobs.mockReset()
     mockPackageJobs.mockReset()
+    mockBatchRunToJobs.mockReset()
 
     mockFetchJobs.mockResolvedValue({ jobs: [] })
     mockFetchPipelineDefinition.mockResolvedValue({
@@ -128,6 +137,7 @@ describe('WorkspaceMainPage', () => {
       batchRerunLoading: false,
       batchPackageLoading: false,
       batchDeleteLoading: false,
+      batchRunToLoading: false,
     })
     useWorkspaceStore.setState({
       workspaces: [],
@@ -427,5 +437,179 @@ describe('WorkspaceMainPage', () => {
     })
 
     expect(mockBatchDeleteJobs).toHaveBeenCalledWith('ws1', ['j1'])
+  })
+
+  it('submits batch run-to with selected target and optional start node', async () => {
+    mockBatchRunToJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'run_to', status: 'succeeded' }],
+    })
+    mockFetchJobs.mockResolvedValue({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'failed',
+          pipeline_key: 'question_content',
+        }),
+      ],
+    })
+    useJobStore.setState({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'failed',
+          pipeline_key: 'question_content',
+        }),
+      ],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    await waitFor(() =>
+      expect(mockFetchPipelineDefinition).toHaveBeenCalledWith(
+        'question_content'
+      )
+    )
+
+    await act(async () => {
+      screen.getByText('运行到').click()
+    })
+
+    expect(screen.getByText('选择运行到节点')).toBeInTheDocument()
+
+    await act(async () => {
+      const chip = document.querySelector(
+        '[data-testid="target-chip-review"]'
+      ) as HTMLElement | null
+      if (chip) fireEvent.click(chip)
+    })
+
+    await act(async () => {
+      screen.getByText('确认运行到').click()
+    })
+
+    expect(mockBatchRunToJobs).toHaveBeenCalledWith(
+      'ws1',
+      'review',
+      ['j1'],
+      undefined
+    )
+  })
+
+  it('preserves skipped selections after batch run-to partial results', async () => {
+    mockBatchRunToJobs.mockResolvedValueOnce({
+      results: [
+        { job_id: 'j1', operation: 'run_to', status: 'succeeded' },
+        { job_id: 'j2', operation: 'run_to', status: 'skipped' },
+      ],
+    })
+    mockFetchJobs.mockResolvedValue({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'failed',
+          pipeline_key: 'question_content',
+        }),
+        makeJob({
+          id: 'j2',
+          status: 'failed',
+          source_id: 'Q2',
+          pipeline_key: 'question_content',
+        }),
+      ],
+    })
+    useJobStore.setState({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'failed',
+          pipeline_key: 'question_content',
+        }),
+        makeJob({
+          id: 'j2',
+          status: 'failed',
+          source_id: 'Q2',
+          pipeline_key: 'question_content',
+        }),
+      ],
+      selectedIds: new Set(['j1', 'j2']),
+      selectMode: true,
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    await act(async () => {
+      screen.getByText('运行到').click()
+    })
+
+    await act(async () => {
+      const chip = document.querySelector(
+        '[data-testid="target-chip-generate"]'
+      ) as HTMLElement | null
+      if (chip) fireEvent.click(chip)
+    })
+
+    await act(async () => {
+      screen.getByText('确认运行到').click()
+    })
+
+    await waitFor(() => {
+      expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
+    })
+    expect(useJobStore.getState().selectedIds.has('j1')).toBe(false)
+  })
+
+  it('refreshes jobs immediately after batch run-to', async () => {
+    mockBatchRunToJobs.mockResolvedValueOnce({
+      results: [{ job_id: 'j1', operation: 'run_to', status: 'succeeded' }],
+    })
+    mockFetchJobs.mockResolvedValue({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'failed',
+          pipeline_key: 'question_content',
+        }),
+      ],
+    })
+    useJobStore.setState({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'failed',
+          pipeline_key: 'question_content',
+        }),
+      ],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    await act(async () => {
+      screen.getByText('运行到').click()
+    })
+
+    await act(async () => {
+      const chip = document.querySelector(
+        '[data-testid="target-chip-generate"]'
+      ) as HTMLElement | null
+      if (chip) fireEvent.click(chip)
+    })
+
+    await act(async () => {
+      screen.getByText('确认运行到').click()
+    })
+
+    await waitFor(() => {
+      expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+    })
   })
 })

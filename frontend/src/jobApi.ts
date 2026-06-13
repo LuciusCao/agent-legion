@@ -8,6 +8,11 @@ export type BatchJobMutationResult =
   components['schemas']['BatchJobMutationResponse']
 export type WorkspacePackageResult =
   components['schemas']['WorkspacePackageResponse']
+export type RunToRequest =
+  components['schemas']['server__app__routes__job_operation_contracts__RunToRequest']
+export type ContinueJobRequest = components['schemas']['ContinueJobRequest']
+export type BatchRunToRequest =
+  components['schemas']['server__app__routes__job_operation_contracts__BatchRunToRequest']
 
 export async function fetchJobLog(
   jobId: string,
@@ -25,6 +30,53 @@ export async function rerunJob(
   return api<JobMutationResult>(
     `/api/jobs/${encodeURIComponent(jobId)}/nodes/${encodeURIComponent(nodeKey)}/rerun`,
     { method: 'POST' }
+  )
+}
+
+export async function runToJob(
+  jobId: string,
+  targetNodeKey: string,
+  startNodeKey?: string | null
+): Promise<JobMutationResult> {
+  const body: Record<string, unknown> = { target_node_key: targetNodeKey }
+  if (startNodeKey != null) {
+    body.start_node_key = startNodeKey
+  }
+  return api<JobMutationResult>(
+    `/api/jobs/${encodeURIComponent(jobId)}/run-to`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
+  )
+}
+
+export async function continueJob(jobId: string): Promise<JobMutationResult> {
+  return api<JobMutationResult>(
+    `/api/jobs/${encodeURIComponent(jobId)}/continue`,
+    { method: 'POST' }
+  )
+}
+
+export async function batchRunToJobs(
+  workspaceId: string,
+  targetNodeKey: string,
+  jobIds: string[],
+  startNodeKey?: string | null
+): Promise<BatchJobMutationResult> {
+  const body: Record<string, unknown> = {
+    job_ids: jobIds,
+    target_node_key: targetNodeKey,
+  }
+  if (startNodeKey != null) {
+    body.start_node_key = startNodeKey
+  }
+  return api<BatchJobMutationResult>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-run-to`,
+    {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }
   )
 }
 
