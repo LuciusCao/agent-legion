@@ -1,4 +1,6 @@
+import json
 from pathlib import Path
+from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
@@ -54,6 +56,14 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
 
 def _sample_pipelines() -> list[PipelineDefinition]:
     return [_sample_pipeline(), _legacy_unconfigured_agent_pipeline()]
+
+
+def _set_pipeline_config(queries: JobQueries, workspace_id: str, config: dict[str, Any]) -> None:
+    with queries.connect() as conn:
+        conn.execute(
+            "update workspaces set pipeline_config_json = ? where id = ?",
+            (json.dumps(config, ensure_ascii=False, sort_keys=True), workspace_id),
+        )
 
 
 def _sample_pipeline() -> PipelineDefinition:
@@ -132,9 +142,9 @@ def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> Non
     workspace = queries.create_workspace(
         name="Local Workspace",
         default_pipeline_key="reading_analysis",
-        pipeline_config={"local": 4},
     )
     workspace_id = str(workspace["id"])
+    _set_pipeline_config(queries, workspace_id, {"local": 4})
 
     with queries.connect() as conn:
         finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
@@ -187,9 +197,9 @@ def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None
     workspace = queries.create_workspace(
         name="Pi Workspace",
         default_pipeline_key="reading_analysis",
-        pipeline_config={"nodes": {"local_a": 1}},
     )
     workspace_id = str(workspace["id"])
+    _set_pipeline_config(queries, workspace_id, {"nodes": {"local_a": 1}})
     queries.upsert_workspace_agent_assignment(workspace_id, "pi", 3)
 
     with queries.connect() as conn:
@@ -269,11 +279,11 @@ def test_finalizer_blocks_on_unknown_agent(queries: JobQueries) -> None:
 
 
 def test_finalizer_blocks_on_invalid_legacy_limit(queries: JobQueries) -> None:
-    queries.create_workspace(
+    workspace = queries.create_workspace(
         name="Bad Limit",
         default_pipeline_key="reading_analysis",
-        pipeline_config={"local": 0},
     )
+    _set_pipeline_config(queries, str(workspace["id"]), {"local": 0})
 
     with pytest.raises(MigrationBlockedError) as exc_info, queries.connect() as conn:
         finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
@@ -342,11 +352,11 @@ def test_finalizer_does_not_bind_unallocated_agent_nodes(queries: JobQueries) ->
 
 
 def test_finalizer_applies_v005_and_removes_pipeline_config_json(queries: JobQueries) -> None:
-    queries.create_workspace(
+    workspace = queries.create_workspace(
         name="V005",
         default_pipeline_key="reading_analysis",
-        pipeline_config={"local": 7},
     )
+    _set_pipeline_config(queries, str(workspace["id"]), {"local": 7})
 
     with queries.connect() as conn:
         finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())

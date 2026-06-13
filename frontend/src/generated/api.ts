@@ -1455,8 +1455,6 @@ export interface components {
     }
     /** WorkspaceConfigurationSettingsRequest */
     WorkspaceConfigurationSettingsRequest: {
-      /** Agentconcurrency */
-      agentConcurrency?: number | null
       /** Entitytype */
       entityType?: string | null
       /** Intakemodes */
@@ -1464,12 +1462,6 @@ export interface components {
       /** Labeloverrides */
       labelOverrides?: {
         [key: string]: string
-      } | null
-      /** Localconcurrency */
-      localConcurrency?: number | null
-      /** Nodelocalconcurrency */
-      nodeLocalConcurrency?: {
-        [key: string]: number
       } | null
       /** Pipelinekey */
       pipelineKey?: string | null
@@ -1500,10 +1492,6 @@ export interface components {
       }
       /** Name */
       name: string
-      /** Pipeline Config */
-      pipeline_config?: {
-        [key: string]: unknown
-      }
       /** Resource Config */
       resource_config?: {
         [key: string]: unknown
@@ -1571,8 +1559,6 @@ export interface components {
     }
     /** WorkspaceSettingsSectionRequest */
     WorkspaceSettingsSectionRequest: {
-      /** Agentconcurrency */
-      agentConcurrency?: number | null
       /** Cmstoken */
       cmsToken?: string | null
       /** Cmsurl */
@@ -1584,12 +1570,6 @@ export interface components {
       /** Labeloverrides */
       labelOverrides?: {
         [key: string]: string
-      } | null
-      /** Localconcurrency */
-      localConcurrency?: number | null
-      /** Nodelocalconcurrency */
-      nodeLocalConcurrency?: {
-        [key: string]: number
       } | null
       /** Pipelinekey */
       pipelineKey?: string | null
@@ -1646,10 +1626,6 @@ export interface components {
       } | null
       /** Name */
       name?: string | null
-      /** Pipeline Config */
-      pipeline_config?: {
-        [key: string]: unknown
-      } | null
       /** Resource Config */
       resource_config?: {
         [key: string]: unknown
