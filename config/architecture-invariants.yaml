@@ -151,3 +151,15 @@ invariants:
       - kind: integration
         target: tests/full/test_backup_restore_drill.py
         gate: full
+
+  - id: CONFIG-STARTUP-001
+    statement: "Secrets use environment overrides and enabled runtime dependencies fail validation at startup."
+    owner: config
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_settings.py
+        gate: quick
+      - kind: integration
+        target: tests/test_startup_validation.py
+        gate: quick

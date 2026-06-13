@@ -6,6 +6,20 @@ from pydantic import ValidationError
 from server.app.settings import load_env_file, load_settings
 
 
+@pytest.fixture(autouse=True)
+def _clear_video_hive_env(monkeypatch):
+    for key in (
+        "VIDEO_HIVE_CMS_TOKEN",
+        "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
+        "VIDEO_HIVE_ASR_WHISPER_BINARY",
+        "VIDEO_HIVE_ASR_WHISPER_MODEL",
+        "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR",
+        "VIDEO_HIVE_PI_BINARY",
+        "VIDEO_HIVE_OPENCLAW_CWD",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+
 def test_load_env_file_preserves_quoted_secret_values(tmp_path, monkeypatch):
     monkeypatch.delenv("BASECMS_SECRET", raising=False)
     monkeypatch.setenv("BASECMS_TOKEN", "already-set")
@@ -134,3 +148,73 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     assert "weird-exec" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("env_var", "config_path", "env_value", "expected"),
+    [
+        ("VIDEO_HIVE_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
+        (
+            "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
+            ["cms", "token_gen", "secret"],
+            "env-secret",
+            "env-secret",
+        ),
+        (
+            "VIDEO_HIVE_ASR_WHISPER_BINARY",
+            ["asr", "whisper", "binary"],
+            "/tmp/whisper-cli",
+            "/tmp/whisper-cli",
+        ),
+        (
+            "VIDEO_HIVE_ASR_WHISPER_MODEL",
+            ["asr", "whisper", "model"],
+            "/tmp/model.bin",
+            "/tmp/model.bin",
+        ),
+        (
+            "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR",
+            ["asr", "sensevoice", "model_dir"],
+            "/tmp/sensevoice",
+            "/tmp/sensevoice",
+        ),
+        ("VIDEO_HIVE_PI_BINARY", ["pipelines", "pi", "binary"], "/tmp/pi", "/tmp/pi"),
+        ("VIDEO_HIVE_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
+    ],
+)
+def test_env_override_precedes_yaml(
+    tmp_path, monkeypatch, env_var, config_path, env_value, expected
+):
+    monkeypatch.setenv(env_var, env_value)
+    config_path_file = tmp_path / "pipeline.yaml"
+    config_path_file.write_text(
+        "data_dir: data\n"
+        "cms:\n"
+        "  token: yaml-token\n"
+        "  token_gen:\n"
+        "    secret: yaml-secret\n"
+        "asr:\n"
+        "  provider: whisper\n"
+        "  whisper:\n"
+        "    binary: yaml-binary\n"
+        "    model: yaml-model\n"
+        "  sensevoice:\n"
+        "    model_dir: yaml-dir\n"
+        "pipelines:\n"
+        "  enabled: false\n"
+        "  pi:\n"
+        "    binary: yaml-pi\n"
+        "openclaw:\n"
+        "  cwd: yaml-cwd\n"
+        "  command_template:\n"
+        "    - openclaw\n"
+        "    - agent\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path_file)
+
+    node = settings.config
+    for key in config_path[:-1]:
+        node = node[key]
+    assert node[config_path[-1]] == expected

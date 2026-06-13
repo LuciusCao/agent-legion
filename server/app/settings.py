@@ -1,4 +1,5 @@
 import os
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -14,6 +15,7 @@ from server.app.executors.runtime_config import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
     PipelinesRuntimeConfig,
+    validate_runtime,
 )
 
 
@@ -53,6 +55,42 @@ def load_env_file(path: Path) -> None:
             os.environ[key] = value
 
 
+def _str_parser(value: str) -> str:
+    return value
+
+
+def _path_parser(value: str) -> str:
+    """Expand ``~`` in path overrides while preserving command names unchanged."""
+    return os.path.expanduser(value)
+
+
+# Reviewed mapping from environment variable to config path and parser.
+# Do not add arbitrary double-underscore mutation; every override is listed here.
+_ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
+    "VIDEO_HIVE_CMS_TOKEN": (("cms", "token"), _str_parser),
+    "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
+    "VIDEO_HIVE_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
+    "VIDEO_HIVE_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
+    "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
+    "VIDEO_HIVE_PI_BINARY": (("pipelines", "pi", "binary"), _path_parser),
+    "VIDEO_HIVE_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
+}
+
+
+def _apply_env_overrides(config: dict[str, Any]) -> None:
+    """Apply known environment variable overrides before typed validation."""
+    for env_var, (path, parser) in _ENV_OVERRIDES.items():
+        raw = os.environ.get(env_var)
+        if raw is None:
+            continue
+        node = config
+        for key in path[:-1]:
+            if not isinstance(node.get(key), dict):
+                node[key] = {}
+            node = node[key]
+        node[path[-1]] = parser(raw)
+
+
 def _normalize_cms_config(config: dict[str, Any]) -> None:
     """Derive legacy URL fields from base_url when present."""
     cms = config.get("cms")
@@ -90,6 +128,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         loaded = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             config = loaded
+    _apply_env_overrides(config)
     _normalize_cms_config(config)
     resolved_data_dir = data_dir or root_dir / str(config.get("data_dir", "data"))
     videos_dir = resolved_data_dir / "videos"
@@ -111,3 +150,8 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         executor_definitions=executor_definitions,
         executor_runtime=executor_runtime,
     )
+
+
+def validate_settings(settings: Settings) -> None:
+    """Validate runtime dependencies after settings are constructed."""
+    validate_runtime(settings.executor_runtime, settings.config)
