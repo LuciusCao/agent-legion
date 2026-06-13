@@ -7,6 +7,7 @@ from server.app.db import Database
 from server.app.db.notifications import NotificationHub
 from server.app.pipeline.openclaw import OpenClawRunner
 from server.app.pipeline.runners import RunnerPool
+from tests.helpers import ensure_legacy_workspace_tables
 
 
 class FakeAgentManager:
@@ -79,6 +80,7 @@ def test_database_workspace_agent_assignment_queries(tmp_path):
     db_path = tmp_path / "test.sqlite"
     hub = NotificationHub()
     db = Database(db_path, hub=hub, videos_dir=tmp_path / "videos")
+    ensure_legacy_workspace_tables(db)
 
     db.set_workspace_agent_assignment("video-hive", "agent-1", 2)
     db.set_workspace_agent_assignment("video-hive", "agent-2", 1)
@@ -106,6 +108,7 @@ def test_agent_status_manager_loads_from_database(tmp_path):
     db_path = tmp_path / "test.sqlite"
     hub = NotificationHub()
     db = Database(db_path, hub=hub, videos_dir=tmp_path / "videos")
+    ensure_legacy_workspace_tables(db)
 
     db.set_workspace_agent_assignment("video-hive", "agent-x", 2)
     db.set_workspace_agent_assignment("video-hive", "agent-y", 3)

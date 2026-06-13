@@ -21,6 +21,7 @@ from server.app.pipelines.definition import (
     PipelineIntake,
     PipelineNode,
 )
+from tests.helpers import ensure_legacy_workspace_tables
 
 
 @pytest.fixture
@@ -28,7 +29,9 @@ def queries(tmp_path: Path) -> JobQueries:
     db_path = tmp_path / "jobs.sqlite"
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
-    return JobQueries(db_path, jobs_dir)
+    q = JobQueries(db_path, jobs_dir)
+    ensure_legacy_workspace_tables(q)
+    return q
 
 
 def _sample_executors() -> dict[str, ExecutorConfig]:
@@ -418,7 +421,9 @@ def _seed_default_workspace_assignment(tmp_path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
-    JobQueries(db_path, jobs_dir=jobs_dir).upsert_workspace_agent_assignment("default", "pi", 3)
+    queries = JobQueries(db_path, jobs_dir=jobs_dir)
+    ensure_legacy_workspace_tables(queries)
+    queries.upsert_workspace_agent_assignment("default", "pi", 3)
 
 
 def test_app_startup_materializes_executor_configuration_without_worker(tmp_path: Path) -> None:
@@ -477,6 +482,7 @@ def test_app_startup_aborts_when_finalization_blocked(tmp_path: Path) -> None:
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir=jobs_dir)
+    ensure_legacy_workspace_tables(queries)
     queries.upsert_workspace_agent_assignment("default", "unknown-agent", 2)
 
     with pytest.raises(RuntimeError, match="finalize-workspace-executor-migration.py --check"):

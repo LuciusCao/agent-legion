@@ -1,10 +1,12 @@
 from pathlib import Path
 
 from server.app.jobs.queries import JobQueries
+from tests.helpers import ensure_legacy_workspace_tables
 
 
 def test_upsert_workspace_agent_assignment(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    ensure_legacy_workspace_tables(db)
     workspace = db.create_workspace("Workspace One")
     result = db.upsert_workspace_agent_assignment(workspace["id"], "pi", 3)
     assert result["workspace_id"] == workspace["id"]

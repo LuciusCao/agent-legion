@@ -29,6 +29,9 @@ def _column_names(conn: sqlite3.Connection, table: str) -> list[str]:
 
 def _drop_pipeline_config_json(conn: sqlite3.Connection) -> None:
     """Remove pipeline_config_json from workspaces, preferring DROP COLUMN."""
+    cols = _column_names(conn, "workspaces")
+    if "pipeline_config_json" not in cols:
+        return
     try:
         conn.execute("alter table workspaces drop column pipeline_config_json")
         return

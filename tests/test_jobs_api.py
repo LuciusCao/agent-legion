@@ -2162,11 +2162,14 @@ def test_app_startup_materializes_executor_configuration_for_default_workspace(t
 
     from server.app.jobs import JobQueries
     from server.app.main import create_app
+    from tests.helpers import ensure_legacy_workspace_tables
 
     db_path = tmp_path / "video_hive.sqlite"
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
-    JobQueries(db_path, jobs_dir=jobs_dir).upsert_workspace_agent_assignment("default", "pi", 3)
+    queries = JobQueries(db_path, jobs_dir=jobs_dir)
+    ensure_legacy_workspace_tables(queries)
+    queries.upsert_workspace_agent_assignment("default", "pi", 3)
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     with TestClient(app) as c:
