@@ -34,7 +34,7 @@ create table jobs__v004 (
   stem text not null default '',
   created_at text not null default current_timestamp,
   updated_at text not null default current_timestamp,
-  execution_mode text not null default 'full' check(execution_mode in ('full', 'targeted')),
+  execution_mode text not null default 'full' check(execution_mode in ('full', 'until_node')),
   target_node_key text,
   execution_paused integer not null default 0 check(execution_paused in (0, 1)),
   pause_reason text not null default '',
@@ -151,7 +151,7 @@ _MIGRATION_NAME = "workspace_dag_foreign_keys"
 _JOB_EXECUTION_CONTROL_COLUMNS: tuple[tuple[str, str], ...] = (
     (
         "execution_mode",
-        "text not null default 'full' check(execution_mode in ('full', 'targeted'))",
+        "text not null default 'full' check(execution_mode in ('full', 'until_node'))",
     ),
     ("target_node_key", "text"),
     ("execution_paused", "integer not null default 0 check(execution_paused in (0, 1))"),

@@ -1,4 +1,7 @@
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.migrations.runner import Migration, run_migrations
@@ -375,6 +378,24 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
         assert tables >= EXPECTED_TABLES
         assert [row["version"] for row in versions] == [1, 2, 3, 4, 6]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
+
+        # V006 check constraint accepts until_node and rejects the old targeted value.
+        conn.execute(
+            "insert into workspaces(id, name) values ('constraint_ws', 'Constraint Workspace')"
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, execution_mode) "
+            "values ('job_ok', 'constraint_ws', 'reading_analysis', 'question_id', 'Q1', 'until_node')"
+        )
+        assert (
+            conn.execute("select execution_mode from jobs where id='job_ok'").fetchone()[0]
+            == "until_node"
+        )
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, execution_mode) "
+                "values ('job_bad', 'constraint_ws', 'reading_analysis', 'question_id', 'Q2', 'targeted')"
+            )
 
 
 def test_v006_is_compatible_with_later_v005_finalizer(tmp_path: Path) -> None:

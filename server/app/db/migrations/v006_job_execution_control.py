@@ -8,7 +8,7 @@ _TABLE_JOBS = "jobs"
 _JOB_COLUMNS: tuple[tuple[str, str], ...] = (
     (
         "execution_mode",
-        "text not null default 'full' check(execution_mode in ('full', 'targeted'))",
+        "text not null default 'full' check(execution_mode in ('full', 'until_node'))",
     ),
     ("target_node_key", "text"),
     ("execution_paused", "integer not null default 0 check(execution_paused in (0, 1))"),
