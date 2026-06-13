@@ -116,6 +116,65 @@ def test_continue_to_target(execution_service: JobExecutionService, job_db: JobQ
     assert job_after["pause_reason"] == ""
 
 
+def test_run_to_without_start_unpauses_target_reached_job(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace
+):
+    job = _create_job(job_db, workspace["id"])
+    job_db.update_job_node(job["id"], "fetch_question_context", status="completed")
+    job_db.update_job_node(job["id"], "question_understanding", status="completed")
+    job_db.set_job_execution_target(job["id"], "question_understanding")
+    job_db.pause_job(job["id"], "target_reached")
+    with job_db.connect() as conn:
+        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
+
+    result = execution_service.run_to(workspace["id"], job["id"], "misconception_analysis")
+
+    assert result["status"] == "succeeded"
+    assert result["node_key"] == "misconception_analysis"
+    job_after = job_db.get_job(job["id"])
+    assert job_after["status"] == "queued"
+    assert job_after["execution_mode"] == "until_node"
+    assert job_after["target_node_key"] == "misconception_analysis"
+    assert job_after["execution_paused"] == 0
+    assert job_after["pause_reason"] == ""
+    statuses = _node_statuses(job_db, job["id"])
+    assert statuses["fetch_question_context"] == "completed"
+    assert statuses["question_understanding"] == "completed"
+    assert statuses["misconception_analysis"] == "pending"
+
+
+def test_run_to_with_start_unpauses_target_reached_job(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace
+):
+    job = _create_job(job_db, workspace["id"])
+    storage = Path(job["storage_dir"])
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "understanding.json").write_text("understanding")
+    job_db.update_job_node(job["id"], "fetch_question_context", status="completed")
+    job_db.update_job_node(job["id"], "question_understanding", status="completed")
+    job_db.set_job_execution_target(job["id"], "question_understanding")
+    job_db.pause_job(job["id"], "target_reached")
+    with job_db.connect() as conn:
+        conn.execute("update jobs set status='paused' where id=?", (job["id"],))
+
+    result = execution_service.run_to(
+        workspace["id"],
+        job["id"],
+        "misconception_analysis",
+        start_node_key="question_understanding",
+    )
+
+    assert result["status"] == "succeeded"
+    job_after = job_db.get_job(job["id"])
+    assert job_after["status"] == "queued"
+    assert job_after["execution_paused"] == 0
+    assert job_after["pause_reason"] == ""
+    statuses = _node_statuses(job_db, job["id"])
+    assert statuses["question_understanding"] == "pending"
+    assert statuses["misconception_analysis"] == "stale"
+    assert not (storage / "understanding.json").exists()
+
+
 def test_run_to_without_start_preserves_completed_ancestors(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):
