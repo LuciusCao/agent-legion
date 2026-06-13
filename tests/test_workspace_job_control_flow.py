@@ -8,6 +8,7 @@ openclaw, or Pi binaries.
 
 from __future__ import annotations
 
+import time
 from pathlib import Path
 from typing import Any
 
@@ -142,8 +143,6 @@ def _make_worker(
 
 
 def _drain(worker: PipelineWorkerThread, timeout: float = 5.0) -> None:
-    import time
-
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         worker._poll()

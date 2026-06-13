@@ -35,7 +35,7 @@ _VIDEO_HIVE_MODULE_PREFIXES = (
 )
 
 _VIDEO_HIVE_EXACT = frozenset({"server.app.pipeline"})
-_VIDEO_HIVE_EXCEPTIONS = {("server/app/services/job_packages.py", "server.app.pipeline.package")}
+_VIDEO_HIVE_EXCEPTIONS: set[tuple[str, str]] = set()
 
 # Job execution services must claim capacity through leases, never by invoking
 # Executor adapters directly.
@@ -63,7 +63,6 @@ _DAG_TRAVERSAL_NAMES = frozenset(
         "ancestor_closure",
         "find_ready_nodes",
         "allowed_nodes",
-        "summarize_job_status",
     }
 )
 _FILESYSTEM_DELETION_ATTRS = frozenset(
