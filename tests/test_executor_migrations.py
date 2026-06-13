@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -24,7 +25,7 @@ def test_empty_database_migrates_to_latest_version(tmp_path: Path) -> None:
     path = tmp_path / "empty.sqlite"
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         tables = {
             row["name"] for row in conn.execute("select name from sqlite_master where type='table'")
         }
@@ -120,7 +121,7 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
 
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         tables = {
             row["name"] for row in conn.execute("select name from sqlite_master where type='table'")
         }
@@ -244,7 +245,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
 
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         batch = conn.execute("select * from job_batches where id = 'batch1'").fetchone()
         assert batch is not None
         assert batch["workspace_id"] == "ws1"
@@ -292,7 +293,7 @@ def test_v004_creates_required_indexes_and_foreign_keys(tmp_path: Path) -> None:
     path = tmp_path / "v004_fks.sqlite"
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         indexes = {
             row["name"]
             for row in conn.execute(
@@ -331,7 +332,7 @@ def test_v004_foreign_key_cascades(tmp_path: Path) -> None:
     path = tmp_path / "v004_cascade.sqlite"
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.execute("insert into workspaces(id, name) values ('ws1', 'Workspace One')")
         conn.execute(
             "insert into job_batches(id, workspace_id, pipeline_key, source_kind) "
@@ -370,7 +371,7 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
     path = tmp_path / "app.sqlite"
     init_db(path)
     init_db(path)
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         tables = {
             row["name"] for row in conn.execute("select name from sqlite_master where type='table'")
         }
@@ -403,12 +404,12 @@ def test_v006_is_compatible_with_later_v005_finalizer(tmp_path: Path) -> None:
     path = tmp_path / "v006_then_v005.sqlite"
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
         assert [row["version"] for row in versions] == [1, 2, 3, 4, 6]
 
     # Simulate the destructive V005 finalizer recording its version manually.
-    with connect_sqlite(path) as conn, conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.execute(
             "insert into schema_migrations(version, name) values (?, ?)",
             (5, "legacy_workspace_executor_finalization"),
@@ -416,7 +417,7 @@ def test_v006_is_compatible_with_later_v005_finalizer(tmp_path: Path) -> None:
 
     init_db(path)
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
         assert [row["version"] for row in versions] == [1, 2, 3, 4, 5, 6]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
@@ -440,7 +441,7 @@ def test_failed_migration_is_fully_rolled_back(tmp_path: Path) -> None:
     finally:
         conn.close()
 
-    with connect_sqlite(path) as conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         tables = {
             row["name"] for row in conn.execute("select name from sqlite_master where type='table'")
         }

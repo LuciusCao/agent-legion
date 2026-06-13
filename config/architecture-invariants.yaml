@@ -79,3 +79,12 @@ invariants:
       - kind: integration
         target: tests/test_jobs_api.py::test_workspace_stats_executor_status_reflects_allocations_and_leases
         gate: quick
+
+  - id: DB-LIFECYCLE-001
+    statement: "SQLite connections opened by application and tests are deterministically closed."
+    owner: database
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_sqlite_connection_lifecycle.py
+        gate: quick

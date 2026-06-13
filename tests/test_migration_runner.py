@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -112,7 +113,7 @@ def test_failed_migration_rolls_back_and_does_not_record_version(tmp_path: Path)
 
     conn.close()
 
-    with connect_sqlite(path) as check:
+    with closing(connect_sqlite(path)) as check, check:
         tables = {
             row["name"]
             for row in check.execute("select name from sqlite_master where type='table'")
