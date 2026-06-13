@@ -1,0 +1,311 @@
+"""Phase 6 architecture ratchets for Workspace Capability Parity.
+
+These checks protect the boundary between generic Workspace job surfaces and
+Video Hive video pipeline phases, keep route modules thin, and enforce derived
+generated types for job/workspace transport shapes.
+"""
+
+import ast
+import re
+from pathlib import Path
+
+from scripts.architecture.helpers import imported_modules
+
+# Generic Workspace modules must not depend on Video Hive video pipeline phases.
+_WORKSPACE_MODULE_PREFIXES = (
+    "server/app/routes/jobs.py",
+    "server/app/routes/job_artifacts.py",
+    "server/app/routes/job_batches.py",
+    "server/app/routes/workspace_",
+    "server/app/services/job_",
+    "server/app/services/workspace_",
+    "server/app/services/executor_catalog.py",
+    "server/app/services/pipeline_catalog.py",
+)
+
+# Video Hive (singular `pipeline`) modules and video-specific services that must
+# not leak into generic Workspace code.  `server.app.pipeline.package` is shared
+# by workspace packaging and is therefore exempt.
+_VIDEO_HIVE_MODULE_PREFIXES = (
+    "server.app.pipeline.",
+    "server.app.services.video_actions",
+    "server.app.services.intake",
+    "server.app.services.manual_run",
+    "server.app.services.interaction_stats",
+)
+
+_VIDEO_HIVE_EXACT = frozenset({"server.app.pipeline"})
+_VIDEO_HIVE_EXCEPTIONS = {("server/app/services/job_packages.py", "server.app.pipeline.package")}
+
+# Job execution services must claim capacity through leases, never by invoking
+# Executor adapters directly.
+_JOB_SERVICE_PREFIX = "server/app/services/job_"
+_DIRECT_EXECUTOR_MODULE_PREFIXES = (
+    "server.app.executors.local",
+    "server.app.executors.pi",
+    "server.app.executors.openclaw",
+    "server.app.executors.runtime",
+    "server.app.executors.registry",
+    "server.app.executors.protocol",
+    "server.app.executors.config",
+)
+
+# Workspace route modules must not perform DAG traversal or filesystem mutation.
+_WORKSPACE_ROUTE_PREFIXES = (
+    "server/app/routes/jobs.py",
+    "server/app/routes/job_artifacts.py",
+    "server/app/routes/job_batches.py",
+    "server/app/routes/workspace_",
+)
+_DAG_TRAVERSAL_NAMES = frozenset(
+    {
+        "downstream_nodes",
+        "ancestor_closure",
+        "find_ready_nodes",
+        "allowed_nodes",
+        "summarize_job_status",
+    }
+)
+_FILESYSTEM_DELETION_ATTRS = frozenset(
+    {
+        "rmtree",
+        "rmdir",
+        "remove",
+        "unlink",
+        "move",
+    }
+)
+
+# Frontend types whose names match generated OpenAPI schemas must be derived from
+# those schemas rather than handwritten.
+_GENERATED_JOB_TRANSPORT_NAMES = frozenset(
+    {
+        "ArtifactResponse",
+        "BatchJobIdsRequest",
+        "BatchJobMutationResponse",
+        "BatchRunToRequest",
+        "ContinueJobRequest",
+        "DeleteJobResponse",
+        "ExecutionControlSummaryResponse",
+        "JobBatchRequest",
+        "JobBatchRerunRequest",
+        "JobBatchResponse",
+        "JobDetailResponse",
+        "JobLogResponse",
+        "JobMutationResultResponse",
+        "JobNodeResponse",
+        "JobNodeSummaryResponse",
+        "JobSummaryResponse",
+        "JobsResponse",
+        "NodeRunResponse",
+        "RunToRequest",
+        "WorkspaceDagResponse",
+        "WorkspacePackageRequest",
+        "WorkspacePackageResponse",
+        "WorkspacePackageResultResponse",
+        "WorkspaceResponse",
+        "WorkspaceRunsResponse",
+        "WorkspaceSettingsResponse",
+        "WorkspaceSettingsSectionRequest",
+        "WorkspaceSettingsTestResponse",
+        "WorkspaceStatsResponse",
+        "WorkspacesResponse",
+    }
+)
+
+_DDL_PATTERN = re.compile(
+    r"\b(create\s+table|alter\s+table|drop\s+table|create\s+index|drop\s+index)\b",
+    re.IGNORECASE,
+)
+
+_TYPE_DECLARATION_RE = re.compile(
+    r"^\s*(?:export\s+)?type\s+([A-Za-z0-9_]+)\s*=\s*(.*?)^(?=\s*(?:export\s+)?(?:type|interface)\b|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+_INTERFACE_DECLARATION_RE = re.compile(
+    r"^\s*(?:export\s+)?interface\s+([A-Za-z0-9_]+)\s*\{(.*?)^(?=\s*(?:export\s+)?(?:type|interface)\b|\Z)",
+    re.MULTILINE | re.DOTALL,
+)
+
+
+def _is_workspace_module(rel_path: str) -> bool:
+    return any(
+        rel_path == prefix or rel_path.startswith(prefix) for prefix in _WORKSPACE_MODULE_PREFIXES
+    )
+
+
+def _is_workspace_route(rel_path: str) -> bool:
+    return any(
+        rel_path == prefix or rel_path.startswith(prefix) for prefix in _WORKSPACE_ROUTE_PREFIXES
+    )
+
+
+def _is_video_hive_import(module: str) -> bool:
+    if module == "server.app.pipeline.package" or module.startswith("server.app.pipeline.package."):
+        return False
+    if module in _VIDEO_HIVE_EXACT:
+        return True
+    return any(module.startswith(prefix) for prefix in _VIDEO_HIVE_MODULE_PREFIXES)
+
+
+def _is_direct_executor_import(module: str) -> bool:
+    return any(module.startswith(prefix) for prefix in _DIRECT_EXECUTOR_MODULE_PREFIXES)
+
+
+def _source_files(root: Path, *globs: str) -> list[Path]:
+    paths: list[Path] = []
+    for pattern in globs:
+        paths.extend(root.glob(pattern))
+    return sorted(paths)
+
+
+def check_workspace_video_hive_imports(root: Path) -> list[str]:
+    errors: list[str] = []
+    for path in _source_files(root, "server/app/**/*.py"):
+        rel_path = path.relative_to(root).as_posix()
+        if not _is_workspace_module(rel_path):
+            continue
+        try:
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=rel_path)
+        except SyntaxError as exc:
+            errors.append(f"{rel_path}: syntax error ({exc})")
+            continue
+        modules = imported_modules(tree)
+        for module, lineno in modules.items():
+            if _is_video_hive_import(module):
+                if (rel_path, module) in _VIDEO_HIVE_EXCEPTIONS:
+                    continue
+                errors.append(
+                    f"{rel_path}:{lineno}: Video Hive phase/service import {module!r} "
+                    "in generic Workspace module"
+                )
+    return errors
+
+
+def check_job_execution_direct_executor_calls(root: Path) -> list[str]:
+    errors: list[str] = []
+    for path in _source_files(root, "server/app/**/*.py"):
+        rel_path = path.relative_to(root).as_posix()
+        if not rel_path.startswith(_JOB_SERVICE_PREFIX):
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=rel_path)
+        except SyntaxError as exc:
+            errors.append(f"{rel_path}: syntax error ({exc})")
+            continue
+        modules = imported_modules(tree)
+        for module, lineno in modules.items():
+            if _is_direct_executor_import(module):
+                errors.append(
+                    f"{rel_path}:{lineno}: direct Executor invocation/import {module!r} "
+                    "in job execution service; claim through leases instead"
+                )
+    return errors
+
+
+def check_route_dag_and_deletion(root: Path) -> list[str]:
+    errors: list[str] = []
+    for path in _source_files(root, "server/app/**/*.py"):
+        rel_path = path.relative_to(root).as_posix()
+        if not _is_workspace_route(rel_path):
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=rel_path)
+        except SyntaxError as exc:
+            errors.append(f"{rel_path}: syntax error ({exc})")
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            call_name = ast.unparse(node.func)
+            base_name = call_name.split("(")[0].split(".")[-1]
+            if base_name in _DAG_TRAVERSAL_NAMES:
+                errors.append(
+                    f"{rel_path}:{node.lineno}: DAG traversal {base_name!r} belongs in services; "
+                    "routes must call orchestration services"
+                )
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in _FILESYSTEM_DELETION_ATTRS
+            ):
+                errors.append(
+                    f"{rel_path}:{node.lineno}: filesystem deletion {node.func.attr!r} belongs in "
+                    "services; routes must call orchestration services"
+                )
+    return errors
+
+
+def _body_is_handwritten(body: str) -> bool:
+    cleaned = re.sub(r"\s+", " ", body).strip()
+    if "ApiSchemas[" in cleaned or "components['schemas']" in cleaned:
+        return False
+    # References to other generated-derived aliases are acceptable.
+    return "{" in cleaned
+
+
+def check_frontend_handwritten_job_transports(root: Path) -> list[str]:
+    errors: list[str] = []
+    frontend_paths = set(root.glob("frontend/src/**/*.ts"))
+    frontend_paths.update(root.glob("frontend/src/**/*.tsx"))
+    for path in sorted(frontend_paths):
+        rel_path = path.relative_to(root).as_posix()
+        try:
+            source = path.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            continue
+        for match in _TYPE_DECLARATION_RE.finditer(source):
+            name = match.group(1)
+            body = match.group(2)
+            if name in _GENERATED_JOB_TRANSPORT_NAMES and _body_is_handwritten(body):
+                errors.append(
+                    f"{rel_path}:{source[: match.start()].count(chr(10)) + 1}: "
+                    f"handwritten transport type {name!r} must be derived from generated "
+                    "OpenAPI types (ApiSchemas['...'])"
+                )
+        for match in _INTERFACE_DECLARATION_RE.finditer(source):
+            name = match.group(1)
+            if name in _GENERATED_JOB_TRANSPORT_NAMES:
+                errors.append(
+                    f"{rel_path}:{source[: match.start()].count(chr(10)) + 1}: "
+                    f"handwritten transport interface {name!r} must be derived from generated "
+                    "OpenAPI types (ApiSchemas['...'])"
+                )
+    return errors
+
+
+def check_schema_mutation_locations(root: Path) -> list[str]:
+    errors: list[str] = []
+    allowed_prefix = "server/app/db/migrations/"
+    allowed_exact = "server/app/db/schema.py"
+    for path in _source_files(root, "server/app/**/*.py"):
+        rel_path = path.relative_to(root).as_posix()
+        if rel_path == allowed_exact or rel_path.startswith(allowed_prefix):
+            continue
+        try:
+            source = path.read_text(encoding="utf-8")
+            tree = ast.parse(source, filename=rel_path)
+        except SyntaxError as exc:
+            errors.append(f"{rel_path}: syntax error ({exc})")
+            continue
+        reported: set[int] = set()
+        for node in ast.walk(tree):
+            value: str | None = None
+            lineno: int | None = None
+            if isinstance(node, ast.Constant) and isinstance(node.value, str):
+                value = node.value
+                lineno = node.lineno
+            if isinstance(node, ast.JoinedStr):
+                # DDL is not expected inside f-strings; reconstructing is expensive.
+                continue
+            if value is None or lineno is None:
+                continue
+            if _DDL_PATTERN.search(value) and lineno not in reported:
+                reported.add(lineno)
+                errors.append(
+                    f"{rel_path}:{lineno}: schema mutation belongs in "
+                    "server/app/db/migrations/ or server/app/db/schema.py"
+                )
+    return errors

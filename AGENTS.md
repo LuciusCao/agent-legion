@@ -487,6 +487,71 @@ cd frontend && npm run api:check
 ./scripts/check-quick.sh
 ```
 
+## Phase 6 Workspace Job Boundary Rules
+
+Generic Workspace Job code must keep Video Hive phases, direct Executor invocation, DAG traversal,
+and filesystem deletion out of the route layer.
+
+```text
+Job UI reads persisted Node state -> mutation calls service -> scheduler claims through leases
+```
+
+Rules:
+
+- Generic Workspace routes/services (`routes/jobs.py`, `routes/job_*.py`, `routes/workspace_*.py`,
+  `services/job_*.py`) must not import Video Hive phase modules (`server.app.pipeline.*` singular)
+  or video services (`services.video_actions`, `services.intake`, `services.manual_run`,
+  `services.interaction_stats`).
+- Job execution services must claim capacity through `server.app.executors.leases`; they must not
+  directly import or invoke Executor adapters (`executors.local`, `.pi`, `.openclaw`, `.runtime`,
+  `.registry`).
+- Route modules must not perform DAG traversal (`downstream_nodes`, `ancestor_closure`,
+  `find_ready_nodes`) or filesystem deletion (`shutil.rmtree`, `os.remove`, `Path.unlink`, etc.).
+  Those belong in services.
+- Frontend transport types for Job/Workspace responses must be derived from
+  `frontend/src/generated/api.ts` (via `components['schemas']` or `ApiSchemas['...']`), not
+  handwritten duplicates.
+- Schema mutation (`CREATE TABLE`, `ALTER TABLE`, `DROP TABLE`, `CREATE INDEX`) belongs in
+  `server/app/db/migrations/` or `server/app/db/schema.py`.
+
+Wrong examples the architecture gate rejects:
+
+```python
+# Wrong: Generic Workspace route imports a Video Hive phase.
+from server.app.pipeline.download import download_video
+```
+
+```python
+# Wrong: Job service invokes an Executor directly.
+from server.app.executors.local import LocalExecutor
+LocalExecutor(...).execute(context)
+```
+
+```python
+# Wrong: Route module traverses the DAG or deletes files.
+from server.app.pipelines.scheduler import downstream_nodes
+shutil.rmtree(storage_dir)
+```
+
+```typescript
+// Wrong: Handwritten transport type duplicating a generated response.
+export type JobSummaryResponse = { id: string }
+```
+
+```python
+# Wrong: Schema mutation outside migrations/schema.
+conn.execute("alter table jobs add column x text")
+```
+
+Run the focused Phase 6 governance and control-flow tests:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run pytest -q \
+  tests/test_architecture_phase6.py \
+  tests/test_check_architecture.py \
+  tests/test_workspace_job_control_flow.py
+```
+
 Before committing or handing off work, run the full gate:
 
 ```bash

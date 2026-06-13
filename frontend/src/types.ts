@@ -209,10 +209,7 @@ export type PipelineDefinitionRecord = ApiSchemas['PipelineDefinitionResponse']
 export type PipelineResponse = ApiSchemas['PipelineResponse']
 export type PipelinesListResponse = ApiSchemas['PipelinesListResponse']
 
-export type ArtifactResponse = {
-  name: string
-  content: string
-}
+export type ArtifactResponse = ApiSchemas['ArtifactResponse']
 
 export type CreateJobBatchInput = {
   workspaceId: string
@@ -253,6 +250,6 @@ export type QuestionDetailResponse = {
   jobs: JobRecord[]
 }
 
-export type WorkspacesResponse = {
+export type WorkspacesResponse = ApiSchemas['WorkspacesResponse'] & {
   workspaces: WorkspaceRecord[]
 }

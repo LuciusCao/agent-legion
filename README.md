@@ -302,4 +302,14 @@ Agent Legion pipeline (workspace / job) endpoints:
 - `GET /api/workspaces/{workspace_id}/jobs` — list jobs in workspace
 - `GET /api/jobs/{job_id}` — job detail with nodes, runs, artifacts
 - `GET /api/jobs/{job_id}/artifacts/{artifact_name}` — read job artifact
+- `GET /api/jobs/{job_id}/runs/{run_id}/log` — safe run log content
 - `POST /api/jobs/{job_id}/nodes/{node_key}/rerun` — rerun a node and mark downstream nodes stale
+- `POST /api/jobs/{job_id}/run-to` — run only the ancestor closure up to a target node
+- `POST /api/jobs/{job_id}/continue` — continue a paused job after a run-to target was reached
+- `DELETE /api/jobs/{job_id}` — delete job records, storage, and logs
+- `POST /api/workspaces/{workspace_id}/jobs/package` — package completed jobs
+
+Generic Workspace Job code follows the boundary: UI reads persisted Node state, mutations call
+services, and the scheduler claims Nodes through Executor leases. See [AGENTS.md](AGENTS.md) for
+Phase 6 architecture rules and wrong examples.
+
