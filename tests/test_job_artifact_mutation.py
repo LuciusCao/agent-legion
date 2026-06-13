@@ -7,8 +7,8 @@ from server.app.services.job_artifact_mutation import JobArtifactMutationService
 
 
 @pytest.fixture
-def mutation_service():
-    return JobArtifactMutationService()
+def mutation_service(tmp_path):
+    return JobArtifactMutationService(tmp_path)
 
 
 @pytest.fixture

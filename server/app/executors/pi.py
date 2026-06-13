@@ -78,8 +78,8 @@ class PiExecutor:
             inputs=list(context.inputs),
             outputs=list(context.expected_outputs),
             tools=list(capability_config.tools),
-            job_db=None,
             persist_run=False,
+            job_dir=context.job_dir,
         )
 
         produced = tuple(

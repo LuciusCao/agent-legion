@@ -64,7 +64,7 @@ def create_router(
     executor_leases = ExecutorLeaseRepository(job_db.path)
     job_rerun = JobRerunService(job_db, executor_leases, settings, pipeline_catalog)
     job_execution = JobExecutionService(
-        job_db, JobArtifactMutationService(), executor_leases, pipeline_catalog
+        job_db, JobArtifactMutationService(settings.jobs_dir), executor_leases, pipeline_catalog
     )
     job_deletion = JobDeletionService(job_db, executor_leases, settings)
     job_packages = JobPackageService(job_db, settings)

@@ -109,7 +109,7 @@
     "server/app/services/job_intake.py": 248,
     "server/app/services/job_logs.py": 99,
     "server/app/services/job_queries.py": 230,
-    "server/app/services/job_artifacts.py": 37,
+    "server/app/services/job_artifacts.py": 38,
     "server/app/services/job_rerun.py": 209,
     "server/app/services/job_artifact_mutation.py": 140,
     "server/app/services/pipeline_catalog.py": 155,

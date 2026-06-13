@@ -13,13 +13,22 @@ from server.app.settings import Settings
 
 
 def _create_settings(tmp_path: Path) -> Settings:
+    # Match the paths produced by the job_db fixture, which uses
+    # load_settings(data_dir=tmp_path) and therefore jobs_dir=tmp_path/jobs.
+    data_dir = tmp_path
+    jobs_dir = data_dir / "jobs"
+    logs_dir = data_dir / "logs"
+    videos_dir = data_dir / "videos"
+    packages_dir = data_dir / "packages"
+    for path in [data_dir, jobs_dir, logs_dir, videos_dir, packages_dir]:
+        path.mkdir(parents=True, exist_ok=True)
     return Settings(
         root_dir=tmp_path,
-        data_dir=tmp_path / "data",
-        videos_dir=tmp_path / "data" / "videos",
-        logs_dir=tmp_path / "data" / "logs",
-        packages_dir=tmp_path / "data" / "packages",
-        jobs_dir=tmp_path / "data" / "jobs",
+        data_dir=data_dir,
+        videos_dir=videos_dir,
+        logs_dir=logs_dir,
+        packages_dir=packages_dir,
+        jobs_dir=jobs_dir,
         config={},
     )
 

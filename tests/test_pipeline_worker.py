@@ -15,7 +15,6 @@ from server.app.pipelines.definition import (
 )
 from server.app.pipelines.executor import (
     _execute_node_wrapped,
-    execute_agent_node_once,
     execute_node_once,
     process_ready_pipeline_node,
 )
@@ -40,6 +39,7 @@ def test_execute_fetch_question_context_writes_artifact(tmp_path):
         job=job,
         node_key="fetch_question_context",
         logs_dir=tmp_path / "logs",
+        jobs_dir=tmp_path / "jobs",
     )
 
     assert completed is True
@@ -107,6 +107,7 @@ def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monke
         node_key="fetch_question_context",
         logs_dir=tmp_path / "logs",
         settings_config={"cms": {"env": "prod"}},
+        jobs_dir=tmp_path / "jobs",
     )
 
     assert completed is True
@@ -192,6 +193,7 @@ def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, 
                 }
             },
         },
+        jobs_dir=tmp_path / "jobs",
     )
 
     assert completed is True
@@ -220,6 +222,7 @@ def test_process_ready_pipeline_node_runs_root(tmp_path):
         job_db=queries,
         definition=definition,
         logs_dir=tmp_path / "logs",
+        jobs_dir=tmp_path / "jobs",
     )
 
     assert processed is True
@@ -247,6 +250,7 @@ def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
             job=job,
             node_key="assemble_package",
             logs_dir=tmp_path / "logs",
+            jobs_dir=tmp_path / "jobs",
         )
 
 
@@ -267,7 +271,7 @@ def _make_fake_skill(skill_dir: Path) -> None:
     validator.chmod(0o755)
 
 
-def test_execute_agent_node_once_runs_pi_node(tmp_path, monkeypatch):
+def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
     fake_pi = tmp_path / "fake_pi"
     fake_pi.write_text(
         "#!/bin/bash\n"
@@ -300,13 +304,15 @@ def test_execute_agent_node_once_runs_pi_node(tmp_path, monkeypatch):
         skill_root=tmp_path / "skills",
     )
 
-    completed = execute_agent_node_once(
+    completed = execute_node_once(
         job_db=queries,
         definition=definition,
         job=job,
         node_key="extract_keywords",
+        logs_dir=tmp_path / "logs",
         pi_runner=pi_runner,
         skill_root=tmp_path / "skills",
+        jobs_dir=tmp_path / "jobs",
     )
 
     assert completed is True
@@ -357,6 +363,7 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
         logs_dir=tmp_path / "logs",
         pi_runner=pi_runner,
         skill_root=tmp_path / "skills",
+        jobs_dir=tmp_path / "jobs",
     )
 
     assert completed is True
@@ -387,6 +394,7 @@ def test_execute_node_once_raises_when_pi_runner_missing_for_agent_node(tmp_path
             job=job,
             node_key="extract_keywords",
             logs_dir=tmp_path / "logs",
+            jobs_dir=tmp_path / "jobs",
         )
 
 
@@ -511,7 +519,9 @@ def test_process_ready_pipeline_node_refreshes_job_status_when_no_local_nodes_re
             return_value={"agent_node": "pending"},
         ),
     ):
-        result = process_ready_pipeline_node(job_db, definition, Path("/tmp/logs"))
+        result = process_ready_pipeline_node(
+            job_db, definition, Path("/tmp/logs"), jobs_dir=Path("/tmp")
+        )
 
     assert result is False
     mock_find.assert_called_once()
