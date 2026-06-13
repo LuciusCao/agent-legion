@@ -56,9 +56,6 @@ class WorkspaceConfigurationSettingsRequest(BaseModel):
     labelOverrides: dict[str, str] | None = None
     pipelineKey: str | None = None
     resources: dict[str, Any] | None = None
-    localConcurrency: int | None = None
-    agentConcurrency: int | None = None
-    nodeLocalConcurrency: dict[str, int] | None = None
 
 
 class WorkspaceConfigurationRequest(BaseModel):

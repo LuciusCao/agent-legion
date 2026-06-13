@@ -192,9 +192,6 @@ export type WorkspaceSettings = {
   resources: Record<string, ResourceBinding>
   cmsUrl?: string
   cmsToken?: string
-  localConcurrency?: number
-  agentConcurrency?: number
-  nodeLocalConcurrency?: Record<string, number>
 }
 
 export type PipelineNodeRecord = {

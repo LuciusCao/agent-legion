@@ -71,7 +71,6 @@ class WorkspaceConfigurationService:
                 cms_config=payload.get("cms_config", {}),
                 resource_config=payload.get("resource_config", {}),
                 intake_config=payload.get("intake_config", {}),
-                pipeline_config=payload.get("pipeline_config", {}),
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
@@ -93,7 +92,6 @@ class WorkspaceConfigurationService:
                 cms_config=payload.get("cms_config"),
                 resource_config=payload.get("resource_config"),
                 intake_config=payload.get("intake_config"),
-                pipeline_config=payload.get("pipeline_config"),
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
@@ -124,21 +122,6 @@ class WorkspaceConfigurationService:
         pipeline_key = settings_patch.get("pipelineKey") or str(current["pipelineKey"])
         pipeline = self.pipelines.definition(pipeline_key)
 
-        local_concurrency = settings_patch.get("localConcurrency")
-        agent_concurrency = settings_patch.get("agentConcurrency")
-        node_concurrency = settings_patch.get("nodeLocalConcurrency")
-        if local_concurrency is not None and local_concurrency < 1:
-            raise InvalidOperationError("localConcurrency must be at least 1")
-        if agent_concurrency is not None and agent_concurrency < 1:
-            raise InvalidOperationError("agentConcurrency must be at least 1")
-        if node_concurrency is not None and any(limit < 1 for limit in node_concurrency.values()):
-            raise InvalidOperationError("Node concurrency must be at least 1")
-
-        pipeline_config = {
-            "local": local_concurrency if local_concurrency is not None else 1,
-            "agent": agent_concurrency if agent_concurrency is not None else 1,
-            "nodes": node_concurrency if node_concurrency is not None else {},
-        }
         validate_workspace_executor_configuration(
             pipeline=pipeline,
             executor_definitions=self.settings.executor_definitions,
@@ -174,7 +157,6 @@ class WorkspaceConfigurationService:
                     if settings_patch.get("labelOverrides") is not None
                     else current["labelOverrides"],
                 },
-                pipeline_config=pipeline_config,
                 executor_allocations=executor_allocations,
                 node_bindings=node_bindings,
                 node_limits=node_limits,
@@ -232,27 +214,9 @@ class WorkspaceConfigurationService:
         elif section == "pipeline":
             if patch.get("pipelineKey") is not None:
                 self.pipelines.definition(patch["pipelineKey"])
-            pipeline_config = workspace.get("pipeline_config")
-            if not isinstance(pipeline_config, dict):
-                pipeline_config = {}
-            if patch.get("localConcurrency") is not None:
-                if patch["localConcurrency"] < 1:
-                    raise InvalidOperationError("localConcurrency must be at least 1")
-                pipeline_config["local"] = patch["localConcurrency"]
-            if patch.get("agentConcurrency") is not None:
-                if patch["agentConcurrency"] < 1:
-                    raise InvalidOperationError("agentConcurrency must be at least 1")
-                pipeline_config["agent"] = patch["agentConcurrency"]
-            if patch.get("nodeLocalConcurrency") is not None:
-                valid_nodes: dict[str, int] = {}
-                for node_key, limit in patch["nodeLocalConcurrency"].items():
-                    if isinstance(limit, int) and limit >= 1:
-                        valid_nodes[node_key] = limit
-                pipeline_config["nodes"] = valid_nodes
             workspace = self.job_db.update_workspace(
                 workspace_id,
                 default_pipeline_key=patch.get("pipelineKey"),
-                pipeline_config=pipeline_config if pipeline_config else None,
             )
         else:
             raise NotFoundError("Unknown settings section")

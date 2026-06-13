@@ -119,59 +119,6 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     assert default_jobs.json()["jobs"] == []
 
 
-def test_workspace_settings_round_trip(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
-    with TestClient(app) as c:
-        connection = c.patch(
-            "/api/workspaces/default/settings/connection",
-            json={
-                "resources": {"question_detail": {"enabled": True, "config": {}}},
-                "cmsUrl": "https://cms.example",
-                "cmsToken": "secret",
-            },
-        )
-        intake = c.patch(
-            "/api/workspaces/default/settings/intake",
-            json={
-                "entityType": "video",
-                "intakeModes": ["direct_ids"],
-                "labelOverrides": {"direct_ids": "输入 ID"},
-            },
-        )
-        pipeline = c.patch(
-            "/api/workspaces/default/settings/pipeline",
-            json={
-                "pipelineKey": "question_content",
-                "localConcurrency": 5,
-                "nodeLocalConcurrency": {"fetch_question_context": 3},
-            },
-        )
-        fetched = c.get("/api/workspaces/default/settings")
-        test_connection = c.post("/api/workspaces/default/settings/test-connection")
-
-    assert connection.status_code == 200
-    assert intake.status_code == 200
-    assert pipeline.status_code == 200
-    assert test_connection.status_code == 200
-    settings = fetched.json()["settings"]
-    assert "cmsUrl" not in settings
-    assert "cmsToken" not in settings
-    assert settings["resources"]["question_detail"]["enabled"] is True
-    assert settings["entityType"] == "video"
-    assert settings["intakeModes"] == ["direct_ids"]
-    assert settings["labelOverrides"] == {"direct_ids": "输入 ID"}
-    assert settings["pipelineKey"] == "question_content"
-    workspace = app.state.job_db.get_workspace("default")
-    # V005 removes pipeline_config_json from workspaces; the settings endpoint
-    # exposes the patched values directly without persisting them in the column.
-    assert workspace.get("pipeline_config", {}) == {}
-
-
 def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -191,9 +138,6 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                     "labelOverrides": {"direct_ids": "Video IDs"},
                     "pipelineKey": "question_content",
                     "resources": {"question_detail": {"enabled": True, "config": {}}},
-                    "localConcurrency": 4,
-                    "agentConcurrency": 2,
-                    "nodeLocalConcurrency": {"fetch_question_context": 3},
                 },
                 "executor_allocations": [
                     {"executor_id": "local-default", "concurrency_limit": 4},
@@ -1923,29 +1867,6 @@ def test_get_and_set_workspace_agent_is_no_op_after_v005(client):
     assert resp.status_code == 200
     # The legacy workspace_agent_assignments table is dropped by V005.
     assert resp.json() == []
-
-
-def test_workspace_settings_pipeline_rejects_invalid_concurrency(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
-    with TestClient(app) as c:
-        resp_local = c.patch(
-            "/api/workspaces/default/settings/pipeline",
-            json={"localConcurrency": 0},
-        )
-        resp_agent = c.patch(
-            "/api/workspaces/default/settings/pipeline",
-            json={"agentConcurrency": 0},
-        )
-
-    assert resp_local.status_code == 400
-    assert "localConcurrency must be at least 1" in resp_local.json()["detail"]
-    assert resp_agent.status_code == 400
-    assert "agentConcurrency must be at least 1" in resp_agent.json()["detail"]
 
 
 def test_update_workspace_rejects_invalid_pipeline_key(tmp_path):

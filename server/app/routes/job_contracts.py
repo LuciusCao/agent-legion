@@ -36,7 +36,6 @@ class WorkspaceCreateRequest(BaseModel):
     cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)
     intake_config: dict[str, Any] = Field(default_factory=dict)
-    pipeline_config: dict[str, Any] = Field(default_factory=dict)
 
 
 class WorkspaceUpdateRequest(BaseModel):
@@ -47,7 +46,6 @@ class WorkspaceUpdateRequest(BaseModel):
     cms_config: dict[str, Any] | None = None
     resource_config: dict[str, Any] | None = None
     intake_config: dict[str, Any] | None = None
-    pipeline_config: dict[str, Any] | None = None
 
 
 class WorkspaceSettingsResponse(BaseModel):
@@ -61,9 +59,6 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
     pipelineKey: str | None = None
-    localConcurrency: int | None = None
-    agentConcurrency: int | None = None
-    nodeLocalConcurrency: dict[str, int] | None = None
     resources: dict[str, Any] | None = None
 
 

@@ -46,7 +46,6 @@ def _workspace_record(row: sqlite3.Row) -> dict[str, Any]:
     record["cms_config"] = _decode_json_object(record.get("cms_config_json"))
     record["resource_config"] = _decode_json_object(record.get("resource_config_json"))
     record["intake_config"] = _decode_json_object(record.get("intake_config_json"))
-    record["pipeline_config"] = _decode_json_object(record.get("pipeline_config_json"))
     return record
 
 
@@ -81,7 +80,6 @@ class JobQueries:
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
         intake_config: dict[str, Any] | None = None,
-        pipeline_config: dict[str, Any] | None = None,
         description: str = "",
     ) -> dict[str, Any]:
         clean_name = name.strip()
@@ -95,11 +93,6 @@ class JobQueries:
         )
         clean_entity = (default_entity or "question").strip() or "question"
         intake_config_json = json.dumps(intake_config or {}, ensure_ascii=False, sort_keys=True)
-        pipeline_config_json = json.dumps(
-            pipeline_config or {},
-            ensure_ascii=False,
-            sort_keys=True,
-        )
         clean_description = (description or "").strip()
 
         base_id = _workspace_id(clean_name)
@@ -110,50 +103,25 @@ class JobQueries:
                 workspace_id = f"{base_id}_{suffix}"
                 suffix += 1
 
-            col_exists = conn.execute(
-                "select 1 from pragma_table_info('workspaces') where name='pipeline_config_json'"
-            ).fetchone()
-            if col_exists is not None:
-                conn.execute(
-                    """
-                    insert into workspaces(
-                      id, name, description, default_pipeline_key, cms_config_json, resource_config_json,
-                      default_entity, intake_config_json, pipeline_config_json
-                    )
-                    values (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        workspace_id,
-                        clean_name,
-                        clean_description,
-                        default_pipeline_key,
-                        cms_config_json,
-                        resource_config_json,
-                        clean_entity,
-                        intake_config_json,
-                        pipeline_config_json,
-                    ),
+            conn.execute(
+                """
+                insert into workspaces(
+                  id, name, description, default_pipeline_key, cms_config_json, resource_config_json,
+                  default_entity, intake_config_json
                 )
-            else:
-                conn.execute(
-                    """
-                    insert into workspaces(
-                      id, name, description, default_pipeline_key, cms_config_json, resource_config_json,
-                      default_entity, intake_config_json
-                    )
-                    values (?, ?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        workspace_id,
-                        clean_name,
-                        clean_description,
-                        default_pipeline_key,
-                        cms_config_json,
-                        resource_config_json,
-                        clean_entity,
-                        intake_config_json,
-                    ),
-                )
+                values (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    workspace_id,
+                    clean_name,
+                    clean_description,
+                    default_pipeline_key,
+                    cms_config_json,
+                    resource_config_json,
+                    clean_entity,
+                    intake_config_json,
+                ),
+            )
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
         return _workspace_record(row)
 
@@ -178,7 +146,6 @@ class JobQueries:
         resource_config: dict[str, Any] | None = None,
         default_entity: str | None = None,
         intake_config: dict[str, Any] | None = None,
-        pipeline_config: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         fields: dict[str, Any] = {}
         if name is not None:
@@ -211,12 +178,6 @@ class JobQueries:
                 ensure_ascii=False,
                 sort_keys=True,
             )
-        if pipeline_config is not None:
-            fields["pipeline_config_json"] = json.dumps(
-                pipeline_config,
-                ensure_ascii=False,
-                sort_keys=True,
-            )
         if not fields:
             workspace = self.get_workspace(workspace_id)
             if workspace is None:
@@ -226,21 +187,6 @@ class JobQueries:
         assignments = ", ".join(f"{key}=?" for key in fields)
         params = list(fields.values()) + [workspace_id]
         with self.connect() as conn:
-            if "pipeline_config_json" in fields:
-                col_exists = conn.execute(
-                    "select 1 from pragma_table_info('workspaces') where name='pipeline_config_json'"
-                ).fetchone()
-                if col_exists is None:
-                    fields.pop("pipeline_config_json")
-                    if not fields:
-                        row = conn.execute(
-                            "select * from workspaces where id=?", (workspace_id,)
-                        ).fetchone()
-                        if row is None:
-                            raise ValueError("Workspace not found")
-                        return _workspace_record(row)
-                    assignments = ", ".join(f"{key}=?" for key in fields)
-                    params = list(fields.values()) + [workspace_id]
             cursor = conn.execute(
                 f"""
                 update workspaces
@@ -264,7 +210,6 @@ class JobQueries:
         default_entity: str,
         resource_config: dict[str, Any],
         intake_config: dict[str, Any],
-        pipeline_config: dict[str, Any],
         executor_allocations: Sequence[Mapping[str, Any]] | None = None,
         node_bindings: Sequence[Mapping[str, Any]] | None = None,
         node_limits: Sequence[Mapping[str, Any]] | None = None,
@@ -276,48 +221,24 @@ class JobQueries:
             exists = conn.execute("select 1 from workspaces where id=?", (workspace_id,)).fetchone()
             if exists is None:
                 raise ValueError("Workspace not found")
-            col_exists = conn.execute(
-                "select 1 from pragma_table_info('workspaces') where name='pipeline_config_json'"
-            ).fetchone()
-            if col_exists is not None:
-                conn.execute(
-                    """
-                    update workspaces
-                    set name=?, description=?, default_pipeline_key=?, default_entity=?,
-                        resource_config_json=?, intake_config_json=?, pipeline_config_json=?,
-                        updated_at=current_timestamp
-                    where id=?
-                    """,
-                    (
-                        clean_name,
-                        description.strip(),
-                        default_pipeline_key,
-                        default_entity,
-                        json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
-                        json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
-                        json.dumps(pipeline_config, ensure_ascii=False, sort_keys=True),
-                        workspace_id,
-                    ),
-                )
-            else:
-                conn.execute(
-                    """
-                    update workspaces
-                    set name=?, description=?, default_pipeline_key=?, default_entity=?,
-                        resource_config_json=?, intake_config_json=?,
-                        updated_at=current_timestamp
-                    where id=?
-                    """,
-                    (
-                        clean_name,
-                        description.strip(),
-                        default_pipeline_key,
-                        default_entity,
-                        json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
-                        json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
-                        workspace_id,
-                    ),
-                )
+            conn.execute(
+                """
+                update workspaces
+                set name=?, description=?, default_pipeline_key=?, default_entity=?,
+                    resource_config_json=?, intake_config_json=?,
+                    updated_at=current_timestamp
+                where id=?
+                """,
+                (
+                    clean_name,
+                    description.strip(),
+                    default_pipeline_key,
+                    default_entity,
+                    json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
+                    json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
+                    workspace_id,
+                ),
+            )
             replace_workspace_executor_configuration(
                 conn,
                 workspace_id,
