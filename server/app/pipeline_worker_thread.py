@@ -54,7 +54,6 @@ class PipelineWorkerThread:
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult]] = {}
         self._round_robin = WorkspaceRoundRobin()
-        # Compat aliases — old code/tests may reference these fields
         self._local_executor: ThreadPoolExecutor | None = None
         self._agent_executor: ThreadPoolExecutor | None = None
 
@@ -159,7 +158,11 @@ class PipelineWorkerThread:
                 "execution_paused": bool(job.get("execution_paused")),
                 "pause_reason": job.get("pause_reason", ""),
             }
-            allowed = allowed_nodes(definition, control_snapshot)
+            try:
+                allowed = allowed_nodes(definition, control_snapshot)
+            except Exception:
+                logger.exception("failed to compute allowed nodes for job %s", job["id"])
+                continue
             ready_nodes = find_ready_nodes(definition, statuses, job_dir)
             for node in ready_nodes:
                 if node.key not in allowed:
@@ -285,11 +288,7 @@ class PipelineWorkerThread:
         self._futures[claim.execution_id] = future
         return True
 
-    def _run_claim(
-        self,
-        claim: ClaimedExecution,
-        context: ExecutionContext,
-    ) -> ExecutionResult:
+    def _run_claim(self, claim: ClaimedExecution, context: ExecutionContext) -> ExecutionResult:
         try:
             return self.runtime.run(claim, context)
         except Exception as exc:

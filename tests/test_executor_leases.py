@@ -47,11 +47,16 @@ def _setup_workspace(
     node_key: str = "review_keywords",
     local_limit: int | None = 1,
     pipeline_key: str = "reading_analysis",
+    node_keys: list[str] | None = None,
 ) -> tuple[str, str]:
     workspace = queries.create_workspace(name=name, default_pipeline_key=pipeline_key)
     workspace_id = workspace["id"]
     job_id = _create_job_in_workspace(
-        queries, workspace_id, node_key=node_key, pipeline_key=pipeline_key
+        queries,
+        workspace_id,
+        node_key=node_key,
+        pipeline_key=pipeline_key,
+        node_keys=node_keys,
     )
     _bind_executor_to_node(
         queries,
@@ -70,6 +75,7 @@ def _create_job_in_workspace(
     workspace_id: str,
     node_key: str = "review_keywords",
     pipeline_key: str = "reading_analysis",
+    node_keys: list[str] | None = None,
 ) -> str:
     job = queries.create_job(
         pipeline_key=pipeline_key,
@@ -77,7 +83,7 @@ def _create_job_in_workspace(
         source_id=f"src-{uuid.uuid4().hex[:8]}",
         batch_id="",
         title="Test Job",
-        node_keys=[node_key],
+        node_keys=node_keys or [node_key],
         workspace_id=workspace_id,
     )
     return str(job["id"])
@@ -660,7 +666,13 @@ def test_claim_rejected_when_job_paused(
 def test_claim_rejected_when_target_snapshot_stale(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
-    workspace_id, job_id = _setup_workspace(queries, "ws-stale", "local-default", workspace_limit=2)
+    workspace_id, job_id = _setup_workspace(
+        queries,
+        "ws-stale",
+        "local-default",
+        workspace_limit=2,
+        node_keys=["review_keywords", "clean_and_parse"],
+    )
     queries.set_job_execution_target(job_id, "review_keywords")
 
     # Snapshot computed before the user changed the target.
@@ -672,7 +684,7 @@ def test_claim_rejected_when_target_snapshot_stale(
         allowed_node_keys=("review_keywords",),
     )
 
-    queries.set_job_execution_target(job_id, "extract_entities")
+    queries.set_job_execution_target(job_id, "clean_and_parse")
 
     claim = repo_a.try_claim(stale_request)
     assert claim is None

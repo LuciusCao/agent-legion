@@ -102,6 +102,40 @@ def test_pause_and_resume_job(tmp_path: Path) -> None:
     assert control["pause_reason"] == ""
 
 
+def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = db.create_workspace("Continue Workspace")
+    job = db.create_job(
+        pipeline_key="reading_analysis",
+        source_type="question_id",
+        source_id="Q-CONTINUE",
+        batch_id="",
+        title="Continue Job",
+        node_keys=["node_a"],
+        workspace_id=workspace["id"],
+    )
+
+    db.set_job_execution_target(job["id"], "node_a")
+    db.pause_job(job["id"], "target_reached")
+    with db.connect() as conn:
+        conn.execute(
+            "update jobs set status='paused' where id=?",
+            (job["id"],),
+        )
+
+    db.resume_job(job["id"])
+    control = db.get_job_execution_control(job["id"])
+    assert control is not None
+    assert control["execution_paused"] is False
+    assert control["execution_mode"] == "full"
+    assert control["target_node_key"] is None
+    assert control["pause_reason"] == ""
+
+    resumed_job = db.get_job(job["id"])
+    assert resumed_job is not None
+    assert resumed_job["status"] == "running"
+
+
 def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = db.create_workspace("Validation Workspace")
@@ -117,6 +151,9 @@ def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: P
 
     with pytest.raises(ValueError):
         db.set_job_execution_target(job["id"], "")
+
+    with pytest.raises(ValueError, match="Unknown target node"):
+        db.set_job_execution_target(job["id"], "unknown_node")
 
     with pytest.raises(ValueError):
         db.set_job_execution_mode(job["id"], "unknown_mode")
