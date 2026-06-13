@@ -183,6 +183,8 @@ class JobExecutionService:
                 """
                 update jobs
                 set status='queued',
+                    execution_paused=0,
+                    pause_reason='',
                     error_message='',
                     updated_at=current_timestamp
                 where id=? and status in ('paused', 'failed', 'completed')
@@ -245,10 +247,10 @@ class JobExecutionService:
                 conn.execute(
                     """
                     update jobs
-                    set status='queued',
-                        error_message='',
+                    set execution_paused=0,
+                        pause_reason='',
                         updated_at=current_timestamp
-                    where id=? and status in ('paused', 'failed', 'completed')
+                    where id=?
                     """,
                     (job_id,),
                 )
