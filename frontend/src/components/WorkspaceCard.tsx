@@ -1,11 +1,12 @@
 import { WORKSPACE_LABELS } from '../labels'
+import type { ExecutorRuntimeStatus } from '../workspaceTypes'
 
 type WorkspaceCardProps = {
   name: string
   pipelineLabel: string
   isSystem?: boolean
   jobStats: Record<string, number>
-  agentStatus: { total: number; busy: number; idle: number }
+  executorStatus: ExecutorRuntimeStatus[]
   onClick: () => void
   onDelete?: () => void
 }
@@ -15,7 +16,7 @@ export default function WorkspaceCard({
   pipelineLabel,
   isSystem,
   jobStats,
-  agentStatus,
+  executorStatus,
   onClick,
   onDelete,
 }: WorkspaceCardProps) {
@@ -23,6 +24,14 @@ export default function WorkspaceCard({
   const running = jobStats['running'] || 0
   const completed = jobStats['completed'] || 0
   const failed = jobStats['failed'] || 0
+  const executorRunning = executorStatus.reduce(
+    (sum, e) => sum + (e.running || 0),
+    0
+  )
+  const executorAvailable = executorStatus.reduce(
+    (sum, e) => sum + (e.available || 0),
+    0
+  )
 
   return (
     <div
@@ -103,10 +112,10 @@ export default function WorkspaceCard({
         </div>
         <div>
           <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-            {WORKSPACE_LABELS.agents}
+            {WORKSPACE_LABELS.executors}
           </div>
           <div style={{ fontWeight: 600 }}>
-            {agentStatus.busy}/{agentStatus.total}
+            {executorRunning}/{executorAvailable}
           </div>
         </div>
       </div>

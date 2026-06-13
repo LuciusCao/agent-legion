@@ -52,3 +52,30 @@ invariants:
       - kind: contract
         target: scripts/check_architecture.py
         gate: quick
+
+  - id: BOUNDARY-READ-001
+    statement: "Video detail GET is read-only; cache persistence occurs only on explicit write/event paths such as producing-phase completion or an explicit cache refresh."
+    owner: video-hive
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_api.py::test_video_detail_read_only_does_not_update_video
+        gate: quick
+      - kind: integration
+        target: tests/test_video_read_service.py
+        gate: quick
+
+  - id: EXEC-STATS-001
+    statement: "Workspace runtime stats derive from executor allocations, bindings, active leases, and configured capacities without consulting AgentStatusManager."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_workspace_configuration_service.py::test_executor_stats_report_configured_capacity_and_leases
+        gate: quick
+      - kind: integration
+        target: tests/test_workspace_configuration_service.py::test_executor_stats_does_not_consult_agent_status_manager
+        gate: quick
+      - kind: integration
+        target: tests/test_jobs_api.py::test_workspace_stats_executor_status_reflects_allocations_and_leases
+        gate: quick

@@ -8,11 +8,12 @@ openclaw, or Pi binaries.
 
 from __future__ import annotations
 
+import io
 import time
+import zipfile
 from pathlib import Path
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 
 from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
@@ -312,8 +313,6 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
         download_response = client.get(f"/api/workspaces/{workspace_id}/packages/{filename}")
         assert download_response.status_code == 200
-        import io
-        import zipfile
 
         with zipfile.ZipFile(io.BytesIO(download_response.content)) as zf:
             names = zf.namelist()
@@ -341,7 +340,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         worker.stop()
 
 
-def test_continue_job_rejects_terminal_states(tmp_path):
+def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     pipeline_path = _write_test_pipeline(tmp_path)
     _original_definition = PipelineCatalogService.definition
 
@@ -350,7 +349,6 @@ def test_continue_job_rejects_terminal_states(tmp_path):
             return load_pipeline_definition(pipeline_path)
         return _original_definition(self, pipeline_key)
 
-    monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
         "server.app.services.pipeline_catalog.PipelineCatalogService.definition",
         _patched_definition,
@@ -391,10 +389,8 @@ def test_continue_job_rejects_terminal_states(tmp_path):
             assert detail_after["job"]["execution_control"]["paused"] is True
             assert detail_after["nodes"] == detail_before["nodes"]
 
-    monkeypatch.undo()
 
-
-def test_continue_job_resumes_paused_state(tmp_path):
+def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     pipeline_path = _write_test_pipeline(tmp_path)
     _original_definition = PipelineCatalogService.definition
 
@@ -403,7 +399,6 @@ def test_continue_job_resumes_paused_state(tmp_path):
             return load_pipeline_definition(pipeline_path)
         return _original_definition(self, pipeline_key)
 
-    monkeypatch = pytest.MonkeyPatch()
     monkeypatch.setattr(
         "server.app.services.pipeline_catalog.PipelineCatalogService.definition",
         _patched_definition,
@@ -440,5 +435,3 @@ def test_continue_job_resumes_paused_state(tmp_path):
     assert detail["job"]["status"] == "running"
     assert detail["job"]["execution_control"]["paused"] is False
     assert detail["job"]["execution_control"]["mode"] == "full"
-
-    monkeypatch.undo()

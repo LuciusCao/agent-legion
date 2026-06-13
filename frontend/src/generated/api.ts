@@ -1158,6 +1158,28 @@ export interface components {
        */
       kind: 'local' | 'pi' | 'openclaw'
     }
+    /** ExecutorRuntimeStatus */
+    ExecutorRuntimeStatus: {
+      /** Available */
+      available: number
+      /** Binding Count */
+      binding_count: number
+      /** Executor Id */
+      executor_id: string
+      /** Global Capacity */
+      global_capacity: number
+      /** Kind */
+      kind: string
+      /** Running */
+      running: number
+      /** Workspace Limit */
+      workspace_limit: number
+    }
+    /** ExecutorStatusSummary */
+    ExecutorStatusSummary: {
+      /** Executors */
+      executors: components['schemas']['ExecutorRuntimeStatus'][]
+    }
     /** GlobalServicesResponse */
     GlobalServicesResponse: {
       /** Cms */
@@ -1796,10 +1818,7 @@ export interface components {
     }
     /** WorkspaceStatsResponse */
     WorkspaceStatsResponse: {
-      /** Agent Status */
-      agent_status: {
-        [key: string]: unknown
-      }
+      executor_status: components['schemas']['ExecutorStatusSummary']
       /** Job Stats */
       job_stats: {
         [key: string]: number

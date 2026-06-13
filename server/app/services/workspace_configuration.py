@@ -30,14 +30,6 @@ class WorkspaceConfigurationService:
             raise NotFoundError("Workspace not found")
         return workspace
 
-    def _effective_cms_config(self, workspace: dict[str, Any]) -> dict[str, Any]:
-        base = self.settings.config.get("cms", {})
-        config = dict(base) if isinstance(base, dict) else {}
-        workspace_config = workspace.get("cms_config")
-        if isinstance(workspace_config, dict):
-            config.update(workspace_config)
-        return config
-
     def _settings_payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
         intake_config = workspace.get("intake_config")
         if not isinstance(intake_config, dict):
@@ -232,22 +224,29 @@ class WorkspaceConfigurationService:
     def stats(self, workspace_id: str) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         pipeline_key = workspace.get("default_pipeline_key", "question_content")
-        allowed = self.agent_manager.get_allowed_agents(workspace_id)
-        all_agents = self.agent_manager.get_all()
-        agents = all_agents if allowed is None else [a for a in all_agents if a.id in allowed]
-        busy = sum(1 for a in agents if a.busy)
         latest_run = self.job_db.get_latest_node_run_for_workspace(workspace_id)
+        executors = []
+        for count in self.job_db.get_workspace_executor_runtime_counts(workspace_id):
+            definition = self.settings.executor_definitions.get(count["executor_id"])
+            global_capacity = definition.global_capacity if definition is not None else 0
+            available = max(0, min(global_capacity, count["workspace_limit"]) - count["running"])
+            executors.append(
+                {
+                    "executor_id": count["executor_id"],
+                    "kind": definition.kind if definition is not None else "unknown",
+                    "global_capacity": global_capacity,
+                    "workspace_limit": count["workspace_limit"],
+                    "running": count["running"],
+                    "available": available,
+                    "binding_count": count["binding_count"],
+                }
+            )
         return {
             "workspace_id": workspace_id,
             "name": workspace.get("name", ""),
             "pipeline_key": pipeline_key,
             "pipeline_label": self.pipelines.definition(pipeline_key).label,
             "job_stats": self.job_db.count_jobs_by_status(workspace_id),
-            "agent_status": {
-                "total": len(agents),
-                "busy": busy,
-                "idle": len(agents) - busy,
-                "agents": [{"id": a.id, "name": a.name or a.id, "busy": a.busy} for a in agents],
-            },
+            "executor_status": {"executors": executors},
             "latest_run": dict(latest_run) if latest_run else None,
         }

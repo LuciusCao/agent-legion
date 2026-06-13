@@ -18,7 +18,7 @@ from server.app.pipeline.transcribe import (
     WhisperCppProvider,
     run_transcription_with_providers,
 )
-from server.app.services.interaction_stats import cache_interaction_stats
+from server.app.services.interaction_cache import InteractionCacheService
 from server.app.settings import Settings
 
 from .pipeline.validators import phase_outputs_sufficient, validate_phase_outputs
@@ -107,13 +107,13 @@ def _handle_agent_phase(ctx: PhaseContext) -> None:
             raise RuntimeError(result.error_message)
     validate_phase_outputs(ctx.video_dir, phase)
     if phase == "content_review" and ctx.video.get("content_type") == "knowledge":
-        cache_interaction_stats(ctx.db, ctx.video["id"], ctx.video_dir)
+        InteractionCacheService(ctx.db, ctx.settings).refresh(ctx.video["id"])
 
 
 def _handle_assemble(ctx: PhaseContext) -> None:
     assemble_video(ctx.video, ctx.video_dir)
     if ctx.video.get("content_type") == "knowledge":
-        cache_interaction_stats(ctx.db, ctx.video["id"], ctx.video_dir)
+        InteractionCacheService(ctx.db, ctx.settings).refresh(ctx.video["id"])
 
 
 _default_registry = PhaseExecutorRegistry()

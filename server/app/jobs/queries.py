@@ -11,6 +11,7 @@ from typing import Any
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.schema import init_db
+from server.app.executors._lease_lifecycle import active_lease_counts
 from server.app.jobs.atomic_mutations import AtomicJobMutationsMixin
 from server.app.jobs.execution_control import JobExecutionControlMixin
 from server.app.jobs.executor_configuration import (
@@ -711,6 +712,39 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
     ) -> dict[str, list[dict[str, Any]]]:
         with self.connect() as conn:
             return get_workspace_executor_configuration(conn, workspace_id)
+
+    def get_workspace_executor_runtime_counts(self, workspace_id: str) -> list[dict[str, Any]]:
+        """Return per-executor allocation, binding, and active-lease counts.
+
+        The result is a list of dicts with ``executor_id``, ``workspace_limit``,
+        ``running`` (active leases for this workspace), ``global_running`` (active
+        leases across all workspaces), and ``binding_count`` (bindings in this
+        workspace for this executor). Global capacities and executor kinds are
+        intentionally left to the caller so the repository stays decoupled from
+        runtime executor definitions.
+        """
+        with self._connect_read() as conn:
+            config = get_workspace_executor_configuration(conn, workspace_id)
+            binding_counts: dict[str, int] = {}
+            for binding in config["bindings"]:
+                binding_counts[binding["executor_id"]] = (
+                    binding_counts.get(binding["executor_id"], 0) + 1
+                )
+
+            result: list[dict[str, Any]] = []
+            for allocation in config["allocations"]:
+                executor_id = allocation["executor_id"]
+                counts = active_lease_counts(conn, executor_id)
+                result.append(
+                    {
+                        "executor_id": executor_id,
+                        "workspace_limit": allocation["concurrency_limit"],
+                        "running": counts.get(workspace_id, 0),
+                        "global_running": counts.get("global", 0),
+                        "binding_count": binding_counts.get(executor_id, 0),
+                    }
+                )
+            return result
 
     def replace_workspace_executor_configuration(
         self, workspace_id, allocations, bindings, node_limits

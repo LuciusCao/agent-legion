@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useVideoStore } from '../stores/videoStore'
-import { useUiStore } from '../stores/uiStore'
+import type { ExecutorRuntimeStatus } from '../workspaceTypes'
 import WorkspaceCard from '../components/WorkspaceCard'
 import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
 import DeleteWorkspaceDialog from '../components/DeleteWorkspaceDialog'
@@ -17,7 +17,6 @@ export function DashboardPage() {
     deleteWorkspace,
   } = useWorkspaceStore()
   const { videos, fetchVideos } = useVideoStore()
-  const { agents } = useUiStore()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingWorkspace, setDeletingWorkspace] = useState<{
@@ -44,11 +43,7 @@ export function DashboardPage() {
     failed: videos.filter((v) => v.status === 'failed').length,
   }
 
-  const videoHiveAgentStatus = {
-    total: agents.length,
-    busy: agents.filter((a) => a.busy).length,
-    idle: agents.filter((a) => !a.busy).length,
-  }
+  const videoHiveExecutorStatus: ExecutorRuntimeStatus[] = []
 
   function openDeleteDialog(id: string, name: string) {
     setDeletingWorkspace({ id, name })
@@ -93,7 +88,7 @@ export function DashboardPage() {
           pipelineLabel="视频处理流水线"
           isSystem={true}
           jobStats={videoHiveStats}
-          agentStatus={videoHiveAgentStatus}
+          executorStatus={videoHiveExecutorStatus}
           onClick={() => navigate('/video-hive')}
         />
 
@@ -105,12 +100,8 @@ export function DashboardPage() {
               workspaceStats[w.id]?.pipeline_label || w.default_pipeline_key
             }
             jobStats={workspaceStats[w.id]?.job_stats || {}}
-            agentStatus={
-              workspaceStats[w.id]?.agent_status || {
-                total: 0,
-                busy: 0,
-                idle: 0,
-              }
+            executorStatus={
+              workspaceStats[w.id]?.executor_status?.executors || []
             }
             onClick={() => navigate(`/workspaces/${w.id}`)}
             onDelete={
