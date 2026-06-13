@@ -75,6 +75,12 @@ class NodeRunResponse(BaseModel):
     session_dir: str
 
 
+class JobLogResponse(BaseModel):
+    run_id: int
+    log: str
+    truncated: bool
+
+
 class JobDetailResponse(BaseModel):
     job: JobSummaryResponse
     nodes: list[JobNodeResponse]

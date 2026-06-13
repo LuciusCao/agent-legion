@@ -1,4 +1,3 @@
-import { useEffect } from 'react'
 import { useJobStore } from '../stores/jobStore'
 import { JobListItem } from './JobListItem'
 import styles from './JobList.module.css'
@@ -10,13 +9,8 @@ export interface JobListProps {
 export function JobList({ workspaceId }: JobListProps) {
   const jobs = useJobStore((state) => state.getFilteredJobs())
   const selectedIds = useJobStore((state) => state.selectedIds)
-  const fetchJobs = useJobStore((state) => state.fetchJobs)
   const toggleSelect = useJobStore((state) => state.toggleSelect)
   const selectMode = useJobStore((state) => state.selectMode)
-
-  useEffect(() => {
-    fetchJobs(workspaceId)
-  }, [workspaceId, fetchJobs])
 
   if (jobs.length === 0) {
     return (

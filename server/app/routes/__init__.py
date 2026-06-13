@@ -39,6 +39,7 @@ def create_router(
     from ..services.executor_catalog import ExecutorCatalogService
     from ..services.job_artifacts import JobArtifactService
     from ..services.job_intake import JobIntakeService
+    from ..services.job_logs import JobLogService
     from ..services.job_queries import JobQueryService
     from ..services.job_rerun import JobRerunService
     from ..services.pipeline_catalog import PipelineCatalogService
@@ -54,6 +55,7 @@ def create_router(
     job_intake = JobIntakeService(job_db, settings, pipeline_catalog)
     job_queries = JobQueryService(job_db, settings, pipeline_catalog)
     job_artifacts = JobArtifactService(job_db)
+    job_logs = JobLogService(settings, job_db)
     job_rerun = JobRerunService(job_db, settings, pipeline_catalog)
 
     router.include_router(create_common_router(db, settings, worker_control))
@@ -73,7 +75,7 @@ def create_router(
     )
     router.include_router(create_job_batches_router(job_intake, settings))
     router.include_router(create_jobs_router(job_queries, job_rerun, settings))
-    router.include_router(create_job_artifacts_router(job_artifacts, settings))
+    router.include_router(create_job_artifacts_router(job_artifacts, settings, job_logs))
     router.include_router(create_workspace_runs_router(job_queries, settings))
     router.include_router(create_video_hive_router(settings))
     router.include_router(create_questions_router(job_db, settings))

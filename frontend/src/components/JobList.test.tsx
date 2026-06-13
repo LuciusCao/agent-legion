@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Routes, Route } from 'react-router-dom'
 import { JobList } from './JobList'
 import { useJobStore } from '../stores/jobStore'
@@ -65,41 +65,37 @@ describe('JobList', () => {
     })
   })
 
-  it('renders one JobListItem per job', async () => {
-    mockFetchJobs.mockResolvedValueOnce({ jobs: mockJobs })
-    await act(async () => {
-      render(
-        <MemoryRouter initialEntries={['/workspaces/ws1']}>
-          <Routes>
-            <Route
-              path="/workspaces/:workspaceId/*"
-              element={<JobList workspaceId="ws1" />}
-            />
-          </Routes>
-        </MemoryRouter>
-      )
-    })
+  it('renders one JobListItem per job', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<JobList workspaceId="ws1" />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
 
     expect(screen.getByText('Algebra - Q100')).toBeInTheDocument()
     expect(screen.getByText('Geometry - Q200')).toBeInTheDocument()
+    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
-  it('empty state shows 暂无任务', async () => {
+  it('empty state shows 暂无任务', () => {
     useJobStore.setState({ jobs: [] })
-    mockFetchJobs.mockResolvedValueOnce({ jobs: [] })
-    await act(async () => {
-      render(
-        <MemoryRouter initialEntries={['/workspaces/ws1']}>
-          <Routes>
-            <Route
-              path="/workspaces/:workspaceId/*"
-              element={<JobList workspaceId="ws1" />}
-            />
-          </Routes>
-        </MemoryRouter>
-      )
-    })
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<JobList workspaceId="ws1" />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
 
     expect(screen.getByText('暂无任务')).toBeInTheDocument()
+    expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 })
