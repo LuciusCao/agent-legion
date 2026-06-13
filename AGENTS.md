@@ -96,7 +96,6 @@ video-hive/
 │       │   └── WorkspacesPage.tsx
 │       ├── components/         # Reusable UI components
 │       │   ├── AddDialog.tsx
-│       │   ├── AgentPanel.tsx
 │       │   ├── BatchDeleteDialog.tsx
 │       │   ├── BatchRerunDialog.tsx
 │       │   ├── BatchToolbar.tsx

@@ -20,8 +20,6 @@ EXPECTED_OPERATIONS = {
     ("patch", "/api/workspaces/{workspace_id}"): "WorkspaceResponse",
     ("delete", "/api/workspaces/{workspace_id}"): "DeleteWorkspaceResponse",
     ("get", "/api/workspaces/{workspace_id}/stats"): "WorkspaceStatsResponse",
-    ("get", "/api/workspaces/{workspace_id}/agents"): "WorkspaceAgentListResponse",
-    ("post", "/api/workspaces/{workspace_id}/agents"): "WorkspaceAgentAssignmentResponse",
     ("get", "/api/workspaces/{workspace_id}/settings"): "WorkspaceSettingsResponse",
     ("put", "/api/workspaces/{workspace_id}/configuration"): "WorkspaceConfigurationResponse",
     ("patch", "/api/workspaces/{workspace_id}/settings/{section}"): "WorkspaceSettingsResponse",

@@ -2,20 +2,12 @@ import json
 from pathlib import Path
 
 
-def test_workspace_job_response_models_are_exposed_in_openapi(tmp_path):
+def test_delete_job_response_model_is_exposed_in_openapi(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     schema = app.openapi()
 
-    assert schema["paths"]["/api/workspaces/{workspace_id}/agents"]["get"]["responses"]["200"][
-        "content"
-    ]["application/json"]["schema"]["$ref"] == ("#/components/schemas/WorkspaceAgentListResponse")
-    assert schema["paths"]["/api/workspaces/{workspace_id}/agents"]["post"]["responses"]["200"][
-        "content"
-    ]["application/json"]["schema"]["$ref"] == (
-        "#/components/schemas/WorkspaceAgentAssignmentResponse"
-    )
     assert (
         schema["paths"]["/api/jobs/{job_id}"]["delete"]["responses"]["200"]["content"][
             "application/json"
@@ -24,25 +16,21 @@ def test_workspace_job_response_models_are_exposed_in_openapi(tmp_path):
     )
 
     schemas = schema["components"]["schemas"]
-    agent_list_schema = schemas["WorkspaceAgentListResponse"]
-    assert agent_list_schema["type"] == "array"
-    assert agent_list_schema["items"] == {
-        "$ref": "#/components/schemas/WorkspaceAgentAssignmentResponse"
-    }
-
-    assignment_schema = schemas["WorkspaceAgentAssignmentResponse"]
-    assert set(assignment_schema["required"]) == {
-        "agent_id",
-        "workspace_id",
-        "concurrency_limit",
-    }
-    assert assignment_schema["properties"]["agent_id"]["type"] == "string"
-    assert assignment_schema["properties"]["workspace_id"]["type"] == "string"
-    assert assignment_schema["properties"]["concurrency_limit"]["type"] == "integer"
-
     delete_schema = schemas["DeleteJobResponse"]
     assert set(delete_schema["required"]) == {"deleted"}
     assert delete_schema["properties"]["deleted"]["type"] == "string"
+
+
+def test_workspace_agent_routes_are_absent_from_openapi(tmp_path):
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    schema = app.openapi()
+
+    assert "/api/workspaces/{workspace_id}/agents" not in schema["paths"]
+    assert "WorkspaceAgentListResponse" not in schema["components"]["schemas"]
+    assert "WorkspaceAgentAssignmentResponse" not in schema["components"]["schemas"]
+    assert "WorkspaceAgentConfig" not in schema["components"]["schemas"]
 
 
 def test_job_routes_are_hidden_when_pipelines_disabled(tmp_path):
@@ -1822,53 +1810,6 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
     assert all(job["pipeline_key"] == "reading_analysis" for job in body["jobs"])
 
 
-def test_workspace_settings_returns_no_agent_assignments_after_v005(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
-    with TestClient(app) as c:
-        c.post("/api/agents/agent-1/assign?workspace_id=default&concurrency_limit=2")
-        c.post("/api/agents/agent-2/assign?workspace_id=default&concurrency_limit=1")
-        response = c.get("/api/workspaces/default/settings")
-
-    assert response.status_code == 200
-    settings = response.json()["settings"]
-    assert "agentIds" not in settings
-    assert "concurrencyLimit" not in settings
-    # The legacy workspace_agent_assignments table is dropped by V005.
-    assignments = app.state.job_db.list_workspace_agents("default")
-    assert assignments == []
-
-
-def test_get_and_set_workspace_agent_is_no_op_after_v005(client):
-    # 先创建 workspace
-    resp = client.post("/api/workspaces", json={"name": "Test WS"})
-    assert resp.status_code == 200
-    ws_id = resp.json()["workspace"]["id"]
-
-    # set
-    resp = client.post(
-        f"/api/workspaces/{ws_id}/agents",
-        json={"agent_id": "pi", "concurrency_limit": 3},
-    )
-    assert resp.status_code == 200
-    assignment = {
-        "agent_id": "pi",
-        "workspace_id": ws_id,
-        "concurrency_limit": 3,
-    }
-    assert resp.json() == assignment
-
-    # get
-    resp = client.get(f"/api/workspaces/{ws_id}/agents")
-    assert resp.status_code == 200
-    # The legacy workspace_agent_assignments table is dropped by V005.
-    assert resp.json() == []
-
-
 def test_update_workspace_rejects_invalid_pipeline_key(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -2169,7 +2110,11 @@ def test_app_startup_materializes_executor_configuration_for_default_workspace(t
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir=jobs_dir)
     ensure_legacy_workspace_tables(queries)
-    queries.upsert_workspace_agent_assignment("default", "pi", 3)
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workspace_agent_assignments(workspace_id, agent_id, concurrency_limit) values (?, ?, ?)",
+            ("default", "pi", 3),
+        )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     with TestClient(app) as c:

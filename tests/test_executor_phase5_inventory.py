@@ -48,6 +48,12 @@ def test_inventory_includes_replacement_for_every_legacy_path() -> None:
     assert set(LEGACY_PATHS) == set(REPLACEMENTS)
 
 
+def test_workspace_agent_assignment_modules_are_removed() -> None:
+    """Legacy workspace agent assignment route and service are gone."""
+    assert not (ROOT / "server/app/routes/workspace_agents.py").exists()
+    assert not (ROOT / "server/app/services/workspace_agent_assignments.py").exists()
+
+
 @pytest.mark.parametrize("rel_path", sorted(PROTECTED_VIDEO_HIVE_PATHS))
 def test_protected_video_hive_path_exists(rel_path: str) -> None:
     """These Video Hive files must still exist at Phase 5 completion."""

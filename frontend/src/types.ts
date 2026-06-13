@@ -1,5 +1,3 @@
-import type { WorkspaceAgentDraft } from './api-contract'
-
 export type ContentType = 'knowledge' | 'question'
 export type DetailTab = 'nodes' | 'subtitles' | 'logs' | 'metadata'
 export type RunToMode = 'continue' | 'rerun'
@@ -41,8 +39,6 @@ export type AgentStatus = {
   current_external_id?: string
   current_phase?: string
 }
-
-export type WorkspaceAgentAssignment = WorkspaceAgentDraft
 
 export type GlobalServiceStatus = {
   cms: {
@@ -187,8 +183,6 @@ export type WorkspaceSettings = {
   intakeModes: string[]
   labelOverrides: Record<string, string>
   pipelineKey: string
-  agentIds: string[]
-  concurrencyLimit: number
   resources: Record<string, ResourceBinding>
   cmsUrl?: string
   cmsToken?: string

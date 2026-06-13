@@ -183,20 +183,10 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     assert _sort(config["node_limits"]) == _sort(remove_pi_payload["node_limits"])
 
     # 10. After V005 the legacy workspace_agent_assignments table is dropped;
-    # assigning legacy agents is a no-op and produces no warnings.
-    agent_response = client.post(
-        f"/api/workspaces/{workspace_id}/agents",
-        json={"agent_id": "unknown-legacy-agent", "concurrency_limit": 2},
-    )
-    assert agent_response.status_code == 200
-
+    # no migration warnings are produced.
     config = _get_config(client, workspace_id)
     assert config["migration_warnings"] == []
 
     saved = _put_config(client, workspace_id, remove_pi_payload)
     assert saved["status_code"] == 200
     assert saved["json"]["executor_configuration"]["migration_warnings"] == []
-
-    agents_response = client.get(f"/api/workspaces/{workspace_id}/agents")
-    assert agents_response.status_code == 200
-    assert agents_response.json() == []

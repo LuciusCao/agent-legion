@@ -1,6 +1,6 @@
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field, RootModel
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobBatchRequest(BaseModel):
@@ -81,20 +81,6 @@ class WorkspacesResponse(BaseModel):
     workspaces: list[dict[str, Any]]
 
 
-class WorkspaceAgentsResponse(BaseModel):
-    agents: list[dict[str, Any]]
-
-
-class WorkspaceAgentAssignmentResponse(BaseModel):
-    agent_id: str
-    workspace_id: str
-    concurrency_limit: int
-
-
-class WorkspaceAgentListResponse(RootModel[list[WorkspaceAgentAssignmentResponse]]):
-    pass
-
-
 class DeleteJobResponse(BaseModel):
     deleted: str
 
@@ -132,17 +118,6 @@ class WorkspaceRunsResponse(BaseModel):
 class WorkspaceDagResponse(BaseModel):
     pipeline: dict[str, Any]
     nodes: list[dict[str, Any]]
-
-
-class WorkspaceAgentConfig(BaseModel):
-    agent_id: str
-    concurrency_limit: int
-
-
-class WorkspaceAgentStatus(BaseModel):
-    id: str
-    name: str
-    busy: bool
 
 
 class WorkspaceStatsResponse(BaseModel):

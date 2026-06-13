@@ -5,7 +5,7 @@ import json
 import re
 import sqlite3
 from collections.abc import Iterator, Mapping, Sequence
-from contextlib import contextmanager, suppress
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -681,45 +681,6 @@ class JobQueries:
             )
             if cursor.rowcount == 0:
                 raise ValueError("Workspace not found")
-
-    def list_workspace_agents(self, workspace_id: str) -> list[dict[str, Any]]:
-        with self._connect_read() as conn:
-            try:
-                rows = conn.execute(
-                    "select agent_id, concurrency_limit from workspace_agent_assignments where workspace_id = ?",
-                    (workspace_id,),
-                ).fetchall()
-            except sqlite3.OperationalError:
-                return []
-        return [
-            {"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows
-        ]
-
-    def upsert_workspace_agent_assignment(
-        self, workspace_id: str, agent_id: str, concurrency_limit: int
-    ) -> dict[str, Any]:
-        fallback = {
-            "workspace_id": workspace_id,
-            "agent_id": agent_id,
-            "concurrency_limit": max(1, concurrency_limit),
-        }
-        with self.connect() as conn, suppress(sqlite3.OperationalError):
-            conn.execute(
-                """
-                insert into workspace_agent_assignments(workspace_id, agent_id, concurrency_limit)
-                values (?, ?, ?)
-                on conflict(workspace_id, agent_id) do update set
-                  concurrency_limit=excluded.concurrency_limit
-                """,
-                (workspace_id, agent_id, fallback["concurrency_limit"]),
-            )
-            row = conn.execute(
-                "select * from workspace_agent_assignments where workspace_id=? and agent_id=?",
-                (workspace_id, agent_id),
-            ).fetchone()
-            if row is not None:
-                return dict(row)
-        return fallback
 
     def get_workspace_executor_configuration(
         self, workspace_id: str

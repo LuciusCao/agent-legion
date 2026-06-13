@@ -69,6 +69,28 @@ def _set_pipeline_config(queries: JobQueries, workspace_id: str, config: dict[st
         )
 
 
+def _insert_legacy_agent_assignment(
+    queries: JobQueries, workspace_id: str, agent_id: str, concurrency_limit: int
+) -> None:
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workspace_agent_assignments(workspace_id, agent_id, concurrency_limit) "
+            "values (?, ?, ?) on conflict(workspace_id, agent_id) do update set "
+            "concurrency_limit = excluded.concurrency_limit",
+            (workspace_id, agent_id, max(1, concurrency_limit)),
+        )
+
+
+def _list_legacy_agent_assignments(queries: JobQueries, workspace_id: str) -> list[dict[str, Any]]:
+    with queries._connect_read() as conn:
+        rows = conn.execute(
+            "select agent_id, concurrency_limit from workspace_agent_assignments "
+            "where workspace_id = ?",
+            (workspace_id,),
+        ).fetchall()
+    return [{"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows]
+
+
 def _sample_pipeline() -> PipelineDefinition:
     return PipelineDefinition(
         key="reading_analysis",
@@ -203,7 +225,7 @@ def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None
     )
     workspace_id = str(workspace["id"])
     _set_pipeline_config(queries, workspace_id, {"nodes": {"local_a": 1}})
-    queries.upsert_workspace_agent_assignment(workspace_id, "pi", 3)
+    _insert_legacy_agent_assignment(queries, workspace_id, "pi", 3)
 
     with queries.connect() as conn:
         finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
@@ -239,7 +261,7 @@ def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) ->
         name="Authoritative",
         default_pipeline_key="reading_analysis",
     )["id"]
-    queries.upsert_workspace_agent_assignment(workspace_id, "pi", 99)
+    _insert_legacy_agent_assignment(queries, workspace_id, "pi", 99)
 
     with queries.connect() as conn:
         finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
@@ -271,7 +293,7 @@ def test_finalizer_blocks_on_unknown_agent(queries: JobQueries) -> None:
         name="Unknown Agent",
         default_pipeline_key="reading_analysis",
     )["id"]
-    queries.upsert_workspace_agent_assignment(workspace_id, "unknown", 2)
+    _insert_legacy_agent_assignment(queries, workspace_id, "unknown", 2)
 
     with pytest.raises(MigrationBlockedError) as exc_info, queries.connect() as conn:
         finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
@@ -313,7 +335,7 @@ def test_finalizer_is_idempotent_after_v005(queries: JobQueries) -> None:
         name="Idempotent",
         default_pipeline_key="reading_analysis",
     )["id"]
-    queries.upsert_workspace_agent_assignment(workspace_id, "pi", 3)
+    _insert_legacy_agent_assignment(queries, workspace_id, "pi", 3)
 
     with queries.connect() as conn:
         finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
@@ -388,7 +410,7 @@ def test_dry_run_returns_report_without_writing(queries: JobQueries) -> None:
         name="Dry Run",
         default_pipeline_key="reading_analysis",
     )["id"]
-    queries.upsert_workspace_agent_assignment(workspace_id, "pi", 3)
+    _insert_legacy_agent_assignment(queries, workspace_id, "pi", 3)
 
     with queries.connect() as conn:
         report = finalize_legacy_executor_schema(
@@ -405,7 +427,7 @@ def test_dry_run_raises_blocked_error_and_leaves_legacy_data(queries: JobQueries
         name="Blocked Dry Run",
         default_pipeline_key="reading_analysis",
     )["id"]
-    queries.upsert_workspace_agent_assignment(workspace_id, "bad-agent", 2)
+    _insert_legacy_agent_assignment(queries, workspace_id, "bad-agent", 2)
 
     with pytest.raises(MigrationBlockedError), queries.connect() as conn:
         finalize_legacy_executor_schema(
@@ -413,7 +435,7 @@ def test_dry_run_raises_blocked_error_and_leaves_legacy_data(queries: JobQueries
         )
 
     assert _table_exists(queries, "workspace_agent_assignments")
-    rows = queries.list_workspace_agents(workspace_id)
+    rows = _list_legacy_agent_assignments(queries, workspace_id)
     assert any(row["agent_id"] == "bad-agent" for row in rows)
 
 
@@ -423,7 +445,7 @@ def _seed_default_workspace_assignment(tmp_path) -> None:
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir=jobs_dir)
     ensure_legacy_workspace_tables(queries)
-    queries.upsert_workspace_agent_assignment("default", "pi", 3)
+    _insert_legacy_agent_assignment(queries, "default", "pi", 3)
 
 
 def test_app_startup_materializes_executor_configuration_without_worker(tmp_path: Path) -> None:
@@ -483,7 +505,7 @@ def test_app_startup_aborts_when_finalization_blocked(tmp_path: Path) -> None:
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir=jobs_dir)
     ensure_legacy_workspace_tables(queries)
-    queries.upsert_workspace_agent_assignment("default", "unknown-agent", 2)
+    _insert_legacy_agent_assignment(queries, "default", "unknown-agent", 2)
 
     with pytest.raises(RuntimeError, match="finalize-workspace-executor-migration.py --check"):
         create_app(data_dir=tmp_path, start_worker=False)

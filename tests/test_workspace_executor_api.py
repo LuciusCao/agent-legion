@@ -21,18 +21,8 @@ def test_get_workspace_executor_configuration_reports_no_warnings_after_v005(cli
     assert workspace_response.status_code == 200
     workspace_id = workspace_response.json()["workspace"]["id"]
 
-    # The legacy workspace_agent_assignments table is removed by V005, so the
-    # agents endpoint no longer persists assignments or produces warnings.
-    agent_response = client.post(
-        f"/api/workspaces/{workspace_id}/agents",
-        json={"agent_id": "unknown-agent", "concurrency_limit": 2},
-    )
-    assert agent_response.status_code == 200
-
-    agents_list_response = client.get(f"/api/workspaces/{workspace_id}/agents")
-    assert agents_list_response.status_code == 200
-    assert agents_list_response.json() == []
-
+    # The legacy workspace_agent_assignments table is removed by V005, so no
+    # migration warnings are produced.
     response = client.get(f"/api/workspaces/{workspace_id}/executor-configuration")
     assert response.status_code == 200
     data = response.json()

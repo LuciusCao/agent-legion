@@ -1,13 +1,10 @@
 import asyncio
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from fastapi import WebSocket
 
 from server.app.pipeline.runners import list_openclaw_agents
-
-if TYPE_CHECKING:
-    from server.app.db import Database
 
 
 @dataclass
@@ -52,13 +49,6 @@ class AgentStatusManager:
     def set_runner_counts(self, runner_counts: dict[str, int]) -> None:
         for agent in self.agents:
             agent.max_tasks = runner_counts.get(agent.id, 1)
-
-    def load_workspace_assignments(self, db: "Database") -> None:
-        self._workspace_assignments = {}
-        for row in db.list_all_workspace_agents():
-            self._workspace_assignments.setdefault(row["workspace_id"], {})[row["agent_id"]] = row[
-                "concurrency_limit"
-            ]
 
     def set_workspace_assignment(
         self, workspace_id: str, agent_id: str, concurrency_limit: int = 1
