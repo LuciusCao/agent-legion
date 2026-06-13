@@ -127,3 +127,27 @@ invariants:
       - kind: integration
         target: tests/full/test_executor_cancellation_recovery.py
         gate: full
+
+  - id: RECOVERY-MIGRATION-001
+    statement: "Interrupted migration is atomic or reopens into a recoverable pre-migration state with valid foreign keys and integrity."
+    owner: database
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_workspace_dag_fk_migration.py::test_v004_interruption_after_copy_recovers_on_reopen
+        gate: quick
+      - kind: integration
+        target: tests/full/test_migration_interruption_recovery.py
+        gate: full
+
+  - id: RECOVERY-BACKUP-001
+    statement: "A created SQLite backup can be restored atomically without losing the current database and reopened with invariant-preserving data."
+    owner: database
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_executor_backup_restore.py::test_restore_preserves_current_database_and_returns_rows
+        gate: quick
+      - kind: integration
+        target: tests/full/test_backup_restore_drill.py
+        gate: full
