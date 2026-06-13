@@ -13,6 +13,8 @@ project_root = Path(__file__).resolve().parents[1]
 if str(project_root) not in sys.path:
     sys.path.insert(0, str(project_root))
 
+import yaml  # noqa: E402
+
 from server.app.quality.invariants import load_registry, validate_registry  # noqa: E402
 
 logger = logging.getLogger(__name__)
@@ -31,18 +33,23 @@ def main(argv: list[str] | None = None) -> int:
 
     registry_path = Path(args.registry)
     if not registry_path.exists():
-        logger.error(f"registry file not found: {registry_path}")
+        logger.error("registry file not found: %s", registry_path)
         return 1
 
-    invariants = load_registry(registry_path)
-    errors = validate_registry(invariants)
+    try:
+        invariants = load_registry(registry_path)
+    except yaml.YAMLError as exc:
+        logger.error("YAML parse error: %s", exc)
+        return 1
+
+    errors = validate_registry(invariants, base_path=project_root)
 
     if errors:
         for error in errors:
-            logger.error(error)
+            logger.error("%s", error)
         return 1
 
-    logger.info(f"OK: {len(invariants)} architecture invariant(s) validated")
+    logger.info("OK: %s architecture invariant(s) validated", len(invariants))
     return 0
 
 

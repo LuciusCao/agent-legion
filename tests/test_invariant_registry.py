@@ -61,15 +61,13 @@ def registry_root(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-def write_registry(registry_root: Path, monkeypatch: pytest.MonkeyPatch):
+def write_registry(registry_root: Path):
     """Write a registry YAML into the temporary root and return the loaded invariants."""
 
     def _write(data: dict) -> tuple[ArchitectureInvariant, ...]:
         path = registry_root / "config" / "architecture-invariants.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml.safe_dump(data))
-        # Resolve relative targets against the temporary project root.
-        monkeypatch.chdir(registry_root)
         return load_registry(path)
 
     return _write
@@ -111,7 +109,7 @@ def test_load_valid_registry(write_registry, registry_root):
     assert validate_registry(invariants, registry_root) == []
 
 
-def test_duplicate_ids_rejected(write_registry):
+def test_duplicate_ids_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -144,7 +142,7 @@ def test_duplicate_ids_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("duplicate invariant ID" in e and "API-CONTRACT-001" in e for e in errors)
 
 
@@ -158,7 +156,7 @@ def test_duplicate_ids_rejected(write_registry):
         "API-CONTRACT-0001",
     ],
 )
-def test_invalid_id_prefix_rejected(write_registry, bad_id):
+def test_invalid_id_prefix_rejected(write_registry, registry_root, bad_id):
     invariants = write_registry(
         {
             "invariants": [
@@ -178,11 +176,11 @@ def test_invalid_id_prefix_rejected(write_registry, bad_id):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("invalid ID format" in e for e in errors)
 
 
-def test_missing_owner_rejected(write_registry):
+def test_missing_owner_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -202,11 +200,11 @@ def test_missing_owner_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("owner is empty" in e for e in errors)
 
 
-def test_missing_statement_rejected(write_registry):
+def test_missing_statement_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -226,11 +224,11 @@ def test_missing_statement_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("statement is empty" in e for e in errors)
 
 
-def test_unsupported_risk_level_rejected(write_registry):
+def test_unsupported_risk_level_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -250,11 +248,11 @@ def test_unsupported_risk_level_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("unsupported risk level" in e for e in errors)
 
 
-def test_missing_evidence_rejected(write_registry):
+def test_missing_evidence_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -268,11 +266,11 @@ def test_missing_evidence_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("missing evidence" in e for e in errors)
 
 
-def test_critical_without_local_runtime_rejected(write_registry):
+def test_critical_without_local_runtime_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -292,11 +290,11 @@ def test_critical_without_local_runtime_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("local" in e.lower() for e in errors)
 
 
-def test_critical_without_full_runtime_rejected(write_registry):
+def test_critical_without_full_runtime_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -316,11 +314,11 @@ def test_critical_without_full_runtime_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("full" in e.lower() for e in errors)
 
 
-def test_critical_ci_never_satisfies(write_registry):
+def test_critical_ci_never_satisfies(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -345,11 +343,11 @@ def test_critical_ci_never_satisfies(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("full" in e.lower() for e in errors)
 
 
-def test_evidence_target_outside_gate_directory(write_registry):
+def test_evidence_target_outside_gate_directory(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -369,11 +367,11 @@ def test_evidence_target_outside_gate_directory(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("outside gate" in e for e in errors)
 
 
-def test_unsupported_evidence_kind_rejected(write_registry):
+def test_unsupported_evidence_kind_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -393,11 +391,11 @@ def test_unsupported_evidence_kind_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("unsupported evidence kind" in e for e in errors)
 
 
-def test_missing_evidence_target_rejected(write_registry):
+def test_missing_evidence_target_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -417,11 +415,11 @@ def test_missing_evidence_target_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("does not exist" in e for e in errors)
 
 
-def test_test_symbol_not_found_rejected(write_registry):
+def test_test_symbol_not_found_rejected(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -441,11 +439,11 @@ def test_test_symbol_not_found_rejected(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert any("symbol" in e.lower() for e in errors)
 
 
-def test_high_risk_static_only_allowed(write_registry):
+def test_high_risk_static_only_allowed(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -465,11 +463,11 @@ def test_high_risk_static_only_allowed(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert errors == []
 
 
-def test_critical_with_local_and_full_runtime_passes(write_registry):
+def test_critical_with_local_and_full_runtime_passes(write_registry, registry_root):
     invariants = write_registry(
         {
             "invariants": [
@@ -494,7 +492,7 @@ def test_critical_with_local_and_full_runtime_passes(write_registry):
             ]
         }
     )
-    errors = validate_registry(invariants)
+    errors = validate_registry(invariants, base_path=registry_root)
     assert errors == []
 
 
