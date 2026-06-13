@@ -129,7 +129,7 @@ export function JobActionBar({
         >
           运行到
         </md-outlined-button>
-        {!isBatch && (
+        {!isBatch && jobs.some((job) => canContinueJob(job)) && (
           <md-outlined-button
             onClick={handleContinue}
             disabled={continueDisabled || undefined}
