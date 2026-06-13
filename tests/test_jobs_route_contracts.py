@@ -38,7 +38,7 @@ EXPECTED_OPERATIONS = {
     ("post", "/api/job-batches"): "JobBatchResponse",
     ("get", "/api/workspaces/{workspace_id}/jobs"): "JobsResponse",
     ("post", "/api/workspaces/{workspace_id}/jobs/batch-rerun"): "BatchJobResponse",
-    ("delete", "/api/workspaces/{workspace_id}/jobs/batch"): "BatchJobResponse",
+    ("delete", "/api/workspaces/{workspace_id}/jobs/batch"): "BatchJobMutationResponse",
     ("get", "/api/workspaces/{workspace_id}/runs"): "WorkspaceRunsResponse",
     ("get", "/api/workspaces/{workspace_id}/dag"): "WorkspaceDagResponse",
     ("get", "/api/jobs"): "JobsResponse",

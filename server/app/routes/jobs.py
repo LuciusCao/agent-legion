@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import cast
 
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException
 
 from server.app.routes.job_contracts import (
     BatchJobRequest,
@@ -11,11 +11,17 @@ from server.app.routes.job_contracts import (
     RerunNodeResponse,
 )
 from server.app.routes.job_http import raise_job_http_error, require_pipelines_enabled
+from server.app.routes.job_operation_contracts import (
+    BatchJobIdsRequest,
+    BatchJobMutationResponse,
+    JobMutationResultResponse,
+)
 from server.app.routes.job_view_contracts import (
     JobDetailResponse,
     JobsResponse,
     JobSummaryResponse,
 )
+from server.app.services.job_deletion import JobDeletionService
 from server.app.services.job_errors import JobServiceError
 from server.app.services.job_queries import JobQueryService
 from server.app.services.job_rerun import JobRerunService
@@ -25,6 +31,7 @@ from server.app.settings import Settings
 def create_jobs_router(
     job_queries: JobQueryService,
     job_rerun: JobRerunService,
+    job_deletion: JobDeletionService,
     settings: Settings,
 ) -> APIRouter:
     router = APIRouter()
@@ -57,16 +64,16 @@ def create_jobs_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.delete("/workspaces/{workspace_id}/jobs/batch", response_model=BatchJobResponse)
+    @router.delete("/workspaces/{workspace_id}/jobs/batch", response_model=BatchJobMutationResponse)
     def batch_delete_workspace_jobs(
         workspace_id: str,
-        payload: BatchJobRequest,
-    ) -> BatchJobResponse:
+        payload: BatchJobIdsRequest,
+    ) -> BatchJobMutationResponse:
         require_pipelines_enabled(settings)
-        try:
-            return BatchJobResponse(results=job_rerun.batch_delete(workspace_id, payload.job_ids))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        results = job_deletion.batch_delete(workspace_id, payload.job_ids)
+        return BatchJobMutationResponse(
+            results=[JobMutationResultResponse(**result) for result in results]
+        )
 
     @router.get("/jobs", response_model=JobsResponse)
     def list_jobs(pipeline_key: str | None = None, status: str | None = None) -> JobsResponse:
@@ -100,9 +107,18 @@ def create_jobs_router(
     @router.delete("/jobs/{job_id}", response_model=DeleteJobResponse)
     def delete_job(job_id: str) -> DeleteJobResponse:
         require_pipelines_enabled(settings)
-        try:
-            return DeleteJobResponse(deleted=job_rerun.delete(job_id))
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
+        job = job_queries.job_db.get_job(job_id)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        result = job_deletion.delete(job["workspace_id"], job_id)
+        if result["status"] != "succeeded":
+            status_code = 400
+            if result.get("reason_code") == "not_found":
+                status_code = 404
+            raise HTTPException(
+                status_code=status_code,
+                detail=result.get("message") or result.get("reason_code") or "Delete failed",
+            )
+        return DeleteJobResponse(deleted=job_id)
 
     return router

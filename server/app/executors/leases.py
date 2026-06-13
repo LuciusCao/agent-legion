@@ -110,3 +110,21 @@ class ExecutorLeaseRepository:
             return active_lease_counts(conn, executor_id)
         finally:
             conn.close()
+
+    def _has_active(self, where: str, params: tuple[str, ...], now: datetime) -> bool:
+        conn = connect_sqlite(self.path)
+        try:
+            row = conn.execute(
+                f"select 1 from executor_leases where {where} "
+                "and status='active' and expires_at>? limit 1",
+                (*params, _sqlite_timestamp(now)),
+            ).fetchone()
+            return row is not None
+        finally:
+            conn.close()
+
+    def has_active_for_job(self, job_id: str, now: datetime) -> bool:
+        return self._has_active("job_id=?", (job_id,), now)
+
+    def has_active_for_node(self, job_id: str, node_key: str, now: datetime) -> bool:
+        return self._has_active("job_id=? and node_key=?", (job_id, node_key), now)

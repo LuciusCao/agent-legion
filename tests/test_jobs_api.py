@@ -1025,7 +1025,11 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
         detail = c.get(f"/api/jobs/{job_id}")
 
     assert response.status_code == 200
-    assert response.json()["results"] == [{"job_id": job_id, "status": "deleted"}]
+    results = response.json()["results"]
+    assert len(results) == 1
+    assert results[0]["job_id"] == job_id
+    assert results[0]["operation"] == "delete"
+    assert results[0]["status"] == "succeeded"
     assert detail.status_code == 404
 
 
@@ -1886,7 +1890,7 @@ def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):
 
     assert resp.status_code == 200
     results = resp.json()["results"]
-    assert any(r["status"] == "not_found" for r in results)
+    assert any(r["status"] == "failed" and r["reason_code"] == "not_found" for r in results)
 
 
 def test_get_artifact_returns_404(tmp_path):
@@ -2083,7 +2087,12 @@ def test_batch_delete_skips_running_job(tmp_path):
         )
     assert resp.status_code == 200
     results = resp.json()["results"]
-    assert any(r["status"] == "skipped" and r["reason"] == "running" for r in results)
+    assert any(
+        r["status"] == "failed"
+        and r["reason_code"] == "delete_failed"
+        and "running" in (r.get("message") or "").lower()
+        for r in results
+    )
 
 
 def test_reject_invalid_job_subpath(tmp_path):

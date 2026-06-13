@@ -92,7 +92,7 @@
     "server/app/pipeline_worker_thread.py": "Shared per-Executor pool created once from registry definitions"
   },
   "files": {
-    "server/app/routes/jobs.py": 108,
+    "server/app/routes/jobs.py": 130,
     "server/app/routes/job_contracts.py": 167,
     "server/app/routes/executor_contracts.py": 77,
     "server/app/routes/job_http.py": 30,
@@ -125,7 +125,7 @@
     "server/app/executors/pi.py": 98,
     "server/app/executors/openclaw.py": 150,
     "server/app/executors/runtime.py": 105,
-    "server/app/executors/leases.py": 112,
+    "server/app/executors/leases.py": 135,
     "server/app/executors/_lease_claims.py": 184,
     "server/app/executors/_lease_lifecycle.py": 211,
     "server/app/executors/_lease_transactions.py": 37,

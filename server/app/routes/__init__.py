@@ -36,10 +36,13 @@ def create_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
+    from ..executors.leases import ExecutorLeaseRepository
     from ..services.executor_catalog import ExecutorCatalogService
     from ..services.job_artifacts import JobArtifactService
+    from ..services.job_deletion import JobDeletionService
     from ..services.job_intake import JobIntakeService
     from ..services.job_logs import JobLogService
+    from ..services.job_packages import JobPackageService
     from ..services.job_queries import JobQueryService
     from ..services.job_rerun import JobRerunService
     from ..services.pipeline_catalog import PipelineCatalogService
@@ -57,12 +60,17 @@ def create_router(
     job_artifacts = JobArtifactService(job_db)
     job_logs = JobLogService(settings, job_db)
     job_rerun = JobRerunService(job_db, settings, pipeline_catalog)
+    executor_leases = ExecutorLeaseRepository(job_db.path)
+    job_deletion = JobDeletionService(job_db, executor_leases, settings)
+    job_packages = JobPackageService(job_db, settings)
 
     router.include_router(create_common_router(db, settings, worker_control))
     router.include_router(create_agents_router(agent_manager))
     router.include_router(create_videos_router(db, settings, agent_manager, video_event_manager))
     router.include_router(create_artifacts_router(db, settings))
-    router.include_router(create_packages_router(db, job_db, settings, video_event_manager))
+    router.include_router(
+        create_packages_router(db, job_db, settings, video_event_manager, job_packages)
+    )
     router.include_router(create_worker_router(worker_control, workspace_worker_control))
     router.include_router(create_pipeline_catalog_router(pipeline_catalog, settings))
     router.include_router(create_workspaces_router(workspace_configuration, settings))
@@ -74,7 +82,7 @@ def create_router(
         )
     )
     router.include_router(create_job_batches_router(job_intake, settings))
-    router.include_router(create_jobs_router(job_queries, job_rerun, settings))
+    router.include_router(create_jobs_router(job_queries, job_rerun, job_deletion, settings))
     router.include_router(create_job_artifacts_router(job_artifacts, settings, job_logs))
     router.include_router(create_workspace_runs_router(job_queries, settings))
     router.include_router(create_video_hive_router(settings))

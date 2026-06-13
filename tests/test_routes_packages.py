@@ -55,10 +55,15 @@ def test_create_workspace_package_job_accepted(workspace_client):
 
     response = workspace_client.post(
         f"/api/workspaces/{ws_id}/jobs/package",
-        json={"video_ids": [job_id]},
+        json={"job_ids": [job_id]},
     )
     assert response.status_code == 200
-    assert response.json() == {"accepted": True}
+    body = response.json()
+    assert body["succeeded_count"] == 1
+    assert body["failed_count"] == 0
+    assert body["results"][0]["status"] == "succeeded"
+    assert body["package_filename"]
+    assert body["download_url"]
 
     settings = workspace_client.app.state.settings
     workspace_packages_dir = settings.packages_dir / f"workspace-{ws_id}"
@@ -73,7 +78,7 @@ def test_create_workspace_package_job_rejects_no_job_ids(workspace_client):
 
     response = workspace_client.post(
         f"/api/workspaces/{ws_id}/jobs/package",
-        json={"video_ids": []},
+        json={"job_ids": []},
     )
     assert response.status_code == 400
     assert "job_ids" in response.json()["detail"].lower()
@@ -97,10 +102,13 @@ def test_create_workspace_package_job_rejects_incomplete_jobs(workspace_client):
 
     response = workspace_client.post(
         f"/api/workspaces/{ws_id}/jobs/package",
-        json={"video_ids": [job_id]},
+        json={"job_ids": [job_id]},
     )
-    assert response.status_code == 400
-    assert "completed" in response.json()["detail"].lower()
+    assert response.status_code == 200
+    body = response.json()
+    assert body["succeeded_count"] == 0
+    assert body["failed_count"] == 1
+    assert body["results"][0]["reason_code"] == "not_completed"
 
 
 def test_workspace_package_download_rejects_path_traversal(workspace_client):
