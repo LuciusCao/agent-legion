@@ -14,6 +14,41 @@ from server.app.pipelines.definition import PipelineDefinition
 from server.app.pipelines.registry import load_registered_pipeline
 from server.app.settings import Settings
 
+_LEGACY_AGENT_TABLE_SQL = """
+create table if not exists workspace_agent_assignments (
+    workspace_id text not null,
+    agent_id text not null,
+    concurrency_limit integer not null default 1,
+    primary key (workspace_id, agent_id)
+)
+"""
+
+_LEGACY_BOOTSTRAP_TABLE_SQL = """
+create table if not exists workspace_executor_bootstrap_state (
+    workspace_id text primary key,
+    completed_at text not null default current_timestamp,
+    foreign key(workspace_id) references workspaces(id) on delete cascade
+)
+"""
+
+
+def ensure_legacy_workspace_tables(db_or_conn: Any) -> None:
+    """Recreate legacy tables removed from base schema so tests can seed pre-V005 state.
+
+    Accepts either a sqlite3.Connection or any object with a ``connect()`` context
+    manager that yields a connection.
+    """
+    import sqlite3
+
+    if isinstance(db_or_conn, sqlite3.Connection):
+        db_or_conn.execute(_LEGACY_AGENT_TABLE_SQL)
+        db_or_conn.execute(_LEGACY_BOOTSTRAP_TABLE_SQL)
+        return
+
+    with db_or_conn.connect() as conn:
+        conn.execute(_LEGACY_AGENT_TABLE_SQL)
+        conn.execute(_LEGACY_BOOTSTRAP_TABLE_SQL)
+
 
 def make_pipeline_worker(
     tmp_path: Path,

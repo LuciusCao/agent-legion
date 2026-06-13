@@ -6,6 +6,7 @@ from server.app.db import Database
 from server.app.jobs import JobQueries
 from server.app.main import create_app
 from server.app.settings import load_settings
+from tests.helpers import ensure_legacy_workspace_tables
 
 
 @pytest.fixture
@@ -22,7 +23,9 @@ def db(settings):
 def job_db(settings):
     jobs_dir = settings.data_dir / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
-    return JobQueries(settings.data_dir / "jobs.sqlite", jobs_dir)
+    queries = JobQueries(settings.data_dir / "jobs.sqlite", jobs_dir)
+    ensure_legacy_workspace_tables(queries)
+    return queries
 
 
 @pytest.fixture
