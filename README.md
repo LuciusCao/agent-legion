@@ -228,6 +228,25 @@ Previous runs are preserved. Rerunning a node deletes that node's and all downst
 
 Do not pass API keys on the command line. Pi inherits authentication from its environment or existing login store. Set provider credentials through Pi's standard environment variables if needed.
 
+## Phase 5 Workspace Executor Migration
+
+If you are upgrading from a pre-Phase-5 database that still contains Workspace Agent
+assignments or `pipeline_config_json`, run the one-time finalizer before starting the server:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --check
+UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --apply
+```
+
+- `--check` is read-only and prints a JSON report. An empty `issues` list means finalization can
+  proceed safely.
+- `--apply` creates a timestamped SQLite backup beside `data/video_hive.sqlite` and then migrates
+  legacy Agent/Pipeline settings into Executor allocations, bindings, and local Node limits.
+
+If the report lists unknown legacy Agent IDs, either configure an equivalent Executor in
+`config/pipeline.yaml` or manually remediate the `workspace_agent_assignments` rows before
+retrying. The server refuses to start until `--check` reports zero issues.
+
 ## API Notes
 
 Add a knowledge video with URL:
