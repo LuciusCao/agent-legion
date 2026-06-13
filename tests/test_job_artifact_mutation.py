@@ -1,3 +1,5 @@
+import shutil
+
 import pytest
 
 from server.app.pipelines.definition import PipelineDefinition, PipelineIntake, PipelineNode
@@ -121,3 +123,31 @@ def test_stage_outputs_idempotent_commit_and_rollback(tmp_path, mutation_service
     staged.commit()
     staged.rollback()  # no-op after commit
     assert not (storage_dir / ".staged" / "a.json").exists()
+
+
+def test_stage_outputs_restores_partial_moves_when_later_move_fails(
+    tmp_path, mutation_service, definition, monkeypatch
+):
+    storage_dir = tmp_path / "job"
+    storage_dir.mkdir()
+    (storage_dir / "a.json").write_text("a")
+    (storage_dir / "b.json").write_text("b")
+
+    original_move = shutil.move
+    calls = 0
+
+    def flaky_move(src, dst):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise OSError("disk failure")
+        return original_move(src, dst)
+
+    monkeypatch.setattr("server.app.services.job_artifact_mutation.shutil.move", flaky_move)
+
+    with pytest.raises(OSError, match="disk failure"):
+        mutation_service.stage_outputs({"storage_dir": str(storage_dir)}, ["a"], definition)
+
+    assert (storage_dir / "a.json").read_text() == "a"
+    assert (storage_dir / "b.json").read_text() == "b"
+    assert not (storage_dir / ".staged").exists()

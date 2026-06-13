@@ -11,6 +11,7 @@ from typing import TypedDict
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -88,53 +89,41 @@ class JobDeletionService:
         restore_paths: list[tuple[Path, Path]] = []
 
         try:
-            if storage_dir.exists() and storage_dir.is_dir():
-                trash_dir = self.settings.jobs_dir / ".trash" / operation_id
-                trash_dir.mkdir(parents=True, exist_ok=True)
-                staged_storage = trash_dir / storage_dir.name
-                shutil.move(str(storage_dir), str(staged_storage))
-                restore_paths.append((staged_storage, storage_dir))
+            with self.job_db.lease_guarded_mutation(
+                job_id,
+                self._now(),
+                reject_running_nodes=True,
+            ) as conn:
+                if storage_dir.exists() and storage_dir.is_dir():
+                    trash_dir = self.settings.jobs_dir / ".trash" / operation_id
+                    trash_dir.mkdir(parents=True, exist_ok=True)
+                    staged_storage = trash_dir / storage_dir.name
+                    shutil.move(str(storage_dir), str(staged_storage))
+                    restore_paths.append((staged_storage, storage_dir))
 
-            if log_paths:
-                log_trash_dir = self.settings.logs_dir / "jobs" / ".trash" / operation_id
-                log_trash_dir.mkdir(parents=True, exist_ok=True)
-                for log_path in log_paths:
-                    staged_log = log_trash_dir / log_path.name
-                    shutil.move(str(log_path), str(staged_log))
-                    staged_logs.append(staged_log)
-                    restore_paths.append((staged_log, log_path))
+                if log_paths:
+                    log_trash_dir = self.settings.logs_dir / "jobs" / ".trash" / operation_id
+                    log_trash_dir.mkdir(parents=True, exist_ok=True)
+                    for log_path in log_paths:
+                        staged_log = log_trash_dir / log_path.name
+                        shutil.move(str(log_path), str(staged_log))
+                        staged_logs.append(staged_log)
+                        restore_paths.append((staged_log, log_path))
 
-            try:
-                self.job_db.delete_job(job_id)
-            except ValueError as exc:
-                # Database operation failed; restore staged paths before re-raising.
-                for staged, original in restore_paths:
-                    if staged.exists():
-                        staged.parent.mkdir(parents=True, exist_ok=True)
-                        original.parent.mkdir(parents=True, exist_ok=True)
-                        if original.exists():
-                            if original.is_dir():
-                                shutil.rmtree(original)
-                            else:
-                                original.unlink()
-                        shutil.move(str(staged), str(original))
-                return self._result(job_id, "failed", "delete_failed", str(exc))
-
-            # Database rows removed; clean up staged files.
-            if staged_storage is not None and staged_storage.exists():
-                shutil.rmtree(staged_storage)
-            for staged_log in staged_logs:
-                if staged_log.exists():
-                    staged_log.unlink(missing_ok=True)
-
-            # Clean up empty trash directories (best effort).
-            self._prune_empty_trash(self.settings.jobs_dir / ".trash" / operation_id)
-            self._prune_empty_trash(self.settings.logs_dir / "jobs" / ".trash" / operation_id)
-
-            return self._result(job_id, "succeeded")
+                self.job_db.delete_job_in_transaction(conn, job_id)
+        except JobMutationConflict as exc:
+            self._restore_paths(restore_paths)
+            reason_code = "active_lease" if "lease" in str(exc).lower() else "delete_failed"
+            return self._result(job_id, "failed", reason_code, str(exc))
         except Exception as exc:
             logger.exception("Unexpected error deleting job %s", job_id)
+            self._restore_paths(restore_paths)
             return self._result(job_id, "failed", "delete_failed", str(exc))
+
+        self._cleanup_staged_paths(job_id, staged_storage, staged_logs)
+        self._prune_empty_trash(self.settings.jobs_dir / ".trash" / operation_id)
+        self._prune_empty_trash(self.settings.logs_dir / "jobs" / ".trash" / operation_id)
+        return self._result(job_id, "succeeded")
 
     def batch_delete(self, workspace_id: str, job_ids: list[str]) -> list[JobDeleteResult]:
         results: list[JobDeleteResult] = []
@@ -157,3 +146,31 @@ class JobDeletionService:
                     parent.rmdir()
         except OSError:
             pass
+
+    @staticmethod
+    def _restore_paths(restore_paths: list[tuple[Path, Path]]) -> None:
+        for staged, original in reversed(restore_paths):
+            if not staged.exists():
+                continue
+            original.parent.mkdir(parents=True, exist_ok=True)
+            if original.exists():
+                if original.is_dir():
+                    shutil.rmtree(original)
+                else:
+                    original.unlink()
+            shutil.move(str(staged), str(original))
+
+    @staticmethod
+    def _cleanup_staged_paths(
+        job_id: str,
+        staged_storage: Path | None,
+        staged_logs: list[Path],
+    ) -> None:
+        try:
+            if staged_storage is not None and staged_storage.exists():
+                shutil.rmtree(staged_storage)
+            for staged_log in staged_logs:
+                if staged_log.exists():
+                    staged_log.unlink(missing_ok=True)
+        except Exception:
+            logger.exception("Failed to clean staged files after deleting job %s", job_id)

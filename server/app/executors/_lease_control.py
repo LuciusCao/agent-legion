@@ -39,6 +39,8 @@ def _execution_control_rejects_claim(
     """Return True when the claim snapshot no longer authorizes the node."""
     if current_control["execution_paused"]:
         return True
+    if current_control["execution_mode"] != request.execution_mode:
+        return True
     if request.execution_mode == "full":
         return False
     if request.execution_mode == "until_node":

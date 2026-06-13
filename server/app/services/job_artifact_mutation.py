@@ -104,22 +104,26 @@ class JobArtifactMutationService:
         staged_dir.mkdir(parents=True, exist_ok=True)
 
         moves: list[tuple[Path, Path]] = []
-        for name in sorted(outputs):
-            original_path = (storage_dir / name).resolve()
-            try:
-                original_path.relative_to(storage_dir)
-            except ValueError as exc:
-                raise ValueError(f"Output path escapes artifact directory: {name}") from exc
+        try:
+            for name in sorted(outputs):
+                original_path = (storage_dir / name).resolve()
+                try:
+                    original_path.relative_to(storage_dir)
+                except ValueError as exc:
+                    raise ValueError(f"Output path escapes artifact directory: {name}") from exc
 
-            if original_path.exists():
-                staged_path = (staged_dir / name).resolve()
-                staged_path.parent.mkdir(parents=True, exist_ok=True)
-                if staged_path.exists():
-                    if staged_path.is_dir():
-                        shutil.rmtree(staged_path)
-                    else:
-                        staged_path.unlink()
-                shutil.move(str(original_path), str(staged_path))
-                moves.append((staged_path, original_path))
+                if original_path.exists():
+                    staged_path = (staged_dir / name).resolve()
+                    staged_path.parent.mkdir(parents=True, exist_ok=True)
+                    if staged_path.exists():
+                        if staged_path.is_dir():
+                            shutil.rmtree(staged_path)
+                        else:
+                            staged_path.unlink()
+                    shutil.move(str(original_path), str(staged_path))
+                    moves.append((staged_path, original_path))
+        except Exception:
+            StagedOutputs(staged_dir, moves).rollback()
+            raise
 
         return StagedOutputs(staged_dir, moves)

@@ -8,9 +8,11 @@ from typing import Any
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.pipelines.scheduler import downstream_nodes
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.pipeline_catalog import PipelineCatalogService
 from server.app.settings import Settings
 
@@ -110,22 +112,29 @@ class JobRerunService:
             )
 
         stale_nodes = downstream_nodes(definition, node_key)
+        staged = None
         try:
-            staged = self.artifact_service.stage_outputs(job, [node_key], definition)
-        except ValueError as exc:
-            return self._result(
+            with self.job_db.lease_guarded_mutation(
                 job_id,
-                "failed",
-                node_key,
-                "cleanup_failed",
-                str(exc),
-            )
-
-        try:
-            self.job_db.mark_nodes_for_rerun_atomic(job_id, [node_key], {node_key: stale_nodes})
+                self._now(),
+                reject_running_nodes=True,
+            ) as conn:
+                staged = self.artifact_service.stage_outputs(job, [node_key], definition)
+                self.job_db.mark_nodes_for_rerun_in_transaction(
+                    conn, job_id, [node_key], {node_key: stale_nodes}
+                )
+        except JobMutationConflict as exc:
+            if staged is not None:
+                staged.rollback()
+            return self._result(job_id, "skipped", node_key, exc.reason_code, str(exc))
+        except ValueError as exc:
+            if staged is not None:
+                staged.rollback()
+            return self._result(job_id, "failed", node_key, "cleanup_failed", str(exc))
         except Exception as exc:
             logger.exception("Failed to mark nodes for rerun for job %s", job_id)
-            staged.rollback()
+            if staged is not None:
+                staged.rollback()
             return self._result(
                 job_id,
                 "failed",
@@ -134,7 +143,7 @@ class JobRerunService:
                 str(exc),
             )
 
-        staged.commit()
+        commit_staged_outputs(staged, job_id, "rerun")
         return self._result(job_id, "succeeded", node_key)
 
     def batch_rerun(

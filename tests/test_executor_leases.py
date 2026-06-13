@@ -696,7 +696,7 @@ def test_claim_rejected_when_target_snapshot_stale(
     assert len(leases) == 0
 
 
-def test_claim_with_full_mode_ignores_target_fields(
+def test_claim_with_stale_full_snapshot_is_rejected_when_job_is_run_to(
     queries: JobQueries, repo_a: ExecutorLeaseRepository
 ) -> None:
     workspace_id, job_id = _setup_workspace(
@@ -704,7 +704,7 @@ def test_claim_with_full_mode_ignores_target_fields(
     )
     queries.set_job_execution_target(job_id, "review_keywords")
 
-    # full mode should succeed even though target differs from node.
+    # The worker read full mode before the user switched the job to run-to.
     claim = repo_a.try_claim(
         _claim_request(
             workspace_id,
@@ -714,7 +714,13 @@ def test_claim_with_full_mode_ignores_target_fields(
             allowed_node_keys=("review_keywords",),
         )
     )
-    assert isinstance(claim, ClaimedExecution)
+    assert claim is None
+
+    with queries.connect() as conn:
+        runs = conn.execute("select * from node_runs where job_id=?", (job_id,)).fetchall()
+        leases = conn.execute("select * from executor_leases where job_id=?", (job_id,)).fetchall()
+    assert len(runs) == 0
+    assert len(leases) == 0
 
 
 def test_sqlite_timestamp_is_utc_without_t_separator() -> None:
