@@ -55,8 +55,6 @@ class PipelineWorkerThread:
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult]] = {}
         self._round_robin = WorkspaceRoundRobin()
-        self._local_executor: ThreadPoolExecutor | None = None
-        self._agent_executor: ThreadPoolExecutor | None = None
 
     @staticmethod
     def is_enabled(settings: Settings) -> bool:
@@ -71,8 +69,6 @@ class PipelineWorkerThread:
     def start(self) -> None:
         self._definitions = list_registered_pipelines(self.settings.root_dir)
         self._ensure_pools()
-        self._local_executor = self._pools.get("local-default")
-        self._agent_executor = self._pools.get("pi-default")
         expired = self.leases.expire_stale(datetime.now(UTC))
         if expired:
             logger.warning("expired stale pipeline executions on startup: %s", ", ".join(expired))
@@ -370,7 +366,16 @@ class PipelineWorkerThread:
         self.stop_event.set()
         if self._thread is not None:
             self._thread.join(timeout=timeout)
-        deadline = time.monotonic() + timeout
+        # Request cancellation for any still-active executions so adapters can
+        # terminate their children and finish leases within a bounded grace
+        # period instead of blocking on the full executor timeout.
+        grace = getattr(self.runtime, "cancellation_grace_seconds", 5)
+        for execution_id in list(self._futures):
+            try:
+                self.runtime.cancel(execution_id)
+            except Exception:
+                logger.exception("failed to cancel execution %s during shutdown", execution_id)
+        deadline = time.monotonic() + min(timeout, grace)
         for future in list(self._futures.values()):
             remaining = deadline - time.monotonic()
             if remaining <= 0:

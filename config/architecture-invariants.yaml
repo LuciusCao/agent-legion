@@ -115,3 +115,15 @@ invariants:
       - kind: failure_injection
         target: tests/ci/test_executor_worker_stress.py::test_fairness_under_randomized_insertion_order
         gate: ci_extended
+
+  - id: EXEC-CANCEL-001
+    statement: "Adapter-specific cancellation terminates active Pi/OpenClaw subprocess groups and isolated local handlers within a bounded grace period; worker shutdown waits only the grace period and releases capacity after child exit."
+    owner: workspace-executor
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/test_executor_cancellation.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_executor_cancellation_recovery.py
+        gate: full

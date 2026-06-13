@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 
+from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.runtime_config import PiRuntimeConfig
@@ -30,6 +32,7 @@ class PiExecutor:
         self.capabilities = capabilities
         self._runner = PiRunner(self.config, skill_root)
         self._cancelled: set[str] = set()
+        self._tracker = SubprocessTracker(grace_seconds=self.config.cancellation_grace_seconds)
 
     def supports(self, capability: str) -> bool:
         return capability in self.capabilities
@@ -71,6 +74,10 @@ class PiExecutor:
         context.job_dir.mkdir(parents=True, exist_ok=True)
         context.log_path.parent.mkdir(parents=True, exist_ok=True)
 
+        raw_token = (
+            context.runtime.get("cancellation") if isinstance(context.runtime, Mapping) else None
+        )
+        token = raw_token if isinstance(raw_token, CancellationToken) else None
         result = self._runner.run(
             job=dict(context.job),
             node_key=context.node_key,
@@ -80,6 +87,9 @@ class PiExecutor:
             tools=list(capability_config.tools),
             persist_run=False,
             job_dir=context.job_dir,
+            execution_id=context.execution_id,
+            cancellation_token=token,
+            tracker=self._tracker,
         )
 
         produced = tuple(
@@ -96,3 +106,4 @@ class PiExecutor:
 
     def cancel(self, execution_id: str) -> None:
         self._cancelled.add(execution_id)
+        self._tracker.cancel(execution_id)

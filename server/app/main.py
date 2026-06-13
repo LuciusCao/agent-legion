@@ -75,6 +75,7 @@ def build_executor_registry(
         openclaw_runtime=settings.executor_runtime.openclaw,
         settings_config=settings.config,
         job_db=job_db,
+        cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
     )
     return ExecutorRegistry.build(settings.executor_definitions, runtime)
 

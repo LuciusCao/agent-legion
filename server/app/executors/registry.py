@@ -50,6 +50,7 @@ class RuntimeDependencies:
     )
     settings_config: Mapping[str, Any] | None = None
     job_db: Any | None = None
+    cancellation_grace_seconds: int = 5
 
 
 class ExecutorRegistry:
@@ -89,6 +90,7 @@ class ExecutorRegistry:
                     handlers=handlers,
                     settings_config=runtime.settings_config,
                     job_db=runtime.job_db,
+                    cancellation_grace_seconds=runtime.cancellation_grace_seconds,
                 )
             elif isinstance(config, PiExecutorConfig):
                 executor = PiExecutor(
