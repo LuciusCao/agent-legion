@@ -53,12 +53,12 @@ def check_legacy_modules_absent(root: Path) -> list[str]:
 def check_forbidden_patterns(root: Path) -> list[str]:
     """Scan production source for legacy executor/concurrency string patterns."""
     errors: list[str] = []
-    scan_dirs = [root / "server", root / "config" / "pipelines"]
+    scan_dirs = [root / "server", root / "frontend" / "src", root / "config" / "pipelines"]
     for scan_dir in scan_dirs:
         if not scan_dir.is_dir():
             continue
         for path in sorted(scan_dir.rglob("*")):
-            if not path.is_file():
+            if not path.is_file() or ".test." in path.name or path.name.startswith("test_"):
                 continue
             if path.suffix not in {".py", ".yaml", ".yml", ".ts", ".tsx"}:
                 continue

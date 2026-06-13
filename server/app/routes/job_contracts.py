@@ -21,14 +21,6 @@ class JobsResponse(BaseModel):
     jobs: list[dict[str, Any]]
 
 
-class PipelineResponse(BaseModel):
-    pipeline: dict[str, Any]
-
-
-class PipelinesListResponse(BaseModel):
-    pipelines: list[dict[str, Any]]
-
-
 class WorkspaceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 

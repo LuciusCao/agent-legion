@@ -1192,19 +1192,62 @@ export interface components {
       /** Name */
       name?: string | null
     }
+    /** PipelineDefinitionResponse */
+    PipelineDefinitionResponse: {
+      intake: components['schemas']['PipelineIntakeResponse']
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Nodes */
+      nodes: components['schemas']['PipelineNodeResponse'][]
+    }
+    /** PipelineIntakeModeResponse */
+    PipelineIntakeModeResponse: {
+      /** Input Field */
+      input_field: string
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Resource */
+      resource: string
+    }
+    /** PipelineIntakeResponse */
+    PipelineIntakeResponse: {
+      /** Modes */
+      modes: components['schemas']['PipelineIntakeModeResponse'][]
+    }
+    /** PipelineNodeResponse */
+    PipelineNodeResponse: {
+      /** After */
+      after: string[]
+      /** Capability */
+      capability: string
+      /** Inputs */
+      inputs: string[]
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Outputs */
+      outputs: string[]
+    }
     /** PipelineResponse */
     PipelineResponse: {
-      /** Pipeline */
-      pipeline: {
-        [key: string]: unknown
-      }
+      pipeline: components['schemas']['PipelineDefinitionResponse']
+    }
+    /** PipelineSummaryResponse */
+    PipelineSummaryResponse: {
+      /** Key */
+      key: string
+      /** Label */
+      label: string
     }
     /** PipelinesListResponse */
     PipelinesListResponse: {
       /** Pipelines */
-      pipelines: {
-        [key: string]: unknown
-      }[]
+      pipelines: components['schemas']['PipelineSummaryResponse'][]
     }
     /** QuestionDetailResponse */
     QuestionDetailResponse: {

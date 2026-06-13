@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from fastapi.testclient import TestClient
 
 from server.app.main import create_app
@@ -69,3 +71,18 @@ def test_workspace_settings_pipeline_rejects_legacy_concurrency_fields(tmp_path)
     assert extra_fields == legacy_fields
     workspace = app.state.job_db.get_workspace("default")
     assert "pipeline_config" not in workspace
+
+
+def test_pipeline_openapi_contract_is_capability_only(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    schemas = app.openapi()["components"]["schemas"]
+
+    node = schemas["PipelineNodeResponse"]["properties"]
+    detail = schemas["PipelineDefinitionResponse"]["properties"]
+    summary = schemas["PipelineSummaryResponse"]["properties"]
+
+    assert "capability" in node
+    assert "runner" not in node
+    assert "agent" not in node
+    assert "concurrency" not in detail
+    assert "concurrency" not in summary

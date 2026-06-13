@@ -14,6 +14,7 @@ from server.app.db import Database
 from server.app.db.migrations.report import MigrationBlockedError
 from server.app.db.notifications import NotificationHub
 from server.app.events import VideoEventManager
+from server.app.executors.backup import legacy_backup_path
 from server.app.executors.config import LocalExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
@@ -100,7 +101,12 @@ def create_app(
     definitions = list_registered_pipelines(settings.root_dir)
     with job_db.connect() as conn:
         try:
-            finalize_legacy_executor_schema(conn, definitions, settings.executor_definitions)
+            finalize_legacy_executor_schema(
+                conn,
+                definitions,
+                settings.executor_definitions,
+                backup_path=legacy_backup_path(job_db.path),
+            )
         except MigrationBlockedError as exc:
             check_cmd = (
                 "UV_CACHE_DIR=.uv-cache uv run python "

@@ -119,7 +119,6 @@ describe('settingStore', () => {
       pipelineDefinition: {
         key: 'question_content',
         label: 'Question Content',
-        concurrency: { local: 1, agent: 1, nodes: {} },
         intake: { modes: [] },
         nodes: [],
       },

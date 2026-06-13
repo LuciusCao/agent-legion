@@ -5,6 +5,7 @@ import type {
   JobDetailResponse,
   JobsResponse,
   PipelineResponse,
+  PipelinesListResponse,
   QuestionDetailResponse,
   WorkspaceRecord,
   WorkspacesResponse,
@@ -131,13 +132,7 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
   })
 }
 
-export async function fetchPipelines(): Promise<{
-  pipelines: Array<{
-    key: string
-    label: string
-    concurrency: { local: number; agent: number }
-  }>
-}> {
+export async function fetchPipelines(): Promise<PipelinesListResponse> {
   return api('/api/pipelines')
 }
 

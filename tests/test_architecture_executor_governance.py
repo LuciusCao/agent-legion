@@ -16,6 +16,7 @@ ROOT = Path(__file__).resolve().parents[1]
 # Directories that contain production source code to scan.
 SCAN_DIRS: tuple[Path, ...] = (
     ROOT / "server",
+    ROOT / "frontend" / "src",
     ROOT / "config" / "pipelines",
 )
 
@@ -63,7 +64,7 @@ def _source_files() -> Iterable[Path]:
         if not scan_dir.exists():
             continue
         for path in scan_dir.rglob("*"):
-            if not path.is_file():
+            if not path.is_file() or ".test." in path.name or path.name.startswith("test_"):
                 continue
             if path.suffix not in {".py", ".yaml", ".yml", ".ts", ".tsx"}:
                 continue
