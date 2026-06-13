@@ -11,7 +11,7 @@ from server.app.routes.job_http import raise_job_http_error, require_pipelines_e
 from server.app.routes.job_operation_contracts import (
     BatchJobIdsRequest,
     BatchJobMutationResponse,
-    BatchRerunRequest,
+    JobBatchRerunRequest,
     JobMutationResultResponse,
 )
 from server.app.routes.job_view_contracts import (
@@ -57,7 +57,7 @@ def create_jobs_router(
     )
     def batch_rerun_workspace_jobs(
         workspace_id: str,
-        payload: BatchRerunRequest,
+        payload: JobBatchRerunRequest,
     ) -> BatchJobMutationResponse:
         require_pipelines_enabled(settings)
         results = job_rerun.batch_rerun(workspace_id, payload.job_ids, payload.node_key)

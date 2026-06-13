@@ -6,6 +6,7 @@ import pytest
 
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
+from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_rerun import JobRerunService
@@ -71,13 +72,14 @@ def running_job(job_db):
 
 
 def _create_lease(
-    job_db,
+    job_db: JobQueries,
     job: dict[str, Any],
     node_key: str,
     *,
     expires_offset_seconds: float,
 ) -> dict[str, Any]:
     run = job_db.start_node_run(job["id"], node_key, ["cmd"], "/dev/null")
+    assert run is not None
     now = datetime.now(UTC)
     expires = now + timedelta(seconds=expires_offset_seconds)
     with job_db.connect() as conn:

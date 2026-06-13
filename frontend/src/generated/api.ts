@@ -1008,6 +1008,13 @@ export interface components {
       /** Results */
       results: components['schemas']['JobMutationResultResponse'][]
     }
+    /** BatchRerunRequest */
+    BatchRerunRequest: {
+      /** Phase */
+      phase: string
+      /** Video Ids */
+      video_ids: string[]
+    }
     /** BatchRerunResponse */
     BatchRerunResponse: {
       /** Results */
@@ -1139,6 +1146,13 @@ export interface components {
       question_ids?: string[]
       /** Source Kind */
       source_kind: string
+    }
+    /** JobBatchRerunRequest */
+    JobBatchRerunRequest: {
+      /** Job Ids */
+      job_ids?: string[]
+      /** Node Key */
+      node_key: string
     }
     /** JobBatchResponse */
     JobBatchResponse: {
@@ -1795,20 +1809,6 @@ export interface components {
       workspaces: {
         [key: string]: unknown
       }[]
-    }
-    /** BatchRerunRequest */
-    server__app__routes__job_operation_contracts__BatchRerunRequest: {
-      /** Job Ids */
-      job_ids?: string[]
-      /** Node Key */
-      node_key: string
-    }
-    /** BatchRerunRequest */
-    server__app__routes__videos__BatchRerunRequest: {
-      /** Phase */
-      phase: string
-      /** Video Ids */
-      video_ids: string[]
     }
   }
   responses: never
@@ -2500,7 +2500,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['server__app__routes__videos__BatchRerunRequest']
+        'application/json': components['schemas']['BatchRerunRequest']
       }
     }
     responses: {
@@ -3385,7 +3385,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['server__app__routes__job_operation_contracts__BatchRerunRequest']
+        'application/json': components['schemas']['JobBatchRerunRequest']
       }
     }
     responses: {
