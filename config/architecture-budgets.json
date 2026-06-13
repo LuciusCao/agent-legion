@@ -150,8 +150,10 @@
     "scripts/architecture/repository.py": 185,
     "scripts/architecture/phase5.py": 77,
     "tests/test_architecture_baselines.py": 217,
+    "tests/test_architecture_executor_governance.py": 110,
     "tests/test_architecture_phase4.py": 103,
     "tests/test_check_architecture.py": 457,
+    "tests/test_executor_phase5_inventory.py": 81,
     "tests/test_executor_recovery.py": 366
   },
   "defaults": {
