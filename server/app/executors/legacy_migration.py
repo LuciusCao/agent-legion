@@ -331,14 +331,13 @@ def _materialize_workspace(
                 node_limit = node_limits_raw.get(node.key)
                 if not _is_positive_int(node_limit):
                     node_limit = 1
-                if _is_positive_int(node_limit):
-                    conn.execute(
-                        """
-                        insert into workspace_node_limits (workspace_id, pipeline_key, node_key, concurrency_limit)
-                        values (?, ?, ?, ?)
-                        """,
-                        (workspace_id, definition.key, node.key, int(node_limit)),  # type: ignore[arg-type]
-                    )
+                conn.execute(
+                    """
+                    insert into workspace_node_limits (workspace_id, pipeline_key, node_key, concurrency_limit)
+                    values (?, ?, ?, ?)
+                    """,
+                    (workspace_id, definition.key, node.key, int(node_limit)),  # type: ignore[arg-type]
+                )
         elif pi_supported and needs_pi and binding_key not in existing.bindings:
             conn.execute(
                 """
