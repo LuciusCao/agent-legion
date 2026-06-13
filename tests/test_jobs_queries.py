@@ -66,7 +66,7 @@ def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
     db.set_job_execution_target(job["id"], "node_b")
     control = db.get_job_execution_control(job["id"])
     assert control is not None
-    assert control["execution_mode"] == "targeted"
+    assert control["execution_mode"] == "until_node"
     assert control["target_node_key"] == "node_b"
 
     db.clear_job_execution_target(job["id"])
@@ -115,9 +115,74 @@ def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: P
         workspace_id=workspace["id"],
     )
 
-    with __import__("pytest").raises(ValueError):
+    with pytest.raises(ValueError):
         db.set_job_execution_target(job["id"], "")
+
+    with pytest.raises(ValueError):
+        db.set_job_execution_mode(job["id"], "unknown_mode")
+
+    with pytest.raises(ValueError):
+        db.set_job_execution_mode(job["id"], "until_node")
 
     # paused is stored as an integer but exposed as a boolean.
     with db.connect() as conn, pytest.raises(sqlite3.IntegrityError):
         conn.execute("update jobs set execution_paused = 2 where id=?", (job["id"],))
+
+
+def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
+    import time
+
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = db.create_workspace("UpdatedAt Workspace")
+    job = db.create_job(
+        pipeline_key="reading_analysis",
+        source_type="question_id",
+        source_id="Q-UPDATED",
+        batch_id="",
+        title="UpdatedAt Job",
+        node_keys=["node_a", "node_b"],
+        workspace_id=workspace["id"],
+    )
+    original_updated_at = job["updated_at"]
+
+    time.sleep(1.1)
+    db.set_job_execution_target(job["id"], "node_b")
+    job = db.get_job(job["id"])
+    assert job is not None
+    assert job["updated_at"] > original_updated_at
+
+    time.sleep(1.1)
+    db.clear_job_execution_target(job["id"])
+    job = db.get_job(job["id"])
+    assert job is not None
+    assert job["updated_at"] > original_updated_at
+
+    time.sleep(1.1)
+    db.pause_job(job["id"], "testing")
+    job = db.get_job(job["id"])
+    assert job is not None
+    assert job["updated_at"] > original_updated_at
+
+    time.sleep(1.1)
+    db.resume_job(job["id"])
+    job = db.get_job(job["id"])
+    assert job is not None
+    assert job["updated_at"] > original_updated_at
+
+
+def test_get_job_execution_control_returns_none_for_missing_job(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    assert db.get_job_execution_control("missing-job") is None
+
+
+def test_execution_control_mutations_raise_for_unknown_job(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+
+    with pytest.raises(ValueError):
+        db.pause_job("missing-job", "reason")
+
+    with pytest.raises(ValueError):
+        db.resume_job("missing-job")
+
+    with pytest.raises(ValueError):
+        db.clear_job_execution_target("missing-job")

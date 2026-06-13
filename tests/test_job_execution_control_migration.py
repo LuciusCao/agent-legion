@@ -1,4 +1,7 @@
+import sqlite3
 from pathlib import Path
+
+import pytest
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.schema import init_db
@@ -113,3 +116,44 @@ def test_v006_migration_is_idempotent(tmp_path: Path) -> None:
             "select count(*) as cnt from schema_migrations where version = 6"
         ).fetchone()
         assert versions["cnt"] == 1
+
+
+def test_v006_execution_mode_check_constraint(tmp_path: Path) -> None:
+    path = tmp_path / "constraint.sqlite"
+    conn = connect_sqlite(path)
+    with conn:
+        conn.executescript(
+            """
+            create table workspaces (
+              id text primary key,
+              name text not null,
+              description text not null default '',
+              default_pipeline_key text not null default 'question_content',
+              cms_config_json text not null default '{}',
+              resource_config_json text not null default '{}',
+              created_at text not null default current_timestamp,
+              updated_at text not null default current_timestamp,
+              default_entity text not null default 'question',
+              intake_config_json text not null default '{}'
+            );
+            insert into workspaces(id, name) values ('ws1', 'Constraint Workspace');
+            """
+        )
+    conn.close()
+
+    init_db(path)
+
+    with connect_sqlite(path) as conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, execution_mode) "
+            "values ('job1', 'ws1', 'reading_analysis', 'question_id', 'Q1', 'until_node')"
+        )
+        job = conn.execute("select * from jobs where id = 'job1'").fetchone()
+        assert job is not None
+        assert job["execution_mode"] == "until_node"
+
+        with pytest.raises(sqlite3.IntegrityError):
+            conn.execute(
+                "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, execution_mode) "
+                "values ('job2', 'ws1', 'reading_analysis', 'question_id', 'Q2', 'targeted')"
+            )

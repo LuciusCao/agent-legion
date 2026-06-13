@@ -10,6 +10,23 @@ class _JobQueries(Protocol):
 
     def connect(self) -> AbstractContextManager[sqlite3.Connection]: ...
     def get_job(self, job_id: str) -> dict[str, Any] | None: ...
+    def set_job_execution_mode(
+        self,
+        job_id: str,
+        mode: str,
+        *,
+        target_node_key: str | None = None,
+    ) -> None: ...
+
+
+_VALID_EXECUTION_MODES = {"full", "until_node"}
+
+
+def _validate_execution_mode(mode: str) -> str:
+    clean = (mode or "").strip()
+    if clean not in _VALID_EXECUTION_MODES:
+        raise ValueError(f"invalid execution_mode: {mode!r}")
+    return clean
 
 
 class JobExecutionControlMixin:
@@ -19,23 +36,36 @@ class JobExecutionControlMixin:
     and ``self.get_job()`` provided by the combined class.
     """
 
-    def set_job_execution_target(self: _JobQueries, job_id: str, target_node_key: str) -> None:
-        target = (target_node_key or "").strip()
-        if not target:
-            raise ValueError("target_node_key is required")
+    def set_job_execution_mode(
+        self: _JobQueries,
+        job_id: str,
+        mode: str,
+        *,
+        target_node_key: str | None = None,
+    ) -> None:
+        clean_mode = _validate_execution_mode(mode)
+        target = (target_node_key or "").strip() or None
+        if clean_mode == "until_node" and not target:
+            raise ValueError("target_node_key is required for until_node mode")
         with self.connect() as conn:
             cursor = conn.execute(
                 """
                 update jobs
-                set execution_mode='targeted',
+                set execution_mode=?,
                     target_node_key=?,
                     updated_at=current_timestamp
                 where id=?
                 """,
-                (target, job_id),
+                (clean_mode, target, job_id),
             )
             if cursor.rowcount == 0:
                 raise ValueError("Job not found")
+
+    def set_job_execution_target(self: _JobQueries, job_id: str, target_node_key: str) -> None:
+        target = (target_node_key or "").strip()
+        if not target:
+            raise ValueError("target_node_key is required")
+        self.set_job_execution_mode(job_id, "until_node", target_node_key=target)
 
     def clear_job_execution_target(self: _JobQueries, job_id: str) -> None:
         with self.connect() as conn:
