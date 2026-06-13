@@ -70,8 +70,14 @@ class JobArtifactMutationService:
         job: dict[str, Any],
         node_keys: Sequence[str],
         definition: PipelineDefinition,
+        *,
+        closure: set[str] | frozenset[str] | None = None,
     ) -> StagedOutputs:
         """Move declared outputs of ``node_keys`` and their descendants to staging.
+
+        When ``closure`` is provided, only outputs declared by nodes inside the
+        closure are staged. This supports targeted rerun-to operations where
+        descendants outside the target closure must keep their artifacts.
 
         Returns a :class:`StagedOutputs` handle. Callers should invoke
         ``commit()`` after a successful database transaction, or ``rollback()``
@@ -86,6 +92,9 @@ class JobArtifactMutationService:
             if node_key not in definition.nodes:
                 raise ValueError(f"Unknown node: {node_key}")
             affected_keys.update(downstream_nodes(definition, node_key))
+
+        if closure is not None:
+            affected_keys &= set(closure)
 
         outputs: set[str] = set()
         for key in affected_keys:

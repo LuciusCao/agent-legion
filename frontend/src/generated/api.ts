@@ -141,6 +141,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/jobs/{job_id}/continue': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Continue Job */
+    post: operations['continue_job_api_jobs__job_id__continue_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/jobs/{job_id}/nodes/{node_key}/rerun': {
     parameters: {
       query?: never
@@ -152,6 +169,23 @@ export interface paths {
     put?: never
     /** Rerun Node */
     post: operations['rerun_node_api_jobs__job_id__nodes__node_key__rerun_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/jobs/{job_id}/run-to': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Run To */
+    post: operations['run_to_api_jobs__job_id__run_to_post']
     delete?: never
     options?: never
     head?: never
@@ -777,6 +811,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/jobs/batch-run-to': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Batch Run To */
+    post: operations['batch_run_to_api_workspaces__workspace_id__jobs_batch_run_to_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/jobs/package': {
     parameters: {
       query?: never
@@ -1020,15 +1071,6 @@ export interface components {
       /** Results */
       results: components['schemas']['RerunResult'][]
     }
-    /** BatchRunToRequest */
-    BatchRunToRequest: {
-      /** Start Phase */
-      start_phase?: string | null
-      /** Target Phase */
-      target_phase: string
-      /** Video Ids */
-      video_ids: string[]
-    }
     /** BatchRunToResponse */
     BatchRunToResponse: {
       /** Results */
@@ -1039,6 +1081,8 @@ export interface components {
       /** Video Ids */
       video_ids: string[]
     }
+    /** ContinueJobRequest */
+    ContinueJobRequest: Record<string, never>
     /** DeleteJobResponse */
     DeleteJobResponse: {
       /** Deleted */
@@ -1493,13 +1537,6 @@ export interface components {
         [key: string]: unknown
       }[]
     }
-    /** RunToRequest */
-    RunToRequest: {
-      /** Start Phase */
-      start_phase?: string | null
-      /** Target Phase */
-      target_phase: string
-    }
     /** RunToResult */
     RunToResult: {
       /** Message */
@@ -1810,6 +1847,38 @@ export interface components {
         [key: string]: unknown
       }[]
     }
+    /** BatchRunToRequest */
+    server__app__routes__job_operation_contracts__BatchRunToRequest: {
+      /** Job Ids */
+      job_ids: string[]
+      /** Start Node Key */
+      start_node_key?: string | null
+      /** Target Node Key */
+      target_node_key: string
+    }
+    /** RunToRequest */
+    server__app__routes__job_operation_contracts__RunToRequest: {
+      /** Start Node Key */
+      start_node_key?: string | null
+      /** Target Node Key */
+      target_node_key: string
+    }
+    /** BatchRunToRequest */
+    server__app__routes__videos__BatchRunToRequest: {
+      /** Start Phase */
+      start_phase?: string | null
+      /** Target Phase */
+      target_phase: string
+      /** Video Ids */
+      video_ids: string[]
+    }
+    /** RunToRequest */
+    server__app__routes__videos__RunToRequest: {
+      /** Start Phase */
+      start_phase?: string | null
+      /** Target Phase */
+      target_phase: string
+    }
   }
   responses: never
   parameters: never
@@ -2058,6 +2127,41 @@ export interface operations {
       }
     }
   }
+  continue_job_api_jobs__job_id__continue_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ContinueJobRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobMutationResultResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   rerun_node_api_jobs__job_id__nodes__node_key__rerun_post: {
     parameters: {
       query?: never
@@ -2069,6 +2173,41 @@ export interface operations {
       cookie?: never
     }
     requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobMutationResultResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  run_to_api_jobs__job_id__run_to_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['server__app__routes__job_operation_contracts__RunToRequest']
+      }
+    }
     responses: {
       /** @description Successful Response */
       200: {
@@ -2533,7 +2672,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchRunToRequest']
+        'application/json': components['schemas']['server__app__routes__videos__BatchRunToRequest']
       }
     }
     responses: {
@@ -2822,7 +2961,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['RunToRequest']
+        'application/json': components['schemas']['server__app__routes__videos__RunToRequest']
       }
     }
     responses: {
@@ -3386,6 +3525,41 @@ export interface operations {
     requestBody: {
       content: {
         'application/json': components['schemas']['JobBatchRerunRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['BatchJobMutationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  batch_run_to_api_workspaces__workspace_id__jobs_batch_run_to_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['server__app__routes__job_operation_contracts__BatchRunToRequest']
       }
     }
     responses: {
