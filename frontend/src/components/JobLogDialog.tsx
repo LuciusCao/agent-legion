@@ -26,9 +26,11 @@ export function JobLogDialog({
 
   useEffect(() => {
     if (!open) {
+      requestIdRef.current += 1
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setLog(null)
       setError('')
+      setLoading(false)
       return
     }
 
