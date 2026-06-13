@@ -21,6 +21,7 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition, PipelineNode
+from server.app.pipelines.execution_control import allowed_nodes
 from server.app.pipelines.registry import list_registered_pipelines
 from server.app.pipelines.scheduler import _node_statuses, find_ready_nodes
 from server.app.settings import Settings
@@ -146,13 +147,26 @@ class PipelineWorkerThread:
             return False
 
         for definition, job in jobs:
-            if job.get("status") in ("completed", "failed"):
+            if job.get("status") in ("completed", "failed", "paused"):
+                continue
+            if job.get("execution_paused"):
                 continue
             job_dir = Path(str(job["storage_dir"]))
             statuses = _node_statuses(self.job_db, job["id"])
+            control_snapshot = {
+                "execution_mode": job.get("execution_mode", "full"),
+                "target_node_key": job.get("target_node_key"),
+                "execution_paused": bool(job.get("execution_paused")),
+                "pause_reason": job.get("pause_reason", ""),
+            }
+            allowed = allowed_nodes(definition, control_snapshot)
             ready_nodes = find_ready_nodes(definition, statuses, job_dir)
             for node in ready_nodes:
-                if self._try_claim_and_submit(workspace, definition, job, node, job_dir):
+                if node.key not in allowed:
+                    continue
+                if self._try_claim_and_submit(
+                    workspace, definition, job, node, job_dir, control_snapshot, allowed
+                ):
                     return True
         return False
 
@@ -163,6 +177,8 @@ class PipelineWorkerThread:
         job: dict[str, Any],
         node: PipelineNode,
         job_dir: Path,
+        control_snapshot: dict[str, Any] | None = None,
+        allowed_node_keys: frozenset[str] | None = None,
     ) -> bool:
         workspace_id = workspace["id"]
         pipeline_key = definition.key
@@ -234,6 +250,13 @@ class PipelineWorkerThread:
                 local_node_limit=local_node_limit,
                 lease_ttl_seconds=self.runtime.lease_ttl_seconds,
                 log_path=str(log_path),
+                execution_mode=control_snapshot.get("execution_mode", "full")
+                if control_snapshot
+                else "full",
+                target_node_key=control_snapshot.get("target_node_key")
+                if control_snapshot
+                else None,
+                allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
             )
         )
         if claim is None:

@@ -490,6 +490,117 @@ def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
     worker.stop()
 
 
+def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS")
+
+    block_event = threading.Event()
+    executor = FakeExecutor("local-default", block_event=block_event)
+    registry = _make_registry(
+        {"local-default": executor},
+        {"local-default": _local_def(4, {"root", "left", "target", "right"})},
+    )
+    definition = _make_definition(
+        [
+            _local_node("root"),
+            PipelineNode(key="left", label="left", capability="left", after=["root"]),
+            PipelineNode(key="target", label="target", capability="target", after=["left"]),
+            PipelineNode(key="right", label="right", capability="right", after=["root"]),
+        ]
+    )
+
+    job = job_db.create_job(
+        pipeline_key="test",
+        source_type="question",
+        source_id="Q1",
+        batch_id="",
+        title="Q1",
+        node_keys=["root", "left", "target", "right"],
+        workspace_id=ws["id"],
+    )
+    job_db.set_job_execution_target(job["id"], "target")
+    for node in definition.nodes.values():
+        _bind(job_db, ws["id"], "test", node.key, "local-default")
+    _allocate(job_db, ws["id"], "local-default", 4)
+    for node_key in ["root", "left", "target"]:
+        _set_node_limit(job_db, ws["id"], "test", node_key, 1)
+
+    worker = _make_worker(tmp_path, db_path, registry, [definition])
+    block_event.set()
+
+    for _ in range(20):
+        worker._poll()
+        job_after = job_db.get_job(job["id"])
+        if job_after and job_after["status"] in ("paused", "completed"):
+            break
+
+    worker.stop()
+
+    statuses = {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job["id"])}
+    assert statuses["root"] == "completed"
+    assert statuses["left"] == "completed"
+    assert statuses["target"] == "completed"
+    assert statuses["right"] == "pending"
+
+    job_after = job_db.get_job(job["id"])
+    assert job_after is not None
+    assert job_after["status"] == "paused"
+    assert job_after["execution_paused"] == 1
+    assert job_after["pause_reason"] == "target_reached"
+
+
+def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS")
+
+    job = job_db.create_job(
+        pipeline_key="test",
+        source_type="question",
+        source_id="Q1",
+        batch_id="",
+        title="Q1",
+        node_keys=["root"],
+        workspace_id=ws["id"],
+    )
+    job_db.set_job_execution_target(job["id"], "root")
+    _bind(job_db, ws["id"], "test", "root", "local-default")
+    _allocate(job_db, ws["id"], "local-default", 2)
+
+    # Simulate a worker with a stale snapshot by calling try_claim directly.
+    leases = ExecutorLeaseRepository(db_path)
+    from server.app.executors.models import LeaseClaimRequest
+
+    job_db.set_job_execution_target(job["id"], "other")
+    claim = leases.try_claim(
+        LeaseClaimRequest(
+            executor_id="local-default",
+            global_capacity=2,
+            workspace_id=ws["id"],
+            job_id=job["id"],
+            pipeline_key="test",
+            node_key="root",
+            capability="root",
+            local_node_limit=1,
+            lease_ttl_seconds=60,
+            log_path="/tmp/run.log",
+            execution_mode="until_node",
+            target_node_key="root",
+            allowed_node_keys=("root",),
+        )
+    )
+    assert claim is None
+
+    with job_db.connect() as conn:
+        runs = conn.execute("select * from node_runs where job_id=?", (job["id"],)).fetchall()
+        leases_rows = conn.execute(
+            "select * from executor_leases where job_id=?", (job["id"],)
+        ).fetchall()
+    assert len(runs) == 0
+    assert len(leases_rows) == 0
+
+
 def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")

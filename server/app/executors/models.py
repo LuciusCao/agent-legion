@@ -48,6 +48,9 @@ class LeaseClaimRequest:
     local_node_limit: int | None
     lease_ttl_seconds: int
     log_path: str
+    execution_mode: Literal["full", "until_node"] = "full"
+    target_node_key: str | None = None
+    allowed_node_keys: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)

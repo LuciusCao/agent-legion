@@ -4,7 +4,11 @@ import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
 
-from server.app.executors._lease_transactions import _sqlite_timestamp, _sync_job_status
+from server.app.executors._lease_control import (
+    _pause_job_on_target_completion,
+    _sync_job_status,
+)
+from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 
 
@@ -85,6 +89,10 @@ def finish_lease(conn: sqlite3.Connection, lease_id: str, result: ExecutionResul
     )
 
     _sync_job_status(conn, lease["job_id"])
+
+    if result.status == "completed":
+        _pause_job_on_target_completion(conn, lease["job_id"], lease["node_key"], now_str)
+
     return True
 
 
