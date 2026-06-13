@@ -29,11 +29,6 @@ class PipelineCatalogService:
                 {
                     "key": definition.key,
                     "label": definition.label,
-                    "concurrency": {
-                        "local": definition.concurrency.local,
-                        "agent": definition.concurrency.agent,
-                        "nodes": definition.concurrency.nodes,
-                    },
                 }
             )
         return pipelines
@@ -42,30 +37,19 @@ class PipelineCatalogService:
         definition = self.definition(pipeline_key)
         nodes: list[dict[str, Any]] = []
         for node in definition.nodes.values():
-            node_payload: dict[str, Any] = {
-                "key": node.key,
-                "label": node.label,
-                "capability": node.capability,
-                "runner": node.runner,
-                "after": node.after,
-                "inputs": node.inputs,
-                "outputs": node.outputs,
-            }
-            if node.agent is not None:
-                node_payload["agent"] = {
-                    "engine": node.agent.engine,
-                    "skill": node.agent.skill,
-                    "tools": node.agent.tools,
+            nodes.append(
+                {
+                    "key": node.key,
+                    "label": node.label,
+                    "capability": node.capability,
+                    "after": node.after,
+                    "inputs": node.inputs,
+                    "outputs": node.outputs,
                 }
-            nodes.append(node_payload)
+            )
         return {
             "key": definition.key,
             "label": definition.label,
-            "concurrency": {
-                "local": definition.concurrency.local,
-                "agent": definition.concurrency.agent,
-                "nodes": definition.concurrency.nodes,
-            },
             "intake": {
                 "modes": [
                     {

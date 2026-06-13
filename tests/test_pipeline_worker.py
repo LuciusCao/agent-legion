@@ -8,8 +8,6 @@ from fastapi.testclient import TestClient
 from server.app.cms.question import CmsQuestionDetail
 from server.app.jobs import JobQueries
 from server.app.pipelines.definition import (
-    PipelineAgent,
-    PipelineConcurrency,
     PipelineDefinition,
     PipelineIntake,
     PipelineNode,
@@ -228,7 +226,7 @@ def test_process_ready_pipeline_node_runs_root(tmp_path):
     assert (Path(job["storage_dir"]) / "question_context.json").exists()
 
 
-def test_process_ready_pipeline_node_marks_missing_local_handler_failed(tmp_path):
+def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
     job = queries.create_job(
@@ -239,25 +237,17 @@ def test_process_ready_pipeline_node_marks_missing_local_handler_failed(tmp_path
         title="Question Q102",
         node_keys=list(definition.nodes),
     )
-    for node_key in definition.nodes:
-        queries.update_job_node(job["id"], node_key, status="completed")
-    queries.update_job_node(job["id"], "assemble_package", status="pending")
-    for artifact_name in definition.nodes["assemble_package"].inputs:
-        (Path(job["storage_dir"]) / artifact_name).write_text("{}", encoding="utf-8")
 
-    processed = process_ready_pipeline_node(
-        job_db=queries,
-        definition=definition,
-        logs_dir=tmp_path / "logs",
-    )
+    from server.app.pipelines.executor import execute_local_node_once
 
-    assert processed is True
-    node = queries.get_job_node(job["id"], "assemble_package")
-    assert node["status"] == "failed"
-    assert "No local handler" in node["error_message"]
-    refreshed = queries.get_job(job["id"])
-    assert refreshed["status"] == "failed"
-    assert "No local handler" in refreshed["error_message"]
+    with pytest.raises(ValueError, match="No local handler"):
+        execute_local_node_once(
+            job_db=queries,
+            definition=definition,
+            job=job,
+            node_key="assemble_package",
+            logs_dir=tmp_path / "logs",
+        )
 
 
 def _make_fake_skill(skill_dir: Path) -> None:
@@ -429,7 +419,6 @@ def _make_test_definition(nodes: list[PipelineNode]) -> PipelineDefinition:
     return PipelineDefinition(
         key="test",
         label="Test",
-        concurrency=PipelineConcurrency(local=1, agent=1),
         intake=PipelineIntake(),
         nodes={n.key: n for n in nodes},
     )
@@ -502,8 +491,6 @@ def test_process_ready_pipeline_node_refreshes_job_status_when_no_local_nodes_re
                 key="agent_node",
                 label="Agent",
                 capability="agent_node",
-                runner="agent",
-                agent=PipelineAgent(engine="pi", skill="test/skill"),
             ),
         ]
     )
@@ -512,7 +499,6 @@ def test_process_ready_pipeline_node_refreshes_job_status_when_no_local_nodes_re
     job_db.list_jobs.return_value = [job]
 
     ready_node = MagicMock()
-    ready_node.runner = "agent"
 
     with (
         patch(

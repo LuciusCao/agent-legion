@@ -135,15 +135,9 @@ class WorkspaceConfigurationService:
             raise InvalidOperationError("Node concurrency must be at least 1")
 
         pipeline_config = {
-            "local": local_concurrency
-            if local_concurrency is not None
-            else pipeline.concurrency.local,
-            "agent": agent_concurrency
-            if agent_concurrency is not None
-            else pipeline.concurrency.agent,
-            "nodes": node_concurrency
-            if node_concurrency is not None
-            else (pipeline.concurrency.nodes or {}),
+            "local": local_concurrency if local_concurrency is not None else 1,
+            "agent": agent_concurrency if agent_concurrency is not None else 1,
+            "nodes": node_concurrency if node_concurrency is not None else {},
         }
         validate_workspace_executor_configuration(
             pipeline=pipeline,

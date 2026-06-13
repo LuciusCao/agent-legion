@@ -11,7 +11,6 @@ from server.app.executors.config import (
     PiExecutorConfig,
 )
 from server.app.pipelines.definition import (
-    PipelineConcurrency,
     PipelineDefinition,
     PipelineIntake,
     PipelineNode,
@@ -30,20 +29,17 @@ def context() -> ValidationContext:
     pipeline = PipelineDefinition(
         key="reading_analysis",
         label="Reading Analysis",
-        concurrency=PipelineConcurrency(local=1, agent=1),
         intake=PipelineIntake(),
         nodes={
             "fetch_questions": PipelineNode(
                 key="fetch_questions",
                 label="Fetch Questions",
                 capability="fetch_questions",
-                runner="local",
             ),
             "review_keywords": PipelineNode(
                 key="review_keywords",
                 label="Review Keywords",
                 capability="review_keywords",
-                runner="local",
             ),
         },
     )

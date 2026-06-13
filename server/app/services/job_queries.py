@@ -104,17 +104,12 @@ class JobQueryService:
             "pipeline": {
                 "key": definition.key,
                 "label": definition.label,
-                "concurrency": {
-                    "local": definition.concurrency.local,
-                    "agent": definition.concurrency.agent,
-                },
             },
             "nodes": [
                 {
                     "key": node.key,
                     "label": node.label,
                     "capability": node.capability,
-                    "runner": node.runner,
                     "after": node.after,
                     "inputs": node.inputs,
                     "outputs": node.outputs,

@@ -21,7 +21,7 @@ nodes:
 
 
 def test_pipeline_node_requires_non_empty_capability(tmp_path: Path) -> None:
-    path = write_pipeline(tmp_path, node_body="label: Fetch\nrunner: local\noutputs: [out.json]")
+    path = write_pipeline(tmp_path, node_body="label: Fetch\noutputs: [out.json]")
     with pytest.raises(PipelineDefinitionError, match="capability"):
         load_pipeline_definition(path)
 
@@ -29,7 +29,7 @@ def test_pipeline_node_requires_non_empty_capability(tmp_path: Path) -> None:
 def test_pipeline_node_loads_capability(tmp_path: Path) -> None:
     path = write_pipeline(
         tmp_path,
-        node_body="label: Fetch\ncapability: fetch_questions\nrunner: local\noutputs: [out.json]",
+        node_body="label: Fetch\ncapability: fetch_questions\noutputs: [out.json]",
     )
     assert load_pipeline_definition(path).nodes["one"].capability == "fetch_questions"
 
@@ -39,8 +39,6 @@ def test_load_question_content_definition():
 
     assert definition.key == "question_content"
     assert definition.label == "题目内容生成"
-    assert definition.concurrency.local == 8
-    assert definition.concurrency.agent == 2
     direct_mode = definition.intake.modes["direct_ids"]
     assert direct_mode.label == "直接输入 ID"
     assert direct_mode.input_field == "question_ids"
@@ -65,24 +63,19 @@ def test_load_question_content_definition():
     ]
 
 
-def test_load_reading_analysis_agent_contracts():
+def test_load_reading_analysis_capabilities():
     definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
 
     assert definition.key == "reading_analysis"
     assert definition.label == "题目审题分析 Pipeline"
-    assert definition.concurrency.local == 4
-    assert definition.concurrency.agent == 2
     assert set(definition.intake.modes) == {"batch_by_knowledge", "batch_by_ids"}
 
     node = definition.nodes["extract_keywords"]
-    assert node.runner == "agent"
-    assert node.agent is not None
-    assert node.agent.engine == "pi"
-    assert node.agent.skill == "reading_analysis/extract_keywords"
-    assert node.agent.tools == ["read", "write", "bash"]
-    assert definition.nodes["fetch_questions"].agent is None
-    assert definition.nodes["clean_and_parse"].agent is None
-    assert definition.nodes["mark_question"].agent is None
+    assert node.capability == "extract_keywords"
+    assert node.after == ["clean_and_parse"]
+    assert definition.nodes["fetch_questions"].capability == "fetch_questions"
+    assert definition.nodes["clean_and_parse"].capability == "clean_and_parse"
+    assert definition.nodes["mark_question"].capability == "mark_question"
 
 
 def test_reject_unknown_dependency(tmp_path):
@@ -94,7 +87,6 @@ label: Bad
 nodes:
   second:
     capability: second
-    runner: local
     after: [missing]
 """,
         encoding="utf-8",
@@ -113,11 +105,9 @@ label: Cycle
 nodes:
   a:
     capability: a
-    runner: local
     after: [b]
   b:
     capability: b
-    runner: local
     after: [a]
 """,
         encoding="utf-8",
@@ -127,26 +117,27 @@ nodes:
         load_pipeline_definition(config)
 
 
-def test_reject_invalid_runner(tmp_path):
-    config = tmp_path / "bad-runner.yaml"
+def test_reject_pipeline_concurrency(tmp_path):
+    config = tmp_path / "bad-concurrency.yaml"
     config.write_text(
         """
-key: bad_runner
-label: Bad Runner
+key: bad
+label: Bad
+concurrency:
+  local: 2
 nodes:
   one:
     capability: one
-    runner: remote
 """,
         encoding="utf-8",
     )
 
-    with pytest.raises(PipelineDefinitionError, match="runner"):
+    with pytest.raises(PipelineDefinitionError, match="Pipeline field 'concurrency' was removed"):
         load_pipeline_definition(config)
 
 
-def test_reject_agent_block_on_local_node(tmp_path):
-    config = tmp_path / "bad-agent-local.yaml"
+def test_reject_node_runner(tmp_path):
+    config = tmp_path / "bad-runner.yaml"
     config.write_text(
         """
 key: bad
@@ -155,6 +146,23 @@ nodes:
   one:
     capability: one
     runner: local
+""",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(PipelineDefinitionError, match="Node field 'runner' was removed"):
+        load_pipeline_definition(config)
+
+
+def test_reject_node_agent(tmp_path):
+    config = tmp_path / "bad-agent.yaml"
+    config.write_text(
+        """
+key: bad
+label: Bad
+nodes:
+  one:
+    capability: one
     agent:
       engine: pi
       skill: foo
@@ -162,133 +170,8 @@ nodes:
         encoding="utf-8",
     )
 
-    with pytest.raises(PipelineDefinitionError, match="agent block"):
+    with pytest.raises(PipelineDefinitionError, match="Node field 'agent' was removed"):
         load_pipeline_definition(config)
-
-
-def test_reject_unsupported_agent_engine(tmp_path):
-    config = tmp_path / "bad-engine.yaml"
-    config.write_text(
-        """
-key: bad
-label: Bad
-nodes:
-  one:
-    capability: one
-    runner: agent
-    agent:
-      engine: other
-      skill: foo
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(PipelineDefinitionError, match="engine"):
-        load_pipeline_definition(config)
-
-
-def test_reject_empty_agent_skill(tmp_path):
-    config = tmp_path / "bad-skill.yaml"
-    config.write_text(
-        """
-key: bad
-label: Bad
-nodes:
-  one:
-    capability: one
-    runner: agent
-    agent:
-      engine: pi
-      skill: ""
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(PipelineDefinitionError, match="skill"):
-        load_pipeline_definition(config)
-
-
-def test_reject_absolute_agent_skill(tmp_path):
-    config = tmp_path / "bad-abs-skill.yaml"
-    config.write_text(
-        """
-key: bad
-label: Bad
-nodes:
-  one:
-    capability: one
-    runner: agent
-    agent:
-      engine: pi
-      skill: /foo
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(PipelineDefinitionError, match="skill"):
-        load_pipeline_definition(config)
-
-
-def test_reject_parent_traversal_agent_skill(tmp_path):
-    config = tmp_path / "bad-traverse-skill.yaml"
-    config.write_text(
-        """
-key: bad
-label: Bad
-nodes:
-  one:
-    capability: one
-    runner: agent
-    agent:
-      engine: pi
-      skill: foo/../bar
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(PipelineDefinitionError, match="skill"):
-        load_pipeline_definition(config)
-
-
-def test_reject_invalid_agent_tool(tmp_path):
-    config = tmp_path / "bad-tool.yaml"
-    config.write_text(
-        """
-key: bad
-label: Bad
-nodes:
-  one:
-    capability: one
-    runner: agent
-    agent:
-      engine: pi
-      skill: foo
-      tools: [read, unknown]
-""",
-        encoding="utf-8",
-    )
-
-    with pytest.raises(PipelineDefinitionError, match="tool"):
-        load_pipeline_definition(config)
-
-
-def test_legacy_agent_node_without_agent_block_is_readable(tmp_path):
-    config = tmp_path / "legacy.yaml"
-    config.write_text(
-        """
-key: legacy
-label: Legacy
-nodes:
-  one:
-    capability: one
-    runner: agent
-""",
-        encoding="utf-8",
-    )
-
-    definition = load_pipeline_definition(config)
-    assert definition.nodes["one"].runner == "agent"
-    assert definition.nodes["one"].agent is None
 
 
 def test_node_label_fallback_to_key(tmp_path):
@@ -300,7 +183,6 @@ label: No Label
 nodes:
   one:
     capability: one
-    runner: local
 """,
         encoding="utf-8",
     )
@@ -318,87 +200,8 @@ nodes:
   one:
     label: 步骤一
     capability: one
-    runner: local
 """,
         encoding="utf-8",
     )
     definition = load_pipeline_definition(config)
     assert definition.nodes["one"].label == "步骤一"
-
-
-def test_loads_node_concurrency(tmp_path):
-    config = tmp_path / "node-concurrency.yaml"
-    config.write_text(
-        """
-key: node_concurrency
-label: Node Concurrency
-concurrency:
-  local: 4
-  agent: 2
-  nodes:
-    fetch_questions: 10
-    clean_and_parse: 2
-    mark_question: 10
-nodes:
-  fetch_questions:
-    capability: fetch_questions
-    runner: local
-  clean_and_parse:
-    capability: clean_and_parse
-    runner: local
-    after: [fetch_questions]
-  mark_question:
-    capability: mark_question
-    runner: local
-    after: [clean_and_parse]
-""",
-        encoding="utf-8",
-    )
-    definition = load_pipeline_definition(config)
-    assert definition.concurrency.nodes == {
-        "fetch_questions": 10,
-        "clean_and_parse": 2,
-        "mark_question": 10,
-    }
-
-
-def test_missing_nodes_defaults_to_empty(tmp_path):
-    config = tmp_path / "no-node-concurrency.yaml"
-    config.write_text(
-        """
-key: no_node_concurrency
-label: No Node Concurrency
-concurrency:
-  local: 4
-  agent: 2
-nodes:
-  one:
-    capability: one
-    runner: local
-""",
-        encoding="utf-8",
-    )
-    definition = load_pipeline_definition(config)
-    assert definition.concurrency.nodes == {}
-
-
-def test_invalid_node_limit_rejected(tmp_path):
-    config = tmp_path / "bad-node-limit.yaml"
-    config.write_text(
-        """
-key: bad_node_limit
-label: Bad Node Limit
-concurrency:
-  local: 4
-  agent: 2
-  nodes:
-    one: invalid
-nodes:
-  one:
-    capability: one
-    runner: local
-""",
-        encoding="utf-8",
-    )
-    with pytest.raises(PipelineDefinitionError, match="concurrency.nodes"):
-        load_pipeline_definition(config)

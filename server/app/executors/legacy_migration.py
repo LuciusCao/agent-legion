@@ -274,7 +274,7 @@ def _materialize_workspace(
     pipeline_config = workspace["pipeline_config"]
     local_limit = pipeline_config.get("local")
     if not _is_positive_int(local_limit):
-        local_limit = definition.concurrency.local
+        local_limit = 1
 
     pi_assignment = next(
         (a for a in workspace["agent_assignments"] if a["agent_id"] == "pi"),
@@ -330,7 +330,7 @@ def _materialize_workspace(
             if binding_key not in existing.node_limits:
                 node_limit = node_limits_raw.get(node.key)
                 if not _is_positive_int(node_limit):
-                    node_limit = definition.concurrency.nodes.get(node.key)
+                    node_limit = 1
                 if _is_positive_int(node_limit):
                     conn.execute(
                         """
