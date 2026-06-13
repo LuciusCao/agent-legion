@@ -6,6 +6,7 @@ from typing import Any
 
 from server.app.cms.client import get_token
 from server.app.cms.question import CmsQuestionDetail, fetch_question_detail
+from server.app.executors.cancellation import check_cancellation
 from server.app.pipelines.resources import resolve_cms_resource
 
 
@@ -60,11 +61,13 @@ def fetch_question_context(
     context: dict[str, Any] | None = None,
 ) -> None:
     context = context or {}
+    check_cancellation(context)
     cms_config = _effective_cms_config(job, context)
     api_url = cms_config.get("api_url") or cms_config.get("question_detail_url")
     if api_url:
         token = get_token(str(cms_config.get("env", "")), cms_config)
         detail = fetch_question_detail(str(job["source_id"]), str(api_url), token)
+        check_cancellation(context)
         payload = _payload_from_detail(job, detail)
     else:
         payload = _base_payload(job)
@@ -107,6 +110,7 @@ def assemble_package(
     }
 
     for name in inputs:
+        check_cancellation(context)
         path = artifact_dir / name
         if path.is_file():
             if name.endswith(".md"):

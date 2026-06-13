@@ -66,6 +66,10 @@ def make_pipeline_worker(
 
     definition = load_registered_pipeline(Path("."), pipeline_key)
     settings = app_main.load_settings(data_dir=tmp_path)
+    # Avoid real CMS/network calls in tests; isolated child processes re-import
+    # modules and do not inherit parent monkeypatches.
+    settings.config.pop("cms", None)
+    settings.config.pop("resource_providers", None)
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
             "pipelines": {

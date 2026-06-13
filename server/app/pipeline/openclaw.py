@@ -5,9 +5,12 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
+from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.models import ExecutionStatus
 from server.app.pipeline.agent_workspace import cleanup_agent_workspace_files
 
@@ -92,13 +95,16 @@ class OpenClawRunner:
         skill_safety: SkillSafetyConfig | None = None,
         isolated_workspace_root: Path | None = None,
         agent_id: str | None = None,
+        cancellation_grace_seconds: int = 5,
     ):
         self.command_template = command_template
         self.cwd = cwd
         self.timeout_seconds = timeout_seconds
+        self.cancellation_grace_seconds = cancellation_grace_seconds
         self.agent_id = agent_id or self._extract_agent_id(command_template)
         self.skill_safety = skill_safety
         self.isolated_workspace_root = isolated_workspace_root
+        self._tracker = SubprocessTracker(grace_seconds=cancellation_grace_seconds)
 
     @staticmethod
     def _extract_agent_id(command_template: list[str]) -> str:
@@ -122,8 +128,6 @@ class OpenClawRunner:
         return value
 
     def render_command(self, video_id: str, video_dir: Path, prompt_file: Path) -> list[str]:
-        import time
-
         prompt_text = prompt_file.read_text(encoding="utf-8") if prompt_file.exists() else ""
         replacements = {
             "{video_id}": video_id,
@@ -148,6 +152,8 @@ class OpenClawRunner:
         expected_outputs: tuple[str, ...] | list[str],
         log_path: Path,
         json_outputs: tuple[str, ...] | list[str] | None = None,
+        cancellation_token: CancellationToken | None = None,
+        tracker: SubprocessTracker | None = None,
     ) -> AgentRunResult:
         """Run one Workspace prompt through this configured OpenClaw agent."""
         if self.skill_safety is not None and self.skill_safety.enabled:
@@ -169,17 +175,34 @@ class OpenClawRunner:
             isolated_cwd.mkdir(parents=True, exist_ok=True)
             run_cwd = isolated_cwd
 
+        effective_tracker = tracker or self._tracker
         with log_path.open("w", encoding="utf-8") as log:
             try:
-                completed = subprocess.run(
+                proc = subprocess.Popen(
                     command,
                     cwd=run_cwd,
                     shell=False,
                     text=True,
                     stdout=log,
                     stderr=subprocess.STDOUT,
-                    timeout=self.timeout_seconds,
+                    start_new_session=True,
                 )
+                effective_tracker.register(execution_id, proc)
+                try:
+                    exit_code, error_message = self._wait_for_process(
+                        proc,
+                        command=command,
+                        cancellation_token=cancellation_token,
+                        tracker=effective_tracker,
+                        execution_id=execution_id,
+                    )
+                finally:
+                    effective_tracker.unregister(execution_id)
+            except FileNotFoundError:
+                cleanup_agent_workspace_files(work_dir)
+                if isolated_cwd is not None:
+                    shutil.rmtree(isolated_cwd, ignore_errors=True)
+                return AgentRunResult("failed", 127, command, "openclaw binary not found")
             except subprocess.TimeoutExpired:
                 cleanup_agent_workspace_files(work_dir)
                 if isolated_cwd is not None:
@@ -190,15 +213,15 @@ class OpenClawRunner:
                 if isolated_cwd is not None:
                     shutil.rmtree(isolated_cwd, ignore_errors=True)
 
-        if completed.returncode != 0:
+        if exit_code != 0:
             return AgentRunResult(
-                "failed", completed.returncode, command, "openclaw command failed"
+                "failed", exit_code, command, error_message or "openclaw command failed"
             )
 
         missing = [name for name in expected_outputs if not (work_dir / name).exists()]
         if missing:
             return AgentRunResult(
-                "failed", completed.returncode, command, f"missing outputs: {', '.join(missing)}"
+                "failed", exit_code, command, f"missing outputs: {', '.join(missing)}"
             )
 
         json_outputs = json_outputs or ()
@@ -206,11 +229,45 @@ class OpenClawRunner:
             try:
                 json.loads((work_dir / name).read_text(encoding="utf-8"))
             except Exception as exc:
-                return AgentRunResult(
-                    "failed", completed.returncode, command, f"invalid json {name}: {exc}"
-                )
+                return AgentRunResult("failed", exit_code, command, f"invalid json {name}: {exc}")
 
-        return AgentRunResult("completed", completed.returncode, command)
+        return AgentRunResult("completed", exit_code, command)
+
+    def _wait_for_process(
+        self,
+        proc: subprocess.Popen[Any],
+        *,
+        command: list[str],
+        cancellation_token: CancellationToken | None,
+        tracker: SubprocessTracker,
+        execution_id: str,
+    ) -> tuple[int, str]:
+        start = time.monotonic()
+        while True:
+            if cancellation_token is not None and cancellation_token.wait(timeout=0.05):
+                tracker.cancel(execution_id)
+                return self._collect_exit(proc, cancelled=True)
+            poll = proc.poll()
+            if poll is not None:
+                return poll, ""
+            if time.monotonic() - start > self.timeout_seconds:
+                tracker.cancel(execution_id)
+                return -1, "openclaw command timed out"
+
+    def _collect_exit(
+        self, proc: subprocess.Popen[Any], cancelled: bool = False
+    ) -> tuple[int, str]:
+        try:
+            exit_code = proc.wait(timeout=self.cancellation_grace_seconds)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            exit_code = -1
+        return exit_code, "execution was cancelled" if cancelled else ""
+
+    def cancel(self, execution_id: str) -> None:
+        """Public cancellation hook used by executor adapters."""
+        self._tracker.cancel(execution_id)
 
     def run(
         self,

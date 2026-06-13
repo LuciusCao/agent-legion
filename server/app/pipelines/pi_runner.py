@@ -6,11 +6,13 @@ import logging
 import os
 import subprocess
 import sys
+import time
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.models import ExecutionStatus
 from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.jobs import JobQueries
@@ -26,6 +28,7 @@ class PiConfig:
     model: str = ""
     thinking: str = "low"
     timeout_seconds: int = 600
+    cancellation_grace_seconds: int = 5
     environment: dict[str, str] = field(default_factory=dict)
 
     @classmethod
@@ -37,6 +40,7 @@ class PiConfig:
             model=config.model,
             thinking=config.thinking or "low",
             timeout_seconds=config.timeout_seconds,
+            cancellation_grace_seconds=config.cancellation_grace_seconds,
             environment=dict(config.environment),
         )
 
@@ -126,6 +130,9 @@ class PiRunner:
         persist_run: bool = True,
         job_dir: Path | None = None,
         jobs_dir: Path | None = None,
+        execution_id: str | None = None,
+        cancellation_token: CancellationToken | None = None,
+        tracker: SubprocessTracker | None = None,
     ) -> PiRunResult:
         if job_dir is None:
             if jobs_dir is None:
@@ -203,18 +210,21 @@ class PiRunner:
                     stderr=stderr_fh,
                     cwd=str(job_dir),
                     env=env,
+                    start_new_session=True,
                 )
+                effective_execution_id = execution_id or run_token
+                if tracker is not None:
+                    tracker.register(effective_execution_id, proc)
                 try:
-                    exit_code = proc.wait(timeout=self.config.timeout_seconds)
-                except subprocess.TimeoutExpired:
-                    proc.terminate()
-                    try:
-                        proc.wait(timeout=5)
-                    except subprocess.TimeoutExpired:
-                        proc.kill()
-                        proc.wait()
-                    exit_code = -1
-                    error_message = f"Pi session timed out after {self.config.timeout_seconds}s"
+                    exit_code, error_message = self._wait_for_process(
+                        proc,
+                        cancellation_token=cancellation_token,
+                        tracker=tracker,
+                        execution_id=effective_execution_id,
+                    )
+                finally:
+                    if tracker is not None:
+                        tracker.unregister(effective_execution_id)
         except FileNotFoundError:
             exit_code = 127
             error_message = f"Pi binary not found: {self.config.binary}"
@@ -278,6 +288,52 @@ class PiRunner:
             session_dir=session_dir,
             error_message=error_message,
         )
+
+    def _wait_for_process(
+        self,
+        proc: subprocess.Popen[Any],
+        *,
+        cancellation_token: CancellationToken | None,
+        tracker: SubprocessTracker | None,
+        execution_id: str,
+    ) -> tuple[int, str]:
+        start = time.monotonic()
+        while True:
+            if cancellation_token is not None and cancellation_token.wait(timeout=0.05):
+                if tracker is not None:
+                    tracker.cancel(execution_id)
+                else:
+                    self._terminate_direct(proc)
+                return self._collect_exit(proc, cancelled=True)
+            poll = proc.poll()
+            if poll is not None:
+                return poll, ""
+            if time.monotonic() - start > self.config.timeout_seconds:
+                if tracker is not None:
+                    tracker.cancel(execution_id)
+                else:
+                    self._terminate_direct(proc)
+                return -1, f"Pi session timed out after {self.config.timeout_seconds}s"
+
+    def _terminate_direct(self, proc: subprocess.Popen[Any]) -> None:
+        proc.terminate()
+        try:
+            proc.wait(timeout=self.config.cancellation_grace_seconds)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+
+    def _collect_exit(
+        self, proc: subprocess.Popen[Any], cancelled: bool = False
+    ) -> tuple[int, str]:
+        try:
+            exit_code = proc.wait(timeout=self.config.cancellation_grace_seconds)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+            exit_code = -1
+        error_message = "execution was cancelled" if cancelled else ""
+        return exit_code, error_message
 
     def _build_prompt(
         self,

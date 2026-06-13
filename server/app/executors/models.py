@@ -1,5 +1,5 @@
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal
 
@@ -23,6 +23,7 @@ class ExecutionContext:
     log_path: Path
     inputs: tuple[str, ...]
     expected_outputs: tuple[str, ...]
+    runtime: Mapping[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)

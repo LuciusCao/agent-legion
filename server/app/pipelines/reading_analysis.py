@@ -6,6 +6,7 @@ from typing import Any
 
 from server.app.cms.client import get_token
 from server.app.cms.question import fetch_question_detail
+from server.app.executors.cancellation import check_cancellation
 from server.app.pipelines.question_content import _effective_cms_config
 
 
@@ -15,6 +16,7 @@ def fetch_questions(
     context: dict[str, Any] | None = None,
 ) -> None:
     context = context or {}
+    check_cancellation(context)
     settings_config = context.get("settings_config")
     if not isinstance(settings_config, dict):
         settings_config = {}
@@ -24,6 +26,7 @@ def fetch_questions(
     if api_url:
         token = get_token(str(cms_config.get("env", "")), cms_config)
         detail = fetch_question_detail(str(job["source_id"]), str(api_url), token)
+        check_cancellation(context)
         payload = {
             "question_id": detail.question_id or job["source_id"],
             "title": detail.title or job["title"],
@@ -54,6 +57,7 @@ def clean_and_parse(
     if not questions_path.is_file():
         raise ValueError("questions.json not found")
 
+    check_cancellation(context)
     data = json.loads(questions_path.read_text(encoding="utf-8"))
     questions = data.get("questions", [])
     if not isinstance(questions, list) or not questions:
@@ -61,6 +65,7 @@ def clean_and_parse(
 
     parsed_questions: list[dict[str, Any]] = []
     for q in questions:
+        check_cancellation(context)
         if not isinstance(q, dict):
             raise ValueError("Invalid question record in questions.json")
         qid = q.get("question_id")
@@ -97,8 +102,10 @@ def mark_question(
         "distractors": artifact_dir / "distractors_reviewed.json",
     }
 
+    check_cancellation(context)
     data: dict[str, Any] = {}
     for key, path in inputs.items():
+        check_cancellation(context)
         if not path.is_file():
             raise ValueError(f"Missing input: {path.name}")
         content = json.loads(path.read_text(encoding="utf-8"))

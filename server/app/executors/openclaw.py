@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from pathlib import Path
 
+from server.app.executors.cancellation import CancellationToken
 from server.app.executors.config import OpenClawCapabilityConfig, OpenClawExecutorConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.runtime_config import OpenClawRuntimeConfig
@@ -33,6 +35,7 @@ def build_openclaw_executor(
         command_template=command_template,
         cwd=Path(runtime.cwd),
         timeout_seconds=runtime.timeout_seconds,
+        cancellation_grace_seconds=runtime.cancellation_grace_seconds,
         skill_safety=skill_safety,
         isolated_workspace_root=isolated_root,
         agent_id=config.agent_id,
@@ -125,12 +128,17 @@ class OpenClawExecutor:
         context.job_dir.mkdir(parents=True, exist_ok=True)
         context.log_path.parent.mkdir(parents=True, exist_ok=True)
 
+        raw_token = (
+            context.runtime.get("cancellation") if isinstance(context.runtime, Mapping) else None
+        )
+        token = raw_token if isinstance(raw_token, CancellationToken) else None
         result = self.runner.run_prompt(
             execution_id=context.execution_id,
             work_dir=context.job_dir,
             prompt_text=prompt_text,
             expected_outputs=context.expected_outputs,
             log_path=context.log_path,
+            cancellation_token=token,
         )
 
         produced = tuple(
@@ -147,3 +155,4 @@ class OpenClawExecutor:
 
     def cancel(self, execution_id: str) -> None:
         self._cancelled.add(execution_id)
+        self.runner.cancel(execution_id)
