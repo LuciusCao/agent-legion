@@ -65,6 +65,19 @@ class JobExecutionControlMixin:
         target = (target_node_key or "").strip()
         if not target:
             raise ValueError("target_node_key is required")
+        with self.connect() as conn:
+            job = conn.execute(
+                "select pipeline_key from jobs where id=?",
+                (job_id,),
+            ).fetchone()
+            if job is None:
+                raise ValueError("Job not found")
+            node = conn.execute(
+                "select 1 from job_nodes where job_id=? and node_key=?",
+                (job_id, target),
+            ).fetchone()
+            if node is None:
+                raise ValueError(f"Unknown target node {target!r} for job {job_id}")
         self.set_job_execution_mode(job_id, "until_node", target_node_key=target)
 
     def clear_job_execution_target(self: _JobQueries, job_id: str) -> None:
@@ -100,16 +113,38 @@ class JobExecutionControlMixin:
 
     def resume_job(self: _JobQueries, job_id: str) -> None:
         with self.connect() as conn:
-            cursor = conn.execute(
-                """
-                update jobs
-                set execution_paused=0,
-                    pause_reason='',
-                    updated_at=current_timestamp
-                where id=?
-                """,
+            job = conn.execute(
+                "select pause_reason from jobs where id=?",
                 (job_id,),
-            )
+            ).fetchone()
+            if job is None:
+                raise ValueError("Job not found")
+            if job["pause_reason"] == "target_reached":
+                cursor = conn.execute(
+                    """
+                    update jobs
+                    set status='running',
+                        execution_paused=0,
+                        execution_mode='full',
+                        target_node_key=null,
+                        pause_reason='',
+                        updated_at=current_timestamp
+                    where id=?
+                    """,
+                    (job_id,),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    update jobs
+                    set status='running',
+                        execution_paused=0,
+                        pause_reason='',
+                        updated_at=current_timestamp
+                    where id=?
+                    """,
+                    (job_id,),
+                )
             if cursor.rowcount == 0:
                 raise ValueError("Job not found")
 

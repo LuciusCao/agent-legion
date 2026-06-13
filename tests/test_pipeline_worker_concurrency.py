@@ -561,7 +561,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
         source_id="Q1",
         batch_id="",
         title="Q1",
-        node_keys=["root"],
+        node_keys=["root", "left"],
         workspace_id=ws["id"],
     )
     job_db.set_job_execution_target(job["id"], "root")
@@ -572,7 +572,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
     leases = ExecutorLeaseRepository(db_path)
     from server.app.executors.models import LeaseClaimRequest
 
-    job_db.set_job_execution_target(job["id"], "other")
+    job_db.set_job_execution_target(job["id"], "left")
     claim = leases.try_claim(
         LeaseClaimRequest(
             executor_id="local-default",

@@ -144,7 +144,6 @@ def _claim_request(
 
 def _setup_workspace(
     queries: JobQueries,
-    repo: ExecutorLeaseRepository,
     definition: PipelineDefinition,
     target_node_key: str | None = None,
     executor_id: str = "local-default",
@@ -202,7 +201,7 @@ def test_unrelated_node_not_claimable_in_until_node_mode(
     repo: ExecutorLeaseRepository,
 ) -> None:
     definition = _branched_definition()
-    workspace_id, job_id = _setup_workspace(queries, repo, definition, target_node_key="target")
+    workspace_id, job_id = _setup_workspace(queries, definition, target_node_key="target")
     allowed = allowed_nodes(
         definition,
         {"execution_mode": "until_node", "target_node_key": "target"},
@@ -244,7 +243,7 @@ def test_stale_target_snapshot_rejected_and_no_state_persisted(
 ) -> None:
     """Worker computes ready nodes, then the job target changes before try_claim."""
     definition = _branched_definition()
-    workspace_id, job_id = _setup_workspace(queries, repo, definition, target_node_key="target")
+    workspace_id, job_id = _setup_workspace(queries, definition, target_node_key="target")
 
     # Simulate an old snapshot computed when the target was "target".
     stale_snapshot = {
@@ -283,7 +282,7 @@ def test_paused_job_rejects_claim_and_creates_no_state(
     repo: ExecutorLeaseRepository,
 ) -> None:
     definition = _branched_definition()
-    workspace_id, job_id = _setup_workspace(queries, repo, definition, target_node_key="target")
+    workspace_id, job_id = _setup_workspace(queries, definition, target_node_key="target")
     queries.pause_job(job_id, "awaiting_resources")
 
     allowed = allowed_nodes(
@@ -315,7 +314,7 @@ def test_target_completion_pauses_job_atomically(
     repo: ExecutorLeaseRepository,
 ) -> None:
     definition = _branched_definition()
-    workspace_id, job_id = _setup_workspace(queries, repo, definition, target_node_key="target")
+    workspace_id, job_id = _setup_workspace(queries, definition, target_node_key="target")
     allowed = allowed_nodes(
         definition,
         {"execution_mode": "until_node", "target_node_key": "target"},
