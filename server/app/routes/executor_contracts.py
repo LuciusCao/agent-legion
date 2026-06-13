@@ -1,6 +1,6 @@
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ExecutorDefinitionResponse(BaseModel):
@@ -51,6 +51,8 @@ class WorkspaceSettingsPayload(BaseModel):
 
 
 class WorkspaceConfigurationSettingsRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     entityType: str | None = None
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
@@ -59,6 +61,8 @@ class WorkspaceConfigurationSettingsRequest(BaseModel):
 
 
 class WorkspaceConfigurationRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str | None = None
     description: str | None = None
     settings: WorkspaceConfigurationSettingsRequest
