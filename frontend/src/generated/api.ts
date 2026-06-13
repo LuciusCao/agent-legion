@@ -998,6 +998,16 @@ export interface components {
       /** Results */
       results: components['schemas']['DeleteResult'][]
     }
+    /** BatchJobIdsRequest */
+    BatchJobIdsRequest: {
+      /** Job Ids */
+      job_ids?: string[]
+    }
+    /** BatchJobMutationResponse */
+    BatchJobMutationResponse: {
+      /** Results */
+      results: components['schemas']['JobMutationResultResponse'][]
+    }
     /** BatchJobRequest */
     BatchJobRequest: {
       /** Job Ids */
@@ -1180,6 +1190,27 @@ export interface components {
       run_id: number
       /** Truncated */
       truncated: boolean
+    }
+    /** JobMutationResultResponse */
+    JobMutationResultResponse: {
+      /** Job Id */
+      job_id: string
+      /** Message */
+      message?: string | null
+      /** Node Key */
+      node_key?: string | null
+      /**
+       * Operation
+       * @enum {string}
+       */
+      operation: 'rerun' | 'run_to' | 'continue' | 'delete' | 'package'
+      /** Reason Code */
+      reason_code?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'succeeded' | 'skipped' | 'failed'
     }
     /** JobNodeResponse */
     JobNodeResponse: {
@@ -1641,6 +1672,38 @@ export interface components {
       migration_warnings: string[]
       /** Node Limits */
       node_limits: components['schemas']['NodeLimitRequest'][]
+    }
+    /** WorkspacePackageRequest */
+    WorkspacePackageRequest: {
+      /** Job Ids */
+      job_ids?: string[]
+    }
+    /** WorkspacePackageResponse */
+    WorkspacePackageResponse: {
+      /** Download Url */
+      download_url?: string | null
+      /** Failed Count */
+      failed_count: number
+      /** Package Filename */
+      package_filename?: string | null
+      /** Results */
+      results: components['schemas']['WorkspacePackageResultResponse'][]
+      /** Succeeded Count */
+      succeeded_count: number
+    }
+    /** WorkspacePackageResultResponse */
+    WorkspacePackageResultResponse: {
+      /** Job Id */
+      job_id: string
+      /** Message */
+      message?: string | null
+      /** Reason Code */
+      reason_code?: string | null
+      /**
+       * Status
+       * @enum {string}
+       */
+      status: 'succeeded' | 'failed'
     }
     /** WorkspaceResponse */
     WorkspaceResponse: {
@@ -3301,7 +3364,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['BatchJobRequest']
+        'application/json': components['schemas']['BatchJobIdsRequest']
       }
     }
     responses: {
@@ -3311,7 +3374,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['BatchJobResponse']
+          'application/json': components['schemas']['BatchJobMutationResponse']
         }
       }
       /** @description Validation Error */
@@ -3371,7 +3434,7 @@ export interface operations {
     }
     requestBody: {
       content: {
-        'application/json': components['schemas']['PackageRequest']
+        'application/json': components['schemas']['WorkspacePackageRequest']
       }
     }
     responses: {
@@ -3381,7 +3444,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': components['schemas']['PackageResponse']
+          'application/json': components['schemas']['WorkspacePackageResponse']
         }
       }
       /** @description Validation Error */

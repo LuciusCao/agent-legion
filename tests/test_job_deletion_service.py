@@ -1,0 +1,177 @@
+from __future__ import annotations
+
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+from typing import Any
+
+from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors.leases import ExecutorLeaseRepository
+from server.app.jobs import JobQueries
+from server.app.services.job_deletion import JobDeletionService
+from server.app.settings import Settings
+
+
+def _create_settings(tmp_path: Path) -> Settings:
+    return Settings(
+        root_dir=tmp_path,
+        data_dir=tmp_path / "data",
+        videos_dir=tmp_path / "data" / "videos",
+        logs_dir=tmp_path / "data" / "logs",
+        packages_dir=tmp_path / "data" / "packages",
+        jobs_dir=tmp_path / "data" / "jobs",
+        config={},
+    )
+
+
+def _create_job(
+    job_db: JobQueries, workspace_id: str, source_id: str, status: str = "queued"
+) -> dict[str, Any]:
+    job_db.create_workspace(workspace_id)
+    batch = job_db.create_batch(
+        "question_content", "direct_ids", {"question_ids": [source_id]}, workspace_id
+    )
+    job = job_db.create_job(
+        "question_content",
+        "question",
+        source_id,
+        batch["id"],
+        f"Job {source_id}",
+        ["extract_question"],
+        workspace_id=workspace_id,
+    )
+    if status != "queued":
+        job_db.update_job_status(job["id"], status)
+    return job
+
+
+def _insert_active_lease(
+    job_db: JobQueries,
+    job_id: str,
+    node_key: str = "extract_question",
+    expires_in_seconds: int = 300,
+) -> None:
+    now = datetime.now(UTC)
+    expires = now + timedelta(seconds=expires_in_seconds)
+    workspace_id = job_id.split("_")[0]
+    with job_db.connect() as conn:
+        cursor = conn.execute(
+            """
+            insert into node_runs(job_id, node_key, status, command_json, log_path, run_dir, session_dir, started_at)
+            values (?, ?, 'running', ?, ?, '', '', ?)
+            """,
+            (job_id, node_key, "[]", "", _sqlite_timestamp(now)),
+        )
+        node_run_id = cursor.lastrowid
+        conn.execute(
+            """
+            insert into executor_leases(
+                id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+                node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            """,
+            (
+                f"lease-{job_id}",
+                f"exec-{job_id}",
+                "local",
+                workspace_id,
+                job_id,
+                "question_content",
+                node_key,
+                node_run_id,
+                _sqlite_timestamp(now),
+                _sqlite_timestamp(now),
+                _sqlite_timestamp(expires),
+            ),
+        )
+
+
+def test_delete_rejects_active_lease_despite_stale_ui(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+
+    job = _create_job(job_db, "ws1", "Q001", status="queued")
+    # Stale UI still shows queued, but an active non-expired lease exists.
+    _insert_active_lease(job_db, job["id"])
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["job_id"] == job["id"]
+    assert result["operation"] == "delete"
+    assert result["status"] == "failed"
+    assert result["reason_code"] == "active_lease"
+    # Database row and storage directory must remain intact.
+    assert job_db.get_job(job["id"]) is not None
+    assert Path(str(job["storage_dir"])).exists()
+
+
+def test_delete_succeeds_for_inactive_job(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+
+    job = _create_job(job_db, "ws2", "Q002", status="completed")
+    storage_dir = Path(str(job["storage_dir"]))
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "artifact.json").write_text("{}", encoding="utf-8")
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["job_id"] == job["id"]
+    assert result["operation"] == "delete"
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert not storage_dir.exists()
+
+
+def test_delete_rejects_wrong_workspace(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+
+    job = _create_job(job_db, "ws3", "Q003", status="completed")
+
+    result = service.delete("other-workspace", job["id"])
+
+    assert result["job_id"] == job["id"]
+    assert result["operation"] == "delete"
+    assert result["status"] == "failed"
+    assert result["reason_code"] == "wrong_workspace"
+
+
+def test_delete_rejects_missing_job(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+
+    result = service.delete("ws-missing", "missing-job-id")
+
+    assert result["job_id"] == "missing-job-id"
+    assert result["operation"] == "delete"
+    assert result["status"] == "failed"
+    assert result["reason_code"] == "not_found"
+
+
+def test_batch_delete_returns_ordered_results(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+
+    job_a = _create_job(job_db, "ws4", "Q004", status="completed")
+    job_b = _create_job(job_db, "ws4", "Q005", status="completed")
+    job_c = _create_job(job_db, "ws5", "Q006", status="completed")
+    _insert_active_lease(job_db, job_b["id"])
+
+    results = service.batch_delete(
+        job_a["workspace_id"], [job_a["id"], job_b["id"], job_c["id"], "missing"]
+    )
+
+    assert [r["job_id"] for r in results] == [job_a["id"], job_b["id"], job_c["id"], "missing"]
+    assert results[0]["status"] == "succeeded"
+    assert results[1]["status"] == "failed"
+    assert results[1]["reason_code"] == "active_lease"
+    assert results[2]["status"] == "failed"
+    assert results[2]["reason_code"] == "wrong_workspace"
+    assert results[3]["status"] == "failed"
+    assert results[3]["reason_code"] == "not_found"

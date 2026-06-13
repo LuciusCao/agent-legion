@@ -14,10 +14,12 @@ from pydantic import BaseModel
 from ..db import Database
 from ..events import VideoEventManager
 from ..jobs import JobQueries
-from ..pipeline.package import create_package, create_workspace_package
+from ..pipeline.package import create_package
 from ..security import validate_package_filename
+from ..services.job_packages import JobPackageService
 from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
+from .job_operation_contracts import WorkspacePackageRequest, WorkspacePackageResponse
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +42,14 @@ class PackageResponse(BaseModel):
 
 
 def create_packages_router(
-    db: Database, job_db: JobQueries, settings: Settings, video_event_manager: VideoEventManager
+    db: Database,
+    job_db: JobQueries,
+    settings: Settings,
+    video_event_manager: VideoEventManager,
+    job_packages: JobPackageService | None = None,
 ) -> APIRouter:
+    if job_packages is None:
+        job_packages = JobPackageService(job_db, settings)
     router = APIRouter(tags=["packages"])
 
     @router.post("/package", response_model=PackageResponse)
@@ -178,29 +186,13 @@ def create_packages_router(
                 )
         return {"packages": packages}
 
-    @router.post("/workspaces/{workspace_id}/jobs/package", response_model=PackageResponse)
-    def package_workspace_jobs(workspace_id: str, request: PackageRequest) -> dict[str, bool]:
-        job_ids = request.video_ids or []
-        if not job_ids:
+    @router.post("/workspaces/{workspace_id}/jobs/package", response_model=WorkspacePackageResponse)
+    def package_workspace_jobs(
+        workspace_id: str, request: WorkspacePackageRequest
+    ) -> WorkspacePackageResponse:
+        if not request.job_ids:
             raise HTTPException(status_code=400, detail="No job_ids provided")
-
-        jobs = []
-        for job_id in job_ids:
-            job = job_db.get_job(job_id)
-            if job and job.get("status") == "completed":
-                jobs.append(job)
-
-        if not jobs:
-            raise HTTPException(status_code=400, detail="No completed jobs to package")
-
-        workspace_packages_dir = settings.packages_dir / f"workspace-{workspace_id}"
-        workspace_packages_dir.mkdir(parents=True, exist_ok=True)
-
-        package_path, count = create_workspace_package(
-            jobs, workspace_packages_dir, settings.jobs_dir
-        )
-
-        return {"accepted": True}
+        return WorkspacePackageResponse(**job_packages.package(workspace_id, request.job_ids))
 
     @router.get("/workspaces/{workspace_id}/packages/{filename:path}")
     def download_workspace_package(workspace_id: str, filename: str):
