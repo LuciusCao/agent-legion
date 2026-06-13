@@ -28,6 +28,13 @@ from scripts.architecture.phase5 import (
     check_forbidden_patterns,
     check_legacy_modules_absent,
 )
+from scripts.architecture.phase6 import (
+    check_frontend_handwritten_job_transports,
+    check_job_execution_direct_executor_calls,
+    check_route_dag_and_deletion,
+    check_schema_mutation_locations,
+    check_workspace_video_hive_imports,
+)
 from scripts.architecture.pipeline import check_pipeline_definitions
 
 
@@ -149,6 +156,11 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_frontend_executor_types(root))
     errors.extend(check_legacy_modules_absent(root))
     errors.extend(check_forbidden_patterns(root))
+    errors.extend(check_workspace_video_hive_imports(root))
+    errors.extend(check_job_execution_direct_executor_calls(root))
+    errors.extend(check_route_dag_and_deletion(root))
+    errors.extend(check_frontend_handwritten_job_transports(root))
+    errors.extend(check_schema_mutation_locations(root))
 
     file_budgets = config.get("files", {})
     for relative_path, budget in file_budgets.items():
