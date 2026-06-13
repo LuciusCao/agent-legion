@@ -1902,6 +1902,96 @@ def test_get_artifact_returns_404(tmp_path):
     assert resp.status_code == 404
 
 
+def test_get_job_run_log_returns_redacted_tail(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.config["secret_token"] = "leaked-token"
+    log_dir = app.state.settings.logs_dir / "jobs"
+    log_dir.mkdir(parents=True, exist_ok=True)
+
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "test_question_content_Q1"
+        log_path = log_dir / f"{job_id}-fetch_question_context.log"
+        log_path.write_text("start\nleaked-token\nend\n", encoding="utf-8")
+        run = app.state.job_db.start_node_run(
+            job_id, "fetch_question_context", ["cmd"], str(log_path)
+        )
+
+        resp = c.get(f"/api/jobs/{job_id}/runs/{run['id']}/log")
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["run_id"] == run["id"]
+    assert "leaked-token" not in body["log"]
+    assert "<redacted>" in body["log"]
+    assert "end" in body["log"]
+    assert "truncated" in body
+
+
+def test_get_job_run_log_returns_404_for_missing_run(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.pipelines.enabled = True
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "test_question_content_Q1"
+        resp = c.get(f"/api/jobs/{job_id}/runs/999999/log")
+    assert resp.status_code == 404
+
+
+def test_get_job_run_log_rejects_escape(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.pipelines.enabled = True
+    with TestClient(app) as c:
+        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces/test/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q1"],
+                "knowledge_codes": [],
+            },
+        )
+        job_id = "test_question_content_Q1"
+        run = app.state.job_db.start_node_run(
+            job_id, "fetch_question_context", ["cmd"], "../escape.log"
+        )
+        resp = c.get(f"/api/jobs/{job_id}/runs/{run['id']}/log")
+    assert resp.status_code == 400
+    assert "Invalid log path" in resp.json()["detail"]
+
+
 def test_rerun_node_errors(tmp_path):
     from fastapi.testclient import TestClient
 

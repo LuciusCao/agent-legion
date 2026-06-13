@@ -561,6 +561,14 @@ class JobQueries:
             rows = conn.execute("select * from node_runs where job_id=? order by id", (job_id,))
             return [dict(row) for row in rows]
 
+    def get_node_run(self, job_id: str, run_id: int) -> dict[str, Any] | None:
+        with self._connect_read() as conn:
+            row = conn.execute(
+                "select * from node_runs where job_id=? and id=?",
+                (job_id, run_id),
+            ).fetchone()
+        return dict(row) if row else None
+
     def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
         with self._connect_read() as conn:
             rows = conn.execute(

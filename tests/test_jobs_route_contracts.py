@@ -46,6 +46,7 @@ EXPECTED_OPERATIONS = {
     ("delete", "/api/jobs/{job_id}"): "DeleteJobResponse",
     ("post", "/api/jobs/{job_id}/nodes/{node_key}/rerun"): "RerunNodeResponse",
     ("get", "/api/jobs/{job_id}/artifacts/{artifact_name}"): "ArtifactResponse",
+    ("get", "/api/jobs/{job_id}/runs/{run_id}/log"): "JobLogResponse",
     ("get", "/api/jobs/{job_id}/{invalid_path}"): "ArtifactResponse",
 }
 

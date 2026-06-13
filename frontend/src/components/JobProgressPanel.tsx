@@ -1,9 +1,9 @@
 import { useState, useCallback } from 'react'
-import type { CSSProperties } from 'react'
 import { DagStepper } from './DagStepper'
 import { durationSeconds } from '../helpers'
 import type { JobNodeRecord, NodeRunRecord } from '../types'
 import { JOB_STATUS_LABELS } from '../labels'
+import { JobLogDialog } from './JobLogDialog'
 import styles from './JobProgressPanel.module.css'
 
 const STATUS_ICONS: Record<string, string> = {
@@ -42,20 +42,22 @@ function formatTime(iso?: string | null): string {
 }
 
 interface JobProgressPanelProps {
+  jobId: string
   nodes: JobNodeRecord[]
   runs: NodeRunRecord[]
   onOpenDagDialog?: () => void
 }
 
 export function JobProgressPanel({
+  jobId,
   nodes,
   runs,
   onOpenDagDialog,
 }: JobProgressPanelProps) {
   const [expandedErrors, setExpandedErrors] = useState<Set<string>>(new Set())
   const [logDialog, setLogDialog] = useState<{
-    nodeKey: string
-    content: string
+    nodeLabel: string
+    runId: number
   } | null>(null)
 
   const toggleError = useCallback((nodeKey: string) => {
@@ -77,12 +79,6 @@ export function JobProgressPanel({
       runByNodeKey.set(run.node_key, run)
     }
   }
-
-  const dialogStyle = {
-    '--md-dialog-container-color': '#ffffff',
-    maxWidth: '760px',
-    width: '90vw',
-  } as CSSProperties
 
   return (
     <div className={styles.panel}>
@@ -149,8 +145,8 @@ export function JobProgressPanel({
                       className={styles.logBtn}
                       onClick={() =>
                         setLogDialog({
-                          nodeKey: node.node_key,
-                          content: run.log_path,
+                          nodeLabel: node.label,
+                          runId: run.id,
                         })
                       }
                     >
@@ -187,17 +183,13 @@ export function JobProgressPanel({
       </div>
 
       {logDialog && (
-        <md-dialog open onClosed={() => setLogDialog(null)} style={dialogStyle}>
-          <div slot="headline">日志 — {logDialog.nodeKey}</div>
-          <div slot="content" className={styles.dialogContent}>
-            <pre className={styles.logPreview}>{logDialog.content}</pre>
-          </div>
-          <div slot="actions">
-            <md-text-button onClick={() => setLogDialog(null)}>
-              关闭
-            </md-text-button>
-          </div>
-        </md-dialog>
+        <JobLogDialog
+          jobId={jobId}
+          runId={logDialog.runId}
+          nodeLabel={logDialog.nodeLabel}
+          open
+          onClose={() => setLogDialog(null)}
+        />
       )}
     </div>
   )

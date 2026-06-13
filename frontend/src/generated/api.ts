@@ -158,6 +158,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/jobs/{job_id}/runs/{run_id}/log': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Job Run Log */
+    get: operations['get_job_run_log_api_jobs__job_id__runs__run_id__log_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/jobs/{job_id}/{invalid_path}': {
     parameters: {
       query?: never
@@ -1155,6 +1172,15 @@ export interface components {
       /** Runs */
       runs: components['schemas']['NodeRunResponse'][]
     }
+    /** JobLogResponse */
+    JobLogResponse: {
+      /** Log */
+      log: string
+      /** Run Id */
+      run_id: number
+      /** Truncated */
+      truncated: boolean
+    }
     /** JobNodeResponse */
     JobNodeResponse: {
       /** After */
@@ -2002,6 +2028,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['RerunNodeResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_job_run_log_api_jobs__job_id__runs__run_id__log_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        job_id: string
+        run_id: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobLogResponse']
         }
       }
       /** @description Validation Error */

@@ -1,5 +1,12 @@
-import { describe, it, expect, vi, afterEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest'
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  cleanup,
+  act,
+} from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import JobDetailPage from './JobDetailPage'
 
@@ -19,7 +26,10 @@ const mockDetail = {
       node_key: 'extract',
       label: 'extract',
       status: 'completed',
+      capability: 'extract',
       after: [],
+      inputs: [],
+      outputs: [],
       started_at: '2026-06-09T08:00:00Z',
       finished_at: '2026-06-09T08:00:12Z',
       error_message: '',
@@ -30,7 +40,10 @@ const mockDetail = {
       node_key: 'generate',
       label: 'generate',
       status: 'running',
+      capability: 'generate',
       after: ['extract'],
+      inputs: [],
+      outputs: [],
       started_at: '2026-06-09T08:00:13Z',
       error_message: '',
     },
@@ -70,8 +83,14 @@ function renderPage(initialEntry = '/workspaces/ws1/jobs/j1') {
 }
 
 describe('JobDetailPage', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ shouldAdvanceTime: true })
+  })
+
   afterEach(() => {
+    vi.useRealTimers()
     vi.unstubAllGlobals()
+    cleanup()
   })
 
   it('renders page with job detail', async () => {
@@ -109,5 +128,47 @@ describe('JobDetailPage', () => {
     expect(container.querySelectorAll('path[data-testid="edge"]')).toHaveLength(
       1
     )
+  })
+
+  it('polls detail while job is running', async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => mockDetail })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('节点进度')).toBeInTheDocument()
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000)
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+  })
+
+  it('does not poll detail when job is completed', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        ...mockDetail,
+        job: { ...mockDetail.job, status: 'completed' },
+      }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('节点进度')).toBeInTheDocument()
+    })
+
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000)
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 })

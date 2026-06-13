@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import type { DagEdge, DagNode } from '../components/DagGraph'
 import { JobProgressPanel } from '../components/JobProgressPanel'
@@ -12,14 +12,14 @@ import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
 
-// NodeDetailPanel removed — node details shown inline in JobProgressPanel
-
 const VALID_STATUSES = new Set<DagNode['status']>([
   'pending',
   'running',
   'completed',
   'failed',
 ])
+
+const POLLING_STATUSES = new Set(['queued', 'running'])
 
 function normalizeStatus(status: string): DagNode['status'] {
   if (VALID_STATUSES.has(status as DagNode['status'])) {
@@ -68,6 +68,20 @@ export default function JobDetailPage() {
   const [dagDialogOpen, setDagDialogOpen] = useState(false)
   const artifactRequestId = useRef(0)
 
+  const refreshDetail =
+    useCallback(async (): Promise<JobDetailResponse | null> => {
+      if (!jobId) return null
+      try {
+        const data = await fetchJobDetail(jobId)
+        setDetail(data)
+        setError('')
+        return data
+      } catch (err) {
+        setError(err instanceof Error ? err.message : String(err))
+        return null
+      }
+    }, [jobId])
+
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setDetail(null)
@@ -77,16 +91,10 @@ export default function JobDetailPage() {
     setPreviewArtifact(null)
     if (!jobId) return
     let stale = false
-    fetchJobDetail(jobId)
-      .then((data) => {
-        if (stale) return
-        setDetail(data)
-        setPageTitle(data.job.title || data.job.source_id || '任务详情')
-      })
-      .catch((err) => {
-        if (stale) return
-        setError(err instanceof Error ? err.message : String(err))
-      })
+    refreshDetail().then((data) => {
+      if (stale || !data) return
+      setPageTitle(data.job.title || data.job.source_id || '任务详情')
+    })
     return () => {
       stale = true
       setPageTitle(null)
@@ -94,7 +102,7 @@ export default function JobDetailPage() {
       setPreviewOpen(false)
       setPreviewArtifact(null)
     }
-  }, [jobId, setPageTitle])
+  }, [jobId, setPageTitle, refreshDetail])
 
   useEffect(() => {
     if (!detail) {
@@ -114,7 +122,7 @@ export default function JobDetailPage() {
     }
   }, [detail, setDetailPageActions])
 
-  // Poll every 5s for running jobs
+  // Poll every 5s for queued and running jobs only
   const detailRef = useRef(detail)
   useEffect(() => {
     detailRef.current = detail
@@ -123,19 +131,19 @@ export default function JobDetailPage() {
     if (!jobId) return
     let stale = false
     const timer = setInterval(() => {
-      if (detailRef.current?.job.status === 'running') {
-        fetchJobDetail(jobId)
-          .then((data) => {
-            if (!stale) setDetail(data)
-          })
-          .catch(() => {})
+      const status = detailRef.current?.job.status
+      if (status && POLLING_STATUSES.has(status)) {
+        refreshDetail().then((data) => {
+          if (stale || !data) return
+          setDetail(data)
+        })
       }
     }, 5000)
     return () => {
       stale = true
       clearInterval(timer)
     }
-  }, [jobId])
+  }, [jobId, refreshDetail])
 
   const dagNodes = useMemo(
     () => (detail ? toDagNodes(detail.nodes) : []),
@@ -190,6 +198,7 @@ export default function JobDetailPage() {
         <div className={styles.right}>
           {detail && (
             <JobProgressPanel
+              jobId={jobId}
               nodes={detail.nodes}
               runs={detail.runs}
               onOpenDagDialog={() => setDagDialogOpen(true)}
