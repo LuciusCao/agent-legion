@@ -43,8 +43,6 @@ const defaultSettings: WorkspaceSettings = {
   intakeModes: [],
   labelOverrides: {},
   pipelineKey: '',
-  agentIds: [],
-  concurrencyLimit: 1,
   resources: {},
 }
 

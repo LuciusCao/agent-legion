@@ -1,10 +1,4 @@
 import type {
-  WorkspaceAgentAssignmentTransport,
-  WorkspaceAgentListTransport,
-  WorkspaceAgentRequestTransport,
-} from './api-contract'
-import type {
-  AgentStatus,
   ArtifactResponse,
   CreateJobBatchInput,
   JobBatchResponse,
@@ -208,64 +202,6 @@ export async function fetchQuestionDetail(
 ): Promise<QuestionDetailResponse> {
   return api(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/questions/${encodeURIComponent(questionId)}`
-  )
-}
-
-export async function fetchAgents(): Promise<{ agents: AgentStatus[] }> {
-  return api('/api/agents')
-}
-
-export async function getWorkspaceAgents(
-  workspaceId: string
-): Promise<WorkspaceAgentListTransport> {
-  return api<WorkspaceAgentListTransport>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`
-  )
-}
-
-export async function setWorkspaceAgent(
-  workspaceId: string,
-  agentId: string,
-  concurrencyLimit: number
-): Promise<WorkspaceAgentAssignmentTransport> {
-  const body: WorkspaceAgentRequestTransport = {
-    agent_id: agentId,
-    concurrency_limit: concurrencyLimit,
-  }
-  return api<WorkspaceAgentAssignmentTransport>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/agents`,
-    {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }
-  )
-}
-
-export async function assignAgent(
-  workspaceId: string,
-  agentId: string,
-  concurrencyLimit: number
-): Promise<{
-  agent_id: string
-  workspace_id: string
-  concurrency_limit: number
-}> {
-  const params = new URLSearchParams({
-    workspace_id: workspaceId,
-    concurrency_limit: String(concurrencyLimit),
-  })
-  return api(`/api/agents/${encodeURIComponent(agentId)}/assign?${params}`, {
-    method: 'POST',
-  })
-}
-
-export async function unassignAgent(
-  workspaceId: string,
-  agentId: string
-): Promise<{ agent_id: string; workspace_id: string; removed: boolean }> {
-  return api(
-    `/api/agents/${encodeURIComponent(agentId)}/assign?workspace_id=${encodeURIComponent(workspaceId)}`,
-    { method: 'DELETE' }
   )
 }
 

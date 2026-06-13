@@ -30,8 +30,6 @@ const defaultState: SettingState = {
     intakeModes: [],
     labelOverrides: {},
     pipelineKey: '',
-    agentIds: [],
-    concurrencyLimit: 1,
     resources: {},
   },
   originalWorkspaceName: '测试空间',
@@ -445,8 +443,6 @@ describe('SettingsPage', () => {
       intakeModes: [],
       labelOverrides: {},
       pipelineKey: 'reading_analysis',
-      agentIds: [],
-      concurrencyLimit: 1,
       resources: {},
     }
     useSettingStore.setState({

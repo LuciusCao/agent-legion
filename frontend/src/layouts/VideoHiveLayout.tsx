@@ -1,7 +1,6 @@
 import { useNavigate, Outlet } from 'react-router-dom'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
-import { AgentPanel } from '../components/AgentPanel'
 
 export default function VideoHiveLayout() {
   const navigate = useNavigate()
@@ -15,7 +14,6 @@ export default function VideoHiveLayout() {
           scrolled={scrolled}
           rightActions={
             <>
-              <AgentPanel autoFetch={false} bare compact />
               <md-icon-button
                 aria-label="设置"
                 onClick={() => navigate('/video-hive/settings')}

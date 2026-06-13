@@ -5,7 +5,6 @@ import { useJobStore } from '../stores/jobStore'
 import { useUiStore } from '../stores/uiStore'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
-import { AgentPanel } from '../components/AgentPanel'
 import { AddDialog } from '../components/AddDialog'
 import { WORKSPACE_LABELS } from '../labels'
 
@@ -20,7 +19,6 @@ export default function WorkspaceLayout() {
     currentWorkspace,
     fetchWorkspaces,
     setCurrentWorkspace,
-    workspaceStats,
     fetchWorkspaceStats,
   } = useWorkspaceStore()
 
@@ -91,10 +89,6 @@ export default function WorkspaceLayout() {
     ? 'Video Hive'
     : currentWorkspace?.name || workspaceId
 
-  const allowedAgentIds =
-    workspaceStats[workspaceId || '']?.agent_status?.agents?.map((a) => a.id) ??
-    undefined
-
   const appBarTitle = pageTitle || workspaceName || ''
 
   const showListActions = !isDetailPage
@@ -139,13 +133,6 @@ export default function WorkspaceLayout() {
                 >
                   <md-icon>inventory_2</md-icon>
                 </md-icon-button>
-                <AgentPanel
-                  autoFetch={false}
-                  bare
-                  compact
-                  allowedAgentIds={allowedAgentIds}
-                  workspaceId={workspaceId}
-                />
                 <md-icon-button
                   aria-label={WORKSPACE_LABELS.settings}
                   onClick={() =>

@@ -1,30 +1,6 @@
 from pathlib import Path
 
 from server.app.jobs.queries import JobQueries
-from tests.helpers import ensure_legacy_workspace_tables
-
-
-def test_upsert_workspace_agent_assignment(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
-    ensure_legacy_workspace_tables(db)
-    workspace = db.create_workspace("Workspace One")
-    result = db.upsert_workspace_agent_assignment(workspace["id"], "pi", 3)
-    assert result["workspace_id"] == workspace["id"]
-    assert result["agent_id"] == "pi"
-    assert result["concurrency_limit"] == 3
-
-    # update
-    result2 = db.upsert_workspace_agent_assignment(workspace["id"], "pi", 5)
-    assert result2["concurrency_limit"] == 5
-
-    # list confirms
-    agents = db.list_workspace_agents(workspace["id"])
-    assert len(agents) == 1
-    assert agents[0]["concurrency_limit"] == 5
-
-    # clamp to minimum of 1
-    result3 = db.upsert_workspace_agent_assignment(workspace["id"], "pi", 0)
-    assert result3["concurrency_limit"] == 1
 
 
 def test_job_query_connections_enable_sqlite_safety_pragmas(tmp_path: Path) -> None:

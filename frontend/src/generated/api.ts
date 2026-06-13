@@ -21,24 +21,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/agents/{agent_id}/assign': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Assign Agent */
-    post: operations['assign_agent_api_agents__agent_id__assign_post']
-    /** Unassign Agent */
-    delete: operations['unassign_agent_api_agents__agent_id__assign_delete']
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/executors': {
     parameters: {
       query?: never
@@ -659,24 +641,6 @@ export interface paths {
     patch: operations['update_workspace_api_workspaces__workspace_id__patch']
     trace?: never
   }
-  '/api/workspaces/{workspace_id}/agents': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Workspace Agents */
-    get: operations['get_workspace_agents_api_workspaces__workspace_id__agents_get']
-    put?: never
-    /** Set Workspace Agent */
-    post: operations['set_workspace_agent_api_workspaces__workspace_id__agents_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/workspaces/{workspace_id}/configuration': {
     parameters: {
       query?: never
@@ -958,15 +922,6 @@ export interface components {
       /** Items */
       items: components['schemas']['VideoInput'][]
     }
-    /** AgentAssignmentResponse */
-    AgentAssignmentResponse: {
-      /** Agent Id */
-      agent_id: string
-      /** Concurrency Limit */
-      concurrency_limit: number
-      /** Workspace Id */
-      workspace_id: string
-    }
     /** AgentStatusResponse */
     AgentStatusResponse: {
       /** Busy */
@@ -997,15 +952,6 @@ export interface components {
       id: string
       /** Name */
       name: string
-    }
-    /** AgentUnassignmentResponse */
-    AgentUnassignmentResponse: {
-      /** Agent Id */
-      agent_id: string
-      /** Removed */
-      removed: boolean
-      /** Workspace Id */
-      workspace_id: string
     }
     /** AgentsResponse */
     AgentsResponse: {
@@ -1412,24 +1358,6 @@ export interface components {
       /** Paused */
       paused: boolean
     }
-    /** WorkspaceAgentAssignmentResponse */
-    WorkspaceAgentAssignmentResponse: {
-      /** Agent Id */
-      agent_id: string
-      /** Concurrency Limit */
-      concurrency_limit: number
-      /** Workspace Id */
-      workspace_id: string
-    }
-    /** WorkspaceAgentConfig */
-    WorkspaceAgentConfig: {
-      /** Agent Id */
-      agent_id: string
-      /** Concurrency Limit */
-      concurrency_limit: number
-    }
-    /** WorkspaceAgentListResponse */
-    WorkspaceAgentListResponse: components['schemas']['WorkspaceAgentAssignmentResponse'][]
     /** WorkspaceConfigurationRequest */
     WorkspaceConfigurationRequest: {
       /** Description */
@@ -1663,73 +1591,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentsResponse']
-        }
-      }
-    }
-  }
-  assign_agent_api_agents__agent_id__assign_post: {
-    parameters: {
-      query: {
-        workspace_id: string
-        concurrency_limit?: number
-      }
-      header?: never
-      path: {
-        agent_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentAssignmentResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  unassign_agent_api_agents__agent_id__assign_delete: {
-    parameters: {
-      query: {
-        workspace_id: string
-      }
-      header?: never
-      path: {
-        agent_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['AgentUnassignmentResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
@@ -3023,72 +2884,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  get_workspace_agents_api_workspaces__workspace_id__agents_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkspaceAgentListResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  set_workspace_agent_api_workspaces__workspace_id__agents_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        workspace_id: string
-      }
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['WorkspaceAgentConfig']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkspaceAgentAssignmentResponse']
         }
       }
       /** @description Validation Error */
