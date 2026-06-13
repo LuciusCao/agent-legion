@@ -79,10 +79,9 @@ def execute_agent_node_once(
     node_key: str,
     pi_runner: PiRunner,
     skill_root: Path,
-    skill_relative: str | None = None,
 ) -> bool:
     node = definition.nodes[node_key]
-    skill = skill_relative or f"{definition.key}/{node.capability}"
+    skill = f"{definition.key}/{node.capability}"
     skill_dir = resolve_pipeline_skill(skill_root, skill)
     result = pi_runner.run(
         job=job,
@@ -138,6 +137,7 @@ def _execute_node_wrapped(
     pi_runner: PiRunner | None = None,
     skill_root: Path | None = None,
 ) -> bool:
+    """Run a single pipeline node and mark the job/node failed on unhandled exceptions."""
     try:
         return execute_node_once(
             job_db,
