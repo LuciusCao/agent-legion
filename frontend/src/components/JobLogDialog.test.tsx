@@ -181,6 +181,69 @@ describe('JobLogDialog', () => {
     expect(screen.queryByText('stale')).not.toBeInTheDocument()
   })
 
+  it('cancels stale request when dialog closes and reopens with a different run', async () => {
+    const responses: Array<{
+      resolve: (value: jobApi.JobLogResponse) => void
+      reject: (reason: Error) => void
+    }> = []
+    mockFetchJobLog.mockImplementation(
+      () =>
+        new Promise((resolve, reject) => {
+          responses.push({ resolve, reject })
+        })
+    )
+
+    const { rerender } = render(
+      <JobLogDialog
+        jobId="j1"
+        runId={1}
+        nodeLabel="extract"
+        open={true}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('加载中...')).toBeInTheDocument()
+
+    rerender(
+      <JobLogDialog
+        jobId="j1"
+        runId={1}
+        nodeLabel="extract"
+        open={false}
+        onClose={vi.fn()}
+      />
+    )
+
+    rerender(
+      <JobLogDialog
+        jobId="j1"
+        runId={2}
+        nodeLabel="generate"
+        open={true}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('加载中...')).toBeInTheDocument()
+
+    await act(async () => {
+      responses[0].resolve({ run_id: 1, log: 'stale', truncated: false })
+    })
+
+    expect(screen.queryByText('stale')).not.toBeInTheDocument()
+    expect(screen.getByText('加载中...')).toBeInTheDocument()
+
+    await act(async () => {
+      responses[1].resolve({ run_id: 2, log: 'fresh', truncated: false })
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('fresh')).toBeInTheDocument()
+    })
+    expect(screen.queryByText('stale')).not.toBeInTheDocument()
+  })
+
   it('calls onClose when close button is clicked', async () => {
     mockFetchJobLog.mockResolvedValue({
       run_id: 1,
