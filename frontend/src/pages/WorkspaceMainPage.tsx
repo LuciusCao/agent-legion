@@ -7,12 +7,12 @@ import { WorkspaceStatCards } from '../components/WorkspaceStatCards'
 import { JobList } from '../components/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
 import {
-  BatchToolbar,
-  type BatchFilter,
-  type BatchAction,
-} from '../components/BatchToolbar'
+  JobActionBar,
+  type JobActionBarFilter,
+} from '../components/JobActionBar'
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
-import { BatchRerunDialog } from '../components/BatchRerunDialog'
+import { fetchPipelineDefinition } from '../api'
+import type { PipelineDefinitionRecord } from '../types'
 import styles from './WorkspaceMainPage.module.css'
 
 const sectionStyle = {
@@ -42,7 +42,14 @@ export default function WorkspaceMainPage() {
     getFilteredJobs,
     selectMode,
     toggleSelectMode,
+    batchRerunLoading,
+    batchPackageLoading,
+    batchDeleteLoading,
   } = useJobStore()
+
+  const [pipelineDefinition, setPipelineDefinition] =
+    useState<PipelineDefinitionRecord | null>(null)
+  const [pipelineError, setPipelineError] = useState<string | null>(null)
 
   useEffect(() => {
     if (workspaceId) {
@@ -59,11 +66,30 @@ export default function WorkspaceMainPage() {
     return () => clearInterval(interval)
   }, [workspaceId, fetchJobs])
 
+  useEffect(() => {
+    const pipelineKey = workspaceId
+      ? workspaceStats[workspaceId]?.pipeline_key
+      : undefined
+    if (!pipelineKey) return
+    let stale = false
+    fetchPipelineDefinition(pipelineKey)
+      .then((data) => {
+        if (stale) return
+        setPipelineDefinition(data.pipeline)
+      })
+      .catch((err) => {
+        if (stale) return
+        setPipelineError(err instanceof Error ? err.message : String(err))
+      })
+    return () => {
+      stale = true
+    }
+  }, [workspaceId, workspaceStats])
+
   const debouncedSetSearchQuery = useDebouncedCallback(setSearchQuery, 250)
   const [searchInputValue, setSearchInputValue] = useState(searchQuery)
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [rerunDialogOpen, setRerunDialogOpen] = useState(false)
 
   const currentStats = workspaceId ? workspaceStats[workspaceId] : undefined
   const counts = useMemo(() => {
@@ -85,33 +111,39 @@ export default function WorkspaceMainPage() {
   const totalJobs = counts.all
   const selectedJobs = jobs.filter((j) => selectedIds.has(j.id))
 
-  const filters: BatchFilter[] = [
+  const pipelineNodesByKey = useMemo(() => {
+    if (!pipelineDefinition) return {}
+    return { [pipelineDefinition.key]: pipelineDefinition }
+  }, [pipelineDefinition])
+
+  const filters: JobActionBarFilter[] = [
     { key: 'all', label: '全选', onClick: selectAll },
     { key: 'failed', label: '仅失败', onClick: selectFailed },
     { key: 'clear', label: '取消选择', onClick: clearSelection },
   ]
 
-  const actions: BatchAction[] = [
-    {
-      key: 'rerun',
-      label: '重跑',
-      onClick: () => setRerunDialogOpen(true),
-    },
-    {
-      key: 'package',
-      label: '打包',
-      onClick: async () => {
-        if (!workspaceId) return
-        await batchPackage(workspaceId)
-      },
-    },
-    {
-      key: 'delete',
-      label: '删除',
-      danger: true,
-      onClick: () => setDeleteDialogOpen(true),
-    },
-  ]
+  const handleRerun = async (nodeKey: string) => {
+    if (!workspaceId) return
+    await batchRerun(workspaceId, nodeKey)
+  }
+
+  const handlePackage = async () => {
+    if (!workspaceId) return
+    const result = await batchPackage(workspaceId)
+    if (result.download_url) {
+      window.open(result.download_url, '_blank')
+    }
+  }
+
+  const handleDelete = () => {
+    setDeleteDialogOpen(true)
+  }
+
+  const handleDeleteConfirm = async () => {
+    if (!workspaceId) return
+    await batchDelete(workspaceId)
+    setDeleteDialogOpen(false)
+  }
 
   const emptyStateSteps = useMemo(
     () => [
@@ -138,38 +170,32 @@ export default function WorkspaceMainPage() {
     >
       {selectMode && (
         <>
-          <BatchToolbar
+          <JobActionBar
+            jobs={selectedJobs}
             selectedCount={selectedIds.size}
+            pipelineDefinition={pipelineDefinition}
+            pipelineNodesByKey={pipelineNodesByKey}
+            mode="batch"
+            loading={
+              batchRerunLoading || batchPackageLoading || batchDeleteLoading
+            }
             filters={filters}
-            actions={actions}
             onExitSelectMode={toggleSelectMode}
+            onRerun={handleRerun}
+            onPackage={handlePackage}
+            onDelete={handleDelete}
           />
           <BatchDeleteDialog
             open={deleteDialogOpen}
             count={selectedIds.size}
             onClose={() => setDeleteDialogOpen(false)}
-            onConfirm={async () => {
-              if (!workspaceId) return
-              await batchDelete(workspaceId)
-              setDeleteDialogOpen(false)
-            }}
-          />
-          <BatchRerunDialog
-            open={rerunDialogOpen}
-            items={selectedJobs.map((j) => ({
-              id: j.id,
-              name: j.source_id || j.id,
-            }))}
-            phases={[]}
-            itemLabel="任务"
-            onConfirm={async () => {
-              if (!workspaceId) return
-              await batchRerun(workspaceId)
-              setRerunDialogOpen(false)
-            }}
-            onClose={() => setRerunDialogOpen(false)}
+            onConfirm={handleDeleteConfirm}
           />
         </>
+      )}
+
+      {pipelineError && (
+        <p className={styles.error}>流水线定义加载失败：{pipelineError}</p>
       )}
 
       <section style={sectionStyle}>

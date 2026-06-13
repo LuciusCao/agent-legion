@@ -7,3 +7,12 @@ export type JobNode = components['schemas']['JobNodeResponse']
 export type NodeRun = components['schemas']['NodeRunResponse']
 export type JobsResponse = components['schemas']['JobsResponse']
 export type JobBatchResponse = components['schemas']['JobBatchResponse']
+export type JobMutationResult =
+  components['schemas']['JobMutationResultResponse']
+export type BatchJobMutationResult =
+  components['schemas']['BatchJobMutationResponse']
+export type JobBatchRerunRequest = components['schemas']['JobBatchRerunRequest']
+export type WorkspacePackageResult =
+  components['schemas']['WorkspacePackageResponse']
+export type WorkspacePackageResultItem =
+  components['schemas']['WorkspacePackageResultResponse']

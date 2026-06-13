@@ -19,6 +19,11 @@
   border-radius: 8px;
 }
 
+.actionBarRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
 .columns {
   display: flex;
   gap: 16px;

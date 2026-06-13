@@ -1,6 +1,11 @@
 import { create } from 'zustand'
-import type { JobSummary } from '../jobTypes'
-import { fetchJobs as apiFetchJobs, api } from '../api'
+import type {
+  BatchJobMutationResult,
+  JobSummary,
+  WorkspacePackageResult,
+} from '../jobTypes'
+import { fetchJobs as apiFetchJobs } from '../api'
+import { batchRerunJobs, batchDeleteJobs, packageJobs } from '../jobApi'
 import { useUiStore } from './uiStore'
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
@@ -28,9 +33,42 @@ interface JobState {
   clearSelection: () => void
   toggleExpand: (id: string) => void
   getFilteredJobs: () => JobSummary[]
-  batchRerun: (workspaceId: string) => Promise<void>
-  batchDelete: (workspaceId: string) => Promise<void>
-  batchPackage: (workspaceId: string) => Promise<void>
+  batchRerun: (
+    workspaceId: string,
+    nodeKey: string
+  ) => Promise<BatchJobMutationResult>
+  batchDelete: (workspaceId: string) => Promise<BatchJobMutationResult>
+  batchPackage: (workspaceId: string) => Promise<WorkspacePackageResult>
+}
+
+type MutationCounts = {
+  succeeded: number
+  skipped: number
+  failed: number
+}
+
+function countMutationResults(
+  results: { status: 'succeeded' | 'skipped' | 'failed' }[]
+): MutationCounts {
+  return results.reduce(
+    (acc, r) => {
+      if (r.status === 'succeeded') acc.succeeded += 1
+      else if (r.status === 'skipped') acc.skipped += 1
+      else if (r.status === 'failed') acc.failed += 1
+      return acc
+    },
+    { succeeded: 0, skipped: 0, failed: 0 }
+  )
+}
+
+function makeMutationToast(action: string, counts: MutationCounts): string {
+  if (counts.skipped === 0 && counts.failed === 0) {
+    return `${action}完成：成功 ${counts.succeeded} 项`
+  }
+  if (counts.failed === 0) {
+    return `${action}完成：成功 ${counts.succeeded} 项，跳过 ${counts.skipped} 项`
+  }
+  return `${action}完成：成功 ${counts.succeeded} 项，跳过 ${counts.skipped} 项，失败 ${counts.failed} 项`
 }
 
 function normalizeJobStatus(status: string): JobStatus {
@@ -140,23 +178,32 @@ export const useJobStore = create<JobState>((set, get) => ({
     return getVisibleJobs(get())
   },
 
-  async batchRerun(workspaceId: string) {
+  async batchRerun(workspaceId: string, nodeKey: string) {
     const ids = Array.from(get().selectedIds)
-    if (ids.length === 0) return
+    if (ids.length === 0) return { results: [] }
     set({ batchRerunLoading: true })
     try {
-      await api(
-        `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-rerun`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ job_ids: ids }),
-        }
+      const data = await batchRerunJobs(workspaceId, nodeKey, ids)
+      const results = data.results ?? []
+      const succeededIds = new Set(
+        results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
       )
-      set({ selectedIds: new Set() })
+      set((state) => {
+        const nextSelected = new Set(state.selectedIds)
+        for (const id of succeededIds) {
+          nextSelected.delete(id)
+        }
+        return { selectedIds: nextSelected }
+      })
+      const counts = countMutationResults(results)
       useUiStore
         .getState()
-        .showToast(`成功重跑 ${ids.length} 个任务`, 'success')
+        .showToast(
+          makeMutationToast('重跑', counts),
+          counts.failed > 0 ? 'error' : 'success'
+        )
       await get().fetchJobs(workspaceId)
+      return data
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Batch rerun failed'
       set({ error: message })
@@ -169,23 +216,33 @@ export const useJobStore = create<JobState>((set, get) => ({
 
   async batchDelete(workspaceId: string) {
     const ids = Array.from(get().selectedIds)
-    if (ids.length === 0) return
+    if (ids.length === 0) return { results: [] }
     set({ batchDeleteLoading: true })
     try {
-      await api(
-        `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch`,
-        {
-          method: 'DELETE',
-          body: JSON.stringify({ job_ids: ids }),
-        }
+      const data = await batchDeleteJobs(workspaceId, ids)
+      const results = data.results ?? []
+      const succeededIds = new Set(
+        results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
       )
-      set((state) => ({
-        jobs: state.jobs.filter((j) => !state.selectedIds.has(j.id)),
-        selectedIds: new Set(),
-      }))
+      set((state) => {
+        const nextSelected = new Set(state.selectedIds)
+        const nextJobs = state.jobs.filter((j) => {
+          if (succeededIds.has(j.id)) {
+            nextSelected.delete(j.id)
+            return false
+          }
+          return true
+        })
+        return { jobs: nextJobs, selectedIds: nextSelected }
+      })
+      const counts = countMutationResults(results)
       useUiStore
         .getState()
-        .showToast(`成功删除 ${ids.length} 个任务`, 'success')
+        .showToast(
+          makeMutationToast('删除', counts),
+          counts.failed > 0 ? 'error' : 'success'
+        )
+      return data
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Batch delete failed'
       set({ error: message })
@@ -198,28 +255,37 @@ export const useJobStore = create<JobState>((set, get) => ({
 
   async batchPackage(workspaceId: string) {
     const ids = Array.from(get().selectedIds)
-    if (ids.length === 0) return
+    if (ids.length === 0)
+      return { results: [], succeeded_count: 0, failed_count: 0 }
     const completedIds = ids.filter(
       (id) => get().jobs.find((j) => j.id === id)?.status === 'completed'
     )
     if (completedIds.length === 0) {
       useUiStore.getState().showToast('没有已完成的任务可打包', 'error')
-      return
+      return { results: [], succeeded_count: 0, failed_count: 0 }
     }
     set({ batchPackageLoading: true })
     try {
-      await api(
-        `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/package`,
-        {
-          method: 'POST',
-          body: JSON.stringify({ job_ids: completedIds }),
-        }
+      const data = await packageJobs(workspaceId, completedIds)
+      const results = data.results ?? []
+      const succeededIds = new Set(
+        results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
       )
+      set((state) => {
+        const nextSelected = new Set(state.selectedIds)
+        for (const id of succeededIds) {
+          nextSelected.delete(id)
+        }
+        return { selectedIds: nextSelected }
+      })
       useUiStore
         .getState()
-        .showToast(`已打包 ${completedIds.length} 个任务`, 'success')
+        .showToast(
+          `打包完成：成功 ${data.succeeded_count} 项，失败 ${data.failed_count} 项`,
+          data.failed_count > 0 ? 'error' : 'success'
+        )
       await get().fetchJobs(workspaceId)
-      get().clearSelection()
+      return data
     } catch (err) {
       const message =
         err instanceof Error ? err.message : 'Batch package failed'
