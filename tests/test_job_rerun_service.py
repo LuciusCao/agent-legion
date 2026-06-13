@@ -1,3 +1,4 @@
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -7,7 +8,7 @@ import pytest
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
-from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_artifact_mutation import JobArtifactMutationService, StagedOutputs
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.pipeline_catalog import PipelineCatalogService
@@ -155,6 +156,57 @@ def test_rerun_rejects_active_lease(rerun_service, job):
     assert result["reason_code"] == "busy"
 
 
+def test_rerun_uses_atomic_lease_guarded_mutation(rerun_service, job, monkeypatch):
+    calls: list[str] = []
+    original = rerun_service.job_db.lease_guarded_mutation
+
+    @contextmanager
+    def tracked(job_id: str, now, *, reject_running_nodes: bool):
+        calls.append(job_id)
+        with original(job_id, now, reject_running_nodes=reject_running_nodes) as conn:
+            yield conn
+
+    monkeypatch.setattr(rerun_service.job_db, "lease_guarded_mutation", tracked)
+
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+
+    assert result["status"] == "succeeded"
+    assert calls == [job["id"]]
+
+
+def test_rerun_atomic_guard_catches_lease_created_after_precheck(rerun_service, job, monkeypatch):
+    original = rerun_service.job_db.lease_guarded_mutation
+    created = False
+
+    monkeypatch.setattr(rerun_service.lease_repo, "has_active_for_node", lambda *args: False)
+    monkeypatch.setattr(rerun_service, "_job_has_running_nodes", lambda _job_id: False)
+
+    @contextmanager
+    def race(job_id: str, now, *, reject_running_nodes: bool):
+        nonlocal created
+        if not created:
+            _create_lease(
+                rerun_service.job_db,
+                job,
+                "question_understanding",
+                expires_offset_seconds=300,
+            )
+            created = True
+        with original(job_id, now, reject_running_nodes=reject_running_nodes) as conn:
+            yield conn
+
+    monkeypatch.setattr(rerun_service.job_db, "lease_guarded_mutation", race)
+
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+
+    assert result["status"] == "skipped"
+    assert result["reason_code"] == "busy"
+    assert (
+        rerun_service.job_db.get_job_node(job["id"], "question_understanding")["status"]
+        == "running"
+    )
+
+
 def test_rerun_node_not_found(rerun_service, job):
     result = rerun_service.rerun(job["workspace_id"], job["id"], "nonexistent")
 
@@ -199,12 +251,38 @@ def test_rerun_rolls_back_artifacts_when_db_fails(rerun_service, job, monkeypatc
     def _fail(*args, **kwargs):
         raise RuntimeError("db down")
 
-    monkeypatch.setattr(rerun_service.job_db, "mark_nodes_for_rerun_atomic", _fail)
+    monkeypatch.setattr(
+        rerun_service.job_db,
+        "mark_nodes_for_rerun_in_transaction",
+        _fail,
+    )
 
     result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
 
     assert result["status"] == "failed"
     assert (storage / "understanding.json").read_text() == "understanding"
+
+
+def test_rerun_reports_success_when_post_commit_cleanup_fails(
+    rerun_service, job, monkeypatch, caplog
+):
+    storage = Path(job["storage_dir"])
+    storage.mkdir(parents=True, exist_ok=True)
+    (storage / "understanding.json").write_text("understanding")
+
+    def _fail_commit(self):
+        raise OSError("cleanup failed")
+
+    monkeypatch.setattr(StagedOutputs, "commit", _fail_commit)
+
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+
+    assert result["status"] == "succeeded"
+    assert "cleanup failed" in caplog.text
+    assert (
+        rerun_service.job_db.get_job_node(job["id"], "question_understanding")["status"]
+        == "pending"
+    )
 
 
 def test_rerun_expired_lease_is_not_blocking(rerun_service, job):

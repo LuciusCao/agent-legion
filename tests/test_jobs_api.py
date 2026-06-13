@@ -2165,8 +2165,11 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
             raise ValueError("invalid node state")
 
         monkeypatch.setattr(
-            "server.app.jobs.queries.JobQueries.mark_nodes_for_rerun_atomic", _fail_mark
+            "server.app.jobs.atomic_mutations.AtomicJobMutationsMixin."
+            "mark_nodes_for_rerun_in_transaction",
+            _fail_mark,
         )
+
         resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_question_context/rerun")
     assert resp.status_code == 400
     assert "invalid node state" in resp.json()["detail"].lower()
@@ -2511,7 +2514,11 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
         def _fail(*args, **kwargs):
             raise RuntimeError("db down")
 
-        monkeypatch.setattr("server.app.jobs.queries.JobQueries.mark_nodes_for_rerun_atomic", _fail)
+        monkeypatch.setattr(
+            "server.app.jobs.atomic_mutations.AtomicJobMutationsMixin."
+            "mark_nodes_for_rerun_in_transaction",
+            _fail,
+        )
         resp = c.post(f"/api/jobs/{job_id}/nodes/question_understanding/rerun")
 
     assert resp.status_code == 400

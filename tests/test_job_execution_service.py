@@ -265,6 +265,59 @@ def test_run_to_rejects_active_lease(
     assert result["reason_code"] == "busy"
 
 
+def test_run_to_uses_atomic_execution_control_mutation(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace, monkeypatch
+):
+    job = _create_job(job_db, workspace["id"])
+    calls: list[tuple[str, str, frozenset[str]]] = []
+
+    original = job_db.apply_run_to_atomic
+
+    def tracked(
+        job_id: str,
+        target_node_key: str,
+        closure: frozenset[str],
+        *,
+        now=None,
+    ) -> None:
+        calls.append((job_id, target_node_key, closure))
+        original(job_id, target_node_key, closure, now=now)
+
+    monkeypatch.setattr(job_db, "apply_run_to_atomic", tracked)
+
+    result = execution_service.run_to(workspace["id"], job["id"], "question_understanding")
+
+    assert result["status"] == "succeeded"
+    assert calls == [
+        (
+            job["id"],
+            "question_understanding",
+            frozenset({"fetch_question_context", "question_understanding"}),
+        )
+    ]
+
+
+def test_run_to_atomic_guard_catches_lease_created_after_precheck(
+    execution_service: JobExecutionService, job_db: JobQueries, workspace, monkeypatch
+):
+    job = _create_job(job_db, workspace["id"])
+    original = job_db.apply_run_to_atomic
+
+    monkeypatch.setattr(execution_service, "_has_active_lease", lambda _job_id: False)
+
+    def race(job_id: str, target_node_key: str, closure: frozenset[str], *, now=None):
+        _create_active_lease(job_db, job, "fetch_question_context")
+        original(job_id, target_node_key, closure, now=now)
+
+    monkeypatch.setattr(job_db, "apply_run_to_atomic", race)
+
+    result = execution_service.run_to(workspace["id"], job["id"], "question_understanding")
+
+    assert result["status"] == "skipped"
+    assert result["reason_code"] == "busy"
+    assert _node_statuses(job_db, job["id"])["fetch_question_context"] == "running"
+
+
 def test_run_to_skips_already_completed_target(
     execution_service: JobExecutionService, job_db: JobQueries, workspace
 ):

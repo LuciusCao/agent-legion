@@ -287,16 +287,9 @@ export const useJobStore = create<JobState>((set, get) => ({
     const ids = Array.from(get().selectedIds)
     if (ids.length === 0)
       return { results: [], succeeded_count: 0, failed_count: 0 }
-    const completedIds = ids.filter(
-      (id) => get().jobs.find((j) => j.id === id)?.status === 'completed'
-    )
-    if (completedIds.length === 0) {
-      useUiStore.getState().showToast('没有已完成的任务可打包', 'error')
-      return { results: [], succeeded_count: 0, failed_count: 0 }
-    }
     set({ batchPackageLoading: true })
     try {
-      const data = await packageJobs(workspaceId, completedIds)
+      const data = await packageJobs(workspaceId, ids)
       const results = data.results ?? []
       const succeededIds = new Set(
         results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)

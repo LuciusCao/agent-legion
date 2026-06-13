@@ -7,10 +7,12 @@ from typing import Any
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.pipelines.definition import PipelineDefinition
 from server.app.pipelines.execution_control import ExecutionControlError, ancestor_closure
 from server.app.pipelines.scheduler import downstream_nodes
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.pipeline_catalog import PipelineCatalogService
 
 logger = logging.getLogger(__name__)
@@ -152,44 +154,24 @@ class JobExecutionService:
             )
 
         try:
-            self.job_db.set_job_execution_target(job_id, target_node_key)
-        except ValueError as exc:
+            self.job_db.apply_run_to_atomic(
+                job_id,
+                target_node_key,
+                closure,
+                now=self._now(),
+            )
+        except JobMutationConflict as exc:
             return self._result(
                 job_id,
                 "run_to",
-                "failed",
+                "skipped",
                 target_node_key,
-                "node_not_found",
+                exc.reason_code,
                 str(exc),
             )
-
-        with self.job_db.connect() as conn:
-            for node_key in closure:
-                if node_statuses.get(node_key) == "completed":
-                    continue
-                conn.execute(
-                    """
-                    update job_nodes
-                    set status='pending',
-                        stale_reason='',
-                        error_message='',
-                        started_at=null,
-                        finished_at=null
-                    where job_id=? and node_key=?
-                    """,
-                    (job_id, node_key),
-                )
-            conn.execute(
-                """
-                update jobs
-                set status='queued',
-                    execution_paused=0,
-                    pause_reason='',
-                    error_message='',
-                    updated_at=current_timestamp
-                where id=? and status in ('paused', 'failed', 'completed')
-                """,
-                (job_id,),
+        except ValueError as exc:
+            return self._result(
+                job_id, "run_to", "failed", target_node_key, "node_not_found", str(exc)
             )
 
         return self._result(job_id, "run_to", "succeeded", target_node_key)
@@ -223,40 +205,37 @@ class JobExecutionService:
                 f"Start node {start_node_key} is not in the target closure",
             )
 
-        try:
-            staged = self.artifact_mutation.stage_outputs(
-                job, [start_node_key], definition, closure=closure
-            )
-        except ValueError as exc:
-            return self._result(
-                job_id,
-                "run_to",
-                "failed",
-                target_node_key,
-                "cleanup_failed",
-                str(exc),
-            )
-
+        staged = None
         try:
             descendants = downstream_nodes(definition, start_node_key)
-            self.job_db.mark_nodes_for_rerun_atomic(
-                job_id, [start_node_key], {start_node_key: descendants}
-            )
-            self.job_db.set_job_execution_target(job_id, target_node_key)
-            with self.job_db.connect() as conn:
-                conn.execute(
-                    """
-                    update jobs
-                    set execution_paused=0,
-                        pause_reason='',
-                        updated_at=current_timestamp
-                    where id=?
-                    """,
-                    (job_id,),
+            with self.job_db.lease_guarded_mutation(
+                job_id,
+                self._now(),
+                reject_running_nodes=True,
+            ) as conn:
+                staged = self.artifact_mutation.stage_outputs(
+                    job, [start_node_key], definition, closure=closure
                 )
+                self.job_db.mark_nodes_for_rerun_in_transaction(
+                    conn, job_id, [start_node_key], {start_node_key: descendants}
+                )
+                self.job_db.set_run_to_control_in_transaction(conn, job_id, target_node_key)
+        except JobMutationConflict as exc:
+            if staged is not None:
+                staged.rollback()
+            return self._result(
+                job_id, "run_to", "skipped", target_node_key, exc.reason_code, str(exc)
+            )
+        except ValueError as exc:
+            if staged is not None:
+                staged.rollback()
+            return self._result(
+                job_id, "run_to", "failed", target_node_key, "cleanup_failed", str(exc)
+            )
         except Exception as exc:
             logger.exception("Failed to persist run-to target for job %s", job_id)
-            staged.rollback()
+            if staged is not None:
+                staged.rollback()
             return self._result(
                 job_id,
                 "run_to",
@@ -266,7 +245,7 @@ class JobExecutionService:
                 str(exc),
             )
 
-        staged.commit()
+        commit_staged_outputs(staged, job_id, "run-to")
         return self._result(job_id, "run_to", "succeeded", target_node_key)
 
     def continue_job(self, workspace_id: str, job_id: str) -> dict[str, Any]:

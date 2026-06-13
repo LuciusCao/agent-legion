@@ -295,6 +295,35 @@ describe('jobStore', () => {
     )
   })
 
+  it('sends every selected job to package eligibility evaluation', async () => {
+    useJobStore.setState({
+      jobs: [
+        makeJob({ id: 'j1', status: 'completed' }),
+        makeJob({ id: 'j2', status: 'running', source_id: 'Q2' }),
+      ],
+      selectedIds: new Set(['j1', 'j2']),
+      selectMode: true,
+    })
+    mockPackageJobs.mockResolvedValueOnce({
+      download_url: '/api/workspaces/ws1/packages/pkg.zip',
+      package_filename: 'pkg.zip',
+      succeeded_count: 1,
+      failed_count: 1,
+      results: [
+        { job_id: 'j1', status: 'succeeded' },
+        { job_id: 'j2', status: 'failed', reason_code: 'not_completed' },
+      ],
+    })
+
+    await useJobStore.getState().batchPackage('ws1')
+
+    expect(mockPackageJobs).toHaveBeenCalledWith('ws1', ['j1', 'j2'])
+    expect(mockShowToast).toHaveBeenCalledWith(
+      '打包完成：成功 1 项，失败 1 项',
+      'error'
+    )
+  })
+
   it('does nothing when batch actions are invoked with empty selection', async () => {
     await useJobStore.getState().batchRerun('ws1', 'extract')
     await useJobStore.getState().batchDelete('ws1')

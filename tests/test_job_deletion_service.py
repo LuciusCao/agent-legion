@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -104,6 +105,39 @@ def test_delete_rejects_active_lease_despite_stale_ui(job_db: JobQueries, tmp_pa
     # Database row and storage directory must remain intact.
     assert job_db.get_job(job["id"]) is not None
     assert Path(str(job["storage_dir"])).exists()
+
+
+def test_delete_atomic_guard_catches_lease_created_after_precheck(
+    job_db: JobQueries, tmp_path: Path, monkeypatch
+) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+    job = _create_job(job_db, "ws-race", "Q001", status="queued")
+    storage_dir = Path(str(job["storage_dir"]))
+    (storage_dir / "artifact.json").write_text("{}", encoding="utf-8")
+
+    original = job_db.lease_guarded_mutation
+    created = False
+    monkeypatch.setattr(lease_repo, "has_active_for_job", lambda *args: False)
+
+    @contextmanager
+    def race(job_id: str, now, *, reject_running_nodes: bool):
+        nonlocal created
+        if not created:
+            _insert_active_lease(job_db, job_id)
+            created = True
+        with original(job_id, now, reject_running_nodes=reject_running_nodes) as conn:
+            yield conn
+
+    monkeypatch.setattr(job_db, "lease_guarded_mutation", race)
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "failed"
+    assert result["reason_code"] == "active_lease"
+    assert job_db.get_job(job["id"]) is not None
+    assert (storage_dir / "artifact.json").exists()
 
 
 def test_delete_succeeds_for_inactive_job(job_db: JobQueries, tmp_path: Path) -> None:
