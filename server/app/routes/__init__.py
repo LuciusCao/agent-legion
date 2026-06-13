@@ -59,8 +59,8 @@ def create_router(
     job_queries = JobQueryService(job_db, settings, pipeline_catalog)
     job_artifacts = JobArtifactService(job_db)
     job_logs = JobLogService(settings, job_db)
-    job_rerun = JobRerunService(job_db, settings, pipeline_catalog)
     executor_leases = ExecutorLeaseRepository(job_db.path)
+    job_rerun = JobRerunService(job_db, executor_leases, settings, pipeline_catalog)
     job_deletion = JobDeletionService(job_db, executor_leases, settings)
     job_packages = JobPackageService(job_db, settings)
 

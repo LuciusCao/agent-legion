@@ -78,20 +78,6 @@ class ArtifactResponse(BaseModel):
     content: str
 
 
-class RerunNodeResponse(BaseModel):
-    job_id: str
-    node_key: str
-    stale_nodes: list[str]
-
-
-class BatchJobRequest(BaseModel):
-    job_ids: list[str] = Field(default_factory=list)
-
-
-class BatchJobResponse(BaseModel):
-    results: list[dict[str, Any]]
-
-
 class WorkspaceRunsResponse(BaseModel):
     runs: list[dict[str, Any]]
 
