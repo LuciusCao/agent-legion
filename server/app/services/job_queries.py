@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
+from server.app.pipelines.definition import PipelineDefinition
 from server.app.services.job_errors import NotFoundError
 from server.app.services.pipeline_catalog import PipelineCatalogService
 from server.app.settings import Settings
@@ -24,9 +25,15 @@ class JobQueryService:
             raise NotFoundError("Job not found")
         return job
 
-    def _job_nodes_with_definition(self, job: dict[str, Any]) -> list[dict[str, Any]]:
-        definition = self.pipelines.definition(str(job["pipeline_key"]))
-        nodes = self.job_db.list_job_nodes(str(job["id"]))
+    def _definition(self, pipeline_key: str) -> PipelineDefinition:
+        return self.pipelines.definition(pipeline_key)
+
+    def _job_nodes_with_definition(
+        self,
+        job: dict[str, Any],
+        nodes: list[dict[str, Any]],
+        definition: PipelineDefinition,
+    ) -> list[dict[str, Any]]:
         return [
             {
                 **node,
@@ -49,6 +56,65 @@ class JobQueryService:
             for node in nodes
         ]
 
+    def _node_summary(
+        self,
+        node: dict[str, Any],
+        definition: PipelineDefinition,
+    ) -> dict[str, Any]:
+        node_key = str(node["node_key"])
+        label = definition.nodes[node_key].label if node_key in definition.nodes else node_key
+        return {
+            "node_key": node_key,
+            "label": label,
+            "status": str(node["status"]),
+            "error_message": str(node.get("error_message", "")),
+        }
+
+    def _job_summary(
+        self,
+        job: dict[str, Any],
+        nodes: list[dict[str, Any]],
+        definition: PipelineDefinition,
+    ) -> dict[str, Any]:
+        summaries = [self._node_summary(node, definition) for node in nodes]
+        completed_nodes = sum(1 for summary in summaries if summary["status"] == "completed")
+        total_nodes = len(summaries)
+
+        active_node_key: str | None = None
+        for summary in summaries:
+            if summary["status"] == "running":
+                active_node_key = summary["node_key"]
+                break
+        if active_node_key is None:
+            for summary in summaries:
+                if summary["status"] == "failed":
+                    active_node_key = summary["node_key"]
+                    break
+
+        error_summary = ""
+        if active_node_key is not None:
+            active_summary = next(
+                (summary for summary in summaries if summary["node_key"] == active_node_key),
+                None,
+            )
+            if active_summary is not None:
+                error_summary = active_summary["error_message"][:240]
+
+        return {
+            **job,
+            "node_summaries": summaries,
+            "completed_nodes": completed_nodes,
+            "total_nodes": total_nodes,
+            "active_node_key": active_node_key,
+            "error_summary": error_summary,
+            "execution_control": {
+                "mode": "full",
+                "target_node_key": None,
+                "paused": False,
+                "pause_reason": "",
+            },
+        }
+
     def _artifact_names(self, job: dict[str, Any]) -> list[str]:
         base = Path(str(job["storage_dir"]))
         if not base.exists():
@@ -61,17 +127,34 @@ class JobQueryService:
         pipeline_key: str | None = None,
         status: str | None = None,
     ) -> list[dict[str, Any]]:
-        return self.job_db.list_jobs(
+        jobs = self.job_db.list_jobs(
             workspace_id=workspace_id,
             pipeline_key=pipeline_key,
             status=status,
         )
+        job_ids = [str(job["id"]) for job in jobs]
+        nodes_by_job = self.job_db.list_job_nodes_for_jobs(job_ids)
+
+        definitions: dict[str, PipelineDefinition] = {}
+        for job in jobs:
+            key = str(job["pipeline_key"])
+            if key not in definitions:
+                definitions[key] = self._definition(key)
+
+        return [
+            self._job_summary(
+                job, nodes_by_job.get(str(job["id"]), []), definitions[str(job["pipeline_key"])]
+            )
+            for job in jobs
+        ]
 
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
+        definition = self._definition(str(job["pipeline_key"]))
+        nodes = self.job_db.list_job_nodes(job_id)
         return {
-            "job": job,
-            "nodes": self._job_nodes_with_definition(job),
+            "job": self._job_summary(job, nodes, definition),
+            "nodes": self._job_nodes_with_definition(job, nodes, definition),
             "runs": self.job_db.list_node_runs(job_id),
             "artifacts": self._artifact_names(job),
         }
@@ -97,7 +180,7 @@ class JobQueryService:
         if workspace is None:
             raise NotFoundError("Workspace not found")
         pipeline_key = str(workspace.get("default_pipeline_key") or "question_content")
-        definition = self.pipelines.definition(pipeline_key)
+        definition = self._definition(pipeline_key)
         counts = self.job_db.count_workspace_job_nodes_by_status(workspace_id, pipeline_key)
         statuses = ["pending", "running", "completed", "failed", "stale"]
         return {

@@ -1043,6 +1043,27 @@ export interface components {
       /** Deleted */
       deleted: string
     }
+    /** ExecutionControlSummaryResponse */
+    ExecutionControlSummaryResponse: {
+      /**
+       * Mode
+       * @default full
+       * @enum {string}
+       */
+      mode: 'full' | 'until_node'
+      /**
+       * Pause Reason
+       * @default
+       */
+      pause_reason: string
+      /**
+       * Paused
+       * @default false
+       */
+      paused: boolean
+      /** Target Node Key */
+      target_node_key?: string | null
+    }
     /** ExecutorAllocationRequest */
     ExecutorAllocationRequest: {
       /** Concurrency Limit */
@@ -1128,25 +1149,103 @@ export interface components {
     JobDetailResponse: {
       /** Artifacts */
       artifacts: string[]
-      /** Job */
-      job: {
-        [key: string]: unknown
-      }
+      job: components['schemas']['JobSummaryResponse']
       /** Nodes */
-      nodes: {
-        [key: string]: unknown
-      }[]
+      nodes: components['schemas']['JobNodeResponse'][]
       /** Runs */
-      runs: {
-        [key: string]: unknown
-      }[]
+      runs: components['schemas']['NodeRunResponse'][]
+    }
+    /** JobNodeResponse */
+    JobNodeResponse: {
+      /** After */
+      after: string[]
+      /** Capability */
+      capability: string
+      /** Error Message */
+      error_message: string
+      /** Finished At */
+      finished_at?: string | null
+      /** Id */
+      id: number
+      /** Inputs */
+      inputs: string[]
+      /** Job Id */
+      job_id: string
+      /** Label */
+      label: string
+      /** Node Key */
+      node_key: string
+      /** Outputs */
+      outputs: string[]
+      /** Stale Reason */
+      stale_reason: string
+      /** Started At */
+      started_at?: string | null
+      /** Status */
+      status: string
+    }
+    /** JobNodeSummaryResponse */
+    JobNodeSummaryResponse: {
+      /** Error Message */
+      error_message: string
+      /** Label */
+      label: string
+      /** Node Key */
+      node_key: string
+      /** Status */
+      status: string
+    }
+    /** JobSummaryResponse */
+    JobSummaryResponse: {
+      /** Active Node Key */
+      active_node_key?: string | null
+      /** Batch Id */
+      batch_id: string
+      /**
+       * Completed Nodes
+       * @default 0
+       */
+      completed_nodes: number
+      /** Created At */
+      created_at: string
+      /** Error Message */
+      error_message: string
+      /**
+       * Error Summary
+       * @default
+       */
+      error_summary: string
+      execution_control?: components['schemas']['ExecutionControlSummaryResponse']
+      /** Id */
+      id: string
+      /** Node Summaries */
+      node_summaries?: components['schemas']['JobNodeSummaryResponse'][]
+      /** Pipeline Key */
+      pipeline_key: string
+      /** Source Id */
+      source_id: string
+      /** Source Type */
+      source_type: string
+      /** Status */
+      status: string
+      /** Storage Dir */
+      storage_dir: string
+      /** Title */
+      title: string
+      /**
+       * Total Nodes
+       * @default 0
+       */
+      total_nodes: number
+      /** Updated At */
+      updated_at: string
+      /** Workspace Id */
+      workspace_id: string
     }
     /** JobsResponse */
     JobsResponse: {
       /** Jobs */
-      jobs: {
-        [key: string]: unknown
-      }[]
+      jobs: components['schemas']['JobSummaryResponse'][]
     }
     /** NodeBindingRequest */
     NodeBindingRequest: {
@@ -1165,6 +1264,33 @@ export interface components {
       node_key: string
       /** Pipeline Key */
       pipeline_key: string
+    }
+    /** NodeRunResponse */
+    NodeRunResponse: {
+      /** Command Json */
+      command_json: string
+      /** Error Message */
+      error_message: string
+      /** Exit Code */
+      exit_code?: number | null
+      /** Finished At */
+      finished_at?: string | null
+      /** Id */
+      id: number
+      /** Job Id */
+      job_id: string
+      /** Log Path */
+      log_path: string
+      /** Node Key */
+      node_key: string
+      /** Run Dir */
+      run_dir: string
+      /** Session Dir */
+      session_dir: string
+      /** Started At */
+      started_at: string
+      /** Status */
+      status: string
     }
     /** OpenclawConfigResponse */
     OpenclawConfigResponse: {
