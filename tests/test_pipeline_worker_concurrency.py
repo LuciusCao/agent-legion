@@ -9,7 +9,7 @@ from server.app.executors.config import (
     PiExecutorConfig,
 )
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.models import ExecutionContext, ExecutionResult
+from server.app.executors.models import ExecutionContext, ExecutionResult, LeaseClaimRequest
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
@@ -570,7 +570,6 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
 
     # Simulate a worker with a stale snapshot by calling try_claim directly.
     leases = ExecutorLeaseRepository(db_path)
-    from server.app.executors.models import LeaseClaimRequest
 
     job_db.set_job_execution_target(job["id"], "left")
     claim = leases.try_claim(
@@ -631,5 +630,78 @@ def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Pat
     node = job_db.get_job_node(job["id"], "fetch")
     assert node["status"] == "failed"
     assert "does not support capability" in node["error_message"]
+
+    worker.stop()
+
+
+def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
+    """The lease repository itself rejects claims that would exceed global capacity."""
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS")
+
+    executor = FakeExecutor("local-default")
+    registry = _make_registry(
+        {"local-default": executor},
+        {"local-default": _local_def(1, {"fetch"})},
+    )
+    definition = _make_definition([_local_node("fetch")])
+
+    job1 = job_db.create_job(
+        pipeline_key="test",
+        source_type="question",
+        source_id="Q1",
+        batch_id="",
+        title="Q1",
+        node_keys=["fetch"],
+        workspace_id=ws["id"],
+    )
+    job2 = job_db.create_job(
+        pipeline_key="test",
+        source_type="question",
+        source_id="Q2",
+        batch_id="",
+        title="Q2",
+        node_keys=["fetch"],
+        workspace_id=ws["id"],
+    )
+    _bind(job_db, ws["id"], "test", "fetch", "local-default")
+    _allocate(job_db, ws["id"], "local-default", 2)
+
+    worker = _make_worker(tmp_path, db_path, registry, [definition])
+    base_request = LeaseClaimRequest(
+        executor_id="local-default",
+        global_capacity=1,
+        workspace_id=ws["id"],
+        job_id=job1["id"],
+        pipeline_key="test",
+        node_key="fetch",
+        capability="fetch",
+        local_node_limit=None,
+        lease_ttl_seconds=60,
+        log_path="/tmp/run.log",
+    )
+
+    claim1 = worker.leases.try_claim(base_request)
+    assert claim1 is not None
+
+    claim2 = worker.leases.try_claim(
+        LeaseClaimRequest(
+            executor_id="local-default",
+            global_capacity=1,
+            workspace_id=ws["id"],
+            job_id=job2["id"],
+            pipeline_key="test",
+            node_key="fetch",
+            capability="fetch",
+            local_node_limit=None,
+            lease_ttl_seconds=60,
+            log_path="/tmp/run2.log",
+        )
+    )
+    assert claim2 is None
+
+    counts = worker.leases.active_counts("local-default")
+    assert counts.get("global", 0) == 1
 
     worker.stop()

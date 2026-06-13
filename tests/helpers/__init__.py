@@ -180,7 +180,7 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     # workspace pipeline during app construction.
     import shutil
 
-    real_root = Path(__file__).resolve().parents[1]
+    real_root = Path(__file__).resolve().parents[2]
     pipelines_src = real_root / "config" / "pipelines"
     pipelines_dst = root_dir / "config" / "pipelines"
     pipelines_dst.mkdir(parents=True, exist_ok=True)
