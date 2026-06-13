@@ -1,0 +1,18 @@
+invariants:
+  - id: API-CONTRACT-001
+    statement: Generated frontend API types remain in sync with the backend OpenAPI schema.
+    owner: architecture
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/generate-api-types.sh
+        gate: quick
+
+  - id: BOUNDARY-LAYER-001
+    statement: Architecture contract checks enforce layer boundaries between routes, services, and pipeline phases.
+    owner: architecture
+    risk: high
+    evidence:
+      - kind: contract
+        target: scripts/check_architecture.py
+        gate: quick

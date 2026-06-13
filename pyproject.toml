@@ -27,6 +27,10 @@ dev = [
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+  "full_gate: deterministic higher-fidelity architecture scenarios",
+  "ci_extended: repeated stress scenarios for CI",
+]
 
 [tool.ruff]
 line-length = 100
