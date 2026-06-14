@@ -43,38 +43,3 @@
   min-width: 0;
   overflow-y: auto;
 }
-
-.graphWrap {
-  background: var(--md-sys-color-surface);
-  border: 1px solid var(--md-sys-color-outline-variant);
-  border-radius: 12px;
-  overflow: hidden;
-}
-
-.graphExpanded {
-  height: 280px;
-}
-
-.graphCollapsed {
-  height: auto;
-}
-
-.graphHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 8px 12px;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant);
-}
-
-.graphTitle {
-  font-size: 14px;
-  font-weight: 600;
-  color: var(--md-sys-color-on-surface);
-}
-
-.graphBody {
-  height: calc(100% - 41px);
-  overflow: auto;
-  padding: 12px;
-}
