@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import JobDetailPage from './JobDetailPage'
+import { useUiStore } from '../stores/uiStore'
 
 const mockDetail = {
   job: {
@@ -78,9 +79,15 @@ const mockDetail = {
   artifacts: ['question.json'],
 }
 
+function ActionRenderer() {
+  const actions = useUiStore((state) => state.detailPageActions)
+  return <div data-testid="detail-actions-host">{actions}</div>
+}
+
 function renderPage(initialEntry = '/workspaces/ws1/jobs/j1') {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
+      <ActionRenderer />
       <Routes>
         <Route
           path="/workspaces/:workspaceId/jobs/:jobId"
@@ -260,9 +267,9 @@ describe('JobDetailPage', () => {
       expect(screen.getByText('节点进度')).toBeInTheDocument()
     })
 
-    expect(screen.getByText('重跑')).toHaveAttribute('disabled')
-    expect(screen.getByText('打包')).toHaveAttribute('disabled')
-    expect(screen.getByText('删除')).not.toHaveAttribute('disabled')
+    expect(screen.getByLabelText('重跑')).toHaveAttribute('disabled')
+    expect(screen.getByLabelText('打包')).toHaveAttribute('disabled')
+    expect(screen.getByLabelText('删除')).not.toHaveAttribute('disabled')
   })
 
   it('reruns a selected node and refreshes detail', async () => {
@@ -275,7 +282,7 @@ describe('JobDetailPage', () => {
     })
 
     await act(async () => {
-      screen.getByText('重跑').click()
+      screen.getByLabelText('重跑').click()
     })
 
     expect(screen.getByText('选择重跑节点')).toBeInTheDocument()
@@ -306,7 +313,7 @@ describe('JobDetailPage', () => {
     })
 
     await act(async () => {
-      screen.getByText('打包').click()
+      screen.getByLabelText('打包').click()
     })
 
     await waitFor(() => {
@@ -325,7 +332,7 @@ describe('JobDetailPage', () => {
     openSpy.mockRestore()
   })
 
-  it('deletes the job and navigates back to the list', async () => {
+  it('deletes the job after confirm and navigates back to the list', async () => {
     const fetchMock = createFetchMock()
     vi.stubGlobal('fetch', fetchMock)
 
@@ -333,6 +340,12 @@ describe('JobDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByText('节点进度')).toBeInTheDocument()
     })
+
+    await act(async () => {
+      screen.getByLabelText('删除').click()
+    })
+
+    expect(screen.getByText(/确定删除任务/)).toBeInTheDocument()
 
     await act(async () => {
       screen.getByText('删除').click()
@@ -357,7 +370,7 @@ describe('JobDetailPage', () => {
     })
 
     await act(async () => {
-      screen.getByText('运行到').click()
+      screen.getByLabelText('运行到').click()
     })
 
     expect(screen.getByText('选择运行到节点')).toBeInTheDocument()
@@ -394,7 +407,7 @@ describe('JobDetailPage', () => {
     })
 
     await act(async () => {
-      screen.getByText('运行到').click()
+      screen.getByLabelText('运行到').click()
     })
 
     await act(async () => {
@@ -438,11 +451,11 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('继续完整流程')).toBeInTheDocument()
+      expect(screen.getByLabelText('继续完整流程')).toBeInTheDocument()
     })
 
     await act(async () => {
-      screen.getByText('继续完整流程').click()
+      screen.getByLabelText('继续完整流程').click()
     })
 
     await waitFor(() => {
@@ -451,5 +464,20 @@ describe('JobDetailPage', () => {
         expect.objectContaining({ method: 'POST' })
       )
     })
+  })
+
+  it('renders actions as icon buttons in app bar, not text buttons in body', async () => {
+    vi.stubGlobal('fetch', createFetchMock({ detailStatus: 'completed' }))
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('节点进度')).toBeInTheDocument()
+    })
+
+    expect(screen.getByLabelText('重跑')).toBeInTheDocument()
+    expect(screen.getByLabelText('打包')).toBeInTheDocument()
+    expect(
+      screen.queryByText('重跑', { selector: 'md-outlined-button' })
+    ).not.toBeInTheDocument()
   })
 })
