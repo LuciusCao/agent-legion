@@ -203,6 +203,15 @@ def test_cms_credentials_allowed_when_no_cms_resource(tmp_path, monkeypatch):
 
 
 def test_cms_credentials_required_when_cms_resource_enabled(tmp_path, monkeypatch):
+    # Set these to empty strings so the real .env file cannot populate them.
+    for env_key in (
+        "BASECMS_TOKEN",
+        "BASECMS_APP_ID",
+        "BASECMS_NONCE",
+        "BASECMS_SECRET",
+        "BASECMS_TOKEN_URL",
+    ):
+        monkeypatch.setenv(env_key, "")
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
@@ -227,6 +236,15 @@ resource_providers:
 
 
 def test_cms_credentials_required_for_provider_keyed_defaults(tmp_path, monkeypatch):
+    # Set these to empty strings so the real .env file cannot populate them.
+    for env_key in (
+        "BASECMS_TOKEN",
+        "BASECMS_APP_ID",
+        "BASECMS_NONCE",
+        "BASECMS_SECRET",
+        "BASECMS_TOKEN_URL",
+    ):
+        monkeypatch.setenv(env_key, "")
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
@@ -305,6 +323,49 @@ resource_providers:
     assert "super-secret-gen" not in message
     # The env overrides make CMS credentials valid; the failing field is elsewhere.
     assert "openclaw.cwd" in message
+
+
+def test_cms_resource_accepts_basecms_token_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("BASECMS_TOKEN", "basecms-token")
+    binary = _make_executable(tmp_path / "whisper-cli")
+    model = tmp_path / "model.bin"
+    model.write_text("model", encoding="utf-8")
+    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
+    config += """
+cms:
+  token: ''
+  token_gen:
+    secret: ''
+resource_providers:
+  question_detail:
+    provider: cms.question.detail
+    path: /question/detail
+"""
+
+    _load_and_validate(tmp_path, monkeypatch, config)
+
+
+def test_cms_resource_accepts_basecms_token_gen_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("BASECMS_APP_ID", "app-id")
+    monkeypatch.setenv("BASECMS_NONCE", "nonce")
+    monkeypatch.setenv("BASECMS_SECRET", "basecms-secret")
+    monkeypatch.setenv("BASECMS_TOKEN_URL", "http://cms.example.com/token")
+    binary = _make_executable(tmp_path / "whisper-cli")
+    model = tmp_path / "model.bin"
+    model.write_text("model", encoding="utf-8")
+    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
+    config += """
+cms:
+  token: ''
+  token_gen:
+    secret: ''
+resource_providers:
+  question_detail:
+    provider: cms.question.detail
+    path: /question/detail
+"""
+
+    _load_and_validate(tmp_path, monkeypatch, config)
 
 
 def test_validate_runtime_can_be_called_directly(tmp_path, monkeypatch):
