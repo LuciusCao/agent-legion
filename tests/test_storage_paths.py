@@ -117,6 +117,20 @@ class TestResolveManagedPath:
         assert "job" in message
         assert str(outside) not in message
 
+    def test_missing_leaf_below_broken_symlink_parent_rejected(self, managed_root: Path) -> None:
+        outside = managed_root.parent / "outside_missing"
+        link = managed_root / "broken_link"
+        link.symlink_to(outside, target_is_directory=True)
+
+        with pytest.raises(ManagedPathError):
+            resolve_managed_path(
+                managed_root,
+                "broken_link/missing_leaf",
+                allow_missing=True,
+                record_id="job-broken-link",
+                root_kind="job",
+            )
+
     def test_managed_root_itself_rejected(self, managed_root: Path) -> None:
         with pytest.raises(ManagedPathError) as exc_info:
             resolve_managed_path(managed_root, ".", allow_missing=False)
@@ -166,6 +180,18 @@ class TestResolveManagedPath:
 
         assert "video" in str(exc_info.value)
         assert str(outside) not in str(exc_info.value)
+
+    def test_missing_inside_path_disallowed_when_allow_missing_is_false(
+        self, managed_root: Path
+    ) -> None:
+        with pytest.raises(ManagedPathError, match="does not exist"):
+            resolve_managed_path(
+                managed_root,
+                "missing.txt",
+                allow_missing=False,
+                record_id="video-strict",
+                root_kind="video",
+            )
 
 
 class TestResolveVideoDir:

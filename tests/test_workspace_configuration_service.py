@@ -248,3 +248,55 @@ def test_executor_stats_does_not_consult_agent_status_manager(
     stats = workspace_service.stats(workspace["id"])
     assert "executor_status" in stats
     assert not consulted, "stats() should not consult AgentStatusManager"
+
+
+def test_executor_stats_available_respects_global_usage_by_other_workspaces(
+    workspace_service, workspace, job_db, settings
+):
+    other = workspace_service.create({"name": "Other", "default_pipeline_key": "question_content"})
+    for workspace_id, limit in ((workspace["id"], 8), (other["id"], 16)):
+        job_db.replace_workspace_executor_configuration(
+            workspace_id,
+            allocations=[{"executor_id": "local-default", "concurrency_limit": limit}],
+            bindings=[
+                {
+                    "pipeline_key": "question_content",
+                    "node_key": "fetch",
+                    "executor_id": "local-default",
+                }
+            ],
+            node_limits=[],
+        )
+
+    repo = ExecutorLeaseRepository(job_db.path)
+    for i in range(16):
+        owner = other
+        job = job_db.create_job(
+            pipeline_key="question_content",
+            source_type="question",
+            source_id=f"global-{i}",
+            batch_id="",
+            title=f"Global {i}",
+            node_keys=["fetch"],
+            workspace_id=owner["id"],
+        )
+        claim = repo.try_claim(
+            LeaseClaimRequest(
+                executor_id="local-default",
+                global_capacity=16,
+                workspace_id=owner["id"],
+                job_id=job["id"],
+                pipeline_key="question_content",
+                node_key="fetch",
+                capability="fetch_questions",
+                local_node_limit=None,
+                lease_ttl_seconds=60,
+                log_path="/tmp/run.log",
+            )
+        )
+        assert claim is not None
+
+    stats = workspace_service.stats(workspace["id"])
+    status = stats["executor_status"]["executors"][0]
+    assert status["running"] == 0
+    assert status["available"] == 0

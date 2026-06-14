@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 import pytest
@@ -61,6 +62,28 @@ def test_enabled_pipelines_require_pi_binary(tmp_path, monkeypatch):
 
     fields = [loc for loc, _ in exc_info.value.fields]
     assert "pipelines.pi.binary" in fields
+
+
+def test_enabled_pipelines_accept_pi_command_from_path(tmp_path, monkeypatch):
+    whisper = _make_executable(tmp_path / "whisper-cli")
+    model = tmp_path / "model.bin"
+    model.write_text("model", encoding="utf-8")
+    _make_executable(tmp_path / "pi")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    config = _minimal_config().format(binary=whisper, model=model, cwd=tmp_path)
+    config += "\npipelines:\n  enabled: true\n  pi:\n    binary: pi\n"
+
+    _load_and_validate(tmp_path, monkeypatch, config)
+
+
+def test_whisper_provider_accepts_binary_from_path(tmp_path, monkeypatch):
+    _make_executable(tmp_path / "whisper-cli")
+    model = tmp_path / "model.bin"
+    model.write_text("model", encoding="utf-8")
+    monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
+    config = _minimal_config().format(binary="whisper-cli", model=model, cwd=tmp_path)
+
+    _load_and_validate(tmp_path, monkeypatch, config)
 
 
 def test_openclaw_cwd_must_exist(tmp_path, monkeypatch):
@@ -201,6 +224,28 @@ resource_providers:
     fields = [loc for loc, _ in exc_info.value.fields]
     assert "cms.token" in fields
     assert "cms.token_gen.secret" in fields
+
+
+def test_cms_credentials_required_for_provider_keyed_defaults(tmp_path, monkeypatch):
+    binary = _make_executable(tmp_path / "whisper-cli")
+    model = tmp_path / "model.bin"
+    model.write_text("model", encoding="utf-8")
+    config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
+    config += """
+cms:
+  token: ''
+  token_gen:
+    secret: ''
+resource_providers:
+  cms.question.detail:
+    path: /question/detail
+"""
+
+    with pytest.raises(StartupValidationError) as exc_info:
+        _load_and_validate(tmp_path, monkeypatch, config)
+
+    fields = {loc for loc, _ in exc_info.value.fields}
+    assert {"cms.token", "cms.token_gen.secret"} <= fields
 
 
 def test_aggregate_invalid_fields_in_one_exception(tmp_path, monkeypatch):

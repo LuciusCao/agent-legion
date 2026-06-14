@@ -20,8 +20,8 @@ LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
 def _handler_key(handler: LocalHandler) -> str | None:
     """Return an importable path for *handler* when it can be resolved in a child.
 
-    Lambdas and other non-serializable callables return ``None`` so the executor
-    can fall back to in-process execution.
+    Lambdas and other non-serializable callables return ``None`` so executor
+    construction can reject handlers that would bypass process isolation.
     """
     qualname = getattr(handler, "__qualname__", "")
     module = getattr(handler, "__module__", "")
@@ -105,6 +105,16 @@ class LocalExecutor:
     ) -> None:
         self.id = id
         self.handlers = dict(handlers)
+        unsafe_capabilities = [
+            capability
+            for capability, handler in self.handlers.items()
+            if _handler_key(handler) is None
+        ]
+        if unsafe_capabilities:
+            raise ValueError(
+                "Local executor handlers must be importable module-level functions: "
+                + ", ".join(sorted(unsafe_capabilities))
+            )
         self.settings_config = dict(settings_config) if settings_config is not None else {}
         self.job_db = job_db
         self.cancellation_grace_seconds = cancellation_grace_seconds
@@ -135,13 +145,8 @@ class LocalExecutor:
             )
 
         key = _handler_key(handler)
-        if key is None:
-            logger.debug(
-                "Handler for capability %s is not serializable; running in-process",
-                context.capability,
-            )
-            return self._execute_in_process(context, handler)
-
+        if key is None:  # guarded by constructor validation
+            raise RuntimeError(f"Local handler for {context.capability!r} is not importable")
         return self._execute_isolated(context, key)
 
     def cancel(self, execution_id: str) -> None:
@@ -170,32 +175,6 @@ class LocalExecutor:
             runtime["_job_db_path"] = str(getattr(self.job_db, "path", ""))
             runtime["_jobs_dir"] = str(getattr(self.job_db, "jobs_dir", ""))
         return runtime
-
-    def _execute_in_process(
-        self, context: ExecutionContext, handler: LocalHandler
-    ) -> ExecutionResult:
-        runtime: dict[str, Any] = self._build_runtime(
-            context,
-            context.runtime.get("cancellation")  # type: ignore[arg-type]
-            if isinstance(context.runtime, Mapping) and "cancellation" in context.runtime
-            else CancellationToken(),
-        )
-        context.job_dir.mkdir(parents=True, exist_ok=True)
-        context.log_path.parent.mkdir(parents=True, exist_ok=True)
-
-        try:
-            handler(dict(context.job), context.job_dir, runtime)
-        except Exception as exc:
-            error_message = str(exc)
-            logger.exception("Local handler failed for execution %s", context.execution_id)
-            return ExecutionResult(
-                status="failed",
-                exit_code=1,
-                error_message=error_message,
-                log_path=str(context.log_path),
-            )
-
-        return self._check_outputs(context)
 
     def _execute_isolated(self, context: ExecutionContext, handler_key: str) -> ExecutionResult:
         context.job_dir.mkdir(parents=True, exist_ok=True)

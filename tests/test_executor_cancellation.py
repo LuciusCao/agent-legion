@@ -128,6 +128,13 @@ def _local_context(
 
 
 class TestLocalExecutorIsolation:
+    def test_local_executor_rejects_non_importable_handler(self) -> None:
+        with pytest.raises(ValueError, match="must be importable"):
+            LocalExecutor(
+                "local-default",
+                {"unsafe": lambda _job, _job_dir, _runtime: None},
+            )
+
     def test_local_executor_runs_handler_in_isolated_child(self, tmp_path: Path) -> None:
         executor = LocalExecutor(
             "local-default",

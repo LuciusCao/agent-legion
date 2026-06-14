@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -78,6 +79,15 @@ def _expand(value: str) -> Path:
     return Path(os.path.expanduser(value))
 
 
+def _resolve_executable(value: str) -> Path | None:
+    expanded = os.path.expanduser(value)
+    if os.sep in expanded or (os.altsep and os.altsep in expanded):
+        path = Path(expanded)
+        return path if path.is_file() and os.access(path, os.X_OK) else None
+    found = shutil.which(expanded)
+    return Path(found) if found else None
+
+
 def _cms_resource_enabled(config: dict[str, Any]) -> bool:
     """Return True when a CMS-backed resource provider is enabled."""
     providers = config.get("resource_providers")
@@ -89,7 +99,12 @@ def _cms_resource_enabled(config: dict[str, Any]) -> bool:
         provider = str(entry.get("provider", ""))
         if provider.startswith("cms.") and entry.get("enabled") is not False:
             return True
-    return False
+    return any(
+        str(key).startswith("cms.")
+        and isinstance(entry, dict)
+        and entry.get("enabled") is not False
+        for key, entry in providers.items()
+    )
 
 
 def validate_runtime(
@@ -121,9 +136,8 @@ def validate_runtime(
         model = str(whisper_cfg.get("model", ""))
         if not binary or not model:
             return False
-        binary_path = _expand(binary)
         model_path = _expand(model)
-        return binary_path.is_file() and os.access(binary_path, os.X_OK) and model_path.is_file()
+        return _resolve_executable(binary) is not None and model_path.is_file()
 
     def _sensevoice_usable() -> bool:
         model_dir = str(sensevoice_cfg.get("model_dir", ""))
@@ -141,10 +155,8 @@ def validate_runtime(
         model = str(whisper_cfg.get("model", ""))
         if not binary:
             errors.append(("asr.whisper.binary", "missing whisper binary"))
-        elif not _expand(binary).is_file():
-            errors.append(("asr.whisper.binary", "whisper binary does not exist"))
-        elif not os.access(_expand(binary), os.X_OK):
-            errors.append(("asr.whisper.binary", "whisper binary is not executable"))
+        elif _resolve_executable(binary) is None:
+            errors.append(("asr.whisper.binary", "whisper binary is not executable or on PATH"))
         if not model:
             errors.append(("asr.whisper.model", "missing whisper model"))
         elif not _expand(model).is_file():
@@ -168,11 +180,8 @@ def validate_runtime(
         if not pi_binary:
             errors.append(("pipelines.pi.binary", "missing pi binary"))
         else:
-            pi_path = _expand(pi_binary)
-            if not pi_path.is_file():
-                errors.append(("pipelines.pi.binary", "pi binary does not exist"))
-            elif not os.access(pi_path, os.X_OK):
-                errors.append(("pipelines.pi.binary", "pi binary is not executable"))
+            if _resolve_executable(pi_binary) is None:
+                errors.append(("pipelines.pi.binary", "pi binary is not executable or on PATH"))
 
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():

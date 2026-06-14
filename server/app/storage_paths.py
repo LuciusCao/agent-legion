@@ -26,20 +26,15 @@ def resolve_with_existing_parent(candidate: Path, *, allow_missing: bool) -> Pat
     from pointing outside the managed root while still allowing not-yet-created
     leaf paths.
     """
-    if candidate.exists() or not allow_missing:
+    if allow_missing:
+        # ``strict=False`` still resolves symlink components, including a broken
+        # symlink whose target does not exist. That is essential for detecting a
+        # stored path that escapes through such a parent.
         return candidate.resolve(strict=False)
-
-    parts = candidate.parts
-    for i in range(len(parts), 0, -1):
-        prefix = Path(*parts[:i])
-        if prefix.exists():
-            resolved_prefix = prefix.resolve(strict=True)
-            suffix = Path(*parts[i:])
-            return resolved_prefix / suffix
-
-    # No existing parent (should not happen when the root exists); fall back to
-    # a best-effort resolution for the error path.
-    return candidate.resolve(strict=False)
+    try:
+        return candidate.resolve(strict=True)
+    except FileNotFoundError:
+        raise
 
 
 def resolve_managed_path(
@@ -61,7 +56,17 @@ def resolve_managed_path(
     candidate = Path(stored_path).expanduser()
     if not candidate.is_absolute():
         candidate = resolved_root / candidate
-    resolved_candidate = resolve_with_existing_parent(candidate, allow_missing=allow_missing)
+    try:
+        resolved_candidate = resolve_with_existing_parent(candidate, allow_missing=allow_missing)
+    except FileNotFoundError as exc:
+        message = f"Path does not exist inside {root_kind} root"
+        if record_id:
+            message = f"{message} for record {record_id}"
+        raise ManagedPathError(
+            message,
+            record_id=record_id,
+            root_kind=root_kind,
+        ) from exc
     if resolved_candidate == resolved_root or not resolved_candidate.is_relative_to(resolved_root):
         message = f"Path escapes {root_kind} root"
         if record_id:

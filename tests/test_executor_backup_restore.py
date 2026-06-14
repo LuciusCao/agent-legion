@@ -148,3 +148,26 @@ def test_restore_uses_same_directory_atomic_replace(tmp_path: Path) -> None:
     assert preserved.parent == db_path.parent
     assert preserved.name != db_path.name
     assert preserved.is_file()
+
+
+def test_restore_rejects_corrupt_backup_without_replacing_live_database(tmp_path: Path) -> None:
+    db_path, workspace_id, _job_id = _seed_database(tmp_path / "live.sqlite")
+    corrupt_backup = tmp_path / "corrupt.sqlite"
+    corrupt_backup.write_text("not a sqlite database", encoding="utf-8")
+
+    quiesce_sqlite_database(db_path)
+
+    with pytest.raises(RestoreError, match="backup validation failed"):
+        restore_sqlite_database(corrupt_backup, db_path)
+
+    live = sqlite3.connect(db_path)
+    try:
+        assert live.execute("pragma integrity_check").fetchone()[0] == "ok"
+        assert (
+            live.execute(
+                "select count(*) from workspaces where id = ?", (workspace_id,)
+            ).fetchone()[0]
+            == 1
+        )
+    finally:
+        live.close()

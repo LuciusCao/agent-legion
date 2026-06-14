@@ -54,6 +54,31 @@ def backup_sqlite_connection(conn: sqlite3.Connection, backup_path: Path) -> Non
         destination.close()
 
 
+def _validate_sqlite_database(path: Path) -> list[dict[str, Any]]:
+    try:
+        conn = sqlite3.connect(str(path), timeout=5.0)
+        try:
+            conn.row_factory = sqlite3.Row
+            conn.execute("pragma foreign_keys=ON")
+            integrity = conn.execute("pragma integrity_check").fetchone()[0]
+            if integrity != "ok":
+                raise RestoreError(f"integrity check failed: {integrity}")
+            if conn.execute("pragma foreign_key_check").fetchall():
+                raise RestoreError("foreign key check failed")
+            return [
+                dict(row)
+                for row in conn.execute(
+                    "select version, name from schema_migrations order by version"
+                ).fetchall()
+            ]
+        finally:
+            conn.close()
+    except (sqlite3.Error, RestoreError) as exc:
+        if isinstance(exc, RestoreError):
+            raise
+        raise RestoreError(f"backup validation failed: {exc}") from exc
+
+
 def restore_sqlite_database(
     backup_path: Path,
     db_path: Path,
@@ -78,6 +103,10 @@ def restore_sqlite_database(
     staging = _restore_backup_path(db_path, "restore-staging")
 
     try:
+        # Validate the exact staged bytes before they can replace the live DB.
+        shutil.copy2(backup_path, staging)
+        history = _validate_sqlite_database(staging)
+
         # Preserve the current database and any associated WAL/SHM files.
         shutil.copy2(db_path, preserved)
         for suffix in ("-wal", "-shm"):
@@ -85,8 +114,6 @@ def restore_sqlite_database(
             if sibling.exists():
                 shutil.copy2(sibling, preserved.with_name(f"{preserved.name}{suffix}"))
 
-        # Stage the backup, then atomically swap it into place.
-        shutil.copy2(backup_path, staging)
         os.replace(staging, db_path)
 
         # Remove stale WAL/SHM siblings left over from the previous database.
@@ -100,22 +127,20 @@ def restore_sqlite_database(
         if staging.exists():
             staging.unlink()
 
-    conn = sqlite3.connect(str(db_path), timeout=5.0)
     try:
-        conn.row_factory = sqlite3.Row
-        conn.execute("pragma foreign_keys=ON")
-        integrity = conn.execute("pragma integrity_check").fetchone()[0]
-        if integrity != "ok":
-            raise RestoreError(f"integrity check failed: {integrity}")
-        if conn.execute("pragma foreign_key_check").fetchall():
-            raise RestoreError("foreign key check failed after restore")
-        history = [
-            dict(row)
-            for row in conn.execute(
-                "select version, name from schema_migrations order by version"
-            ).fetchall()
-        ]
-    finally:
-        conn.close()
+        history = _validate_sqlite_database(db_path)
+    except RestoreError as exc:
+        rollback = _restore_backup_path(db_path, "restore-rollback")
+        try:
+            shutil.copy2(preserved, rollback)
+            os.replace(rollback, db_path)
+        except OSError as rollback_exc:
+            raise RestoreError(
+                f"restored database validation failed and rollback failed: {rollback_exc}"
+            ) from exc
+        finally:
+            if rollback.exists():
+                rollback.unlink()
+        raise RestoreError(f"restored database validation failed: {exc}") from exc
 
     return preserved, history

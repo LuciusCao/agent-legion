@@ -1,3 +1,4 @@
+import json
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -50,17 +51,56 @@ def context(tmp_path: Path) -> ExecutionContext:
 # LocalExecutor
 
 
+def noop_local_handler(
+    _job: dict[str, Any], _job_dir: Path, _runtime: dict[str, Any] | None
+) -> None:
+    return None
+
+
+def write_output_handler(
+    _job: dict[str, Any], job_dir: Path, _runtime: dict[str, Any] | None
+) -> None:
+    (job_dir / "out.json").write_text("{}", encoding="utf-8")
+
+
+def raising_local_handler(
+    _job: dict[str, Any], _job_dir: Path, _runtime: dict[str, Any] | None
+) -> None:
+    raise ValueError("boom")
+
+
+def record_runtime_handler(
+    _job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None
+) -> None:
+    runtime = runtime or {}
+    payload = {
+        key: str(value) if isinstance(value, Path) else value
+        for key, value in runtime.items()
+        if key
+        in {
+            "job_dir",
+            "log_path",
+            "inputs",
+            "expected_outputs",
+            "capability",
+            "node_key",
+            "pipeline_key",
+            "execution_id",
+            "workspace_id",
+        }
+    }
+    (job_dir / "runtime.json").write_text(json.dumps(payload), encoding="utf-8")
+    (job_dir / "out.json").write_text("{}", encoding="utf-8")
+
+
 def test_local_executor_supports_capability() -> None:
-    executor = LocalExecutor("local-default", {"fetch": lambda _job, _job_dir, _runtime: None})
+    executor = LocalExecutor("local-default", {"fetch": noop_local_handler})
     assert executor.supports("fetch")
     assert not executor.supports("other")
 
 
 def test_local_executor_returns_normalized_artifacts(context: ExecutionContext) -> None:
-    def handler(job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None) -> None:
-        (job_dir / "out.json").write_text("{}", encoding="utf-8")
-
-    executor = LocalExecutor("local-default", {"fetch": handler})
+    executor = LocalExecutor("local-default", {"fetch": write_output_handler})
     result = executor.execute(replace(context, capability="fetch", expected_outputs=("out.json",)))
     assert result.status == "completed"
     assert result.exit_code == 0
@@ -68,40 +108,28 @@ def test_local_executor_returns_normalized_artifacts(context: ExecutionContext) 
 
 
 def test_local_executor_fails_when_output_missing(context: ExecutionContext) -> None:
-    def handler(job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None) -> None:
-        pass
-
-    executor = LocalExecutor("local-default", {"fetch": handler})
+    executor = LocalExecutor("local-default", {"fetch": noop_local_handler})
     result = executor.execute(replace(context, capability="fetch"))
     assert result.status == "failed"
     assert "out.json" in result.error_message
 
 
 def test_local_executor_catches_handler_exception(context: ExecutionContext) -> None:
-    def handler(job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None) -> None:
-        raise ValueError("boom")
-
-    executor = LocalExecutor("local-default", {"fetch": handler})
+    executor = LocalExecutor("local-default", {"fetch": raising_local_handler})
     result = executor.execute(replace(context, capability="fetch"))
     assert result.status == "failed"
     assert "boom" in result.error_message
 
 
 def test_local_executor_cancel_records_intent(context: ExecutionContext) -> None:
-    executor = LocalExecutor("local-default", {"fetch": lambda _job, _job_dir, _runtime: None})
+    executor = LocalExecutor("local-default", {"fetch": noop_local_handler})
     executor.cancel("exec-1")
     result = executor.execute(replace(context, capability="fetch"))
     assert result.status == "cancelled"
 
 
 def test_local_executor_runtime_includes_expected_keys(context: ExecutionContext) -> None:
-    captured: dict[str, Any] = {}
-
-    def handler(job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None) -> None:
-        captured.update(runtime or {})
-        (job_dir / "out.json").write_text("{}", encoding="utf-8")
-
-    executor = LocalExecutor("local-default", {"fetch": handler})
+    executor = LocalExecutor("local-default", {"fetch": record_runtime_handler})
     executor.execute(
         replace(
             context,
@@ -111,10 +139,11 @@ def test_local_executor_runtime_includes_expected_keys(context: ExecutionContext
         )
     )
 
-    assert captured["job_dir"] == context.job_dir
-    assert captured["log_path"] == context.log_path
-    assert captured["inputs"] == ("a.json", "b.json")
-    assert captured["expected_outputs"] == ("out.json",)
+    captured = json.loads((context.job_dir / "runtime.json").read_text(encoding="utf-8"))
+    assert captured["job_dir"] == str(context.job_dir)
+    assert captured["log_path"] == str(context.log_path)
+    assert captured["inputs"] == ["a.json", "b.json"]
+    assert captured["expected_outputs"] == ["out.json"]
     assert captured["capability"] == "fetch"
     assert captured["node_key"] == context.node_key
     assert captured["pipeline_key"] == context.pipeline_key
