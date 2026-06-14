@@ -105,11 +105,22 @@ class LocalExecutor:
     ) -> None:
         self.id = id
         self.handlers = dict(handlers)
-        unsafe_capabilities = [
-            capability
-            for capability, handler in self.handlers.items()
-            if _handler_key(handler) is None
-        ]
+        self._handler_keys: dict[str, str] = {}
+        unsafe_capabilities: list[str] = []
+        for capability, handler in self.handlers.items():
+            key = _handler_key(handler)
+            if key is None:
+                unsafe_capabilities.append(capability)
+                continue
+            try:
+                resolved = _resolve_handler(key)
+            except (AttributeError, ImportError, ValueError):
+                unsafe_capabilities.append(capability)
+                continue
+            if resolved is not handler:
+                unsafe_capabilities.append(capability)
+                continue
+            self._handler_keys[capability] = key
         if unsafe_capabilities:
             raise ValueError(
                 "Local executor handlers must be importable module-level functions: "
@@ -144,7 +155,7 @@ class LocalExecutor:
                 log_path=str(context.log_path),
             )
 
-        key = _handler_key(handler)
+        key = self._handler_keys.get(context.capability)
         if key is None:  # guarded by constructor validation
             raise RuntimeError(f"Local handler for {context.capability!r} is not importable")
         return self._execute_isolated(context, key)

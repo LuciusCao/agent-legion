@@ -114,13 +114,14 @@ def restore_sqlite_database(
             if sibling.exists():
                 shutil.copy2(sibling, preserved.with_name(f"{preserved.name}{suffix}"))
 
-        os.replace(staging, db_path)
-
-        # Remove stale WAL/SHM siblings left over from the previous database.
+        # Clear stale sidecars before crossing the atomic replacement boundary.
+        # A cleanup failure must leave the live database itself untouched.
         for suffix in ("-wal", "-shm"):
             stale = db_path.with_name(f"{db_path.name}{suffix}")
             if stale.exists():
                 stale.unlink()
+
+        os.replace(staging, db_path)
     except OSError as exc:
         raise RestoreError(f"atomic replace failed: {exc}") from exc
     finally:

@@ -135,6 +135,16 @@ class TestLocalExecutorIsolation:
                 {"unsafe": lambda _job, _job_dir, _runtime: None},
             )
 
+    def test_local_executor_rejects_handler_from_missing_module(self) -> None:
+        def handler(_job, _job_dir, _runtime) -> None:
+            return None
+
+        handler.__module__ = "module_that_does_not_exist"
+        handler.__qualname__ = "handler"
+
+        with pytest.raises(ValueError, match="must be importable"):
+            LocalExecutor("local-default", {"unsafe": handler})
+
     def test_local_executor_runs_handler_in_isolated_child(self, tmp_path: Path) -> None:
         executor = LocalExecutor(
             "local-default",
