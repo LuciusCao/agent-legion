@@ -236,6 +236,63 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
         assert 4 not in {row["version"] for row in versions}
 
 
+def test_v004_rebuilds_tables_with_pre_existing_indexes(tmp_path: Path) -> None:
+    """If the legacy tables already carry the named indexes, V004 must not fail
+    with "index already exists" when it keeps the old copies of jobs/node_runs.
+    """
+    path = tmp_path / "v004_with_indexes.sqlite"
+    _create_pre_v004_database(path)
+
+    conn = connect_sqlite(path)
+    with conn:
+        # Indexes that may already exist on a real database from prior schema init.
+        conn.execute("create index idx_jobs_pipeline_status on jobs(pipeline_key, status)")
+        conn.execute("create index idx_jobs_source on jobs(pipeline_key, source_type, source_id)")
+        conn.execute(
+            "create index idx_jobs_workspace_pipeline_status on jobs(workspace_id, pipeline_key, status)"
+        )
+        conn.execute(
+            "create index idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id)"
+        )
+        conn.execute("create index idx_job_nodes_job_status on job_nodes(job_id, status)")
+        conn.execute("create index idx_node_runs_job_id on node_runs(job_id)")
+        conn.execute(
+            "create index idx_job_batches_workspace on job_batches(workspace_id, created_at)"
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id) "
+            "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
+        )
+        conn.execute(
+            "insert into job_nodes(job_id, node_key, status) values ('job1', 'extract', 'pending')"
+        )
+    conn.close()
+
+    init_db(path)
+
+    with closing(connect_sqlite(path)) as conn, conn:
+        # All expected indexes still exist and are attached to the rebuilt tables,
+        # not the temporary old copies.
+        rows = {
+            row["name"]: row["tbl_name"]
+            for row in conn.execute(
+                "select name, tbl_name from sqlite_master where type = 'index'"
+            ).fetchall()
+        }
+        assert rows["idx_jobs_pipeline_status"] == "jobs"
+        assert rows["idx_jobs_source"] == "jobs"
+        assert rows["idx_jobs_workspace_pipeline_status"] == "jobs"
+        assert rows["idx_jobs_workspace_source"] == "jobs"
+        assert rows["idx_job_nodes_job_status"] == "job_nodes"
+        assert rows["idx_node_runs_job_id"] == "node_runs"
+        assert rows["idx_job_batches_workspace"] == "job_batches"
+        assert "jobs__v004_old" not in {
+            row["name"]
+            for row in conn.execute("select name from sqlite_master where type = 'table'")
+        }
+        assert conn.execute("select count(*) from jobs").fetchone()[0] == 1
+
+
 def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
     path = tmp_path / "v004_fk.sqlite"
     _create_pre_v004_database(path)
