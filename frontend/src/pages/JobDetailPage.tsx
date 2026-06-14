@@ -17,7 +17,7 @@ import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
-import { JobActionBar } from '../components/JobActionBar'
+import { JobDetailActions } from '../components/JobDetailActions'
 
 const VALID_STATUSES = new Set<DagNode['status']>([
   'pending',
@@ -131,24 +131,6 @@ export default function JobDetailPage() {
     }
   }, [jobId, setPageTitle, refreshDetail])
 
-  useEffect(() => {
-    if (!detail) {
-      setDetailPageActions(null)
-      return
-    }
-    setDetailPageActions(
-      <md-icon-button
-        aria-label="产物文件"
-        onClick={() => setArtifactListOpen(true)}
-      >
-        <md-icon>folder_open</md-icon>
-      </md-icon-button>
-    )
-    return () => {
-      setDetailPageActions(null)
-    }
-  }, [detail, setDetailPageActions])
-
   // Poll every 5s for queued and running jobs only
   const detailRef = useRef(detail)
   useEffect(() => {
@@ -260,6 +242,39 @@ export default function JobDetailPage() {
     }
   }, [jobId, workspaceId, navigate])
 
+  useEffect(() => {
+    if (!detail) {
+      setDetailPageActions(null)
+      return
+    }
+    setDetailPageActions(
+      <JobDetailActions
+        jobs={[detail.job]}
+        pipelineDefinition={pipelineDefinition}
+        loading={actionLoading}
+        onRerun={handleRerun}
+        onRunTo={handleRunTo}
+        onContinue={handleContinue}
+        onPackage={handlePackage}
+        onDelete={handleDelete}
+        onOpenArtifacts={() => setArtifactListOpen(true)}
+      />
+    )
+    return () => {
+      setDetailPageActions(null)
+    }
+  }, [
+    detail,
+    setDetailPageActions,
+    pipelineDefinition,
+    actionLoading,
+    handleRerun,
+    handleRunTo,
+    handleContinue,
+    handlePackage,
+    handleDelete,
+  ])
+
   async function openArtifact(name: string) {
     if (!jobId) return
     const requestId = ++artifactRequestId.current
@@ -290,22 +305,6 @@ export default function JobDetailPage() {
   return (
     <div className={styles.page}>
       {error ? <p className={styles.error}>{error}</p> : null}
-
-      {detail && (
-        <div className={styles.actionBarRow}>
-          <JobActionBar
-            jobs={[detail.job]}
-            pipelineDefinition={pipelineDefinition}
-            mode="single"
-            loading={actionLoading}
-            onRerun={handleRerun}
-            onRunTo={handleRunTo}
-            onContinue={handleContinue}
-            onPackage={handlePackage}
-            onDelete={handleDelete}
-          />
-        </div>
-      )}
 
       <div className={styles.columns}>
         <div className={styles.left}>
