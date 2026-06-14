@@ -1,14 +1,12 @@
 import { useState } from 'react'
 import type { JobSummary, PipelineDefinitionRecord } from '../types'
-import {
-  JobRerunDialog,
-  type PipelineNodesByKey,
-} from './JobRerunDialog'
+import { JobRerunDialog, type PipelineNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import {
   canRerunJob,
   canPackageJob,
   canContinueJob,
+  canDeleteJob,
 } from './JobActionBar'
 import styles from './JobDetailActions.module.css'
 
@@ -41,10 +39,14 @@ export function JobDetailActions({
   const [runToOpen, setRunToOpen] = useState(false)
 
   const rerunDisabled =
-    jobs.length === 0 || loading || jobs.every((job) => !canRerunJob(job.status))
+    jobs.length === 0 ||
+    loading ||
+    jobs.every((job) => !canRerunJob(job.status))
 
   const runToDisabled =
-    jobs.length === 0 || loading || jobs.every((job) => !canRerunJob(job.status))
+    jobs.length === 0 ||
+    loading ||
+    jobs.every((job) => !canRerunJob(job.status))
 
   const continueDisabled =
     jobs.length === 0 || loading || !jobs.some((job) => canContinueJob(job))
@@ -54,7 +56,8 @@ export function JobDetailActions({
     loading ||
     jobs.every((job) => !canPackageJob(job.status))
 
-  const deleteDisabled = jobs.length === 0 || loading
+  const deleteDisabled =
+    jobs.length === 0 || loading || jobs.every(() => !canDeleteJob())
 
   const handleRerun = async (nodeKey: string) => {
     await onRerun(nodeKey)
@@ -89,7 +92,7 @@ export function JobDetailActions({
         >
           <md-icon>play_circle</md-icon>
         </md-icon-button>
-        {showContinue && (
+        {showContinue && onContinue && (
           <md-icon-button
             aria-label="继续完整流程"
             title="继续完整流程"
