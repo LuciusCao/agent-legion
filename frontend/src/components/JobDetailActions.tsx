@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { JobSummary, PipelineDefinitionRecord } from '../types'
 import { JobRerunDialog, type PipelineNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
+import { JobDeleteDialog } from './JobDeleteDialog'
 import {
   canRerunJob,
   canPackageJob,
@@ -37,6 +38,7 @@ export function JobDetailActions({
 }: JobDetailActionsProps) {
   const [rerunOpen, setRerunOpen] = useState(false)
   const [runToOpen, setRunToOpen] = useState(false)
+  const [deleteOpen, setDeleteOpen] = useState(false)
 
   const rerunDisabled =
     jobs.length === 0 ||
@@ -114,7 +116,7 @@ export function JobDetailActions({
           aria-label="删除"
           title="删除"
           disabled={deleteDisabled || undefined}
-          onClick={onDelete}
+          onClick={() => setDeleteOpen(true)}
           style={{ color: 'var(--md-sys-color-error)' }}
         >
           <md-icon>delete</md-icon>
@@ -144,6 +146,15 @@ export function JobDetailActions({
         pipelineNodesByKey={pipelineNodesByKey}
         onClose={() => setRunToOpen(false)}
         onConfirm={handleRunTo}
+      />
+      <JobDeleteDialog
+        open={deleteOpen}
+        title={jobs[0]?.title || jobs[0]?.source_id}
+        onClose={() => setDeleteOpen(false)}
+        onConfirm={async () => {
+          await onDelete()
+          setDeleteOpen(false)
+        }}
       />
     </>
   )
