@@ -1,3 +1,4 @@
+import re
 import sqlite3
 
 from server.app.db.migrations.helpers import add_column_if_missing
@@ -268,6 +269,22 @@ def _column_names(conn: sqlite3.Connection, table: str) -> list[str]:
     return [row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()]
 
 
+_INDEX_NAME_RE = re.compile(r"create\s+index\s+(?:if\s+not\s+exists\s+)?(\S+)", re.IGNORECASE)
+
+
+def _drop_indexes_by_name(conn: sqlite3.Connection, index_sqls: tuple[str, ...]) -> None:
+    """Drop any existing indexes with the names declared in ``index_sqls``.
+
+    When a source table is kept as ``<table>__v004_old`` its indexes keep their
+    original names and collide with the new indexes we are about to create.
+    Dropping them is safe because the old table is ultimately removed.
+    """
+    for sql in index_sqls:
+        match = _INDEX_NAME_RE.match(sql.strip())
+        if match:
+            conn.execute(f"drop index if exists {match.group(1)}")
+
+
 def _copy_table(
     conn: sqlite3.Connection,
     source_table: str,
@@ -328,6 +345,7 @@ def _copy_table(
     _call_phase_hook(f"v004:rename:{replacement_table}")
     conn.execute(f"alter table {replacement_table} rename to {source_table}")
 
+    _drop_indexes_by_name(conn, index_sqls)
     for idx_sql in index_sqls:
         conn.execute(idx_sql)
 

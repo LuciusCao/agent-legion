@@ -107,6 +107,33 @@ def _cms_resource_enabled(config: dict[str, Any]) -> bool:
     )
 
 
+def _cms_token_available(config: dict[str, Any]) -> bool:
+    """Return True when CMS credentials are available from any supported source.
+
+    Credentials may come from the config file, ``VIDEO_HIVE_CMS_*`` environment
+    overrides, or the legacy ``BASECMS_*`` environment variables.
+    """
+    cms_config = config.get("cms") or {}
+    if not isinstance(cms_config, dict):
+        return False
+    if cms_config.get("token"):
+        return True
+    if os.environ.get("BASECMS_TOKEN"):
+        return True
+    token_gen = cms_config.get("token_gen") or {}
+    if all(str(token_gen.get(key) or "") for key in ("app_id", "nonce", "secret", "url")):
+        return True
+    return all(
+        os.environ.get(env_key)
+        for env_key in (
+            "BASECMS_APP_ID",
+            "BASECMS_NONCE",
+            "BASECMS_SECRET",
+            "BASECMS_TOKEN_URL",
+        )
+    )
+
+
 def validate_runtime(
     runtime: ExecutorRuntimeConfig,
     config: dict[str, Any],
@@ -187,7 +214,7 @@ def validate_runtime(
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
 
-    if _cms_resource_enabled(config):
+    if _cms_resource_enabled(config) and not _cms_token_available(config):
         cms_config = config.get("cms") or {}
         if not isinstance(cms_config, dict):
             cms_config = {}
