@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act, fireEvent } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 import { JobDetailActions } from './JobDetailActions'
 import { makeJob } from '../testing/fixtures'
 import type { PipelineDefinitionRecord } from '../types'
@@ -33,7 +33,9 @@ function renderActions(
 ) {
   return render(
     <JobDetailActions
-      jobs={[makeJob({ id: 'j1', status: 'failed', pipeline_key: pipeline.key })]}
+      jobs={[
+        makeJob({ id: 'j1', status: 'failed', pipeline_key: pipeline.key }),
+      ]}
       pipelineDefinition={pipeline}
       onRerun={vi.fn()}
       onPackage={vi.fn()}
@@ -118,30 +120,26 @@ describe('JobDetailActions', () => {
 
   it('opens rerun dialog and calls onRerun with selected node', async () => {
     const onRerun = vi.fn()
-    const { container } = renderActions({ onRerun })
+    renderActions({ onRerun })
     await act(async () => {
       screen.getByLabelText('重跑').click()
     })
     expect(screen.getByText('选择重跑节点')).toBeInTheDocument()
     await act(async () => {
-      const confirmBtn = container.querySelector('md-dialog md-filled-button')
-      expect(confirmBtn).toBeInTheDocument()
-      fireEvent.click(confirmBtn!)
+      screen.getByText('确认重跑').click()
     })
     expect(onRerun).toHaveBeenCalledWith('extract')
   })
 
   it('opens run-to dialog and calls onRunTo with selected target', async () => {
     const onRunTo = vi.fn()
-    const { container } = renderActions({ onRunTo })
+    renderActions({ onRunTo })
     await act(async () => {
       screen.getByLabelText('运行到').click()
     })
     expect(screen.getByText('选择运行到节点')).toBeInTheDocument()
     await act(async () => {
-      const confirmBtn = container.querySelector('md-dialog md-filled-button')
-      expect(confirmBtn).toBeInTheDocument()
-      fireEvent.click(confirmBtn!)
+      screen.getByText('确认运行到').click()
     })
     expect(onRunTo).toHaveBeenCalledWith('extract', undefined)
   })

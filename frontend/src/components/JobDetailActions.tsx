@@ -3,12 +3,7 @@ import type { JobSummary, PipelineDefinitionRecord } from '../types'
 import { JobRerunDialog, type PipelineNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobDeleteDialog } from './JobDeleteDialog'
-import {
-  canRerunJob,
-  canPackageJob,
-  canContinueJob,
-  canDeleteJob,
-} from './JobActionBar'
+import { canRerunJob, canPackageJob, canContinueJob } from './JobActionBar'
 import styles from './JobDetailActions.module.css'
 
 export type JobDetailActionsProps = {
@@ -58,8 +53,7 @@ export function JobDetailActions({
     loading ||
     jobs.every((job) => !canPackageJob(job.status))
 
-  const deleteDisabled =
-    jobs.length === 0 || loading || jobs.every(() => !canDeleteJob())
+  const deleteDisabled = jobs.length === 0 || loading
 
   const handleRerun = async (nodeKey: string) => {
     await onRerun(nodeKey)
@@ -152,8 +146,11 @@ export function JobDetailActions({
         title={jobs[0]?.title || jobs[0]?.source_id}
         onClose={() => setDeleteOpen(false)}
         onConfirm={async () => {
-          await onDelete()
-          setDeleteOpen(false)
+          try {
+            await onDelete()
+          } finally {
+            setDeleteOpen(false)
+          }
         }}
       />
     </>
