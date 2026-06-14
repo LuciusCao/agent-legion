@@ -171,3 +171,44 @@ def test_restore_rejects_corrupt_backup_without_replacing_live_database(tmp_path
         )
     finally:
         live.close()
+
+
+def test_restore_sidecar_cleanup_failure_leaves_live_database_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    db_path, workspace_id, _job_id = _seed_database(tmp_path / "live.sqlite")
+    backup_path = tmp_path / "backup.sqlite"
+    source = sqlite3.connect(db_path)
+    try:
+        backup = sqlite3.connect(backup_path)
+        source.backup(backup)
+        backup.close()
+    finally:
+        source.close()
+
+    queries = JobQueries(db_path, tmp_path / "jobs")
+    queries.update_workspace(workspace_id=workspace_id, name="Mutated")
+    quiesce_sqlite_database(db_path)
+
+    shm_path = db_path.with_name(f"{db_path.name}-shm")
+    shm_path.write_bytes(b"stale sidecar")
+    original_unlink = Path.unlink
+
+    def fail_sidecar_unlink(path: Path, *args, **kwargs) -> None:
+        if path == shm_path:
+            raise OSError("sidecar is locked")
+        original_unlink(path, *args, **kwargs)
+
+    monkeypatch.setattr(Path, "unlink", fail_sidecar_unlink)
+
+    with pytest.raises(RestoreError, match="atomic replace failed"):
+        restore_sqlite_database(backup_path, db_path)
+
+    live = sqlite3.connect(db_path)
+    try:
+        assert (
+            live.execute("select name from workspaces where id = ?", (workspace_id,)).fetchone()[0]
+            == "Mutated"
+        )
+    finally:
+        live.close()
