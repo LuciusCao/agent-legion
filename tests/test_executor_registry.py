@@ -14,7 +14,7 @@ from server.app.executors.config import (
     PiCapabilityConfig,
     PiExecutorConfig,
 )
-from server.app.executors.local import LocalExecutor, LocalHandler
+from server.app.executors.local import LocalExecutor
 from server.app.executors.openclaw import OpenClawExecutor
 from server.app.executors.registry import (
     ExecutorRegistry,
@@ -30,11 +30,26 @@ from server.app.executors.runtime_config import (
 )
 
 
-def _make_local_handler(name: str) -> LocalHandler:
-    def handler(job: dict[str, Any], artifact_dir: Path, context: dict[str, Any] | None) -> None:
-        (artifact_dir / f"{name}.txt").write_text(name, encoding="utf-8")
+def _write_handler_artifact(artifact_dir: Path, name: str) -> None:
+    (artifact_dir / f"{name}.txt").write_text(name, encoding="utf-8")
 
-    return handler
+
+def _fetch_questions_handler(
+    job: dict[str, Any], artifact_dir: Path, context: dict[str, Any] | None
+) -> None:
+    _write_handler_artifact(artifact_dir, "fetch_questions")
+
+
+def _clean_and_parse_handler(
+    job: dict[str, Any], artifact_dir: Path, context: dict[str, Any] | None
+) -> None:
+    _write_handler_artifact(artifact_dir, "clean_and_parse")
+
+
+def _available_handler(
+    job: dict[str, Any], artifact_dir: Path, context: dict[str, Any] | None
+) -> None:
+    _write_handler_artifact(artifact_dir, "available")
 
 
 def _sample_pi_runtime() -> PiRuntimeConfig:
@@ -92,8 +107,8 @@ def definitions() -> dict[str, ExecutorConfig]:
 def runtime_dependencies() -> RuntimeDependencies:
     return RuntimeDependencies(
         local_handlers={
-            "reading_analysis.fetch_questions": _make_local_handler("fetch_questions"),
-            "reading_analysis.clean_and_parse": _make_local_handler("clean_and_parse"),
+            "reading_analysis.fetch_questions": _fetch_questions_handler,
+            "reading_analysis.clean_and_parse": _clean_and_parse_handler,
         },
         pi_runtime=_sample_pi_runtime(),
         pi_skill_root=Path("."),
@@ -194,7 +209,7 @@ def test_registry_skips_unavailable_local_handlers(
         ),
     }
     runtime = RuntimeDependencies(
-        local_handlers={"reading_analysis.available": _make_local_handler("available")},
+        local_handlers={"reading_analysis.available": _available_handler},
         pi_runtime=runtime_dependencies.pi_runtime,
         pi_skill_root=runtime_dependencies.pi_skill_root,
         openclaw_runtime=runtime_dependencies.openclaw_runtime,

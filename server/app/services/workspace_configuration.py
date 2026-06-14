@@ -229,7 +229,8 @@ class WorkspaceConfigurationService:
         for count in self.job_db.get_workspace_executor_runtime_counts(workspace_id):
             definition = self.settings.executor_definitions.get(count["executor_id"])
             global_capacity = definition.global_capacity if definition is not None else 0
-            available = max(0, min(global_capacity, count["workspace_limit"]) - count["running"])
+            global_available = global_capacity - count["global_running"]
+            available = max(0, min(count["workspace_limit"] - count["running"], global_available))
             executors.append(
                 {
                     "executor_id": count["executor_id"],
