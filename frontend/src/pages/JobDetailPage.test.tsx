@@ -79,6 +79,9 @@ const mockDetail = {
   artifacts: ['question.json'],
 }
 
+// JobDetailPage injects app-bar actions into useUiStore, but WorkspaceLayout/AppBar
+// is not rendered in this isolated test, so ActionRenderer renders the stored actions
+// so tests can interact with them.
 function ActionRenderer() {
   const actions = useUiStore((state) => state.detailPageActions)
   return <div data-testid="detail-actions-host">{actions}</div>
@@ -376,10 +379,8 @@ describe('JobDetailPage', () => {
     expect(screen.getByText('选择运行到节点')).toBeInTheDocument()
 
     await act(async () => {
-      const chip = document.querySelector(
-        '[data-testid="target-chip-review"]'
-      ) as HTMLElement | null
-      if (chip) fireEvent.click(chip)
+      const chip = screen.getByTestId('target-chip-review')
+      fireEvent.click(chip)
     })
 
     await act(async () => {
@@ -411,17 +412,13 @@ describe('JobDetailPage', () => {
     })
 
     await act(async () => {
-      const chip = document.querySelector(
-        '[data-testid="target-chip-review"]'
-      ) as HTMLElement | null
-      if (chip) fireEvent.click(chip)
+      const chip = screen.getByTestId('target-chip-review')
+      fireEvent.click(chip)
     })
 
     await act(async () => {
-      const chip = document.querySelector(
-        '[data-testid="start-chip-generate"]'
-      ) as HTMLElement | null
-      if (chip) fireEvent.click(chip)
+      const chip = screen.getByTestId('start-chip-generate')
+      fireEvent.click(chip)
     })
 
     await act(async () => {
@@ -476,6 +473,8 @@ describe('JobDetailPage', () => {
 
     expect(screen.getByLabelText('重跑')).toBeInTheDocument()
     expect(screen.getByLabelText('打包')).toBeInTheDocument()
+    // The old body action bar used md-outlined-button with text labels;
+    // app bar actions are now md-icon-button with aria-label.
     expect(
       screen.queryByText('重跑', { selector: 'md-outlined-button' })
     ).not.toBeInTheDocument()
