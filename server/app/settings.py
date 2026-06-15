@@ -91,6 +91,16 @@ def _apply_env_overrides(config: dict[str, Any]) -> None:
         node[path[-1]] = parser(raw)
 
 
+def _apply_basecms_env_overrides(config: dict[str, Any]) -> None:
+    """Apply BASECMS_* overrides that predate the VIDEO_HIVE_* overrides."""
+    cms = config.setdefault("cms", {})
+    if not isinstance(cms, dict):
+        return
+    base_url = os.environ.get("BASECMS_BASE_URL")
+    if base_url:
+        cms["base_url"] = base_url
+
+
 def _normalize_cms_config(config: dict[str, Any]) -> None:
     """Derive legacy URL fields from base_url when present."""
     cms = config.get("cms")
@@ -129,6 +139,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         if isinstance(loaded, dict):
             config = loaded
     _apply_env_overrides(config)
+    _apply_basecms_env_overrides(config)
     _normalize_cms_config(config)
     resolved_data_dir = data_dir or root_dir / str(config.get("data_dir", "data"))
     videos_dir = resolved_data_dir / "videos"
