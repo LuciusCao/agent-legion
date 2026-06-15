@@ -44,13 +44,13 @@ def get_token(env: str, config: dict[str, Any] | None = None) -> str | None:
     from server.app.cms.auth import _generate_prod_token
 
     config = config or {}
+    token = os.environ.get("BASECMS_TOKEN")
+    if token:
+        return token
     token = config.get("token")
     if token:
         result: str = str(token)
         return result
-    token = os.environ.get("BASECMS_TOKEN")
-    if token:
-        return token
     if env == "prod":
         return _generate_prod_token(config)
     return None
