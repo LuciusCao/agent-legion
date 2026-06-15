@@ -7,7 +7,7 @@ export interface JobNodeStepperProps {
   totalNodes?: number
 }
 
-const STATUS_CLASSES: Record<string, string> = {
+const STATUS_CLASSES: Record<JobNodeSummary['status'], string> = {
   completed: styles.completed,
   running: styles.running,
   failed: styles.failed,
@@ -29,7 +29,7 @@ export function JobNodeStepper({
       ? nodeSummaries
       : Array.from({ length: totalNodes }, (_, index) => ({
           node_key: `pending-${index}`,
-          label: '',
+          label: `节点 ${index + 1}`,
           status: 'pending' as const,
           error_message: '',
         }))
@@ -54,6 +54,7 @@ export function JobNodeStepper({
                   : undefined
               }
             >
+              {/* .pulse-blue is a global utility class defined in styles.css */}
               <div
                 className={`${styles.bar} ${
                   summary.status === 'running' ? 'pulse-blue' : ''
