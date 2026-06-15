@@ -1,4 +1,5 @@
 import os
+from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
@@ -10,6 +11,11 @@ from server.app.settings import load_env_file, load_settings
 def _clear_video_hive_env(monkeypatch):
     for key in (
         "BASECMS_BASE_URL",
+        "BASECMS_TOKEN",
+        "BASECMS_APP_ID",
+        "BASECMS_NONCE",
+        "BASECMS_SECRET",
+        "BASECMS_TOKEN_URL",
         "VIDEO_HIVE_CMS_TOKEN",
         "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
         "VIDEO_HIVE_ASR_WHISPER_BINARY",
@@ -22,7 +28,6 @@ def _clear_video_hive_env(monkeypatch):
 
 
 def test_load_env_file_preserves_quoted_secret_values(tmp_path, monkeypatch):
-    monkeypatch.delenv("BASECMS_SECRET", raising=False)
     monkeypatch.setenv("BASECMS_TOKEN", "already-set")
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -34,6 +39,63 @@ def test_load_env_file_preserves_quoted_secret_values(tmp_path, monkeypatch):
 
     assert os.environ["BASECMS_TOKEN"] == "already-set"
     assert os.environ["BASECMS_SECRET"] == "fake#secret$value"
+
+
+def test_env_example_lists_all_basecms_variables():
+    example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    example = example_path.read_text(encoding="utf-8")
+    for key in (
+        "BASECMS_BASE_URL",
+        "BASECMS_TOKEN",
+        "BASECMS_APP_ID",
+        "BASECMS_NONCE",
+        "BASECMS_SECRET",
+        "BASECMS_TOKEN_URL",
+    ):
+        assert f"{key}=" in example, f"{key} is missing from .env.example"
+
+
+def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypatch):
+    from server.app.cms.auth import _token_gen_config
+    from server.app.cms.client import get_token
+
+    monkeypatch.setenv("VIDEO_HIVE_CMS_TOKEN", "video-hive-token")
+    monkeypatch.setenv("VIDEO_HIVE_CMS_TOKEN_GEN_SECRET", "video-hive-secret")
+    monkeypatch.setenv("BASECMS_TOKEN", "basecms-token")
+    monkeypatch.setenv("BASECMS_APP_ID", "basecms-app")
+    monkeypatch.setenv("BASECMS_NONCE", "basecms-nonce")
+    monkeypatch.setenv("BASECMS_SECRET", "basecms-secret")
+    monkeypatch.setenv("BASECMS_TOKEN_URL", "http://basecms/token")
+    config_path = tmp_path / "pipeline.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "cms:\n"
+        "  token: yaml-token\n"
+        "  token_gen:\n"
+        "    app_id: yaml-app\n"
+        "    nonce: yaml-nonce\n"
+        "    secret: yaml-secret\n"
+        "    url: http://yaml/token\n"
+        "openclaw:\n"
+        "  cwd: .\n"
+        "  command_template:\n"
+        "    - openclaw\n"
+        "    - agent\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    # VIDEO_HIVE_* still wins in the parsed config (generic YAML override).
+    assert settings.config["cms"]["token"] == "video-hive-token"
+    assert settings.config["cms"]["token_gen"]["secret"] == "video-hive-secret"
+    # BASECMS_* wins at the CMS client/auth layer.
+    assert get_token("dev", settings.config) == "basecms-token"
+    token_gen = _token_gen_config(settings.config)
+    assert token_gen["app_id"] == "basecms-app"
+    assert token_gen["nonce"] == "basecms-nonce"
+    assert token_gen["secret"] == "basecms-secret"
+    assert token_gen["url"] == "http://basecms/token"
 
 
 def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
