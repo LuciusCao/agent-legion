@@ -70,7 +70,7 @@ describe('JobNodeStepper', () => {
     expect(screen.queryByText('打包组装')).not.toBeInTheDocument()
   })
 
-  it('does not render active node label', () => {
+  it('sets data-active on the segment matching activeNodeKey only', () => {
     render(
       <JobNodeStepper
         nodeSummaries={summaries}
@@ -78,7 +78,13 @@ describe('JobNodeStepper', () => {
       />
     )
 
-    expect(screen.queryByText(/当前：/)).not.toBeInTheDocument()
+    const activeSegment = screen.getByTitle('自然语言阅读')
+    expect(activeSegment).toHaveAttribute('data-active', 'true')
+
+    const inactiveLabels = ['题目理解', '打包组装', 'FAQ 生成', '内容审核']
+    inactiveLabels.forEach((label) => {
+      expect(screen.getByTitle(label)).not.toHaveAttribute('data-active')
+    })
   })
 
   it('renders placeholder when no summaries and no totalNodes are provided', () => {
