@@ -84,14 +84,13 @@ export function JobProgressPanel({
     <div className={styles.panel}>
       <div className={styles.stepperWrap}>
         <div className={styles.stepperHeader}>
-          <h3 className={styles.panelTitle}>节点进度</h3>
+          <DagStepper nodes={nodes} />
           {onOpenDagDialog && (
             <md-icon-button aria-label="查看 DAG" onClick={onOpenDagDialog}>
               <md-icon>account_tree</md-icon>
             </md-icon-button>
           )}
         </div>
-        <DagStepper nodes={nodes} />
       </div>
 
       <div>
