@@ -25,6 +25,7 @@
   height: 4px;
   border-radius: 2px;
   background: var(--md-sys-color-outline-variant);
+  transition: background 200ms ease;
 }
 
 .completed .bar {

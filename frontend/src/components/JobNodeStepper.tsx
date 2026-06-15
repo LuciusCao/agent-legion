@@ -7,6 +7,14 @@ export interface JobNodeStepperProps {
   totalNodes?: number
 }
 
+const STATUS_CLASSES: Record<string, string> = {
+  completed: styles.completed,
+  running: styles.running,
+  failed: styles.failed,
+  stale: styles.stale,
+  pending: styles.pending,
+}
+
 export function JobNodeStepper({
   nodeSummaries,
   activeNodeKey,
@@ -30,8 +38,7 @@ export function JobNodeStepper({
     <div className={styles.stepper}>
       <div className={styles.track} role="list" aria-label="节点进度">
         {segments.map((summary) => {
-          const stateClass =
-            styles[summary.status as keyof typeof styles] || styles.pending
+          const stateClass = STATUS_CLASSES[summary.status] || styles.pending
           const isActive = summary.node_key === activeNodeKey
           return (
             <div
@@ -41,6 +48,11 @@ export function JobNodeStepper({
               data-status={summary.status}
               data-active={isActive || undefined}
               role="listitem"
+              aria-label={
+                summary.label
+                  ? `${summary.label}: ${summary.status}`
+                  : undefined
+              }
             >
               <div
                 className={`${styles.bar} ${
