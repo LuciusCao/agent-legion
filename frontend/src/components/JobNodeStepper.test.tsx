@@ -62,6 +62,15 @@ describe('JobNodeStepper', () => {
     )
   })
 
+  it('sets accessible aria-label with node label and status', () => {
+    render(<JobNodeStepper nodeSummaries={summaries} />)
+
+    expect(screen.getByTitle('题目理解')).toHaveAttribute(
+      'aria-label',
+      '题目理解: completed'
+    )
+  })
+
   it('does not render node labels', () => {
     render(<JobNodeStepper nodeSummaries={summaries} />)
 
