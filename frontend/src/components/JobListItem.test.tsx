@@ -122,28 +122,22 @@ describe('JobListItem', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByTitle('题目理解')).toHaveAttribute(
-      'data-status',
-      'completed'
-    )
-    expect(screen.getByTitle('自然语言阅读')).toHaveAttribute(
-      'data-status',
-      'running'
-    )
-    expect(screen.getByTitle('打包组装')).toHaveAttribute(
-      'data-status',
-      'failed'
-    )
+    expect(
+      screen.getByRole('listitem', { name: '题目理解: completed' })
+    ).toHaveAttribute('data-status', 'completed')
+    expect(
+      screen.getByRole('listitem', { name: '自然语言阅读: running' })
+    ).toHaveAttribute('data-status', 'running')
+    expect(
+      screen.getByRole('listitem', { name: '打包组装: failed' })
+    ).toHaveAttribute('data-status', 'failed')
   })
 
-  it('shows completed/total count, active node label, and error summary', () => {
+  it('shows active node label on the left of stepper and hides relative time', () => {
     render(
       <MemoryRouter>
         <JobListItem
-          job={{
-            ...mockJob,
-            error_summary: 'assemble failed',
-          }}
+          job={mockJob}
           selected={false}
           selectMode={false}
           onToggleSelect={vi.fn()}
@@ -151,8 +145,61 @@ describe('JobListItem', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText('2/5')).toBeInTheDocument()
-    expect(screen.getByText('当前：自然语言阅读')).toBeInTheDocument()
-    expect(screen.getAllByText('assemble failed')).toHaveLength(2)
+    const activeLabel = screen.getByText('自然语言阅读')
+    expect(activeLabel).toBeInTheDocument()
+    expect(activeLabel.tagName.toLowerCase()).toBe('span')
+    expect(screen.queryByText(/当前：/)).not.toBeInTheDocument()
+    expect(screen.queryByText(/前$/)).not.toBeInTheDocument()
+  })
+
+  it('does not render node labels under the stepper', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={mockJob}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('自然语言阅读')).toBeInTheDocument()
+    expect(screen.queryByText('题目理解')).not.toBeInTheDocument()
+    expect(screen.queryByText('打包组装')).not.toBeInTheDocument()
+    expect(screen.queryByText('FAQ 生成')).not.toBeInTheDocument()
+  })
+
+  it('renders error summary when present', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{ ...mockJob, error_summary: 'assemble failed' }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+    expect(screen.getByText('assemble failed')).toBeInTheDocument()
+  })
+
+  it('passes totalNodes to JobNodeStepper for empty summaries', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{ ...mockJob, node_summaries: [], active_node_key: '' }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    const segments = screen.getAllByRole('listitem')
+    expect(segments).toHaveLength(5)
+    segments.forEach((segment) => {
+      expect(segment).toHaveAttribute('data-status', 'pending')
+    })
   })
 })

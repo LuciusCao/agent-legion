@@ -37,7 +37,7 @@
   flex-direction: column;
   gap: 2px;
   min-width: 120px;
-  flex: 0 1 auto;
+  flex: 1 1 auto;
   overflow: hidden;
 }
 
@@ -49,22 +49,12 @@
   text-overflow: ellipsis;
 }
 
-.title {
-  font-size: 13px;
-  color: var(--md-sys-color-on-surface-variant);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 .badge {
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 999px;
   white-space: nowrap;
   flex-shrink: 0;
-  background: var(--md-sys-color-surface-variant);
-  color: var(--md-sys-color-on-surface-variant);
 }
 
 .pending {
@@ -73,49 +63,61 @@
 }
 
 .running {
-  background: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
 }
 
 .completed {
-  background: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-on-secondary-container);
+  background: var(--status-completed-bg);
+  color: var(--status-completed-text);
 }
 
 .failed {
-  background: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
-}
-
-.time {
-  font-size: 13px;
-  color: var(--md-sys-color-on-surface-variant);
-  white-space: nowrap;
-  flex-shrink: 0;
-  min-width: 80px;
-  text-align: right;
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
 }
 
 .nodeProgress {
   display: flex;
   flex-direction: column;
   gap: 2px;
-  flex: 1 1 220px;
-  min-width: 180px;
+  flex: 0 1 320px;
+  min-width: 220px;
   max-width: 360px;
 }
 
-.nodeProgressHeader {
+.nodeProgressRow {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
+  gap: 12px;
+  width: 100%;
 }
 
-.nodeProgressCount {
-  font-size: 11px;
+.activeLabel {
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 64px;
+  max-width: 96px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.activeLabel.running {
+  color: var(--status-running-text);
+}
+
+.activeLabel.completed {
+  color: var(--status-completed-text);
+}
+
+.activeLabel.failed {
+  color: var(--status-failed-text);
+}
+
+.activeLabel.pending {
   color: var(--md-sys-color-on-surface-variant);
-  font-variant-numeric: tabular-nums;
 }
 
 .errorSummary {
@@ -124,19 +126,4 @@
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-.expandBtn {
-  flex-shrink: 0;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--md-sys-color-primary);
-  cursor: pointer;
-  font-size: 13px;
-}
-
-.expandBtn:hover {
-  background: var(--md-sys-color-surface-container-high);
 }
