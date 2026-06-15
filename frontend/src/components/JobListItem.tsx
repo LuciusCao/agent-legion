@@ -1,6 +1,5 @@
 import { useNavigate } from 'react-router-dom'
 import { JOB_STATUS_LABELS } from '../labels'
-import { formatRelativeTime } from '../helpers'
 import type { JobRecord } from '../types'
 import type { JobNodeSummary } from '../jobTypes'
 import { JobNodeStepper } from './JobNodeStepper'
@@ -46,6 +45,12 @@ function activeNodeKey(job: JobRecord): string | null {
   return running?.node_key ?? null
 }
 
+function activeNodeSummary(job: JobRecord): JobNodeSummary | undefined {
+  const key = activeNodeKey(job)
+  if (!key) return undefined
+  return job.node_summaries?.find((n) => n.node_key === key)
+}
+
 export function JobListItem({
   job,
   selected,
@@ -60,6 +65,9 @@ export function JobListItem({
       navigate(`/workspaces/${workspaceId}/jobs/${job.id}`)
     }
   }
+
+  const activeSummary = activeNodeSummary(job)
+  const status = job.status
 
   return (
     <div
@@ -97,22 +105,27 @@ export function JobListItem({
         </div>
       </div>
       <div className={styles.nodeProgress}>
-        <div className={styles.nodeProgressHeader}>
-          <span className={styles.nodeProgressCount}>{progressText(job)}</span>
+        <div className={styles.nodeProgressRow}>
+          {activeSummary && (
+            <span
+              className={`${styles.activeLabel} ${statusClass(status)}`}
+              title={activeSummary.label}
+            >
+              {activeSummary.label}
+            </span>
+          )}
+          <JobNodeStepper
+            nodeSummaries={job.node_summaries ?? []}
+            activeNodeKey={activeSummary?.node_key}
+            totalNodes={job.total_nodes ?? 0}
+          />
         </div>
-        <JobNodeStepper
-          nodeSummaries={job.node_summaries ?? []}
-          activeNodeKey={activeNodeKey(job)}
-        />
         {job.error_summary ? (
           <div className={styles.errorSummary}>{job.error_summary}</div>
         ) : null}
       </div>
-      <span className={`${styles.badge} ${statusClass(job.status)}`}>
+      <span className={`${styles.badge} ${statusClass(status)}`}>
         {JOB_STATUS_LABELS[job.status] || job.status}
-      </span>
-      <span className={styles.time}>
-        {job.created_at ? formatRelativeTime(job.created_at) : '—'}
       </span>
     </div>
   )
