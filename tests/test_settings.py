@@ -9,6 +9,7 @@ from server.app.settings import load_env_file, load_settings
 @pytest.fixture(autouse=True)
 def _clear_video_hive_env(monkeypatch):
     for key in (
+        "BASECMS_BASE_URL",
         "VIDEO_HIVE_CMS_TOKEN",
         "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
         "VIDEO_HIVE_ASR_WHISPER_BINARY",
@@ -153,6 +154,12 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
 @pytest.mark.parametrize(
     ("env_var", "config_path", "env_value", "expected"),
     [
+        (
+            "BASECMS_BASE_URL",
+            ["cms", "base_url"],
+            "http://cms.internal.example.com/v2",
+            "http://cms.internal.example.com/v2",
+        ),
         ("VIDEO_HIVE_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
         (
             "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
