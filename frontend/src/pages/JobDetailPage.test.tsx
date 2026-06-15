@@ -208,7 +208,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('节点进度')).toBeInTheDocument()
+    expect(await screen.findByText('阶段明细')).toBeInTheDocument()
     expect(screen.getAllByText('提取').length).toBeGreaterThanOrEqual(2)
     expect(screen.getAllByText('生成').length).toBeGreaterThanOrEqual(1)
   })
@@ -234,7 +234,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('节点进度')).toBeInTheDocument()
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -251,7 +251,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('节点进度')).toBeInTheDocument()
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -267,7 +267,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('节点进度')).toBeInTheDocument()
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
     })
 
     expect(screen.getByLabelText('重跑')).toHaveAttribute('disabled')
@@ -281,7 +281,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('节点进度')).toBeInTheDocument()
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -312,7 +312,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('节点进度')).toBeInTheDocument()
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -341,7 +341,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('节点进度')).toBeInTheDocument()
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -369,7 +369,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('节点进度')).toBeInTheDocument()
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -404,7 +404,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('节点进度')).toBeInTheDocument()
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -468,7 +468,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('节点进度')).toBeInTheDocument()
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
     })
 
     expect(screen.getByLabelText('重跑')).toBeInTheDocument()
