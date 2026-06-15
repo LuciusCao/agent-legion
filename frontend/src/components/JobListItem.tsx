@@ -108,8 +108,8 @@ export function JobListItem({
             : job.source_id}
         </div>
       </div>
-      <div className={styles.nodeProgress}>
-        <div className={styles.nodeProgressRow}>
+      <div className={styles.statusEnd}>
+        <div className={styles.statusEndRow}>
           {activeSummary && (
             <span
               className={`${styles.activeLabel} ${activeLabelClass(status)}`}
@@ -123,14 +123,14 @@ export function JobListItem({
             activeNodeKey={activeSummary?.node_key}
             totalNodes={job.total_nodes ?? 0}
           />
+          <span className={`${styles.badge} ${statusClass(status)}`}>
+            {JOB_STATUS_LABELS[job.status] || job.status}
+          </span>
         </div>
         {job.error_summary ? (
           <div className={styles.errorSummary}>{job.error_summary}</div>
         ) : null}
       </div>
-      <span className={`${styles.badge} ${statusClass(status)}`}>
-        {JOB_STATUS_LABELS[job.status] || job.status}
-      </span>
     </div>
   )
 }
