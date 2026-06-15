@@ -62,14 +62,15 @@ describe('JobNodeStepper', () => {
     )
   })
 
-  it('shows failed node label and error message', () => {
+  it('does not render node labels', () => {
     render(<JobNodeStepper nodeSummaries={summaries} />)
 
-    expect(screen.getByText('打包组装')).toBeInTheDocument()
-    expect(screen.getByText('assemble failed')).toBeInTheDocument()
+    expect(screen.queryByText('题目理解')).not.toBeInTheDocument()
+    expect(screen.queryByText('自然语言阅读')).not.toBeInTheDocument()
+    expect(screen.queryByText('打包组装')).not.toBeInTheDocument()
   })
 
-  it('shows active node label from summary instead of a percentage', () => {
+  it('does not render active node label', () => {
     render(
       <JobNodeStepper
         nodeSummaries={summaries}
@@ -77,13 +78,22 @@ describe('JobNodeStepper', () => {
       />
     )
 
-    expect(screen.getByText('当前：自然语言阅读')).toBeInTheDocument()
-    expect(screen.queryByText('%')).not.toBeInTheDocument()
+    expect(screen.queryByText(/当前：/)).not.toBeInTheDocument()
   })
 
-  it('renders placeholder when no summaries are provided', () => {
+  it('renders placeholder when no summaries and no totalNodes are provided', () => {
     render(<JobNodeStepper nodeSummaries={[]} />)
 
     expect(screen.getByText('—')).toBeInTheDocument()
+  })
+
+  it('renders pending segments from totalNodes when summaries are empty', () => {
+    render(<JobNodeStepper nodeSummaries={[]} totalNodes={4} />)
+
+    const segments = screen.getAllByRole('listitem')
+    expect(segments).toHaveLength(4)
+    segments.forEach((segment) => {
+      expect(segment).toHaveAttribute('data-status', 'pending')
+    })
   })
 })
