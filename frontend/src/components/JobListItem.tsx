@@ -30,6 +30,10 @@ function statusClass(status: string): string {
   }
 }
 
+function activeLabelClass(status: string): string {
+  return status === 'running' ? styles.running : ''
+}
+
 function progressText(job: JobRecord): string {
   const completed = job.completed_nodes ?? 0
   const total = job.total_nodes ?? 0
@@ -108,7 +112,7 @@ export function JobListItem({
         <div className={styles.nodeProgressRow}>
           {activeSummary && (
             <span
-              className={`${styles.activeLabel} ${statusClass(status)}`}
+              className={`${styles.activeLabel} ${activeLabelClass(status)}`}
               title={activeSummary.label}
             >
               {activeSummary.label}
