@@ -202,4 +202,123 @@ describe('JobListItem', () => {
       expect(segment).toHaveAttribute('data-status', 'pending')
     })
   })
+
+  it('shows pending placeholder label when summaries are empty but totalNodes is set', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'pending',
+            node_summaries: [],
+            active_node_key: '',
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('待调度')).toBeInTheDocument()
+  })
+
+  it('shows first pending node label when no active node is set', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'pending',
+            active_node_key: '',
+            node_summaries: [
+              {
+                node_key: 'question_understanding',
+                label: '题目理解',
+                status: 'completed',
+                error_message: '',
+              },
+              {
+                node_key: 'faq_generation',
+                label: 'FAQ 生成',
+                status: 'pending',
+                error_message: '',
+              },
+            ],
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('FAQ 生成')).toBeInTheDocument()
+  })
+
+  it('shows failed node label for failed jobs', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'failed',
+            active_node_key: '',
+            node_summaries: [
+              {
+                node_key: 'question_understanding',
+                label: '题目理解',
+                status: 'completed',
+                error_message: '',
+              },
+              {
+                node_key: 'assemble_package',
+                label: '打包组装',
+                status: 'failed',
+                error_message: 'assemble failed',
+              },
+            ],
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('打包组装')).toBeInTheDocument()
+  })
+
+  it('shows last completed node label for completed jobs', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            status: 'completed',
+            active_node_key: '',
+            node_summaries: [
+              {
+                node_key: 'question_understanding',
+                label: '题目理解',
+                status: 'completed',
+                error_message: '',
+              },
+              {
+                node_key: 'assemble_package',
+                label: '打包组装',
+                status: 'completed',
+                error_message: '',
+              },
+            ],
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('打包组装')).toBeInTheDocument()
+  })
 })

@@ -30,8 +30,8 @@ function statusClass(status: string): string {
   }
 }
 
-function activeLabelClass(status: string): string {
-  return status === 'running' ? styles.running : ''
+function activeLabelClass(nodeStatus: string): string {
+  return nodeStatus === 'running' ? styles.running : ''
 }
 
 function progressText(job: JobRecord): string {
@@ -41,18 +41,48 @@ function progressText(job: JobRecord): string {
   return `${completed}/${total}`
 }
 
-function activeNodeKey(job: JobRecord): string | null {
-  if (job.active_node_key) return job.active_node_key
-  const running = job.node_summaries?.find(
-    (n: JobNodeSummary) => n.status === 'running'
-  )
-  return running?.node_key ?? null
-}
+function currentNodeSummary(job: JobRecord): JobNodeSummary | undefined {
+  const summaries = job.node_summaries ?? []
 
-function activeNodeSummary(job: JobRecord): JobNodeSummary | undefined {
-  const key = activeNodeKey(job)
-  if (!key) return undefined
-  return job.node_summaries?.find((n) => n.node_key === key)
+  // Empty summaries but pipeline has nodes: show a pending placeholder
+  if (summaries.length === 0 && (job.total_nodes ?? 0) > 0) {
+    return {
+      node_key: 'pending-start',
+      label: '待调度',
+      status: 'pending',
+      error_message: '',
+    }
+  }
+
+  // Prefer explicitly active node
+  if (job.active_node_key) {
+    const found = summaries.find((n) => n.node_key === job.active_node_key)
+    if (found) return found
+  }
+
+  // Prefer running node
+  const running = summaries.find((n) => n.status === 'running')
+  if (running) return running
+
+  // Fall back based on overall job status
+  if (job.status === 'failed') {
+    return (
+      summaries.find((n) => n.status === 'failed') ??
+      summaries.find((n) => n.status === 'stale') ??
+      summaries[summaries.length - 1]
+    )
+  }
+  if (job.status === 'completed') {
+    const completed = summaries.filter((n) => n.status === 'completed')
+    return completed[completed.length - 1] ?? summaries[summaries.length - 1]
+  }
+
+  // queued / pending / default: first pending or first node
+  return (
+    summaries.find((n) => n.status === 'pending') ??
+    summaries.find((n) => n.status === 'stale') ??
+    summaries[0]
+  )
 }
 
 export function JobListItem({
@@ -70,7 +100,7 @@ export function JobListItem({
     }
   }
 
-  const activeSummary = activeNodeSummary(job)
+  const currentSummary = currentNodeSummary(job)
   const status = job.status
 
   return (
@@ -110,17 +140,17 @@ export function JobListItem({
       </div>
       <div className={styles.statusEnd}>
         <div className={styles.statusEndRow}>
-          {activeSummary && (
+          {currentSummary && (
             <span
-              className={`${styles.activeLabel} ${activeLabelClass(status)}`}
-              title={activeSummary.label}
+              className={`${styles.activeLabel} ${activeLabelClass(currentSummary.status)}`}
+              title={currentSummary.label}
             >
-              {activeSummary.label}
+              {currentSummary.label}
             </span>
           )}
           <JobNodeStepper
             nodeSummaries={job.node_summaries ?? []}
-            activeNodeKey={activeSummary?.node_key}
+            activeNodeKey={currentSummary?.node_key}
             totalNodes={job.total_nodes ?? 0}
           />
           <span className={`${styles.badge} ${statusClass(status)}`}>
