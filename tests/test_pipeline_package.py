@@ -230,3 +230,46 @@ def test_workspace_package_skips_job_when_directory_missing(tmp_path):
     assert "manifest.json" in names
     assert not any(name.startswith("job_3/") for name in names)
     assert manifest["jobs"][0]["status"] == "completed"
+
+
+def test_workspace_package_includes_comprehension_info(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    job_dir = jobs_dir / "reading_Q100"
+    job_dir.mkdir(parents=True)
+    (job_dir / "comprehension_info.json").write_text(
+        json.dumps(
+            {
+                "question_id": "Q100",
+                "fingerprint": None,
+                "fingerprint_missing": True,
+                "comprehension_data": {
+                    "fingerprint": None,
+                    "comprehension_difficulty": 65,
+                    "key_info_list": [],
+                    "possible_error_list": [],
+                },
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    jobs = [
+        {
+            "id": "reading_Q100",
+            "source_id": "Q100",
+            "pipeline_key": "question_comprehension_info",
+            "status": "completed",
+        }
+    ]
+
+    package_path, job_count = create_workspace_package(jobs, packages_dir, jobs_dir)
+
+    assert job_count == 1
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        payload = json.loads(zf.read("reading_Q100/comprehension_info.json").decode("utf-8"))
+
+    assert "reading_Q100/comprehension_info.json" in names
+    assert payload["question_id"] == "Q100"
