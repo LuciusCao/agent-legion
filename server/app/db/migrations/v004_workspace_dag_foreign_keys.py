@@ -10,7 +10,7 @@ _JOB_BATCHES_TABLE_SQL = """
 create table job_batches__v004 (
   id text primary key,
   workspace_id text not null default 'default',
-  pipeline_key text not null,
+  workflow_key text not null,
   source_kind text not null,
   source_payload_json text not null default '{}',
   status text not null default 'created',
@@ -25,7 +25,7 @@ _JOBS_TABLE_SQL = """
 create table jobs__v004 (
   id text primary key,
   workspace_id text not null default 'default',
-  pipeline_key text not null,
+  workflow_key text not null,
   source_type text not null,
   source_id text not null,
   batch_id text not null default '',
@@ -84,7 +84,7 @@ create table executor_leases__v004 (
   executor_id text not null,
   workspace_id text not null,
   job_id text not null,
-  pipeline_key text not null,
+  workflow_key text not null,
   node_key text not null,
   node_run_id integer not null,
   status text not null check(status in ('active', 'released', 'expired')),
@@ -110,10 +110,10 @@ _TABLES: tuple[tuple[str, str, str, tuple[str, ...], bool], ...] = (
         _JOBS_TABLE_SQL,
         "jobs__v004",
         (
-            "create index idx_jobs_pipeline_status on jobs(pipeline_key, status)",
-            "create index idx_jobs_source on jobs(pipeline_key, source_type, source_id)",
-            "create index idx_jobs_workspace_pipeline_status on jobs(workspace_id, pipeline_key, status)",
-            "create index idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id)",
+            "create index idx_jobs_workflow_status on jobs(workflow_key, status)",
+            "create index idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id)",
+            "create index idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status)",
+            "create index idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id)",
         ),
         False,
     ),
@@ -140,7 +140,7 @@ _EXECUTOR_LEASES = (
     (
         "create index idx_executor_leases_global_active on executor_leases(executor_id, status, expires_at)",
         "create index idx_executor_leases_workspace_active on executor_leases(workspace_id, executor_id, status, expires_at)",
-        "create index idx_executor_leases_node_active on executor_leases(workspace_id, pipeline_key, node_key, status, expires_at)",
+        "create index idx_executor_leases_workflow_node_active on executor_leases(workspace_id, workflow_key, node_key, status, expires_at)",
     ),
 )
 
@@ -350,8 +350,29 @@ def _copy_table(
         conn.execute(idx_sql)
 
 
+def _rename_legacy_pipeline_columns(conn: sqlite3.Connection) -> None:
+    """Rename pre-rename ``pipeline_key`` columns to ``workflow_key``.
+
+    Databases created before the workflow rename carry ``pipeline_key`` on
+    ``job_batches``, ``jobs``, and ``executor_leases``.  Renaming them here
+    lets the V004 rebuild copy columns by name without misalignment.  The
+    standalone V007 migration handles the same rename for databases that
+    already applied V004.
+    """
+    renames = (
+        ("job_batches", "pipeline_key", "workflow_key"),
+        ("jobs", "pipeline_key", "workflow_key"),
+        ("executor_leases", "pipeline_key", "workflow_key"),
+    )
+    for table, old_name, new_name in renames:
+        cols = _column_names(conn, table)
+        if old_name in cols and new_name not in cols:
+            conn.execute(f"alter table {table} rename column {old_name} to {new_name}")
+
+
 def _apply(conn: sqlite3.Connection) -> None:
     _preflight_orphans(conn)
+    _rename_legacy_pipeline_columns(conn)
 
     # Ensure V006 columns exist on legacy jobs tables before the rebuild.
     for column, ddl_fragment in _JOB_EXECUTION_CONTROL_COLUMNS:

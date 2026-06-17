@@ -34,7 +34,7 @@ def validate_workspace_executor_configuration(
 
     binding_by_node: dict[tuple[str, str], Mapping[str, Any]] = {}
     for binding in bindings:
-        pipeline_key = str(binding["pipeline_key"])
+        pipeline_key = str(binding["workflow_key"])
         node_key = str(binding["node_key"])
         key = (pipeline_key, node_key)
         if key in binding_by_node:
@@ -57,7 +57,7 @@ def validate_workspace_executor_configuration(
 
     seen_limits: set[tuple[str, str]] = set()
     for node_limit in node_limits:
-        key = (str(node_limit["pipeline_key"]), str(node_limit["node_key"]))
+        key = (str(node_limit["workflow_key"]), str(node_limit["node_key"]))
         if key in seen_limits:
             raise InvalidOperationError(f"Duplicate Node limit {key[0]}.{key[1]}")
         bound = binding_by_node.get(key)

@@ -47,14 +47,14 @@ def test_replace_configuration_saves_workspace_and_executors_in_one_transaction(
         executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
         node_bindings=[
             {
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "node_key": "fetch_questions",
                 "executor_id": "local-default",
             }
         ],
         node_limits=[
             {
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "node_key": "fetch_questions",
                 "concurrency_limit": 2,
             }
@@ -80,7 +80,7 @@ def test_replace_configuration_rolls_back_workspace_on_invalid_binding(
             executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
             node_bindings=[
                 {
-                    "pipeline_key": "reading_analysis",
+                    "workflow_key": "reading_analysis",
                     "node_key": "unknown_node",
                     "executor_id": "local-default",
                 }
@@ -126,17 +126,17 @@ def test_executor_stats_report_configured_capacity_and_leases(
         ],
         bindings=[
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "node_key": "fetch",
                 "executor_id": "local-default",
             },
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "node_key": "extract",
                 "executor_id": "pi-default",
             },
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "node_key": "review",
                 "executor_id": "openclaw-main",
             },
@@ -147,7 +147,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
     jobs = []
     for i in range(3):
         job = job_db.create_job(
-            pipeline_key="question_content",
+            workflow_key="question_content",
             source_type="question",
             source_id=f"src-{i}",
             batch_id="",
@@ -172,7 +172,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
                 global_capacity=global_capacity,
                 workspace_id=workspace["id"],
                 job_id=jobs[i]["id"],
-                pipeline_key="question_content",
+                workflow_key="question_content",
                 node_key=node_key,
                 capability=capability,
                 local_node_limit=local_limit,
@@ -221,7 +221,7 @@ def test_executor_stats_does_not_consult_agent_status_manager(
         allocations=[{"executor_id": "local-default", "concurrency_limit": 2}],
         bindings=[
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "node_key": "fetch",
                 "executor_id": "local-default",
             }
@@ -261,7 +261,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
             allocations=[{"executor_id": "local-default", "concurrency_limit": limit}],
             bindings=[
                 {
-                    "pipeline_key": "question_content",
+                    "workflow_key": "question_content",
                     "node_key": "fetch",
                     "executor_id": "local-default",
                 }
@@ -273,7 +273,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
     for i in range(16):
         owner = other
         job = job_db.create_job(
-            pipeline_key="question_content",
+            workflow_key="question_content",
             source_type="question",
             source_id=f"global-{i}",
             batch_id="",
@@ -287,7 +287,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
                 global_capacity=16,
                 workspace_id=owner["id"],
                 job_id=job["id"],
-                pipeline_key="question_content",
+                workflow_key="question_content",
                 node_key="fetch",
                 capability="fetch_questions",
                 local_node_limit=None,
@@ -317,14 +317,14 @@ def test_replace_configuration_adds_pi_agent_for_pi_allocation(
         ],
         node_bindings=[
             {
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "node_key": "fetch_questions",
                 "executor_id": "local-default",
             }
         ],
         node_limits=[
             {
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "node_key": "fetch_questions",
                 "concurrency_limit": 2,
             }
@@ -350,7 +350,7 @@ def test_replace_configuration_removes_pi_agent_when_pi_allocation_dropped(
         executor_allocations=[{"executor_id": "pi-default", "concurrency_limit": 2}],
         node_bindings=[
             {
-                "pipeline_key": "question_comprehension_info",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "generate_key_info",
                 "executor_id": "pi-default",
             }
@@ -369,7 +369,7 @@ def test_replace_configuration_removes_pi_agent_when_pi_allocation_dropped(
         executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
         node_bindings=[
             {
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "node_key": "fetch_questions",
                 "executor_id": "local-default",
             }
@@ -394,7 +394,7 @@ def test_sync_workspace_pi_agents_registers_existing_pi_allocations(
         allocations=[{"executor_id": "pi-default", "concurrency_limit": 5}],
         bindings=[
             {
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "node_key": "extract_keywords",
                 "executor_id": "pi-default",
             }

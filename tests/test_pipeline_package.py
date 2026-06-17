@@ -149,7 +149,7 @@ def test_create_workspace_package_includes_manifest_and_artifacts(tmp_path):
         {
             "id": "job_1",
             "source_id": "S1",
-            "pipeline_key": "test_pipeline",
+            "workflow_key": "test_pipeline",
             "status": "completed",
         }
     ]
@@ -167,7 +167,7 @@ def test_create_workspace_package_includes_manifest_and_artifacts(tmp_path):
             {
                 "id": "job_1",
                 "source_id": "S1",
-                "pipeline_key": "test_pipeline",
+                "workflow_key": "test_pipeline",
                 "status": "completed",
             }
         ]
@@ -186,7 +186,7 @@ def test_workspace_package_falls_back_to_jobs_base_dir_when_storage_dir_empty(tm
         {
             "id": "job_2",
             "source_id": "S2",
-            "pipeline_key": "question_content",
+            "workflow_key": "question_content",
             "status": "completed",
             "storage_dir": "",
         }
@@ -201,7 +201,7 @@ def test_workspace_package_falls_back_to_jobs_base_dir_when_storage_dir_empty(tm
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
 
     assert "job_2/artifact.json" in names
-    assert manifest["jobs"][0]["pipeline_key"] == "question_content"
+    assert manifest["jobs"][0]["workflow_key"] == "question_content"
 
 
 def test_workspace_package_skips_job_when_directory_missing(tmp_path):
@@ -213,7 +213,7 @@ def test_workspace_package_skips_job_when_directory_missing(tmp_path):
         {
             "id": "job_3",
             "source_id": "S3",
-            "pipeline_key": "question_content",
+            "workflow_key": "question_content",
             "status": "completed",
             "storage_dir": "",
         }
@@ -259,7 +259,7 @@ def test_workspace_package_includes_comprehension_info(tmp_path):
         {
             "id": "reading_Q100",
             "source_id": "Q100",
-            "pipeline_key": "question_comprehension_info",
+            "workflow_key": "question_comprehension_info",
             "status": "completed",
         }
     ]

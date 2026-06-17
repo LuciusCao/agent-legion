@@ -33,7 +33,7 @@ def create_workspace_package(
             {
                 "id": job["id"],
                 "source_id": job.get("source_id", ""),
-                "pipeline_key": job.get("pipeline_key", ""),
+                "workflow_key": job.get("workflow_key", ""),
                 "status": job.get("status", ""),
             }
             for job in jobs

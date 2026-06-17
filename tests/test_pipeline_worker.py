@@ -25,7 +25,7 @@ def test_execute_fetch_question_context_writes_artifact(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q100",
         batch_id="",
@@ -73,7 +73,7 @@ def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monke
         workspace_id=workspace["id"],
     )
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q100",
         batch_id=batch["id"],
@@ -152,7 +152,7 @@ def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, 
         workspace_id=workspace["id"],
     )
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q200",
         batch_id=batch["id"],
@@ -210,7 +210,7 @@ def test_process_ready_pipeline_node_runs_root(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q101",
         batch_id="",
@@ -233,7 +233,7 @@ def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q102",
         batch_id="",
@@ -287,7 +287,7 @@ def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="",
@@ -338,7 +338,7 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="",
@@ -375,7 +375,7 @@ def test_execute_node_once_raises_when_pi_runner_missing_for_agent_node(tmp_path
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="",

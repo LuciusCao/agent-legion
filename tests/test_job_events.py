@@ -182,7 +182,7 @@ def test_fail_without_lease_broadcasts_job_updated(manager, tmp_path):
     request = ConfigurationFailureRequest(
         workspace_id="ws1",
         job_id="j1",
-        pipeline_key="p1",
+        workflow_key="p1",
         node_key="n1",
         capability="c1",
         log_path="",

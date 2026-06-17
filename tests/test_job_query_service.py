@@ -29,7 +29,7 @@ def create_question_job(job_db, source_id: str) -> dict[str, Any]:
         workspace_id=workspace["id"],
     )
     job: dict[str, Any] = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id=source_id,
         batch_id=batch["id"],
@@ -96,7 +96,7 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     job = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -122,7 +122,7 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     job = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -166,7 +166,7 @@ def test_job_detail_resolves_executor_binding_for_job_pipeline_only(query_servic
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     job = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -208,7 +208,7 @@ def test_workspace_run_service_filters_runs(query_service, job_db):
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     job = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],

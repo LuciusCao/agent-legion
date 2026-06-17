@@ -18,7 +18,7 @@ def job(job_db):
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     return job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],

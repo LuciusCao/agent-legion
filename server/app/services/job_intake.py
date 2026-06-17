@@ -236,7 +236,7 @@ class JobIntakeService:
         for candidate in candidates:
             jobs.append(
                 self.job_db.create_job(
-                    pipeline_key=payload["pipeline_key"],
+                    workflow_key=payload["pipeline_key"],
                     source_type=str(candidate["entity_type"]),
                     source_id=str(candidate["entity_id"]),
                     batch_id=batch["id"],

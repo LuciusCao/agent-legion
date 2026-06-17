@@ -32,17 +32,17 @@ def _create_job(
     job_db: JobQueries,
     workspace_id: str,
     source_id: str = "Q1",
-    pipeline_key: str = "question_content",
+    workflow_key: str = "question_content",
 ) -> dict[str, Any]:
     batch = job_db.create_batch(
-        pipeline_key,
+        workflow_key,
         "direct_ids",
         {"question_ids": [source_id]},
         workspace_id=workspace_id,
     )
-    definition = load_registered_pipeline(Path(".").resolve(), pipeline_key)
+    definition = load_registered_pipeline(Path(".").resolve(), workflow_key)
     return job_db.create_job(
-        pipeline_key=pipeline_key,
+        workflow_key=workflow_key,
         source_type="question",
         source_id=source_id,
         batch_id=batch["id"],
@@ -70,7 +70,7 @@ def _create_active_lease(
         conn.execute(
             """
             insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                 node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             )
             values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
@@ -81,7 +81,7 @@ def _create_active_lease(
                 "local-default",
                 job["workspace_id"],
                 job["id"],
-                job["pipeline_key"],
+                job["workflow_key"],
                 node_key,
                 run["id"],
                 _sqlite_timestamp(now),

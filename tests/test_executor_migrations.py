@@ -32,7 +32,7 @@ def test_empty_database_migrates_to_latest_version(tmp_path: Path) -> None:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
 
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 
@@ -47,7 +47,7 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
               id text primary key,
               name text not null,
               description text not null default '',
-              default_pipeline_key text not null default 'question_content',
+              default_workflow_key text not null default 'question_content',
               cms_config_json text not null default '{}',
               resource_config_json text not null default '{}',
               created_at text not null default current_timestamp,
@@ -59,7 +59,7 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
             create table job_batches (
               id text primary key,
               workspace_id text not null default 'default',
-              pipeline_key text not null,
+              workflow_key text not null,
               source_kind text not null,
               source_payload_json text not null default '{}',
               status text not null default 'created',
@@ -70,7 +70,7 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
             create table jobs (
               id text primary key,
               workspace_id text not null default 'default',
-              pipeline_key text not null,
+              workflow_key text not null,
               source_type text not null,
               source_id text not null,
               batch_id text not null default '',
@@ -131,7 +131,7 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
         ).fetchone()
 
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7]
         assert legacy_row is not None
         assert legacy_row["agent_id"] == "agent_a"
         assert conn.execute("pragma foreign_key_check").fetchall() == []
@@ -148,7 +148,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
               id text primary key,
               name text not null,
               description text not null default '',
-              default_pipeline_key text not null default 'question_content',
+              default_workflow_key text not null default 'question_content',
               cms_config_json text not null default '{}',
               resource_config_json text not null default '{}',
               created_at text not null default current_timestamp,
@@ -160,7 +160,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
             create table job_batches (
               id text primary key,
               workspace_id text not null default 'default',
-              pipeline_key text not null,
+              workflow_key text not null,
               source_kind text not null,
               source_payload_json text not null default '{}',
               status text not null default 'created',
@@ -171,7 +171,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
             create table jobs (
               id text primary key,
               workspace_id text not null default 'default',
-              pipeline_key text not null,
+              workflow_key text not null,
               source_type text not null,
               source_id text not null,
               batch_id text not null default '',
@@ -210,14 +210,14 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
             );
             insert into workspaces(id, name) values ('ws1', 'Legacy Workspace');
             insert into job_batches(
-              id, workspace_id, pipeline_key, source_kind, source_payload_json,
+              id, workspace_id, workflow_key, source_kind, source_payload_json,
               status, created_count, error_message, created_at
             ) values (
               'batch1', 'ws1', 'reading_analysis', 'question', '{}',
               'created', 5, '', '2024-01-01 09:00:00'
             );
             insert into jobs(
-              id, workspace_id, pipeline_key, source_type, source_id, batch_id,
+              id, workspace_id, workflow_key, source_type, source_id, batch_id,
               title, status, storage_dir, error_message, created_at, updated_at, stem
             ) values (
               'job1', 'ws1', 'reading_analysis', 'question', 'q1', 'batch1',
@@ -249,7 +249,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
         batch = conn.execute("select * from job_batches where id = 'batch1'").fetchone()
         assert batch is not None
         assert batch["workspace_id"] == "ws1"
-        assert batch["pipeline_key"] == "reading_analysis"
+        assert batch["workflow_key"] == "reading_analysis"
         assert batch["source_kind"] == "question"
         assert batch["created_count"] == 5
         assert batch["created_at"] == "2024-01-01 09:00:00"
@@ -257,7 +257,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
         job = conn.execute("select * from jobs where id = 'job1'").fetchone()
         assert job is not None
         assert job["workspace_id"] == "ws1"
-        assert job["pipeline_key"] == "reading_analysis"
+        assert job["workflow_key"] == "reading_analysis"
         assert job["source_type"] == "question"
         assert job["source_id"] == "q1"
         assert job["batch_id"] == "batch1"
@@ -301,15 +301,15 @@ def test_v004_creates_required_indexes_and_foreign_keys(tmp_path: Path) -> None:
             ).fetchall()
         }
         assert "idx_job_batches_workspace" in indexes
-        assert "idx_jobs_pipeline_status" in indexes
-        assert "idx_jobs_source" in indexes
-        assert "idx_jobs_workspace_pipeline_status" in indexes
-        assert "idx_jobs_workspace_source" in indexes
+        assert "idx_jobs_workflow_status" in indexes
+        assert "idx_jobs_workflow_source" in indexes
+        assert "idx_jobs_workspace_workflow_status" in indexes
+        assert "idx_jobs_workspace_workflow_source" in indexes
         assert "idx_job_nodes_job_status" in indexes
         assert "idx_node_runs_job_id" in indexes
         assert "idx_executor_leases_global_active" in indexes
         assert "idx_executor_leases_workspace_active" in indexes
-        assert "idx_executor_leases_node_active" in indexes
+        assert "idx_executor_leases_workflow_node_active" in indexes
 
         relationships = {
             (table, row["from"], row["table"])
@@ -335,11 +335,11 @@ def test_v004_foreign_key_cascades(tmp_path: Path) -> None:
     with closing(connect_sqlite(path)) as conn, conn:
         conn.execute("insert into workspaces(id, name) values ('ws1', 'Workspace One')")
         conn.execute(
-            "insert into job_batches(id, workspace_id, pipeline_key, source_kind) "
+            "insert into job_batches(id, workspace_id, workflow_key, source_kind) "
             "values ('batch1', 'ws1', 'question_content', 'mixed')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id) "
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
             "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
         )
         conn.execute(
@@ -350,7 +350,7 @@ def test_v004_foreign_key_cascades(tmp_path: Path) -> None:
         )
         conn.execute(
             "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
-            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "workflow_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
             "values ('lease1', 'exec1', 'exec_a', 'ws1', 'job1', 'question_content', "
             "'node_a', 1, 'active', '2024-01-01 10:00:00', '2024-01-01 10:00:00', "
             "'2024-01-01 11:00:00')"
@@ -377,7 +377,7 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
         }
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
         # V006 check constraint accepts until_node and rejects the old targeted value.
@@ -385,7 +385,7 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
             "insert into workspaces(id, name) values ('constraint_ws', 'Constraint Workspace')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, execution_mode) "
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, execution_mode) "
             "values ('job_ok', 'constraint_ws', 'reading_analysis', 'question_id', 'Q1', 'until_node')"
         )
         assert (
@@ -394,7 +394,7 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
         )
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, execution_mode) "
+                "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, execution_mode) "
                 "values ('job_bad', 'constraint_ws', 'reading_analysis', 'question_id', 'Q2', 'targeted')"
             )
 
@@ -406,7 +406,7 @@ def test_v006_is_compatible_with_later_v005_finalizer(tmp_path: Path) -> None:
 
     with closing(connect_sqlite(path)) as conn, conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7]
 
     # Simulate the destructive V005 finalizer recording its version manually.
     with closing(connect_sqlite(path)) as conn, conn:
@@ -419,7 +419,7 @@ def test_v006_is_compatible_with_later_v005_finalizer(tmp_path: Path) -> None:
 
     with closing(connect_sqlite(path)) as conn, conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 5, 6]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4, 5, 6, 7]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 

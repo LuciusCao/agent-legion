@@ -59,10 +59,10 @@ def _make_definition() -> PipelineDefinition:
 
 
 def _setup_workspace(queries: JobQueries, name: str) -> tuple[str, str]:
-    workspace = queries.create_workspace(name=name, default_pipeline_key="recovery_test")
+    workspace = queries.create_workspace(name=name, default_workflow_key="recovery_test")
     workspace_id = workspace["id"]
     job = queries.create_job(
-        pipeline_key="recovery_test",
+        workflow_key="recovery_test",
         source_type="question",
         source_id=f"src-{uuid.uuid4().hex[:8]}",
         batch_id="",
@@ -102,7 +102,7 @@ def _claim(workspace_id: str, job_id: str, repo: ExecutorLeaseRepository) -> Non
         global_capacity=1,
         workspace_id=workspace_id,
         job_id=job_id,
-        pipeline_key="recovery_test",
+        workflow_key="recovery_test",
         node_key="fetch",
         capability="fetch",
         local_node_limit=1,
@@ -261,7 +261,7 @@ def test_recovery_frees_global_and_workspace_capacity(
 ) -> None:
     workspace_id, job_id_a = _setup_workspace(queries, "capacity-a")
     job_b = queries.create_job(
-        pipeline_key="recovery_test",
+        workflow_key="recovery_test",
         source_type="question",
         source_id=f"src-{uuid.uuid4().hex[:8]}",
         batch_id="",
@@ -291,7 +291,7 @@ def test_recovery_frees_global_and_workspace_capacity(
             global_capacity=1,
             workspace_id=workspace_id,
             job_id=job_id_b,
-            pipeline_key="recovery_test",
+            workflow_key="recovery_test",
             node_key="fetch",
             capability="fetch",
             local_node_limit=1,

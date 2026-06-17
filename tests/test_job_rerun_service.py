@@ -31,7 +31,7 @@ def job(job_db):
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     return job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -59,7 +59,7 @@ def running_job(job_db):
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     job = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -86,7 +86,7 @@ def _create_lease(
         conn.execute(
             """
             insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                 node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             )
             values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
@@ -97,7 +97,7 @@ def _create_lease(
                 "local-default",
                 job["workspace_id"],
                 job["id"],
-                job["pipeline_key"],
+                job["workflow_key"],
                 node_key,
                 run["id"],
                 _sqlite_timestamp(now),
@@ -309,7 +309,7 @@ def test_batch_rerun_returns_results_in_request_order(rerun_service, job_db):
     for qid in ["Q1", "Q2"]:
         jobs.append(
             job_db.create_job(
-                pipeline_key="question_content",
+                workflow_key="question_content",
                 source_type="question",
                 source_id=qid,
                 batch_id=batch["id"],
@@ -333,7 +333,7 @@ def test_batch_rerun_node_not_found_for_one_job(rerun_service, job_db):
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     job = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -358,7 +358,7 @@ def test_batch_rerun_mixed_pipelines(rerun_service, job_db):
         "reading_analysis", "batch_by_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     q_job = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q1",
         batch_id=q_batch["id"],
@@ -367,7 +367,7 @@ def test_batch_rerun_mixed_pipelines(rerun_service, job_db):
         workspace_id=workspace["id"],
     )
     r_job = job_db.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q1",
         batch_id=r_batch["id"],

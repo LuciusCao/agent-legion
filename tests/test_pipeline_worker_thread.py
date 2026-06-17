@@ -147,7 +147,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
     definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -185,7 +185,7 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
     definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -222,7 +222,7 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
     definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -261,7 +261,7 @@ def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
     definition = _make_definition([_local_node("fetch")])
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -294,7 +294,7 @@ def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
     definition = _make_definition([_local_node("fetch")])
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -342,7 +342,7 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
     definition = _make_definition([_local_node("fetch")])
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -388,7 +388,7 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     )
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -464,7 +464,7 @@ def test_make_pipeline_worker_runs_reading_analysis_local_node(tmp_path: Path, m
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     worker, definition = make_pipeline_worker(tmp_path, queries)
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="",
@@ -576,7 +576,7 @@ def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
     agent_manager = MagicMock()
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -629,7 +629,7 @@ def test_poll_does_not_update_agent_status_for_local_executor(tmp_path: Path) ->
     agent_manager = MagicMock()
 
     job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",

@@ -100,18 +100,18 @@ def allocate(
 def bind(
     job_db: JobQueries,
     workspace_id: str,
-    pipeline_key: str,
+    workflow_key: str,
     node_key: str,
     executor_id: str,
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
             """
-            insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id)
+            insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id)
             values (?, ?, ?, ?)
-            on conflict(workspace_id, pipeline_key, node_key) do update set executor_id=excluded.executor_id
+            on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
             """,
-            (workspace_id, pipeline_key, node_key, executor_id),
+            (workspace_id, workflow_key, node_key, executor_id),
         )
 
 

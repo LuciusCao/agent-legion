@@ -47,13 +47,13 @@ def get_workspace_executor_configuration(
         (workspace_id,),
     ).fetchall()
     bindings = conn.execute(
-        "select pipeline_key, node_key, executor_id "
-        "from workspace_node_bindings where workspace_id=? order by pipeline_key, node_key",
+        "select workflow_key, node_key, executor_id "
+        "from workspace_node_bindings where workspace_id=? order by workflow_key, node_key",
         (workspace_id,),
     ).fetchall()
     node_limits = conn.execute(
-        "select pipeline_key, node_key, concurrency_limit "
-        "from workspace_node_limits where workspace_id=? order by pipeline_key, node_key",
+        "select workflow_key, node_key, concurrency_limit "
+        "from workspace_node_limits where workspace_id=? order by workflow_key, node_key",
         (workspace_id,),
     ).fetchall()
     return {
@@ -80,17 +80,17 @@ def replace_workspace_executor_configuration(
     )
     conn.executemany(
         "insert into workspace_node_bindings "
-        "(workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+        "(workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
         [
-            (workspace_id, row["pipeline_key"], row["node_key"], row["executor_id"])
+            (workspace_id, row["workflow_key"], row["node_key"], row["executor_id"])
             for row in bindings
         ],
     )
     conn.executemany(
         "insert into workspace_node_limits "
-        "(workspace_id, pipeline_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+        "(workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
         [
-            (workspace_id, row["pipeline_key"], row["node_key"], row["concurrency_limit"])
+            (workspace_id, row["workflow_key"], row["node_key"], row["concurrency_limit"])
             for row in node_limits
         ],
     )

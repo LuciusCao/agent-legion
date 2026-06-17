@@ -48,16 +48,16 @@ def _setup_workspace(
     workspace_limit: int,
     node_key: str = "review_keywords",
     local_limit: int | None = 1,
-    pipeline_key: str = "reading_analysis",
+    workflow_key: str = "reading_analysis",
     node_keys: list[str] | None = None,
 ) -> tuple[str, str]:
-    workspace = queries.create_workspace(name=name, default_pipeline_key=pipeline_key)
+    workspace = queries.create_workspace(name=name, default_workflow_key=workflow_key)
     workspace_id = workspace["id"]
     job_id = _create_job_in_workspace(
         queries,
         workspace_id,
         node_key=node_key,
-        pipeline_key=pipeline_key,
+        workflow_key=workflow_key,
         node_keys=node_keys,
     )
     _bind_executor_to_node(
@@ -67,7 +67,7 @@ def _setup_workspace(
         workspace_limit,
         node_key=node_key,
         local_limit=local_limit,
-        pipeline_key=pipeline_key,
+        workflow_key=workflow_key,
     )
     return workspace_id, job_id
 
@@ -76,11 +76,11 @@ def _create_job_in_workspace(
     queries: JobQueries,
     workspace_id: str,
     node_key: str = "review_keywords",
-    pipeline_key: str = "reading_analysis",
+    workflow_key: str = "reading_analysis",
     node_keys: list[str] | None = None,
 ) -> str:
     job = queries.create_job(
-        pipeline_key=pipeline_key,
+        workflow_key=workflow_key,
         source_type="question",
         source_id=f"src-{uuid.uuid4().hex[:8]}",
         batch_id="",
@@ -98,7 +98,7 @@ def _bind_executor_to_node(
     workspace_limit: int,
     node_key: str = "review_keywords",
     local_limit: int | None = 1,
-    pipeline_key: str = "reading_analysis",
+    workflow_key: str = "reading_analysis",
 ) -> None:
     with queries.connect() as conn:
         conn.execute(
@@ -112,22 +112,22 @@ def _bind_executor_to_node(
         )
         conn.execute(
             """
-            insert into workspace_node_bindings(workspace_id, pipeline_key, node_key, executor_id)
+            insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
             values (?, ?, ?, ?)
-            on conflict(workspace_id, pipeline_key, node_key) do update set
+            on conflict(workspace_id, workflow_key, node_key) do update set
               executor_id=excluded.executor_id
             """,
-            (workspace_id, pipeline_key, node_key, executor_id),
+            (workspace_id, workflow_key, node_key, executor_id),
         )
         if local_limit is not None:
             conn.execute(
                 """
-                insert into workspace_node_limits(workspace_id, pipeline_key, node_key, concurrency_limit)
+                insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
                 values (?, ?, ?, ?)
-                on conflict(workspace_id, pipeline_key, node_key) do update set
+                on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
-                (workspace_id, pipeline_key, node_key, local_limit),
+                (workspace_id, workflow_key, node_key, local_limit),
             )
 
 
@@ -140,7 +140,7 @@ def _claim_request(
     local_node_limit: int | None = 1,
     ttl: int = 60,
     log_path: str = "/tmp/run.log",
-    pipeline_key: str = "reading_analysis",
+    workflow_key: str = "reading_analysis",
     execution_mode: str = "full",
     target_node_key: str | None = None,
     allowed_node_keys: tuple[str, ...] = (),
@@ -150,7 +150,7 @@ def _claim_request(
         global_capacity=global_capacity,
         workspace_id=workspace_id,
         job_id=job_id,
-        pipeline_key=pipeline_key,
+        workflow_key=workflow_key,
         node_key=node_key,
         capability="review_keywords",
         local_node_limit=local_node_limit,
@@ -366,11 +366,11 @@ def test_local_node_limit_blocks_same_node_but_allows_other_local_node(
     other_node_key = "extract_entities"
     with queries.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings(workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
             (workspace_id, "reading_analysis", other_node_key, executor_id),
         )
         conn.execute(
-            "insert into workspace_node_limits(workspace_id, pipeline_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
             (workspace_id, "reading_analysis", other_node_key, 1),
         )
         conn.execute(
@@ -520,7 +520,7 @@ def test_fail_without_lease_creates_failed_run_and_updates_job_status(
     request = ConfigurationFailureRequest(
         workspace_id=workspace_id,
         job_id=job_id,
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         node_key="review_keywords",
         capability="review_keywords",
         log_path="/tmp/error.log",
@@ -550,7 +550,7 @@ def test_fail_without_lease_is_idempotent_for_the_same_node(
     request = ConfigurationFailureRequest(
         workspace_id=workspace_id,
         job_id=job_id,
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         node_key="review_keywords",
         capability="review_keywords",
         log_path="/tmp/error.log",
@@ -843,7 +843,7 @@ def test_claim_lease_transitions_queued_job_back_to_running(
         1,
         node_key="node_b",
         local_limit=1,
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
     )
     with queries.connect() as conn:
         conn.execute(
@@ -860,7 +860,7 @@ def test_claim_lease_transitions_queued_job_back_to_running(
         executor_id="exec-requeue",
         workspace_id=workspace_id,
         job_id=job_id,
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         node_key="node_b",
         capability="review_keywords",
         log_path="/tmp/node_b.log",
@@ -966,7 +966,7 @@ def test_recover_skips_jobs_with_active_lease(
         conn.execute(
             """
             insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                 node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             )
             values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)

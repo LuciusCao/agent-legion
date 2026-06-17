@@ -15,7 +15,7 @@ def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="question_comprehension_info",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q100",
         batch_id="batch1",
@@ -57,7 +57,7 @@ def test_clean_and_parse_marks_missing_fingerprint_without_hashing(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="question_comprehension_info",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q100",
         batch_id="batch1",
@@ -100,7 +100,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="question_comprehension_info",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q100",
         batch_id="batch1",

@@ -11,7 +11,7 @@ def test_execution_context_carries_persisted_identity(tmp_path: Path) -> None:
         executor_id="pi-default",
         workspace_id="ws-a",
         job_id="job-1",
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         node_key="review_keywords",
         capability="review_keywords",
         workspace={"id": "ws-a", "name": "Workspace A"},
