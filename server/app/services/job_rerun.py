@@ -3,6 +3,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
+from server.app.events import JobEventManager, broadcast_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
@@ -24,6 +25,7 @@ class JobRerunService:
         pipelines: PipelineCatalogService,
         artifact_service: JobArtifactMutationService | None = None,
         clock: Callable[[], float] | None = None,
+        job_event_manager: JobEventManager | None = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
@@ -31,6 +33,7 @@ class JobRerunService:
         self.pipelines = pipelines
         self.artifact_service = artifact_service or JobArtifactMutationService(settings.jobs_dir)
         self.clock = clock
+        self.job_event_manager = job_event_manager
 
     def _now(self) -> datetime:
         if self.clock is not None:
@@ -140,6 +143,7 @@ class JobRerunService:
             )
 
         commit_staged_outputs(staged, job_id, "rerun")
+        broadcast_job_update(self.job_db, self.job_event_manager, job_id)
         return self._result(job_id, "succeeded", node_key)
 
     def batch_rerun(

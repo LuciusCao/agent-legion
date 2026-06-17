@@ -1,9 +1,14 @@
 import asyncio
 import json
+import logging
 from typing import Any
 
 from fastapi import Request
 from fastapi.responses import StreamingResponse
+
+from server.app.jobs import JobQueries
+
+logger = logging.getLogger(__name__)
 
 
 class VideoEventManager:
@@ -159,6 +164,7 @@ class JobEventManager:
 
     def __init__(self) -> None:
         self._clients: dict[str, set[asyncio.Queue[str]]] = {}
+        self._stop_events: dict[asyncio.Queue[str], asyncio.Event] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
 
     def _get_workspace_queues(self, workspace_id: str) -> set[asyncio.Queue[str]]:
@@ -175,25 +181,36 @@ class JobEventManager:
             oldest_workspace = next(iter(self._clients))
             oldest_queue = next(iter(self._clients[oldest_workspace]))
             self._clients[oldest_workspace].discard(oldest_queue)
+            stop_event = self._stop_events.pop(oldest_queue, None)
+            if stop_event is not None:
+                stop_event.set()
             self._cleanup_empty_workspace(oldest_workspace)
 
         queues = self._get_workspace_queues(workspace_id)
         queue: asyncio.Queue[str] = asyncio.Queue(maxsize=64)
         queues.add(queue)
+        stop_event = asyncio.Event()
+        self._stop_events[queue] = stop_event
 
         async def event_stream():
             try:
-                while True:
+                while not stop_event.is_set():
                     try:
                         data = await asyncio.wait_for(queue.get(), timeout=30.0)
-                        yield f"data: {data}\n\n"
                     except TimeoutError:
+                        if stop_event.is_set():
+                            return
                         yield ":heartbeat\n\n"
+                    else:
+                        if stop_event.is_set():
+                            return
+                        yield f"data: {data}\n\n"
             except asyncio.CancelledError:
                 raise
             finally:
                 queues.discard(queue)
                 self._cleanup_empty_workspace(workspace_id)
+                self._stop_events.pop(queue, None)
 
         return StreamingResponse(event_stream(), media_type="text/event-stream")
 
@@ -213,6 +230,10 @@ class JobEventManager:
                 except Exception:
                     dead.add(queue)
             if dead:
+                for dq in dead:
+                    stop_event = self._stop_events.pop(dq, None)
+                    if stop_event is not None:
+                        stop_event.set()
                 queues -= dead
                 self._cleanup_empty_workspace(workspace_id)
 
@@ -274,3 +295,23 @@ class JobEventManager:
             workspace_id,
             self._build_payload("job_deleted", workspace_id, stats, job_id=job_id),
         )
+
+
+def broadcast_job_update(
+    job_db: JobQueries | None,
+    job_event_manager: JobEventManager | None,
+    job_id: str,
+) -> None:
+    try:
+        if job_event_manager is None or job_db is None:
+            return
+        job = job_db.get_job(job_id)
+        if job is None:
+            return
+        workspace_id = str(job.get("workspace_id", ""))
+        if not workspace_id:
+            return
+        stats = job_db.count_jobs_by_status(workspace_id)
+        job_event_manager.broadcast_job_updated(workspace_id, job_id, stats)
+    except Exception:
+        logger.exception("Failed to broadcast job update for %s", job_id)
