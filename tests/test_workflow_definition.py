@@ -132,7 +132,7 @@ nodes:
         encoding="utf-8",
     )
 
-    with pytest.raises(WorkflowDefinitionError, match="Pipeline field 'concurrency' was removed"):
+    with pytest.raises(WorkflowDefinitionError, match="Workflow field 'concurrency' was removed"):
         load_workflow_definition(config)
 
 

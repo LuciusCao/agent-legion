@@ -168,7 +168,7 @@ def create_app(
                 try:
                     workflow_worker_thread.start()
                 except Exception:
-                    logging.getLogger(__name__).exception("pipeline worker failed to start")
+                    logging.getLogger(__name__).exception("workflow worker failed to start")
         yield
         if workflow_worker_thread is not None:
             workflow_worker_thread.stop()

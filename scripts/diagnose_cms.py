@@ -11,8 +11,8 @@ sys.path.insert(0, ".")
 
 from server.app.cms.client import get_token
 from server.app.cms.question import list_questions_by_knowledge
-from server.app.pipelines.resources import resolve_cms_resource
 from server.app.settings import load_settings
+from server.app.workflows.resources import resolve_cms_resource
 
 
 def main(knowledge_code: str) -> None:
