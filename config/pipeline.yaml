@@ -53,9 +53,9 @@ executors:
     global_capacity: 16
     capabilities:
       fetch_questions:
-        handler: reading_analysis.fetch_questions
+        handler: question_comprehension_info.fetch_questions
       clean_and_parse:
-        handler: reading_analysis.clean_and_parse
+        handler: question_comprehension_info.clean_and_parse
       assemble_comprehension_info:
         handler: question_comprehension_info.assemble_comprehension_info
       fetch_question_context:

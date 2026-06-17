@@ -1,6 +1,9 @@
 import json
 from pathlib import Path
 
+import yaml
+
+from server.app.executors.config import load_executor_definitions
 from server.app.jobs.queries import JobQueries
 from server.app.pipelines.question_comprehension_info import (
     assemble_comprehension_info,
@@ -184,3 +187,16 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
     assert manifest["question_id"] == "Q100"
     assert manifest["fingerprint_missing"] is True
     assert manifest["artifacts"]["comprehension_info.json"]["present"] is True
+
+
+def test_local_executor_config_binds_question_comprehension_info_handlers():
+    raw = yaml.safe_load(Path("config/pipeline.yaml").read_text(encoding="utf-8"))
+    config = load_executor_definitions(raw["executors"])
+    local = config["local-default"]
+    assert local.kind == "local"
+
+    for capability in ("fetch_questions", "clean_and_parse", "assemble_comprehension_info"):
+        handler = local.capabilities[capability].handler
+        assert handler.startswith("question_comprehension_info."), (
+            f"capability {capability!r} must bind to question_comprehension_info, got {handler!r}"
+        )
