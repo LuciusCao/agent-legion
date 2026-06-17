@@ -5,7 +5,7 @@ import pytest
 from server.app.workflows.definition import WorkflowDefinitionError, load_workflow_definition
 
 
-def write_pipeline(tmp_path: Path, node_body: str) -> Path:
+def write_workflow(tmp_path: Path, node_body: str) -> Path:
     config = tmp_path / "pipeline.yaml"
     indented_body = node_body.replace("\n", "\n    ")
     config.write_text(
@@ -20,14 +20,14 @@ nodes:
     return config
 
 
-def test_pipeline_node_requires_non_empty_capability(tmp_path: Path) -> None:
-    path = write_pipeline(tmp_path, node_body="label: Fetch\noutputs: [out.json]")
+def test_workflow_node_requires_non_empty_capability(tmp_path: Path) -> None:
+    path = write_workflow(tmp_path, node_body="label: Fetch\noutputs: [out.json]")
     with pytest.raises(WorkflowDefinitionError, match="capability"):
         load_workflow_definition(path)
 
 
-def test_pipeline_node_loads_capability(tmp_path: Path) -> None:
-    path = write_pipeline(
+def test_workflow_node_loads_capability(tmp_path: Path) -> None:
+    path = write_workflow(
         tmp_path,
         node_body="label: Fetch\ncapability: fetch_questions\noutputs: [out.json]",
     )

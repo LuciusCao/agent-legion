@@ -1,1 +1,1 @@
-"""Generic artifact-first pipeline support."""
+"""Generic artifact-first workflow support."""

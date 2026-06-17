@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException
 from server.app.routes.job_contracts import (
     DeleteJobResponse,
 )
-from server.app.routes.job_http import raise_job_http_error, require_pipelines_enabled
+from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.routes.job_operation_contracts import (
     BatchJobIdsRequest,
     BatchJobMutationResponse,
@@ -45,7 +45,7 @@ def create_jobs_router(
         workflow_key: str | None = None,
         status: str | None = None,
     ) -> JobsResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         try:
             return JobsResponse(
                 jobs=cast(
@@ -64,7 +64,7 @@ def create_jobs_router(
         workspace_id: str,
         payload: JobBatchRerunRequest,
     ) -> BatchJobMutationResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         results = job_rerun.batch_rerun(workspace_id, payload.job_ids, payload.node_key)
         return BatchJobMutationResponse(
             results=[JobMutationResultResponse.model_validate(result) for result in results]
@@ -75,7 +75,7 @@ def create_jobs_router(
         workspace_id: str,
         payload: BatchJobIdsRequest,
     ) -> BatchJobMutationResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         results = job_deletion.batch_delete(workspace_id, payload.job_ids)
         return BatchJobMutationResponse(
             results=[JobMutationResultResponse.model_validate(result) for result in results]
@@ -83,7 +83,7 @@ def create_jobs_router(
 
     @router.get("/jobs", response_model=JobsResponse)
     def list_jobs(workflow_key: str | None = None, status: str | None = None) -> JobsResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         try:
             return JobsResponse(
                 jobs=cast(
@@ -96,7 +96,7 @@ def create_jobs_router(
 
     @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
     def get_job(job_id: str) -> JobDetailResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         try:
             return JobDetailResponse(**job_queries.detail(job_id))
         except JobServiceError as exc:
@@ -104,7 +104,7 @@ def create_jobs_router(
 
     @router.post("/jobs/{job_id}/nodes/{node_key}/rerun", response_model=JobMutationResultResponse)
     def rerun_node(job_id: str, node_key: str) -> JobMutationResultResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -122,7 +122,7 @@ def create_jobs_router(
 
     @router.delete("/jobs/{job_id}", response_model=DeleteJobResponse)
     def delete_job(job_id: str) -> DeleteJobResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -151,7 +151,7 @@ def create_jobs_router(
 
     @router.post("/jobs/{job_id}/run-to", response_model=JobMutationResultResponse)
     def run_to(job_id: str, payload: RunToRequest) -> JobMutationResultResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -169,7 +169,7 @@ def create_jobs_router(
         job_id: str,
         payload: ContinueJobRequest,
     ) -> JobMutationResultResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         job = job_queries.job_db.get_job(job_id)
         if job is None:
             raise HTTPException(status_code=404, detail="Job not found")
@@ -192,7 +192,7 @@ def create_jobs_router(
         workspace_id: str,
         payload: BatchRunToRequest,
     ) -> BatchJobMutationResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         results = job_execution.batch_run_to(
             workspace_id,
             payload.job_ids,

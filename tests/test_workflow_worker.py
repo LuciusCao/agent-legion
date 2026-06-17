@@ -398,7 +398,7 @@ def test_execute_node_once_raises_when_pi_runner_missing_for_agent_node(tmp_path
         )
 
 
-def test_pipeline_worker_does_not_start_when_app_worker_disabled(tmp_path, monkeypatch):
+def test_workflow_worker_does_not_start_when_app_worker_disabled(tmp_path, monkeypatch):
     from server.app import main as app_main
 
     started: list[bool] = []

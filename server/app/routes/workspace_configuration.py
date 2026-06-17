@@ -4,7 +4,7 @@ from server.app.routes.executor_contracts import (
     WorkspaceConfigurationRequest,
     WorkspaceConfigurationResponse,
 )
-from server.app.routes.job_http import raise_job_http_error, require_pipelines_enabled
+from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.settings import Settings
@@ -23,7 +23,7 @@ def create_workspace_configuration_router(
         workspace_id: str,
         payload: WorkspaceConfigurationRequest,
     ) -> WorkspaceConfigurationResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         try:
             result = service.replace_configuration(
                 workspace_id,
