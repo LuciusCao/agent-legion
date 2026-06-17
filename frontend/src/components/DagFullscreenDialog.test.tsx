@@ -90,6 +90,39 @@ describe('DagFullscreenDialog', () => {
     expect(mockFetchJobLog).toHaveBeenCalledWith('job-1', 42)
   })
 
+  it('opens the latest run log when a node has multiple runs', async () => {
+    mockFetchJobLog.mockResolvedValue({
+      run_id: 43,
+      log: 'latest log line',
+      truncated: false,
+    })
+
+    renderDialog({
+      runs: [
+        {
+          id: 42,
+          node_key: 'a',
+          status: 'failed',
+          started_at: '2026-06-17T00:00:00Z',
+        },
+        {
+          id: 43,
+          node_key: 'a',
+          status: 'completed',
+          started_at: '2026-06-17T00:05:00Z',
+        },
+      ],
+    })
+
+    fireEvent.click(screen.getAllByTestId('dag-node')[0])
+    fireEvent.click(screen.getByText('查看日志'))
+
+    await waitFor(() => {
+      expect(screen.getByText('latest log line')).toBeInTheDocument()
+    })
+    expect(mockFetchJobLog).toHaveBeenCalledWith('job-1', 43)
+  })
+
   it('does not open the log dialog when the selected node has no run', () => {
     renderDialog()
 

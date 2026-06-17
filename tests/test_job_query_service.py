@@ -160,6 +160,48 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
     assert nodes["assemble_package"]["executor_kind"] == "local"
 
 
+def test_job_detail_resolves_executor_binding_for_job_pipeline_only(query_service, job_db):
+    workspace = job_db.create_workspace("default")
+    batch = job_db.create_batch(
+        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+    )
+    job = job_db.create_job(
+        pipeline_key="question_content",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=["assemble_package"],
+        workspace_id=workspace["id"],
+    )
+    job_db.replace_workspace_executor_configuration(
+        workspace["id"],
+        allocations=[
+            {"executor_id": "local-default", "concurrency_limit": 1},
+            {"executor_id": "pi-default", "concurrency_limit": 1},
+        ],
+        bindings=[
+            {
+                "pipeline_key": "question_content",
+                "node_key": "assemble_package",
+                "executor_id": "local-default",
+            },
+            {
+                "pipeline_key": "reading_analysis",
+                "node_key": "assemble_package",
+                "executor_id": "pi-default",
+            },
+        ],
+        node_limits=[],
+    )
+
+    detail = query_service.detail(job["id"])
+
+    node = detail["nodes"][0]
+    assert node["executor_id"] == "local-default"
+    assert node["executor_kind"] == "local"
+
+
 def test_workspace_run_service_filters_runs(query_service, job_db):
     workspace = job_db.create_workspace("default")
     batch = job_db.create_batch(

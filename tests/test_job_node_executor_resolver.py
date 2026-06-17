@@ -32,7 +32,7 @@ def test_resolve_node_executors_returns_empty_when_config_raises():
     service = FakeWorkspaceExecutorConfigurationService(fail=True)
     settings = FakeSettings()
 
-    result = resolve_node_executors("missing", service, settings)
+    result = resolve_node_executors("missing", "question_content", service, settings)
 
     assert result == {}
 
@@ -42,8 +42,21 @@ def test_resolve_node_executors_maps_node_keys_to_executor_id_and_kind():
         configs={
             "ws1": {
                 "bindings": [
-                    {"node_key": "node_a", "executor_id": "local-default"},
-                    {"node_key": "node_b", "executor_id": "pi-default"},
+                    {
+                        "pipeline_key": "question_content",
+                        "node_key": "node_a",
+                        "executor_id": "local-default",
+                    },
+                    {
+                        "pipeline_key": "question_content",
+                        "node_key": "node_b",
+                        "executor_id": "pi-default",
+                    },
+                    {
+                        "pipeline_key": "reading_analysis",
+                        "node_key": "node_a",
+                        "executor_id": "pi-default",
+                    },
                 ]
             }
         }
@@ -55,7 +68,7 @@ def test_resolve_node_executors_maps_node_keys_to_executor_id_and_kind():
         }
     )
 
-    result = resolve_node_executors("ws1", service, settings)
+    result = resolve_node_executors("ws1", "question_content", service, settings)
 
     assert result == {
         "node_a": ("local-default", "local"),
@@ -68,14 +81,18 @@ def test_resolve_node_executors_returns_none_kind_for_unknown_executor():
         configs={
             "ws1": {
                 "bindings": [
-                    {"node_key": "node_a", "executor_id": "unknown-executor"},
+                    {
+                        "pipeline_key": "question_content",
+                        "node_key": "node_a",
+                        "executor_id": "unknown-executor",
+                    },
                 ]
             }
         }
     )
     settings = FakeSettings(executor_definitions={})
 
-    result = resolve_node_executors("ws1", service, settings)
+    result = resolve_node_executors("ws1", "question_content", service, settings)
 
     assert result == {"node_a": ("unknown-executor", None)}
 
@@ -85,15 +102,19 @@ def test_resolve_node_executors_skips_bindings_without_node_key():
         configs={
             "ws1": {
                 "bindings": [
-                    {"node_key": "node_a", "executor_id": "local-default"},
-                    {"executor_id": "pi-default"},
+                    {
+                        "pipeline_key": "question_content",
+                        "node_key": "node_a",
+                        "executor_id": "local-default",
+                    },
+                    {"pipeline_key": "question_content", "executor_id": "pi-default"},
                 ]
             }
         }
     )
     settings = FakeSettings(executor_definitions={"local-default": FakeExecutorConfig("local")})
 
-    result = resolve_node_executors("ws1", service, settings)
+    result = resolve_node_executors("ws1", "question_content", service, settings)
 
     assert result == {"node_a": ("local-default", "local")}
 
@@ -115,6 +136,6 @@ def test_resolve_node_executors_with_real_service(job_db, settings):
 
     config_service = WorkspaceExecutorConfigurationService(job_db)
 
-    result = resolve_node_executors(workspace["id"], config_service, settings)
+    result = resolve_node_executors(workspace["id"], "question_content", config_service, settings)
 
     assert result == {"assemble_package": ("local-default", "local")}

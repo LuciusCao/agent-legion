@@ -17,6 +17,11 @@ interface DagFullscreenDialogProps {
   onClose: () => void
 }
 
+function runStartedAtMs(run: NodeRunSummary): number {
+  const timestamp = new Date(run.started_at).getTime()
+  return Number.isNaN(timestamp) ? 0 : timestamp
+}
+
 export function DagFullscreenDialog({
   open,
   jobId,
@@ -29,7 +34,13 @@ export function DagFullscreenDialog({
   const [logNodeKey, setLogNodeKey] = useState<string | null>(null)
 
   const selectedRun = useMemo(
-    () => runs?.find((run) => run.node_key === logNodeKey) || null,
+    () =>
+      runs
+        ?.filter((run) => run.node_key === logNodeKey)
+        .sort((a, b) => {
+          const startedAtDelta = runStartedAtMs(b) - runStartedAtMs(a)
+          return startedAtDelta === 0 ? b.id - a.id : startedAtDelta
+        })[0] || null,
     [runs, logNodeKey]
   )
 
