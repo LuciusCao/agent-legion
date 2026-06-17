@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from scripts.check_architecture import check_repository
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -15,31 +17,32 @@ def _empty_budgets(path: Path) -> None:
 
 
 class TestWorkspaceVideoHiveBoundary:
-    def test_rejects_video_hive_phase_import_in_workspace_route(self, tmp_path):
-        write(
-            tmp_path / "server/app/routes/jobs.py",
-            "from fastapi import APIRouter\n"
-            "from server.app.pipeline.download import download_video\n"
-            "router = APIRouter()\n",
-        )
+    @pytest.mark.parametrize(
+        "rel_path,source,expected_fragment",
+        [
+            (
+                "server/app/routes/jobs.py",
+                "from fastapi import APIRouter\n"
+                "from server.app.pipeline.download import download_video\n"
+                "router = APIRouter()\n",
+                "download",
+            ),
+            (
+                "server/app/services/job_execution.py",
+                "from server.app.services.video_actions import delete_video\n"
+                "class JobExecutionService:\n"
+                "    def run(self): delete_video('x')\n",
+                "video_actions",
+            ),
+        ],
+    )
+    def test_rejects_video_hive_imports(self, tmp_path, rel_path, source, expected_fragment):
+        write(tmp_path / rel_path, source)
         _empty_budgets(tmp_path)
 
         errors = check_repository(tmp_path)
 
-        assert any("Video Hive" in error and "download" in error for error in errors)
-
-    def test_rejects_video_hive_service_import_in_workspace_service(self, tmp_path):
-        write(
-            tmp_path / "server/app/services/job_execution.py",
-            "from server.app.services.video_actions import delete_video\n"
-            "class JobExecutionService:\n"
-            "    def run(self): delete_video('x')\n",
-        )
-        _empty_budgets(tmp_path)
-
-        errors = check_repository(tmp_path)
-
-        assert any("Video Hive" in error and "video_actions" in error for error in errors)
+        assert any("Video Hive" in error and expected_fragment in error for error in errors)
 
     def test_allows_generic_pipeline_imports_in_workspace_services(self, tmp_path):
         write(
@@ -58,27 +61,26 @@ class TestWorkspaceVideoHiveBoundary:
 
 
 class TestJobExecutionExecutorBoundary:
-    def test_rejects_direct_executor_invocation_in_job_service(self, tmp_path):
-        write(
-            tmp_path / "server/app/services/job_execution.py",
-            "from server.app.executors.local import LocalExecutor\n"
-            "class JobExecutionService:\n"
-            "    def run(self):\n"
-            "        LocalExecutor(id='x', handlers={}).execute(None)\n",
-        )
-        _empty_budgets(tmp_path)
-
-        errors = check_repository(tmp_path)
-
-        assert any("direct Executor" in error for error in errors)
-
-    def test_rejects_executor_registry_import_in_job_service(self, tmp_path):
-        write(
-            tmp_path / "server/app/services/job_rerun.py",
-            "from server.app.executors.registry import ExecutorRegistry\n"
-            "class JobRerunService:\n"
-            "    pass\n",
-        )
+    @pytest.mark.parametrize(
+        "rel_path,source",
+        [
+            (
+                "server/app/services/job_execution.py",
+                "from server.app.executors.local import LocalExecutor\n"
+                "class JobExecutionService:\n"
+                "    def run(self):\n"
+                "        LocalExecutor(id='x', handlers={}).execute(None)\n",
+            ),
+            (
+                "server/app/services/job_rerun.py",
+                "from server.app.executors.registry import ExecutorRegistry\n"
+                "class JobRerunService:\n"
+                "    pass\n",
+            ),
+        ],
+    )
+    def test_rejects_direct_executor_use_in_job_service(self, tmp_path, rel_path, source):
+        write(tmp_path / rel_path, source)
         _empty_budgets(tmp_path)
 
         errors = check_repository(tmp_path)
@@ -100,37 +102,36 @@ class TestJobExecutionExecutorBoundary:
 
 
 class TestRouteDagAndDeletionBoundary:
-    def test_rejects_dag_traversal_in_workspace_route(self, tmp_path):
-        write(
-            tmp_path / "server/app/routes/jobs.py",
-            "from fastapi import APIRouter\n"
-            "from server.app.pipelines.scheduler import downstream_nodes\n"
-            "router = APIRouter()\n"
-            "@router.post('/x')\n"
-            "def x():\n"
-            "    return downstream_nodes(None, 'a')\n",
-        )
+    @pytest.mark.parametrize(
+        "expected_error,source",
+        [
+            (
+                "DAG traversal",
+                "from fastapi import APIRouter\n"
+                "from server.app.pipelines.scheduler import downstream_nodes\n"
+                "router = APIRouter()\n"
+                "@router.post('/x')\n"
+                "def x():\n"
+                "    return downstream_nodes(None, 'a')\n",
+            ),
+            (
+                "filesystem deletion",
+                "import shutil\n"
+                "from fastapi import APIRouter\n"
+                "router = APIRouter()\n"
+                "@router.delete('/x')\n"
+                "def x():\n"
+                "    shutil.rmtree('/tmp/x')\n",
+            ),
+        ],
+    )
+    def test_rejects_dag_or_deletion_in_route(self, tmp_path, expected_error, source):
+        write(tmp_path / "server/app/routes/jobs.py", source)
         _empty_budgets(tmp_path)
 
         errors = check_repository(tmp_path)
 
-        assert any("DAG traversal" in error for error in errors)
-
-    def test_rejects_filesystem_deletion_in_workspace_route(self, tmp_path):
-        write(
-            tmp_path / "server/app/routes/jobs.py",
-            "import shutil\n"
-            "from fastapi import APIRouter\n"
-            "router = APIRouter()\n"
-            "@router.delete('/x')\n"
-            "def x():\n"
-            "    shutil.rmtree('/tmp/x')\n",
-        )
-        _empty_budgets(tmp_path)
-
-        errors = check_repository(tmp_path)
-
-        assert any("filesystem deletion" in error for error in errors)
+        assert any(expected_error in error for error in errors)
 
     def test_allows_deletion_in_services(self, tmp_path):
         write(
@@ -149,18 +150,28 @@ class TestRouteDagAndDeletionBoundary:
 
 
 class TestFrontendJobTransportTypes:
-    def test_rejects_handwritten_job_summary_response(self, tmp_path):
-        write(
-            tmp_path / "frontend/src/types.ts",
-            "export type JobSummaryResponse = { id: string }\n",
-        )
+    @pytest.mark.parametrize(
+        "rel_path,source,expected_type",
+        [
+            (
+                "frontend/src/types.ts",
+                "export type JobSummaryResponse = { id: string }\n",
+                "JobSummaryResponse",
+            ),
+            (
+                "frontend/src/workspaceTypes.ts",
+                "export type WorkspacePackageResponse = { results: any[] }\n",
+                "WorkspacePackageResponse",
+            ),
+        ],
+    )
+    def test_rejects_handwritten_transport_types(self, tmp_path, rel_path, source, expected_type):
+        write(tmp_path / rel_path, source)
         _empty_budgets(tmp_path)
 
         errors = check_repository(tmp_path)
 
-        assert any(
-            "handwritten transport" in error and "JobSummaryResponse" in error for error in errors
-        )
+        assert any("handwritten transport" in error and expected_type in error for error in errors)
 
     def test_accepts_derived_job_response_type(self, tmp_path):
         write(
@@ -175,51 +186,45 @@ class TestFrontendJobTransportTypes:
 
         assert not any("handwritten transport" in error for error in errors)
 
-    def test_rejects_handwritten_workspace_package_response(self, tmp_path):
-        write(
-            tmp_path / "frontend/src/workspaceTypes.ts",
-            "export type WorkspacePackageResponse = { results: any[] }\n",
-        )
-        _empty_budgets(tmp_path)
-
-        errors = check_repository(tmp_path)
-
-        assert any(
-            "handwritten transport" in error and "WorkspacePackageResponse" in error
-            for error in errors
-        )
-
 
 class TestSchemaMutationLocations:
-    def test_rejects_schema_mutation_outside_migrations(self, tmp_path):
-        write(
-            tmp_path / "server/app/services/job_queries.py",
-            "class JobQueries:\n"
-            "    def add_column(self, conn):\n"
-            '        conn.execute("alter table jobs add column x text")\n',
-        )
+    @pytest.mark.parametrize(
+        "rel_path,source,expected_error",
+        [
+            (
+                "server/app/services/job_queries.py",
+                "class JobQueries:\n"
+                "    def add_column(self, conn):\n"
+                '        conn.execute("alter table jobs add column x text")\n',
+                "schema mutation",
+            ),
+        ],
+    )
+    def test_rejects_schema_mutation_outside_migrations(
+        self, tmp_path, rel_path, source, expected_error
+    ):
+        write(tmp_path / rel_path, source)
         _empty_budgets(tmp_path)
 
         errors = check_repository(tmp_path)
 
-        assert any("schema mutation" in error for error in errors)
+        assert any(expected_error in error for error in errors)
 
-    def test_allows_schema_mutation_in_migrations(self, tmp_path):
-        write(
-            tmp_path / "server/app/db/migrations/v999_test.py",
-            'def migrate(conn):\n    conn.execute("create table test (id text)")\n',
-        )
-        _empty_budgets(tmp_path)
-
-        errors = check_repository(tmp_path)
-
-        assert not any("schema mutation" in error for error in errors)
-
-    def test_allows_schema_mutation_in_schema_module(self, tmp_path):
-        write(
-            tmp_path / "server/app/db/schema.py",
-            'SCHEMA_SQL = "create table if not exists videos (id text)"\n',
-        )
+    @pytest.mark.parametrize(
+        "rel_path,source",
+        [
+            (
+                "server/app/db/migrations/v999_test.py",
+                'def migrate(conn):\n    conn.execute("create table test (id text)")\n',
+            ),
+            (
+                "server/app/db/schema.py",
+                'SCHEMA_SQL = "create table if not exists videos (id text)"\n',
+            ),
+        ],
+    )
+    def test_allows_schema_mutation_in_allowed_locations(self, tmp_path, rel_path, source):
+        write(tmp_path / rel_path, source)
         _empty_budgets(tmp_path)
 
         errors = check_repository(tmp_path)
