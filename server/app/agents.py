@@ -74,6 +74,10 @@ class AgentStatusManager:
     def add_pi_agent_for_workspace(self, workspace_id: str, max_tasks: int = 1) -> None:
         for agent in self.agents:
             if agent.id == "pi" and agent.workspace_id == workspace_id:
+                if agent.max_tasks != max_tasks:
+                    agent.max_tasks = max_tasks
+                    self._broadcast()
+                    return
                 agent.max_tasks = max_tasks
                 return
         self.agents.append(
@@ -87,6 +91,16 @@ class AgentStatusManager:
             )
         )
         self._broadcast()
+
+    def remove_pi_agent_for_workspace(self, workspace_id: str) -> None:
+        before = len(self.agents)
+        self.agents = [
+            agent
+            for agent in self.agents
+            if not (agent.id == "pi" and agent.workspace_id == workspace_id)
+        ]
+        if len(self.agents) != before:
+            self._broadcast()
 
     def add_pi_agent(self, max_tasks: int = 1) -> None:
         """Deprecated: use add_pi_agent_for_workspace."""

@@ -265,6 +265,39 @@ def test_workspace_isolated_pi_status():
     assert ws1["current_video_id"] is None
 
 
+def test_remove_pi_agent_for_workspace():
+    manager = AgentStatusManager()
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+    manager.add_pi_agent_for_workspace("ws-2", max_tasks=3)
+
+    manager.remove_pi_agent_for_workspace("ws-1")
+
+    assert [a["workspace_id"] for a in manager.to_dicts() if a["id"] == "pi"] == ["ws-2"]
+
+
+def test_remove_pi_agent_for_workspace_is_noop_when_missing():
+    manager = AgentStatusManager()
+    manager.remove_pi_agent_for_workspace("ws-missing")
+    assert manager.to_dicts() == []
+
+
+def test_add_pi_agent_for_workspace_broadcasts_capacity_changes(monkeypatch):
+    manager = AgentStatusManager()
+    broadcast_count = 0
+
+    def fake_broadcast():
+        nonlocal broadcast_count
+        broadcast_count += 1
+
+    monkeypatch.setattr(manager, "_broadcast", fake_broadcast)
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=5)
+
+    agent = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    assert agent["max_tasks"] == 5
+    assert broadcast_count == 2
+
+
 def test_idle_pops_correct_video_id():
     manager = AgentStatusManager()
     manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)

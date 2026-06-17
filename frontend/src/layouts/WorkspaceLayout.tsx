@@ -6,6 +6,7 @@ import { useUiStore } from '../stores/uiStore'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
 import { AddDialog } from '../components/AddDialog'
+import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 import { WORKSPACE_LABELS } from '../labels'
 
 export const VIDEO_HIVE_ID = 'video-hive'
@@ -82,8 +83,10 @@ export default function WorkspaceLayout() {
   }, [workspaceId, refreshStats])
 
   useEffect(() => {
-    fetchWorkerStatus()
-  }, [fetchWorkerStatus])
+    if (workspaceId) {
+      fetchWorkerStatus(workspaceId)
+    }
+  }, [fetchWorkerStatus, workspaceId])
 
   const workspaceName = isVideoHive
     ? 'Video Hive'
@@ -104,6 +107,7 @@ export default function WorkspaceLayout() {
           rightActions={
             showListActions ? (
               <>
+                <AgentStatusIndicator workspaceId={workspaceId} />
                 <md-icon-button
                   aria-label={selectMode ? '完成' : '多选'}
                   onClick={toggleSelectMode}

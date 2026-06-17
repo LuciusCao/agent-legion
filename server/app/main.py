@@ -27,6 +27,7 @@ from server.app.pipeline.runners import RunnerPool
 from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.pipelines.registry import list_registered_pipelines
 from server.app.routes import create_router
+from server.app.services.workspace_configuration import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
 from server.app.worker_control import WorkerControl, WorkspaceWorkerControl
 from server.app.worker_thread import WorkerThread
@@ -133,6 +134,7 @@ def create_app(
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
+            sync_workspace_pi_agents(job_db, settings, agent_manager)
             recover_interrupted_videos(db, settings)
             runner_pool = RunnerPool.from_settings(
                 settings, [a.id for a in agent_manager.agents], agent_manager=agent_manager
