@@ -97,7 +97,7 @@ class JobExecutionService:
                 "failed",
                 target_node_key,
                 "node_not_found",
-                f"Node {target_node_key} not found in pipeline",
+                f"Node {target_node_key} not found in workflow",
             )
 
         try:
@@ -188,7 +188,7 @@ class JobExecutionService:
                 "failed",
                 target_node_key,
                 "node_not_found",
-                f"Start node {start_node_key} not found in pipeline",
+                f"Start node {start_node_key} not found in workflow",
             )
 
         if start_node_key not in closure:

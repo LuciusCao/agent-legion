@@ -1,4 +1,4 @@
-def test_get_pipeline_definition_when_enabled(tmp_path):
+def test_get_workflow_definition_when_enabled(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -40,7 +40,7 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     assert graph_node["after"] == ["solution_decomposition"]
 
 
-def test_list_pipelines_includes_registered_pipelines(tmp_path):
+def test_list_workflows_includes_registered_workflows(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app

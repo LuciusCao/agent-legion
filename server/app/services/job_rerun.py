@@ -80,7 +80,7 @@ class JobRerunService:
                 "failed",
                 node_key,
                 "node_not_found",
-                f"Node {node_key} not found in pipeline",
+                f"Node {node_key} not found in workflow",
             )
 
         if self.job_db.get_job_node(job_id, node_key) is None:

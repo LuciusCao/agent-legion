@@ -44,7 +44,7 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     assert default_jobs.json()["jobs"] == []
 
 
-def test_delete_workspace_hidden_when_pipelines_disabled(tmp_path):
+def test_delete_workspace_hidden_when_workflows_disabled(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app

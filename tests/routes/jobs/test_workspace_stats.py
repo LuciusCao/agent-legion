@@ -1,4 +1,4 @@
-def test_workspace_stats_hidden_when_pipelines_disabled(tmp_path):
+def test_workspace_stats_hidden_when_workflows_disabled(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app

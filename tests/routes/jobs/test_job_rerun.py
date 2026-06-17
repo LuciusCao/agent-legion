@@ -301,7 +301,7 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
     assert results[0]["reason_code"] == "node_not_found"
 
 
-def test_batch_rerun_mixed_pipelines(tmp_path):
+def test_batch_rerun_mixed_workflows(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app

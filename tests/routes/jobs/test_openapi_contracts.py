@@ -29,7 +29,7 @@ def test_workspace_agent_routes_are_absent_from_openapi(tmp_path):
     assert "WorkspaceAgentConfig" not in schema["components"]["schemas"]
 
 
-def test_job_routes_are_hidden_when_pipelines_disabled(tmp_path):
+def test_job_routes_are_hidden_when_workflows_disabled(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
