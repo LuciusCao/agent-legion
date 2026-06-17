@@ -35,6 +35,11 @@
   border-color: #c2410c;
 }
 
+.node.pending {
+  background: #f9fafb;
+  border-color: #d1d5db;
+}
+
 .header {
   display: flex;
   align-items: center;
