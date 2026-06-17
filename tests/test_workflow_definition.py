@@ -6,7 +6,7 @@ from server.app.workflows.definition import WorkflowDefinitionError, load_workfl
 
 
 def write_workflow(tmp_path: Path, node_body: str) -> Path:
-    config = tmp_path / "pipeline.yaml"
+    config = tmp_path / "workflow.yaml"
     indented_body = node_body.replace("\n", "\n    ")
     config.write_text(
         f"""key: test
@@ -117,7 +117,7 @@ nodes:
         load_workflow_definition(config)
 
 
-def test_reject_pipeline_concurrency(tmp_path):
+def test_reject_workflow_concurrency(tmp_path):
     config = tmp_path / "bad-concurrency.yaml"
     config.write_text(
         """

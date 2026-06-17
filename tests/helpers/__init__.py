@@ -51,7 +51,7 @@ def ensure_legacy_workspace_tables(db_or_conn: Any) -> None:
         conn.execute(_LEGACY_BOOTSTRAP_TABLE_SQL)
 
 
-def make_pipeline_worker(
+def make_workflow_worker(
     tmp_path: Path,
     queries: JobQueries,
     *,
@@ -185,16 +185,16 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     data_dir.mkdir(parents=True)
 
     # Copy pipeline definitions so the legacy finalizer can resolve the default
-    # workspace pipeline during app construction.
+    # workspace workflow during app construction.
     import shutil
 
     real_root = Path(__file__).resolve().parents[2]
-    pipelines_src = real_root / "config" / "workflows"
-    pipelines_dst = root_dir / "config" / "workflows"
-    pipelines_dst.mkdir(parents=True, exist_ok=True)
-    for src_file in pipelines_src.iterdir():
+    workflows_src = real_root / "config" / "workflows"
+    workflows_dst = root_dir / "config" / "workflows"
+    workflows_dst.mkdir(parents=True, exist_ok=True)
+    for src_file in workflows_src.iterdir():
         if src_file.is_file():
-            shutil.copy2(src_file, pipelines_dst / src_file.name)
+            shutil.copy2(src_file, workflows_dst / src_file.name)
 
     from server.app import main as app_main
 

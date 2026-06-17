@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 @pytest.fixture
 def workspace_client(client):
-    """Ensure pipelines are enabled and provide a helper to create workspaces/jobs."""
+    """Ensure workflows are enabled and provide a helper to create workspaces/jobs."""
     client.app.state.settings.config.setdefault("workflows", {})["enabled"] = True
     return client
 

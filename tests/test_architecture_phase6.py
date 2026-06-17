@@ -44,7 +44,7 @@ class TestWorkspaceVideoHiveBoundary:
 
         assert any("Video Hive" in error and expected_fragment in error for error in errors)
 
-    def test_allows_generic_pipeline_imports_in_workspace_services(self, tmp_path):
+    def test_allows_generic_workflow_imports_in_workspace_services(self, tmp_path):
         write(
             tmp_path / "server/app/services/job_execution.py",
             "from server.app.workflows.definition import WorkflowDefinition\n"

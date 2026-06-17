@@ -23,7 +23,7 @@ from server.app.workflows.definition import (
     WorkflowIntake,
     WorkflowNode,
 )
-from tests.helpers import make_pipeline_worker
+from tests.helpers import make_workflow_worker
 
 
 def _make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
@@ -447,7 +447,7 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     assert job_after["pause_reason"] == "target_reached"
 
 
-def test_make_pipeline_worker_runs_reading_analysis_local_node(tmp_path: Path, monkeypatch) -> None:
+def test_make_workflow_worker_runs_reading_analysis_local_node(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
         "server.app.workflows.reading_analysis.get_token",
         lambda env, config: "test-token",
@@ -462,7 +462,7 @@ def test_make_pipeline_worker_runs_reading_analysis_local_node(tmp_path: Path, m
         ),
     )
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    worker, definition = make_pipeline_worker(tmp_path, queries)
+    worker, definition = make_workflow_worker(tmp_path, queries)
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",

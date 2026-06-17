@@ -124,7 +124,7 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
     }
 
 
-def _sample_pipeline() -> WorkflowDefinition:
+def _sample_workflow() -> WorkflowDefinition:
     return WorkflowDefinition(
         key="reading_analysis",
         label="Reading Analysis",
@@ -136,7 +136,7 @@ def _sample_pipeline() -> WorkflowDefinition:
     )
 
 
-def _question_comprehension_info_pipeline() -> WorkflowDefinition:
+def _question_comprehension_info_workflow() -> WorkflowDefinition:
     return WorkflowDefinition(
         key="question_comprehension_info",
         label="Question Comprehension Info",
@@ -182,7 +182,7 @@ def test_v005_finalizer_interruption_before_commit_retains_backup_and_reruns(
         conn.set_authorizer(block_schema_history_insert)
         finalize_legacy_executor_schema(
             conn,
-            [_sample_pipeline(), _question_comprehension_info_pipeline()],
+            [_sample_workflow(), _question_comprehension_info_workflow()],
             _sample_executors(),
             backup_path=backup_path,
         )
@@ -208,7 +208,7 @@ def test_v005_finalizer_interruption_before_commit_retains_backup_and_reruns(
     with queries2.connect() as conn:
         report = finalize_legacy_executor_schema(
             conn,
-            [_sample_pipeline(), _question_comprehension_info_pipeline()],
+            [_sample_workflow(), _question_comprehension_info_workflow()],
             _sample_executors(),
             backup_path=backup_path,
         )

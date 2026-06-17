@@ -17,13 +17,13 @@ def test_lifespan_with_start_worker_initializes_worker_threads(tmp_path, monkeyp
     def patched_worker_start(self):
         calls.append("worker")
 
-    def patched_pipeline_start(self):
-        calls.append("pipeline")
+    def patched_workflow_start(self):
+        calls.append("workflow")
         nonlocal received_registry
         received_registry = self.executor_registry
 
     monkeypatch.setattr(WorkerThread, "start", patched_worker_start)
-    monkeypatch.setattr(WorkflowWorkerThread, "start", patched_pipeline_start)
+    monkeypatch.setattr(WorkflowWorkerThread, "start", patched_workflow_start)
 
     # Keep lifespan wiring independent of real openclaw discovery/runner creation.
     monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
@@ -48,7 +48,7 @@ def test_lifespan_with_start_worker_initializes_worker_threads(tmp_path, monkeyp
         pass  # lifespan startup runs here
 
     assert "worker" in calls
-    assert "pipeline" in calls
+    assert "workflow" in calls
     assert isinstance(app.state.executor_registry, ExecutorRegistry)
     assert app.state.executor_registry is received_registry
 

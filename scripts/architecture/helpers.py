@@ -3,14 +3,12 @@ import ast
 HTTP_DECORATORS = {"get", "post", "put", "patch", "delete"}
 SCHEDULER_FORBIDDEN = (
     "server.app.pipeline.openclaw",
-    "server.app.pipeline.pi_runner",
     "server.app.workflows.openclaw",
     "server.app.workflows.pi_runner",
     "server.app.workflows.skills",
     "server.app.workflows.reading_analysis",
     "server.app.workflows.question_content",
     "pipeline.openclaw",
-    "pipeline.pi_runner",
     "workflows.openclaw",
     "workflows.pi_runner",
     "workflows.skills",
