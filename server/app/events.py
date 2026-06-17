@@ -199,7 +199,7 @@ class JobEventManager:
 
     def _broadcast(self, workspace_id: str, payload: str) -> None:
         loop = self._loop
-        if loop is None or not loop.is_running():
+        if loop is None:
             return
 
         def _send() -> None:
@@ -216,7 +216,12 @@ class JobEventManager:
                 queues -= dead
                 self._cleanup_empty_workspace(workspace_id)
 
-        loop.call_soon_threadsafe(_send)
+        if loop.is_running():
+            loop.call_soon_threadsafe(_send)
+        else:
+            # Synchronous fallback is single-threaded/test-only; do not call from a
+            # background thread while the loop is set but not running.
+            _send()
 
     def _build_payload(
         self,

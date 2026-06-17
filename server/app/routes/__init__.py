@@ -58,7 +58,9 @@ def create_router(
     workspace_configuration = WorkspaceConfigurationService(
         job_db, settings, agent_manager, pipeline_catalog
     )
-    job_intake = JobIntakeService(job_db, settings, pipeline_catalog)
+    job_intake = JobIntakeService(
+        job_db, settings, pipeline_catalog, job_event_manager=job_event_manager
+    )
     job_queries = JobQueryService(job_db, settings, pipeline_catalog)
     job_artifacts = JobArtifactService(job_db)
     job_logs = JobLogService(settings, job_db)
