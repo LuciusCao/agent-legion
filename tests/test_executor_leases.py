@@ -752,6 +752,32 @@ def test_sync_job_status_returns_queued_when_nodes_remain(
     assert job["status"] == "queued"
 
 
+def test_sync_job_status_keeps_running_when_another_node_is_running(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-concurrent", "exec-concurrent", 2, node_keys=["node_a", "node_b"]
+    )
+    with queries.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='completed' where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        )
+        conn.execute(
+            "update job_nodes set status='running' where job_id=? and node_key=?",
+            (job_id, "node_b"),
+        )
+        conn.execute("commit")
+
+    with queries.connect() as conn:
+        _sync_job_status(conn, job_id)
+        conn.commit()
+
+    job = queries.get_job(job_id)
+    assert job is not None
+    assert job["status"] == "running"
+
+
 def test_sync_job_status_keeps_paused_when_execution_paused(
     repo_a: ExecutorLeaseRepository, queries: JobQueries
 ) -> None:
