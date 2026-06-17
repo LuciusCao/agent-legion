@@ -111,6 +111,53 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
     assert len(detail["nodes"]) == 2
     assert detail["nodes"][0]["label"]
     assert "artifacts" in detail
+    for node in detail["nodes"]:
+        assert node["executor_id"] is None
+        assert node["executor_kind"] is None
+
+
+def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, job_db):
+    workspace = job_db.create_workspace("default")
+    batch = job_db.create_batch(
+        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+    )
+    job = job_db.create_job(
+        pipeline_key="question_content",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=["question_understanding", "assemble_package"],
+        workspace_id=workspace["id"],
+    )
+    job_db.replace_workspace_executor_configuration(
+        workspace["id"],
+        allocations=[
+            {"executor_id": "local-default", "concurrency_limit": 1},
+            {"executor_id": "pi-default", "concurrency_limit": 1},
+        ],
+        bindings=[
+            {
+                "pipeline_key": "question_content",
+                "node_key": "question_understanding",
+                "executor_id": "pi-default",
+            },
+            {
+                "pipeline_key": "question_content",
+                "node_key": "assemble_package",
+                "executor_id": "local-default",
+            },
+        ],
+        node_limits=[],
+    )
+
+    detail = query_service.detail(job["id"])
+
+    nodes = {node["node_key"]: node for node in detail["nodes"]}
+    assert nodes["question_understanding"]["executor_id"] == "pi-default"
+    assert nodes["question_understanding"]["executor_kind"] == "pi"
+    assert nodes["assemble_package"]["executor_id"] == "local-default"
+    assert nodes["assemble_package"]["executor_kind"] == "local"
 
 
 def test_workspace_run_service_filters_runs(query_service, job_db):

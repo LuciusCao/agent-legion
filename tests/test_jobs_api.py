@@ -709,6 +709,55 @@ def test_job_detail_includes_node_dependencies(tmp_path):
     assert nodes["content_graph_generation"]["after"] == ["solution_decomposition"]
 
 
+def test_job_detail_includes_executor_binding_and_kind(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.pipelines.enabled = True
+    job_db = app.state.job_db
+    with TestClient(app) as c:
+        created = c.post(
+            "/api/job-batches",
+            json={
+                "pipeline_key": "question_content",
+                "source_kind": "direct_ids",
+                "question_ids": ["Q203"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        job_id = created["jobs"][0]["id"]
+        job_db.replace_workspace_executor_configuration(
+            "default",
+            allocations=[
+                {"executor_id": "local-default", "concurrency_limit": 1},
+                {"executor_id": "pi-default", "concurrency_limit": 1},
+            ],
+            bindings=[
+                {
+                    "pipeline_key": "question_content",
+                    "node_key": "question_understanding",
+                    "executor_id": "pi-default",
+                },
+                {
+                    "pipeline_key": "question_content",
+                    "node_key": "assemble_package",
+                    "executor_id": "local-default",
+                },
+            ],
+            node_limits=[],
+        )
+        response = c.get(f"/api/jobs/{job_id}")
+
+    assert response.status_code == 200
+    nodes = {node["node_key"]: node for node in response.json()["nodes"]}
+    assert nodes["question_understanding"]["executor_id"] == "pi-default"
+    assert nodes["question_understanding"]["executor_kind"] == "pi"
+    assert nodes["assemble_package"]["executor_id"] == "local-default"
+    assert nodes["assemble_package"]["executor_kind"] == "local"
+
+
 def test_workspace_stats_hidden_when_pipelines_disabled(tmp_path):
     from fastapi.testclient import TestClient
 

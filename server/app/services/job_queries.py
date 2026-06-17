@@ -66,7 +66,10 @@ class JobQueryService:
             config = self.workspace_executor_config.get(workspace_id)
         except Exception:
             return {}
-        executor_kinds = {exe["id"]: exe.get("kind") for exe in config.get("executors", [])}
+        executor_kinds = {
+            executor_id: executor.kind
+            for executor_id, executor in self.settings.executor_definitions.items()
+        }
         return {
             binding["node_key"]: (
                 binding.get("executor_id"),
