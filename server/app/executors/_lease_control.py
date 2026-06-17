@@ -53,16 +53,6 @@ def _execution_control_rejects_claim(
 
 
 def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:
-    non_terminal = conn.execute(
-        """
-        select 1 from job_nodes
-        where job_id=? and status not in ('completed', 'failed')
-        """,
-        (job_id,),
-    ).fetchone()
-    if non_terminal is not None:
-        return
-
     any_failed = conn.execute(
         "select 1 from job_nodes where job_id=? and status='failed'",
         (job_id,),
@@ -82,6 +72,20 @@ def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:
         conn.execute(
             "update jobs set status=?, updated_at=? where id=?",
             ("paused", _sqlite_timestamp(datetime.now(UTC)), job_id),
+        )
+        return
+
+    non_terminal = conn.execute(
+        """
+        select 1 from job_nodes
+        where job_id=? and status not in ('completed', 'failed')
+        """,
+        (job_id,),
+    ).fetchone()
+    if non_terminal is not None:
+        conn.execute(
+            "update jobs set status=?, updated_at=? where id=?",
+            ("queued", _sqlite_timestamp(datetime.now(UTC)), job_id),
         )
         return
 

@@ -336,7 +336,7 @@ def test_target_completion_pauses_job_atomically(
 
     job = queries.get_job(job_id)
     assert job is not None
-    assert job["status"] == "running"
+    assert job["status"] == "queued"
     assert job["execution_mode"] == "until_node"
 
     # Complete the target node; job should pause atomically.
