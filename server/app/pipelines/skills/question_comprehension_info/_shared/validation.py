@@ -154,3 +154,73 @@ def validate_key_info_payload(
         if item_id in seen_ids:
             raise ContractError(f"duplicate key_info_id: {item_id!r}")
         seen_ids.add(item_id)
+
+
+def load_valid_key_info_ids(job_dir: Path) -> set[str]:
+    """Load reviewed key-info IDs from the upstream skill output."""
+    path = job_dir / "key_info_reviewed.json"
+    if not path.is_file():
+        raise ContractError("Missing input file: key_info_reviewed.json")
+
+    data = load_json_object(path)
+    key_info_list = data.get("key_info_list")
+    if not isinstance(key_info_list, list):
+        raise ContractError("key_info_reviewed.json 'key_info_list' must be an array")
+
+    valid_ids: set[str] = set()
+    for item in key_info_list:
+        if not isinstance(item, dict):
+            raise ContractError("key_info_reviewed.json item must be an object")
+        key_info_id = item.get("key_info_id")
+        if not isinstance(key_info_id, str):
+            raise ContractError("key_info_reviewed.json key_info_id must be a string")
+        valid_ids.add(key_info_id)
+    return valid_ids
+
+
+def validate_possible_error_item(item: object, valid_key_info_ids: set[str], index: int) -> None:
+    """Validate a single possible-error entry."""
+    if not isinstance(item, dict):
+        raise ContractError(f"possible_error item at index {index} must be an object")
+
+    error_id = item.get("error_id")
+    if not isinstance(error_id, str) or not error_id.startswith("pe_"):
+        raise ContractError(f"error_id must start with 'pe_', got {error_id!r}")
+
+    error_type = item.get("error_type")
+    if error_type != "question_comprehension":
+        raise ContractError(f"error_type must be 'question_comprehension', got {error_type!r}")
+
+    _validate_non_empty_string(item.get("error_answer"), f"possible_error[{index}].error_answer")
+    _validate_non_empty_string(
+        item.get("error_description"), f"possible_error[{index}].error_description"
+    )
+
+    related_key_info_ids = item.get("related_key_info_ids")
+    if not isinstance(related_key_info_ids, list):
+        raise ContractError(
+            f"related_key_info_ids must be an array, got {type(related_key_info_ids).__name__}"
+        )
+
+    for related_id in related_key_info_ids:
+        _validate_non_empty_string(related_id, "related_key_info_ids entry")
+        if related_id not in valid_key_info_ids:
+            raise ContractError(f"unknown related_key_info_id: {related_id!r}")
+
+
+def validate_possible_errors_payload(payload: dict[str, Any], valid_key_info_ids: set[str]) -> None:
+    """Validate a possible-errors payload, independent of the source question."""
+    payload_id = payload.get("question_id")
+    _validate_non_empty_string(payload_id, "question_id")
+
+    possible_error_list = payload.get("possible_error_list")
+    if not isinstance(possible_error_list, list) or len(possible_error_list) == 0:
+        raise ContractError("possible_error_list must be a non-empty array")
+
+    seen_ids: set[str] = set()
+    for i, item in enumerate(possible_error_list):
+        validate_possible_error_item(item, valid_key_info_ids, i)
+        item_id = item["error_id"]
+        if item_id in seen_ids:
+            raise ContractError(f"duplicate error_id: {item_id!r}")
+        seen_ids.add(item_id)
