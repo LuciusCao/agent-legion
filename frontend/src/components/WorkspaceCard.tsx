@@ -3,7 +3,7 @@ import type { ExecutorRuntimeStatus } from '../workspaceTypes'
 
 type WorkspaceCardProps = {
   name: string
-  pipelineLabel: string
+  workflowLabel: string
   isSystem?: boolean
   jobStats: Record<string, number>
   executorStatus: ExecutorRuntimeStatus[]
@@ -13,7 +13,7 @@ type WorkspaceCardProps = {
 
 export default function WorkspaceCard({
   name,
-  pipelineLabel,
+  workflowLabel,
   isSystem,
   jobStats,
   executorStatus,
@@ -77,7 +77,7 @@ export default function WorkspaceCard({
               borderRadius: 12,
             }}
           >
-            {pipelineLabel}
+            {workflowLabel}
           </span>
         </div>
         {!isSystem && onDelete && (

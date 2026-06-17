@@ -4,8 +4,8 @@ import type {
   JobBatchResponse,
   JobDetailResponse,
   JobsResponse,
-  PipelineResponse,
-  PipelinesListResponse,
+  WorkflowResponse,
+  WorkflowsListResponse,
   QuestionDetailResponse,
   WorkspaceRecord,
   WorkspacesResponse,
@@ -42,10 +42,10 @@ export async function updatePackage(
 
 export async function fetchJobs(
   workspaceId: string,
-  pipelineKey?: string
+  workflowKey?: string
 ): Promise<JobsResponse> {
   const params = new URLSearchParams()
-  if (pipelineKey) params.set('pipeline_key', pipelineKey)
+  if (workflowKey) params.set('workflow_key', workflowKey)
   const query = params.toString()
   try {
     return await api(
@@ -103,7 +103,7 @@ export async function updateWorkspace(
   fields: {
     name?: string
     description?: string
-    default_pipeline_key?: string
+    default_workflow_key?: string
     default_entity?: string
     cms_config?: Record<string, unknown>
     resource_config?: Record<string, unknown>
@@ -132,14 +132,14 @@ export async function deleteWorkspace(workspaceId: string): Promise<void> {
   })
 }
 
-export async function fetchPipelines(): Promise<PipelinesListResponse> {
-  return api('/api/pipelines')
+export async function fetchWorkflows(): Promise<WorkflowsListResponse> {
+  return api('/api/workflows')
 }
 
-export async function fetchPipelineDefinition(
-  pipelineKey = 'question_content'
-): Promise<PipelineResponse> {
-  return api(`/api/pipelines/${encodeURIComponent(pipelineKey)}`)
+export async function fetchWorkflowDefinition(
+  workflowKey = 'question_content'
+): Promise<WorkflowResponse> {
+  return api(`/api/workflows/${encodeURIComponent(workflowKey)}`)
 }
 
 export async function createJobBatch(
@@ -147,14 +147,14 @@ export async function createJobBatch(
 ): Promise<JobBatchResponse> {
   const {
     workspaceId,
-    pipelineKey = 'question_content',
+    workflowKey = 'question_content',
     entity,
     sourceKind,
     inputField,
     values,
   } = input
   const body: Record<string, unknown> = {
-    pipeline_key: pipelineKey,
+    workflow_key: workflowKey,
     source_kind: sourceKind,
   }
   if (entity) {

@@ -16,7 +16,7 @@ type SelectRefEntry = {
 
 export function ExecutorBindingSection() {
   const {
-    pipelineDefinition,
+    workflowDefinition,
     executorCatalog,
     executorConfiguration,
     setNodeBinding,
@@ -28,9 +28,9 @@ export function ExecutorBindingSection() {
     executorConfiguration.allocations.map((a) => a.executor_id)
   )
 
-  if (!pipelineDefinition) return null
+  if (!workflowDefinition) return null
 
-  const pipelineKey = pipelineDefinition.key
+  const workflowKey = workflowDefinition.key
 
   return (
     <div>
@@ -54,9 +54,9 @@ export function ExecutorBindingSection() {
           gap: 12,
         }}
       >
-        {pipelineDefinition.nodes.map((node) => {
+        {workflowDefinition.nodes.map((node) => {
           const currentBinding = executorConfiguration.bindings.find(
-            (b) => b.pipeline_key === pipelineKey && b.node_key === node.key
+            (b) => b.workflow_key === workflowKey && b.node_key === node.key
           )
           const compatibleExecutors = executorCatalog.filter(
             (executor) =>
@@ -120,7 +120,7 @@ export function ExecutorBindingSection() {
                     const handler = (event: Event) => {
                       const value = getSelectedValue(event)
                       setNodeBinding(
-                        pipelineKey,
+                        workflowKey,
                         node.key,
                         value === '' ? null : value
                       )

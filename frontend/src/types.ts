@@ -183,7 +183,7 @@ export type WorkspaceRecord = {
   id: string
   name: string
   description?: string
-  default_pipeline_key: string
+  default_workflow_key: string
   default_entity: string
   cms_config?: Record<string, unknown>
   resource_config?: Record<string, unknown>
@@ -197,23 +197,23 @@ export type WorkspaceSettings = {
   entityType: 'question' | 'knowledge' | 'video'
   intakeModes: string[]
   labelOverrides: Record<string, string>
-  pipelineKey: string
+  workflowKey: string
   resources: Record<string, ResourceBinding>
   cmsUrl?: string
   cmsToken?: string
 }
 
-export type PipelineNodeRecord = ApiSchemas['PipelineNodeResponse']
-export type PipelineIntakeModeRecord = ApiSchemas['PipelineIntakeModeResponse']
-export type PipelineDefinitionRecord = ApiSchemas['PipelineDefinitionResponse']
-export type PipelineResponse = ApiSchemas['PipelineResponse']
-export type PipelinesListResponse = ApiSchemas['PipelinesListResponse']
+export type WorkflowNodeRecord = ApiSchemas['WorkflowNodeResponse']
+export type WorkflowIntakeModeRecord = ApiSchemas['WorkflowIntakeModeResponse']
+export type WorkflowDefinitionRecord = ApiSchemas['WorkflowDefinitionResponse']
+export type WorkflowResponse = ApiSchemas['WorkflowResponse']
+export type WorkflowsListResponse = ApiSchemas['WorkflowsListResponse']
 
 export type ArtifactResponse = ApiSchemas['ArtifactResponse']
 
 export type CreateJobBatchInput = {
   workspaceId: string
-  pipelineKey?: string
+  workflowKey?: string
   entity?: string
   sourceKind: string
   inputField: string

@@ -18,7 +18,7 @@ const mockJobs: JobRecord[] = [
   {
     id: 'j1',
     workspace_id: 'ws1',
-    pipeline_key: 'p1',
+    workflow_key: 'p1',
     source_id: 'Q100',
     source_type: 'question',
     title: 'Algebra',
@@ -35,7 +35,7 @@ const mockJobs: JobRecord[] = [
   {
     id: 'j2',
     workspace_id: 'ws1',
-    pipeline_key: 'p1',
+    workflow_key: 'p1',
     source_id: 'Q200',
     source_type: 'question',
     title: 'Geometry',

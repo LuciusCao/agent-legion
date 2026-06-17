@@ -9,7 +9,7 @@ Local processing console for educational videos. It queues knowledge videos and 
 - Frontend: Vite + TypeScript, ESLint + Prettier.
 - Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`, `data/jobs/`.
 - Video queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
-- Agent Legion pipeline model: workspace-scoped DAG jobs with configurable pipeline definitions (`config/pipelines/`).
+- Agent Legion workflow model: workspace-scoped DAG jobs with configurable workflow definitions (`config/workflows/`).
 
 ## Setup
 
@@ -29,7 +29,7 @@ UV_CACHE_DIR=.uv-cache uv sync
 
 ## Configuration
 
-Edit `config/pipeline.yaml`.
+Edit `config/workflow.yaml`.
 
 - `asr.provider`: `auto`, `whisper`, or `sensevoice`.
 - `asr.whisper.binary`: local `whisper-cli`.
@@ -166,7 +166,7 @@ The package endpoint creates a zip with per-video JSON plus `manifest.json`. The
 
 ## Pi Agent Runner
 
-Video Hive can execute `reading_analysis` pipeline agent nodes through the Pi CLI (`@earendil-works/pi-coding-agent`).
+Video Hive can execute `reading_analysis` workflow agent nodes through the Pi CLI (`@earendil-works/pi-coding-agent`).
 
 ### Installation
 
@@ -179,10 +179,10 @@ pi
 
 ### Configuration
 
-Pi settings live in `config/pipeline.yaml` under `pipelines.pi`:
+Pi settings live in `config/workflow.yaml` under `workflows.pi`:
 
 ```yaml
-pipelines:
+workflows:
   enabled: true
   pi:
     binary: pi
@@ -201,7 +201,7 @@ pipelines:
 
 ### Repository Skills
 
-Each agent node in `reading_analysis` maps to one repository-owned skill under `server/app/pipelines/skills/reading_analysis/{node_key}/`. Every skill contains:
+Each agent node in `reading_analysis` maps to one repository-owned skill under `server/app/workflows/skills/reading_analysis/{node_key}/`. Every skill contains:
 
 - `SKILL.md` — execution workflow and I/O contract
 - `references/output-contract.md` — field-level artifact specification
@@ -241,10 +241,10 @@ UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migrati
 - `--check` is read-only and prints a JSON report. An empty `issues` list means finalization can
   proceed safely.
 - `--apply` creates a timestamped SQLite backup beside `data/video_hive.sqlite` and then migrates
-  legacy Agent/Pipeline settings into Executor allocations, bindings, and local Node limits.
+  legacy Agent/Workflow settings into Executor allocations, bindings, and local Node limits.
 
 If the report lists unknown legacy Agent IDs, either configure an equivalent Executor in
-`config/pipeline.yaml` or manually remediate the `workspace_agent_assignments` rows before
+`config/workflow.yaml` or manually remediate the `workspace_agent_assignments` rows before
 retrying. The server refuses to start until `--check` reports zero issues.
 
 ## API Notes
@@ -291,9 +291,9 @@ Useful endpoints (video pipeline):
 - `POST /api/worker/tick` processes one local non-agent phase; agent phases are handled by the background worker runner pool.
 - `POST /api/package`
 
-Agent Legion pipeline (workspace / job) endpoints:
+Agent Legion workflow (workspace / job) endpoints:
 
-- `GET /api/pipelines/{pipeline_key}` — pipeline definition metadata (includes `intake.modes` without `task_entity` / `resolver`)
+- `GET /api/workflows/{workflow_key}` — workflow definition metadata (includes `intake.modes` without `task_entity` / `resolver`)
 - `GET /api/workspaces` — list workspaces
 - `POST /api/workspaces` — create workspace (supports `default_entity` and `intake_config`)
 - `GET /api/workspaces/{workspace_id}` — get workspace (returns `default_entity` and `intake_config`)

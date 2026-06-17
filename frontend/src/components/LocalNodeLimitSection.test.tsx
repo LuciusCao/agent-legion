@@ -18,7 +18,7 @@ const catalog = [
   },
 ]
 
-const pipelineDefinition = {
+const workflowDefinition = {
   key: 'reading_analysis',
   label: '阅读分析',
   concurrency: { local: 8, agent: 2, nodes: {} },
@@ -68,7 +68,7 @@ describe('LocalNodeLimitSection', () => {
     useSettingStore.setState({
       workspaceId: 'ws1',
       executorCatalog: catalog,
-      pipelineDefinition,
+      workflowDefinition,
       executorConfiguration: {
         allocations: [
           {
@@ -84,19 +84,19 @@ describe('LocalNodeLimitSection', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'review_keywords',
             executor_id: 'pi-review',
           },
         ],
         node_limits: [
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'fetch_questions',
             concurrency_limit: 2,
           },
@@ -146,7 +146,7 @@ describe('LocalNodeLimitSection', () => {
         useSettingStore.getState().executorConfiguration.node_limits
       ).toEqual([
         {
-          pipeline_key: 'reading_analysis',
+          workflow_key: 'reading_analysis',
           node_key: 'fetch_questions',
           concurrency_limit: 3,
         },
@@ -182,7 +182,7 @@ describe('LocalNodeLimitSection', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'clean_and_parse',
             executor_id: 'local-default',
           },
@@ -205,7 +205,7 @@ describe('LocalNodeLimitSection', () => {
         useSettingStore.getState().executorConfiguration.node_limits
       ).toEqual([
         {
-          pipeline_key: 'reading_analysis',
+          workflow_key: 'reading_analysis',
           node_key: 'clean_and_parse',
           concurrency_limit: 2,
         },

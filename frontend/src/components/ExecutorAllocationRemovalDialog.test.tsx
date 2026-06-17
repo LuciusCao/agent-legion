@@ -24,7 +24,7 @@ describe('ExecutorAllocationRemovalDialog', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'ingest',
             executor_id: 'local-default',
           },
@@ -73,14 +73,14 @@ describe('ExecutorAllocationRemovalDialog', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'ingest',
             executor_id: 'local-default',
           },
         ],
         node_limits: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'ingest',
             concurrency_limit: 2,
           },

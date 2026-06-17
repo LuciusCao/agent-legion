@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import type { JobSummary, PipelineDefinitionRecord } from '../types'
-import { JobRerunDialog, type PipelineNodesByKey } from './JobRerunDialog'
+import type { JobSummary, WorkflowDefinitionRecord } from '../types'
+import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import styles from './JobActionBar.module.css'
 
@@ -13,8 +13,8 @@ export type JobActionBarFilter = {
 export type JobActionBarProps = {
   jobs: JobSummary[]
   selectedCount?: number
-  pipelineDefinition?: PipelineDefinitionRecord | null
-  pipelineNodesByKey?: PipelineNodesByKey | null
+  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowNodesByKey?: WorkflowNodesByKey | null
   mode?: 'batch' | 'single'
   loading?: boolean
   filters?: JobActionBarFilter[]
@@ -49,8 +49,8 @@ export function canContinueJob(job: JobSummary): boolean {
 export function JobActionBar({
   jobs,
   selectedCount,
-  pipelineDefinition,
-  pipelineNodesByKey,
+  workflowDefinition,
+  workflowNodesByKey,
   mode = jobs.length > 1 ? 'batch' : 'single',
   loading = false,
   filters,
@@ -160,8 +160,8 @@ export function JobActionBar({
       <JobRerunDialog
         open={rerunOpen}
         jobs={jobs}
-        pipelineDefinition={pipelineDefinition}
-        pipelineNodesByKey={pipelineNodesByKey}
+        workflowDefinition={workflowDefinition}
+        workflowNodesByKey={workflowNodesByKey}
         itemLabel={itemLabel}
         onClose={() => setRerunOpen(false)}
         onConfirm={handleRerun}
@@ -169,8 +169,8 @@ export function JobActionBar({
       <JobRunToDialog
         open={runToOpen}
         jobs={jobs}
-        pipelineDefinition={pipelineDefinition}
-        pipelineNodesByKey={pipelineNodesByKey}
+        workflowDefinition={workflowDefinition}
+        workflowNodesByKey={workflowNodesByKey}
         itemLabel={itemLabel}
         onClose={() => setRunToOpen(false)}
         onConfirm={handleRunTo}

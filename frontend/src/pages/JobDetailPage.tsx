@@ -10,7 +10,7 @@ import { useJobStore } from '../stores/jobStore'
 import type {
   JobDetailResponse,
   JobNodeRecord,
-  PipelineDefinitionRecord,
+  WorkflowDefinitionRecord,
 } from '../types'
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
@@ -73,13 +73,13 @@ function toDagEdges(nodes: JobNodeRecord[]): DagEdge[] {
   return edges
 }
 
-function toPipelineDefinition(
+function toWorkflowDefinition(
   detail: JobDetailResponse | null
-): PipelineDefinitionRecord | null {
+): WorkflowDefinitionRecord | null {
   if (!detail) return null
   return {
-    key: detail.job.pipeline_key,
-    label: detail.job.pipeline_key,
+    key: detail.job.workflow_key,
+    label: detail.job.workflow_key,
     intake: { modes: [] },
     nodes: detail.nodes.map((n) => ({
       key: n.node_key,
@@ -177,8 +177,8 @@ export default function JobDetailPage() {
     () => (detail ? toDagEdges(detail.nodes) : []),
     [detail]
   )
-  const pipelineDefinition = useMemo(
-    () => toPipelineDefinition(detail),
+  const workflowDefinition = useMemo(
+    () => toWorkflowDefinition(detail),
     [detail]
   )
 
@@ -265,7 +265,7 @@ export default function JobDetailPage() {
     setDetailPageActions(
       <JobDetailActions
         jobs={[detail.job]}
-        pipelineDefinition={pipelineDefinition}
+        workflowDefinition={workflowDefinition}
         loading={actionLoading}
         onRerun={handleRerun}
         onRunTo={handleRunTo}
@@ -281,7 +281,7 @@ export default function JobDetailPage() {
   }, [
     detail,
     setDetailPageActions,
-    pipelineDefinition,
+    workflowDefinition,
     actionLoading,
     handleRerun,
     handleRunTo,

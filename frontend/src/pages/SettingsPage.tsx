@@ -6,7 +6,7 @@ import { AppBar } from '../components/AppBar'
 import { ExecutorAllocationSection } from '../components/ExecutorAllocationSection'
 import { ExecutorBindingSection } from '../components/ExecutorBindingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
-import { fetchPipelines } from '../api'
+import { fetchWorkflows } from '../api'
 import styles from './SettingsPage.module.css'
 
 type ConnectionState = 'idle' | 'testing' | 'success' | 'failed'
@@ -48,7 +48,7 @@ export function SettingsPage() {
     isSaving,
     saveError,
     resourceProviders,
-    pipelineDefinition,
+    workflowDefinition,
     executorCatalog,
     executorConfiguration,
     testStatus,
@@ -58,20 +58,20 @@ export function SettingsPage() {
     fetchSettings,
     fetchGlobalServices,
     fetchResourceProviders,
-    fetchPipelineDefinition,
+    fetchWorkflowDefinition,
   } = useSettingStore()
 
   const localBoundNodeKeys = useMemo(() => {
-    if (!pipelineDefinition) return new Set<string>()
+    if (!workflowDefinition) return new Set<string>()
     const allocatedIds = new Set(
       executorConfiguration.allocations.map((a) => a.executor_id)
     )
     return new Set(
-      pipelineDefinition.nodes
+      workflowDefinition.nodes
         .filter((node) => {
           const binding = executorConfiguration.bindings.find(
             (b) =>
-              b.pipeline_key === pipelineDefinition.key &&
+              b.workflow_key === workflowDefinition.key &&
               b.node_key === node.key
           )
           if (!binding || !allocatedIds.has(binding.executor_id)) return false
@@ -82,7 +82,7 @@ export function SettingsPage() {
         })
         .map((node) => node.key)
     )
-  }, [pipelineDefinition, executorConfiguration, executorCatalog])
+  }, [workflowDefinition, executorConfiguration, executorCatalog])
 
   const hasLocalNodes = localBoundNodeKeys.size > 0
 
@@ -90,7 +90,7 @@ export function SettingsPage() {
     () => [
       { id: 'basic-info', label: '基础信息' },
       { id: 'intake-config', label: '接入与资源' },
-      { id: 'pipeline', label: 'Pipeline' },
+      { id: 'workflow', label: '工作流' },
       { id: 'executor-allocation', label: '执行器分配' },
       { id: 'executor-binding', label: '节点绑定' },
       ...(hasLocalNodes
@@ -101,7 +101,7 @@ export function SettingsPage() {
   )
 
   const [activeSection, setActiveSection] = useState('basic-info')
-  const [pipelineOptions, setPipelineOptions] = useState<
+  const [workflowOptions, setWorkflowOptions] = useState<
     Array<{ key: string; label: string }>
   >([])
 
@@ -115,18 +115,18 @@ export function SettingsPage() {
     setWorkspaceId,
     resetTestStatus,
     fetchSettings,
-    fetchPipelineDefinition,
+    fetchWorkflowDefinition,
   ])
 
   useEffect(() => {
-    fetchPipelines()
+    fetchWorkflows()
       .then((data) => {
-        setPipelineOptions(
-          data.pipelines.map((p) => ({ key: p.key, label: p.label }))
+        setWorkflowOptions(
+          data.workflows.map((p) => ({ key: p.key, label: p.label }))
         )
       })
       .catch(() => {
-        setPipelineOptions([])
+        setWorkflowOptions([])
       })
   }, [])
 
@@ -137,9 +137,9 @@ export function SettingsPage() {
   }, [workspaceId, fetchGlobalServices, fetchResourceProviders])
 
   useEffect(() => {
-    if (!settings.pipelineKey) return
-    void fetchPipelineDefinition()
-  }, [settings.pipelineKey, fetchPipelineDefinition])
+    if (!settings.workflowKey) return
+    void fetchWorkflowDefinition()
+  }, [settings.workflowKey, fetchWorkflowDefinition])
 
   const scrollToSection = useCallback((id: string) => {
     setActiveSection(id)
@@ -155,7 +155,7 @@ export function SettingsPage() {
       ? settings.intakeModes.filter((k) => k !== key)
       : [...settings.intakeModes, key]
 
-    const mode = pipelineDefinition?.intake?.modes.find((m) => m.key === key)
+    const mode = workflowDefinition?.intake?.modes.find((m) => m.key === key)
     if (mode?.resource) {
       const binding = settings.resources[mode.resource] || {
         enabled: true,
@@ -294,7 +294,7 @@ export function SettingsPage() {
                   marginTop: 8,
                 }}
               >
-                {(pipelineDefinition?.intake?.modes || []).map((mode) => (
+                {(workflowDefinition?.intake?.modes || []).map((mode) => (
                   <div
                     key={mode.key}
                     style={{
@@ -315,7 +315,7 @@ export function SettingsPage() {
 
             {(() => {
               const activeKeys = new Set<string>()
-              for (const mode of pipelineDefinition?.intake?.modes || []) {
+              for (const mode of workflowDefinition?.intake?.modes || []) {
                 if (settings.intakeModes.includes(mode.key) && mode.resource) {
                   activeKeys.add(mode.resource)
                 }
@@ -440,23 +440,23 @@ export function SettingsPage() {
             )}
           </section>
 
-          <section id="pipeline" className={styles.section}>
-            <h2 className={styles.sectionTitle}>Pipeline</h2>
+          <section id="workflow" className={styles.section}>
+            <h2 className={styles.sectionTitle}>工作流</h2>
             <hr className={styles.sectionDivider} />
             <div className={styles.field}>
               <md-outlined-select
-                label="流水线"
-                value={settings.pipelineKey || ''}
+                label="工作流"
+                value={settings.workflowKey || ''}
                 onChange={(e: React.FormEvent<HTMLSelectElement>) =>
                   setSettings({
-                    pipelineKey: (e.target as HTMLSelectElement).value,
+                    workflowKey: (e.target as HTMLSelectElement).value,
                   })
                 }
               >
                 <md-select-option value="">
                   <div slot="headline">请选择</div>
                 </md-select-option>
-                {pipelineOptions.map((p) => (
+                {workflowOptions.map((p) => (
                   <md-select-option key={p.key} value={p.key}>
                     <div slot="headline">{p.label}</div>
                   </md-select-option>

@@ -41,7 +41,7 @@ describe('VideoHiveSettingsPage', () => {
     )
     expect(screen.getByText('全局服务状态')).toBeInTheDocument()
     expect(screen.getByText('Worker 控制')).toBeInTheDocument()
-    expect(screen.getByText('流水线信息')).toBeInTheDocument()
+    expect(screen.getByText('工作流信息')).toBeInTheDocument()
 
     await waitFor(() => {
       expect(screen.getByText('https://example.com')).toBeInTheDocument()

@@ -12,8 +12,8 @@ import {
   type JobActionBarFilter,
 } from '../components/JobActionBar'
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
-import { fetchPipelineDefinition } from '../api'
-import type { PipelineDefinitionRecord } from '../types'
+import { fetchWorkflowDefinition } from '../api'
+import type { WorkflowDefinitionRecord } from '../types'
 import styles from './WorkspaceMainPage.module.css'
 
 const sectionStyle = {
@@ -50,9 +50,9 @@ export default function WorkspaceMainPage() {
     batchRunToLoading,
   } = useJobStore()
 
-  const [pipelineDefinition, setPipelineDefinition] =
-    useState<PipelineDefinitionRecord | null>(null)
-  const [pipelineError, setPipelineError] = useState<string | null>(null)
+  const [workflowDefinition, setWorkflowDefinition] =
+    useState<WorkflowDefinitionRecord | null>(null)
+  const [workflowError, setWorkflowError] = useState<string | null>(null)
 
   useWorkspaceEvents(workspaceId)
 
@@ -68,19 +68,19 @@ export default function WorkspaceMainPage() {
   }, [workspaceId, fetchJobs])
 
   useEffect(() => {
-    const pipelineKey = workspaceId
-      ? workspaceStats[workspaceId]?.pipeline_key
+    const workflowKey = workspaceId
+      ? workspaceStats[workspaceId]?.workflow_key
       : undefined
-    if (!pipelineKey) return
+    if (!workflowKey) return
     let stale = false
-    fetchPipelineDefinition(pipelineKey)
+    fetchWorkflowDefinition(workflowKey)
       .then((data) => {
         if (stale) return
-        setPipelineDefinition(data.pipeline)
+        setWorkflowDefinition(data.workflow)
       })
       .catch((err) => {
         if (stale) return
-        setPipelineError(err instanceof Error ? err.message : String(err))
+        setWorkflowError(err instanceof Error ? err.message : String(err))
       })
     return () => {
       stale = true
@@ -112,10 +112,10 @@ export default function WorkspaceMainPage() {
   const totalJobs = counts.all
   const selectedJobs = jobs.filter((j) => selectedIds.has(j.id))
 
-  const pipelineNodesByKey = useMemo(() => {
-    if (!pipelineDefinition) return {}
-    return { [pipelineDefinition.key]: pipelineDefinition }
-  }, [pipelineDefinition])
+  const workflowNodesByKey = useMemo(() => {
+    if (!workflowDefinition) return {}
+    return { [workflowDefinition.key]: workflowDefinition }
+  }, [workflowDefinition])
 
   const filters: JobActionBarFilter[] = [
     { key: 'all', label: '全选', onClick: selectAll },
@@ -179,8 +179,8 @@ export default function WorkspaceMainPage() {
           <JobActionBar
             jobs={selectedJobs}
             selectedCount={selectedIds.size}
-            pipelineDefinition={pipelineDefinition}
-            pipelineNodesByKey={pipelineNodesByKey}
+            workflowDefinition={workflowDefinition}
+            workflowNodesByKey={workflowNodesByKey}
             mode="batch"
             loading={
               batchRerunLoading ||
@@ -204,8 +204,8 @@ export default function WorkspaceMainPage() {
         </>
       )}
 
-      {pipelineError && (
-        <p className={styles.error}>流水线定义加载失败：{pipelineError}</p>
+      {workflowError && (
+        <p className={styles.error}>工作流定义加载失败：{workflowError}</p>
       )}
 
       <section style={sectionStyle}>
