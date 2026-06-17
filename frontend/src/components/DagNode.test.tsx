@@ -68,13 +68,10 @@ describe('DagNode', () => {
     ['completed', 'check_circle'],
     ['failed', 'error'],
     ['stale', 'warning'],
-  ] as const)(
-    'applies %s status and renders %s icon',
-    (status, icon) => {
-      renderWithProvider({ ...baseData, status })
-      const card = screen.getByTestId('dag-node')
-      expect(card).toHaveAttribute('data-status', status)
-      expect(screen.getByText(icon)).toBeInTheDocument()
-    }
-  )
+  ] as const)('applies %s status and renders %s icon', (status, icon) => {
+    renderWithProvider({ ...baseData, status })
+    const card = screen.getByTestId('dag-node')
+    expect(card).toHaveAttribute('data-status', status)
+    expect(screen.getByText(icon)).toBeInTheDocument()
+  })
 })

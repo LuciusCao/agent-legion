@@ -1,6 +1,10 @@
 import { memo, useState } from 'react'
 import { Handle, Position, NodeProps, type Node } from '@xyflow/react'
-import { formatDuration, STATUS_ICON, type DagNodeStatus } from './dagNodeStatus'
+import {
+  formatDuration,
+  STATUS_ICON,
+  type DagNodeStatus,
+} from './dagNodeStatus'
 import styles from './DagNode.module.css'
 
 export interface DagNodeData extends Record<string, unknown> {
