@@ -75,6 +75,7 @@ def clean_and_parse(
     artifact_dir: Path,
     context: dict[str, Any] | None = None,
 ) -> None:
+    context = context or {}
     questions_path = artifact_dir / "questions.json"
     if not questions_path.is_file():
         raise ValueError("questions.json not found")
@@ -149,6 +150,7 @@ def assemble_comprehension_info(
     artifact_dir: Path,
     context: dict[str, Any] | None = None,
 ) -> None:
+    context = context or {}
     source_id = str(job["source_id"])
     question = _single_parsed_question(artifact_dir, source_id)
     key_info = _load_json_object(artifact_dir / "key_info_reviewed.json")
