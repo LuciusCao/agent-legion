@@ -60,7 +60,11 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
 
 
 def _sample_pipelines() -> list[PipelineDefinition]:
-    return [_sample_pipeline(), _legacy_unconfigured_agent_pipeline()]
+    return [
+        _sample_pipeline(),
+        _legacy_unconfigured_agent_pipeline(),
+        _question_comprehension_info_pipeline(),
+    ]
 
 
 def _set_pipeline_config(queries: JobQueries, workspace_id: str, config: dict[str, Any]) -> None:
@@ -133,6 +137,21 @@ def _legacy_unconfigured_agent_pipeline() -> PipelineDefinition:
                 key="understand",
                 label="Understand",
                 capability="understand",
+            ),
+        },
+    )
+
+
+def _question_comprehension_info_pipeline() -> PipelineDefinition:
+    return PipelineDefinition(
+        key="question_comprehension_info",
+        label="Question Comprehension Info",
+        intake=PipelineIntake(),
+        nodes={
+            "local_a": PipelineNode(
+                key="local_a",
+                label="Local A",
+                capability="local_a",
             ),
         },
     )
@@ -477,7 +496,7 @@ def test_dry_run_returns_report_without_writing(queries: JobQueries) -> None:
 
     with queries.connect() as conn:
         report = finalize_legacy_executor_schema(
-            conn, [_sample_pipeline()], _sample_executors(), dry_run=True
+            conn, _sample_pipelines(), _sample_executors(), dry_run=True
         )
 
     assert report.issues == ()
@@ -494,7 +513,7 @@ def test_dry_run_raises_blocked_error_and_leaves_legacy_data(queries: JobQueries
 
     with pytest.raises(MigrationBlockedError), queries.connect() as conn:
         finalize_legacy_executor_schema(
-            conn, [_sample_pipeline()], _sample_executors(), dry_run=True
+            conn, _sample_pipelines(), _sample_executors(), dry_run=True
         )
 
     assert _table_exists(queries, "workspace_agent_assignments")
@@ -596,7 +615,7 @@ def test_finalizer_interruption_before_commit_retains_backup_and_reruns(
     with pytest.raises(sqlite3.DatabaseError), queries.connect() as conn:
         conn.set_authorizer(block_schema_history_insert)
         finalize_legacy_executor_schema(
-            conn, [_sample_pipeline()], _sample_executors(), backup_path=backup_path
+            conn, _sample_pipelines(), _sample_executors(), backup_path=backup_path
         )
 
     assert backup_path.is_file()
@@ -604,7 +623,7 @@ def test_finalizer_interruption_before_commit_retains_backup_and_reruns(
 
     with queries.connect() as conn:
         report = finalize_legacy_executor_schema(
-            conn, [_sample_pipeline()], _sample_executors(), backup_path=backup_path
+            conn, _sample_pipelines(), _sample_executors(), backup_path=backup_path
         )
 
     assert report.issues == ()

@@ -158,6 +158,14 @@ def init_db(path: Path) -> None:
 
         run_migrations(conn, MIGRATIONS)
 
+        with conn:
+            conn.execute(
+                """
+                insert or ignore into workspaces(id, name, default_pipeline_key, default_entity)
+                values ('question_comprehension', '题目审题信息', 'question_comprehension_info', 'question')
+                """
+            )
+
         # Performance indexes for issue 012. These are created after migrations
         # so that columns added by V003 (e.g. videos.content_type) are present.
         _execute_statements(

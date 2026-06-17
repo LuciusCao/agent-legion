@@ -1205,7 +1205,7 @@ export interface components {
       knowledge_codes?: string[]
       /**
        * Pipeline Key
-       * @default reading_analysis
+       * @default question_comprehension_info
        */
       pipeline_key: string
       /** Question Ids */
@@ -1682,7 +1682,7 @@ export interface components {
       default_entity: string
       /**
        * Default Pipeline Key
-       * @default reading_analysis
+       * @default question_comprehension_info
        */
       default_pipeline_key: string
       /** Intake Config */
