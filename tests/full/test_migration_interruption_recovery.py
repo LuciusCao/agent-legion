@@ -136,6 +136,17 @@ def _sample_pipeline() -> PipelineDefinition:
     )
 
 
+def _question_comprehension_info_pipeline() -> PipelineDefinition:
+    return PipelineDefinition(
+        key="question_comprehension_info",
+        label="Question Comprehension Info",
+        intake=PipelineIntake(),
+        nodes={
+            "local_a": PipelineNode(key="local_a", label="Local A", capability="local_a"),
+        },
+    )
+
+
 def test_v005_finalizer_interruption_before_commit_retains_backup_and_reruns(
     tmp_path: Path,
 ) -> None:
@@ -170,7 +181,10 @@ def test_v005_finalizer_interruption_before_commit_retains_backup_and_reruns(
     with pytest.raises(sqlite3.DatabaseError), queries.connect() as conn:
         conn.set_authorizer(block_schema_history_insert)
         finalize_legacy_executor_schema(
-            conn, [_sample_pipeline()], _sample_executors(), backup_path=backup_path
+            conn,
+            [_sample_pipeline(), _question_comprehension_info_pipeline()],
+            _sample_executors(),
+            backup_path=backup_path,
         )
 
     # Backup was written before the destructive work and survives the rollback.
@@ -193,7 +207,10 @@ def test_v005_finalizer_interruption_before_commit_retains_backup_and_reruns(
     queries2 = JobQueries(db_path, jobs_dir)
     with queries2.connect() as conn:
         report = finalize_legacy_executor_schema(
-            conn, [_sample_pipeline()], _sample_executors(), backup_path=backup_path
+            conn,
+            [_sample_pipeline(), _question_comprehension_info_pipeline()],
+            _sample_executors(),
+            backup_path=backup_path,
         )
 
     assert report.issues == ()

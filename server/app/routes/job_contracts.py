@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobBatchRequest(BaseModel):
-    pipeline_key: str = "reading_analysis"
+    pipeline_key: str = "question_comprehension_info"
     entity: str | None = None
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
@@ -21,7 +21,7 @@ class WorkspaceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    default_pipeline_key: str = "reading_analysis"
+    default_pipeline_key: str = "question_comprehension_info"
     default_entity: str = "question"
     cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)

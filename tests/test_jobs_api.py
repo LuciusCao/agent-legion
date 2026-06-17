@@ -74,6 +74,19 @@ def test_create_question_jobs_when_enabled(tmp_path):
     assert [job["source_id"] for job in body["jobs"]] == ["Q001", "Q002"]
 
 
+def test_startup_creates_question_comprehension_workspace(client):
+    with client as c:
+        response = c.get("/api/workspaces")
+
+    assert response.status_code == 200
+    workspaces = response.json()["workspaces"]
+    by_id = {workspace["id"]: workspace for workspace in workspaces}
+
+    assert "question_comprehension" in by_id
+    assert by_id["question_comprehension"]["name"] == "题目审题信息"
+    assert by_id["question_comprehension"]["default_pipeline_key"] == "question_comprehension_info"
+
+
 def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -721,7 +734,7 @@ def test_workspace_stats_returns_counts_and_executor_status(tmp_path):
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "pipeline_key": "reading_analysis",
+                "pipeline_key": "question_comprehension_info",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q301", "Q302"],
                 "knowledge_codes": [],
@@ -733,8 +746,8 @@ def test_workspace_stats_returns_counts_and_executor_status(tmp_path):
     body = stats.json()
     assert body["workspace_id"] == ws_id
     assert body["name"] == "Stats WS"
-    assert body["pipeline_key"] == "reading_analysis"
-    assert body["pipeline_label"] == "题目审题分析 Pipeline"
+    assert body["pipeline_key"] == "question_comprehension_info"
+    assert body["pipeline_label"] == "题目审题信息生成 DAG"
     assert body["job_stats"]["pending"] == 2
     assert "queued" not in body["job_stats"]
     assert body["executor_status"]["executors"] == []

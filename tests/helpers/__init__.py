@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import json
 import time
 from collections.abc import Callable
@@ -100,7 +101,10 @@ def make_pipeline_worker(
     )
     worker._definitions = [definition]
     with queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, [definition], settings.executor_definitions)
+        definitions = [definition]
+        with contextlib.suppress(KeyError, FileNotFoundError):
+            definitions.append(load_registered_pipeline(Path("."), "question_comprehension_info"))
+        finalize_legacy_executor_schema(conn, definitions, settings.executor_definitions)
 
     return worker, definition
 
