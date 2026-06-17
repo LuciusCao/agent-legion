@@ -718,7 +718,7 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('does not expose the legacy pipeline local concurrency control', () => {
+  it('does not expose the legacy workflow local concurrency control', () => {
     renderPage()
 
     expect(screen.queryByText('本地并发限制')).not.toBeInTheDocument()

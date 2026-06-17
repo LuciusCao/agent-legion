@@ -4,7 +4,7 @@ import { JobRunToDialog } from './JobRunToDialog'
 import type { WorkflowDefinitionRecord } from '../types'
 import { makeJob } from '../testing/fixtures'
 
-const pipeline: WorkflowDefinitionRecord = {
+const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
@@ -70,7 +70,7 @@ describe('JobRunToDialog', () => {
             workflow_key: 'question_content',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={onConfirm}
         onClose={vi.fn()}
       />
@@ -99,7 +99,7 @@ describe('JobRunToDialog', () => {
             workflow_key: 'question_content',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={onConfirm}
         onClose={vi.fn()}
       />
@@ -131,7 +131,7 @@ describe('JobRunToDialog', () => {
             workflow_key: 'question_content',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />
@@ -162,7 +162,7 @@ describe('JobRunToDialog', () => {
             workflow_key: 'question_content',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={onConfirm}
         onClose={vi.fn()}
       />
@@ -200,7 +200,7 @@ describe('JobRunToDialog', () => {
             workflow_key: 'question_content',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={vi.fn()}
         onClose={onClose}
       />
@@ -224,7 +224,7 @@ describe('JobRunToDialog', () => {
             workflow_key: 'question_content',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />

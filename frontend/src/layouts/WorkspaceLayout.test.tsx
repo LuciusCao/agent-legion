@@ -73,7 +73,7 @@ describe('WorkspaceLayout', () => {
     fetchWorkerStatusMock.mockResolvedValue(undefined)
   })
 
-  it('renders app bar with workspace name and no pipeline tag', () => {
+  it('renders app bar with workspace name and no workflow tag', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>

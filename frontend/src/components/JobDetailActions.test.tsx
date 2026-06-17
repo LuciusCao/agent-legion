@@ -4,7 +4,7 @@ import { JobDetailActions } from './JobDetailActions'
 import { makeJob } from '../testing/fixtures'
 import type { WorkflowDefinitionRecord } from '../types'
 
-const pipeline: WorkflowDefinitionRecord = {
+const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
@@ -34,9 +34,9 @@ function renderActions(
   return render(
     <JobDetailActions
       jobs={[
-        makeJob({ id: 'j1', status: 'failed', workflow_key: pipeline.key }),
+        makeJob({ id: 'j1', status: 'failed', workflow_key: workflow.key }),
       ]}
-      workflowDefinition={pipeline}
+      workflowDefinition={workflow}
       onRerun={vi.fn()}
       onPackage={vi.fn()}
       onDelete={vi.fn()}

@@ -4,7 +4,7 @@ import { JobRerunDialog } from './JobRerunDialog'
 import { makeJob } from '../testing/fixtures'
 import type { WorkflowDefinitionRecord } from '../types'
 
-const pipeline: WorkflowDefinitionRecord = {
+const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
@@ -37,9 +37,9 @@ const pipeline: WorkflowDefinitionRecord = {
 }
 
 const workflowNodesByKey: Record<string, WorkflowDefinitionRecord> = {
-  question_content: pipeline,
-  other_pipeline: {
-    key: 'other_pipeline',
+  question_content: workflow,
+  other_workflow: {
+    key: 'other_workflow',
     label: 'Other',
     intake: { modes: [] },
     nodes: [
@@ -68,7 +68,7 @@ describe('JobRerunDialog', () => {
     vi.clearAllMocks()
   })
 
-  it('renders nodes in pipeline-definition order', () => {
+  it('renders nodes in workflow-definition order', () => {
     const { container } = render(
       <JobRerunDialog
         open
@@ -79,7 +79,7 @@ describe('JobRerunDialog', () => {
             workflow_key: 'question_content',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />
@@ -93,7 +93,7 @@ describe('JobRerunDialog', () => {
     expect(chips[2]?.getAttribute('label')).toBe('审核')
   })
 
-  it('shows common node intersection for batch selections across pipelines', () => {
+  it('shows common node intersection for batch selections across workflows', () => {
     const { container } = render(
       <JobRerunDialog
         open
@@ -106,10 +106,10 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j2',
             status: 'completed',
-            workflow_key: 'other_pipeline',
+            workflow_key: 'other_workflow',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         workflowNodesByKey={workflowNodesByKey}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
@@ -121,7 +121,7 @@ describe('JobRerunDialog', () => {
     expect(chips[0]?.getAttribute('label')).toBe('提取')
   })
 
-  it('identifies jobs excluded by pipeline mismatch for the selected node', () => {
+  it('identifies jobs excluded by workflow mismatch for the selected node', () => {
     const { container } = render(
       <JobRerunDialog
         open
@@ -139,7 +139,7 @@ describe('JobRerunDialog', () => {
             source_id: 'Q2',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         workflowNodesByKey={workflowNodesByKey}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
@@ -168,7 +168,7 @@ describe('JobRerunDialog', () => {
             workflow_key: 'question_content',
           }),
         ]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={onConfirm}
         onClose={onClose}
       />
@@ -193,7 +193,7 @@ describe('JobRerunDialog', () => {
       <JobRerunDialog
         open
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={vi.fn()}
         onClose={onClose}
       />
@@ -210,7 +210,7 @@ describe('JobRerunDialog', () => {
       <JobRerunDialog
         open={false}
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
-        workflowDefinition={pipeline}
+        workflowDefinition={workflow}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />

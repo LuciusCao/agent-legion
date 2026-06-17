@@ -29,7 +29,7 @@ describe('WorkspaceCard', () => {
     vi.clearAllMocks()
   })
 
-  it('renders name and pipeline label', () => {
+  it('renders name and workflow label', () => {
     render(<WorkspaceCard {...createProps()} />)
     expect(screen.getByText('Test Workspace')).toBeInTheDocument()
     expect(screen.getByText('Test Workflow')).toBeInTheDocument()
