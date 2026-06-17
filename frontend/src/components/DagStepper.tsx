@@ -12,10 +12,9 @@ function getStepState(status: string): StepState {
 
 export function DagStepper({ nodes }: { nodes: JobNodeRecord[] }) {
   if (nodes.length === 0) return null
-  const compact = nodes.length > 8
 
   return (
-    <div className={`${styles.dagStepper} ${compact ? styles.compact : ''}`}>
+    <div className={styles.dagStepper}>
       {nodes.map((node) => {
         const state = getStepState(node.status)
         return (
@@ -24,7 +23,6 @@ export function DagStepper({ nodes }: { nodes: JobNodeRecord[] }) {
               /* .pulse-blue is a global utility class defined in styles.css */
               className={`${styles.stepBar} ${styles[state]} ${state === 'running' ? 'pulse-blue' : ''}`}
             />
-            <span className={styles.stepLabel}>{node.label}</span>
           </div>
         )
       })}
