@@ -214,7 +214,7 @@ exemptions:
 
   # Scheduler threadpool exemption ------------------------------------------------------------
   - check: architecture.scheduler_threadpool
-    path: server/app/pipeline_worker_thread.py:self._pools[executor_id]
-    reason: PipelineWorkerThread creates one shared ThreadPoolExecutor per executor definition to submit adapter executions; each pool is bounded by the executor's global capacity and keyed by executor_id, not workspace.
+    path: server/app/workflow_worker_thread.py:self._pools[executor_id]
+    reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor per executor definition to submit adapter executions; each pool is bounded by the executor's global capacity and keyed by executor_id, not workspace.
     owner: workspace-executor
     remove_when: issues/open/032-P2-event-driven-worker.md

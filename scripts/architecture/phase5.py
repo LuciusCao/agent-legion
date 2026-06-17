@@ -13,15 +13,15 @@ _FORBIDDEN_PATTERNS = {
     "pipeline_config_json column": re.compile("pipeline_config_json"),
     "workspace_agent_assignments table": re.compile("workspace_agent_assignments"),
     "workspace_executor_bootstrap_state table": re.compile("workspace_executor_bootstrap_state"),
-    "PipelineNode.agent attribute": re.compile(r"\.agent\b"),
-    "PipelineDefinition.concurrency attribute": re.compile(r"\.concurrency\b"),
+    "WorkflowNode.agent attribute": re.compile(r"\.agent\b"),
+    "WorkflowDefinition.concurrency attribute": re.compile(r"\.concurrency\b"),
 }
 
 _FORBIDDEN_PATTERN_WHITELIST = {
     "server/app/db/migrations",
     "server/app/executors/legacy_migration.py",
     "server/app/jobs/executor_configuration.py",
-    "server/app/pipelines/definition.py",
+    "server/app/workflows/definition.py",
     "server/app/pipeline/runners.py",
     "server/app/worker_scheduler.py",
     "server/app/worker_thread.py",
@@ -53,7 +53,7 @@ def check_legacy_modules_absent(root: Path) -> list[str]:
 def check_forbidden_patterns(root: Path) -> list[str]:
     """Scan production source for legacy executor/concurrency string patterns."""
     errors: list[str] = []
-    scan_dirs = [root / "server", root / "frontend" / "src", root / "config" / "pipelines"]
+    scan_dirs = [root / "server", root / "frontend" / "src", root / "config" / "workflows"]
     for scan_dir in scan_dirs:
         if not scan_dir.is_dir():
             continue

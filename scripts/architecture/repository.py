@@ -152,13 +152,13 @@ def check_repository(root: Path) -> list[str]:
                         f"{relative_path}:{lineno}: scheduler must not use "
                         "_futures length for capacity decisions"
                     )
-                if relative_path == "server/app/pipeline_worker_thread.py":
+                if relative_path == "server/app/workflow_worker_thread.py":
                     from scripts.architecture.helpers import accesses_runner_or_agent
 
                     for lineno in accesses_runner_or_agent(tree):
                         errors.append(
                             f"{relative_path}:{lineno}: "
-                            "PipelineWorkerThread must branch on capability, not .runner or .agent"
+                            "WorkflowWorkerThread must branch on capability, not .runner or .agent"
                         )
 
             if (
