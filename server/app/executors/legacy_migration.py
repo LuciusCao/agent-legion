@@ -17,7 +17,7 @@ from server.app.executors.legacy_configuration import (
     collect_existing_configuration,
 )
 from server.app.jobs import executor_configuration
-from server.app.pipelines.definition import PipelineDefinition
+from server.app.workflows.definition import WorkflowDefinition
 
 logger = logging.getLogger(__name__)
 
@@ -119,7 +119,7 @@ def _collect_legacy_data(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
 def _preflight_workspace(
     workspace_id: str,
     workspace: dict[str, Any],
-    definitions_by_key: dict[str, PipelineDefinition],
+    definitions_by_key: dict[str, WorkflowDefinition],
     executors: dict[str, ExecutorConfig],
 ) -> list[MigrationIssue]:
     issues: list[MigrationIssue] = []
@@ -257,7 +257,7 @@ def _materialize_workspace(
     conn: sqlite3.Connection,
     workspace_id: str,
     workspace: dict[str, Any],
-    definition: PipelineDefinition,
+    definition: WorkflowDefinition,
     executors: dict[str, ExecutorConfig],
     existing: ExistingConfiguration,
 ) -> None:
@@ -345,7 +345,7 @@ def _materialize_workspace(
 
 def finalize_legacy_executor_schema(
     conn: sqlite3.Connection,
-    definitions: list[PipelineDefinition],
+    definitions: list[WorkflowDefinition],
     executors: dict[str, ExecutorConfig],
     *,
     dry_run: bool = False,

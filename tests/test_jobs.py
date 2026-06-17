@@ -3,7 +3,7 @@ from pathlib import Path
 import pytest
 
 from server.app.jobs.queries import JobQueries
-from server.app.pipelines.definition import load_pipeline_definition
+from server.app.workflows.definition import load_workflow_definition
 
 
 def test_create_batch_and_question_jobs(tmp_path):
@@ -155,7 +155,7 @@ def test_start_node_run_rejects_missing_node(tmp_path):
 
 def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     job = queries.create_job(
         workflow_key="question_content",
         source_type="question_id",

@@ -8,9 +8,9 @@ from pathlib import Path
 
 import pytest
 
-from server.app.pipelines.definition import load_pipeline_definition
-from server.app.pipelines.skills import resolve_pipeline_skill
-from server.app.pipelines.skills.reading_analysis._shared.validation import ContractError
+from server.app.workflows.definition import load_workflow_definition
+from server.app.workflows.skills import resolve_workflow_skill
+from server.app.workflows.skills.reading_analysis._shared.validation import ContractError
 
 FIXTURE_ROOT = Path("tests/fixtures/reading_analysis/eval")
 SKILL_NAMES = [
@@ -26,7 +26,7 @@ SKILL_NAMES = [
 def _run_validator(skill_name: str, job_dir: Path) -> list[str]:
     """Call a skill's in-process validate() and return a flat list of error messages."""
     mod = importlib.import_module(
-        f"server.app.pipelines.skills.reading_analysis.{skill_name.split('/')[-1]}.scripts.validate_output"
+        f"server.app.workflows.skills.reading_analysis.{skill_name.split('/')[-1]}.scripts.validate_output"
     )
     try:
         result = mod.validate(job_dir)
@@ -317,33 +317,33 @@ def _agent_skill_path(capability: str) -> str:
 
 
 def test_all_agent_nodes_have_complete_repository_skills():
-    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
-    root = Path("server/app/pipelines/skills")
+    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
+    root = Path("server/app/workflows/skills")
 
     for node in definition.nodes.values():
         if node.capability in LOCAL_CAPABILITIES:
             continue
-        skill = resolve_pipeline_skill(root, _agent_skill_path(node.capability))
+        skill = resolve_workflow_skill(root, _agent_skill_path(node.capability))
         assert (skill / "SKILL.md").is_file()
         assert (skill / "references" / "output-contract.md").is_file()
         assert (skill / "scripts" / "validate_output.py").is_file()
 
 
-def test_resolve_pipeline_skill_rejects_escape(tmp_path):
+def test_resolve_workflow_skill_rejects_escape(tmp_path):
     with pytest.raises(ValueError, match="skill path"):
-        resolve_pipeline_skill(tmp_path, "../outside")
+        resolve_workflow_skill(tmp_path, "../outside")
 
 
-def test_resolve_pipeline_skill_rejects_absolute(tmp_path):
+def test_resolve_workflow_skill_rejects_absolute(tmp_path):
     with pytest.raises(ValueError, match="skill path"):
-        resolve_pipeline_skill(tmp_path, "/outside")
+        resolve_workflow_skill(tmp_path, "/outside")
 
 
-def test_resolve_pipeline_skill_requires_contract_files(tmp_path):
+def test_resolve_workflow_skill_requires_contract_files(tmp_path):
     (tmp_path / "foo" / "SKILL.md").parent.mkdir(parents=True)
     (tmp_path / "foo" / "SKILL.md").write_text("x")
     with pytest.raises(ValueError, match="output-contract"):
-        resolve_pipeline_skill(tmp_path, "foo")
+        resolve_workflow_skill(tmp_path, "foo")
 
 
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
@@ -462,8 +462,8 @@ def test_validator_rejects_invalid_report_in_process(skill_name, tmp_path):
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
 def test_validator_cli_smoke_accepts_valid_output(skill_name, tmp_path):
     """Keep one subprocess smoke per skill to verify the CLI entry point."""
-    root = Path("server/app/pipelines/skills")
-    skill = resolve_pipeline_skill(root, skill_name)
+    root = Path("server/app/workflows/skills")
+    skill = resolve_workflow_skill(root, skill_name)
     validator = skill / "scripts" / "validate_output.py"
     job_dir = tmp_path / "job"
     job_dir.mkdir()
@@ -481,7 +481,7 @@ def test_validator_cli_smoke_accepts_valid_output(skill_name, tmp_path):
 
 def test_validator_usage_requires_directory_argument():
     validator = Path(
-        "server/app/pipelines/skills/reading_analysis/extract_keywords/scripts/validate_output.py"
+        "server/app/workflows/skills/reading_analysis/extract_keywords/scripts/validate_output.py"
     )
     result = subprocess.run(
         [sys.executable, str(validator)],
@@ -493,13 +493,13 @@ def test_validator_usage_requires_directory_argument():
 
 
 def test_all_skill_validators_are_executable():
-    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
-    root = Path("server/app/pipelines/skills")
+    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
+    root = Path("server/app/workflows/skills")
 
     for node in definition.nodes.values():
         if node.capability in LOCAL_CAPABILITIES:
             continue
-        skill = resolve_pipeline_skill(root, _agent_skill_path(node.capability))
+        skill = resolve_workflow_skill(root, _agent_skill_path(node.capability))
         validator = skill / "scripts" / "validate_output.py"
         assert validator.stat().st_mode & 0o111, f"{validator} is not executable"
 
@@ -515,7 +515,7 @@ EXPECTED_SKILLS = {
 
 
 def test_reading_analysis_has_six_complete_skills():
-    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
     actual = {
         node.capability
         for node in definition.nodes.values()

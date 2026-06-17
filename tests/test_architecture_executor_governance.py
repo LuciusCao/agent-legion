@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCAN_DIRS: tuple[Path, ...] = (
     ROOT / "server",
     ROOT / "frontend" / "src",
-    ROOT / "config" / "pipelines",
+    ROOT / "config" / "workflows",
 )
 
 # Files and directories that legitimately reference legacy concepts.
@@ -29,7 +29,7 @@ WHITELIST: set[str] = {
     # Bootstrap state helper is transitional until all databases are past V005.
     str(ROOT / "server" / "app" / "jobs" / "executor_configuration.py"),
     # Pipeline definition loader intentionally rejects removed 'runner'/'agent' fields.
-    str(ROOT / "server" / "app" / "pipelines" / "definition.py"),
+    str(ROOT / "server" / "app" / "workflows" / "definition.py"),
     # Video pipeline runner uses openclaw command template strings.
     str(ROOT / "server" / "app" / "pipeline" / "runners.py"),
     # Video work scheduler uses 'agent' as a local work-item kind.
@@ -46,8 +46,8 @@ FORBIDDEN_PATTERNS = {
     "pipeline_config_json column": "pipeline_config_json",
     "workspace_agent_assignments table": "workspace_agent_assignments",
     "workspace_executor_bootstrap_state table": "workspace_executor_bootstrap_state",
-    "PipelineNode.agent attribute": r"\.agent\b",
-    "PipelineDefinition.concurrency attribute": r"\.concurrency\b",
+    "WorkflowNode.agent attribute": r"\.agent\b",
+    "WorkflowDefinition.concurrency attribute": r"\.concurrency\b",
 }
 
 

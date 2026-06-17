@@ -12,7 +12,7 @@ def _sort(rows: list[dict]) -> list[dict]:
     return sorted(
         rows,
         key=lambda row: (
-            row.get("pipeline_key", ""),
+            row.get("workflow_key", ""),
             row.get("node_key", ""),
             row.get("executor_id", ""),
         ),

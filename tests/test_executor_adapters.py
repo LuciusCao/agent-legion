@@ -14,7 +14,7 @@ from server.app.executors.models import ExecutionContext
 from server.app.executors.openclaw import OpenClawExecutor
 from server.app.executors.pi import PiExecutor
 from server.app.pipeline.openclaw import OpenClawRunner
-from server.app.pipelines.pi_runner import PiConfig
+from server.app.workflows.pi_runner import PiConfig
 
 
 @pytest.fixture

@@ -9,7 +9,7 @@ from pathlib import Path
 import pytest
 
 VALIDATOR = Path(__file__).resolve().parents[1] / (
-    "server/app/pipelines/skills/reading_analysis/review_distractors/scripts/validate_output.py"
+    "server/app/workflows/skills/reading_analysis/review_distractors/scripts/validate_output.py"
 )
 FIXTURE_QUESTIONS = (
     Path(__file__).resolve().parents[1] / "tests/fixtures/reading_analysis/questions_parsed.json"

@@ -5,30 +5,30 @@ from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.pipelines.definition import PipelineDefinition
-from server.app.pipelines.pi_runner import PiRunner
-from server.app.pipelines.question_comprehension_info import (
+from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.pi_runner import PiRunner
+from server.app.workflows.question_comprehension_info import (
     assemble_comprehension_info as qci_assemble_comprehension_info,
 )
-from server.app.pipelines.question_comprehension_info import (
+from server.app.workflows.question_comprehension_info import (
     clean_and_parse as qci_clean_and_parse,
 )
-from server.app.pipelines.question_comprehension_info import (
+from server.app.workflows.question_comprehension_info import (
     fetch_questions as qci_fetch_questions,
 )
-from server.app.pipelines.question_content import fetch_question_context
-from server.app.pipelines.reading_analysis import (
+from server.app.workflows.question_content import fetch_question_context
+from server.app.workflows.reading_analysis import (
     clean_and_parse,
     fetch_questions,
     mark_question,
 )
-from server.app.pipelines.scheduler import (
+from server.app.workflows.scheduler import (
     _node_statuses,
     _refresh_job_status,
     find_ready_nodes,
 )
-from server.app.pipelines.skills import resolve_pipeline_skill
-from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.workflows.skills import resolve_workflow_skill
 
 LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
 LOCAL_HANDLERS: dict[str, dict[str, LocalHandler]] = {
@@ -60,7 +60,7 @@ def _resolve_job_dir(job: dict[str, Any], jobs_dir: Path | None) -> Path:
 
 def execute_local_node_once(
     job_db: JobQueries,
-    definition: PipelineDefinition,
+    definition: WorkflowDefinition,
     job: dict[str, Any],
     node_key: str,
     logs_dir: Path,
@@ -96,7 +96,7 @@ def execute_local_node_once(
 
 def execute_node_once(
     job_db: JobQueries,
-    definition: PipelineDefinition,
+    definition: WorkflowDefinition,
     job: dict[str, Any],
     node_key: str,
     logs_dir: Path,
@@ -119,7 +119,7 @@ def execute_node_once(
     if pi_runner is None or skill_root is None:
         raise ValueError("Pi runner is not configured")
     node = definition.nodes[node_key]
-    skill_dir = resolve_pipeline_skill(skill_root, f"{definition.key}/{node.capability}")
+    skill_dir = resolve_workflow_skill(skill_root, f"{definition.key}/{node.capability}")
     result = pi_runner.run(
         job=job,
         node_key=node_key,
@@ -135,7 +135,7 @@ def execute_node_once(
 
 def _execute_node_wrapped(
     job_db: JobQueries,
-    definition: PipelineDefinition,
+    definition: WorkflowDefinition,
     job: dict[str, Any],
     node_key: str,
     logs_dir: Path,
@@ -174,15 +174,15 @@ def _execute_node_wrapped(
         return False
 
 
-def process_ready_pipeline_node(
+def process_ready_workflow_node(
     job_db: JobQueries,
-    definition: PipelineDefinition,
+    definition: WorkflowDefinition,
     logs_dir: Path,
     settings_config: dict[str, Any] | None = None,
     jobs_dir: Path | None = None,
 ) -> bool:
     local_handler_keys = set(LOCAL_HANDLERS.get(definition.key, {}))
-    for job in job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
+    for job in job_db.list_jobs(workspace_id=None, workflow_key=definition.key):
         if job.get("status") in ("completed", "failed"):
             continue
         statuses = _node_statuses(job_db, job["id"])

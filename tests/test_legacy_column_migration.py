@@ -54,13 +54,13 @@ create table packages (
 create table workspaces (
   id text primary key,
   name text not null,
-  default_pipeline_key text not null default 'question_content',
+  default_workflow_key text not null default 'question_content',
   created_at text not null default current_timestamp,
   updated_at text not null default current_timestamp
 );
 create table job_batches (
   id text primary key,
-  pipeline_key text not null,
+  workflow_key text not null,
   source_kind text not null,
   source_payload_json text not null default '{}',
   status text not null default 'created',
@@ -70,7 +70,7 @@ create table job_batches (
 );
 create table jobs (
   id text primary key,
-  pipeline_key text not null,
+  workflow_key text not null,
   source_type text not null,
   source_id text not null,
   batch_id text not null default '',
@@ -157,10 +157,10 @@ def _create_legacy_fixture(path: Path) -> sqlite3.Connection:
         )
         conn.execute("insert into packages(path) values ('/tmp/p1.zip')")
         conn.execute(
-            "insert into job_batches(id, pipeline_key, source_kind) values ('b1', 'question_content', 'question')"
+            "insert into job_batches(id, workflow_key, source_kind) values ('b1', 'question_content', 'question')"
         )
         conn.execute(
-            "insert into jobs(id, pipeline_key, source_type, source_id) values ('j1', 'question_content', 'question', 'Q001')"
+            "insert into jobs(id, workflow_key, source_type, source_id) values ('j1', 'question_content', 'question', 'Q001')"
         )
         conn.execute("insert into job_nodes(job_id, node_key) values ('j1', 'extract')")
         conn.execute(
@@ -237,7 +237,7 @@ def test_v003_adds_missing_columns_and_preserves_rows(tmp_path: Path) -> None:
     # Values written before the migration must survive.
     assert video["title"] == "Video 1"
     assert package["path"] == "/tmp/p1.zip"
-    assert batch["pipeline_key"] == "question_content"
+    assert batch["workflow_key"] == "question_content"
     assert job["source_id"] == "Q001"
     assert node_run["status"] == "completed"
     conn.close()

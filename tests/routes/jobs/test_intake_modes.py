@@ -7,7 +7,7 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/workspaces/default/job-batches",
@@ -41,7 +41,7 @@ def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         workspace_response = c.post(
             "/api/workspaces",
@@ -75,7 +75,7 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         workspace_response = c.post(
             "/api/workspaces",
@@ -112,7 +112,7 @@ def test_batch_with_entity_question(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/job-batches",
@@ -141,7 +141,7 @@ def test_batch_unsupported_entity_mode(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/job-batches",
@@ -164,7 +164,7 @@ def test_batch_video_resolver_not_implemented(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/job-batches",
@@ -187,7 +187,7 @@ def test_batch_with_entity_video_direct_ids(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces/default/job-batches",
@@ -219,7 +219,7 @@ def test_pipeline_response_no_task_entity(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.get("/api/pipelines/question_content")
 
@@ -240,7 +240,7 @@ def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -271,7 +271,7 @@ def test_batch_delete_skips_running_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -310,7 +310,7 @@ def test_batch_run_to_returns_results_in_order(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/job-batches",

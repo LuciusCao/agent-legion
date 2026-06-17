@@ -7,7 +7,7 @@ from typing import Any, cast
 from server.app.cms.client import get_token
 from server.app.cms.question import fetch_question_detail
 from server.app.executors.cancellation import check_cancellation
-from server.app.pipelines.question_content import _effective_cms_config
+from server.app.workflows.question_content import _effective_cms_config
 
 
 def _first_string(*values: Any) -> str | None:
@@ -184,7 +184,7 @@ def assemble_comprehension_info(
     }
     manifest = {
         "question_id": source_id,
-        "pipeline_key": job.get("pipeline_key", "question_comprehension_info"),
+        "workflow_key": job.get("workflow_key", "question_comprehension_info"),
         "source_type": job.get("source_type", "question"),
         "title": job.get("title", ""),
         "fingerprint": fingerprint,

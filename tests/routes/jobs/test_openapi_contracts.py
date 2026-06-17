@@ -35,7 +35,7 @@ def test_job_routes_are_hidden_when_pipelines_disabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = False
+    app.state.settings.executor_runtime.workflows.enabled = False
     with TestClient(app) as c:
         response = c.get("/api/jobs")
         workspaces = c.get("/api/workspaces")

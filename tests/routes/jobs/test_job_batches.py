@@ -7,7 +7,7 @@ def test_create_question_jobs_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/job-batches",
@@ -33,7 +33,7 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces/default/job-batches",
@@ -75,7 +75,7 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
     monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
@@ -123,7 +123,7 @@ def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch)
     monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["cms"] = {"env": "prod"}
     app.state.settings.config["resource_providers"] = {
         "cms.question.list_by_knowledge": {
@@ -179,7 +179,7 @@ def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces/default/job-batches",
@@ -201,7 +201,7 @@ def test_job_batch_rejects_disabled_resource_provider(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["resource_providers"] = {
         "cms.question.list_by_knowledge": {"api_url": "http://cms.example/list"},
     }
@@ -268,7 +268,7 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
     monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",

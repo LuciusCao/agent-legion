@@ -8,8 +8,8 @@ from server.app.executors.cancellation import CancellationToken, SubprocessTrack
 from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.runtime_config import PiRuntimeConfig
-from server.app.pipelines.pi_runner import PiConfig, PiRunner
-from server.app.pipelines.skills import resolve_pipeline_skill
+from server.app.workflows.pi_runner import PiConfig, PiRunner
+from server.app.workflows.skills import resolve_workflow_skill
 
 logger = logging.getLogger(__name__)
 
@@ -57,7 +57,7 @@ class PiExecutor:
             )
 
         try:
-            skill_dir = resolve_pipeline_skill(self.skill_root, capability_config.skill)
+            skill_dir = resolve_workflow_skill(self.skill_root, capability_config.skill)
         except Exception as exc:
             logger.exception(
                 "Failed to resolve Pi skill %s for execution %s",

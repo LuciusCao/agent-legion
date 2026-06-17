@@ -4,7 +4,7 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.put(
             "/api/workspaces/default/configuration",
@@ -67,7 +67,7 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         original = c.get("/api/workspaces/default").json()["workspace"]
         response = c.put(

@@ -4,13 +4,13 @@ from collections.abc import Mapping, Sequence
 from typing import Any
 
 from server.app.executors.config import ExecutorConfig
-from server.app.pipelines.definition import PipelineDefinition
 from server.app.services.job_errors import InvalidOperationError
+from server.app.workflows.definition import WorkflowDefinition
 
 
 def validate_workspace_executor_configuration(
     *,
-    pipeline: PipelineDefinition,
+    pipeline: WorkflowDefinition,
     executor_definitions: Mapping[str, ExecutorConfig],
     allocations: Sequence[Mapping[str, Any]],
     bindings: Sequence[Mapping[str, Any]],

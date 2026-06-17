@@ -25,16 +25,16 @@ def _seed_database(db_path: Path) -> tuple[str, str, str]:
     jobs_dir = db_path.parent / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir)
-    workspace = queries.create_workspace(name="Drill", default_pipeline_key="question_content")
+    workspace = queries.create_workspace(name="Drill", default_workflow_key="question_content")
     workspace_id = str(workspace["id"])
     batch = queries.create_batch(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_kind="mixed",
         source_payload={"ids": [1, 2]},
         workspace_id=workspace_id,
     )
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q1",
         batch_id=batch["id"],
@@ -47,7 +47,7 @@ def _seed_database(db_path: Path) -> tuple[str, str, str]:
         workspace_id=workspace_id,
         name="Drill",
         description="",
-        default_pipeline_key="question_content",
+        default_workflow_key="question_content",
         default_entity="question",
         resource_config={},
         intake_config={},

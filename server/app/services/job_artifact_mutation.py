@@ -6,9 +6,9 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from server.app.pipelines.definition import PipelineDefinition
-from server.app.pipelines.scheduler import downstream_nodes
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.scheduler import downstream_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -73,7 +73,7 @@ class JobArtifactMutationService:
         self,
         job: dict[str, Any],
         node_keys: Sequence[str],
-        definition: PipelineDefinition,
+        definition: WorkflowDefinition,
         *,
         closure: set[str] | frozenset[str] | None = None,
     ) -> StagedOutputs:

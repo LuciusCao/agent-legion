@@ -3,12 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.pipelines.definition import PipelineDefinition, PipelineNode
+from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 
 RUNNABLE_STATUSES = {"pending", "ready", "stale"}
 
 
-def _inputs_exist(node: PipelineNode, artifact_dir: Path) -> bool:
+def _inputs_exist(node: WorkflowNode, artifact_dir: Path) -> bool:
     return all((artifact_dir / name).exists() for name in node.inputs)
 
 
@@ -29,11 +29,11 @@ def _refresh_job_status(job_db: Any, job_id: str) -> None:
 
 
 def find_ready_nodes(
-    definition: PipelineDefinition,
+    definition: WorkflowDefinition,
     node_statuses: dict[str, str],
     artifact_dir: Path,
-) -> list[PipelineNode]:
-    ready: list[PipelineNode] = []
+) -> list[WorkflowNode]:
+    ready: list[WorkflowNode] = []
     for node in definition.nodes.values():
         if node_statuses.get(node.key, "pending") not in RUNNABLE_STATUSES:
             continue
@@ -45,7 +45,7 @@ def find_ready_nodes(
     return ready
 
 
-def downstream_nodes(definition: PipelineDefinition, node_key: str) -> list[str]:
+def downstream_nodes(definition: WorkflowDefinition, node_key: str) -> list[str]:
     children: dict[str, list[str]] = {key: [] for key in definition.nodes}
     for candidate in definition.nodes.values():
         for dep in candidate.after:

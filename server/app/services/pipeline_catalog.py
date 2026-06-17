@@ -3,11 +3,11 @@ import os
 from typing import Any
 from urllib.parse import urlparse
 
-from server.app.pipelines.definition import PipelineDefinition
-from server.app.pipelines.registry import list_registered_pipelines, load_registered_pipeline
-from server.app.pipelines.resources import RESOURCE_PARAM_KEYS, RESOURCE_PROVIDERS
 from server.app.services.job_errors import NotFoundError
 from server.app.settings import Settings
+from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.registry import list_registered_workflows, load_registered_workflow
+from server.app.workflows.resources import RESOURCE_PARAM_KEYS, RESOURCE_PROVIDERS
 
 logger = logging.getLogger(__name__)
 
@@ -16,15 +16,15 @@ class PipelineCatalogService:
     def __init__(self, settings: Settings):
         self.settings = settings
 
-    def definition(self, pipeline_key: str) -> PipelineDefinition:
+    def definition(self, pipeline_key: str) -> WorkflowDefinition:
         try:
-            return load_registered_pipeline(self.settings.root_dir, pipeline_key)
+            return load_registered_workflow(self.settings.root_dir, pipeline_key)
         except KeyError as exc:
             raise NotFoundError("Unknown pipeline") from exc
 
     def list_pipelines(self) -> list[dict[str, Any]]:
         pipelines: list[dict[str, Any]] = []
-        for definition in list_registered_pipelines(self.settings.root_dir):
+        for definition in list_registered_workflows(self.settings.root_dir):
             pipelines.append(
                 {
                     "key": definition.key,

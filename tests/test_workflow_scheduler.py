@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from server.app.pipelines.definition import load_pipeline_definition
-from server.app.pipelines.scheduler import (
+from server.app.workflows.definition import load_workflow_definition
+from server.app.workflows.scheduler import (
     downstream_nodes,
     find_ready_nodes,
     summarize_job_status,
@@ -9,7 +9,7 @@ from server.app.pipelines.scheduler import (
 
 
 def _definition():
-    return load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    return load_workflow_definition(Path("config/workflows/question_content.yaml"))
 
 
 def test_find_ready_nodes_starts_with_root(tmp_path):

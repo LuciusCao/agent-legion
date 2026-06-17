@@ -13,7 +13,7 @@ from server.app.settings import Settings
 
 
 def require_pipelines_enabled(settings: Settings) -> None:
-    if not settings.executor_runtime.pipelines.enabled:
+    if not settings.executor_runtime.workflows.enabled:
         raise HTTPException(status_code=404, detail="Pipelines are disabled")
 
 

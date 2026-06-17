@@ -7,11 +7,11 @@ from server.app.events import JobEventManager, broadcast_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
-from server.app.pipelines.scheduler import downstream_nodes
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.pipeline_catalog import PipelineCatalogService
 from server.app.settings import Settings
+from server.app.workflows.scheduler import downstream_nodes
 
 logger = logging.getLogger(__name__)
 

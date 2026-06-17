@@ -3,8 +3,8 @@ from fastapi.testclient import TestClient
 from server.app.agents import AgentStatusManager
 from server.app.executors.registry import ExecutorRegistry
 from server.app.pipeline.runners import RunnerPool
-from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.worker_thread import WorkerThread
+from server.app.workflow_worker_thread import WorkflowWorkerThread
 from tests.helpers import setup_spa_app
 
 
@@ -23,7 +23,7 @@ def test_lifespan_with_start_worker_initializes_worker_threads(tmp_path, monkeyp
         received_registry = self.executor_registry
 
     monkeypatch.setattr(WorkerThread, "start", patched_worker_start)
-    monkeypatch.setattr(PipelineWorkerThread, "start", patched_pipeline_start)
+    monkeypatch.setattr(WorkflowWorkerThread, "start", patched_pipeline_start)
 
     # Keep lifespan wiring independent of real openclaw discovery/runner creation.
     monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])

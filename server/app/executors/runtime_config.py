@@ -40,7 +40,7 @@ class OpenClawRuntimeConfig(BaseModel):
     )
 
 
-class PipelinesRuntimeConfig(BaseModel):
+class WorkflowsRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     enabled: bool = False
@@ -51,7 +51,7 @@ class ExecutorRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     cancellation_grace_seconds: int = Field(default=5, ge=0)
-    pipelines: PipelinesRuntimeConfig = Field(default_factory=PipelinesRuntimeConfig)
+    workflows: WorkflowsRuntimeConfig = Field(default_factory=WorkflowsRuntimeConfig)
     openclaw: OpenClawRuntimeConfig = Field(
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
     )
@@ -202,13 +202,13 @@ def validate_runtime(
     if provider == "auto" and not (_whisper_usable() or _sensevoice_usable()):
         errors.append(("asr.provider", "auto mode requires at least one usable ASR provider"))
 
-    if runtime.pipelines.enabled:
-        pi_binary = str(runtime.pipelines.pi.binary or "")
+    if runtime.workflows.enabled:
+        pi_binary = str(runtime.workflows.pi.binary or "")
         if not pi_binary:
-            errors.append(("pipelines.pi.binary", "missing pi binary"))
+            errors.append(("workflows.pi.binary", "missing pi binary"))
         else:
             if _resolve_executable(pi_binary) is None:
-                errors.append(("pipelines.pi.binary", "pi binary is not executable or on PATH"))
+                errors.append(("workflows.pi.binary", "pi binary is not executable or on PATH"))
 
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():

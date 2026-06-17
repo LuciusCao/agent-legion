@@ -91,7 +91,7 @@ def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) ->
     random.Random(seed).shuffle(jobs)
     for workspace_id, source_id in jobs:
         job_db.create_job(
-            pipeline_key="test",
+            workflow_key="test",
             source_type="question",
             source_id=source_id,
             batch_id="",

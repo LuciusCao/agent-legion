@@ -7,7 +7,7 @@ from typing import Any
 from server.app.cms.client import get_token
 from server.app.cms.question import fetch_question_detail
 from server.app.executors.cancellation import check_cancellation
-from server.app.pipelines.question_content import _effective_cms_config
+from server.app.workflows.question_content import _effective_cms_config
 
 
 def fetch_questions(

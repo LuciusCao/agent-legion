@@ -7,12 +7,12 @@ from typing import Any
 import yaml
 
 
-class PipelineDefinitionError(ValueError):
-    """Raised when a pipeline YAML file is invalid."""
+class WorkflowDefinitionError(ValueError):
+    """Raised when a workflow YAML file is invalid."""
 
 
 @dataclass(frozen=True)
-class PipelineNode:
+class WorkflowNode:
     key: str
     label: str
     capability: str
@@ -22,7 +22,7 @@ class PipelineNode:
 
 
 @dataclass(frozen=True)
-class PipelineIntakeMode:
+class WorkflowIntakeMode:
     key: str
     label: str
     input_field: str
@@ -30,16 +30,16 @@ class PipelineIntakeMode:
 
 
 @dataclass(frozen=True)
-class PipelineIntake:
-    modes: dict[str, PipelineIntakeMode] = field(default_factory=dict)
+class WorkflowIntake:
+    modes: dict[str, WorkflowIntakeMode] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
-class PipelineDefinition:
+class WorkflowDefinition:
     key: str
     label: str
-    intake: PipelineIntake
-    nodes: dict[str, PipelineNode]
+    intake: WorkflowIntake
+    nodes: dict[str, WorkflowNode]
 
     @property
     def terminal_nodes(self) -> list[str]:
@@ -51,17 +51,17 @@ def _string_list(value: Any, field_name: str, node_key: str) -> list[str]:
     if value is None:
         return []
     if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
-        raise PipelineDefinitionError(f"{node_key}.{field_name} must be a list of strings")
+        raise WorkflowDefinitionError(f"{node_key}.{field_name} must be a list of strings")
     return list(value)
 
 
-def _validate_acyclic(nodes: dict[str, PipelineNode]) -> None:
+def _validate_acyclic(nodes: dict[str, WorkflowNode]) -> None:
     visiting: set[str] = set()
     visited: set[str] = set()
 
     def visit(node_key: str) -> None:
         if node_key in visiting:
-            raise PipelineDefinitionError(f"Pipeline contains a cycle at node {node_key}")
+            raise WorkflowDefinitionError(f"Pipeline contains a cycle at node {node_key}")
         if node_key in visited:
             return
         visiting.add(node_key)
@@ -74,90 +74,90 @@ def _validate_acyclic(nodes: dict[str, PipelineNode]) -> None:
         visit(key)
 
 
-def _load_intake(raw: dict[str, Any]) -> PipelineIntake:
+def _load_intake(raw: dict[str, Any]) -> WorkflowIntake:
     raw_intake = raw.get("intake", {})
     if raw_intake is None:
         raw_intake = {}
     if not isinstance(raw_intake, dict):
-        raise PipelineDefinitionError("Pipeline intake must be a mapping")
+        raise WorkflowDefinitionError("Pipeline intake must be a mapping")
     raw_modes = raw_intake.get("modes", {})
     if raw_modes is None:
         raw_modes = {}
     if not isinstance(raw_modes, dict):
-        raise PipelineDefinitionError("Pipeline intake.modes must be a mapping")
+        raise WorkflowDefinitionError("Pipeline intake.modes must be a mapping")
 
-    modes: dict[str, PipelineIntakeMode] = {}
+    modes: dict[str, WorkflowIntakeMode] = {}
     for mode_key, raw_mode in raw_modes.items():
         if not isinstance(mode_key, str) or not mode_key:
-            raise PipelineDefinitionError("Intake mode keys must be non-empty strings")
+            raise WorkflowDefinitionError("Intake mode keys must be non-empty strings")
         if not isinstance(raw_mode, dict):
-            raise PipelineDefinitionError(f"Intake mode {mode_key} must be a mapping")
+            raise WorkflowDefinitionError(f"Intake mode {mode_key} must be a mapping")
         label = raw_mode.get("label", mode_key)
         input_field = raw_mode.get("input_field", mode_key)
         resource = raw_mode.get("resource", "")
         if not isinstance(label, str) or not label:
-            raise PipelineDefinitionError(f"Intake mode {mode_key}.label must be a string")
+            raise WorkflowDefinitionError(f"Intake mode {mode_key}.label must be a string")
         if not isinstance(input_field, str) or not input_field:
-            raise PipelineDefinitionError(f"Intake mode {mode_key}.input_field must be a string")
+            raise WorkflowDefinitionError(f"Intake mode {mode_key}.input_field must be a string")
         if not isinstance(resource, str):
-            raise PipelineDefinitionError(f"Intake mode {mode_key}.resource must be a string")
-        modes[mode_key] = PipelineIntakeMode(
+            raise WorkflowDefinitionError(f"Intake mode {mode_key}.resource must be a string")
+        modes[mode_key] = WorkflowIntakeMode(
             key=mode_key,
             label=label,
             input_field=input_field,
             resource=resource,
         )
-    return PipelineIntake(modes=modes)
+    return WorkflowIntake(modes=modes)
 
 
-def load_pipeline_definition(path: Path) -> PipelineDefinition:
+def load_workflow_definition(path: Path) -> WorkflowDefinition:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        raise PipelineDefinitionError("Pipeline definition must be a mapping")
+        raise WorkflowDefinitionError("Pipeline definition must be a mapping")
 
     key = raw.get("key")
     label = raw.get("label")
     raw_nodes = raw.get("nodes")
 
     if not isinstance(key, str) or not key:
-        raise PipelineDefinitionError("Pipeline key is required")
+        raise WorkflowDefinitionError("Pipeline key is required")
     if not isinstance(label, str) or not label:
-        raise PipelineDefinitionError("Pipeline label is required")
+        raise WorkflowDefinitionError("Pipeline label is required")
     if not isinstance(raw_nodes, dict) or not raw_nodes:
-        raise PipelineDefinitionError("Pipeline nodes are required")
+        raise WorkflowDefinitionError("Pipeline nodes are required")
 
     if "concurrency" in raw:
-        raise PipelineDefinitionError(
+        raise WorkflowDefinitionError(
             "Pipeline field 'concurrency' was removed; configure Executor limits at Workspace level."
         )
 
     intake = _load_intake(raw)
 
-    nodes: dict[str, PipelineNode] = {}
+    nodes: dict[str, WorkflowNode] = {}
     for node_key, raw_node in raw_nodes.items():
         if not isinstance(node_key, str) or not node_key:
-            raise PipelineDefinitionError("Node keys must be non-empty strings")
+            raise WorkflowDefinitionError("Node keys must be non-empty strings")
         if not isinstance(raw_node, dict):
-            raise PipelineDefinitionError(f"Node {node_key} must be a mapping")
+            raise WorkflowDefinitionError(f"Node {node_key} must be a mapping")
 
         if "runner" in raw_node:
-            raise PipelineDefinitionError(
+            raise WorkflowDefinitionError(
                 "Node field 'runner' was removed; bind a compatible Executor in Workspace settings."
             )
         if "agent" in raw_node:
-            raise PipelineDefinitionError(
+            raise WorkflowDefinitionError(
                 "Node field 'agent' was removed; invocation details belong to Executor capabilities."
             )
 
         node_label = raw_node.get("label", node_key)
         if not isinstance(node_label, str) or not node_label:
-            raise PipelineDefinitionError(f"Node {node_key} label must be a non-empty string")
+            raise WorkflowDefinitionError(f"Node {node_key} label must be a non-empty string")
 
         capability = raw_node.get("capability", "")
         if not isinstance(capability, str) or not capability:
-            raise PipelineDefinitionError(f"Node {node_key} capability must be a non-empty string")
+            raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
-        nodes[node_key] = PipelineNode(
+        nodes[node_key] = WorkflowNode(
             key=node_key,
             label=node_label,
             capability=capability,
@@ -169,10 +169,10 @@ def load_pipeline_definition(path: Path) -> PipelineDefinition:
     for node in nodes.values():
         for dep in node.after:
             if dep not in nodes:
-                raise PipelineDefinitionError(f"Unknown dependency {dep!r} for node {node.key}")
+                raise WorkflowDefinitionError(f"Unknown dependency {dep!r} for node {node.key}")
 
     _validate_acyclic(nodes)
-    return PipelineDefinition(
+    return WorkflowDefinition(
         key=key,
         label=label,
         intake=intake,

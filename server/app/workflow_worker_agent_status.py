@@ -26,7 +26,7 @@ def _agent_status_payload(context: ExecutionContext) -> dict[str, Any]:
     return {
         "id": context.job_id,
         "title": str(context.job.get("title", "")),
-        "content_type": str(context.workspace.get("default_entity") or context.pipeline_key),
+        "content_type": str(context.workspace.get("default_entity") or context.workflow_key),
         "external_id": str(context.job.get("source_id", "")),
         "current_phase": context.node_key,
     }

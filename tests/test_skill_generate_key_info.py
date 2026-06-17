@@ -4,7 +4,7 @@ from pathlib import Path
 
 VALIDATOR = (
     Path(__file__).resolve().parents[1]
-    / "server/app/pipelines/skills/question_comprehension_info/generate_key_info/scripts/validate_output.py"
+    / "server/app/workflows/skills/question_comprehension_info/generate_key_info/scripts/validate_output.py"
 )
 
 

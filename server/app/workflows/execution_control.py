@@ -2,21 +2,21 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.pipelines.definition import PipelineDefinition
+from server.app.workflows.definition import WorkflowDefinition
 
 
 class ExecutionControlError(ValueError):
-    """Raised when execution control state is invalid for a pipeline definition."""
+    """Raised when execution control state is invalid for a workflow definition."""
 
 
-def ancestor_closure(definition: PipelineDefinition, target_node_key: str) -> frozenset[str]:
+def ancestor_closure(definition: WorkflowDefinition, target_node_key: str) -> frozenset[str]:
     """Return all ancestors of *target_node_key* including itself.
 
     Raises ExecutionControlError when the target is unknown.
     """
     if target_node_key not in definition.nodes:
         raise ExecutionControlError(
-            f"Unknown target node {target_node_key!r} in pipeline {definition.key!r}"
+            f"Unknown target node {target_node_key!r} in workflow {definition.key!r}"
         )
 
     closure: set[str] = {target_node_key}
@@ -31,7 +31,7 @@ def ancestor_closure(definition: PipelineDefinition, target_node_key: str) -> fr
 
 
 def allowed_nodes(
-    definition: PipelineDefinition, execution_control: dict[str, Any]
+    definition: WorkflowDefinition, execution_control: dict[str, Any]
 ) -> frozenset[str]:
     """Return the set of node keys that may be claimed for *execution_control*.
 

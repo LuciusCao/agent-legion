@@ -1,5 +1,5 @@
 key: reading_analysis
-label: 题目审题分析 Pipeline
+label: 题目审题分析 工作流
 intake:
   modes:
     batch_by_knowledge:

@@ -4,8 +4,8 @@ from pathlib import Path
 import pytest
 
 from server.app.jobs import JobQueries
-from server.app.pipelines.executor import LOCAL_HANDLERS
-from server.app.pipelines.reading_analysis import (
+from server.app.workflows.executor import LOCAL_HANDLERS
+from server.app.workflows.reading_analysis import (
     clean_and_parse,
     fetch_questions,
     mark_question,
@@ -16,7 +16,7 @@ def test_fetch_questions_with_cms_writes_single_question(tmp_path, monkeypatch):
     from server.app.cms.question import CmsQuestionDetail
 
     monkeypatch.setattr(
-        "server.app.pipelines.reading_analysis.fetch_question_detail",
+        "server.app.workflows.reading_analysis.fetch_question_detail",
         lambda qid, url, token: CmsQuestionDetail(
             question_id="Q100",
             title="CMS 题目一",

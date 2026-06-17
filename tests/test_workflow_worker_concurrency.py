@@ -13,13 +13,13 @@ from server.app.executors.models import ExecutionContext, ExecutionResult, Lease
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
-from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.definition import (
-    PipelineDefinition,
-    PipelineIntake,
-    PipelineNode,
-)
 from server.app.settings import Settings
+from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflows.definition import (
+    WorkflowDefinition,
+    WorkflowIntake,
+    WorkflowNode,
+)
 
 
 class FakeExecutor:
@@ -94,17 +94,17 @@ def _make_registry(
     )
 
 
-def _make_definition(nodes: list[PipelineNode]) -> PipelineDefinition:
-    return PipelineDefinition(
+def _make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="test",
         label="Test",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={n.key: n for n in nodes},
     )
 
 
-def _local_node(key: str, outputs: list[str] | None = None) -> PipelineNode:
-    return PipelineNode(
+def _local_node(key: str, outputs: list[str] | None = None) -> WorkflowNode:
+    return WorkflowNode(
         key=key,
         label=key,
         capability=key,
@@ -112,8 +112,8 @@ def _local_node(key: str, outputs: list[str] | None = None) -> PipelineNode:
     )
 
 
-def _agent_node(key: str, outputs: list[str] | None = None) -> PipelineNode:
-    return PipelineNode(
+def _agent_node(key: str, outputs: list[str] | None = None) -> WorkflowNode:
+    return WorkflowNode(
         key=key,
         label=key,
         capability=key,
@@ -141,36 +141,36 @@ def _allocate(
 def _set_node_limit(
     job_db: JobQueries,
     workspace_id: str,
-    pipeline_key: str,
+    workflow_key: str,
     node_key: str,
     concurrency_limit: int,
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
             """
-            insert into workspace_node_limits (workspace_id, pipeline_key, node_key, concurrency_limit)
+            insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit)
             values (?, ?, ?, ?)
-            on conflict(workspace_id, pipeline_key, node_key) do update set concurrency_limit=excluded.concurrency_limit
+            on conflict(workspace_id, workflow_key, node_key) do update set concurrency_limit=excluded.concurrency_limit
             """,
-            (workspace_id, pipeline_key, node_key, concurrency_limit),
+            (workspace_id, workflow_key, node_key, concurrency_limit),
         )
 
 
 def _bind(
     job_db: JobQueries,
     workspace_id: str,
-    pipeline_key: str,
+    workflow_key: str,
     node_key: str,
     executor_id: str,
 ) -> None:
     with job_db.connect() as conn:
         conn.execute(
             """
-            insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id)
+            insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id)
             values (?, ?, ?, ?)
-            on conflict(workspace_id, pipeline_key, node_key) do update set executor_id=excluded.executor_id
+            on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
             """,
-            (workspace_id, pipeline_key, node_key, executor_id),
+            (workspace_id, workflow_key, node_key, executor_id),
         )
 
 
@@ -178,8 +178,8 @@ def _make_worker(
     tmp_path: Path,
     db_path: Path,
     registry: ExecutorRegistry,
-    definitions: list[PipelineDefinition],
-) -> PipelineWorkerThread:
+    definitions: list[WorkflowDefinition],
+) -> WorkflowWorkerThread:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     leases = ExecutorLeaseRepository(db_path)
     runtime = ExecutionRuntime(
@@ -195,10 +195,10 @@ def _make_worker(
         logs_dir=tmp_path / "logs",
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True}},
+        config={"workflows": {"enabled": True}},
         executor_definitions=registry.definitions(),
     )
-    worker = PipelineWorkerThread(
+    worker = WorkflowWorkerThread(
         job_db=job_db,
         leases=leases,
         registry=registry,
@@ -504,9 +504,9 @@ def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -
     definition = _make_definition(
         [
             _local_node("root"),
-            PipelineNode(key="left", label="left", capability="left", after=["root"]),
-            PipelineNode(key="target", label="target", capability="target", after=["left"]),
-            PipelineNode(key="right", label="right", capability="right", after=["root"]),
+            WorkflowNode(key="left", label="left", capability="left", after=["root"]),
+            WorkflowNode(key="target", label="target", capability="target", after=["left"]),
+            WorkflowNode(key="right", label="right", capability="right", after=["root"]),
         ]
     )
 

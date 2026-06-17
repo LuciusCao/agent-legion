@@ -4,7 +4,7 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.get("/api/pipelines/question_content")
 
@@ -46,7 +46,7 @@ def test_list_pipelines_includes_registered_pipelines(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.get("/api/pipelines")
 
@@ -61,7 +61,7 @@ def test_get_resource_providers_returns_provider_list(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["resource_providers"] = {
         "cms.question.detail": {"path": "/question/detail"},
         "cms.question.list_by_knowledge": {"path": "/question/list"},
@@ -103,7 +103,7 @@ def test_get_global_services_returns_cms_status(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "base_url": "http://cms.internal.example.com/v2",
@@ -134,7 +134,7 @@ def test_get_global_services_unconfigured_token(tmp_path, monkeypatch):
         "BASECMS_TOKEN",
     ):
         monkeypatch.delenv(key, raising=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["cms"] = {"env": "dev"}
     with TestClient(app) as c:
         response = c.get("/api/global-services")
@@ -150,7 +150,7 @@ def test_get_global_services_token_gen_configured(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "base_url": "http://cms.example/v2",
@@ -175,7 +175,7 @@ def test_update_workspace_rejects_invalid_pipeline_key(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         create_resp = c.post("/api/workspaces", json={"name": "Test"})
         assert create_resp.status_code == 200, create_resp.text

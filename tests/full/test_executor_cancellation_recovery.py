@@ -13,7 +13,7 @@ from server.app.executors.config import (
 from server.app.executors.local import LocalExecutor
 from server.app.executors.pi import PiExecutor
 from server.app.jobs import JobQueries
-from server.app.pipelines.pi_runner import PiConfig
+from server.app.workflows.pi_runner import PiConfig
 from tests.helpers.executor_worker import (
     allocate,
     bind,
@@ -132,7 +132,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
         )
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -200,7 +200,7 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
 
     # Capacity reuse: a newly queued cooperative node can be claimed and completed.
     job2 = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q2",
         batch_id="",

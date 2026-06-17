@@ -10,33 +10,33 @@ from server.app.executors.config import (
     PiCapabilityConfig,
     PiExecutorConfig,
 )
-from server.app.pipelines.definition import (
-    PipelineDefinition,
-    PipelineIntake,
-    PipelineNode,
-)
 from server.app.services.job_errors import InvalidOperationError
+from server.app.workflows.definition import (
+    WorkflowDefinition,
+    WorkflowIntake,
+    WorkflowNode,
+)
 
 
 @dataclass
 class ValidationContext:
-    pipeline: PipelineDefinition
+    pipeline: WorkflowDefinition
     executors: dict[str, LocalExecutorConfig | PiExecutorConfig]
 
 
 @pytest.fixture
 def context() -> ValidationContext:
-    pipeline = PipelineDefinition(
+    pipeline = WorkflowDefinition(
         key="reading_analysis",
         label="Reading Analysis",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "fetch_questions": PipelineNode(
+            "fetch_questions": WorkflowNode(
                 key="fetch_questions",
                 label="Fetch Questions",
                 capability="fetch_questions",
             ),
-            "review_keywords": PipelineNode(
+            "review_keywords": WorkflowNode(
                 key="review_keywords",
                 label="Review Keywords",
                 capability="review_keywords",
@@ -155,7 +155,7 @@ def test_binding_pipeline_must_equal_workspace_pipeline(context: ValidationConte
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Unknown Pipeline Node other_pipeline\\.fetch_questions"
+        InvalidOperationError, match="Unknown Workflow Node other_pipeline\\.fetch_questions"
     ):
         validate_workspace_executor_configuration(
             pipeline=context.pipeline,
@@ -172,7 +172,7 @@ def test_binding_node_must_exist_in_pipeline(context: ValidationContext) -> None
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Unknown Pipeline Node reading_analysis\\.unknown_node"
+        InvalidOperationError, match="Unknown Workflow Node reading_analysis\\.unknown_node"
     ):
         validate_workspace_executor_configuration(
             pipeline=context.pipeline,

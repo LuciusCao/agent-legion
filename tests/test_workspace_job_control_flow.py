@@ -22,9 +22,9 @@ from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.main import create_app
-from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.definition import load_pipeline_definition
 from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflows.definition import load_workflow_definition
 
 ROOT = Path(__file__).resolve().parents[1]
 PIPELINE_KEY = "test_control_flow"
@@ -125,14 +125,14 @@ def _make_worker(
     registry: ExecutorRegistry,
     settings: Any,
     definition: Any,
-) -> PipelineWorkerThread:
+) -> WorkflowWorkerThread:
     runtime = ExecutionRuntime(
         leases=leases,
         registry=registry,
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=30,
     )
-    worker = PipelineWorkerThread(
+    worker = WorkflowWorkerThread(
         job_db=job_db,
         leases=leases,
         registry=registry,
@@ -144,7 +144,7 @@ def _make_worker(
     return worker
 
 
-def _drain(worker: PipelineWorkerThread, timeout: float = 5.0) -> None:
+def _drain(worker: WorkflowWorkerThread, timeout: float = 5.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         worker._poll()
@@ -169,17 +169,17 @@ def _configure_workspace(job_db: Any, workspace_id: str, pipeline_key: str) -> N
         for node_key in node_keys:
             conn.execute(
                 """
-                insert into workspace_node_bindings(workspace_id, pipeline_key, node_key, executor_id)
+                insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
                 values (?, ?, ?, ?)
-                on conflict(workspace_id, pipeline_key, node_key) do update set executor_id=excluded.executor_id
+                on conflict(workspace_id, workflow_key, node_key) do update set executor_id=excluded.executor_id
                 """,
                 (workspace_id, pipeline_key, node_key, "local-test"),
             )
             conn.execute(
                 """
-                insert into workspace_node_limits(workspace_id, pipeline_key, node_key, concurrency_limit)
+                insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
                 values (?, ?, ?, ?)
-                on conflict(workspace_id, pipeline_key, node_key) do update set concurrency_limit=excluded.concurrency_limit
+                on conflict(workspace_id, workflow_key, node_key) do update set concurrency_limit=excluded.concurrency_limit
                 """,
                 (workspace_id, pipeline_key, node_key, 4),
             )
@@ -195,7 +195,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
     def _patched_definition(self, pipeline_key: str):
         if pipeline_key == PIPELINE_KEY:
-            return load_pipeline_definition(pipeline_path)
+            return load_workflow_definition(pipeline_path)
         return _original_definition(self, pipeline_key)
 
     monkeypatch.setattr(
@@ -204,7 +204,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
     )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
 
     with TestClient(app) as client:
         ws_response = client.post("/api/workspaces", json={"name": "Control Flow"})
@@ -346,7 +346,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
 
     def _patched_definition(self, pipeline_key: str):
         if pipeline_key == PIPELINE_KEY:
-            return load_pipeline_definition(pipeline_path)
+            return load_workflow_definition(pipeline_path)
         return _original_definition(self, pipeline_key)
 
     monkeypatch.setattr(
@@ -355,7 +355,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
 
     with TestClient(app) as client:
         ws_response = client.post("/api/workspaces", json={"name": "Terminal State"})
@@ -396,7 +396,7 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
 
     def _patched_definition(self, pipeline_key: str):
         if pipeline_key == PIPELINE_KEY:
-            return load_pipeline_definition(pipeline_path)
+            return load_workflow_definition(pipeline_path)
         return _original_definition(self, pipeline_key)
 
     monkeypatch.setattr(
@@ -405,7 +405,7 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
 
     with TestClient(app) as client:
         ws_response = client.post("/api/workspaces", json={"name": "Paused State"})

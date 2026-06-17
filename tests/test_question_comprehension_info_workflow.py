@@ -5,7 +5,7 @@ import yaml
 
 from server.app.executors.config import load_executor_definitions
 from server.app.jobs.queries import JobQueries
-from server.app.pipelines.question_comprehension_info import (
+from server.app.workflows.question_comprehension_info import (
     assemble_comprehension_info,
     clean_and_parse,
 )

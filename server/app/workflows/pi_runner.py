@@ -347,7 +347,7 @@ class PiRunner:
         outputs: list[str],
     ) -> str:
         lines: list[str] = [
-            "Execute the loaded node skill for this Video Hive pipeline job.",
+            "Execute the loaded node skill for this Video Hive workflow job.",
             "",
             f"Job ID: {job_id}",
             f"Node: {node_key}",

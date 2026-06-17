@@ -1,8 +1,8 @@
 from pathlib import Path
 
 
-def resolve_pipeline_skill(root: Path, relative_name: str) -> Path:
-    """Resolve a pipeline skill directory under root, validating it remains below root.
+def resolve_workflow_skill(root: Path, relative_name: str) -> Path:
+    """Resolve a workflow skill directory under root, validating it remains below root.
 
     Raises ValueError if the path escapes root or if required contract files are missing.
     """

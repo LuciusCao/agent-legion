@@ -50,7 +50,7 @@ def create_jobs_router(
             return JobsResponse(
                 jobs=cast(
                     list[JobSummaryResponse],
-                    job_queries.list_jobs(workspace_id, pipeline_key=pipeline_key, status=status),
+                    job_queries.list_jobs(workspace_id, workflow_key=pipeline_key, status=status),
                 )
             )
         except JobServiceError as exc:
@@ -88,7 +88,7 @@ def create_jobs_router(
             return JobsResponse(
                 jobs=cast(
                     list[JobSummaryResponse],
-                    job_queries.list_jobs("default", pipeline_key=pipeline_key, status=status),
+                    job_queries.list_jobs("default", workflow_key=pipeline_key, status=status),
                 )
             )
         except JobServiceError as exc:

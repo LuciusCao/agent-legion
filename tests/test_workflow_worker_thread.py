@@ -16,27 +16,27 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
-from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.definition import (
-    PipelineDefinition,
-    PipelineIntake,
-    PipelineNode,
-)
 from server.app.settings import Settings
+from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflows.definition import (
+    WorkflowDefinition,
+    WorkflowIntake,
+    WorkflowNode,
+)
 from tests.helpers import make_pipeline_worker
 
 
-def _make_definition(nodes: list[PipelineNode]) -> PipelineDefinition:
-    return PipelineDefinition(
+def _make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="test",
         label="Test",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={n.key: n for n in nodes},
     )
 
 
-def _local_node(key: str, outputs: list[str] | None = None) -> PipelineNode:
-    return PipelineNode(
+def _local_node(key: str, outputs: list[str] | None = None) -> WorkflowNode:
+    return WorkflowNode(
         key=key,
         label=key,
         capability=key,
@@ -76,8 +76,8 @@ def _make_worker(
     tmp_path: Path,
     db_path: Path,
     executor: RecordingExecutor,
-    definitions: list[PipelineDefinition],
-) -> PipelineWorkerThread:
+    definitions: list[WorkflowDefinition],
+) -> WorkflowWorkerThread:
     executor_def = LocalExecutorConfig(
         kind="local",
         global_capacity=2,
@@ -108,11 +108,11 @@ def _make_worker(
     )
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
-            "pipelines": {"enabled": True},
+            "workflows": {"enabled": True},
             "openclaw": {"command_template": ["openclaw"]},
         }
     )
-    worker = PipelineWorkerThread(
+    worker = WorkflowWorkerThread(
         job_db=job_db,
         leases=leases,
         registry=registry,
@@ -157,7 +157,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
@@ -195,7 +195,7 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
@@ -232,7 +232,7 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
@@ -304,7 +304,7 @@ def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
     )
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
@@ -353,7 +353,7 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
     job_db.pause_job(job["id"], "awaiting_resources")
     with job_db.connect() as conn:
         conn.execute(
-            "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
             (ws["id"], "test", "fetch", "local-default"),
         )
         conn.execute(
@@ -372,7 +372,7 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
 
 
 def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> None:
-    from server.app.pipelines.execution_control import allowed_nodes
+    from server.app.workflows.execution_control import allowed_nodes
 
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
@@ -381,9 +381,9 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     definition = _make_definition(
         [
             _local_node("root"),
-            PipelineNode(key="left", label="left", capability="left", after=["root"]),
-            PipelineNode(key="target", label="target", capability="target", after=["left"]),
-            PipelineNode(key="right", label="right", capability="right", after=["root"]),
+            WorkflowNode(key="left", label="left", capability="left", after=["root"]),
+            WorkflowNode(key="target", label="target", capability="target", after=["left"]),
+            WorkflowNode(key="right", label="right", capability="right", after=["root"]),
         ]
     )
 
@@ -400,7 +400,7 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     with job_db.connect() as conn:
         for node in definition.nodes.values():
             conn.execute(
-                "insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id) values (?, ?, ?, ?)",
+                "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
                 (ws["id"], "test", node.key, "local-default"),
             )
         conn.execute(
@@ -408,15 +408,15 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
             (ws["id"], "local-default", 2),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, pipeline_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
             (ws["id"], "test", "root", 1),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, pipeline_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
             (ws["id"], "test", "left", 1),
         )
         conn.execute(
-            "insert into workspace_node_limits (workspace_id, pipeline_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
+            "insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
             (ws["id"], "test", "target", 1),
         )
 
@@ -449,11 +449,11 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 
 def test_make_pipeline_worker_runs_reading_analysis_local_node(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "server.app.pipelines.reading_analysis.get_token",
+        "server.app.workflows.reading_analysis.get_token",
         lambda env, config: "test-token",
     )
     monkeypatch.setattr(
-        "server.app.pipelines.reading_analysis.fetch_question_detail",
+        "server.app.workflows.reading_analysis.fetch_question_detail",
         lambda question_id, api_url, token: SimpleNamespace(
             question_id=question_id,
             title="Question Q100",
@@ -517,9 +517,9 @@ def _make_pi_worker(
     tmp_path: Path,
     db_path: Path,
     executor: RecordingPiExecutor,
-    definitions: list[PipelineDefinition],
+    definitions: list[WorkflowDefinition],
     agent_manager: Any | None = None,
-) -> PipelineWorkerThread:
+) -> WorkflowWorkerThread:
     executor_def = PiExecutorConfig(
         kind="pi",
         global_capacity=2,
@@ -550,11 +550,11 @@ def _make_pi_worker(
     )
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
-            "pipelines": {"enabled": True},
+            "workflows": {"enabled": True},
             "openclaw": {"command_template": ["openclaw"]},
         }
     )
-    worker = PipelineWorkerThread(
+    worker = WorkflowWorkerThread(
         job_db=job_db,
         leases=leases,
         registry=registry,
@@ -588,7 +588,7 @@ def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
         conn.execute(
             """
             insert into workspace_node_bindings
-            (workspace_id, pipeline_key, node_key, executor_id)
+            (workspace_id, workflow_key, node_key, executor_id)
             values (?, ?, ?, ?)
             """,
             (ws["id"], "test", "fetch", "pi-default"),
@@ -641,7 +641,7 @@ def test_poll_does_not_update_agent_status_for_local_executor(tmp_path: Path) ->
         conn.execute(
             """
             insert into workspace_node_bindings
-            (workspace_id, pipeline_key, node_key, executor_id)
+            (workspace_id, workflow_key, node_key, executor_id)
             values (?, ?, ?, ?)
             """,
             (ws["id"], "test", "fetch", "local-default"),

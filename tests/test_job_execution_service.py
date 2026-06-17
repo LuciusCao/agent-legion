@@ -7,10 +7,10 @@ import pytest
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
-from server.app.pipelines.registry import load_registered_pipeline
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_execution import JobExecutionService
 from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.workflows.registry import load_registered_workflow
 
 
 @pytest.fixture
@@ -40,7 +40,7 @@ def _create_job(
         {"question_ids": [source_id]},
         workspace_id=workspace_id,
     )
-    definition = load_registered_pipeline(Path(".").resolve(), workflow_key)
+    definition = load_registered_workflow(Path(".").resolve(), workflow_key)
     return job_db.create_job(
         workflow_key=workflow_key,
         source_type="question",

@@ -7,7 +7,7 @@ from typing import Any
 from server.app.cms.client import get_token
 from server.app.cms.question import CmsQuestionDetail, fetch_question_detail
 from server.app.executors.cancellation import check_cancellation
-from server.app.pipelines.resources import resolve_cms_resource
+from server.app.workflows.resources import resolve_cms_resource
 
 
 def _decode_json_object(value: Any) -> dict[str, Any]:

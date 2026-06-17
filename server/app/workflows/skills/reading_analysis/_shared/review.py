@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 try:
-    from server.app.pipelines.skills.reading_analysis._shared.validation import (
+    from server.app.workflows.skills.reading_analysis._shared.validation import (
         ContractError,
         _normalize_json,
         load_json_object,

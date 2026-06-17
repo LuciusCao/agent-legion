@@ -25,7 +25,7 @@ from server.app.executors.config import (
 )
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.jobs import JobQueries
-from server.app.pipelines.definition import PipelineDefinition, PipelineIntake, PipelineNode
+from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from tests.helpers import ensure_legacy_workspace_tables
 from tests.test_workspace_dag_fk_migration import _create_pre_v004_database
 
@@ -67,7 +67,7 @@ def test_v004_interruption_at_phase_boundary_recovers(tmp_path: Path, interrupt_
     conn = connect_sqlite(path)
     with conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id) "
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
             "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
         )
         conn.execute(
@@ -124,25 +124,25 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
     }
 
 
-def _sample_pipeline() -> PipelineDefinition:
-    return PipelineDefinition(
+def _sample_pipeline() -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="reading_analysis",
         label="Reading Analysis",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "local_a": PipelineNode(key="local_a", label="Local A", capability="local_a"),
-            "pi_a": PipelineNode(key="pi_a", label="Pi A", capability="pi_a"),
+            "local_a": WorkflowNode(key="local_a", label="Local A", capability="local_a"),
+            "pi_a": WorkflowNode(key="pi_a", label="Pi A", capability="pi_a"),
         },
     )
 
 
-def _question_comprehension_info_pipeline() -> PipelineDefinition:
-    return PipelineDefinition(
+def _question_comprehension_info_pipeline() -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="question_comprehension_info",
         label="Question Comprehension Info",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "local_a": PipelineNode(key="local_a", label="Local A", capability="local_a"),
+            "local_a": WorkflowNode(key="local_a", label="Local A", capability="local_a"),
         },
     )
 
@@ -157,7 +157,7 @@ def test_v005_finalizer_interruption_before_commit_retains_backup_and_reruns(
     queries = JobQueries(db_path, jobs_dir)
     ensure_legacy_workspace_tables(queries)
 
-    workspace_id = queries.create_workspace(name="Legacy", default_pipeline_key="reading_analysis")[
+    workspace_id = queries.create_workspace(name="Legacy", default_workflow_key="reading_analysis")[
         "id"
     ]
     with queries.connect() as conn:

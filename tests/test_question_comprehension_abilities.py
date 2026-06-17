@@ -3,7 +3,7 @@ from pathlib import Path
 
 TAXONOMY = (
     Path(__file__).resolve().parents[1]
-    / "server/app/pipelines/skills/question_comprehension_info/_shared/references/question_comprehension_abilities.json"
+    / "server/app/workflows/skills/question_comprehension_info/_shared/references/question_comprehension_abilities.json"
 )
 
 

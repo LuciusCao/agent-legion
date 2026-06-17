@@ -4,7 +4,7 @@ def test_workspace_stats_hidden_when_pipelines_disabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = False
+    app.state.settings.executor_runtime.workflows.enabled = False
     with TestClient(app) as c:
         response = c.get("/api/workspaces/default/stats")
     assert response.status_code == 404
@@ -16,7 +16,7 @@ def test_workspace_stats_returns_counts_and_executor_status(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
         ws_id = ws["workspace"]["id"]
@@ -49,7 +49,7 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(tmp_pat
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     job_db = app.state.job_db
 
     with TestClient(app) as c:
@@ -97,7 +97,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/job-batches",
@@ -128,7 +128,7 @@ def test_workspace_stats_returns_404_for_unknown_workspace(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         resp = c.get("/api/workspaces/nonexistent/stats")
     assert resp.status_code == 404
