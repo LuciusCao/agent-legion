@@ -205,3 +205,39 @@ nodes:
     )
     definition = load_pipeline_definition(config)
     assert definition.nodes["one"].label == "步骤一"
+
+
+def test_load_question_comprehension_info_capabilities():
+    definition = load_pipeline_definition(Path("config/pipelines/question_comprehension_info.yaml"))
+
+    assert definition.key == "question_comprehension_info"
+    assert definition.label == "题目审题信息生成 DAG"
+    assert set(definition.intake.modes) == {"batch_by_knowledge", "batch_by_ids"}
+
+    assert list(definition.nodes) == [
+        "fetch_questions",
+        "clean_and_parse",
+        "generate_key_info",
+        "review_key_info",
+        "generate_possible_errors",
+        "review_possible_errors",
+        "assess_comprehension_difficulty",
+        "assemble_comprehension_info",
+    ]
+    assert definition.nodes["fetch_questions"].capability == "fetch_questions"
+    assert definition.nodes["clean_and_parse"].capability == "clean_and_parse"
+    assert definition.nodes["generate_key_info"].after == ["clean_and_parse"]
+    assert definition.nodes["review_key_info"].after == ["generate_key_info"]
+    assert definition.nodes["generate_possible_errors"].after == ["review_key_info"]
+    assert definition.nodes["review_possible_errors"].after == ["generate_possible_errors"]
+    assert definition.nodes["assess_comprehension_difficulty"].after == [
+        "review_key_info",
+        "review_possible_errors",
+    ]
+    assert definition.nodes["assemble_comprehension_info"].after == [
+        "assess_comprehension_difficulty"
+    ]
+    assert definition.nodes["assemble_comprehension_info"].outputs == [
+        "comprehension_info.json",
+        "manifest.json",
+    ]
