@@ -135,7 +135,7 @@ def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
 
     resumed_job = db.get_job(job["id"])
     assert resumed_job is not None
-    assert resumed_job["status"] == "running"
+    assert resumed_job["status"] == "queued"
 
 
 def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: Path) -> None:

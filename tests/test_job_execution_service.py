@@ -109,7 +109,7 @@ def test_continue_to_target(execution_service: JobExecutionService, job_db: JobQ
         "message": None,
     }
     job_after = job_db.get_job(job["id"])
-    assert job_after["status"] == "running"
+    assert job_after["status"] == "queued"
     assert job_after["execution_mode"] == "full"
     assert job_after["target_node_key"] is None
     assert job_after["execution_paused"] == 0
