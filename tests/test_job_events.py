@@ -345,8 +345,8 @@ def test_rerun_broadcasts_job_updated(manager):
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_node.return_value = False
     settings = MagicMock(spec=Settings)
-    pipelines = MagicMock(spec=WorkflowCatalogService)
-    pipelines.definition.return_value = WorkflowDefinition(
+    workflows = MagicMock(spec=WorkflowCatalogService)
+    workflows.definition.return_value = WorkflowDefinition(
         key="p1",
         label="P1",
         intake=WorkflowIntake(),
@@ -360,7 +360,7 @@ def test_rerun_broadcasts_job_updated(manager):
         job_db,
         lease_repo,
         settings,
-        pipelines,
+        workflows,
         artifact_service=artifact_service,
         job_event_manager=manager,
     )
@@ -380,12 +380,12 @@ def test_continue_job_broadcasts_job_updated(manager):
     job_db = FakeJobDB()
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     artifact_mutation = MagicMock(spec=JobArtifactMutationService)
-    pipelines = MagicMock(spec=WorkflowCatalogService)
+    workflows = MagicMock(spec=WorkflowCatalogService)
     service = JobExecutionService(
         job_db,
         artifact_mutation,
         lease_repo,
-        pipelines,
+        workflows,
         job_event_manager=manager,
     )
     queue = _ws1_queue(manager)
@@ -468,13 +468,13 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
     artifact_mutation = MagicMock(spec=JobArtifactMutationService)
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_job.return_value = False
-    pipelines = MagicMock(spec=WorkflowCatalogService)
+    workflows = MagicMock(spec=WorkflowCatalogService)
 
     service = JobExecutionService(
         job_db,
         artifact_mutation,
         lease_repo,
-        pipelines,
+        workflows,
         job_event_manager=manager,
     )
     simple_definition = WorkflowDefinition(
@@ -518,8 +518,8 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_node.return_value = False
     settings = MagicMock()
-    pipelines = MagicMock(spec=WorkflowCatalogService)
-    pipelines.definition.return_value = WorkflowDefinition(
+    workflows = MagicMock(spec=WorkflowCatalogService)
+    workflows.definition.return_value = WorkflowDefinition(
         key="p1",
         label="P1",
         intake=WorkflowIntake(),
@@ -530,7 +530,7 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
         job_db,
         lease_repo,
         settings,
-        pipelines,
+        workflows,
         artifact_service=artifact_service,
         job_event_manager=manager,
     )
