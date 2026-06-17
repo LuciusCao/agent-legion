@@ -2,10 +2,16 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useVideoStore } from '../stores/videoStore'
+import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
 import type { ExecutorRuntimeStatus } from '../workspaceTypes'
 import WorkspaceCard from '../components/WorkspaceCard'
 import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
 import DeleteWorkspaceDialog from '../components/DeleteWorkspaceDialog'
+
+function WorkspaceEventSubscriber({ workspaceId }: { workspaceId: string }) {
+  useWorkspaceEvents(workspaceId)
+  return null
+}
 
 export function DashboardPage() {
   const navigate = useNavigate()
@@ -93,23 +99,28 @@ export function DashboardPage() {
         />
 
         {workspaces.map((w) => (
-          <WorkspaceCard
-            key={w.id}
-            name={w.name}
-            pipelineLabel={
-              workspaceStats[w.id]?.pipeline_label || w.default_pipeline_key
-            }
-            jobStats={workspaceStats[w.id]?.job_stats || {}}
-            executorStatus={
-              workspaceStats[w.id]?.executor_status?.executors || []
-            }
-            onClick={() => navigate(`/workspaces/${w.id}`)}
-            onDelete={
-              w.id === 'default'
-                ? undefined
-                : () => openDeleteDialog(w.id, w.name)
-            }
-          />
+          <div key={w.id} style={{ display: 'contents' }}>
+            <WorkspaceEventSubscriber
+              key={`events-${w.id}`}
+              workspaceId={w.id}
+            />
+            <WorkspaceCard
+              name={w.name}
+              pipelineLabel={
+                workspaceStats[w.id]?.pipeline_label || w.default_pipeline_key
+              }
+              jobStats={workspaceStats[w.id]?.job_stats || {}}
+              executorStatus={
+                workspaceStats[w.id]?.executor_status?.executors || []
+              }
+              onClick={() => navigate(`/workspaces/${w.id}`)}
+              onDelete={
+                w.id === 'default'
+                  ? undefined
+                  : () => openDeleteDialog(w.id, w.name)
+              }
+            />
+          </div>
         ))}
       </div>
 

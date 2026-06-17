@@ -3,6 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
+import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
 import { WorkspaceStatCards } from '../components/WorkspaceStatCards'
 import { JobList } from '../components/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
@@ -53,6 +54,8 @@ export default function WorkspaceMainPage() {
     useState<PipelineDefinitionRecord | null>(null)
   const [pipelineError, setPipelineError] = useState<string | null>(null)
 
+  useWorkspaceEvents(workspaceId)
+
   useEffect(() => {
     if (workspaceId) {
       fetchWorkspaceStats(workspaceId)
@@ -62,10 +65,6 @@ export default function WorkspaceMainPage() {
   useEffect(() => {
     if (!workspaceId) return
     fetchJobs(workspaceId)
-    const interval = setInterval(() => {
-      fetchJobs(workspaceId)
-    }, 5000)
-    return () => clearInterval(interval)
   }, [workspaceId, fetchJobs])
 
   useEffect(() => {
