@@ -42,7 +42,7 @@ const defaultSettings: WorkspaceSettings = {
   entityType: 'question',
   intakeModes: [],
   labelOverrides: {},
-  pipelineKey: '',
+  workflowKey: '',
   resources: {},
 }
 
@@ -59,14 +59,14 @@ const initialExecutorConfiguration: WorkspaceExecutorConfiguration = {
   ],
   bindings: [
     {
-      pipeline_key: 'question_content',
+      workflow_key: 'question_content',
       node_key: 'ingest',
       executor_id: 'local-default',
     },
   ],
   node_limits: [
     {
-      pipeline_key: 'question_content',
+      workflow_key: 'question_content',
       node_key: 'ingest',
       concurrency_limit: 1,
     },
@@ -85,7 +85,7 @@ const defaultState: Partial<SettingState> = {
   isDirty: false,
   globalServices: null,
   resourceProviders: [],
-  pipelineDefinition: null,
+  workflowDefinition: null,
   testStatus: { state: 'idle' as const },
   isSaving: false,
   saveError: null,
@@ -108,15 +108,15 @@ describe('settingStore', () => {
   })
 
   it('updates settings via setSettings', () => {
-    useSettingStore.getState().setSettings({ pipelineKey: 'knowledge_content' })
-    expect(useSettingStore.getState().settings.pipelineKey).toBe(
+    useSettingStore.getState().setSettings({ workflowKey: 'knowledge_content' })
+    expect(useSettingStore.getState().settings.workflowKey).toBe(
       'knowledge_content'
     )
   })
 
   it('clears stale node configuration when the pipeline changes', () => {
     useSettingStore.setState({
-      pipelineDefinition: {
+      workflowDefinition: {
         key: 'question_content',
         label: 'Question Content',
         intake: { modes: [] },
@@ -127,10 +127,10 @@ describe('settingStore', () => {
       originalExecutorConfiguration: initialExecutorConfiguration,
     })
 
-    useSettingStore.getState().setSettings({ pipelineKey: 'reading_analysis' })
+    useSettingStore.getState().setSettings({ workflowKey: 'reading_analysis' })
 
     const state = useSettingStore.getState()
-    expect(state.pipelineDefinition).toBeNull()
+    expect(state.workflowDefinition).toBeNull()
     expect(state.executorConfiguration.allocations).toEqual(
       initialExecutorConfiguration.allocations
     )
@@ -167,7 +167,7 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       originalExecutorConfiguration: initialExecutorConfiguration,
     })
-    useSettingStore.getState().setSettings({ pipelineKey: 'knowledge_content' })
+    useSettingStore.getState().setSettings({ workflowKey: 'knowledge_content' })
     expect(useSettingStore.getState().isDirty).toBe(true)
   })
 
@@ -247,7 +247,7 @@ describe('settingStore', () => {
           entityType: 'knowledge',
           intakeModes: ['direct_ids'],
           labelOverrides: { direct_ids: '输入 ID' },
-          pipelineKey: 'knowledge_content',
+          workflowKey: 'knowledge_content',
           resources: {
             question_detail: { enabled: true, config: { bank_version: 'v5' } },
           },
@@ -276,7 +276,7 @@ describe('settingStore', () => {
     expect(state.settings.entityType).toBe('knowledge')
     expect(state.settings.intakeModes).toEqual(['direct_ids'])
     expect(state.settings.labelOverrides).toEqual({ direct_ids: '输入 ID' })
-    expect(state.settings.pipelineKey).toBe('knowledge_content')
+    expect(state.settings.workflowKey).toBe('knowledge_content')
     expect(state.settings.resources).toEqual({
       question_detail: { enabled: true, config: { bank_version: 'v5' } },
     })
@@ -363,7 +363,7 @@ describe('settingStore', () => {
       workspace: { name: 'Test', description: 'Desc' },
       settings: {
         ...defaultSettings,
-        pipelineKey: 'question_content',
+        workflowKey: 'question_content',
         intakeModes: ['direct_ids'],
         resources: { question_detail: { enabled: true, config: {} } },
       },
@@ -377,14 +377,14 @@ describe('settingStore', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'ingest',
             executor_id: 'local-default',
           },
         ],
         node_limits: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'ingest',
             concurrency_limit: 2,
           },
@@ -400,7 +400,7 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       settings: {
         ...defaultSettings,
-        pipelineKey: 'question_content',
+        workflowKey: 'question_content',
         intakeModes: ['direct_ids'],
         resources: { question_detail: { enabled: true, config: {} } },
       },
@@ -420,14 +420,14 @@ describe('settingStore', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'ingest',
             executor_id: 'local-default',
           },
         ],
         node_limits: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'ingest',
             concurrency_limit: 2,
           },
@@ -453,14 +453,14 @@ describe('settingStore', () => {
       ],
       node_bindings: [
         {
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
           node_key: 'ingest',
           executor_id: 'local-default',
         },
       ],
       node_limits: [
         {
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
           node_key: 'ingest',
           concurrency_limit: 2,
         },
@@ -486,7 +486,7 @@ describe('settingStore', () => {
       workspace: { name: 'Saved', description: 'Saved Desc' },
       settings: {
         ...defaultSettings,
-        pipelineKey: 'question_content',
+        workflowKey: 'question_content',
       },
       executor_configuration: responseConfiguration,
     })
@@ -498,7 +498,7 @@ describe('settingStore', () => {
       originalSettings: defaultSettings,
       settings: {
         ...defaultSettings,
-        pipelineKey: 'question_content',
+        workflowKey: 'question_content',
       },
       originalExecutorConfiguration: {
         allocations: [],
@@ -561,10 +561,10 @@ describe('settingStore', () => {
     const binding = useSettingStore
       .getState()
       .executorConfiguration.bindings.find(
-        (b) => b.pipeline_key === 'question_content' && b.node_key === 'parse'
+        (b) => b.workflow_key === 'question_content' && b.node_key === 'parse'
       )
     expect(binding).toEqual({
-      pipeline_key: 'question_content',
+      workflow_key: 'question_content',
       node_key: 'parse',
       executor_id: 'other-executor',
     })
@@ -581,12 +581,12 @@ describe('settingStore', () => {
     const state = useSettingStore.getState()
     expect(
       state.executorConfiguration.bindings.some(
-        (b) => b.pipeline_key === 'question_content' && b.node_key === 'ingest'
+        (b) => b.workflow_key === 'question_content' && b.node_key === 'ingest'
       )
     ).toBe(false)
     expect(
       state.executorConfiguration.node_limits.some(
-        (l) => l.pipeline_key === 'question_content' && l.node_key === 'ingest'
+        (l) => l.workflow_key === 'question_content' && l.node_key === 'ingest'
       )
     ).toBe(false)
   })
@@ -600,7 +600,7 @@ describe('settingStore', () => {
     const limit = useSettingStore
       .getState()
       .executorConfiguration.node_limits.find(
-        (l) => l.pipeline_key === 'question_content' && l.node_key === 'ingest'
+        (l) => l.workflow_key === 'question_content' && l.node_key === 'ingest'
       )
     expect(limit?.concurrency_limit).toBe(3)
   })
@@ -616,7 +616,7 @@ describe('settingStore', () => {
         .getState()
         .executorConfiguration.node_limits.some(
           (l) =>
-            l.pipeline_key === 'question_content' && l.node_key === 'ingest'
+            l.workflow_key === 'question_content' && l.node_key === 'ingest'
         )
     ).toBe(false)
   })
@@ -653,24 +653,24 @@ describe('settingStore', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'ingest',
             executor_id: 'local-default',
           },
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'parse',
             executor_id: 'other-executor',
           },
         ],
         node_limits: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'ingest',
             concurrency_limit: 1,
           },
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'parse',
             concurrency_limit: 1,
           },

@@ -53,7 +53,7 @@ describe('workspaceStore', () => {
       {
         id: 'ws1',
         name: 'Test Workspace',
-        default_pipeline_key: 'question_content',
+        default_workflow_key: 'question_content',
         default_entity: 'question',
       },
     ]
@@ -79,7 +79,7 @@ describe('workspaceStore', () => {
     const ws: WorkspaceRecord = {
       id: 'ws2',
       name: 'New Workspace',
-      default_pipeline_key: 'question_content',
+      default_workflow_key: 'question_content',
       default_entity: 'question',
     }
     mockCreateWorkspace.mockResolvedValueOnce(ws)
@@ -106,13 +106,13 @@ describe('workspaceStore', () => {
     const existing: WorkspaceRecord = {
       id: 'ws1',
       name: 'Old',
-      default_pipeline_key: 'question_content',
+      default_workflow_key: 'question_content',
       default_entity: 'question',
     }
     const updated: WorkspaceRecord = {
       id: 'ws1',
       name: 'Old',
-      default_pipeline_key: 'question_content',
+      default_workflow_key: 'question_content',
       default_entity: 'question',
       cms_config: { subject_id: '5' },
     }
@@ -137,13 +137,13 @@ describe('workspaceStore', () => {
         {
           id: 'ws1',
           name: 'A',
-          default_pipeline_key: 'question_content',
+          default_workflow_key: 'question_content',
           default_entity: 'question',
         },
         {
           id: 'ws2',
           name: 'B',
-          default_pipeline_key: 'question_content',
+          default_workflow_key: 'question_content',
           default_entity: 'question',
         },
       ],
@@ -170,7 +170,7 @@ describe('workspaceStore', () => {
     const ws: WorkspaceRecord = {
       id: 'ws1',
       name: 'Current',
-      default_pipeline_key: 'question_content',
+      default_workflow_key: 'question_content',
       default_entity: 'question',
     }
     useWorkspaceStore.getState().setCurrentWorkspace(ws)
@@ -181,8 +181,8 @@ describe('workspaceStore', () => {
     const stats: WorkspaceStats = {
       workspace_id: 'ws1',
       name: 'Test Workspace',
-      pipeline_key: 'question_content',
-      pipeline_label: 'Question Content',
+      workflow_key: 'question_content',
+      workflow_label: 'Question Content',
       job_stats: {
         total_jobs: 10,
         pending: 3,

@@ -31,18 +31,18 @@ vi.mock('../stores/workspaceStore', () => ({
       {
         id: 'ws1',
         name: '测试空间',
-        default_pipeline_key: 'question_content',
+        default_workflow_key: 'question_content',
         default_entity: 'question',
       },
     ],
     currentWorkspace: {
       id: 'ws1',
       name: '测试空间',
-      default_pipeline_key: 'question_content',
+      default_workflow_key: 'question_content',
       default_entity: 'question',
     },
     workspaceStats: {
-      ws1: { pipeline_key: 'question_content', job_stats: {} },
+      ws1: { workflow_key: 'question_content', job_stats: {} },
     },
     fetchWorkspaces: vi.fn(),
     setCurrentWorkspace: vi.fn(),
