@@ -76,14 +76,14 @@ def _collect_legacy_data(conn: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     workspaces: dict[str, dict[str, Any]] = {}
     try:
         rows = conn.execute(
-            "select id, default_pipeline_key, pipeline_config_json from workspaces"
+            "select id, default_workflow_key, pipeline_config_json from workspaces"
         ).fetchall()
         for row in rows:
             pipeline_config, pipeline_config_error = _decode_json_object(
                 row["pipeline_config_json"]
             )
             workspaces[row["id"]] = {
-                "default_pipeline_key": row["default_pipeline_key"],
+                "default_workflow_key": row["default_workflow_key"],
                 "pipeline_config": pipeline_config,
                 "pipeline_config_error": pipeline_config_error,
                 "agent_assignments": [],
@@ -139,15 +139,15 @@ def _preflight_workspace(
         )
         return issues
 
-    pipeline_key = workspace["default_pipeline_key"]
-    definition = definitions_by_key.get(pipeline_key)
+    workflow_key = workspace["default_workflow_key"]
+    definition = definitions_by_key.get(workflow_key)
     if definition is None:
         issues.append(
             MigrationIssue(
                 table="workspaces",
                 row_key=workspace_id,
-                constraint="default_pipeline_key",
-                message=f"pipeline {pipeline_key!r} has no registered definition",
+                constraint="default_workflow_key",
+                message=f"pipeline {workflow_key!r} has no registered definition",
             )
         )
         return issues
@@ -314,7 +314,7 @@ def _materialize_workspace(
             if binding_key not in existing.bindings:
                 conn.execute(
                     """
-                    insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id)
+                    insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id)
                     values (?, ?, ?, ?)
                     """,
                     (workspace_id, definition.key, node.key, _DEFAULT_LOCAL_EXECUTOR_ID),
@@ -326,7 +326,7 @@ def _materialize_workspace(
                     node_limit = 1
                 conn.execute(
                     """
-                    insert into workspace_node_limits (workspace_id, pipeline_key, node_key, concurrency_limit)
+                    insert into workspace_node_limits (workspace_id, workflow_key, node_key, concurrency_limit)
                     values (?, ?, ?, ?)
                     """,
                     (workspace_id, definition.key, node.key, int(node_limit)),  # type: ignore[arg-type]
@@ -334,7 +334,7 @@ def _materialize_workspace(
         elif pi_supported and needs_pi and binding_key not in existing.bindings:
             conn.execute(
                 """
-                insert into workspace_node_bindings (workspace_id, pipeline_key, node_key, executor_id)
+                insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id)
                 values (?, ?, ?, ?)
                 """,
                 (workspace_id, definition.key, node.key, _DEFAULT_PI_EXECUTOR_ID),
@@ -392,7 +392,7 @@ def finalize_legacy_executor_schema(
         backup_sqlite_connection(conn, backup_path)
 
     for workspace_id, workspace in workspaces.items():
-        definition = definitions_by_key.get(workspace["default_pipeline_key"])
+        definition = definitions_by_key.get(workspace["default_workflow_key"])
         if definition is None:
             continue
         existing = collect_existing_configuration(conn, workspace_id)

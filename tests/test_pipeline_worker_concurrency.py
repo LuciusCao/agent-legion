@@ -223,7 +223,7 @@ def test_same_node_submitted_once(tmp_path: Path) -> None:
     definition = _make_definition([_local_node("fetch")])
 
     job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -263,7 +263,7 @@ def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
 
     for i in range(2):
         job_db.create_job(
-            pipeline_key="test",
+            workflow_key="test",
             source_type="question",
             source_id=f"Q{i}",
             batch_id="",
@@ -304,7 +304,7 @@ def test_workspace_limit_does_not_reserve_unused_global_capacity(tmp_path: Path)
 
     for i in range(2):
         job_db.create_job(
-            pipeline_key="test",
+            workflow_key="test",
             source_type="question",
             source_id=f"QB{i}",
             batch_id="",
@@ -342,7 +342,7 @@ def test_two_agent_nodes_share_workspace_executor_limit(tmp_path: Path) -> None:
     definition = _make_definition([_agent_node("agent_a"), _agent_node("agent_b")])
 
     job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -382,7 +382,7 @@ def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
     for workspace in [ws_a, ws_b]:
         for i in range(2):
             job_db.create_job(
-                pipeline_key="test",
+                workflow_key="test",
                 source_type="question",
                 source_id=f"{workspace['id']}_{i}",
                 batch_id="",
@@ -423,7 +423,7 @@ def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
 
     for i in range(2):
         job_db.create_job(
-            pipeline_key="test",
+            workflow_key="test",
             source_type="question",
             source_id=f"QA{i}",
             batch_id="",
@@ -432,7 +432,7 @@ def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
             workspace_id=ws_a["id"],
         )
     job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="QB0",
         batch_id="",
@@ -470,7 +470,7 @@ def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
     definition = _make_definition([_local_node("fetch")])
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -511,7 +511,7 @@ def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -
     )
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -556,7 +556,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
     ws = job_db.create_workspace("Test WS")
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -578,7 +578,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
             global_capacity=2,
             workspace_id=ws["id"],
             job_id=job["id"],
-            pipeline_key="test",
+            workflow_key="test",
             node_key="root",
             capability="root",
             local_node_limit=1,
@@ -613,7 +613,7 @@ def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Pat
     definition = _make_definition([_local_node("fetch")])
 
     job = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -648,7 +648,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
     definition = _make_definition([_local_node("fetch")])
 
     job1 = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -657,7 +657,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
         workspace_id=ws["id"],
     )
     job2 = job_db.create_job(
-        pipeline_key="test",
+        workflow_key="test",
         source_type="question",
         source_id="Q2",
         batch_id="",
@@ -674,7 +674,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
         global_capacity=1,
         workspace_id=ws["id"],
         job_id=job1["id"],
-        pipeline_key="test",
+        workflow_key="test",
         node_key="fetch",
         capability="fetch",
         local_node_limit=None,
@@ -691,7 +691,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
             global_capacity=1,
             workspace_id=ws["id"],
             job_id=job2["id"],
-            pipeline_key="test",
+            workflow_key="test",
             node_key="fetch",
             capability="fetch",
             local_node_limit=None,

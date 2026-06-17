@@ -48,7 +48,7 @@ def test_legacy_database_gains_execution_control_defaults(tmp_path: Path) -> Non
               id text primary key,
               name text not null,
               description text not null default '',
-              default_pipeline_key text not null default 'question_content',
+              default_workflow_key text not null default 'question_content',
               cms_config_json text not null default '{}',
               resource_config_json text not null default '{}',
               created_at text not null default current_timestamp,
@@ -60,7 +60,7 @@ def test_legacy_database_gains_execution_control_defaults(tmp_path: Path) -> Non
             create table jobs (
               id text primary key,
               workspace_id text not null default 'default',
-              pipeline_key text not null,
+              workflow_key text not null,
               source_type text not null,
               source_id text not null,
               batch_id text not null default '',
@@ -73,7 +73,7 @@ def test_legacy_database_gains_execution_control_defaults(tmp_path: Path) -> Non
               updated_at text not null default current_timestamp
             );
             insert into jobs(
-              id, workspace_id, pipeline_key, source_type, source_id, batch_id,
+              id, workspace_id, workflow_key, source_type, source_id, batch_id,
               title, status, storage_dir, error_message, stem
             ) values (
               'job1', 'ws1', 'reading_analysis', 'question_id', 'Q1', 'batch1',
@@ -129,7 +129,7 @@ def test_v006_execution_mode_check_constraint(tmp_path: Path) -> None:
               id text primary key,
               name text not null,
               description text not null default '',
-              default_pipeline_key text not null default 'question_content',
+              default_workflow_key text not null default 'question_content',
               cms_config_json text not null default '{}',
               resource_config_json text not null default '{}',
               created_at text not null default current_timestamp,
@@ -146,7 +146,7 @@ def test_v006_execution_mode_check_constraint(tmp_path: Path) -> None:
 
     with closing(connect_sqlite(path)) as conn, conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, execution_mode) "
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, execution_mode) "
             "values ('job1', 'ws1', 'reading_analysis', 'question_id', 'Q1', 'until_node')"
         )
         job = conn.execute("select * from jobs where id = 'job1'").fetchone()
@@ -155,6 +155,6 @@ def test_v006_execution_mode_check_constraint(tmp_path: Path) -> None:
 
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
-                "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, execution_mode) "
+                "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, execution_mode) "
                 "values ('job2', 'ws1', 'reading_analysis', 'question_id', 'Q2', 'targeted')"
             )

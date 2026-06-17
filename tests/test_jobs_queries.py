@@ -19,7 +19,7 @@ def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = db.create_workspace("Cascade Workspace")
     job = db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q-CASCADE",
         batch_id="",
@@ -47,7 +47,7 @@ def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = db.create_workspace("Target Workspace")
     job = db.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question_id",
         source_id="Q-TARGET",
         batch_id="",
@@ -80,7 +80,7 @@ def test_pause_and_resume_job(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = db.create_workspace("Pause Workspace")
     job = db.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question_id",
         source_id="Q-PAUSE",
         batch_id="",
@@ -108,7 +108,7 @@ def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = db.create_workspace("Continue Workspace")
     job = db.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question_id",
         source_id="Q-CONTINUE",
         batch_id="",
@@ -142,7 +142,7 @@ def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: P
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = db.create_workspace("Validation Workspace")
     job = db.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question_id",
         source_id="Q-VALID",
         batch_id="",
@@ -172,7 +172,7 @@ def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = db.create_workspace("UpdatedAt Workspace")
     job = db.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question_id",
         source_id="Q-UPDATED",
         batch_id="",

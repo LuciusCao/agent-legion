@@ -69,7 +69,7 @@ class JobExecutionControlMixin:
             raise ValueError("target_node_key is required")
         with self.connect() as conn:
             job = conn.execute(
-                "select pipeline_key from jobs where id=?",
+                "select workflow_key from jobs where id=?",
                 (job_id,),
             ).fetchone()
             if job is None:

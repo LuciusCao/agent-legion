@@ -10,12 +10,12 @@ def test_create_batch_and_question_jobs(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
 
     batch = queries.create_batch(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_kind="mixed",
         source_payload={"knowledge_codes": ["K001"], "question_ids": ["Q001"]},
     )
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q001",
         batch_id=batch["id"],
@@ -23,7 +23,7 @@ def test_create_batch_and_question_jobs(tmp_path):
         node_keys=["fetch_question_context", "assemble_package"],
     )
 
-    assert batch["pipeline_key"] == "question_content"
+    assert batch["workflow_key"] == "question_content"
     assert batch["workspace_id"] == "default"
     assert job["id"] == "default_question_content_Q001"
     assert job["workspace_id"] == "default"
@@ -41,7 +41,7 @@ def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
     workspace = queries.create_workspace("Math Sprint")
 
     default_job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q100",
         batch_id="",
@@ -49,7 +49,7 @@ def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
         node_keys=["fetch_question_context"],
     )
     workspace_job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q100",
         batch_id="",
@@ -74,7 +74,7 @@ def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
 def test_node_run_lifecycle(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q002",
         batch_id="",
@@ -98,7 +98,7 @@ def test_start_node_run_claims_each_node_only_once(tmp_path):
     first = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     second = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     job = first.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q-CLAIM",
         batch_id="",
@@ -117,7 +117,7 @@ def test_start_node_run_claims_each_node_only_once(tmp_path):
 def test_create_job_rejects_identity_collision(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q003",
         batch_id="",
@@ -127,7 +127,7 @@ def test_create_job_rejects_identity_collision(tmp_path):
 
     with pytest.raises(ValueError, match="identity collision"):
         queries.create_job(
-            pipeline_key="question_content",
+            workflow_key="question_content",
             source_type="knowledge_code",
             source_id="Q003",
             batch_id="",
@@ -139,7 +139,7 @@ def test_create_job_rejects_identity_collision(tmp_path):
 def test_start_node_run_rejects_missing_node(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q004",
         batch_id="",
@@ -157,7 +157,7 @@ def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q200",
         batch_id="",
@@ -197,7 +197,7 @@ def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
 def test_mark_node_for_rerun_rejects_missing_persisted_node(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q202",
         batch_id="",
@@ -212,7 +212,7 @@ def test_mark_node_for_rerun_rejects_missing_persisted_node(tmp_path):
 def test_start_node_run_clears_stale_reason(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q203",
         batch_id="",
@@ -238,7 +238,7 @@ def test_start_node_run_clears_stale_reason(tmp_path):
 def test_start_node_run_persists_run_and_session_directories(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question_id",
         source_id="Q203",
         batch_id="",

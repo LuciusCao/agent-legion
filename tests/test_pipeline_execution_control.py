@@ -130,7 +130,7 @@ def _claim_request(
         global_capacity=global_capacity,
         workspace_id=workspace_id,
         job_id=job_id,
-        pipeline_key=pipeline_key,
+        workflow_key=pipeline_key,
         node_key=node_key,
         capability=capability,
         local_node_limit=local_node_limit,
@@ -148,10 +148,10 @@ def _setup_workspace(
     target_node_key: str | None = None,
     executor_id: str = "local-default",
 ) -> tuple[str, str]:
-    workspace = queries.create_workspace(name="control-ws", default_pipeline_key="branched")
+    workspace = queries.create_workspace(name="control-ws", default_workflow_key="branched")
     workspace_id = workspace["id"]
     job = queries.create_job(
-        pipeline_key="branched",
+        workflow_key="branched",
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -436,10 +436,10 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
     tmp_path: Path,
 ) -> None:
     definition = _branched_definition()
-    workspace = queries.create_workspace(name="worker-control-ws", default_pipeline_key="branched")
+    workspace = queries.create_workspace(name="worker-control-ws", default_workflow_key="branched")
     workspace_id = workspace["id"]
     job = queries.create_job(
-        pipeline_key="branched",
+        workflow_key="branched",
         source_type="question",
         source_id="Q1",
         batch_id="",

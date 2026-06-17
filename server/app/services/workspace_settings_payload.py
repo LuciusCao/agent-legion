@@ -20,6 +20,6 @@ def workspace_settings_payload(workspace: dict[str, Any]) -> dict[str, Any]:
         "entityType": str(workspace.get("default_entity") or "question"),
         "intakeModes": enabled_modes if isinstance(enabled_modes, list) else [],
         "labelOverrides": label_overrides if isinstance(label_overrides, dict) else {},
-        "pipelineKey": str(workspace.get("default_pipeline_key") or "question_content"),
+        "pipelineKey": str(workspace.get("default_workflow_key") or "question_content"),
         "resources": resources,
     }

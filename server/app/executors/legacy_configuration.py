@@ -19,13 +19,13 @@ def collect_existing_configuration(
     ).fetchall():
         result.allocations.add(row["executor_id"])
     for row in conn.execute(
-        "select pipeline_key, node_key from workspace_node_bindings where workspace_id = ?",
+        "select workflow_key, node_key from workspace_node_bindings where workspace_id = ?",
         (workspace_id,),
     ).fetchall():
-        result.bindings.add((row["pipeline_key"], row["node_key"]))
+        result.bindings.add((row["workflow_key"], row["node_key"]))
     for row in conn.execute(
-        "select pipeline_key, node_key from workspace_node_limits where workspace_id = ?",
+        "select workflow_key, node_key from workspace_node_limits where workspace_id = ?",
         (workspace_id,),
     ).fetchall():
-        result.node_limits.add((row["pipeline_key"], row["node_key"]))
+        result.node_limits.add((row["workflow_key"], row["node_key"]))
     return result

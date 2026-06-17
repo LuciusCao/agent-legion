@@ -24,13 +24,12 @@ def run_migrations(
     """Run pending migrations; ``_phase_hook`` is internal test-only failure injection."""
     migration_tuple: tuple[Migration, ...] = tuple(migrations or ())
     registry = validate_registry(migration_tuple)
-    sorted_migrations = tuple(sorted(migration_tuple, key=lambda m: m.version))
     token = _set_phase_hook(_phase_hook)
     try:
         ensure_foreign_keys(conn)
         applied = load_applied(conn)
         check_history(applied, registry)
-        for migration in sorted_migrations:
+        for migration in sorted(migration_tuple, key=lambda m: m.version):
             if migration.version in applied:
                 continue
             logger.info("Applying migration %d: %s", migration.version, migration.name)

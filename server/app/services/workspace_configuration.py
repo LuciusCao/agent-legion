@@ -40,7 +40,7 @@ class WorkspaceConfigurationService:
         try:
             return self.job_db.create_workspace(
                 payload["name"],
-                default_pipeline_key=payload["default_pipeline_key"],
+                default_workflow_key=payload["default_pipeline_key"],
                 default_entity=payload.get("default_entity", "question"),
                 cms_config=payload.get("cms_config", {}),
                 resource_config=payload.get("resource_config", {}),
@@ -61,7 +61,7 @@ class WorkspaceConfigurationService:
                 workspace_id,
                 name=payload.get("name"),
                 description=payload.get("description"),
-                default_pipeline_key=payload.get("default_pipeline_key"),
+                default_workflow_key=payload.get("default_pipeline_key"),
                 default_entity=payload.get("default_entity"),
                 cms_config=payload.get("cms_config"),
                 resource_config=payload.get("resource_config"),
@@ -96,12 +96,21 @@ class WorkspaceConfigurationService:
         pipeline_key = settings_patch.get("pipelineKey") or str(current["pipelineKey"])
         pipeline = self.pipelines.definition(pipeline_key)
 
+        def _map_binding(row: dict[str, Any]) -> dict[str, Any]:
+            return {
+                "workflow_key" if k == "pipeline_key" else k: v
+                for k, v in row.items()
+            }
+
+        mapped_bindings = [_map_binding(b) for b in node_bindings]
+        mapped_limits = [_map_binding(n) for n in node_limits]
+
         validate_workspace_executor_configuration(
             pipeline=pipeline,
             executor_definitions=self.settings.executor_definitions,
             allocations=executor_allocations,
-            bindings=node_bindings,
-            node_limits=node_limits,
+            bindings=mapped_bindings,
+            node_limits=mapped_limits,
         )
         name_value = workspace_patch.get("name")
         name: str = name_value if name_value is not None else str(workspace["name"])
@@ -116,7 +125,7 @@ class WorkspaceConfigurationService:
                 workspace_id,
                 name=name,
                 description=description,
-                default_pipeline_key=pipeline_key,
+                default_workflow_key=pipeline_key,
                 default_entity=settings_patch.get("entityType") or str(current["entityType"]),
                 resource_config={
                     "resources": settings_patch.get("resources")
@@ -132,8 +141,8 @@ class WorkspaceConfigurationService:
                     else current["labelOverrides"],
                 },
                 executor_allocations=executor_allocations,
-                node_bindings=node_bindings,
-                node_limits=node_limits,
+                node_bindings=mapped_bindings,
+                node_limits=mapped_limits,
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
@@ -196,7 +205,7 @@ class WorkspaceConfigurationService:
                 self.pipelines.definition(patch["pipelineKey"])
             workspace = self.job_db.update_workspace(
                 workspace_id,
-                default_pipeline_key=patch.get("pipelineKey"),
+                default_workflow_key=patch.get("pipelineKey"),
             )
         else:
             raise NotFoundError("Unknown settings section")
@@ -211,7 +220,7 @@ class WorkspaceConfigurationService:
 
     def stats(self, workspace_id: str) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        pipeline_key = workspace.get("default_pipeline_key", "question_content")
+        pipeline_key = workspace.get("default_workflow_key", "question_content")
         latest_run = self.job_db.get_latest_node_run_for_workspace(workspace_id)
         executors = []
         for count in self.job_db.get_workspace_executor_runtime_counts(workspace_id):

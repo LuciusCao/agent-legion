@@ -46,12 +46,12 @@ def test_executor_lease_repository_closes_connections(tmp_path: Path) -> None:
     init_db(path)
 
     queries = JobQueries(path, jobs_dir)
-    queries.create_workspace("lifecycle", default_pipeline_key="reading_analysis")
+    queries.create_workspace("lifecycle", default_workflow_key="reading_analysis")
     queries.update_workspace_configuration(
         "lifecycle",
         name="lifecycle",
         description="",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
         default_entity="question",
         resource_config={},
         intake_config={},
@@ -87,7 +87,7 @@ def test_executor_lease_repository_closes_connections(tmp_path: Path) -> None:
         global_capacity=1,
         workspace_id="lifecycle",
         job_id="lifecycle_reading_analysis_q1",
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         node_key="extract_keywords",
         capability="extract_keywords",
         local_node_limit=1,

@@ -73,7 +73,7 @@ def init_db(path: Path) -> None:
                   id text primary key,
                   name text not null,
                   description text not null default '',
-                  default_pipeline_key text not null default 'question_content',
+                  default_workflow_key text not null default 'question_content',
                   cms_config_json text not null default '{}',
                   resource_config_json text not null default '{}',
                   created_at text not null default current_timestamp,
@@ -84,7 +84,7 @@ def init_db(path: Path) -> None:
                 create table if not exists job_batches (
                   id text primary key,
                   workspace_id text not null default 'default',
-                  pipeline_key text not null,
+                  workflow_key text not null,
                   source_kind text not null,
                   source_payload_json text not null default '{}',
                   status text not null default 'created',
@@ -96,7 +96,7 @@ def init_db(path: Path) -> None:
                 create table if not exists jobs (
                   id text primary key,
                   workspace_id text not null default 'default',
-                  pipeline_key text not null,
+                  workflow_key text not null,
                   source_type text not null,
                   source_id text not null,
                   batch_id text not null default '',
@@ -141,9 +141,13 @@ def init_db(path: Path) -> None:
                 );
                 """,
             )
+
+        run_migrations(conn, MIGRATIONS)
+
+        with conn:
             conn.execute(
                 """
-                insert into workspaces(id, name, default_pipeline_key)
+                insert into workspaces(id, name, default_workflow_key)
                 values ('default', '默认工作空间', 'reading_analysis')
                 on conflict(id) do nothing
                 """
@@ -151,17 +155,13 @@ def init_db(path: Path) -> None:
             conn.execute(
                 """
                 update workspaces
-                set default_pipeline_key = 'reading_analysis'
-                where id = 'default' and default_pipeline_key = 'question_content'
+                set default_workflow_key = 'reading_analysis'
+                where id = 'default' and default_workflow_key = 'question_content'
                 """
             )
-
-        run_migrations(conn, MIGRATIONS)
-
-        with conn:
             conn.execute(
                 """
-                insert or ignore into workspaces(id, name, default_pipeline_key, default_entity)
+                insert or ignore into workspaces(id, name, default_workflow_key, default_entity)
                 values ('question_comprehension', '题目审题信息', 'question_comprehension_info', 'question')
                 """
             )
@@ -177,12 +177,12 @@ def init_db(path: Path) -> None:
             create index if not exists idx_phase_runs_video_id on phase_runs(video_id);
             create index if not exists idx_phase_runs_video_id_status on phase_runs(video_id, status);
             create index if not exists idx_transcription_runs_video_id on transcription_runs(video_id);
-            create index if not exists idx_jobs_pipeline_status on jobs(pipeline_key, status);
-            create index if not exists idx_jobs_source on jobs(pipeline_key, source_type, source_id);
+            create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status);
+            create index if not exists idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id);
             create index if not exists idx_workspaces_created_at on workspaces(created_at);
             create index if not exists idx_job_batches_workspace on job_batches(workspace_id, created_at);
-            create index if not exists idx_jobs_workspace_pipeline_status on jobs(workspace_id, pipeline_key, status);
-            create index if not exists idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id);
+            create index if not exists idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status);
+            create index if not exists idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id);
             create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
             create index if not exists idx_node_runs_job_id on node_runs(job_id);
             """,

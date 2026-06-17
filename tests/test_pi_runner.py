@@ -198,7 +198,7 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
     db_path = tmp_path / "jobs.sqlite"
     job_db = JobQueries(db_path, tmp_path / "jobs")
     job = job_db.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q1",
         batch_id="b1",

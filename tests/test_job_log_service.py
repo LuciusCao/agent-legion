@@ -16,7 +16,7 @@ def _create_job_with_run(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     workspace = job_db.create_workspace("Test WS")
     job = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q001",
         batch_id="batch-1",
@@ -139,7 +139,7 @@ def test_job_log_service_rejects_run_from_other_job(log_service):
 
     workspace = job_db.create_workspace("Other WS")
     other_job = job_db.create_job(
-        pipeline_key="question_content",
+        workflow_key="question_content",
         source_type="question",
         source_id="Q002",
         batch_id="batch-2",

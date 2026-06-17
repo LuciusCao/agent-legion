@@ -64,8 +64,8 @@ class JobExecutionService:
     def _has_active_lease(self, job_id: str) -> bool:
         return self.lease_repo.has_active_for_job(job_id, self._now())
 
-    def _definition(self, pipeline_key: str) -> PipelineDefinition:
-        return self.pipelines.definition(pipeline_key)
+    def _definition(self, workflow_key: str) -> PipelineDefinition:
+        return self.pipelines.definition(workflow_key)
 
     def run_to(
         self,
@@ -89,7 +89,7 @@ class JobExecutionService:
                 f"Job does not belong to workspace {workspace_id}",
             )
 
-        definition = self._definition(str(job["pipeline_key"]))
+        definition = self._definition(str(job["workflow_key"]))
         if target_node_key not in definition.nodes:
             return self._result(
                 job_id,

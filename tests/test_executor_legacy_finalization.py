@@ -187,7 +187,7 @@ def _fetch_all_node_limits(queries: JobQueries) -> list[dict]:
 def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> None:
     workspace = queries.create_workspace(
         name="Local Workspace",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )
     workspace_id = str(workspace["id"])
     _set_pipeline_config(queries, workspace_id, {"local": 4})
@@ -242,7 +242,7 @@ def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> Non
 def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None:
     workspace = queries.create_workspace(
         name="Pi Workspace",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )
     workspace_id = str(workspace["id"])
     _set_pipeline_config(queries, workspace_id, {"nodes": {"local_a": 1}})
@@ -280,7 +280,7 @@ def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None
 def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Authoritative",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 99)
 
@@ -312,7 +312,7 @@ def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) ->
 def test_finalizer_blocks_on_unknown_agent(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Unknown Agent",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "unknown", 2)
 
@@ -327,7 +327,7 @@ def test_finalizer_blocks_on_unknown_agent(queries: JobQueries) -> None:
 def test_finalizer_blocks_on_invalid_legacy_limit(queries: JobQueries) -> None:
     workspace = queries.create_workspace(
         name="Bad Limit",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )
     _set_pipeline_config(queries, str(workspace["id"]), {"local": 0})
 
@@ -344,7 +344,7 @@ def test_finalizer_blocks_on_invalid_pipeline_config_json(
 ) -> None:
     workspace_id = queries.create_workspace(
         name=f"Invalid JSON {raw_value}",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )["id"]
     with queries.connect() as conn:
         conn.execute(
@@ -369,7 +369,7 @@ def test_finalizer_blocks_on_invalid_pipeline_config_json(
 def test_finalizer_blocks_on_missing_pipeline_definition(queries: JobQueries) -> None:
     queries.create_workspace(
         name="Missing Pipeline",
-        default_pipeline_key="nonexistent",
+        default_workflow_key="nonexistent",
     )
 
     with pytest.raises(MigrationBlockedError) as exc_info, queries.connect() as conn:
@@ -382,7 +382,7 @@ def test_finalizer_blocks_on_missing_pipeline_definition(queries: JobQueries) ->
 def test_finalizer_is_idempotent_after_v005(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Idempotent",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 3)
 
@@ -408,7 +408,7 @@ def test_finalizer_is_idempotent_after_v005(queries: JobQueries) -> None:
 def test_finalizer_does_not_bind_unallocated_agent_nodes(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Unallocated Agent",
-        default_pipeline_key="question_content",
+        default_workflow_key="question_content",
     )["id"]
 
     with queries.connect() as conn:
@@ -428,7 +428,7 @@ def test_finalizer_does_not_bind_unallocated_agent_nodes(queries: JobQueries) ->
 def test_finalizer_applies_v005_and_removes_pipeline_config_json(queries: JobQueries) -> None:
     workspace = queries.create_workspace(
         name="V005",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )
     _set_pipeline_config(queries, str(workspace["id"]), {"local": 7})
 
@@ -449,7 +449,7 @@ def test_finalizer_applies_v005_and_removes_pipeline_config_json(queries: JobQue
 def test_v005_rolls_back_when_drop_column_is_not_supported(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Unsupported SQLite",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )["id"]
     with queries.connect() as conn:
         conn.execute(
@@ -490,7 +490,7 @@ def _table_exists(queries: JobQueries, table: str) -> bool:
 def test_dry_run_returns_report_without_writing(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Dry Run",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 3)
 
@@ -507,7 +507,7 @@ def test_dry_run_returns_report_without_writing(queries: JobQueries) -> None:
 def test_dry_run_raises_blocked_error_and_leaves_legacy_data(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Blocked Dry Run",
-        default_pipeline_key="reading_analysis",
+        default_workflow_key="reading_analysis",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "bad-agent", 2)
 
@@ -599,7 +599,7 @@ def test_finalizer_interruption_before_commit_retains_backup_and_reruns(
     queries: JobQueries,
 ) -> None:
     """A crash before the finalizer commits leaves the backup and allows a safe rerun."""
-    workspace_id = queries.create_workspace(name="Legacy", default_pipeline_key="reading_analysis")[
+    workspace_id = queries.create_workspace(name="Legacy", default_workflow_key="reading_analysis")[
         "id"
     ]
     _set_pipeline_config(queries, workspace_id, {"local": 3})

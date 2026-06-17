@@ -31,8 +31,8 @@ class JobQueryService:
             raise NotFoundError("Job not found")
         return job
 
-    def _definition(self, pipeline_key: str) -> PipelineDefinition:
-        return self.pipelines.definition(pipeline_key)
+    def _definition(self, workflow_key: str) -> PipelineDefinition:
+        return self.pipelines.definition(workflow_key)
 
     def _job_nodes_with_definition(
         self,
@@ -131,12 +131,12 @@ class JobQueryService:
     def list_jobs(
         self,
         workspace_id: str,
-        pipeline_key: str | None = None,
+        workflow_key: str | None = None,
         status: str | None = None,
     ) -> list[dict[str, Any]]:
         jobs = self.job_db.list_jobs(
             workspace_id=workspace_id,
-            pipeline_key=pipeline_key,
+            workflow_key=workflow_key,
             status=status,
         )
         job_ids = [str(job["id"]) for job in jobs]
@@ -144,25 +144,25 @@ class JobQueryService:
 
         definitions: dict[str, PipelineDefinition] = {}
         for job in jobs:
-            key = str(job["pipeline_key"])
+            key = str(job["workflow_key"])
             if key not in definitions:
                 definitions[key] = self._definition(key)
 
         return [
             self._job_summary(
-                job, nodes_by_job.get(str(job["id"]), []), definitions[str(job["pipeline_key"])]
+                job, nodes_by_job.get(str(job["id"]), []), definitions[str(job["workflow_key"])]
             )
             for job in jobs
         ]
 
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
-        definition = self._definition(str(job["pipeline_key"]))
+        definition = self._definition(str(job["workflow_key"]))
         nodes = self.job_db.list_job_nodes(job_id)
         nodes_with_definition = self._job_nodes_with_definition(job, nodes, definition)
         executor_map = resolve_node_executors(
             str(job["workspace_id"]),
-            str(job["pipeline_key"]),
+            str(job["workflow_key"]),
             self.workspace_executor_config,
             self.settings,
         )
@@ -197,9 +197,9 @@ class JobQueryService:
         workspace = self.job_db.get_workspace(workspace_id)
         if workspace is None:
             raise NotFoundError("Workspace not found")
-        pipeline_key = str(workspace.get("default_pipeline_key") or "question_content")
-        definition = self._definition(pipeline_key)
-        counts = self.job_db.count_workspace_job_nodes_by_status(workspace_id, pipeline_key)
+        workflow_key = str(workspace.get("default_workflow_key") or "question_content")
+        definition = self._definition(workflow_key)
+        counts = self.job_db.count_workspace_job_nodes_by_status(workspace_id, workflow_key)
         statuses = ["pending", "running", "completed", "failed", "stale"]
         return {
             "pipeline": {

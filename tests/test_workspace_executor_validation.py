@@ -67,16 +67,16 @@ def allocation(executor_id: str, concurrency_limit: int) -> dict[str, object]:
 
 
 def binding(
-    node_key: str, executor_id: str, pipeline_key: str = "reading_analysis"
+    node_key: str, executor_id: str, workflow_key: str = "reading_analysis"
 ) -> dict[str, object]:
-    return {"pipeline_key": pipeline_key, "node_key": node_key, "executor_id": executor_id}
+    return {"workflow_key": workflow_key, "node_key": node_key, "executor_id": executor_id}
 
 
 def node_limit(
-    node_key: str, concurrency_limit: int, pipeline_key: str = "reading_analysis"
+    node_key: str, concurrency_limit: int, workflow_key: str = "reading_analysis"
 ) -> dict[str, object]:
     return {
-        "pipeline_key": pipeline_key,
+        "workflow_key": workflow_key,
         "node_key": node_key,
         "concurrency_limit": concurrency_limit,
     }
@@ -161,7 +161,7 @@ def test_binding_pipeline_must_equal_workspace_pipeline(context: ValidationConte
             pipeline=context.pipeline,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 4)],
-            bindings=[binding("fetch_questions", "local-default", pipeline_key="other_pipeline")],
+            bindings=[binding("fetch_questions", "local-default", workflow_key="other_pipeline")],
             node_limits=[],
         )
 

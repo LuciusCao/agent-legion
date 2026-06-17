@@ -28,7 +28,7 @@ def test_fetch_questions_with_cms_writes_single_question(tmp_path, monkeypatch):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="batch1",
@@ -65,7 +65,7 @@ def test_fetch_questions_without_cms_writes_base_payload(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="batch1",
@@ -92,7 +92,7 @@ def test_clean_and_parse_produces_normalized_question(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="batch1",
@@ -141,7 +141,7 @@ def test_clean_and_parse_fails_when_question_id_missing(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="batch1",
@@ -162,7 +162,7 @@ def test_mark_question_joins_reviewed_artifacts(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="batch1",
@@ -202,7 +202,7 @@ def test_mark_question_fails_when_question_id_mismatch(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
-        pipeline_key="reading_analysis",
+        workflow_key="reading_analysis",
         source_type="question",
         source_id="Q100",
         batch_id="batch1",

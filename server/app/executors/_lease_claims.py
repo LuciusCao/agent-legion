@@ -50,13 +50,13 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
         """
         select executor_id
         from workspace_node_bindings
-        where workspace_id=? and pipeline_key=? and node_key=?
+        where workspace_id=? and workflow_key=? and node_key=?
         """,
-        (request.workspace_id, request.pipeline_key, request.node_key),
+        (request.workspace_id, request.workflow_key, request.node_key),
     ).fetchone()
     if binding is None:
         raise ValueError(
-            f"No binding for node {request.node_key} in {request.workspace_id}/{request.pipeline_key}"
+            f"No binding for node {request.node_key} in {request.workspace_id}/{request.workflow_key}"
         )
     if binding["executor_id"] != request.executor_id:
         raise ValueError(
@@ -68,13 +68,13 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
             """
             select concurrency_limit
             from workspace_node_limits
-            where workspace_id=? and pipeline_key=? and node_key=?
+            where workspace_id=? and workflow_key=? and node_key=?
             """,
-            (request.workspace_id, request.pipeline_key, request.node_key),
+            (request.workspace_id, request.workflow_key, request.node_key),
         ).fetchone()
         if limit_row is None:
             raise ValueError(
-                f"No local node limit for {request.node_key} in {request.workspace_id}/{request.pipeline_key}"
+                f"No local node limit for {request.node_key} in {request.workspace_id}/{request.workflow_key}"
             )
         if limit_row["concurrency_limit"] != request.local_node_limit:
             raise ValueError(
@@ -110,9 +110,9 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
             """
             select count(*) as cnt
             from executor_leases
-            where workspace_id=? and pipeline_key=? and node_key=? and status='active' and expires_at>?
+            where workspace_id=? and workflow_key=? and node_key=? and status='active' and expires_at>?
             """,
-            (request.workspace_id, request.pipeline_key, request.node_key, now_str),
+            (request.workspace_id, request.workflow_key, request.node_key, now_str),
         ).fetchone()["cnt"]
         if node_count >= request.local_node_limit:
             return None
@@ -149,7 +149,7 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
     conn.execute(
         """
         insert into executor_leases(
-            id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+            id, execution_id, executor_id, workspace_id, job_id, workflow_key,
             node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
         )
         values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
@@ -160,7 +160,7 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
             request.executor_id,
             request.workspace_id,
             request.job_id,
-            request.pipeline_key,
+            request.workflow_key,
             request.node_key,
             node_run_id,
             now_str,
@@ -185,7 +185,7 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
         executor_id=request.executor_id,
         workspace_id=request.workspace_id,
         job_id=request.job_id,
-        pipeline_key=request.pipeline_key,
+        workflow_key=request.workflow_key,
         node_key=request.node_key,
         capability=request.capability,
         log_path=request.log_path,

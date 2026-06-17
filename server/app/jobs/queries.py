@@ -25,9 +25,9 @@ def _safe_identifier(value: str, fallback: str) -> str:
     return safe_value or fallback
 
 
-def _job_id(workspace_id: str, pipeline_key: str, source_id: str) -> str:
+def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:
     safe_source_id = source_id.strip().replace("/", "_")
-    return f"{workspace_id}_{pipeline_key}_{safe_source_id}"
+    return f"{workspace_id}_{workflow_key}_{safe_source_id}"
 
 
 def _workspace_id(name: str) -> str:
@@ -78,7 +78,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
     def create_workspace(
         self,
         name: str,
-        default_pipeline_key: str = "question_content",
+        default_workflow_key: str = "question_content",
         cms_config: dict[str, Any] | None = None,
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
@@ -109,7 +109,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
             conn.execute(
                 """
                 insert into workspaces(
-                  id, name, description, default_pipeline_key, cms_config_json, resource_config_json,
+                  id, name, description, default_workflow_key, cms_config_json, resource_config_json,
                   default_entity, intake_config_json
                 )
                 values (?, ?, ?, ?, ?, ?, ?, ?)
@@ -118,7 +118,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
                     workspace_id,
                     clean_name,
                     clean_description,
-                    default_pipeline_key,
+                    default_workflow_key,
                     cms_config_json,
                     resource_config_json,
                     clean_entity,
@@ -144,7 +144,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
         *,
         name: str | None = None,
         description: str | None = None,
-        default_pipeline_key: str | None = None,
+        default_workflow_key: str | None = None,
         cms_config: dict[str, Any] | None = None,
         resource_config: dict[str, Any] | None = None,
         default_entity: str | None = None,
@@ -158,8 +158,8 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
             fields["name"] = clean_name
         if description is not None:
             fields["description"] = description.strip()
-        if default_pipeline_key is not None:
-            fields["default_pipeline_key"] = default_pipeline_key
+        if default_workflow_key is not None:
+            fields["default_workflow_key"] = default_workflow_key
         if cms_config is not None:
             fields["cms_config_json"] = json.dumps(
                 cms_config,
@@ -209,7 +209,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
         *,
         name: str,
         description: str,
-        default_pipeline_key: str,
+        default_workflow_key: str,
         default_entity: str,
         resource_config: dict[str, Any],
         intake_config: dict[str, Any],
@@ -227,7 +227,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
             conn.execute(
                 """
                 update workspaces
-                set name=?, description=?, default_pipeline_key=?, default_entity=?,
+                set name=?, description=?, default_workflow_key=?, default_entity=?,
                     resource_config_json=?, intake_config_json=?,
                     updated_at=current_timestamp
                 where id=?
@@ -235,7 +235,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
                 (
                     clean_name,
                     description.strip(),
-                    default_pipeline_key,
+                    default_workflow_key,
                     default_entity,
                     json.dumps(resource_config, ensure_ascii=False, sort_keys=True),
                     json.dumps(intake_config, ensure_ascii=False, sort_keys=True),
@@ -254,22 +254,22 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
 
     def create_batch(
         self,
-        pipeline_key: str,
+        workflow_key: str,
         source_kind: str,
         source_payload: dict[str, Any],
         workspace_id: str = "default",
     ) -> dict[str, Any]:
         payload_json = json.dumps(source_payload, ensure_ascii=False, sort_keys=True)
         payload_digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]
-        batch_id = f"{workspace_id}_{pipeline_key}_{source_kind}_{payload_digest}"
+        batch_id = f"{workspace_id}_{workflow_key}_{source_kind}_{payload_digest}"
         with self.connect() as conn:
             conn.execute(
                 """
-                insert into job_batches(id, workspace_id, pipeline_key, source_kind, source_payload_json)
+                insert into job_batches(id, workspace_id, workflow_key, source_kind, source_payload_json)
                 values (?, ?, ?, ?, ?)
                 on conflict(id) do update set source_payload_json=excluded.source_payload_json
                 """,
-                (batch_id, workspace_id, pipeline_key, source_kind, payload_json),
+                (batch_id, workspace_id, workflow_key, source_kind, payload_json),
             )
             row = conn.execute("select * from job_batches where id=?", (batch_id,)).fetchone()
         return dict(row)
@@ -283,7 +283,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
 
     def create_job(
         self,
-        pipeline_key: str,
+        workflow_key: str,
         source_type: str,
         source_id: str,
         batch_id: str,
@@ -292,7 +292,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
         workspace_id: str = "default",
         stem: str = "",
     ) -> dict[str, Any]:
-        job_id = _job_id(workspace_id, pipeline_key, source_id)
+        job_id = _job_id(workspace_id, workflow_key, source_id)
         storage_dir = self.jobs_dir / workspace_id / job_id
         storage_dir.mkdir(parents=True, exist_ok=True)
 
@@ -300,7 +300,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
             existing = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
             if existing is not None and (
                 existing["workspace_id"] != workspace_id
-                or existing["pipeline_key"] != pipeline_key
+                or existing["workflow_key"] != workflow_key
                 or existing["source_type"] != source_type
                 or existing["source_id"] != source_id
             ):
@@ -308,7 +308,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
             conn.execute(
                 """
                 insert into jobs(
-                  id, workspace_id, pipeline_key, source_type, source_id, batch_id, title, storage_dir, stem
+                  id, workspace_id, workflow_key, source_type, source_id, batch_id, title, storage_dir, stem
                 )
                 values (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
@@ -320,7 +320,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
                 (
                     job_id,
                     workspace_id,
-                    pipeline_key,
+                    workflow_key,
                     source_type,
                     source_id,
                     batch_id,
@@ -342,7 +342,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
 
     def list_jobs(
         self,
-        pipeline_key: str | None = None,
+        workflow_key: str | None = None,
         status: str | None = None,
         workspace_id: str | None = "default",
         source_id: str | None = None,
@@ -352,9 +352,9 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
         if workspace_id:
             clauses.append("workspace_id=?")
             params.append(workspace_id)
-        if pipeline_key:
-            clauses.append("pipeline_key=?")
-            params.append(pipeline_key)
+        if workflow_key:
+            clauses.append("workflow_key=?")
+            params.append(workflow_key)
         if status:
             clauses.append("status=?")
             params.append(status)
@@ -587,7 +587,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
             return result
 
     def count_workspace_job_nodes_by_status(
-        self, workspace_id: str, pipeline_key: str
+        self, workspace_id: str, workflow_key: str
     ) -> dict[str, dict[str, int]]:
         result: dict[str, dict[str, int]] = {}
         with self._connect_read() as conn:
@@ -596,10 +596,10 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
                 select job_nodes.node_key, job_nodes.status, count(*) as cnt
                 from job_nodes
                 join jobs on jobs.id = job_nodes.job_id
-                where jobs.workspace_id = ? and jobs.pipeline_key = ?
+                where jobs.workspace_id = ? and jobs.workflow_key = ?
                 group by job_nodes.node_key, job_nodes.status
                 """,
-                (workspace_id, pipeline_key),
+                (workspace_id, workflow_key),
             )
             for row in rows:
                 node_counts = result.setdefault(row["node_key"], {})
@@ -637,7 +637,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
                   jobs.title as job_title,
                   jobs.source_id,
                   jobs.source_type,
-                  jobs.pipeline_key
+                  jobs.workflow_key
                 from node_runs
                 join jobs on jobs.id = node_runs.job_id
                 where {where}

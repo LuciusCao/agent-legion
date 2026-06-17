@@ -14,7 +14,7 @@ class ExecutionContext:
     executor_id: str
     workspace_id: str
     job_id: str
-    pipeline_key: str
+    workflow_key: str
     node_key: str
     capability: str
     workspace: Mapping[str, object]
@@ -43,7 +43,7 @@ class LeaseClaimRequest:
     global_capacity: int
     workspace_id: str
     job_id: str
-    pipeline_key: str
+    workflow_key: str
     node_key: str
     capability: str
     local_node_limit: int | None
@@ -58,7 +58,7 @@ class LeaseClaimRequest:
 class ConfigurationFailureRequest:
     workspace_id: str
     job_id: str
-    pipeline_key: str
+    workflow_key: str
     node_key: str
     capability: str
     log_path: str
@@ -72,7 +72,7 @@ class ClaimedExecution:
     executor_id: str
     workspace_id: str
     job_id: str
-    pipeline_key: str
+    workflow_key: str
     node_key: str
     capability: str
     log_path: str

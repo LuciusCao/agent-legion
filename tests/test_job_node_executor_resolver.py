@@ -43,17 +43,17 @@ def test_resolve_node_executors_maps_node_keys_to_executor_id_and_kind():
             "ws1": {
                 "bindings": [
                     {
-                        "pipeline_key": "question_content",
+                        "workflow_key": "question_content",
                         "node_key": "node_a",
                         "executor_id": "local-default",
                     },
                     {
-                        "pipeline_key": "question_content",
+                        "workflow_key": "question_content",
                         "node_key": "node_b",
                         "executor_id": "pi-default",
                     },
                     {
-                        "pipeline_key": "reading_analysis",
+                        "workflow_key": "reading_analysis",
                         "node_key": "node_a",
                         "executor_id": "pi-default",
                     },
@@ -82,7 +82,7 @@ def test_resolve_node_executors_returns_none_kind_for_unknown_executor():
             "ws1": {
                 "bindings": [
                     {
-                        "pipeline_key": "question_content",
+                        "workflow_key": "question_content",
                         "node_key": "node_a",
                         "executor_id": "unknown-executor",
                     },
@@ -103,11 +103,11 @@ def test_resolve_node_executors_skips_bindings_without_node_key():
             "ws1": {
                 "bindings": [
                     {
-                        "pipeline_key": "question_content",
+                        "workflow_key": "question_content",
                         "node_key": "node_a",
                         "executor_id": "local-default",
                     },
-                    {"pipeline_key": "question_content", "executor_id": "pi-default"},
+                    {"workflow_key": "question_content", "executor_id": "pi-default"},
                 ]
             }
         }
@@ -126,7 +126,7 @@ def test_resolve_node_executors_with_real_service(job_db, settings):
         allocations=[{"executor_id": "local-default", "concurrency_limit": 1}],
         bindings=[
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "node_key": "assemble_package",
                 "executor_id": "local-default",
             }

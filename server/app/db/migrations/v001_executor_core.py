@@ -19,10 +19,10 @@ def _apply(conn: sqlite3.Connection) -> None:
         """
         create table workspace_node_bindings (
           workspace_id text not null,
-          pipeline_key text not null,
+          workflow_key text not null,
           node_key text not null,
           executor_id text not null,
-          primary key(workspace_id, pipeline_key, node_key),
+          primary key(workspace_id, workflow_key, node_key),
           foreign key(workspace_id) references workspaces(id) on delete cascade
         )
         """
@@ -31,10 +31,10 @@ def _apply(conn: sqlite3.Connection) -> None:
         """
         create table workspace_node_limits (
           workspace_id text not null,
-          pipeline_key text not null,
+          workflow_key text not null,
           node_key text not null,
           concurrency_limit integer not null check(concurrency_limit > 0),
-          primary key(workspace_id, pipeline_key, node_key),
+          primary key(workspace_id, workflow_key, node_key),
           foreign key(workspace_id) references workspaces(id) on delete cascade
         )
         """
@@ -47,7 +47,7 @@ def _apply(conn: sqlite3.Connection) -> None:
           executor_id text not null,
           workspace_id text not null,
           job_id text not null,
-          pipeline_key text not null,
+          workflow_key text not null,
           node_key text not null,
           node_run_id integer not null,
           status text not null check(status in ('active', 'released', 'expired')),
@@ -74,8 +74,8 @@ def _apply(conn: sqlite3.Connection) -> None:
     )
     conn.execute(
         """
-        create index if not exists idx_executor_leases_node_active
-          on executor_leases(workspace_id, pipeline_key, node_key, status, expires_at)
+        create index if not exists idx_executor_leases_workflow_node_active
+          on executor_leases(workspace_id, workflow_key, node_key, status, expires_at)
         """
     )
 

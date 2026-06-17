@@ -73,7 +73,7 @@ class JobRerunService:
                 f"Job does not belong to workspace {workspace_id}",
             )
 
-        definition = self.pipelines.definition(str(job["pipeline_key"]))
+        definition = self.pipelines.definition(str(job["workflow_key"]))
         if node_key not in definition.nodes:
             return self._result(
                 job_id,

@@ -104,7 +104,7 @@ class OpenClawExecutor:
             f"Execution ID: {context.execution_id}",
             f"Workspace ID: {context.workspace_id}",
             f"Job ID: {context.job_id}",
-            f"Pipeline: {context.pipeline_key}",
+            f"Pipeline: {context.workflow_key}",
             f"Node: {context.node_key}",
             f"Capability: {context.capability}",
             f"Working directory: {context.job_dir}",

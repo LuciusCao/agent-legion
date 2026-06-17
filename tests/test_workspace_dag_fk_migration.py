@@ -23,7 +23,7 @@ def _create_pre_v004_database(path: Path) -> None:
               id text primary key,
               name text not null,
               description text not null default '',
-              default_pipeline_key text not null default 'question_content',
+              default_workflow_key text not null default 'question_content',
               cms_config_json text not null default '{}',
               resource_config_json text not null default '{}',
               created_at text not null default current_timestamp,
@@ -35,7 +35,7 @@ def _create_pre_v004_database(path: Path) -> None:
             create table job_batches (
               id text primary key,
               workspace_id text not null default 'default',
-              pipeline_key text not null,
+              workflow_key text not null,
               source_kind text not null,
               source_payload_json text not null default '{}',
               status text not null default 'created',
@@ -46,7 +46,7 @@ def _create_pre_v004_database(path: Path) -> None:
             create table jobs (
               id text primary key,
               workspace_id text not null default 'default',
-              pipeline_key text not null,
+              workflow_key text not null,
               source_type text not null,
               source_id text not null,
               batch_id text not null default '',
@@ -89,7 +89,7 @@ def _create_pre_v004_database(path: Path) -> None:
               executor_id text not null,
               workspace_id text not null,
               job_id text not null,
-              pipeline_key text not null,
+              workflow_key text not null,
               node_key text not null,
               node_run_id integer not null,
               status text not null check(status in ('active', 'released', 'expired')),
@@ -131,15 +131,15 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
         # Disable FK enforcement so we can insert intentional orphan rows.
         conn.execute("pragma foreign_keys = off")
         conn.execute(
-            "insert into job_batches(id, workspace_id, pipeline_key, source_kind) "
+            "insert into job_batches(id, workspace_id, workflow_key, source_kind) "
             "values ('batch1', 'missing_ws', 'question_content', 'mixed')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id) "
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
             "values ('job1', 'missing_ws', 'question_content', 'question_id', 'Q1')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id) "
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
             "values ('job2', 'ws1', 'question_content', 'question_id', 'Q2')"
         )
         conn.execute(
@@ -150,28 +150,28 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
         )
         conn.execute(
             "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
-            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "workflow_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
             "values ('lease1', 'exec1', 'exec_a', 'ws1', 'job2', 'question_content', 'node_a', "
             "1, 'active', '2024-01-01 10:00:00', '2024-01-01 10:00:00', '2024-01-01 11:00:00')"
         )
         # Intentional orphans on executor_leases.
         conn.execute(
             "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
-            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "workflow_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
             "values ('lease_bad_ws', 'exec_bad_ws', 'exec_a', 'missing_ws', 'job2', "
             "'question_content', 'node_a', 1, 'active', '2024-01-01 10:00:00', "
             "'2024-01-01 10:00:00', '2024-01-01 11:00:00')"
         )
         conn.execute(
             "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
-            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "workflow_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
             "values ('lease_bad_job', 'exec_bad_job', 'exec_a', 'ws1', 'missing_job', "
             "'question_content', 'node_a', 1, 'active', '2024-01-01 10:00:00', "
             "'2024-01-01 10:00:00', '2024-01-01 11:00:00')"
         )
         conn.execute(
             "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
-            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "workflow_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
             "values ('lease_bad_run', 'exec_bad_run', 'exec_a', 'ws1', 'job2', "
             "'question_content', 'node_a', 999, 'active', '2024-01-01 10:00:00', "
             "'2024-01-01 10:00:00', '2024-01-01 11:00:00')"
@@ -246,13 +246,13 @@ def test_v004_rebuilds_tables_with_pre_existing_indexes(tmp_path: Path) -> None:
     conn = connect_sqlite(path)
     with conn:
         # Indexes that may already exist on a real database from prior schema init.
-        conn.execute("create index idx_jobs_pipeline_status on jobs(pipeline_key, status)")
-        conn.execute("create index idx_jobs_source on jobs(pipeline_key, source_type, source_id)")
+        conn.execute("create index idx_jobs_workflow_status on jobs(workflow_key, status)")
+        conn.execute("create index idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id)")
         conn.execute(
-            "create index idx_jobs_workspace_pipeline_status on jobs(workspace_id, pipeline_key, status)"
+            "create index idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status)"
         )
         conn.execute(
-            "create index idx_jobs_workspace_source on jobs(workspace_id, pipeline_key, source_type, source_id)"
+            "create index idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id)"
         )
         conn.execute("create index idx_job_nodes_job_status on job_nodes(job_id, status)")
         conn.execute("create index idx_node_runs_job_id on node_runs(job_id)")
@@ -260,7 +260,7 @@ def test_v004_rebuilds_tables_with_pre_existing_indexes(tmp_path: Path) -> None:
             "create index idx_job_batches_workspace on job_batches(workspace_id, created_at)"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id) "
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
             "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
         )
         conn.execute(
@@ -279,10 +279,10 @@ def test_v004_rebuilds_tables_with_pre_existing_indexes(tmp_path: Path) -> None:
                 "select name, tbl_name from sqlite_master where type = 'index'"
             ).fetchall()
         }
-        assert rows["idx_jobs_pipeline_status"] == "jobs"
-        assert rows["idx_jobs_source"] == "jobs"
-        assert rows["idx_jobs_workspace_pipeline_status"] == "jobs"
-        assert rows["idx_jobs_workspace_source"] == "jobs"
+        assert rows["idx_jobs_workflow_status"] == "jobs"
+        assert rows["idx_jobs_workflow_source"] == "jobs"
+        assert rows["idx_jobs_workspace_workflow_status"] == "jobs"
+        assert rows["idx_jobs_workspace_workflow_source"] == "jobs"
         assert rows["idx_job_nodes_job_status"] == "job_nodes"
         assert rows["idx_node_runs_job_id"] == "node_runs"
         assert rows["idx_job_batches_workspace"] == "job_batches"
@@ -300,13 +300,13 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
     conn = connect_sqlite(path)
     with conn:
         conn.execute(
-            "insert into job_batches(id, workspace_id, pipeline_key, source_kind, source_payload_json, "
+            "insert into job_batches(id, workspace_id, workflow_key, source_kind, source_payload_json, "
             "status, created_count, error_message, created_at) "
             "values ('batch1', 'ws1', 'question_content', 'mixed', '{\"ids\":[1]}', "
             "'created', 3, '', '2024-01-01 09:00:00')"
         )
         conn.execute(
-            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id, batch_id, "
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, batch_id, "
             "title, status, storage_dir, error_message, created_at, updated_at, stem) "
             "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1', 'batch1', "
             "'Title', 'running', '/tmp/job1', '', '2024-01-01 10:00:00', '2024-01-01 11:00:00', 'stem1')"
@@ -324,7 +324,7 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
         )
         conn.execute(
             "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
-            "pipeline_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
+            "workflow_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
             "values ('lease1', 'exec1', 'exec_a', 'ws1', 'job1', 'question_content', "
             "'extract', 1, 'active', '2024-01-01 10:00:00', '2024-01-01 10:00:00', "
             "'2024-01-01 11:00:00')"
@@ -375,15 +375,15 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
             ).fetchall()
         }
         assert "idx_job_batches_workspace" in indexes
-        assert "idx_jobs_pipeline_status" in indexes
-        assert "idx_jobs_source" in indexes
-        assert "idx_jobs_workspace_pipeline_status" in indexes
-        assert "idx_jobs_workspace_source" in indexes
+        assert "idx_jobs_workflow_status" in indexes
+        assert "idx_jobs_workflow_source" in indexes
+        assert "idx_jobs_workspace_workflow_status" in indexes
+        assert "idx_jobs_workspace_workflow_source" in indexes
         assert "idx_job_nodes_job_status" in indexes
         assert "idx_node_runs_job_id" in indexes
         assert "idx_executor_leases_global_active" in indexes
         assert "idx_executor_leases_workspace_active" in indexes
-        assert "idx_executor_leases_node_active" in indexes
+        assert "idx_executor_leases_workflow_node_active" in indexes
 
         # Required FK relationships.
         assert _foreign_key_relationships(conn) == {
@@ -417,7 +417,7 @@ def test_v004_is_idempotent(tmp_path: Path) -> None:
 
     with closing(connect_sqlite(path)) as conn, conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6]
+        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7]
         assert _foreign_key_relationships(conn) == {
             ("job_batches", "workspace_id", "workspaces"),
             ("jobs", "workspace_id", "workspaces"),
@@ -473,7 +473,7 @@ def test_v004_interruption_after_copy_recovers_on_reopen(tmp_path: Path) -> None
     conn = connect_sqlite(path)
     with conn:
         conn.execute(
-            "insert into jobs(id, workspace_id, pipeline_key, source_type, source_id) "
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
             "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
         )
         conn.execute(
@@ -501,7 +501,7 @@ def test_v004_interruption_after_copy_recovers_on_reopen(tmp_path: Path) -> None
                 "select version from schema_migrations order by version"
             ).fetchall()
         ]
-        assert versions == [1, 2, 3, 4, 6]
+        assert versions == [1, 2, 3, 4, 6, 7]
         assert _foreign_key_relationships(conn) == {
             ("job_batches", "workspace_id", "workspaces"),
             ("jobs", "workspace_id", "workspaces"),
