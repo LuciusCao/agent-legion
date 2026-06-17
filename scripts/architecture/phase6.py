@@ -20,7 +20,7 @@ _WORKSPACE_MODULE_PREFIXES = (
     "server/app/services/job_",
     "server/app/services/workspace_",
     "server/app/services/executor_catalog.py",
-    "server/app/services/pipeline_catalog.py",
+    "server/app/services/workflow_catalog.py",
 )
 
 # Video Hive (singular `pipeline`) modules and video-specific services that must

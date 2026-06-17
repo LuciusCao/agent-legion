@@ -10,7 +10,7 @@ from server.app.workflows.definition import WorkflowDefinition
 
 def validate_workspace_executor_configuration(
     *,
-    pipeline: WorkflowDefinition,
+    workflow: WorkflowDefinition,
     executor_definitions: Mapping[str, ExecutorConfig],
     allocations: Sequence[Mapping[str, Any]],
     bindings: Sequence[Mapping[str, Any]],
@@ -39,7 +39,7 @@ def validate_workspace_executor_configuration(
         key = (workflow_key, node_key)
         if key in binding_by_node:
             raise InvalidOperationError(f"Duplicate Node binding {workflow_key}.{node_key}")
-        if workflow_key != pipeline.key or node_key not in pipeline.nodes:
+        if workflow_key != workflow.key or node_key not in workflow.nodes:
             raise InvalidOperationError(f"Unknown Workflow Node {workflow_key}.{node_key}")
         executor_id = str(binding["executor_id"])
         if executor_id not in allocation_by_id:
@@ -47,7 +47,7 @@ def validate_workspace_executor_configuration(
                 f"Executor {executor_id} is not allocated to this Workspace"
             )
         executor = executor_definitions[executor_id]
-        capability = pipeline.nodes[node_key].capability
+        capability = workflow.nodes[node_key].capability
         if capability not in executor.capabilities:
             raise InvalidOperationError(
                 f"Executor {executor_id} does not support capability {capability} "

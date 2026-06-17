@@ -97,7 +97,7 @@ class WorkspaceConfigurationService:
         workflow = self.workflows.definition(workflow_key)
 
         validate_workspace_executor_configuration(
-            pipeline=workflow,
+            workflow=workflow,
             executor_definitions=self.settings.executor_definitions,
             allocations=executor_allocations,
             bindings=node_bindings,
@@ -191,7 +191,7 @@ class WorkspaceConfigurationService:
                 default_entity=patch.get("entityType"),
                 intake_config=next_intake_config,
             )
-        elif section == "pipeline":
+        elif section == "workflow":
             if patch.get("workflowKey") is not None:
                 self.workflows.definition(patch["workflowKey"])
             workspace = self.job_db.update_workspace(
