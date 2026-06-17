@@ -71,7 +71,9 @@ def create_router(
     job_execution = JobExecutionService(
         job_db, JobArtifactMutationService(settings.jobs_dir), executor_leases, pipeline_catalog
     )
-    job_deletion = JobDeletionService(job_db, executor_leases, settings)
+    job_deletion = JobDeletionService(
+        job_db, executor_leases, settings, job_event_manager=job_event_manager
+    )
     job_packages = JobPackageService(job_db, settings)
 
     router.include_router(create_common_router(db, settings, worker_control))

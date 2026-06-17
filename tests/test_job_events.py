@@ -1,5 +1,6 @@
 import asyncio
 import sqlite3
+from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
 
@@ -9,14 +10,23 @@ from fastapi import Request
 from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository, _sqlite_timestamp
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
+from server.app.settings import Settings
 
 
 class FakeJobDB:
     def get_job(self, job_id):
-        return {"id": job_id, "workspace_id": "ws1"}
+        return {"id": job_id, "workspace_id": "ws1", "storage_dir": f"jobs/{job_id}"}
 
     def count_jobs_by_status(self, workspace_id):
         return {"pending": 0, "running": 0, "completed": 0, "failed": 0}
+
+    @contextmanager
+    def lease_guarded_mutation(self, job_id, now, *, reject_running_nodes):
+        yield MagicMock(spec=sqlite3.Connection)
+
+    @staticmethod
+    def delete_job_in_transaction(conn, job_id):
+        pass
 
 
 @pytest.fixture
@@ -198,9 +208,7 @@ def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
     monkeypatch.setattr(
         executors.leases,
         "finish_lease",
-        lambda _conn, _lease_id, _result: (_ for _ in ()).throw(
-            RuntimeError("simulated failure")
-        ),
+        lambda _conn, _lease_id, _result: (_ for _ in ()).throw(RuntimeError("simulated failure")),
     )
 
     queue = _ws1_queue(manager)
@@ -227,3 +235,48 @@ def test_connect_evicts_oldest_at_capacity():
 
     assert q1 not in m._get_workspace_queues("ws1")
     assert q2 in m._get_workspace_queues("ws2")
+
+
+def test_job_deletion_broadcasts_job_deleted(manager, tmp_path):
+    from server.app.services.job_deletion import JobDeletionService
+
+    lease_repo = ExecutorLeaseRepository(tmp_path / "leases.sqlite")
+    settings = MagicMock(spec=Settings)
+    settings.logs_dir = tmp_path / "logs"
+    settings.jobs_dir = tmp_path / "jobs"
+    settings.logs_dir.mkdir(parents=True, exist_ok=True)
+    settings.jobs_dir.mkdir(parents=True, exist_ok=True)
+    service = JobDeletionService(FakeJobDB(), lease_repo, settings, job_event_manager=manager)
+    queue = _ws1_queue(manager)
+    result = service.delete("ws1", "j1")
+    assert result["status"] == "succeeded"
+    assert not queue.empty()
+    data = queue.get_nowait()
+    assert '"type": "job_deleted"' in data
+    assert '"workspace_id": "ws1"' in data
+    assert '"job_id": "j1"' in data
+
+
+def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
+    from server.app.services.job_deletion import JobDeletionService
+
+    lease_repo = ExecutorLeaseRepository(tmp_path / "leases.sqlite")
+    settings = MagicMock(spec=Settings)
+    settings.logs_dir = tmp_path / "logs"
+    settings.jobs_dir = tmp_path / "jobs"
+    settings.logs_dir.mkdir(parents=True, exist_ok=True)
+    settings.jobs_dir.mkdir(parents=True, exist_ok=True)
+    service = JobDeletionService(FakeJobDB(), lease_repo, settings, job_event_manager=manager)
+
+    expires_at = datetime.now(UTC) + timedelta(hours=1)
+    conn = sqlite3.connect(lease_repo.path)
+    try:
+        _insert_lease(conn, "l1", expires_at)
+        conn.commit()
+    finally:
+        conn.close()
+
+    queue = _ws1_queue(manager)
+    result = service.delete("ws1", "j1")
+    assert result["status"] == "failed"
+    assert queue.empty()

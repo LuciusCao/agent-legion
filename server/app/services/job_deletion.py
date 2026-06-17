@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TypedDict
 
+from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
@@ -49,11 +50,13 @@ class JobDeletionService:
         lease_repo: ExecutorLeaseRepository,
         settings: Settings,
         clock: Callable[[], float] | None = None,
+        job_event_manager: JobEventManager | None = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
         self.settings = settings
         self.clock = clock
+        self.job_event_manager = job_event_manager
 
     def _now(self) -> datetime:
         if self.clock is not None:
@@ -161,6 +164,9 @@ class JobDeletionService:
         self._cleanup_staged_paths(job_id, staged_storage, staged_logs)
         self._prune_empty_trash(self.settings.jobs_dir / ".trash" / operation_id)
         self._prune_empty_trash(self.settings.logs_dir / "jobs" / ".trash" / operation_id)
+        if self.job_event_manager is not None:
+            stats = self.job_db.count_jobs_by_status(workspace_id)
+            self.job_event_manager.broadcast_job_deleted(workspace_id, job_id, stats)
         return self._result(job_id, "succeeded")
 
     def batch_delete(self, workspace_id: str, job_ids: list[str]) -> list[JobDeleteResult]:
