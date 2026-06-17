@@ -54,8 +54,12 @@ interface DagGraphProps {
 }
 
 const NODE_WIDTH = 240
-const NODE_HEIGHT = 140
 const nodeTypes = { dagNode: DagNodeComponent }
+
+const BASE_HEIGHT = 66
+const SECTION_TITLE_HEIGHT = 14
+const CHIP_ROW_HEIGHT = 17
+const CHIPS_PER_ROW = 2
 
 type NormalizedExecutorKind = NonNullable<DagNodeData['executorKind']>
 
@@ -66,13 +70,31 @@ function normalizeExecutorKind(
   return kind as NormalizedExecutorKind
 }
 
+function estimateNodeHeight(node: DagGraphNode): number {
+  let height = BASE_HEIGHT
+  const inputCount = node.inputs?.length || 0
+  const outputCount = node.outputs?.length || 0
+  if (inputCount > 0) {
+    const inputRows = Math.ceil(Math.min(inputCount, 3) / CHIPS_PER_ROW)
+    height += SECTION_TITLE_HEIGHT + inputRows * CHIP_ROW_HEIGHT
+  }
+  if (outputCount > 0) {
+    const outputRows = Math.ceil(Math.min(outputCount, 3) / CHIPS_PER_ROW)
+    height += SECTION_TITLE_HEIGHT + outputRows * CHIP_ROW_HEIGHT
+  }
+  return height
+}
+
 function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
   const g = new dagre.graphlib.Graph()
   g.setGraph({ rankdir: 'LR', nodesep: 60, ranksep: 100 })
   g.setDefaultEdgeLabel(() => ({}))
 
+  const heightMap = new Map<string, number>()
   for (const node of nodes) {
-    g.setNode(node.key, { width: NODE_WIDTH, height: NODE_HEIGHT })
+    const height = estimateNodeHeight(node)
+    heightMap.set(node.key, height)
+    g.setNode(node.key, { width: NODE_WIDTH, height })
   }
   for (const edge of edges) {
     g.setEdge(edge.from, edge.to)
@@ -82,10 +104,11 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
 
   const rfNodes: Node<DagNodeData>[] = nodes.map((node) => {
     const gNode = g.node(node.key)
+    const height = heightMap.get(node.key)!
     return {
       id: node.key,
       type: 'dagNode',
-      position: { x: gNode.x - NODE_WIDTH / 2, y: gNode.y - NODE_HEIGHT / 2 },
+      position: { x: gNode.x - NODE_WIDTH / 2, y: gNode.y - height / 2 },
       data: {
         label: node.label,
         status: node.status,
