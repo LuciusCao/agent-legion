@@ -42,9 +42,6 @@ def fetch_questions(
 ) -> None:
     context = context or {}
     check_cancellation(context)
-    settings_config = context.get("settings_config")
-    if not isinstance(settings_config, dict):
-        settings_config = {}
 
     cms_config = _effective_cms_config(job, context)
     api_url = cms_config.get("api_url") or cms_config.get("question_detail_url")
@@ -103,10 +100,10 @@ def clean_and_parse(
         parsed_questions.append(
             {
                 "question_id": str(qid),
-                "stem": normalized.get("stem", ""),
-                "options": normalized.get("options", []),
-                "answer": normalized.get("answer", ""),
-                "analysis": normalized.get("analysis", ""),
+                "stem": normalized.get("stem") or "",
+                "options": normalized.get("options") or [],
+                "answer": normalized.get("answer") or "",
+                "analysis": normalized.get("analysis") or "",
                 "fingerprint": fingerprint,
                 "fingerprint_source": "cms" if fingerprint else "missing",
                 "fingerprint_missing": fingerprint is None,
