@@ -148,4 +148,4 @@ def test_review_key_info_validator_rejects_count_mismatch(tmp_path):
     )
 
     assert result.returncode != 0
-    assert "approved_count" in result.stderr or "rejected_count" in result.stderr
+    assert "approved_count + rejected_count (0) must equal len(key_info_list) (1)" in result.stderr
