@@ -25,8 +25,8 @@ def test_workspace_settings_round_trip(tmp_path):
                 "labelOverrides": {"direct_ids": "输入 ID"},
             },
         )
-        pipeline = c.patch(
-            "/api/workspaces/default/settings/pipeline",
+        workflow = c.patch(
+            "/api/workspaces/default/settings/workflow",
             json={"workflowKey": "question_content"},
         )
         fetched = c.get("/api/workspaces/default/settings")
@@ -34,7 +34,7 @@ def test_workspace_settings_round_trip(tmp_path):
 
     assert connection.status_code == 200
     assert intake.status_code == 200
-    assert pipeline.status_code == 200
+    assert workflow.status_code == 200
     assert test_connection.status_code == 200
     settings = fetched.json()["settings"]
     assert "cmsUrl" not in settings
@@ -48,12 +48,12 @@ def test_workspace_settings_round_trip(tmp_path):
     assert "pipeline_config" not in workspace
 
 
-def test_workspace_settings_pipeline_rejects_legacy_concurrency_fields(tmp_path):
+def test_workspace_settings_workflow_rejects_legacy_concurrency_fields(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.patch(
-            "/api/workspaces/default/settings/pipeline",
+            "/api/workspaces/default/settings/workflow",
             json={
                 "workflowKey": "question_content",
                 "localConcurrency": 5,

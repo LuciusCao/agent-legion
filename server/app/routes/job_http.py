@@ -12,9 +12,9 @@ from server.app.services.job_errors import (
 from server.app.settings import Settings
 
 
-def require_pipelines_enabled(settings: Settings) -> None:
+def require_workflows_enabled(settings: Settings) -> None:
     if not settings.executor_runtime.workflows.enabled:
-        raise HTTPException(status_code=404, detail="Pipelines are disabled")
+        raise HTTPException(status_code=404, detail="Workflows are disabled")
 
 
 def raise_job_http_error(error: JobServiceError) -> Never:
