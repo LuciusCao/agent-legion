@@ -315,3 +315,24 @@ def test_assess_comprehension_difficulty_validator_rejects_bad_possible_error_co
     assert result.returncode != 0
     assert "possible_error_count" in result.stderr
     assert "does not match" in result.stderr
+
+
+def test_assess_comprehension_difficulty_validator_rejects_bad_ability_count(tmp_path):
+    _write_valid_inputs(tmp_path)
+    _write_valid_outputs(tmp_path)
+    data = json.loads((tmp_path / "comprehension_difficulty.json").read_text(encoding="utf-8"))
+    data["signals"]["ability_count"] = 5
+    (tmp_path / "comprehension_difficulty.json").write_text(
+        json.dumps(data, ensure_ascii=False), encoding="utf-8"
+    )
+
+    result = subprocess.run(
+        ["python", str(VALIDATOR), str(tmp_path)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert result.returncode != 0
+    assert "ability_count" in result.stderr
+    assert "does not match" in result.stderr

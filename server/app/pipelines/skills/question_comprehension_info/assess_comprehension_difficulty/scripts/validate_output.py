@@ -128,6 +128,9 @@ def _validate_report(job_dir: Path, report: dict[str, Any], question: dict[str, 
     warnings = report.get("warnings")
     if not isinstance(warnings, list):
         raise ContractError("report warnings must be an array")
+    for i, item in enumerate(warnings):
+        if not isinstance(item, str) or not item.strip():
+            raise ContractError(f"report warnings[{i}] must be a non-empty string")
 
     method = report.get("method")
     if not isinstance(method, str) or not method.strip():
