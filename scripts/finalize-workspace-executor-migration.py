@@ -18,9 +18,9 @@ from server.app.executors.backup import legacy_backup_path
 from server.app.executors.config import ExecutorConfig
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.jobs import JobQueries
-from server.app.pipelines.definition import PipelineDefinition
-from server.app.pipelines.registry import list_registered_pipelines
 from server.app.settings import load_settings
+from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.registry import list_registered_workflows
 
 _EMPTY_REPORT_JSON = json.dumps(
     {
@@ -34,7 +34,7 @@ _EMPTY_REPORT_JSON = json.dumps(
 
 
 def _check(
-    db_path: Path, definitions: list[PipelineDefinition], executors: dict[str, ExecutorConfig]
+    db_path: Path, definitions: list[WorkflowDefinition], executors: dict[str, ExecutorConfig]
 ) -> int:
     if not db_path.exists():
         print(_EMPTY_REPORT_JSON)
@@ -53,7 +53,7 @@ def _check(
 
 
 def _apply(
-    db_path: Path, definitions: list[PipelineDefinition], executors: dict[str, ExecutorConfig]
+    db_path: Path, definitions: list[WorkflowDefinition], executors: dict[str, ExecutorConfig]
 ) -> int:
     if not db_path.exists():
         print(f"Database not found: {db_path}", file=sys.stderr)
@@ -94,7 +94,7 @@ def main(argv: list[str] | None = None) -> int:
 
     settings = load_settings(data_dir=args.data_dir)
     db_path = settings.data_dir / "video_hive.sqlite"
-    definitions = list_registered_pipelines(settings.root_dir)
+    definitions = list_registered_workflows(settings.root_dir)
     executors = settings.executor_definitions
 
     if args.check:

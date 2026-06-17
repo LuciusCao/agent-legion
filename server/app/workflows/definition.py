@@ -61,7 +61,7 @@ def _validate_acyclic(nodes: dict[str, WorkflowNode]) -> None:
 
     def visit(node_key: str) -> None:
         if node_key in visiting:
-            raise WorkflowDefinitionError(f"Pipeline contains a cycle at node {node_key}")
+            raise WorkflowDefinitionError(f"Workflow contains a cycle at node {node_key}")
         if node_key in visited:
             return
         visiting.add(node_key)
@@ -79,12 +79,12 @@ def _load_intake(raw: dict[str, Any]) -> WorkflowIntake:
     if raw_intake is None:
         raw_intake = {}
     if not isinstance(raw_intake, dict):
-        raise WorkflowDefinitionError("Pipeline intake must be a mapping")
+        raise WorkflowDefinitionError("Workflow intake must be a mapping")
     raw_modes = raw_intake.get("modes", {})
     if raw_modes is None:
         raw_modes = {}
     if not isinstance(raw_modes, dict):
-        raise WorkflowDefinitionError("Pipeline intake.modes must be a mapping")
+        raise WorkflowDefinitionError("Workflow intake.modes must be a mapping")
 
     modes: dict[str, WorkflowIntakeMode] = {}
     for mode_key, raw_mode in raw_modes.items():
@@ -113,22 +113,22 @@ def _load_intake(raw: dict[str, Any]) -> WorkflowIntake:
 def load_workflow_definition(path: Path) -> WorkflowDefinition:
     raw = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        raise WorkflowDefinitionError("Pipeline definition must be a mapping")
+        raise WorkflowDefinitionError("Workflow definition must be a mapping")
 
     key = raw.get("key")
     label = raw.get("label")
     raw_nodes = raw.get("nodes")
 
     if not isinstance(key, str) or not key:
-        raise WorkflowDefinitionError("Pipeline key is required")
+        raise WorkflowDefinitionError("Workflow key is required")
     if not isinstance(label, str) or not label:
-        raise WorkflowDefinitionError("Pipeline label is required")
+        raise WorkflowDefinitionError("Workflow label is required")
     if not isinstance(raw_nodes, dict) or not raw_nodes:
-        raise WorkflowDefinitionError("Pipeline nodes are required")
+        raise WorkflowDefinitionError("Workflow nodes are required")
 
     if "concurrency" in raw:
         raise WorkflowDefinitionError(
-            "Pipeline field 'concurrency' was removed; configure Executor limits at Workspace level."
+            "Workflow field 'concurrency' was removed; configure Executor limits at Workspace level."
         )
 
     intake = _load_intake(raw)

@@ -86,7 +86,7 @@ class WorkflowWorkerThread:
                     processed = False
                 self.stop_event.wait(0.2 if processed else 3)
 
-        self._thread = threading.Thread(target=_loop, name="pipeline-worker", daemon=True)
+        self._thread = threading.Thread(target=_loop, name="workflow-worker", daemon=True)
         self._thread.start()
 
     def _poll(self) -> bool:
@@ -314,7 +314,7 @@ class WorkflowWorkerThread:
                 try:
                     future.result()
                 except Exception:
-                    logger.exception("pipeline future %s failed", execution_id)
+                    logger.exception("workflow future %s failed", execution_id)
                 self._futures.pop(execution_id, None)
 
     def _get_binding(
@@ -391,7 +391,7 @@ class WorkflowWorkerThread:
             try:
                 future.result(timeout=remaining)
             except Exception:
-                logger.exception("pipeline future failed during shutdown")
+                logger.exception("workflow future failed during shutdown")
         self._futures.clear()
         for pool in self._pools.values():
             pool.shutdown(wait=False, cancel_futures=True)
