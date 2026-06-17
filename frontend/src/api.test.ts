@@ -76,7 +76,7 @@ describe('workspace api', () => {
           workspace: {
             id: 'math',
             name: 'Math',
-            default_pipeline_key: 'question_content',
+            default_workflow_key: 'question_content',
             default_entity: 'question',
             cms_config: { subject_id: '5' },
           },
@@ -106,7 +106,7 @@ describe('workspace api', () => {
           workspace: {
             id: 'math',
             name: 'Math',
-            default_pipeline_key: 'question_content',
+            default_workflow_key: 'question_content',
             default_entity: 'knowledge',
             intake_config: { enabled_modes: ['manual'] },
           },
@@ -141,7 +141,7 @@ describe('workspace api', () => {
           workspace: {
             id: 'physics',
             name: 'Physics',
-            default_pipeline_key: 'question_content',
+            default_workflow_key: 'question_content',
             default_entity: 'knowledge',
             cms_config: { subject_id: '3' },
             resource_config: { storage: 's3' },
@@ -194,7 +194,7 @@ describe('createJobBatch', () => {
 
     await createJobBatch({
       workspaceId: 'math',
-      pipelineKey: 'question_content',
+      workflowKey: 'question_content',
       sourceKind: 'question_ids',
       inputField: 'question_ids',
       values: ['q1', 'q2'],
@@ -205,7 +205,7 @@ describe('createJobBatch', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
           source_kind: 'question_ids',
           question_ids: ['q1', 'q2'],
           knowledge_codes: [],
@@ -238,7 +238,7 @@ describe('createJobBatch', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
           source_kind: 'knowledge_codes',
           knowledge_codes: ['k1'],
           question_ids: [],
@@ -257,7 +257,7 @@ describe('job helpers', () => {
           job: {
             id: 'j1',
             workspace_id: 'w1',
-            pipeline_key: 'p1',
+            workflow_key: 'p1',
             source_id: 's1',
             title: 'T',
             status: 'running',

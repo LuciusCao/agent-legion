@@ -8,12 +8,12 @@ import {
   createJobBatch,
   deleteJob,
   fetchJobs,
-  fetchPipelineDefinition,
+  fetchWorkflowDefinition,
 } from '../api'
 import type {
   JobRecord,
-  PipelineDefinitionRecord,
-  PipelineIntakeModeRecord,
+  WorkflowDefinitionRecord,
+  WorkflowIntakeModeRecord,
 } from '../types'
 
 function parseBatchInput(value: string): string[] {
@@ -51,7 +51,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   const { currentWorkspace } = useWorkspaceStore()
   const { videos, fetchVideos } = useVideoStore()
 
-  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(
+  const [workflow, setWorkflow] = useState<WorkflowDefinitionRecord | null>(
     null
   )
   const [jobs, setJobs] = useState<JobRecord[]>([])
@@ -66,8 +66,8 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   )
 
   const workspaceId = currentWorkspace?.id
-  const pipelineKey =
-    currentWorkspace?.default_pipeline_key || 'question_content'
+  const workflowKey =
+    currentWorkspace?.default_workflow_key || 'question_content'
   const entity = currentWorkspace?.default_entity || 'question'
 
   const intakeConfig = currentWorkspace?.intake_config
@@ -77,7 +77,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
   )
 
   const effectiveModes = useMemo(() => {
-    const modes = pipeline?.intake?.modes || []
+    const modes = workflow?.intake?.modes || []
     if (enabledModeKeys.size === 0) {
       return modes.filter((mode) => isIntakeModeSupported(entity, mode.key))
     }
@@ -85,9 +85,9 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       (mode) =>
         enabledModeKeys.has(mode.key) && isIntakeModeSupported(entity, mode.key)
     )
-  }, [pipeline?.intake?.modes, enabledModeKeys, entity])
+  }, [workflow?.intake?.modes, enabledModeKeys, entity])
 
-  function effectiveLabel(mode: PipelineIntakeModeRecord): string {
+  function effectiveLabel(mode: WorkflowIntakeModeRecord): string {
     const override = intakeConfig?.label_overrides?.[mode.key]
     return override || mode.label
   }
@@ -106,11 +106,11 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setError('')
 
-      fetchPipelineDefinition(pipelineKey)
+      fetchWorkflowDefinition(workflowKey)
         .then((result) => {
           if (cancelled) return
-          setPipeline(result.pipeline)
-          const modes = result.pipeline.intake?.modes || []
+          setWorkflow(result.workflow)
+          const modes = result.workflow.intake?.modes || []
           const enabledKeys = new Set(intakeConfig?.enabled_modes || [])
           const availableModes =
             enabledKeys.size === 0
@@ -127,7 +127,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
           setError(err instanceof Error ? err.message : String(err))
         })
 
-      fetchJobs(workspaceId, pipelineKey)
+      fetchJobs(workspaceId, workflowKey)
         .then((result) => {
           if (cancelled) return
           setJobs(result.jobs)
@@ -143,7 +143,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
         cancelled = true
       }
     }
-  }, [isVideoHive, workspaceId, pipelineKey, intakeConfig, entity])
+  }, [isVideoHive, workspaceId, workflowKey, intakeConfig, entity])
 
   async function handleCreateBatch() {
     const selectedMode = effectiveModes.find(
@@ -161,7 +161,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
     try {
       const result = await createJobBatch({
         workspaceId,
-        pipelineKey,
+        workflowKey,
         entity,
         sourceKind: selectedMode.key,
         inputField: selectedMode.input_field,
@@ -171,7 +171,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
       setMessage(`已创建 ${result.created_count} 个题目任务`)
       setInputValue('')
       try {
-        const refreshed = await fetchJobs(workspaceId, pipelineKey)
+        const refreshed = await fetchJobs(workspaceId, workflowKey)
         setJobs(refreshed.jobs)
       } catch {
         // refresh failure should not erase success message
@@ -237,7 +237,7 @@ export default function WorkspaceJobList({ isVideoHive }: Props) {
     <div>
       <section className="card-outlined workspace-job-create">
         <h3>
-          {pipeline?.label || currentWorkspace?.name || '题目生产'}
+          {workflow?.label || currentWorkspace?.name || '题目生产'}
           {currentWorkspace?.default_entity
             ? ` · ${currentWorkspace.default_entity}`
             : ''}

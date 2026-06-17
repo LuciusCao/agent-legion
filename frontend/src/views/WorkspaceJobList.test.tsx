@@ -29,12 +29,12 @@ function createFetchMock(responses: Record<string, unknown>) {
 const defaultWorkspace = {
   id: 'math_ws',
   name: '数学工作空间',
-  default_pipeline_key: 'question_content',
+  default_workflow_key: 'question_content',
   default_entity: 'question',
 }
 
-const pipelineResponse = {
-  pipeline: {
+const workflowResponse = {
+  workflow: {
     key: 'question_content',
     label: '题目内容生成',
     concurrency: { local: 8, agent: 2 },
@@ -69,8 +69,8 @@ describe('WorkspaceJobList', () => {
 
   it('creates jobs from selected knowledge code intake', async () => {
     const fetchMock = createFetchMock({
-      'GET /api/pipelines/question_content': pipelineResponse,
-      'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+      'GET /api/workflows/question_content': workflowResponse,
+      'GET /api/workspaces/math_ws/jobs?workflow_key=question_content': {
         jobs: [],
       },
       'POST /api/workspaces/math_ws/job-batches': {
@@ -80,7 +80,7 @@ describe('WorkspaceJobList', () => {
           {
             id: 'j1',
             workspace_id: 'math_ws',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             source_id: 'q1',
             title: 'Q1',
             status: 'queued',
@@ -88,7 +88,7 @@ describe('WorkspaceJobList', () => {
           {
             id: 'j2',
             workspace_id: 'math_ws',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             source_id: 'q2',
             title: 'Q2',
             status: 'queued',
@@ -130,7 +130,7 @@ describe('WorkspaceJobList', () => {
     expect(batchCall).toBeDefined()
     const body = JSON.parse(batchCall![1].body as string)
     expect(body).toMatchObject({
-      pipeline_key: 'question_content',
+      workflow_key: 'question_content',
       entity: 'question',
       source_kind: 'by_knowledge',
       question_ids: [],
@@ -140,8 +140,8 @@ describe('WorkspaceJobList', () => {
 
   it('opens a job detail route from the list', async () => {
     const fetchMock = createFetchMock({
-      'GET /api/pipelines/question_content': {
-        pipeline: {
+      'GET /api/workflows/question_content': {
+        workflow: {
           key: 'question_content',
           label: '题目内容生成',
           concurrency: { local: 8, agent: 2 },
@@ -149,12 +149,12 @@ describe('WorkspaceJobList', () => {
           nodes: [],
         },
       },
-      'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+      'GET /api/workspaces/math_ws/jobs?workflow_key=question_content': {
         jobs: [
           {
             id: 'j1',
             workspace_id: 'math_ws',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             source_id: 'q1',
             title: 'Q1',
             status: 'completed',
@@ -176,13 +176,13 @@ describe('WorkspaceJobList', () => {
 
   it('requires confirmation before deleting a job', async () => {
     const fetchMock = createFetchMock({
-      'GET /api/pipelines/question_content': pipelineResponse,
-      'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+      'GET /api/workflows/question_content': workflowResponse,
+      'GET /api/workspaces/math_ws/jobs?workflow_key=question_content': {
         jobs: [
           {
             id: 'j1',
             workspace_id: 'math_ws',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             source_id: 'q1',
             title: 'Q1',
             status: 'completed',
@@ -226,8 +226,8 @@ describe('WorkspaceJobList', () => {
 
   it('shows error when batch creation fails', async () => {
     const fetchMock = createFetchMock({
-      'GET /api/pipelines/question_content': pipelineResponse,
-      'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+      'GET /api/workflows/question_content': workflowResponse,
+      'GET /api/workspaces/math_ws/jobs?workflow_key=question_content': {
         jobs: [],
       },
     })
@@ -242,8 +242,8 @@ describe('WorkspaceJobList', () => {
         })
       }
       const response: Record<string, unknown> = {
-        'GET /api/pipelines/question_content': pipelineResponse,
-        'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+        'GET /api/workflows/question_content': workflowResponse,
+        'GET /api/workspaces/math_ws/jobs?workflow_key=question_content': {
           jobs: [],
         },
       }
@@ -285,8 +285,8 @@ describe('WorkspaceJobList', () => {
 
   it('shows validation error when input is empty', async () => {
     const fetchMock = createFetchMock({
-      'GET /api/pipelines/question_content': {
-        pipeline: {
+      'GET /api/workflows/question_content': {
+        workflow: {
           key: 'question_content',
           label: '题目内容生成',
           concurrency: { local: 8, agent: 2 },
@@ -303,7 +303,7 @@ describe('WorkspaceJobList', () => {
           nodes: [],
         },
       },
-      'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+      'GET /api/workspaces/math_ws/jobs?workflow_key=question_content': {
         jobs: [],
       },
     })
@@ -333,8 +333,8 @@ describe('WorkspaceJobList', () => {
     })
 
     const fetchMock = createFetchMock({
-      'GET /api/pipelines/question_content': pipelineResponse,
-      'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+      'GET /api/workflows/question_content': workflowResponse,
+      'GET /api/workspaces/math_ws/jobs?workflow_key=question_content': {
         jobs: [],
       },
     })
@@ -365,8 +365,8 @@ describe('WorkspaceJobList', () => {
     })
 
     const fetchMock = createFetchMock({
-      'GET /api/pipelines/question_content': pipelineResponse,
-      'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+      'GET /api/workflows/question_content': workflowResponse,
+      'GET /api/workspaces/math_ws/jobs?workflow_key=question_content': {
         jobs: [],
       },
     })
@@ -394,8 +394,8 @@ describe('WorkspaceJobList', () => {
     })
 
     const fetchMock = createFetchMock({
-      'GET /api/pipelines/question_content': pipelineResponse,
-      'GET /api/workspaces/math_ws/jobs?pipeline_key=question_content': {
+      'GET /api/workflows/question_content': workflowResponse,
+      'GET /api/workspaces/math_ws/jobs?workflow_key=question_content': {
         jobs: [],
       },
       'POST /api/workspaces/math_ws/job-batches': {
@@ -405,7 +405,7 @@ describe('WorkspaceJobList', () => {
           {
             id: 'j1',
             workspace_id: 'math_ws',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             source_id: 'v1',
             title: 'V1',
             status: 'queued',
@@ -441,7 +441,7 @@ describe('WorkspaceJobList', () => {
     expect(batchCall).toBeDefined()
     const body = JSON.parse(batchCall![1].body as string)
     expect(body).toMatchObject({
-      pipeline_key: 'question_content',
+      workflow_key: 'question_content',
       entity: 'video',
       source_kind: 'direct_ids',
       question_ids: ['v1'],
