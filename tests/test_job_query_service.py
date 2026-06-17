@@ -160,7 +160,7 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
     assert nodes["assemble_package"]["executor_kind"] == "local"
 
 
-def test_job_detail_resolves_executor_binding_for_job_pipeline_only(query_service, job_db):
+def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_service, job_db):
     workspace = job_db.create_workspace("default")
     batch = job_db.create_batch(
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]

@@ -147,7 +147,7 @@ def _preflight_workspace(
                 table="workspaces",
                 row_key=workspace_id,
                 constraint="default_workflow_key",
-                message=f"pipeline {workflow_key!r} has no registered definition",
+                message=f"workflow {workflow_key!r} has no registered definition",
             )
         )
         return issues

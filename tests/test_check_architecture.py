@@ -422,7 +422,7 @@ def test_rejects_executor_module_reading_raw_executors_config(tmp_path):
         ),
     ],
 )
-def test_rejects_invalid_pipeline_yaml(tmp_path, yaml_content, expected_error):
+def test_rejects_invalid_workflow_yaml(tmp_path, yaml_content, expected_error):
     (tmp_path / "server/app").mkdir(parents=True)
     (tmp_path / "config/workflows").mkdir(parents=True)
     write(tmp_path / "config/workflows/example.yaml", yaml_content)

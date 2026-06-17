@@ -14,8 +14,8 @@ def mutation_service(tmp_path):
 @pytest.fixture
 def definition():
     return WorkflowDefinition(
-        key="test_pipeline",
-        label="Test Pipeline",
+        key="test_workflow",
+        label="Test Workflow",
         intake=WorkflowIntake(),
         nodes={
             "a": WorkflowNode(key="a", label="A", capability="a", outputs=["a.json"]),
@@ -97,8 +97,8 @@ def test_stage_outputs_preserves_inputs_and_unrelated_files(tmp_path, mutation_s
 
 def test_stage_outputs_rejects_escape_paths(tmp_path, mutation_service):
     definition = WorkflowDefinition(
-        key="test_pipeline",
-        label="Test Pipeline",
+        key="test_workflow",
+        label="Test Workflow",
         intake=WorkflowIntake(),
         nodes={
             "a": WorkflowNode(key="a", label="A", capability="a", outputs=["../escape.json"]),

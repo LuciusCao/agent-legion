@@ -184,7 +184,7 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True)
 
-    # Copy pipeline definitions so the legacy finalizer can resolve the default
+    # Copy workflow definitions so the legacy finalizer can resolve the default
     # workspace workflow during app construction.
     import shutil
 
