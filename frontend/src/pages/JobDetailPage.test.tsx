@@ -58,7 +58,7 @@ const mockDetail = {
       job_id: 'j1',
       node_key: 'review',
       label: '审核',
-      status: 'pending',
+      status: 'stale',
       capability: 'review',
       executor_id: 'openclaw-default',
       executor_kind: 'openclaw',
@@ -231,6 +231,9 @@ describe('JobDetailPage', () => {
     expect(container.querySelectorAll('[data-testid="dag-node"]')).toHaveLength(
       3
     )
+    expect(
+      container.querySelector('[data-testid="dag-node"][data-status="stale"]')
+    ).toBeInTheDocument()
     expect(screen.getAllByText('提取').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('生成').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('审核').length).toBeGreaterThanOrEqual(1)

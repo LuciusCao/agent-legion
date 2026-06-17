@@ -23,6 +23,7 @@ const VALID_STATUSES = new Set<DagGraphNode['status']>([
   'running',
   'completed',
   'failed',
+  'stale',
 ])
 
 const POLLING_STATUSES = new Set(['queued', 'running'])

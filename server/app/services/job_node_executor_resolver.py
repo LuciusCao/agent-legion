@@ -6,6 +6,7 @@ from server.app.settings import Settings
 
 def resolve_node_executors(
     workspace_id: str,
+    pipeline_key: str,
     workspace_executor_config: WorkspaceExecutorConfigurationService,
     settings: Settings,
 ) -> dict[str, tuple[str | None, str | None]]:
@@ -30,5 +31,5 @@ def resolve_node_executors(
             executor_kinds.get(binding.get("executor_id")),
         )
         for binding in config.get("bindings", [])
-        if binding.get("node_key")
+        if binding.get("pipeline_key") == pipeline_key and binding.get("node_key")
     }

@@ -162,6 +162,7 @@ class JobQueryService:
         nodes_with_definition = self._job_nodes_with_definition(job, nodes, definition)
         executor_map = resolve_node_executors(
             str(job["workspace_id"]),
+            str(job["pipeline_key"]),
             self.workspace_executor_config,
             self.settings,
         )
