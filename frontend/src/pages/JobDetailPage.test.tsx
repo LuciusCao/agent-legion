@@ -29,6 +29,8 @@ const mockDetail = {
       label: '提取',
       status: 'completed',
       capability: 'extract',
+      executor_id: 'local-default',
+      executor_kind: 'local',
       after: [],
       inputs: [],
       outputs: [],
@@ -43,6 +45,8 @@ const mockDetail = {
       label: '生成',
       status: 'running',
       capability: 'generate',
+      executor_id: 'pi-default',
+      executor_kind: 'pi',
       after: ['extract'],
       inputs: [],
       outputs: [],
@@ -56,6 +60,8 @@ const mockDetail = {
       label: '审核',
       status: 'pending',
       capability: 'review',
+      executor_id: 'openclaw-default',
+      executor_kind: 'openclaw',
       after: ['generate'],
       inputs: [],
       outputs: [],
@@ -222,10 +228,12 @@ describe('JobDetailPage', () => {
     })
     fireEvent.click(screen.getByLabelText('查看 DAG'))
     expect(await screen.findByLabelText('关闭')).toBeInTheDocument()
-    expect(container.querySelectorAll('[data-node]')).toHaveLength(3)
-    expect(container.querySelectorAll('path[data-testid="edge"]')).toHaveLength(
-      2
+    expect(container.querySelectorAll('[data-testid="dag-node"]')).toHaveLength(
+      3
     )
+    expect(screen.getAllByText('提取').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('生成').length).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('审核').length).toBeGreaterThanOrEqual(1)
   })
 
   it('polls detail while job is running', async () => {

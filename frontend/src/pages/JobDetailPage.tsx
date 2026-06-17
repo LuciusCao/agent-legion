@@ -1,11 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import type { DagEdge, DagNode } from '../components/DagGraph'
+import type { DagEdge, DagGraphNode } from '../components/DagGraph'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact, fetchJobDetail, deleteJob } from '../api'
 import { rerunJob, runToJob, packageJobs } from '../jobApi'
-import { durationSeconds } from '../helpers'
 import { useUiStore } from '../stores/uiStore'
 import { useJobStore } from '../stores/jobStore'
 import type {
@@ -19,7 +18,7 @@ import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
 import { JobDetailActions } from '../components/JobDetailActions'
 
-const VALID_STATUSES = new Set<DagNode['status']>([
+const VALID_STATUSES = new Set<DagGraphNode['status']>([
   'pending',
   'running',
   'completed',
@@ -28,21 +27,37 @@ const VALID_STATUSES = new Set<DagNode['status']>([
 
 const POLLING_STATUSES = new Set(['queued', 'running'])
 
-function normalizeStatus(status: string): DagNode['status'] {
-  if (VALID_STATUSES.has(status as DagNode['status'])) {
-    return status as DagNode['status']
+function normalizeStatus(status: string): DagGraphNode['status'] {
+  if (VALID_STATUSES.has(status as DagGraphNode['status'])) {
+    return status as DagGraphNode['status']
   }
   return 'pending'
 }
 
-function toDagNodes(nodes: JobNodeRecord[]): DagNode[] {
+function computeNodeDuration(
+  startedAt?: string | null,
+  finishedAt?: string | null
+): number | undefined {
+  if (startedAt && finishedAt) {
+    return (
+      (new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000
+    )
+  }
+  if (startedAt) {
+    return (Date.now() - new Date(startedAt).getTime()) / 1000
+  }
+  return undefined
+}
+
+function toDagNodes(nodes: JobNodeRecord[]): DagGraphNode[] {
   return nodes.map((n) => ({
     key: n.node_key,
     label: n.label || n.node_key,
     status: normalizeStatus(n.status),
     inputs: n.inputs,
     outputs: n.outputs,
-    duration: durationSeconds(n.started_at, n.finished_at),
+    duration: computeNodeDuration(n.started_at, n.finished_at),
+    executorKind: n.executor_kind as DagGraphNode['executorKind'],
   }))
 }
 
@@ -347,6 +362,7 @@ export default function JobDetailPage() {
         open={dagDialogOpen}
         nodes={dagNodes}
         edges={dagEdges}
+        runs={detail?.runs}
         onClose={() => setDagDialogOpen(false)}
       />
     </div>
