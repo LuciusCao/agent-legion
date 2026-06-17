@@ -152,7 +152,9 @@ def create_app(
             )
             worker_thread.start()
             if PipelineWorkerThread.is_enabled(settings):
-                executor_leases = ExecutorLeaseRepository(job_db.path)
+                executor_leases = ExecutorLeaseRepository(
+                    job_db.path, job_db=job_db, job_event_manager=job_event_manager
+                )
                 execution_runtime = ExecutionRuntime(executor_leases, executor_registry)
                 pipeline_worker_thread = PipelineWorkerThread(
                     job_db=job_db,
