@@ -1,0 +1,82 @@
+.panel {
+  width: 280px;
+  background: white;
+  border-left: 1px solid #e5e7eb;
+  height: 100%;
+  padding: 16px;
+  overflow-y: auto;
+  box-shadow: -2px 0 8px rgba(0, 0, 0, 0.05);
+}
+
+.title {
+  margin: 0 0 16px;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.section {
+  margin-bottom: 16px;
+}
+
+.sectionTitle {
+  font-size: 11px;
+  color: #9ca3af;
+  margin-bottom: 4px;
+}
+
+.statusRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.icon {
+  font-family: 'Material Symbols Outlined', sans-serif;
+}
+
+.muted {
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.tag {
+  font-size: 12px;
+  background: #e5e7eb;
+  color: #374151;
+  padding: 3px 8px;
+  border-radius: 10px;
+  text-transform: uppercase;
+}
+
+.list {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 13px;
+  color: #374151;
+}
+
+.runCard {
+  background: #f3f4f6;
+  padding: 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #374151;
+  margin-bottom: 8px;
+}
+
+.error {
+  color: #b91c1c;
+  margin-top: 4px;
+}
+
+.logButton {
+  width: 100%;
+  padding: 8px;
+  background: #1d4ed8;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
