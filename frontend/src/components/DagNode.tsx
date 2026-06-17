@@ -1,10 +1,11 @@
 import { memo, useState } from 'react'
 import { Handle, Position, NodeProps, type Node } from '@xyflow/react'
+import { formatDuration, STATUS_ICON, type DagNodeStatus } from './dagNodeStatus'
 import styles from './DagNode.module.css'
 
 export interface DagNodeData extends Record<string, unknown> {
   label: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'stale'
+  status: DagNodeStatus
   duration?: number
   executorKind?: 'local' | 'pi' | 'openclaw' | null
   inputs: string[]
@@ -12,14 +13,6 @@ export interface DagNodeData extends Record<string, unknown> {
 }
 
 export type DagNodeType = Node<DagNodeData, 'dagNode'>
-
-const STATUS_ICON: Record<DagNodeData['status'], string> = {
-  completed: 'check_circle',
-  running: 'hourglass_empty',
-  failed: 'error',
-  stale: 'warning',
-  pending: 'radio_button_unchecked',
-}
 
 const CHIP_LIMIT = 3
 
@@ -75,12 +68,7 @@ function ChipList({
 export const DagNode = memo(function DagNode(props: NodeProps<DagNodeType>) {
   const { data, selected } = props
   const icon = STATUS_ICON[data.status]
-  const durationText =
-    data.status === 'running'
-      ? `运行中 ${data.duration ?? 0}s`
-      : typeof data.duration === 'number'
-        ? `耗时 ${data.duration}s`
-        : ''
+  const durationText = formatDuration(data.status, data.duration)
 
   return (
     <div

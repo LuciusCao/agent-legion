@@ -1,13 +1,12 @@
-import styles from './NodeDetailsPanel.module.css'
+import type { components } from '../generated/api'
+import { formatDuration, STATUS_ICON, STATUS_LABEL } from './dagNodeStatus'
 import type { DagNodeData } from './DagNode'
+import styles from './NodeDetailsPanel.module.css'
 
-interface LatestRun {
-  id: number
-  status: string
-  started_at: string
-  exit_code: number | null
-  error_message?: string
-}
+type LatestRun = Pick<
+  components['schemas']['NodeRunResponse'],
+  'id' | 'status' | 'started_at' | 'exit_code' | 'error_message'
+>
 
 interface NodeDetailsPanelProps {
   nodeKey: string
@@ -16,34 +15,13 @@ interface NodeDetailsPanelProps {
   onViewLogs: (nodeKey: string) => void
 }
 
-const STATUS_ICON: Record<DagNodeData['status'], string> = {
-  completed: 'check_circle',
-  running: 'hourglass_empty',
-  failed: 'error',
-  stale: 'warning',
-  pending: 'radio_button_unchecked',
-}
-
-const STATUS_LABEL: Record<DagNodeData['status'], string> = {
-  completed: '已完成',
-  running: '运行中',
-  failed: '失败',
-  stale: '过期',
-  pending: '等待中',
-}
-
 export function NodeDetailsPanel({
   nodeKey,
   data,
   latestRun,
   onViewLogs,
 }: NodeDetailsPanelProps) {
-  const durationText =
-    data.status === 'running'
-      ? `运行中 ${data.duration ?? 0}s`
-      : typeof data.duration === 'number'
-        ? `耗时 ${data.duration}s`
-        : '—'
+  const durationText = formatDuration(data.status, data.duration) || '—'
 
   return (
     <div className={styles.panel}>
@@ -113,7 +91,11 @@ export function NodeDetailsPanel({
         </div>
       )}
 
-      <button className={styles.logButton} onClick={() => onViewLogs(nodeKey)}>
+      <button
+        type="button"
+        className={styles.logButton}
+        onClick={() => onViewLogs(nodeKey)}
+      >
         查看日志
       </button>
     </div>
