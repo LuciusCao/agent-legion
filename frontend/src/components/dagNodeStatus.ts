@@ -1,4 +1,9 @@
-export type DagNodeStatus = 'pending' | 'running' | 'completed' | 'failed' | 'stale'
+export type DagNodeStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'stale'
 
 export const STATUS_ICON: Record<DagNodeStatus, string> = {
   completed: 'check_circle',
@@ -16,7 +21,10 @@ export const STATUS_LABEL: Record<DagNodeStatus, string> = {
   pending: '等待中',
 }
 
-export function formatDuration(status: DagNodeStatus, duration?: number): string {
+export function formatDuration(
+  status: DagNodeStatus,
+  duration?: number
+): string {
   if (status === 'running') {
     return `运行中 ${duration ?? 0}s`
   }
