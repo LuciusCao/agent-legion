@@ -287,21 +287,21 @@ describe('WorkspaceMainPage', () => {
     expect(screen.getByText('仅失败')).toBeInTheDocument()
   })
 
-  it('live polling fetches jobs repeatedly', async () => {
+  it('fetches jobs once on mount without polling', async () => {
     vi.useFakeTimers()
 
     await act(async () => {
       renderPage()
     })
 
+    expect(mockFetchJobs).toHaveBeenCalledTimes(1)
     expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
-    const callsBefore = mockFetchJobs.mock.calls.length
 
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
 
-    expect(mockFetchJobs.mock.calls.length).toBeGreaterThan(callsBefore)
+    expect(mockFetchJobs).toHaveBeenCalledTimes(1)
   })
 
   it('search input updates query after debounce', async () => {
