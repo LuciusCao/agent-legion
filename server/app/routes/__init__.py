@@ -58,7 +58,9 @@ def create_router(
         job_db, settings, agent_manager, pipeline_catalog
     )
     job_intake = JobIntakeService(job_db, settings, pipeline_catalog)
-    job_queries = JobQueryService(job_db, settings, pipeline_catalog)
+    job_queries = JobQueryService(
+        job_db, settings, pipeline_catalog, workspace_executor_configuration
+    )
     job_artifacts = JobArtifactService(job_db)
     job_logs = JobLogService(settings, job_db)
     executor_leases = ExecutorLeaseRepository(job_db.path)

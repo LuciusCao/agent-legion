@@ -1281,6 +1281,10 @@ export interface components {
       capability: string
       /** Error Message */
       error_message: string
+      /** Executor Id */
+      executor_id?: string | null
+      /** Executor Kind */
+      executor_kind?: ('local' | 'pi' | 'openclaw') | null
       /** Finished At */
       finished_at?: string | null
       /** Id */
