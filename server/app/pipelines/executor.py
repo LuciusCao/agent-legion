@@ -1,18 +1,12 @@
 from __future__ import annotations
 
-from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition
+from server.app.pipelines.local_handlers import LOCAL_HANDLERS
 from server.app.pipelines.pi_runner import PiRunner
-from server.app.pipelines.question_content import fetch_question_context
-from server.app.pipelines.reading_analysis import (
-    clean_and_parse,
-    fetch_questions,
-    mark_question,
-)
 from server.app.pipelines.scheduler import (
     _node_statuses,
     _refresh_job_status,
@@ -20,19 +14,6 @@ from server.app.pipelines.scheduler import (
 )
 from server.app.pipelines.skills import resolve_pipeline_skill
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
-
-LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
-
-LOCAL_HANDLERS: dict[str, dict[str, LocalHandler]] = {
-    "question_content": {
-        "fetch_question_context": fetch_question_context,
-    },
-    "reading_analysis": {
-        "fetch_questions": fetch_questions,
-        "clean_and_parse": clean_and_parse,
-        "mark_question": mark_question,
-    },
-}
 
 
 def _resolve_job_dir(job: dict[str, Any], jobs_dir: Path | None) -> Path:

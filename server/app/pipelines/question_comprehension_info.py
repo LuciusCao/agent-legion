@@ -115,3 +115,89 @@ def clean_and_parse(
         json.dumps({"questions": parsed_questions}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+
+
+def _load_json_object(path: Path) -> dict[str, Any]:
+    if not path.is_file():
+        raise ValueError(f"Missing input: {path.name}")
+    content = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(content, dict):
+        raise ValueError(f"Invalid content in {path.name}")
+    return content
+
+
+def _single_parsed_question(artifact_dir: Path, source_id: str) -> dict[str, Any]:
+    parsed = _load_json_object(artifact_dir / "questions_parsed.json")
+    questions = parsed.get("questions")
+    if not isinstance(questions, list) or len(questions) != 1:
+        raise ValueError("questions_parsed.json must contain exactly one question")
+    question = questions[0]
+    if not isinstance(question, dict):
+        raise ValueError("questions_parsed.json contains an invalid question")
+    if question.get("question_id") != source_id:
+        raise ValueError(f"Expected question_id {source_id}, got {question.get('question_id')}")
+    return question
+
+
+def _assert_artifact_question_id(name: str, content: dict[str, Any], source_id: str) -> None:
+    if content.get("question_id") != source_id:
+        raise ValueError(f"{name} question_id mismatch: {content.get('question_id')}")
+
+
+def assemble_comprehension_info(
+    job: dict[str, Any],
+    artifact_dir: Path,
+    context: dict[str, Any] | None = None,
+) -> None:
+    source_id = str(job["source_id"])
+    question = _single_parsed_question(artifact_dir, source_id)
+    key_info = _load_json_object(artifact_dir / "key_info_reviewed.json")
+    possible_errors = _load_json_object(artifact_dir / "possible_errors_reviewed.json")
+    difficulty = _load_json_object(artifact_dir / "comprehension_difficulty.json")
+
+    for name, content in (
+        ("key_info_reviewed.json", key_info),
+        ("possible_errors_reviewed.json", possible_errors),
+        ("comprehension_difficulty.json", difficulty),
+    ):
+        check_cancellation(context)
+        _assert_artifact_question_id(name, content, source_id)
+
+    fingerprint = question.get("fingerprint")
+    if fingerprint is not None and not isinstance(fingerprint, str):
+        raise ValueError("fingerprint must be a string or null")
+
+    comprehension_data = {
+        "fingerprint": fingerprint,
+        "comprehension_difficulty": difficulty.get("comprehension_difficulty"),
+        "key_info_list": key_info.get("key_info_list", []),
+        "possible_error_list": possible_errors.get("possible_error_list", []),
+    }
+    payload = {
+        "question_id": source_id,
+        "fingerprint": fingerprint,
+        "fingerprint_source": question.get("fingerprint_source", "missing"),
+        "fingerprint_missing": fingerprint is None,
+        "comprehension_data": comprehension_data,
+    }
+    manifest = {
+        "question_id": source_id,
+        "pipeline_key": job.get("pipeline_key", "question_comprehension_info"),
+        "source_type": job.get("source_type", "question"),
+        "title": job.get("title", ""),
+        "fingerprint": fingerprint,
+        "fingerprint_missing": fingerprint is None,
+        "artifacts": {
+            "comprehension_info.json": {"present": True},
+        },
+    }
+
+    artifact_dir.mkdir(parents=True, exist_ok=True)
+    (artifact_dir / "comprehension_info.json").write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    (artifact_dir / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
