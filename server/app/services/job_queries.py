@@ -3,6 +3,7 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition
 from server.app.services.job_errors import NotFoundError
+from server.app.services.job_node_executor_resolver import resolve_node_executors
 from server.app.services.pipeline_catalog import PipelineCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
@@ -60,24 +61,6 @@ class JobQueryService:
             }
             for node in nodes
         ]
-
-    def _node_executor_map(self, workspace_id: str) -> dict[str, tuple[str | None, str | None]]:
-        try:
-            config = self.workspace_executor_config.get(workspace_id)
-        except Exception:
-            return {}
-        executor_kinds = {
-            executor_id: executor.kind
-            for executor_id, executor in self.settings.executor_definitions.items()
-        }
-        return {
-            binding["node_key"]: (
-                binding.get("executor_id"),
-                executor_kinds.get(binding.get("executor_id")),
-            )
-            for binding in config.get("bindings", [])
-            if binding.get("node_key")
-        }
 
     def _node_summary(
         self,
@@ -177,7 +160,11 @@ class JobQueryService:
         definition = self._definition(str(job["pipeline_key"]))
         nodes = self.job_db.list_job_nodes(job_id)
         nodes_with_definition = self._job_nodes_with_definition(job, nodes, definition)
-        executor_map = self._node_executor_map(str(job["workspace_id"]))
+        executor_map = resolve_node_executors(
+            str(job["workspace_id"]),
+            self.workspace_executor_config,
+            self.settings,
+        )
         for node in nodes_with_definition:
             executor_id, executor_kind = executor_map.get(node["node_key"], (None, None))
             node["executor_id"] = executor_id
