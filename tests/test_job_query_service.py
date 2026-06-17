@@ -5,11 +5,19 @@ import pytest
 
 from server.app.services.job_queries import JobQueryService
 from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workspace_executor_configuration import (
+    WorkspaceExecutorConfigurationService,
+)
 
 
 @pytest.fixture
 def query_service(job_db, settings):
-    return JobQueryService(job_db, settings, PipelineCatalogService(settings))
+    return JobQueryService(
+        job_db,
+        settings,
+        PipelineCatalogService(settings),
+        WorkspaceExecutorConfigurationService(job_db),
+    )
 
 
 def create_question_job(job_db, source_id: str) -> dict[str, Any]:

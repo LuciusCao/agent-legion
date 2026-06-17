@@ -4,6 +4,9 @@ from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition
 from server.app.services.job_errors import NotFoundError
 from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workspace_executor_configuration import (
+    WorkspaceExecutorConfigurationService,
+)
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 
@@ -14,10 +17,12 @@ class JobQueryService:
         job_db: JobQueries,
         settings: Settings,
         pipelines: PipelineCatalogService,
+        workspace_executor_config: WorkspaceExecutorConfigurationService,
     ):
         self.job_db = job_db
         self.settings = settings
         self.pipelines = pipelines
+        self.workspace_executor_config = workspace_executor_config
 
     def _job_or_404(self, job_id: str) -> dict[str, Any]:
         job = self.job_db.get_job(job_id)
@@ -55,6 +60,21 @@ class JobQueryService:
             }
             for node in nodes
         ]
+
+    def _node_executor_map(self, workspace_id: str) -> dict[str, tuple[str | None, str | None]]:
+        try:
+            config = self.workspace_executor_config.get(workspace_id)
+        except Exception:
+            return {}
+        executor_kinds = {exe["id"]: exe.get("kind") for exe in config.get("executors", [])}
+        return {
+            binding["node_key"]: (
+                binding.get("executor_id"),
+                executor_kinds.get(binding.get("executor_id")),
+            )
+            for binding in config.get("bindings", [])
+            if binding.get("node_key")
+        }
 
     def _node_summary(
         self,
@@ -153,9 +173,15 @@ class JobQueryService:
         job = self._job_or_404(job_id)
         definition = self._definition(str(job["pipeline_key"]))
         nodes = self.job_db.list_job_nodes(job_id)
+        nodes_with_definition = self._job_nodes_with_definition(job, nodes, definition)
+        executor_map = self._node_executor_map(str(job["workspace_id"]))
+        for node in nodes_with_definition:
+            executor_id, executor_kind = executor_map.get(node["node_key"], (None, None))
+            node["executor_id"] = executor_id
+            node["executor_kind"] = executor_kind
         return {
             "job": self._job_summary(job, nodes, definition),
-            "nodes": self._job_nodes_with_definition(job, nodes, definition),
+            "nodes": nodes_with_definition,
             "runs": self.job_db.list_node_runs(job_id),
             "artifacts": self._artifact_names(job),
         }
