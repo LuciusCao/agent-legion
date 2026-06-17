@@ -13,7 +13,7 @@ from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.db.migrations.report import MigrationBlockedError
 from server.app.db.notifications import NotificationHub
-from server.app.events import VideoEventManager
+from server.app.events import JobEventManager, VideoEventManager
 from server.app.executors.backup import legacy_backup_path
 from server.app.executors.config import LocalExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -92,6 +92,7 @@ def create_app(
     worker_control = WorkerControl()
     workspace_worker_control = WorkspaceWorkerControl()
     video_event_manager = VideoEventManager()
+    job_event_manager = JobEventManager()
     hub = NotificationHub()
     hub.on_change = video_event_manager.broadcast  # type: ignore[assignment]
     hub.on_delete = video_event_manager.broadcast_delete
@@ -131,6 +132,7 @@ def create_app(
     async def lifespan(app: FastAPI):
         nonlocal pipeline_worker_thread, worker_thread
         video_event_manager._loop = asyncio.get_running_loop()
+        job_event_manager._loop = asyncio.get_running_loop()
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
@@ -180,6 +182,7 @@ def create_app(
     app.state.worker_control = worker_control
     app.state.workspace_worker_control = workspace_worker_control
     app.state.video_event_manager = video_event_manager
+    app.state.job_event_manager = job_event_manager
 
     app.include_router(
         create_router(
@@ -190,6 +193,7 @@ def create_app(
             video_event_manager,
             worker_control,
             workspace_worker_control,
+            job_event_manager=job_event_manager,
         )
     )
 

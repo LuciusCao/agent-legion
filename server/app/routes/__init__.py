@@ -2,7 +2,7 @@ from fastapi import APIRouter
 
 from ..agents import AgentStatusManager
 from ..db import Database
-from ..events import VideoEventManager
+from ..events import JobEventManager, VideoEventManager
 from ..jobs import JobQueries
 from ..settings import Settings
 from ..worker_control import WorkerControl, WorkspaceWorkerControl
@@ -33,6 +33,7 @@ def create_router(
     video_event_manager: VideoEventManager,
     worker_control: WorkerControl,
     workspace_worker_control: WorkspaceWorkerControl | None = None,
+    job_event_manager: JobEventManager | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -78,7 +79,11 @@ def create_router(
     )
     router.include_router(create_worker_router(worker_control, workspace_worker_control))
     router.include_router(create_pipeline_catalog_router(pipeline_catalog, settings))
-    router.include_router(create_workspaces_router(workspace_configuration, settings))
+    router.include_router(
+        create_workspaces_router(
+            workspace_configuration, settings, job_event_manager=job_event_manager
+        )
+    )
     router.include_router(create_workspace_settings_router(workspace_configuration, settings))
     router.include_router(create_workspace_configuration_router(workspace_configuration, settings))
     router.include_router(
