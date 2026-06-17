@@ -34,13 +34,13 @@ openclaw:
 
 
 def _load_and_validate(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, config_text: str):
-    config_path = tmp_path / "pipeline.yaml"
+    config_path = tmp_path / "workflow.yaml"
     config_path.write_text(config_text, encoding="utf-8")
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
     validate_settings(settings)
 
 
-def test_disabled_pipelines_require_no_pi_binary(tmp_path, monkeypatch):
+def test_disabled_workflows_require_no_pi_binary(tmp_path, monkeypatch):
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
@@ -50,7 +50,7 @@ def test_disabled_pipelines_require_no_pi_binary(tmp_path, monkeypatch):
     _load_and_validate(tmp_path, monkeypatch, config)
 
 
-def test_enabled_pipelines_require_pi_binary(tmp_path, monkeypatch):
+def test_enabled_workflows_require_pi_binary(tmp_path, monkeypatch):
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
@@ -64,7 +64,7 @@ def test_enabled_pipelines_require_pi_binary(tmp_path, monkeypatch):
     assert "workflows.pi.binary" in fields
 
 
-def test_enabled_pipelines_accept_pi_command_from_path(tmp_path, monkeypatch):
+def test_enabled_workflows_accept_pi_command_from_path(tmp_path, monkeypatch):
     whisper = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
@@ -372,7 +372,7 @@ def test_validate_runtime_can_be_called_directly(tmp_path, monkeypatch):
     binary = _make_executable(tmp_path / "whisper-cli")
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
-    config_path = tmp_path / "pipeline.yaml"
+    config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         _minimal_config().format(binary=binary, model=model, cwd=tmp_path),
         encoding="utf-8",

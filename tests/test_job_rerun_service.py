@@ -349,7 +349,7 @@ def test_batch_rerun_node_not_found_for_one_job(rerun_service, job_db):
     assert results[0]["reason_code"] == "node_not_found"
 
 
-def test_batch_rerun_mixed_pipelines(rerun_service, job_db):
+def test_batch_rerun_mixed_workflows(rerun_service, job_db):
     workspace = job_db.create_workspace("default")
     q_batch = job_db.create_batch(
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]

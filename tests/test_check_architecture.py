@@ -331,7 +331,7 @@ def test_default_budget_enforced_for_new_files(tmp_path):
     )
 
 
-def test_rejects_pipeline_worker_accessing_runner_attribute(tmp_path):
+def test_rejects_workflow_worker_accessing_runner_attribute(tmp_path):
     write(
         tmp_path / "server/app/workflow_worker_thread.py",
         "class Worker:\n    def run(self, node):\n        if node.runner == 'local':\n            pass\n",
@@ -343,7 +343,7 @@ def test_rejects_pipeline_worker_accessing_runner_attribute(tmp_path):
     assert any(".runner or .agent" in error for error in errors)
 
 
-def test_rejects_pipeline_worker_accessing_agent_attribute(tmp_path):
+def test_rejects_workflow_worker_accessing_agent_attribute(tmp_path):
     write(
         tmp_path / "server/app/workflow_worker_thread.py",
         "class Worker:\n    def run(self, node):\n        if node.agent is not None:\n            pass\n",

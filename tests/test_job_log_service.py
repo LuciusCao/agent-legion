@@ -214,7 +214,7 @@ def test_job_log_service_redacts_root_dir(log_service, tmp_path):
     logs_root.mkdir(parents=True, exist_ok=True)
     log_file = logs_root / "run.log"
     log_file.write_text(
-        f"config at {settings.root_dir / 'config' / 'pipeline.yaml'}",
+        f"config at {settings.root_dir / 'config' / 'workflow.yaml'}",
         encoding="utf-8",
     )
 

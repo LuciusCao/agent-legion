@@ -273,15 +273,15 @@ def extract_pipeline_phases(root: Path) -> str:
 
 
 def extract_config(root: Path) -> str:
-    """Extract top-level config keys from config/pipeline.yaml."""
-    config_file = root / "config" / "pipeline.yaml"
+    """Extract top-level config keys from config/workflow.yaml."""
+    config_file = root / "config" / "workflow.yaml"
     if not config_file.exists():
-        return "_No pipeline.yaml found._\n"
+        return "_No workflow.yaml found._\n"
 
     try:
         data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
     except Exception:
-        return "_Could not parse pipeline.yaml._\n"
+        return "_Could not parse workflow.yaml._\n"
 
     if not isinstance(data, dict):
         return "_Invalid config format._\n"
@@ -289,7 +289,7 @@ def extract_config(root: Path) -> str:
     descriptions = {
         "asr": "ASR 提供商配置（whisper / SenseVoice）",
         "openclaw": "OpenClaw 命令模板与工作目录",
-        "pipelines": "Agent Legion DAG 流水线开关",
+        "workflows": "Agent Legion DAG 工作流开关",
     }
 
     lines = []

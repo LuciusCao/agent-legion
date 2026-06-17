@@ -1,6 +1,6 @@
 """Phase 5 completion inventory.
 
-This test verifies that the legacy Pipeline definition symbols removed in Phase 5
+This test verifies that the legacy Workflow definition symbols removed in Phase 5
 are no longer present and that the replacement mechanisms are in place.
 """
 
@@ -11,13 +11,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 LEGACY_PATHS: dict[str, tuple[str, str]] = {
-    "pipeline runner": ("server/app/workflows/definition.py", "RunnerKind"),
-    "pipeline concurrency": ("server/app/workflows/definition.py", "PipelineConcurrency"),
+    "workflow runner": ("server/app/workflows/definition.py", "RunnerKind"),
+    "workflow concurrency": ("server/app/workflows/definition.py", "PipelineConcurrency"),
 }
 
 REPLACEMENTS: dict[str, str] = {
-    "pipeline runner": "Node capability + Executor binding kind",
-    "pipeline concurrency": "Workspace-level Executor allocation limits + local Node limits",
+    "workflow runner": "Node capability + Executor binding kind",
+    "workflow concurrency": "Workspace-level Executor allocation limits + local Node limits",
 }
 
 PROTECTED_VIDEO_HIVE_PATHS: set[str] = {
@@ -50,11 +50,11 @@ def test_inventory_includes_replacement_for_every_legacy_path() -> None:
 
 # Concrete replacement tokens that demonstrate the legacy concepts were replaced.
 REPLACEMENT_TOKENS: dict[str, list[tuple[str, str]]] = {
-    "pipeline runner": [
+    "workflow runner": [
         ("server/app/workflows/definition.py", "capability"),
         ("server/app/workflow_worker_thread.py", "workspace_node_bindings"),
     ],
-    "pipeline concurrency": [
+    "workflow concurrency": [
         ("server/app/db/migrations/v001_executor_core.py", "workspace_executor_allocations"),
         ("server/app/db/migrations/v001_executor_core.py", "workspace_node_limits"),
     ],

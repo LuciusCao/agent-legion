@@ -20,13 +20,13 @@ from server.app.workflows.definition import (
 
 @dataclass
 class ValidationContext:
-    pipeline: WorkflowDefinition
+    workflow: WorkflowDefinition
     executors: dict[str, LocalExecutorConfig | PiExecutorConfig]
 
 
 @pytest.fixture
 def context() -> ValidationContext:
-    pipeline = WorkflowDefinition(
+    workflow = WorkflowDefinition(
         key="reading_analysis",
         label="Reading Analysis",
         intake=WorkflowIntake(),
@@ -59,7 +59,7 @@ def context() -> ValidationContext:
             },
         ),
     }
-    return ValidationContext(pipeline=pipeline, executors=executors)
+    return ValidationContext(workflow=workflow, executors=executors)
 
 
 def allocation(executor_id: str, concurrency_limit: int) -> dict[str, object]:
@@ -89,7 +89,7 @@ def test_duplicate_allocation_ids_are_rejected(context: ValidationContext) -> No
 
     with pytest.raises(InvalidOperationError, match="Duplicate Executor allocation local-default"):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 2), allocation("local-default", 3)],
             bindings=[],
@@ -104,7 +104,7 @@ def test_unknown_executor_ids_are_rejected(context: ValidationContext) -> None:
 
     with pytest.raises(InvalidOperationError, match="Unknown Executor unknown-exec"):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("unknown-exec", 1)],
             bindings=[],
@@ -121,7 +121,7 @@ def test_workspace_limit_must_not_exceed_global_capacity(context: ValidationCont
         InvalidOperationError, match="Workspace limit 5 exceeds local-default global capacity 4"
     ):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 5)],
             bindings=[],
@@ -138,7 +138,7 @@ def test_duplicate_node_bindings_are_rejected(context: ValidationContext) -> Non
         InvalidOperationError, match="Duplicate Node binding reading_analysis\\.fetch_questions"
     ):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 4)],
             bindings=[
@@ -149,24 +149,24 @@ def test_duplicate_node_bindings_are_rejected(context: ValidationContext) -> Non
         )
 
 
-def test_binding_pipeline_must_equal_workspace_pipeline(context: ValidationContext) -> None:
+def test_binding_workflow_must_equal_workspace_workflow(context: ValidationContext) -> None:
     from server.app.services.workspace_executor_validation import (
         validate_workspace_executor_configuration,
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Unknown Workflow Node other_pipeline\\.fetch_questions"
+        InvalidOperationError, match="Unknown Workflow Node other_workflow\\.fetch_questions"
     ):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 4)],
-            bindings=[binding("fetch_questions", "local-default", workflow_key="other_pipeline")],
+            bindings=[binding("fetch_questions", "local-default", workflow_key="other_workflow")],
             node_limits=[],
         )
 
 
-def test_binding_node_must_exist_in_pipeline(context: ValidationContext) -> None:
+def test_binding_node_must_exist_in_workflow(context: ValidationContext) -> None:
     from server.app.services.workspace_executor_validation import (
         validate_workspace_executor_configuration,
     )
@@ -175,7 +175,7 @@ def test_binding_node_must_exist_in_pipeline(context: ValidationContext) -> None
         InvalidOperationError, match="Unknown Workflow Node reading_analysis\\.unknown_node"
     ):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 4)],
             bindings=[binding("unknown_node", "local-default")],
@@ -192,7 +192,7 @@ def test_binding_executor_must_be_allocated(context: ValidationContext) -> None:
         InvalidOperationError, match="Executor local-default is not allocated to this Workspace"
     ):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[],
             bindings=[binding("fetch_questions", "local-default")],
@@ -207,7 +207,7 @@ def test_binding_rejects_executor_without_capability(context: ValidationContext)
 
     with pytest.raises(InvalidOperationError, match="does not support capability review_keywords"):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 4)],
             bindings=[binding("review_keywords", "local-default")],
@@ -224,7 +224,7 @@ def test_duplicate_node_limits_are_rejected(context: ValidationContext) -> None:
         InvalidOperationError, match="Duplicate Node limit reading_analysis\\.fetch_questions"
     ):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 4)],
             bindings=[binding("fetch_questions", "local-default")],
@@ -245,7 +245,7 @@ def test_node_limit_requires_existing_binding(context: ValidationContext) -> Non
         match="Node limit requires binding for reading_analysis\\.fetch_questions",
     ):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 4)],
             bindings=[],
@@ -263,7 +263,7 @@ def test_node_limit_rejects_agent_bound_node(context: ValidationContext) -> None
         match="Agent-bound Node reading_analysis\\.review_keywords cannot have a Node limit",
     ):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("pi-default", 2)],
             bindings=[binding("review_keywords", "pi-default")],
@@ -281,7 +281,7 @@ def test_node_limit_must_not_exceed_workspace_allocation(context: ValidationCont
         match="Node limit for reading_analysis\\.fetch_questions exceeds Workspace allocation for local-default",
     ):
         validate_workspace_executor_configuration(
-            pipeline=context.pipeline,
+            workflow=context.workflow,
             executor_definitions=context.executors,
             allocations=[allocation("local-default", 2)],
             bindings=[binding("fetch_questions", "local-default")],
@@ -295,7 +295,7 @@ def test_unbound_node_is_valid(context: ValidationContext) -> None:
     )
 
     validate_workspace_executor_configuration(
-        pipeline=context.pipeline,
+        workflow=context.workflow,
         executor_definitions=context.executors,
         allocations=[allocation("local-default", 4)],
         bindings=[binding("fetch_questions", "local-default")],

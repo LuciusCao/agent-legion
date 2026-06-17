@@ -53,8 +53,8 @@ def validate_unique_api_routes(app: Any) -> None:
 def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
     data_dir.mkdir(parents=True, exist_ok=True)
     app = create_app(data_dir=data_dir, start_worker=False)
-    pipelines = app.state.settings.config.setdefault("pipelines", {})
-    pipelines["enabled"] = True
+    workflows = app.state.settings.config.setdefault("workflows", {})
+    workflows["enabled"] = True
     validate_unique_api_routes(app)
     schema = deepcopy(app.openapi())
     schema["paths"] = {
