@@ -81,4 +81,26 @@ describe('useWorkspaceEvents', () => {
     renderHook(() => useWorkspaceEvents(undefined))
     expect(EventSourceMock.instances.length).toBe(0)
   })
+
+  it('statsOnly fetches workspace stats but not jobs on refresh', async () => {
+    renderHook(() => useWorkspaceEvents('ws1', true, true))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'job_updated',
+            workspace_id: 'ws1',
+            job_id: 'job1',
+          }),
+        })
+      )
+    })
+
+    await waitFor(() => {
+      expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
+    })
+    expect(mockFetchJobs).not.toHaveBeenCalled()
+  })
 })

@@ -274,13 +274,3 @@ class JobEventManager:
             workspace_id,
             self._build_payload("job_deleted", workspace_id, stats, job_id=job_id),
         )
-
-    def broadcast_stats_updated(
-        self,
-        workspace_id: str,
-        stats: dict[str, int],
-    ) -> None:
-        self._broadcast(
-            workspace_id,
-            self._build_payload("stats_updated", workspace_id, stats),
-        )
