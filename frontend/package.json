@@ -39,6 +39,7 @@
     "@material/web": "^2.4.1",
     "@tanstack/react-virtual": "^3.13.26",
     "@types/dagre": "^0.7.54",
+    "@xyflow/react": "^12.11.0",
     "dagre": "^0.8.5",
     "katex": "^0.17.0",
     "react": "^18.3.1",
