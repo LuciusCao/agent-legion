@@ -4,18 +4,18 @@ HTTP_DECORATORS = {"get", "post", "put", "patch", "delete"}
 SCHEDULER_FORBIDDEN = (
     "server.app.pipeline.openclaw",
     "server.app.pipeline.pi_runner",
-    "server.app.pipelines.openclaw",
-    "server.app.pipelines.pi_runner",
-    "server.app.pipelines.skills",
-    "server.app.pipelines.reading_analysis",
-    "server.app.pipelines.question_content",
+    "server.app.workflows.openclaw",
+    "server.app.workflows.pi_runner",
+    "server.app.workflows.skills",
+    "server.app.workflows.reading_analysis",
+    "server.app.workflows.question_content",
     "pipeline.openclaw",
     "pipeline.pi_runner",
-    "pipelines.openclaw",
-    "pipelines.pi_runner",
-    "pipelines.skills",
-    "pipelines.reading_analysis",
-    "pipelines.question_content",
+    "workflows.openclaw",
+    "workflows.pi_runner",
+    "workflows.skills",
+    "workflows.reading_analysis",
+    "workflows.question_content",
     "pi_runner",
     "openclaw",
     "skills",
@@ -92,7 +92,7 @@ def forbidden_imports(modules: dict[str, int], prefixes: tuple[str, ...]) -> lis
 def is_scheduler_path(relative_path: str) -> bool:
     return (
         relative_path.endswith("/scheduler.py")
-        or relative_path == "server/app/pipeline_worker_thread.py"
+        or relative_path == "server/app/workflow_worker_thread.py"
         or relative_path.startswith("server/app/executors/scheduling/")
     )
 
