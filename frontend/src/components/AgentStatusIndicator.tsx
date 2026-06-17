@@ -1,14 +1,41 @@
-import { useMemo } from 'react'
+import { useEffect, useMemo } from 'react'
 import { useUiStore } from '../stores/uiStore'
 import styles from './AgentStatusIndicator.module.css'
 
-export function AgentStatusIndicator() {
+export interface AgentStatusIndicatorProps {
+  workspaceId?: string
+}
+
+export function AgentStatusIndicator({
+  workspaceId,
+}: AgentStatusIndicatorProps) {
   const allAgents = useUiStore((state) => state.agents)
-  const agents = useMemo(
-    () => allAgents.filter((agent) => !agent.workspace_id),
-    [allAgents]
-  )
+  const workerPaused = useUiStore((state) => state.getWorkerPaused(workspaceId))
+  const fetchWorkerStatus = useUiStore((state) => state.fetchWorkerStatus)
+  const setWorkerPaused = useUiStore((state) => state.setWorkerPaused)
+  const showToast = useUiStore((state) => state.showToast)
+
+  const agents = useMemo(() => {
+    if (!workspaceId || workspaceId === 'video-hive') {
+      return allAgents.filter((agent) => !agent.workspace_id)
+    }
+    return allAgents.filter((agent) => agent.workspace_id === workspaceId)
+  }, [allAgents, workspaceId])
   const busy = agents.some((agent) => agent.busy)
+
+  useEffect(() => {
+    fetchWorkerStatus(workspaceId).catch(() => {})
+  }, [fetchWorkerStatus, workspaceId])
+
+  const togglePause = async () => {
+    const next = !workerPaused
+    try {
+      await setWorkerPaused(next, workspaceId)
+      showToast(next ? '已暂停自动调度' : '已恢复自动调度', 'success')
+    } catch {
+      showToast('更新失败', 'error')
+    }
+  }
 
   return (
     <div className={styles.root}>
@@ -20,6 +47,14 @@ export function AgentStatusIndicator() {
         />
       </md-icon-button>
       <div className={styles.popover} role="status">
+        <div className={styles.controlRow}>
+          <span className={styles.controlLabel}>自动调度</span>
+          <md-switch
+            selected={!workerPaused || undefined}
+            onClick={togglePause}
+          />
+        </div>
+        <div className={styles.divider} />
         {agents.length === 0 ? (
           <div className={styles.empty}>暂无运行中的 Agent</div>
         ) : (

@@ -155,6 +155,7 @@ class WorkspaceConfigurationService:
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
+        self._sync_pi_agents(workspace_id, executor_allocations)
         executor_configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
         return {
             "workspace": saved_workspace,
@@ -221,6 +222,25 @@ class WorkspaceConfigurationService:
             raise InvalidOperationError("Global CMS URL is not configured")
         return {"ok": True, "message": "全局配置已就绪"}
 
+    def _sync_pi_agents(
+        self,
+        workspace_id: str,
+        executor_allocations: list[dict[str, Any]],
+    ) -> None:
+        pi_allocation: dict[str, Any] | None = None
+        for allocation in executor_allocations:
+            executor_id = allocation.get("executor_id", "")
+            definition = self.settings.executor_definitions.get(executor_id)
+            if definition is not None and definition.kind == "pi":
+                pi_allocation = allocation
+                break
+        if pi_allocation is not None:
+            self.agent_manager.add_pi_agent_for_workspace(
+                workspace_id, int(pi_allocation.get("concurrency_limit", 1))
+            )
+        else:
+            self.agent_manager.remove_pi_agent_for_workspace(workspace_id)
+
     def stats(self, workspace_id: str) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         pipeline_key = workspace.get("default_pipeline_key", "question_content")
@@ -251,3 +271,27 @@ class WorkspaceConfigurationService:
             "executor_status": {"executors": executors},
             "latest_run": dict(latest_run) if latest_run else None,
         }
+
+
+def sync_workspace_pi_agents(
+    job_db: JobQueries,
+    settings: Settings,
+    agent_manager: AgentStatusManager,
+) -> None:
+    """Register pi agents for all workspaces that currently allocate a pi executor."""
+    for workspace in job_db.list_workspaces():
+        workspace_id = str(workspace["id"])
+        config = job_db.get_workspace_executor_configuration(workspace_id)
+        pi_allocation: dict[str, Any] | None = None
+        for allocation in config.get("allocations", []):
+            executor_id = allocation.get("executor_id", "")
+            definition = settings.executor_definitions.get(executor_id)
+            if definition is not None and definition.kind == "pi":
+                pi_allocation = allocation
+                break
+        if pi_allocation is not None:
+            agent_manager.add_pi_agent_for_workspace(
+                workspace_id, int(pi_allocation.get("concurrency_limit", 1))
+            )
+        else:
+            agent_manager.remove_pi_agent_for_workspace(workspace_id)

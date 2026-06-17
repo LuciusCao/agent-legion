@@ -10,7 +10,10 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import LeaseClaimRequest
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.pipeline_catalog import PipelineCatalogService
-from server.app.services.workspace_configuration import WorkspaceConfigurationService
+from server.app.services.workspace_configuration import (
+    WorkspaceConfigurationService,
+    sync_workspace_pi_agents,
+)
 
 
 @pytest.fixture
@@ -300,3 +303,113 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
     status = stats["executor_status"]["executors"][0]
     assert status["running"] == 0
     assert status["available"] == 0
+
+
+def test_replace_configuration_adds_pi_agent_for_pi_allocation(
+    workspace_service: WorkspaceConfigurationService,
+    workspace,
+) -> None:
+    workspace_service.replace_configuration(
+        workspace["id"],
+        workspace_patch={},
+        settings_patch={"pipelineKey": "reading_analysis"},
+        executor_allocations=[
+            {"executor_id": "local-default", "concurrency_limit": 4},
+            {"executor_id": "pi-default", "concurrency_limit": 3},
+        ],
+        node_bindings=[
+            {
+                "pipeline_key": "reading_analysis",
+                "node_key": "fetch_questions",
+                "executor_id": "local-default",
+            }
+        ],
+        node_limits=[
+            {
+                "pipeline_key": "reading_analysis",
+                "node_key": "fetch_questions",
+                "concurrency_limit": 2,
+            }
+        ],
+    )
+    pi_agents = [
+        a
+        for a in workspace_service.agent_manager.to_dicts()
+        if a["id"] == "pi" and a["workspace_id"] == workspace["id"]
+    ]
+    assert len(pi_agents) == 1
+    assert pi_agents[0]["max_tasks"] == 3
+
+
+def test_replace_configuration_removes_pi_agent_when_pi_allocation_dropped(
+    workspace_service: WorkspaceConfigurationService,
+    workspace,
+) -> None:
+    workspace_service.replace_configuration(
+        workspace["id"],
+        workspace_patch={},
+        settings_patch={"pipelineKey": "reading_analysis"},
+        executor_allocations=[{"executor_id": "pi-default", "concurrency_limit": 2}],
+        node_bindings=[
+            {
+                "pipeline_key": "reading_analysis",
+                "node_key": "extract_keywords",
+                "executor_id": "pi-default",
+            }
+        ],
+        node_limits=[],
+    )
+    assert any(
+        a["id"] == "pi" and a["workspace_id"] == workspace["id"]
+        for a in workspace_service.agent_manager.to_dicts()
+    )
+
+    workspace_service.replace_configuration(
+        workspace["id"],
+        workspace_patch={},
+        settings_patch={"pipelineKey": "reading_analysis"},
+        executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
+        node_bindings=[
+            {
+                "pipeline_key": "reading_analysis",
+                "node_key": "fetch_questions",
+                "executor_id": "local-default",
+            }
+        ],
+        node_limits=[],
+    )
+    assert not any(
+        a["id"] == "pi" and a["workspace_id"] == workspace["id"]
+        for a in workspace_service.agent_manager.to_dicts()
+    )
+
+
+def test_sync_workspace_pi_agents_registers_existing_pi_allocations(
+    workspace_service: WorkspaceConfigurationService,
+    workspace,
+    job_db,
+    settings,
+    agent_manager,
+) -> None:
+    job_db.replace_workspace_executor_configuration(
+        workspace["id"],
+        allocations=[{"executor_id": "pi-default", "concurrency_limit": 5}],
+        bindings=[
+            {
+                "pipeline_key": "reading_analysis",
+                "node_key": "extract_keywords",
+                "executor_id": "pi-default",
+            }
+        ],
+        node_limits=[],
+    )
+
+    sync_workspace_pi_agents(job_db, settings, agent_manager)
+
+    pi_agents = [
+        a
+        for a in agent_manager.to_dicts()
+        if a["id"] == "pi" and a["workspace_id"] == workspace["id"]
+    ]
+    assert len(pi_agents) == 1
+    assert pi_agents[0]["max_tasks"] == 5

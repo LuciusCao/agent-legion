@@ -15,7 +15,7 @@ export default function VideoHiveLayout() {
           scrolled={scrolled}
           rightActions={
             <>
-              <AgentStatusIndicator />
+              <AgentStatusIndicator workspaceId="video-hive" />
               <md-icon-button
                 aria-label="设置"
                 onClick={() => navigate('/video-hive/settings')}

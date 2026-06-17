@@ -70,6 +70,7 @@ describe('WorkspaceLayout', () => {
     mockNavigate.mockClear()
     setWorkerPausedMock.mockClear()
     fetchWorkerStatusMock.mockClear()
+    fetchWorkerStatusMock.mockResolvedValue(undefined)
   })
 
   it('renders app bar with workspace name and no pipeline tag', () => {
@@ -181,5 +182,19 @@ describe('WorkspaceLayout', () => {
     })
     const header = container.querySelector('[data-testid="app-bar"]')
     expect(header!.classList.contains(appBarStyles.scrolled)).toBe(true)
+  })
+
+  it('renders agent status indicator in the app bar', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    expect(screen.getByLabelText('Agent 状态')).toBeInTheDocument()
   })
 })

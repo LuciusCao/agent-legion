@@ -35,6 +35,26 @@
   display: block;
 }
 
+.controlRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+}
+
+.controlLabel {
+  font-size: 14px;
+}
+
+.divider {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--md-sys-color-outline-variant);
+}
+
 .row {
   display: flex;
   justify-content: space-between;

@@ -1,14 +1,17 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
 import VideoHiveLayout from './VideoHiveLayout'
 import { createMockUiState } from '../testing/fixtures'
+
+const fetchWorkerStatusMock = vi.fn()
 
 vi.mock('../stores/uiStore', () => ({
   useUiStore: (
     selector?: (state: ReturnType<typeof createMockUiState>) => unknown
   ) => {
     const state = createMockUiState({
+      fetchWorkerStatus: fetchWorkerStatusMock,
       agents: [
         {
           id: 'main',
@@ -26,6 +29,11 @@ vi.mock('../stores/uiStore', () => ({
 }))
 
 describe('VideoHiveLayout', () => {
+  beforeEach(() => {
+    fetchWorkerStatusMock.mockClear()
+    fetchWorkerStatusMock.mockResolvedValue(undefined)
+  })
+
   it('keeps the Video Hive agent status entry in the app bar', () => {
     render(
       <MemoryRouter initialEntries={['/video-hive']}>
