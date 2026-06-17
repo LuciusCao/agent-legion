@@ -4,7 +4,7 @@ from server.app.routes.executor_contracts import (
     ExecutorCatalogResponse,
     WorkspaceExecutorConfigurationResponse,
 )
-from server.app.routes.job_http import raise_job_http_error, require_pipelines_enabled
+from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_executor_configuration import (
@@ -22,7 +22,7 @@ def create_workspace_executors_router(
 
     @router.get("/executors", response_model=ExecutorCatalogResponse)
     def get_executors() -> ExecutorCatalogResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         return ExecutorCatalogResponse(**catalog.catalog())
 
     @router.get(
@@ -32,7 +32,7 @@ def create_workspace_executors_router(
     def get_workspace_executor_configuration(
         workspace_id: str,
     ) -> WorkspaceExecutorConfigurationResponse:
-        require_pipelines_enabled(settings)
+        require_workflows_enabled(settings)
         try:
             return WorkspaceExecutorConfigurationResponse(
                 **workspace_configuration.get(workspace_id)

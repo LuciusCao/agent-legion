@@ -210,7 +210,7 @@ def test_scheduler_executor_id_indexed_pool_is_allowed(tmp_path):
     assert not any("ThreadPoolExecutor" in error for error in errors)
 
 
-def test_pipeline_yaml_capability_node_is_allowed(tmp_path):
+def test_workflow_yaml_capability_node_is_allowed(tmp_path):
     (tmp_path / "server/app").mkdir(parents=True)
     (tmp_path / "config/workflows").mkdir(parents=True)
     write(

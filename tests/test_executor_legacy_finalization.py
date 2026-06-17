@@ -59,15 +59,15 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
     }
 
 
-def _sample_pipelines() -> list[WorkflowDefinition]:
+def _sample_workflows() -> list[WorkflowDefinition]:
     return [
-        _sample_pipeline(),
-        _legacy_unconfigured_agent_pipeline(),
-        _question_comprehension_info_pipeline(),
+        _sample_workflow(),
+        _legacy_unconfigured_agent_workflow(),
+        _question_comprehension_info_workflow(),
     ]
 
 
-def _set_pipeline_config(queries: JobQueries, workspace_id: str, config: dict[str, Any]) -> None:
+def _set_workflow_config(queries: JobQueries, workspace_id: str, config: dict[str, Any]) -> None:
     with queries.connect() as conn:
         conn.execute(
             "update workspaces set pipeline_config_json = ? where id = ?",
@@ -97,7 +97,7 @@ def _list_legacy_agent_assignments(queries: JobQueries, workspace_id: str) -> li
     return [{"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows]
 
 
-def _sample_pipeline() -> WorkflowDefinition:
+def _sample_workflow() -> WorkflowDefinition:
     return WorkflowDefinition(
         key="reading_analysis",
         label="Reading Analysis",
@@ -122,7 +122,7 @@ def _sample_pipeline() -> WorkflowDefinition:
     )
 
 
-def _legacy_unconfigured_agent_pipeline() -> WorkflowDefinition:
+def _legacy_unconfigured_agent_workflow() -> WorkflowDefinition:
     return WorkflowDefinition(
         key="question_content",
         label="Question Content",
@@ -142,7 +142,7 @@ def _legacy_unconfigured_agent_pipeline() -> WorkflowDefinition:
     )
 
 
-def _question_comprehension_info_pipeline() -> WorkflowDefinition:
+def _question_comprehension_info_workflow() -> WorkflowDefinition:
     return WorkflowDefinition(
         key="question_comprehension_info",
         label="Question Comprehension Info",
@@ -190,10 +190,10 @@ def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> Non
         default_workflow_key="reading_analysis",
     )
     workspace_id = str(workspace["id"])
-    _set_pipeline_config(queries, workspace_id, {"local": 4})
+    _set_workflow_config(queries, workspace_id, {"local": 4})
 
     with queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     allocations = [
         row for row in _fetch_all_allocations(queries) if row["workspace_id"] == workspace_id
@@ -245,11 +245,11 @@ def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None
         default_workflow_key="reading_analysis",
     )
     workspace_id = str(workspace["id"])
-    _set_pipeline_config(queries, workspace_id, {"nodes": {"local_a": 1}})
+    _set_workflow_config(queries, workspace_id, {"nodes": {"local_a": 1}})
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 3)
 
     with queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     allocations = {
         row["executor_id"]: row["concurrency_limit"]
@@ -285,7 +285,7 @@ def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) ->
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 99)
 
     with queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
         # Pretend a user edited the configuration after the first materialization.
         conn.execute(
             "update workspace_executor_allocations set concurrency_limit = 123 "
@@ -299,7 +299,7 @@ def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) ->
         )
 
     with queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     allocations = {
         row["executor_id"]: row["concurrency_limit"]
@@ -317,7 +317,7 @@ def test_finalizer_blocks_on_unknown_agent(queries: JobQueries) -> None:
     _insert_legacy_agent_assignment(queries, workspace_id, "unknown", 2)
 
     with pytest.raises(MigrationBlockedError) as exc_info, queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     issues = {issue.constraint for issue in exc_info.value.report.issues}
     assert "agent_id" in issues
@@ -329,10 +329,10 @@ def test_finalizer_blocks_on_invalid_legacy_limit(queries: JobQueries) -> None:
         name="Bad Limit",
         default_workflow_key="reading_analysis",
     )
-    _set_pipeline_config(queries, str(workspace["id"]), {"local": 0})
+    _set_workflow_config(queries, str(workspace["id"]), {"local": 0})
 
     with pytest.raises(MigrationBlockedError) as exc_info, queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     issues = {issue.constraint for issue in exc_info.value.report.issues}
     assert "pipeline_config_json.local" in issues
@@ -353,7 +353,7 @@ def test_finalizer_blocks_on_invalid_pipeline_config_json(
         )
 
     with pytest.raises(MigrationBlockedError) as exc_info, queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     assert any(
         issue.row_key == workspace_id and issue.constraint == "pipeline_config_json"
@@ -366,14 +366,14 @@ def test_finalizer_blocks_on_invalid_pipeline_config_json(
     assert stored == raw_value
 
 
-def test_finalizer_blocks_on_missing_pipeline_definition(queries: JobQueries) -> None:
+def test_finalizer_blocks_on_missing_workflow_definition(queries: JobQueries) -> None:
     queries.create_workspace(
-        name="Missing Pipeline",
+        name="Missing Workflow",
         default_workflow_key="nonexistent",
     )
 
     with pytest.raises(MigrationBlockedError) as exc_info, queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     issues = {issue.constraint for issue in exc_info.value.report.issues}
     assert "default_workflow_key" in issues
@@ -387,7 +387,7 @@ def test_finalizer_is_idempotent_after_v005(queries: JobQueries) -> None:
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 3)
 
     with queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     first_allocations = _fetch_all_allocations(queries)
     first_bindings = _fetch_all_bindings(queries)
@@ -397,7 +397,7 @@ def test_finalizer_is_idempotent_after_v005(queries: JobQueries) -> None:
     assert not _table_exists(queries, "workspace_executor_bootstrap_state")
 
     with queries.connect() as conn:
-        report = finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        report = finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     assert report.issues == ()
     assert _fetch_all_allocations(queries) == first_allocations
@@ -412,7 +412,7 @@ def test_finalizer_does_not_bind_unallocated_agent_nodes(queries: JobQueries) ->
     )["id"]
 
     with queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     bindings = [row for row in _fetch_all_bindings(queries) if row["workspace_id"] == workspace_id]
     assert bindings == [
@@ -430,10 +430,10 @@ def test_finalizer_applies_v005_and_removes_pipeline_config_json(queries: JobQue
         name="V005",
         default_workflow_key="reading_analysis",
     )
-    _set_pipeline_config(queries, str(workspace["id"]), {"local": 7})
+    _set_workflow_config(queries, str(workspace["id"]), {"local": 7})
 
     with queries.connect() as conn:
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     with queries._connect_read() as conn:
         columns = {row["name"] for row in conn.execute("pragma table_info(workspaces)").fetchall()}
@@ -463,7 +463,7 @@ def test_v005_rolls_back_when_drop_column_is_not_supported(queries: JobQueries) 
                 sqlite3.SQLITE_DENY if action == sqlite3.SQLITE_ALTER_TABLE else sqlite3.SQLITE_OK
             )
         )
-        finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
+        finalize_legacy_executor_schema(conn, _sample_workflows(), _sample_executors())
 
     assert _table_exists(queries, "workspace_agent_assignments")
     assert _table_exists(queries, "workspace_executor_bootstrap_state")
@@ -496,7 +496,7 @@ def test_dry_run_returns_report_without_writing(queries: JobQueries) -> None:
 
     with queries.connect() as conn:
         report = finalize_legacy_executor_schema(
-            conn, _sample_pipelines(), _sample_executors(), dry_run=True
+            conn, _sample_workflows(), _sample_executors(), dry_run=True
         )
 
     assert report.issues == ()
@@ -513,7 +513,7 @@ def test_dry_run_raises_blocked_error_and_leaves_legacy_data(queries: JobQueries
 
     with pytest.raises(MigrationBlockedError), queries.connect() as conn:
         finalize_legacy_executor_schema(
-            conn, _sample_pipelines(), _sample_executors(), dry_run=True
+            conn, _sample_workflows(), _sample_executors(), dry_run=True
         )
 
     assert _table_exists(queries, "workspace_agent_assignments")
@@ -602,7 +602,7 @@ def test_finalizer_interruption_before_commit_retains_backup_and_reruns(
     workspace_id = queries.create_workspace(name="Legacy", default_workflow_key="reading_analysis")[
         "id"
     ]
-    _set_pipeline_config(queries, workspace_id, {"local": 3})
+    _set_workflow_config(queries, workspace_id, {"local": 3})
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 2)
 
     backup_path = queries.path.parent / "v005-backup.sqlite"
@@ -615,7 +615,7 @@ def test_finalizer_interruption_before_commit_retains_backup_and_reruns(
     with pytest.raises(sqlite3.DatabaseError), queries.connect() as conn:
         conn.set_authorizer(block_schema_history_insert)
         finalize_legacy_executor_schema(
-            conn, _sample_pipelines(), _sample_executors(), backup_path=backup_path
+            conn, _sample_workflows(), _sample_executors(), backup_path=backup_path
         )
 
     assert backup_path.is_file()
@@ -623,7 +623,7 @@ def test_finalizer_interruption_before_commit_retains_backup_and_reruns(
 
     with queries.connect() as conn:
         report = finalize_legacy_executor_schema(
-            conn, _sample_pipelines(), _sample_executors(), backup_path=backup_path
+            conn, _sample_workflows(), _sample_executors(), backup_path=backup_path
         )
 
     assert report.issues == ()
