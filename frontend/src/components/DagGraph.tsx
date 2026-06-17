@@ -22,7 +22,7 @@ export interface DagGraphNode {
   label: string
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stale'
   duration?: number
-  executorKind?: 'local' | 'agent' | 'openclaw' | null
+  executorKind?: 'local' | 'pi' | 'openclaw' | null
   inputs?: string[]
   outputs?: string[]
 }
@@ -35,7 +35,7 @@ export interface DagGraphEdge {
 export type DagNode = DagGraphNode
 export type DagEdge = DagGraphEdge
 
-interface NodeRunSummary {
+export interface NodeRunSummary {
   id: number
   node_key: string
   status: string
@@ -49,6 +49,8 @@ interface DagGraphProps {
   edges: DagGraphEdge[]
   runs?: NodeRunSummary[]
   onViewLogs?: (nodeKey: string) => void
+  selectedNode?: string | null
+  onSelectedNodeChange?: (nodeKey: string | null) => void
 }
 
 const NODE_WIDTH = 240
@@ -58,10 +60,9 @@ const nodeTypes = { dagNode: DagNodeComponent }
 type NormalizedExecutorKind = NonNullable<DagNodeData['executorKind']>
 
 function normalizeExecutorKind(
-  kind?: 'local' | 'agent' | 'openclaw' | null
+  kind?: 'local' | 'pi' | 'openclaw' | null
 ): DagNodeData['executorKind'] {
   if (!kind) return null
-  if (kind === 'agent') return 'pi'
   return kind as NormalizedExecutorKind
 }
 
@@ -150,6 +151,8 @@ export function DagGraph({
   edges,
   runs = [],
   onViewLogs = () => {},
+  selectedNode: controlledSelectedNode,
+  onSelectedNodeChange,
 }: DagGraphProps) {
   const { rfNodes: initialNodes, rfEdges: initialEdges } = useMemo(
     () => computeLayout(nodes, edges),
@@ -157,8 +160,25 @@ export function DagGraph({
   )
   const [rfNodes, setRfNodes, onNodesChange] = useNodesState(initialNodes)
   const [rfEdges, setRfEdges, onEdgesChange] = useEdgesState(initialEdges)
-  const [selectedNode, setSelectedNode] = useState<string | null>(null)
+  const [internalSelectedNode, setInternalSelectedNode] = useState<
+    string | null
+  >(null)
   const [hoveredNode, setHoveredNode] = useState<string | null>(null)
+
+  const isControlled = controlledSelectedNode !== undefined
+  const selectedNode = isControlled
+    ? controlledSelectedNode
+    : internalSelectedNode
+  const setSelectedNode = useCallback(
+    (nodeKey: string | null) => {
+      if (isControlled) {
+        onSelectedNodeChange?.(nodeKey)
+      } else {
+        setInternalSelectedNode(nodeKey)
+      }
+    },
+    [isControlled, onSelectedNodeChange]
+  )
 
   useEffect(() => {
     setRfNodes(initialNodes)
@@ -169,12 +189,12 @@ export function DagGraph({
     (_event: React.MouseEvent, node: Node<DagNodeData>) => {
       setSelectedNode(node.id)
     },
-    []
+    [setSelectedNode]
   )
 
   const onPaneClick = useCallback(() => {
     setSelectedNode(null)
-  }, [])
+  }, [setSelectedNode])
 
   const onNodeMouseEnter = useCallback(
     (_event: React.MouseEvent, node: Node<DagNodeData>) => {
