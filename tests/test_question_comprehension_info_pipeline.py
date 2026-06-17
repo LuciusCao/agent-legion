@@ -2,7 +2,10 @@ import json
 from pathlib import Path
 
 from server.app.jobs.queries import JobQueries
-from server.app.pipelines.question_comprehension_info import clean_and_parse
+from server.app.pipelines.question_comprehension_info import (
+    assemble_comprehension_info,
+    clean_and_parse,
+)
 
 
 def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
@@ -91,8 +94,6 @@ def test_clean_and_parse_marks_missing_fingerprint_without_hashing(tmp_path):
 
 
 def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
-    from server.app.pipelines.question_comprehension_info import assemble_comprehension_info
-
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     job = queries.create_job(
