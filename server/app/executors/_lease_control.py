@@ -53,6 +53,17 @@ def _execution_control_rejects_claim(
 
 
 def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:
+    still_running = conn.execute(
+        "select 1 from job_nodes where job_id=? and status='running'",
+        (job_id,),
+    ).fetchone()
+    if still_running is not None:
+        conn.execute(
+            "update jobs set status=?, updated_at=? where id=?",
+            ("running", _sqlite_timestamp(datetime.now(UTC)), job_id),
+        )
+        return
+
     any_failed = conn.execute(
         "select 1 from job_nodes where job_id=? and status='failed'",
         (job_id,),
