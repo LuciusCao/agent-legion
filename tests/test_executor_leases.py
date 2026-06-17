@@ -851,3 +851,126 @@ def test_claim_lease_transitions_queued_job_back_to_running(
     job = queries.get_job(job_id)
     assert job is not None
     assert job["status"] == "running"
+
+
+def test_recover_orphaned_running_jobs_returns_them_to_queued(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-orphan", "exec-orphan", 1, node_keys=["node_a", "node_b"]
+    )
+    # simulate a stuck state: job running, node_a running, but no active lease
+    with queries.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='running' where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        )
+        conn.execute(
+            "update jobs set status='running' where id=?",
+            (job_id,),
+        )
+        conn.execute("commit")
+
+    recovered = repo_a.recover_orphaned_running_jobs(datetime.now(UTC))
+
+    assert recovered == [job_id]
+    job = queries.get_job(job_id)
+    assert job["status"] == "queued"
+    node = queries.get_job_node(job_id, "node_a")
+    assert node is not None
+    assert node["status"] == "pending"
+
+
+def test_recover_skips_jobs_with_active_lease(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-active", "exec-active", 1, node_keys=["node_a", "node_b"]
+    )
+    # insert an active lease for the job
+    with queries.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='running' where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        )
+        conn.execute(
+            "update jobs set status='running' where id=?",
+            (job_id,),
+        )
+        cursor = conn.execute(
+            """
+            insert into node_runs(job_id, node_key, status, started_at, log_path)
+            values (?, ?, 'running', ?, ?)
+            """,
+            (job_id, "node_a", _sqlite_timestamp(datetime.now(UTC)), "/tmp/run.log"),
+        )
+        node_run_id = cursor.lastrowid
+        conn.execute(
+            """
+            insert into executor_leases(
+                id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+                node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
+            )
+            values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
+            """,
+            (
+                "lease-1",
+                "exec-1",
+                "exec-active",
+                workspace_id,
+                job_id,
+                "reading_analysis",
+                "node_a",
+                node_run_id,
+                _sqlite_timestamp(datetime.now(UTC)),
+                _sqlite_timestamp(datetime.now(UTC)),
+                _sqlite_timestamp(datetime.now(UTC) + timedelta(seconds=60)),
+            ),
+        )
+        conn.execute("commit")
+
+    recovered = repo_a.recover_orphaned_running_jobs(datetime.now(UTC))
+
+    assert recovered == []
+    job = queries.get_job(job_id)
+    assert job["status"] == "running"
+
+
+def test_recover_orphaned_running_jobs_marks_running_node_runs_failed(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-orphan-runs", "exec-orphan-runs", 1, node_keys=["node_a", "node_b"]
+    )
+    now = datetime.now(UTC)
+    now_str = _sqlite_timestamp(now)
+    with queries.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='running' where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        )
+        conn.execute(
+            "update jobs set status='running' where id=?",
+            (job_id,),
+        )
+        conn.execute(
+            """
+            insert into node_runs(job_id, node_key, status, started_at, log_path)
+            values (?, ?, 'running', ?, ?)
+            """,
+            (job_id, "node_a", now_str, "/tmp/orphan.log"),
+        )
+        conn.execute("commit")
+
+    recovered = repo_a.recover_orphaned_running_jobs(now)
+
+    assert recovered == [job_id]
+    with queries.connect() as conn:
+        run = conn.execute(
+            "select * from node_runs where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        ).fetchone()
+    assert run is not None
+    assert run["status"] == "failed"
+    assert run["error_message"] == "orphaned recovery"
+    assert run["finished_at"] is not None
