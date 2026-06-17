@@ -40,6 +40,7 @@ class WorkspaceConfigurationService:
         try:
             return self.job_db.create_workspace(
                 payload["name"],
+                # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
                 default_workflow_key=payload["default_pipeline_key"],
                 default_entity=payload.get("default_entity", "question"),
                 cms_config=payload.get("cms_config", {}),
@@ -61,6 +62,7 @@ class WorkspaceConfigurationService:
                 workspace_id,
                 name=payload.get("name"),
                 description=payload.get("description"),
+                # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
                 default_workflow_key=payload.get("default_pipeline_key"),
                 default_entity=payload.get("default_entity"),
                 cms_config=payload.get("cms_config"),
@@ -93,14 +95,13 @@ class WorkspaceConfigurationService:
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         current = workspace_settings_payload(workspace)
+        # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
         pipeline_key = settings_patch.get("pipelineKey") or str(current["pipelineKey"])
         pipeline = self.pipelines.definition(pipeline_key)
 
+        # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
         def _map_binding(row: dict[str, Any]) -> dict[str, Any]:
-            return {
-                "workflow_key" if k == "pipeline_key" else k: v
-                for k, v in row.items()
-            }
+            return {"workflow_key" if k == "pipeline_key" else k: v for k, v in row.items()}
 
         mapped_bindings = [_map_binding(b) for b in node_bindings]
         mapped_limits = [_map_binding(n) for n in node_limits]
@@ -125,6 +126,7 @@ class WorkspaceConfigurationService:
                 workspace_id,
                 name=name,
                 description=description,
+                # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
                 default_workflow_key=pipeline_key,
                 default_entity=settings_patch.get("entityType") or str(current["entityType"]),
                 resource_config={
@@ -205,6 +207,7 @@ class WorkspaceConfigurationService:
                 self.pipelines.definition(patch["pipelineKey"])
             workspace = self.job_db.update_workspace(
                 workspace_id,
+                # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
                 default_workflow_key=patch.get("pipelineKey"),
             )
         else:
