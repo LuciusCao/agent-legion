@@ -267,9 +267,14 @@ def test_workspace_package_includes_comprehension_info(tmp_path):
     package_path, job_count = create_workspace_package(jobs, packages_dir, jobs_dir)
 
     assert job_count == 1
+    assert package_path.exists()
     with zipfile.ZipFile(package_path) as zf:
         names = set(zf.namelist())
+        assert "reading_Q100/comprehension_info.json" in names
         payload = json.loads(zf.read("reading_Q100/comprehension_info.json").decode("utf-8"))
 
-    assert "reading_Q100/comprehension_info.json" in names
     assert payload["question_id"] == "Q100"
+    assert payload["fingerprint_missing"] is True
+    assert payload["comprehension_data"]["comprehension_difficulty"] == 65
+    assert payload["comprehension_data"]["key_info_list"] == []
+    assert payload["comprehension_data"]["possible_error_list"] == []
