@@ -38,15 +38,14 @@ function computeNodeDuration(
   startedAt?: string | null,
   finishedAt?: string | null
 ): number | undefined {
-  if (startedAt && finishedAt) {
-    return (
-      (new Date(finishedAt).getTime() - new Date(startedAt).getTime()) / 1000
-    )
+  const start = startedAt ? new Date(startedAt).getTime() : NaN
+  if (Number.isNaN(start)) return undefined
+  if (finishedAt) {
+    const end = new Date(finishedAt).getTime()
+    if (Number.isNaN(end)) return undefined
+    return (end - start) / 1000
   }
-  if (startedAt) {
-    return (Date.now() - new Date(startedAt).getTime()) / 1000
-  }
-  return undefined
+  return (Date.now() - start) / 1000
 }
 
 function toDagNodes(nodes: JobNodeRecord[]): DagGraphNode[] {
@@ -57,7 +56,7 @@ function toDagNodes(nodes: JobNodeRecord[]): DagGraphNode[] {
     inputs: n.inputs,
     outputs: n.outputs,
     duration: computeNodeDuration(n.started_at, n.finished_at),
-    executorKind: n.executor_kind as DagGraphNode['executorKind'],
+    executorKind: (n.executor_kind as DagGraphNode['executorKind']) ?? null,
   }))
 }
 
