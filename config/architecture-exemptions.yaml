@@ -61,6 +61,12 @@ exemptions:
     remove_when: issues/open/022-P2-frontend-websocket-and-misc.md
 
   - check: architecture.route_response_model
+    path: server/app/routes/workspaces.py:workspace_events
+    reason: Workspace SSE endpoint returns an asynchronous event-stream response that cannot be represented by a named Pydantic model.
+    owner: workspace-executor
+    remove_when: issues/open/022-P2-frontend-websocket-and-misc.md
+
+  - check: architecture.route_response_model
     path: server/app/routes/videos.py:add_videos
     reason: Add videos endpoint returns a dynamic JSON result pending typed response models.
     owner: video-hive

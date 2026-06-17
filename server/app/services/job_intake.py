@@ -3,6 +3,7 @@ from typing import Any
 
 from server.app.cms.client import get_token
 from server.app.cms.question import list_questions_by_knowledge
+from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.pipelines.resources import resolve_cms_resource
 from server.app.services.job_errors import (
@@ -60,10 +61,12 @@ class JobIntakeService:
         job_db: JobQueries,
         settings: Settings,
         pipelines: PipelineCatalogService,
+        job_event_manager: JobEventManager | None = None,
     ):
         self.job_db = job_db
         self.settings = settings
         self.pipelines = pipelines
+        self.job_event_manager = job_event_manager
 
     def _workspace(self, workspace_id: str) -> dict[str, Any]:
         workspace = self.job_db.get_workspace(workspace_id)
@@ -245,4 +248,7 @@ class JobIntakeService:
             )
 
         batch["created_count"] = len(jobs)
+        if self.job_event_manager is not None:
+            stats = self.job_db.count_jobs_by_status(workspace_id)
+            self.job_event_manager.broadcast_jobs_created(workspace_id, jobs, stats)
         return {"batch": batch, "created_count": len(jobs), "jobs": jobs}
