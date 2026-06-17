@@ -220,6 +220,30 @@ def test_expire_stale_broadcasts_job_updated(manager, tmp_path):
     assert '"job_id": "j1"' in data
 
 
+def test_recover_orphaned_running_jobs_broadcasts_job_updated(manager, tmp_path):
+    lease_repo = ExecutorLeaseRepository(
+        tmp_path / "leases.sqlite",
+        job_db=FakeJobDB(),
+        job_event_manager=manager,
+    )
+    conn = sqlite3.connect(lease_repo.path)
+    try:
+        _insert_workspace_job(conn)
+        conn.execute("update jobs set status='running' where id='j1'")
+        conn.commit()
+    finally:
+        conn.close()
+
+    queue = _ws1_queue(manager)
+    recovered = lease_repo.recover_orphaned_running_jobs(datetime.now(UTC))
+    assert recovered == ["j1"]
+    assert not queue.empty()
+    data = queue.get_nowait()
+    assert '"type": "job_updated"' in data
+    assert '"workspace_id": "ws1"' in data
+    assert '"job_id": "j1"' in data
+
+
 def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
     from server.app import executors
 
