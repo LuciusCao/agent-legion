@@ -32,6 +32,7 @@ interface JobState {
   continueLoading: boolean
 
   fetchJobs: (workspaceId: string) => Promise<void>
+  setJobs: (jobs: JobSummary[]) => void
   setStatusFilter: (filter: JobStatus | 'all') => void
   setSearchQuery: (query: string) => void
   toggleSelectMode: () => void
@@ -147,6 +148,10 @@ export const useJobStore = create<JobState>((set, get) => ({
       const message = err instanceof Error ? err.message : 'Failed to load jobs'
       set({ error: message, isLoading: false })
     }
+  },
+
+  setJobs(jobs) {
+    set({ jobs })
   },
 
   setStatusFilter(filter) {
