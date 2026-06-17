@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from server.app.main import create_app
 
-PIPELINE_KEY = "reading_analysis"
+PIPELINE_KEY = "question_comprehension_info"
 
 
 def _sort(rows: list[dict]) -> list[dict]:
@@ -42,7 +42,11 @@ def _expected_local_bindings(workspace_id: str) -> list[dict]:
             "node_key": "fetch_questions",
             "executor_id": "local-default",
         },
-        {"pipeline_key": PIPELINE_KEY, "node_key": "mark_question", "executor_id": "local-default"},
+        {
+            "pipeline_key": PIPELINE_KEY,
+            "node_key": "assemble_comprehension_info",
+            "executor_id": "local-default",
+        },
     ]
 
 
@@ -50,10 +54,14 @@ def _expected_pi_bindings(workspace_id: str) -> list[dict]:
     return [
         {
             "pipeline_key": PIPELINE_KEY,
-            "node_key": "assess_difficulty",
+            "node_key": "generate_key_info",
             "executor_id": "pi-default",
         },
-        {"pipeline_key": PIPELINE_KEY, "node_key": "review_keywords", "executor_id": "pi-default"},
+        {
+            "pipeline_key": PIPELINE_KEY,
+            "node_key": "review_key_info",
+            "executor_id": "pi-default",
+        },
     ]
 
 
@@ -79,7 +87,7 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     assert local_executor["kind"] == "local"
     assert "fetch_questions" in local_executor["capabilities"]
     assert pi_executor["kind"] == "pi"
-    assert "review_keywords" in pi_executor["capabilities"]
+    assert "generate_key_info" in pi_executor["capabilities"]
 
     # Create a workspace to configure.
     workspace_response = client.post(
@@ -98,7 +106,7 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
 
     # 3. Allocate Pi and local Executors.
     # 4. Bind compatible Nodes.
-    # 5. Leave one Node unbound (e.g. generate_distractors).
+    # 5. Leave remaining Nodes unbound.
     save_payload = {
         "settings": {"pipelineKey": PIPELINE_KEY},
         "executor_allocations": [
@@ -110,7 +118,11 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "node_limits": [
             {"pipeline_key": PIPELINE_KEY, "node_key": "fetch_questions", "concurrency_limit": 2},
             {"pipeline_key": PIPELINE_KEY, "node_key": "clean_and_parse", "concurrency_limit": 1},
-            {"pipeline_key": PIPELINE_KEY, "node_key": "mark_question", "concurrency_limit": 1},
+            {
+                "pipeline_key": PIPELINE_KEY,
+                "node_key": "assemble_comprehension_info",
+                "concurrency_limit": 1,
+            },
         ],
     }
     result = _put_config(client, workspace_id, save_payload)
@@ -139,7 +151,7 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "node_bindings": [
             {
                 "pipeline_key": PIPELINE_KEY,
-                "node_key": "mark_question",
+                "node_key": "assemble_comprehension_info",
                 "executor_id": "pi-default",
             },
         ],
@@ -169,7 +181,11 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "node_limits": [
             {"pipeline_key": PIPELINE_KEY, "node_key": "fetch_questions", "concurrency_limit": 2},
             {"pipeline_key": PIPELINE_KEY, "node_key": "clean_and_parse", "concurrency_limit": 1},
-            {"pipeline_key": PIPELINE_KEY, "node_key": "mark_question", "concurrency_limit": 1},
+            {
+                "pipeline_key": PIPELINE_KEY,
+                "node_key": "assemble_comprehension_info",
+                "concurrency_limit": 1,
+            },
         ],
     }
     result = _put_config(client, workspace_id, remove_pi_payload)

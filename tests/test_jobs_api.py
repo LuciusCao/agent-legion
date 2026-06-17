@@ -218,11 +218,6 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
             "node_key": "fetch_questions",
             "executor_id": "local-default",
         },
-        {
-            "pipeline_key": "reading_analysis",
-            "node_key": "mark_question",
-            "executor_id": "local-default",
-        },
     ]
     assert config["node_limits"] == [
         {
@@ -233,11 +228,6 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
         {
             "pipeline_key": "reading_analysis",
             "node_key": "fetch_questions",
-            "concurrency_limit": 1,
-        },
-        {
-            "pipeline_key": "reading_analysis",
-            "node_key": "mark_question",
             "concurrency_limit": 1,
         },
     ]

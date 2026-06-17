@@ -346,12 +346,12 @@ def test_replace_configuration_removes_pi_agent_when_pi_allocation_dropped(
     workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={},
-        settings_patch={"pipelineKey": "reading_analysis"},
+        settings_patch={"pipelineKey": "question_comprehension_info"},
         executor_allocations=[{"executor_id": "pi-default", "concurrency_limit": 2}],
         node_bindings=[
             {
-                "pipeline_key": "reading_analysis",
-                "node_key": "extract_keywords",
+                "pipeline_key": "question_comprehension_info",
+                "node_key": "generate_key_info",
                 "executor_id": "pi-default",
             }
         ],

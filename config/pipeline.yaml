@@ -56,8 +56,8 @@ executors:
         handler: reading_analysis.fetch_questions
       clean_and_parse:
         handler: reading_analysis.clean_and_parse
-      mark_question:
-        handler: reading_analysis.mark_question
+      assemble_comprehension_info:
+        handler: question_comprehension_info.assemble_comprehension_info
       fetch_question_context:
         handler: question_content.fetch_question_context
       assemble_package:
@@ -66,23 +66,20 @@ executors:
     kind: pi
     global_capacity: 20
     capabilities:
-      extract_keywords:
-        skill: reading_analysis/extract_keywords
+      generate_key_info:
+        skill: question_comprehension_info/generate_key_info
         tools: [read, write, bash]
-      review_keywords:
-        skill: reading_analysis/review_keywords
+      review_key_info:
+        skill: question_comprehension_info/review_key_info
         tools: [read, write, bash]
-      assess_difficulty:
-        skill: reading_analysis/assess_difficulty
+      generate_possible_errors:
+        skill: question_comprehension_info/generate_possible_errors
         tools: [read, write, bash]
-      review_difficulty:
-        skill: reading_analysis/review_difficulty
+      review_possible_errors:
+        skill: question_comprehension_info/review_possible_errors
         tools: [read, write, bash]
-      generate_distractors:
-        skill: reading_analysis/generate_distractors
-        tools: [read, write, bash]
-      review_distractors:
-        skill: reading_analysis/review_distractors
+      assess_comprehension_difficulty:
+        skill: question_comprehension_info/assess_comprehension_difficulty
         tools: [read, write, bash]
 
 pipelines:

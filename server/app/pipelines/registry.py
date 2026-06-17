@@ -6,6 +6,7 @@ from server.app.pipelines.definition import PipelineDefinition, load_pipeline_de
 PIPELINE_FILES = {
     "question_content": "question_content.yaml",
     "reading_analysis": "reading_analysis.yaml",
+    "question_comprehension_info": "question_comprehension_info.yaml",
 }
 
 
