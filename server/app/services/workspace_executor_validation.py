@@ -34,13 +34,13 @@ def validate_workspace_executor_configuration(
 
     binding_by_node: dict[tuple[str, str], Mapping[str, Any]] = {}
     for binding in bindings:
-        pipeline_key = str(binding["workflow_key"])
+        workflow_key = str(binding["workflow_key"])
         node_key = str(binding["node_key"])
-        key = (pipeline_key, node_key)
+        key = (workflow_key, node_key)
         if key in binding_by_node:
-            raise InvalidOperationError(f"Duplicate Node binding {pipeline_key}.{node_key}")
-        if pipeline_key != pipeline.key or node_key not in pipeline.nodes:
-            raise InvalidOperationError(f"Unknown Pipeline Node {pipeline_key}.{node_key}")
+            raise InvalidOperationError(f"Duplicate Node binding {workflow_key}.{node_key}")
+        if workflow_key != pipeline.key or node_key not in pipeline.nodes:
+            raise InvalidOperationError(f"Unknown Workflow Node {workflow_key}.{node_key}")
         executor_id = str(binding["executor_id"])
         if executor_id not in allocation_by_id:
             raise InvalidOperationError(
@@ -51,7 +51,7 @@ def validate_workspace_executor_configuration(
         if capability not in executor.capabilities:
             raise InvalidOperationError(
                 f"Executor {executor_id} does not support capability {capability} "
-                f"for {pipeline_key}.{node_key}"
+                f"for {workflow_key}.{node_key}"
             )
         binding_by_node[key] = binding
 
