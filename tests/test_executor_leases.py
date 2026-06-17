@@ -726,3 +726,83 @@ def test_claim_with_stale_full_snapshot_is_rejected_when_job_is_run_to(
 def test_sqlite_timestamp_is_utc_without_t_separator() -> None:
     now = datetime(2025, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
     assert _sqlite_timestamp(now) == "2025-01-02 03:04:05.123456"
+
+
+def test_sync_job_status_returns_queued_when_nodes_remain(repo_a, queries):
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-queued", "exec-queued", 1, node_keys=["node_a", "node_b"]
+    )
+    with queries.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='completed' where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        )
+        conn.execute("commit")
+
+    import sqlite3
+
+    with sqlite3.connect(queries.path) as conn:
+        conn.row_factory = sqlite3.Row
+        from server.app.executors._lease_control import _sync_job_status
+
+        _sync_job_status(conn, job_id)
+        conn.commit()
+
+    job = queries.get_job(job_id)
+    assert job["status"] == "queued"
+
+
+def test_sync_job_status_keeps_paused_when_execution_paused(repo_a, queries):
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-paused", "exec-paused", 1, node_keys=["node_a", "node_b"]
+    )
+    with queries.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='completed' where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        )
+        conn.execute(
+            "update jobs set execution_paused=1, status='paused' where id=?",
+            (job_id,),
+        )
+        conn.execute("commit")
+
+    import sqlite3
+
+    with sqlite3.connect(queries.path) as conn:
+        conn.row_factory = sqlite3.Row
+        from server.app.executors._lease_control import _sync_job_status
+
+        _sync_job_status(conn, job_id)
+        conn.commit()
+
+    job = queries.get_job(job_id)
+    assert job["status"] == "paused"
+
+
+def test_sync_job_status_failed_when_any_node_failed(repo_a, queries):
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-failed", "exec-failed", 1, node_keys=["node_a", "node_b"]
+    )
+    with queries.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='failed' where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        )
+        conn.execute(
+            "update job_nodes set status='completed' where job_id=? and node_key=?",
+            (job_id, "node_b"),
+        )
+        conn.execute("commit")
+
+    import sqlite3
+
+    with sqlite3.connect(queries.path) as conn:
+        conn.row_factory = sqlite3.Row
+        from server.app.executors._lease_control import _sync_job_status
+
+        _sync_job_status(conn, job_id)
+        conn.commit()
+
+    job = queries.get_job(job_id)
+    assert job["status"] == "failed"
