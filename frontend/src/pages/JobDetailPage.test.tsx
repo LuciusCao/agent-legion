@@ -215,7 +215,7 @@ describe('JobDetailPage', () => {
     renderPage()
 
     expect(await screen.findByText('阶段明细')).toBeInTheDocument()
-    expect(screen.getAllByText('提取').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('提取').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('生成').length).toBeGreaterThanOrEqual(1)
   })
 

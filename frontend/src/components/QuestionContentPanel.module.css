@@ -93,7 +93,7 @@
 }
 
 .answerCard {
-  background: var(--md-sys-color-secondary-container);
+  background: var(--md-sys-color-surface-container-low);
 }
 
 .answerBadges {
@@ -138,7 +138,7 @@
 
 .blankLabel {
   font-weight: 600;
-  color: var(--md-sys-color-on-secondary-container);
+  color: var(--md-sys-color-on-surface);
   flex-shrink: 0;
 }
 

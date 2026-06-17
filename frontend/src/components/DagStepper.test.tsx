@@ -14,15 +14,10 @@ describe('DagStepper', () => {
       after: i > 0 ? [`node-${i - 1}`] : [],
     })) as JobNodeRecord[]
 
-  it('shows labels when node count <= 8', () => {
+  it('does not render node labels', () => {
     render(<DagStepper nodes={makeNodes(8)} />)
-    expect(screen.getByText('节点 0')).toBeInTheDocument()
-    expect(screen.getByText('节点 7')).toBeInTheDocument()
-  })
-
-  it('hides labels when node count > 8', () => {
-    const { container } = render(<DagStepper nodes={makeNodes(9)} />)
-    expect((container.firstChild as HTMLElement).className).toContain('compact')
+    expect(screen.queryByText('节点 0')).not.toBeInTheDocument()
+    expect(screen.queryByText('节点 7')).not.toBeInTheDocument()
   })
 
   it('applies status classes', () => {

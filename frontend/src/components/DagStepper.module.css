@@ -24,19 +24,6 @@
   transition: background 200ms ease;
 }
 
-.stepLabel {
-  font-size: 10px;
-  color: var(--md-sys-color-on-surface-variant);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  max-width: 100%;
-}
-
-.compact .stepLabel {
-  display: none;
-}
-
 .completed {
   background: var(--status-completed-border);
 }
