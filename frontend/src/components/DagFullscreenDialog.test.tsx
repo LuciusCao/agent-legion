@@ -1,15 +1,16 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { DagFullscreenDialog } from './DagFullscreenDialog'
+import type { DagGraphNode, DagGraphEdge } from './DagGraph'
 
-const nodes = [
-  { key: 'a', label: '提取', status: 'completed' as const },
-  { key: 'b', label: '生成', status: 'running' as const },
+const nodes: DagGraphNode[] = [
+  { key: 'a', label: '提取', status: 'completed' },
+  { key: 'b', label: '生成', status: 'running' },
 ]
-const edges = [{ from: 'a', to: 'b' }]
+const edges: DagGraphEdge[] = [{ from: 'a', to: 'b' }]
 
 describe('DagFullscreenDialog', () => {
-  it('renders when open', () => {
+  it('renders nodes when open', () => {
     render(
       <DagFullscreenDialog
         open={true}
