@@ -56,13 +56,13 @@ def _seed_database(db_path: Path) -> tuple[str, str, str]:
         ],
         node_bindings=[
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "node_key": "fetch",
                 "executor_id": "local-default",
             },
         ],
         node_limits=[
-            {"pipeline_key": "question_content", "node_key": "fetch", "concurrency_limit": 2},
+            {"workflow_key": "question_content", "node_key": "fetch", "concurrency_limit": 2},
         ],
     )
     return workspace_id, batch["id"], job_id

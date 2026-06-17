@@ -9,7 +9,7 @@ def test_run_to_target_sets_execution_control(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q801"],
                 "knowledge_codes": [],
@@ -42,7 +42,7 @@ def test_run_to_rejects_unknown_target(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q802"],
                 "knowledge_codes": [],
@@ -66,7 +66,7 @@ def test_run_to_rejects_start_outside_target_closure(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q803"],
                 "knowledge_codes": [],
@@ -93,7 +93,7 @@ def test_continue_job_resumes_after_target_reached(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q804"],
                 "knowledge_codes": [],

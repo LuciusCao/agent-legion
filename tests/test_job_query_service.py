@@ -4,7 +4,7 @@ from typing import Any
 import pytest
 
 from server.app.services.job_queries import JobQueryService
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
@@ -15,7 +15,7 @@ def query_service(job_db, settings):
     return JobQueryService(
         job_db,
         settings,
-        PipelineCatalogService(settings),
+        WorkflowCatalogService(settings),
         WorkspaceExecutorConfigurationService(job_db),
     )
 
@@ -138,12 +138,12 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
         ],
         bindings=[
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "node_key": "question_understanding",
                 "executor_id": "pi-default",
             },
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "node_key": "assemble_package",
                 "executor_id": "local-default",
             },
@@ -182,12 +182,12 @@ def test_job_detail_resolves_executor_binding_for_job_pipeline_only(query_servic
         ],
         bindings=[
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "node_key": "assemble_package",
                 "executor_id": "local-default",
             },
             {
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "node_key": "assemble_package",
                 "executor_id": "pi-default",
             },

@@ -9,7 +9,7 @@ from server.app.executors.config import (
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import LeaseClaimRequest
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 
@@ -17,13 +17,13 @@ from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 @pytest.fixture
 def workspace_service(job_db, settings, agent_manager):
     return WorkspaceConfigurationService(
-        job_db, settings, agent_manager, PipelineCatalogService(settings)
+        job_db, settings, agent_manager, WorkflowCatalogService(settings)
     )
 
 
 @pytest.fixture
 def workspace(workspace_service):
-    return workspace_service.create({"name": "Test", "default_pipeline_key": "question_content"})
+    return workspace_service.create({"name": "Test", "default_workflow_key": "question_content"})
 
 
 def test_workspace_configuration_missing_workspace_raises_domain_error(workspace_service):
@@ -43,7 +43,7 @@ def test_replace_configuration_saves_workspace_and_executors_in_one_transaction(
     result = workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={"name": "Reading"},
-        settings_patch={"pipelineKey": "reading_analysis"},
+        settings_patch={"workflowKey": "reading_analysis"},
         executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
         node_bindings=[
             {
@@ -61,7 +61,7 @@ def test_replace_configuration_saves_workspace_and_executors_in_one_transaction(
         ],
     )
     assert result["workspace"]["name"] == "Reading"
-    assert result["settings"]["pipelineKey"] == "reading_analysis"
+    assert result["settings"]["workflowKey"] == "reading_analysis"
     assert result["executor_configuration"]["allocations"][0]["concurrency_limit"] == 4
     assert result["executor_configuration"]["bindings"][0]["node_key"] == "fetch_questions"
     assert result["executor_configuration"]["node_limits"][0]["concurrency_limit"] == 2
@@ -76,7 +76,7 @@ def test_replace_configuration_rolls_back_workspace_on_invalid_binding(
         workspace_service.replace_configuration(
             workspace["id"],
             workspace_patch={"name": "Must Roll Back"},
-            settings_patch={"pipelineKey": "reading_analysis"},
+            settings_patch={"workflowKey": "reading_analysis"},
             executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
             node_bindings=[
                 {
@@ -102,7 +102,7 @@ def test_workspace_configuration_update_delegates(workspace_service, workspace):
 
 def test_workspace_configuration_settings_payload(workspace_service, workspace):
     payload = workspace_service.settings_payload(workspace["id"])
-    assert payload["pipelineKey"] == "question_content"
+    assert payload["workflowKey"] == "question_content"
 
 
 def test_executor_stats_report_configured_capacity_and_leases(
@@ -254,7 +254,7 @@ def test_executor_stats_does_not_consult_agent_status_manager(
 def test_executor_stats_available_respects_global_usage_by_other_workspaces(
     workspace_service, workspace, job_db, settings
 ):
-    other = workspace_service.create({"name": "Other", "default_pipeline_key": "question_content"})
+    other = workspace_service.create({"name": "Other", "default_workflow_key": "question_content"})
     for workspace_id, limit in ((workspace["id"], 8), (other["id"], 16)):
         job_db.replace_workspace_executor_configuration(
             workspace_id,
@@ -310,7 +310,7 @@ def test_replace_configuration_adds_pi_agent_for_pi_allocation(
     workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={},
-        settings_patch={"pipelineKey": "reading_analysis"},
+        settings_patch={"workflowKey": "reading_analysis"},
         executor_allocations=[
             {"executor_id": "local-default", "concurrency_limit": 4},
             {"executor_id": "pi-default", "concurrency_limit": 3},
@@ -346,7 +346,7 @@ def test_replace_configuration_removes_pi_agent_when_pi_allocation_dropped(
     workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={},
-        settings_patch={"pipelineKey": "question_comprehension_info"},
+        settings_patch={"workflowKey": "question_comprehension_info"},
         executor_allocations=[{"executor_id": "pi-default", "concurrency_limit": 2}],
         node_bindings=[
             {
@@ -365,7 +365,7 @@ def test_replace_configuration_removes_pi_agent_when_pi_allocation_dropped(
     workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={},
-        settings_patch={"pipelineKey": "reading_analysis"},
+        settings_patch={"workflowKey": "reading_analysis"},
         executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
         node_bindings=[
             {

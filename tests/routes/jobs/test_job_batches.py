@@ -12,7 +12,7 @@ def test_create_question_jobs_when_enabled(tmp_path):
         response = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q001", "Q002"],
                 "knowledge_codes": [],
@@ -38,7 +38,7 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
         response = c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q001", " Q002 ", "Q001", ""],
                 "knowledge_codes": ["K001"],
@@ -84,7 +84,7 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
         response = c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "by_knowledge",
                 "question_ids": [],
                 "knowledge_codes": ["K001", "K001", " K002 "],
@@ -151,7 +151,7 @@ def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch)
         response = c.post(
             f"/api/workspaces/{workspace['id']}/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "by_knowledge",
                 "question_ids": [],
                 "knowledge_codes": ["K101"],
@@ -184,7 +184,7 @@ def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
         response = c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": [" ", ""],
                 "knowledge_codes": [],
@@ -218,7 +218,7 @@ def test_job_batch_rejects_disabled_resource_provider(tmp_path):
         response = c.post(
             f"/api/workspaces/{workspace['id']}/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "by_knowledge",
                 "question_ids": [],
                 "knowledge_codes": ["K001"],
@@ -233,7 +233,7 @@ def test_reading_analysis_batch_by_ids_creates_one_job_per_question(client):
     response = client.post(
         "/api/workspaces/default/job-batches",
         json={
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "source_kind": "batch_by_ids",
             "question_ids": ["Q1", "Q2", "Q1"],
         },
@@ -243,7 +243,7 @@ def test_reading_analysis_batch_by_ids_creates_one_job_per_question(client):
     body = response.json()
     assert body["created_count"] == 2
     assert {job["source_id"] for job in body["jobs"]} == {"Q1", "Q2"}
-    assert all(job["pipeline_key"] == "reading_analysis" for job in body["jobs"])
+    assert all(job["workflow_key"] == "reading_analysis" for job in body["jobs"])
 
 
 def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkeypatch):
@@ -277,7 +277,7 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
         response = c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "source_kind": "batch_by_knowledge",
                 "question_ids": [],
                 "knowledge_codes": ["K001", "K001", " K002 "],
@@ -293,4 +293,4 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
     assert body["created_count"] == 2
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["title"] for job in body["jobs"]] == ["题目一", "题目二"]
-    assert all(job["pipeline_key"] == "reading_analysis" for job in body["jobs"])
+    assert all(job["workflow_key"] == "reading_analysis" for job in body["jobs"])

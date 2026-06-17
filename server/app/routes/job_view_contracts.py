@@ -20,7 +20,7 @@ class JobNodeSummaryResponse(BaseModel):
 class JobSummaryResponse(BaseModel):
     id: str
     workspace_id: str
-    pipeline_key: str
+    workflow_key: str
     source_type: str
     source_id: str
     batch_id: str

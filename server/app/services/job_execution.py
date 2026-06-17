@@ -11,7 +11,7 @@ from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_staged_cleanup import commit_staged_outputs
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.execution_control import ExecutionControlError, ancestor_closure
 from server.app.workflows.scheduler import downstream_nodes
@@ -27,14 +27,14 @@ class JobExecutionService:
         job_db: JobQueries,
         artifact_mutation: JobArtifactMutationService,
         lease_repo: ExecutorLeaseRepository,
-        pipelines: PipelineCatalogService,
+        workflows: WorkflowCatalogService,
         clock: Callable[[], float] | None = None,
         job_event_manager: JobEventManager | None = None,
     ) -> None:
         self.job_db = job_db
         self.artifact_mutation = artifact_mutation
         self.lease_repo = lease_repo
-        self.pipelines = pipelines
+        self.workflows = workflows
         self.clock = clock
         self.job_event_manager = job_event_manager
 
@@ -65,7 +65,7 @@ class JobExecutionService:
         return self.lease_repo.has_active_for_job(job_id, self._now())
 
     def _definition(self, workflow_key: str) -> WorkflowDefinition:
-        return self.pipelines.definition(workflow_key)
+        return self.workflows.definition(workflow_key)
 
     def run_to(
         self,

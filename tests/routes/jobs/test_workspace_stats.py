@@ -23,7 +23,7 @@ def test_workspace_stats_returns_counts_and_executor_status(tmp_path):
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "pipeline_key": "question_comprehension_info",
+                "workflow_key": "question_comprehension_info",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q301", "Q302"],
                 "knowledge_codes": [],
@@ -35,8 +35,8 @@ def test_workspace_stats_returns_counts_and_executor_status(tmp_path):
     body = stats.json()
     assert body["workspace_id"] == ws_id
     assert body["name"] == "Stats WS"
-    assert body["pipeline_key"] == "question_comprehension_info"
-    assert body["pipeline_label"] == "题目审题信息生成 DAG"
+    assert body["workflow_key"] == "question_comprehension_info"
+    assert body["workflow_label"] == "题目审题信息生成 DAG"
     assert body["job_stats"]["pending"] == 2
     assert "queued" not in body["job_stats"]
     assert body["executor_status"]["executors"] == []
@@ -60,7 +60,7 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(tmp_pat
             allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
             bindings=[
                 {
-                    "pipeline_key": "reading_analysis",
+                    "workflow_key": "reading_analysis",
                     "node_key": "review_keywords",
                     "executor_id": "local-default",
                 }
@@ -70,7 +70,7 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(tmp_pat
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q301"],
                 "knowledge_codes": [],
@@ -102,7 +102,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q401"],
                 "knowledge_codes": [],

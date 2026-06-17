@@ -190,7 +190,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
 
 
 def test_local_executor_config_binds_question_comprehension_info_handlers():
-    raw = yaml.safe_load(Path("config/pipeline.yaml").read_text(encoding="utf-8"))
+    raw = yaml.safe_load(Path("config/workflow.yaml").read_text(encoding="utf-8"))
     config = load_executor_definitions(raw["executors"])
     local = config["local-default"]
     assert local.kind == "local"

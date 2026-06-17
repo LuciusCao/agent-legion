@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 
 from server.app.main import create_app
 
-PIPELINE_KEY = "question_comprehension_info"
+WORKFLOW_KEY = "question_comprehension_info"
 
 
 def _sort(rows: list[dict]) -> list[dict]:
@@ -33,17 +33,17 @@ def _put_config(client: TestClient, workspace_id: str, payload: dict) -> dict:
 def _expected_local_bindings(workspace_id: str) -> list[dict]:
     return [
         {
-            "pipeline_key": PIPELINE_KEY,
+            "workflow_key": WORKFLOW_KEY,
             "node_key": "clean_and_parse",
             "executor_id": "local-default",
         },
         {
-            "pipeline_key": PIPELINE_KEY,
+            "workflow_key": WORKFLOW_KEY,
             "node_key": "fetch_questions",
             "executor_id": "local-default",
         },
         {
-            "pipeline_key": PIPELINE_KEY,
+            "workflow_key": WORKFLOW_KEY,
             "node_key": "assemble_comprehension_info",
             "executor_id": "local-default",
         },
@@ -53,12 +53,12 @@ def _expected_local_bindings(workspace_id: str) -> list[dict]:
 def _expected_pi_bindings(workspace_id: str) -> list[dict]:
     return [
         {
-            "pipeline_key": PIPELINE_KEY,
+            "workflow_key": WORKFLOW_KEY,
             "node_key": "generate_key_info",
             "executor_id": "pi-default",
         },
         {
-            "pipeline_key": PIPELINE_KEY,
+            "workflow_key": WORKFLOW_KEY,
             "node_key": "review_key_info",
             "executor_id": "pi-default",
         },
@@ -92,7 +92,7 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     # Create a workspace to configure.
     workspace_response = client.post(
         "/api/workspaces",
-        json={"name": "Flow Workspace", "default_pipeline_key": PIPELINE_KEY},
+        json={"name": "Flow Workspace", "default_workflow_key": WORKFLOW_KEY},
     )
     assert workspace_response.status_code == 200
     workspace_id = workspace_response.json()["workspace"]["id"]
@@ -108,7 +108,7 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     # 4. Bind compatible Nodes.
     # 5. Leave remaining Nodes unbound.
     save_payload = {
-        "settings": {"pipelineKey": PIPELINE_KEY},
+        "settings": {"workflowKey": WORKFLOW_KEY},
         "executor_allocations": [
             {"executor_id": "local-default", "concurrency_limit": 8},
             {"executor_id": "pi-default", "concurrency_limit": 10},
@@ -116,10 +116,10 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "node_bindings": _expected_local_bindings(workspace_id)
         + _expected_pi_bindings(workspace_id),
         "node_limits": [
-            {"pipeline_key": PIPELINE_KEY, "node_key": "fetch_questions", "concurrency_limit": 2},
-            {"pipeline_key": PIPELINE_KEY, "node_key": "clean_and_parse", "concurrency_limit": 1},
+            {"workflow_key": WORKFLOW_KEY, "node_key": "fetch_questions", "concurrency_limit": 2},
+            {"workflow_key": WORKFLOW_KEY, "node_key": "clean_and_parse", "concurrency_limit": 1},
             {
-                "pipeline_key": PIPELINE_KEY,
+                "workflow_key": WORKFLOW_KEY,
                 "node_key": "assemble_comprehension_info",
                 "concurrency_limit": 1,
             },
@@ -143,14 +143,14 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     # 8. Reject an unsupported binding without changing any persisted rows.
     bad_payload = {
         "name": "Must Not Change",
-        "settings": {"pipelineKey": PIPELINE_KEY},
+        "settings": {"workflowKey": WORKFLOW_KEY},
         "executor_allocations": [
             {"executor_id": "local-default", "concurrency_limit": 8},
             {"executor_id": "pi-default", "concurrency_limit": 10},
         ],
         "node_bindings": [
             {
-                "pipeline_key": PIPELINE_KEY,
+                "workflow_key": WORKFLOW_KEY,
                 "node_key": "assemble_comprehension_info",
                 "executor_id": "pi-default",
             },
@@ -173,16 +173,16 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
 
     # 9. Remove Pi allocation and its bindings in one request.
     remove_pi_payload = {
-        "settings": {"pipelineKey": PIPELINE_KEY},
+        "settings": {"workflowKey": WORKFLOW_KEY},
         "executor_allocations": [
             {"executor_id": "local-default", "concurrency_limit": 8},
         ],
         "node_bindings": _expected_local_bindings(workspace_id),
         "node_limits": [
-            {"pipeline_key": PIPELINE_KEY, "node_key": "fetch_questions", "concurrency_limit": 2},
-            {"pipeline_key": PIPELINE_KEY, "node_key": "clean_and_parse", "concurrency_limit": 1},
+            {"workflow_key": WORKFLOW_KEY, "node_key": "fetch_questions", "concurrency_limit": 2},
+            {"workflow_key": WORKFLOW_KEY, "node_key": "clean_and_parse", "concurrency_limit": 1},
             {
-                "pipeline_key": PIPELINE_KEY,
+                "workflow_key": WORKFLOW_KEY,
                 "node_key": "assemble_comprehension_info",
                 "concurrency_limit": 1,
             },

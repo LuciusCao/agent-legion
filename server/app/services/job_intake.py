@@ -10,7 +10,7 @@ from server.app.services.job_errors import (
     NotFoundError,
     UnsupportedOperationError,
 )
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
 from server.app.workflows.resources import resolve_cms_resource
 
@@ -60,12 +60,12 @@ class JobIntakeService:
         self,
         job_db: JobQueries,
         settings: Settings,
-        pipelines: PipelineCatalogService,
+        workflows: WorkflowCatalogService,
         job_event_manager: JobEventManager | None = None,
     ):
         self.job_db = job_db
         self.settings = settings
-        self.pipelines = pipelines
+        self.workflows = workflows
         self.job_event_manager = job_event_manager
 
     def _workspace(self, workspace_id: str) -> dict[str, Any]:
@@ -93,7 +93,8 @@ class JobIntakeService:
 
     def create_batch(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        definition = self.pipelines.definition(payload["pipeline_key"])
+        workflow_key = payload["workflow_key"]
+        definition = self.workflows.definition(workflow_key)
         intake_mode = (
             definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         )
@@ -226,9 +227,8 @@ class JobIntakeService:
             "resource": mode.resource,
         }
         source_payload["task_candidates"] = candidates
-        # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
         batch = self.job_db.create_batch(
-            payload["pipeline_key"],
+            workflow_key,
             payload["source_kind"],
             source_payload,
             workspace_id=workspace_id,
@@ -237,8 +237,7 @@ class JobIntakeService:
         for candidate in candidates:
             jobs.append(
                 self.job_db.create_job(
-                    # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
-                    workflow_key=payload["pipeline_key"],
+                    workflow_key=workflow_key,
                     source_type=str(candidate["entity_type"]),
                     source_id=str(candidate["entity_id"]),
                     batch_id=batch["id"],

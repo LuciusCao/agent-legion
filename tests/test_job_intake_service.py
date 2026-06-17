@@ -2,22 +2,22 @@ import pytest
 
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake import JobIntakeService
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 
 
 @pytest.fixture
 def intake_service(job_db, settings):
-    return JobIntakeService(job_db, settings, PipelineCatalogService(settings))
+    return JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
 
 def test_job_intake_creates_direct_id_jobs(job_db, settings):
     job_db.get_workspace("default")
-    service = JobIntakeService(job_db, settings, PipelineCatalogService(settings))
+    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
     result = service.create_batch(
         "default",
         {
-            "pipeline_key": "question_content",
+            "workflow_key": "question_content",
             "source_kind": "direct_ids",
             "entity": "question",
             "question_ids": ["Q1", "Q1", " Q2 "],
@@ -34,7 +34,7 @@ def test_job_intake_rejects_missing_workspace(intake_service):
         intake_service.create_batch(
             "missing",
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -52,7 +52,7 @@ def test_job_intake_rejects_disabled_mode(intake_service):
         intake_service.create_batch(
             workspace["id"],
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -65,7 +65,7 @@ def test_job_intake_rejects_unsupported_entity_mode(intake_service):
         intake_service.create_batch(
             "default",
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "entity": "unknown_entity",
                 "question_ids": ["Q1"],
@@ -79,7 +79,7 @@ def test_job_intake_requires_at_least_one_value(intake_service):
         intake_service.create_batch(
             "default",
             {
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": [],
                 "knowledge_codes": [],

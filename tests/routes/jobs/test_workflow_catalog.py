@@ -6,13 +6,13 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        response = c.get("/api/pipelines/question_content")
+        response = c.get("/api/workflows/question_content")
 
     assert response.status_code == 200
     body = response.json()
-    assert body["pipeline"]["key"] == "question_content"
-    assert body["pipeline"]["label"] == "题目内容生成"
-    assert body["pipeline"]["intake"]["modes"] == [
+    assert body["workflow"]["key"] == "question_content"
+    assert body["workflow"]["label"] == "题目内容生成"
+    assert body["workflow"]["intake"]["modes"] == [
         {
             "key": "direct_ids",
             "label": "直接输入 ID",
@@ -26,16 +26,16 @@ def test_get_pipeline_definition_when_enabled(tmp_path):
             "resource": "by_knowledge",
         },
     ]
-    node_keys = [node["key"] for node in body["pipeline"]["nodes"]]
+    node_keys = [node["key"] for node in body["workflow"]["nodes"]]
     assert node_keys[0] == "fetch_question_context"
     assert "assemble_package" in node_keys
-    assert all("label" in node for node in body["pipeline"]["nodes"])
+    assert all("label" in node for node in body["workflow"]["nodes"])
     fetch_node = next(
-        node for node in body["pipeline"]["nodes"] if node["key"] == "fetch_question_context"
+        node for node in body["workflow"]["nodes"] if node["key"] == "fetch_question_context"
     )
     assert fetch_node["label"] == "获取题目上下文"
     graph_node = next(
-        node for node in body["pipeline"]["nodes"] if node["key"] == "content_graph_generation"
+        node for node in body["workflow"]["nodes"] if node["key"] == "content_graph_generation"
     )
     assert graph_node["after"] == ["solution_decomposition"]
 
@@ -48,11 +48,11 @@ def test_list_pipelines_includes_registered_pipelines(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        response = c.get("/api/pipelines")
+        response = c.get("/api/workflows")
 
     assert response.status_code == 200
     body = response.json()
-    assert any(p["key"] for p in body["pipelines"])
+    assert any(p["key"] for p in body["workflows"])
 
 
 def test_get_resource_providers_returns_provider_list(tmp_path):
@@ -169,7 +169,7 @@ def test_get_global_services_token_gen_configured(tmp_path):
     assert body["cms"]["tokenConfigured"] is True
 
 
-def test_update_workspace_rejects_invalid_pipeline_key(tmp_path):
+def test_update_workspace_rejects_invalid_workflow_key(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -182,8 +182,8 @@ def test_update_workspace_rejects_invalid_pipeline_key(tmp_path):
         ws_id = create_resp.json()["workspace"]["id"]
         resp = c.patch(
             f"/api/workspaces/{ws_id}",
-            json={"default_pipeline_key": "nonexistent"},
+            json={"default_workflow_key": "nonexistent"},
         )
 
     assert resp.status_code == 404
-    assert "Unknown pipeline" in resp.json()["detail"]
+    assert "Unknown workflow" in resp.json()["detail"]

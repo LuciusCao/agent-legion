@@ -24,13 +24,13 @@ class ExecutorAllocationResponse(ExecutorAllocationRequest):
 
 
 class NodeBindingRequest(BaseModel):
-    pipeline_key: str = Field(min_length=1)
+    workflow_key: str = Field(min_length=1)
     node_key: str = Field(min_length=1)
     executor_id: str = Field(min_length=1)
 
 
 class NodeLimitRequest(BaseModel):
-    pipeline_key: str = Field(min_length=1)
+    workflow_key: str = Field(min_length=1)
     node_key: str = Field(min_length=1)
     concurrency_limit: int = Field(ge=1)
 
@@ -46,7 +46,7 @@ class WorkspaceSettingsPayload(BaseModel):
     entityType: str
     intakeModes: list[str]
     labelOverrides: dict[str, str]
-    pipelineKey: str
+    workflowKey: str
     resources: dict[str, Any]
 
 
@@ -56,7 +56,7 @@ class WorkspaceConfigurationSettingsRequest(BaseModel):
     entityType: str | None = None
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
-    pipelineKey: str | None = None
+    workflowKey: str | None = None
     resources: dict[str, Any] | None = None
 
 

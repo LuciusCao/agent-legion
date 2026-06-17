@@ -36,7 +36,7 @@ from scripts.architecture.phase6 import (
     check_schema_mutation_locations,
     check_workspace_video_hive_imports,
 )
-from scripts.architecture.pipeline import check_pipeline_definitions
+from scripts.architecture.workflow import check_workflow_definitions
 
 
 def _load_exemptions(root: Path) -> tuple:
@@ -211,7 +211,7 @@ def check_repository(root: Path) -> list[str]:
                         "return annotation may not contain Any"
                     )
 
-    errors.extend(check_pipeline_definitions(root))
+    errors.extend(check_workflow_definitions(root))
     errors.extend(check_executor_contract_models(root))
     errors.extend(check_settings_store_legacy_agents(root))
     errors.extend(check_workspace_save_outside_transaction(root))

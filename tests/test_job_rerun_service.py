@@ -10,7 +10,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService, StagedOutputs
 from server.app.services.job_rerun import JobRerunService
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 
 
 @pytest.fixture
@@ -19,7 +19,7 @@ def rerun_service(job_db, settings):
         job_db,
         ExecutorLeaseRepository(job_db.path),
         settings,
-        PipelineCatalogService(settings),
+        WorkflowCatalogService(settings),
         JobArtifactMutationService(settings.jobs_dir),
     )
 

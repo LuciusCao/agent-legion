@@ -9,7 +9,7 @@ from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_staged_cleanup import commit_staged_outputs
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
 from server.app.workflows.scheduler import downstream_nodes
 
@@ -22,7 +22,7 @@ class JobRerunService:
         job_db: JobQueries,
         lease_repo: ExecutorLeaseRepository,
         settings: Settings,
-        pipelines: PipelineCatalogService,
+        workflows: WorkflowCatalogService,
         artifact_service: JobArtifactMutationService | None = None,
         clock: Callable[[], float] | None = None,
         job_event_manager: JobEventManager | None = None,
@@ -30,7 +30,7 @@ class JobRerunService:
         self.job_db = job_db
         self.lease_repo = lease_repo
         self.settings = settings
-        self.pipelines = pipelines
+        self.workflows = workflows
         self.artifact_service = artifact_service or JobArtifactMutationService(settings.jobs_dir)
         self.clock = clock
         self.job_event_manager = job_event_manager
@@ -73,7 +73,7 @@ class JobRerunService:
                 f"Job does not belong to workspace {workspace_id}",
             )
 
-        definition = self.pipelines.definition(str(job["workflow_key"]))
+        definition = self.workflows.definition(str(job["workflow_key"]))
         if node_key not in definition.nodes:
             return self._result(
                 job_id,

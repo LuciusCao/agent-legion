@@ -1,14 +1,14 @@
 from fastapi import APIRouter
 
-from server.app.routes import job_contracts, pipeline_contracts
+from server.app.routes import job_contracts, workflow_contracts
 from server.app.routes.job_http import raise_job_http_error, require_pipelines_enabled
 from server.app.services.job_errors import JobServiceError
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
 
 
-def create_pipeline_catalog_router(
-    service: PipelineCatalogService, settings: Settings
+def create_workflow_catalog_router(
+    service: WorkflowCatalogService, settings: Settings
 ) -> APIRouter:
     router = APIRouter()
 
@@ -21,16 +21,16 @@ def create_pipeline_catalog_router(
     def get_global_services() -> job_contracts.GlobalServicesResponse:
         return job_contracts.GlobalServicesResponse(**service.global_services())
 
-    @router.get("/pipelines", response_model=pipeline_contracts.PipelinesListResponse)
-    def list_pipelines() -> pipeline_contracts.PipelinesListResponse:
+    @router.get("/workflows", response_model=workflow_contracts.WorkflowsListResponse)
+    def list_workflows() -> workflow_contracts.WorkflowsListResponse:
         require_pipelines_enabled(settings)
-        return pipeline_contracts.pipelines_list_response(service.list_pipelines())
+        return workflow_contracts.workflows_list_response(service.list_workflows())
 
-    @router.get("/pipelines/{pipeline_key}", response_model=pipeline_contracts.PipelineResponse)
-    def get_pipeline(pipeline_key: str) -> pipeline_contracts.PipelineResponse:
+    @router.get("/workflows/{workflow_key}", response_model=workflow_contracts.WorkflowResponse)
+    def get_workflow(workflow_key: str) -> workflow_contracts.WorkflowResponse:
         require_pipelines_enabled(settings)
         try:
-            return pipeline_contracts.pipeline_response(service.pipeline(pipeline_key))
+            return workflow_contracts.workflow_response(service.workflow(workflow_key))
         except JobServiceError as exc:
             raise_job_http_error(exc)
 

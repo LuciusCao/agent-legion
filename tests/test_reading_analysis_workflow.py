@@ -24,6 +24,10 @@ def test_fetch_questions_with_cms_writes_single_question(tmp_path, monkeypatch):
             payload={"data": {"uuid": "Q100"}},
         ),
     )
+    monkeypatch.setattr(
+        "server.app.workflows.reading_analysis.get_token",
+        lambda env, config: "dummy-token",
+    )
 
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")

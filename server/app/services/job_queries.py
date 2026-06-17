@@ -3,7 +3,7 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_node_executor_resolver import resolve_node_executors
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
@@ -17,12 +17,12 @@ class JobQueryService:
         self,
         job_db: JobQueries,
         settings: Settings,
-        pipelines: PipelineCatalogService,
+        workflows: WorkflowCatalogService,
         workspace_executor_config: WorkspaceExecutorConfigurationService,
     ):
         self.job_db = job_db
         self.settings = settings
-        self.pipelines = pipelines
+        self.workflows = workflows
         self.workspace_executor_config = workspace_executor_config
 
     def _job_or_404(self, job_id: str) -> dict[str, Any]:
@@ -32,7 +32,7 @@ class JobQueryService:
         return job
 
     def _definition(self, workflow_key: str) -> WorkflowDefinition:
-        return self.pipelines.definition(workflow_key)
+        return self.workflows.definition(workflow_key)
 
     def _job_nodes_with_definition(
         self,
@@ -202,7 +202,7 @@ class JobQueryService:
         counts = self.job_db.count_workspace_job_nodes_by_status(workspace_id, workflow_key)
         statuses = ["pending", "running", "completed", "failed", "stale"]
         return {
-            "pipeline": {
+            "workflow": {
                 "key": definition.key,
                 "label": definition.label,
             },

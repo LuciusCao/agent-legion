@@ -13,11 +13,11 @@ from .job_artifacts import create_job_artifacts_router
 from .job_batches import create_job_batches_router
 from .jobs import create_jobs_router
 from .packages import create_packages_router
-from .pipeline_catalog import create_pipeline_catalog_router
 from .questions import create_questions_router
 from .video_hive import create_video_hive_router
 from .videos import create_videos_router
 from .worker import create_worker_router
+from .workflow_catalog import create_workflow_catalog_router
 from .workspace_configuration import create_workspace_configuration_router
 from .workspace_executors import create_workspace_executors_router
 from .workspace_runs import create_workspace_runs_router
@@ -48,21 +48,21 @@ def create_router(
     from ..services.job_packages import JobPackageService
     from ..services.job_queries import JobQueryService
     from ..services.job_rerun import JobRerunService
-    from ..services.pipeline_catalog import PipelineCatalogService
+    from ..services.workflow_catalog import WorkflowCatalogService
     from ..services.workspace_configuration import WorkspaceConfigurationService
     from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
 
-    pipeline_catalog = PipelineCatalogService(settings)
+    workflow_catalog = WorkflowCatalogService(settings)
     executor_catalog = ExecutorCatalogService(settings)
     workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db)
     workspace_configuration = WorkspaceConfigurationService(
-        job_db, settings, agent_manager, pipeline_catalog
+        job_db, settings, agent_manager, workflow_catalog
     )
     job_intake = JobIntakeService(
-        job_db, settings, pipeline_catalog, job_event_manager=job_event_manager
+        job_db, settings, workflow_catalog, job_event_manager=job_event_manager
     )
     job_queries = JobQueryService(
-        job_db, settings, pipeline_catalog, workspace_executor_configuration
+        job_db, settings, workflow_catalog, workspace_executor_configuration
     )
     job_artifacts = JobArtifactService(job_db)
     job_logs = JobLogService(settings, job_db)
@@ -70,13 +70,13 @@ def create_router(
         job_db.path, job_db=job_db, job_event_manager=job_event_manager
     )
     job_rerun = JobRerunService(
-        job_db, executor_leases, settings, pipeline_catalog, job_event_manager=job_event_manager
+        job_db, executor_leases, settings, workflow_catalog, job_event_manager=job_event_manager
     )
     job_execution = JobExecutionService(
         job_db,
         JobArtifactMutationService(settings.jobs_dir),
         executor_leases,
-        pipeline_catalog,
+        workflow_catalog,
         job_event_manager=job_event_manager,
     )
     job_deletion = JobDeletionService(
@@ -92,7 +92,7 @@ def create_router(
         create_packages_router(db, job_db, settings, video_event_manager, job_packages)
     )
     router.include_router(create_worker_router(worker_control, workspace_worker_control))
-    router.include_router(create_pipeline_catalog_router(pipeline_catalog, settings))
+    router.include_router(create_workflow_catalog_router(workflow_catalog, settings))
     router.include_router(
         create_workspaces_router(
             workspace_configuration, settings, job_event_manager=job_event_manager

@@ -95,7 +95,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_pipeline_worker_concurrency.py::test_global_capacity_enforced_by_lease_transaction
+        target: tests/test_workflow_worker_concurrency.py::test_global_capacity_enforced_by_lease_transaction
         gate: quick
       - kind: integration
         target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_bounded_fairness
@@ -107,7 +107,7 @@ invariants:
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_pipeline_worker_concurrency.py::test_round_robin_allows_small_workspace_to_claim
+        target: tests/test_workflow_worker_concurrency.py::test_round_robin_allows_small_workspace_to_claim
         gate: quick
       - kind: integration
         target: tests/full/test_executor_worker_fairness.py::test_shared_capacity_and_bounded_fairness

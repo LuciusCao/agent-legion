@@ -295,40 +295,6 @@ export interface paths {
     patch: operations['update_package_api_packages__package_id__patch']
     trace?: never
   }
-  '/api/pipelines': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** List Pipelines */
-    get: operations['list_pipelines_api_pipelines_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/pipelines/{pipeline_key}': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Get Pipeline */
-    get: operations['get_pipeline_api_pipelines__pipeline_key__get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/resource-providers': {
     parameters: {
       query?: never
@@ -649,6 +615,40 @@ export interface paths {
     put?: never
     /** Worker Tick */
     post: operations['worker_tick_api_worker_tick_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workflows': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Workflows */
+    get: operations['list_workflows_api_workflows_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workflows/{workflow_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workflow */
+    get: operations['get_workflow_api_workflows__workflow_key__get']
+    put?: never
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -1220,15 +1220,15 @@ export interface components {
       entity?: string | null
       /** Knowledge Codes */
       knowledge_codes?: string[]
-      /**
-       * Pipeline Key
-       * @default question_comprehension_info
-       */
-      pipeline_key: string
       /** Question Ids */
       question_ids?: string[]
       /** Source Kind */
       source_kind: string
+      /**
+       * Workflow Key
+       * @default question_comprehension_info
+       */
+      workflow_key: string
     }
     /** JobBatchRerunRequest */
     JobBatchRerunRequest: {
@@ -1359,8 +1359,6 @@ export interface components {
       id: string
       /** Node Summaries */
       node_summaries?: components['schemas']['JobNodeSummaryResponse'][]
-      /** Pipeline Key */
-      pipeline_key: string
       /** Source Id */
       source_id: string
       /** Source Type */
@@ -1378,6 +1376,8 @@ export interface components {
       total_nodes: number
       /** Updated At */
       updated_at: string
+      /** Workflow Key */
+      workflow_key: string
       /** Workspace Id */
       workspace_id: string
     }
@@ -1392,8 +1392,8 @@ export interface components {
       executor_id: string
       /** Node Key */
       node_key: string
-      /** Pipeline Key */
-      pipeline_key: string
+      /** Workflow Key */
+      workflow_key: string
     }
     /** NodeLimitRequest */
     NodeLimitRequest: {
@@ -1401,8 +1401,8 @@ export interface components {
       concurrency_limit: number
       /** Node Key */
       node_key: string
-      /** Pipeline Key */
-      pipeline_key: string
+      /** Workflow Key */
+      workflow_key: string
     }
     /** NodeRunResponse */
     NodeRunResponse: {
@@ -1456,63 +1456,6 @@ export interface components {
       locked?: boolean | null
       /** Name */
       name?: string | null
-    }
-    /** PipelineDefinitionResponse */
-    PipelineDefinitionResponse: {
-      intake: components['schemas']['PipelineIntakeResponse']
-      /** Key */
-      key: string
-      /** Label */
-      label: string
-      /** Nodes */
-      nodes: components['schemas']['PipelineNodeResponse'][]
-    }
-    /** PipelineIntakeModeResponse */
-    PipelineIntakeModeResponse: {
-      /** Input Field */
-      input_field: string
-      /** Key */
-      key: string
-      /** Label */
-      label: string
-      /** Resource */
-      resource: string
-    }
-    /** PipelineIntakeResponse */
-    PipelineIntakeResponse: {
-      /** Modes */
-      modes: components['schemas']['PipelineIntakeModeResponse'][]
-    }
-    /** PipelineNodeResponse */
-    PipelineNodeResponse: {
-      /** After */
-      after: string[]
-      /** Capability */
-      capability: string
-      /** Inputs */
-      inputs: string[]
-      /** Key */
-      key: string
-      /** Label */
-      label: string
-      /** Outputs */
-      outputs: string[]
-    }
-    /** PipelineResponse */
-    PipelineResponse: {
-      pipeline: components['schemas']['PipelineDefinitionResponse']
-    }
-    /** PipelineSummaryResponse */
-    PipelineSummaryResponse: {
-      /** Key */
-      key: string
-      /** Label */
-      label: string
-    }
-    /** PipelinesListResponse */
-    PipelinesListResponse: {
-      /** Pipelines */
-      pipelines: components['schemas']['PipelineSummaryResponse'][]
     }
     /** QuestionDetailResponse */
     QuestionDetailResponse: {
@@ -1650,6 +1593,63 @@ export interface components {
       /** Paused */
       paused: boolean
     }
+    /** WorkflowDefinitionResponse */
+    WorkflowDefinitionResponse: {
+      intake: components['schemas']['WorkflowIntakeResponse']
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Nodes */
+      nodes: components['schemas']['WorkflowNodeResponse'][]
+    }
+    /** WorkflowIntakeModeResponse */
+    WorkflowIntakeModeResponse: {
+      /** Input Field */
+      input_field: string
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Resource */
+      resource: string
+    }
+    /** WorkflowIntakeResponse */
+    WorkflowIntakeResponse: {
+      /** Modes */
+      modes: components['schemas']['WorkflowIntakeModeResponse'][]
+    }
+    /** WorkflowNodeResponse */
+    WorkflowNodeResponse: {
+      /** After */
+      after: string[]
+      /** Capability */
+      capability: string
+      /** Inputs */
+      inputs: string[]
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Outputs */
+      outputs: string[]
+    }
+    /** WorkflowResponse */
+    WorkflowResponse: {
+      workflow: components['schemas']['WorkflowDefinitionResponse']
+    }
+    /** WorkflowSummaryResponse */
+    WorkflowSummaryResponse: {
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+    }
+    /** WorkflowsListResponse */
+    WorkflowsListResponse: {
+      /** Workflows */
+      workflows: components['schemas']['WorkflowSummaryResponse'][]
+    }
     /** WorkspaceConfigurationRequest */
     WorkspaceConfigurationRequest: {
       /** Description */
@@ -1683,12 +1683,12 @@ export interface components {
       labelOverrides?: {
         [key: string]: string
       } | null
-      /** Pipelinekey */
-      pipelineKey?: string | null
       /** Resources */
       resources?: {
         [key: string]: unknown
       } | null
+      /** Workflowkey */
+      workflowKey?: string | null
     }
     /** WorkspaceCreateRequest */
     WorkspaceCreateRequest: {
@@ -1702,10 +1702,10 @@ export interface components {
        */
       default_entity: string
       /**
-       * Default Pipeline Key
+       * Default Workflow Key
        * @default question_comprehension_info
        */
-      default_pipeline_key: string
+      default_workflow_key: string
       /** Intake Config */
       intake_config?: {
         [key: string]: unknown
@@ -1723,8 +1723,8 @@ export interface components {
       nodes: {
         [key: string]: unknown
       }[]
-      /** Pipeline */
-      pipeline: {
+      /** Workflow */
+      workflow: {
         [key: string]: unknown
       }
     }
@@ -1795,12 +1795,12 @@ export interface components {
       labelOverrides: {
         [key: string]: string
       }
-      /** Pipelinekey */
-      pipelineKey: string
       /** Resources */
       resources: {
         [key: string]: unknown
       }
+      /** Workflowkey */
+      workflowKey: string
     }
     /** WorkspaceSettingsResponse */
     WorkspaceSettingsResponse: {
@@ -1823,12 +1823,12 @@ export interface components {
       labelOverrides?: {
         [key: string]: string
       } | null
-      /** Pipelinekey */
-      pipelineKey?: string | null
       /** Resources */
       resources?: {
         [key: string]: unknown
       } | null
+      /** Workflowkey */
+      workflowKey?: string | null
     }
     /** WorkspaceSettingsTestResponse */
     WorkspaceSettingsTestResponse: {
@@ -1850,10 +1850,10 @@ export interface components {
       } | null
       /** Name */
       name: string
-      /** Pipeline Key */
-      pipeline_key: string
-      /** Pipeline Label */
-      pipeline_label: string
+      /** Workflow Key */
+      workflow_key: string
+      /** Workflow Label */
+      workflow_label: string
       /** Workspace Id */
       workspace_id: string
     }
@@ -1865,8 +1865,8 @@ export interface components {
       } | null
       /** Default Entity */
       default_entity?: string | null
-      /** Default Pipeline Key */
-      default_pipeline_key?: string | null
+      /** Default Workflow Key */
+      default_workflow_key?: string | null
       /** Description */
       description?: string | null
       /** Intake Config */
@@ -2044,7 +2044,7 @@ export interface operations {
   list_jobs_api_jobs_get: {
     parameters: {
       query?: {
-        pipeline_key?: string | null
+        workflow_key?: string | null
         status?: string | null
       }
       header?: never
@@ -2476,57 +2476,6 @@ export interface operations {
           'application/json': {
             [key: string]: unknown
           }
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  list_pipelines_api_pipelines_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['PipelinesListResponse']
-        }
-      }
-    }
-  }
-  get_pipeline_api_pipelines__pipeline_key__get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        pipeline_key: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['PipelineResponse']
         }
       }
       /** @description Validation Error */
@@ -3202,6 +3151,57 @@ export interface operations {
       }
     }
   }
+  list_workflows_api_workflows_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowsListResponse']
+        }
+      }
+    }
+  }
+  get_workflow_api_workflows__workflow_key__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workflow_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_workspaces_api_workspaces_get: {
     parameters: {
       query?: never
@@ -3518,7 +3518,7 @@ export interface operations {
   list_workspace_jobs_api_workspaces__workspace_id__jobs_get: {
     parameters: {
       query?: {
-        pipeline_key?: string | null
+        workflow_key?: string | null
         status?: string | null
       }
       header?: never

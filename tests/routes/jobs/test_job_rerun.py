@@ -12,7 +12,7 @@ def test_rerun_node_marks_downstream_stale(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q201"],
                 "knowledge_codes": [],
@@ -51,7 +51,7 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
         created = c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q603"],
                 "knowledge_codes": [],
@@ -94,7 +94,7 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -123,7 +123,7 @@ def test_rerun_node_errors(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -153,7 +153,7 @@ def test_rerun_node_rejects_running_job(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -182,7 +182,7 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -214,7 +214,7 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -247,7 +247,7 @@ def test_rerun_node_preserves_ancestors(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q700"],
                 "knowledge_codes": [],
@@ -275,7 +275,7 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q701"],
                 "knowledge_codes": [],
@@ -313,7 +313,7 @@ def test_batch_rerun_mixed_pipelines(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q702"],
                 "knowledge_codes": [],
@@ -322,7 +322,7 @@ def test_batch_rerun_mixed_pipelines(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q702"],
             },
@@ -355,7 +355,7 @@ def test_batch_rerun_request_order_preserved(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q703", "Q704"],
                 "knowledge_codes": [],
@@ -392,7 +392,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q705"],
                 "knowledge_codes": [],
@@ -406,7 +406,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
             conn.execute(
                 """
                 insert into executor_leases(
-                    id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+                    id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                     node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
                 )
                 values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
@@ -446,7 +446,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q706"],
                 "knowledge_codes": [],
@@ -461,7 +461,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
             conn.execute(
                 """
                 insert into executor_leases(
-                    id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+                    id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                     node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
                 )
                 values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)
@@ -501,7 +501,7 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q707"],
                 "knowledge_codes": [],
