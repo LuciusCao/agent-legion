@@ -45,7 +45,24 @@ def test_generate_key_info_validator_accepts_valid_artifact(tmp_path):
                             ],
                         },
                         "question_comprehension_abilities": ["information_locating"],
-                    }
+                    },
+                    {
+                        "key_info_id": "ki_002",
+                        "type": "hidden",
+                        "content": {
+                            "derived_text": "平局场数",
+                            "position": {"start": 24, "end": 27},
+                            "derivation": "其余为平局",
+                        },
+                        "question": {
+                            "text": "小明有多少场平局？",
+                            "options": [
+                                {"label": "A", "text": "4场", "is_correct": True},
+                                {"label": "B", "text": "5场", "is_correct": False},
+                            ],
+                        },
+                        "question_comprehension_abilities": ["inference"],
+                    },
                 ],
             },
             ensure_ascii=False,
