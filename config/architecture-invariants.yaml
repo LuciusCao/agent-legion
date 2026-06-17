@@ -163,3 +163,19 @@ invariants:
       - kind: integration
         target: tests/test_startup_validation.py
         gate: quick
+
+  - id: EXEC-EVENT-001
+    statement: |
+      Workspace job lifecycle SSE events are broadcast to JobEventManager only
+      after the underlying SQLite transaction has been committed. Broadcasting
+      inside a transaction is forbidden because clients may react by querying
+      the database and seeing pre-transaction state.
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_job_events.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_workspace_sse.py
+        gate: full
