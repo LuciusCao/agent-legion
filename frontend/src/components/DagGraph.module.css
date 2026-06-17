@@ -1,71 +1,19 @@
-.dag-graph {
+.graphContainer {
+  display: flex;
   width: 100%;
   height: 100%;
-  display: block;
+  overflow: hidden;
 }
 
-.node-rect {
-  cursor: pointer;
-  transition: filter 0.15s ease;
-  outline: none;
+.flowWrapper {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
 }
 
-.node-rect:hover {
-  filter: brightness(0.97);
-}
-
-g[role='button']:focus-visible .node-rect {
-  outline: 2px solid #1d4ed8;
-  outline-offset: 2px;
-}
-
-.node-label {
-  font-size: 12px;
-  font-weight: 500;
-  text-anchor: middle;
-  dominant-baseline: middle;
-  pointer-events: none;
-  fill: #1f2937;
-}
-
-.node-icon {
-  font-size: 12px;
-  text-anchor: middle;
-  dominant-baseline: middle;
-  pointer-events: none;
-  font-family: 'Material Symbols Outlined', sans-serif;
-}
-
-.node-duration {
-  font-size: 10px;
-  text-anchor: middle;
-  dominant-baseline: middle;
-  pointer-events: none;
-  fill: #6b7280;
-}
-
-.chip-label {
-  font-size: 8px;
-  text-anchor: middle;
-  dominant-baseline: middle;
-  pointer-events: none;
-  fill: #374151;
-}
-
-.edge-line {
-  fill: none;
-  stroke-width: 1.5;
-}
-
-.edge-line-completed {
-  stroke: #999;
-}
-
-.edge-line-pending {
-  stroke: #ccc;
-  stroke-dasharray: 4 3;
-}
-
-.selected-shadow {
-  filter: drop-shadow(0 2px 4px rgba(0, 0, 0, 0.15));
+.miniMap {
+  background: white;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
