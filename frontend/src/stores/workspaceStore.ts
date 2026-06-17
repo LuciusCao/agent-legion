@@ -32,6 +32,7 @@ type WorkspaceState = {
   ) => Promise<WorkspaceRecord>
   deleteWorkspace: (id: string) => Promise<void>
   fetchWorkspaceStats: (id: string) => Promise<void>
+  setWorkspaceStats: (id: string, stats: WorkspaceStats) => void
   setCurrentWorkspace: (w: WorkspaceRecord | null) => void
 }
 
@@ -101,6 +102,12 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     } catch {
       // ignore — card will show fallback
     }
+  },
+
+  setWorkspaceStats(id, stats) {
+    set((s) => ({
+      workspaceStats: { ...s.workspaceStats, [id]: stats },
+    }))
   },
 
   setCurrentWorkspace(w) {

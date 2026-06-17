@@ -1,5 +1,6 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, HTTPException, Request
 
+from server.app.events import JobEventManager
 from server.app.routes.job_contracts import (
     DeleteWorkspaceResponse,
     WorkspaceCreateRequest,
@@ -15,7 +16,9 @@ from server.app.settings import Settings
 
 
 def create_workspaces_router(
-    service: WorkspaceConfigurationService, settings: Settings
+    service: WorkspaceConfigurationService,
+    settings: Settings,
+    job_event_manager: JobEventManager | None = None,
 ) -> APIRouter:
     router = APIRouter()
 
@@ -69,5 +72,12 @@ def create_workspaces_router(
             return WorkspaceStatsResponse(**service.stats(workspace_id))
         except JobServiceError as exc:
             raise_job_http_error(exc)
+
+    @router.get("/workspaces/{workspace_id}/events")
+    async def workspace_events(request: Request, workspace_id: str):
+        require_pipelines_enabled(settings)
+        if job_event_manager is None:
+            raise HTTPException(status_code=503, detail="Event manager not available")
+        return await job_event_manager.connect(request, workspace_id)
 
     return router
