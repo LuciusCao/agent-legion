@@ -91,7 +91,7 @@ export function DashboardPage() {
       >
         <WorkspaceCard
           name="Video Hive"
-          pipelineLabel="视频处理流水线"
+          workflowLabel="视频处理工作流"
           isSystem={true}
           jobStats={videoHiveStats}
           executorStatus={videoHiveExecutorStatus}
@@ -106,8 +106,8 @@ export function DashboardPage() {
             />
             <WorkspaceCard
               name={w.name}
-              pipelineLabel={
-                workspaceStats[w.id]?.pipeline_label || w.default_pipeline_key
+              workflowLabel={
+                workspaceStats[w.id]?.workflow_label || w.default_workflow_key
               }
               jobStats={workspaceStats[w.id]?.job_stats || {}}
               executorStatus={

@@ -86,7 +86,7 @@ export function ExpandedJobPanel({
       </div>
 
       <div className={styles.section}>
-        <div className={styles.sectionTitle}>节点流水线</div>
+        <div className={styles.sectionTitle}>节点工作流</div>
         <MiniDag nodes={dagNodes} />
       </div>
 

@@ -2,15 +2,15 @@ import { useSettingStore } from '../stores/settingStore'
 
 export function LocalNodeLimitSection() {
   const {
-    pipelineDefinition,
+    workflowDefinition,
     executorCatalog,
     executorConfiguration,
     setNodeLimit,
   } = useSettingStore()
 
-  if (!pipelineDefinition) return null
+  if (!workflowDefinition) return null
 
-  const pipelineKey = pipelineDefinition.key
+  const workflowKey = workflowDefinition.key
   const allocatedMap = new Map(
     executorConfiguration.allocations.map((a) => [
       a.executor_id,
@@ -18,9 +18,9 @@ export function LocalNodeLimitSection() {
     ])
   )
 
-  const localBoundNodes = pipelineDefinition.nodes.filter((node) => {
+  const localBoundNodes = workflowDefinition.nodes.filter((node) => {
     const binding = executorConfiguration.bindings.find(
-      (b) => b.pipeline_key === pipelineKey && b.node_key === node.key
+      (b) => b.workflow_key === workflowKey && b.node_key === node.key
     )
     if (!binding) return false
     const executor = executorCatalog.find((e) => e.id === binding.executor_id)
@@ -51,11 +51,11 @@ export function LocalNodeLimitSection() {
       >
         {localBoundNodes.map((node) => {
           const binding = executorConfiguration.bindings.find(
-            (b) => b.pipeline_key === pipelineKey && b.node_key === node.key
+            (b) => b.workflow_key === workflowKey && b.node_key === node.key
           )
           const max = binding ? (allocatedMap.get(binding.executor_id) ?? 1) : 1
           const limit = executorConfiguration.node_limits.find(
-            (l) => l.pipeline_key === pipelineKey && l.node_key === node.key
+            (l) => l.workflow_key === workflowKey && l.node_key === node.key
           )
 
           return (
@@ -79,7 +79,7 @@ export function LocalNodeLimitSection() {
                   const raw = (event.target as HTMLInputElement).value
                   const value = Number(raw)
                   setNodeLimit(
-                    pipelineKey,
+                    workflowKey,
                     node.key,
                     raw === '' || Number.isNaN(value) ? null : value
                   )

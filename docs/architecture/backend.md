@@ -5,7 +5,7 @@
 Video Hive 后端基于 FastAPI，提供 REST API 和 SSE 事件推送。核心职责包括：
 
 - 视频队列管理（ intake → 下载 → 转录 → Agent 阶段 → 打包）
-- Agent Legion DAG 流水线执行（Workspace / Job / Node）
+- Agent Legion DAG 工作流执行（Workspace / Job / Node）
 - CMS 集成（知识库与题库查询）
 - SQLite 持久化与本地文件系统管理
 
@@ -31,8 +31,8 @@ server/app/
 │   ├── openclaw.py         # OpenClaw Agent 调用
 │   ├── assemble.py         # 元数据组装
 │   └── package.py          # ZIP 打包
-├── pipelines/              # Agent Legion DAG 定义与执行
-│   ├── definition.py       # 流水线定义解析
+├── workflows/              # Agent Legion DAG 定义与执行
+│   ├── definition.py       # 工作流定义解析
 │   ├── scheduler.py        # DAG 调度
 │   ├── executor.py         # 节点执行
 │   └── pi_runner.py        # Pi Agent 运行器
@@ -45,7 +45,7 @@ server/app/
 │   ├── client.py           # HTTP 客户端
 │   ├── knowledge.py        # 知识库查询
 │   └── question.py         # 题库查询
-├── worker*.py              # 后台工作线程（视频 + 流水线）
+├── worker*.py              # 后台工作线程（视频 + 工作流）
 └── agents.py               # Agent 发现与状态跟踪
 ```
 
@@ -64,7 +64,7 @@ server/app/
 ## Key Decisions
 
 - 使用 SQLite 作为本地数据库，避免外部依赖。详见相关 spec。
-- 视频流水线与 Agent Legion 流水线使用独立的 Worker 线程，避免相互阻塞。
+- 视频流水线与 Agent Legion 工作流使用独立的 Worker 线程，避免相互阻塞。
 - 所有文件 I/O 限制在 `data/` 目录内，由 `security.py` 做路径校验。
 
 ## API Surface / Interface
@@ -78,40 +78,24 @@ server/app/
 | 方法 | 路径 | 处理函数 | 文件 |
 |------|------|----------|------|
 | GET | `/agents` | `list_agents` | routes/agents.py |
-| POST | `/agents/{agent_id}/assign` | `assign_agent` | routes/agents.py |
-| DELETE | `/agents/{agent_id}/assign` | `unassign_agent` | routes/agents.py |
 | GET | `/videos/{video_id}/artifacts` | `artifacts` | routes/artifacts.py |
 | GET | `/health` | `health` | routes/common.py |
 | POST | `/worker/tick` | `worker_tick` | routes/common.py |
-| GET | `/resource-providers` | `get_resource_providers` | routes/jobs.py |
-| GET | `/global-services` | `get_global_services` | routes/jobs.py |
-| GET | `/pipelines` | `list_pipelines` | routes/jobs.py |
-| GET | `/pipelines/{pipeline_key}` | `get_pipeline` | routes/jobs.py |
-| GET | `/workspaces` | `list_workspaces` | routes/jobs.py |
-| POST | `/workspaces` | `create_workspace` | routes/jobs.py |
-| GET | `/workspaces/{workspace_id}` | `get_workspace` | routes/jobs.py |
-| GET | `/workspaces/{workspace_id}/agents` | `get_workspace_agents` | routes/jobs.py |
-| POST | `/workspaces/{workspace_id}/agents` | `set_workspace_agent` | routes/jobs.py |
-| GET | `/workspaces/{workspace_id}/settings` | `get_workspace_settings` | routes/jobs.py |
-| PUT | `/workspaces/{workspace_id}/configuration` | `replace_workspace_configuration` | routes/jobs.py |
-| PATCH | `/workspaces/{workspace_id}/settings/{section}` | `update_workspace_settings_section` | routes/jobs.py |
-| POST | `/workspaces/{workspace_id}/settings/test-connection` | `test_workspace_connection` | routes/jobs.py |
-| PATCH | `/workspaces/{workspace_id}` | `update_workspace` | routes/jobs.py |
-| GET | `/workspaces/{workspace_id}/stats` | `get_workspace_stats` | routes/jobs.py |
-| DELETE | `/workspaces/{workspace_id}` | `delete_workspace` | routes/jobs.py |
-| POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/jobs.py |
+| GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/job_artifacts.py |
+| GET | `/jobs/{job_id}/runs/{run_id}/log` | `get_job_run_log` | routes/job_artifacts.py |
+| GET | `/jobs/{job_id}/{invalid_path:path}` | `reject_invalid_job_subpath` | routes/job_artifacts.py |
+| POST | `/workspaces/{workspace_id}/job-batches` | `create_workspace_job_batch` | routes/job_batches.py |
+| POST | `/job-batches` | `create_job_batch` | routes/job_batches.py |
 | GET | `/workspaces/{workspace_id}/jobs` | `list_workspace_jobs` | routes/jobs.py |
 | POST | `/workspaces/{workspace_id}/jobs/batch-rerun` | `batch_rerun_workspace_jobs` | routes/jobs.py |
 | DELETE | `/workspaces/{workspace_id}/jobs/batch` | `batch_delete_workspace_jobs` | routes/jobs.py |
-| GET | `/workspaces/{workspace_id}/runs` | `list_workspace_runs` | routes/jobs.py |
-| GET | `/workspaces/{workspace_id}/dag` | `get_workspace_dag` | routes/jobs.py |
-| POST | `/job-batches` | `create_job_batch` | routes/jobs.py |
 | GET | `/jobs` | `list_jobs` | routes/jobs.py |
 | GET | `/jobs/{job_id}` | `get_job` | routes/jobs.py |
-| GET | `/jobs/{job_id}/artifacts/{artifact_name:path}` | `get_artifact` | routes/jobs.py |
 | POST | `/jobs/{job_id}/nodes/{node_key}/rerun` | `rerun_node` | routes/jobs.py |
 | DELETE | `/jobs/{job_id}` | `delete_job` | routes/jobs.py |
-| GET | `/jobs/{job_id}/{invalid_path:path}` | `reject_invalid_job_subpath` | routes/jobs.py |
+| POST | `/jobs/{job_id}/run-to` | `run_to` | routes/jobs.py |
+| POST | `/jobs/{job_id}/continue` | `continue_job` | routes/jobs.py |
+| POST | `/workspaces/{workspace_id}/jobs/batch-run-to` | `batch_run_to` | routes/jobs.py |
 | POST | `/package` | `package_completed` | routes/packages.py |
 | GET | `/packages` | `list_packages` | routes/packages.py |
 | DELETE | `/packages/{package_id:int}` | `delete_package` | routes/packages.py |
@@ -138,49 +122,92 @@ server/app/
 | GET | `/worker/status` | `worker_status` | routes/worker.py |
 | POST | `/worker/pause` | `pause_worker` | routes/worker.py |
 | POST | `/worker/resume` | `resume_worker` | routes/worker.py |
+| GET | `/resource-providers` | `get_resource_providers` | routes/workflow_catalog.py |
+| GET | `/global-services` | `get_global_services` | routes/workflow_catalog.py |
+| GET | `/workflows` | `list_workflows` | routes/workflow_catalog.py |
+| GET | `/workflows/{workflow_key}` | `get_workflow` | routes/workflow_catalog.py |
+| PUT | `/workspaces/{workspace_id}/configuration` | `replace_workspace_configuration` | routes/workspace_configuration.py |
+| GET | `/executors` | `get_executors` | routes/workspace_executors.py |
+| GET | `/workspaces/{workspace_id}/executor-configuration` | `get_workspace_executor_configuration` | routes/workspace_executors.py |
+| GET | `/workspaces/{workspace_id}/runs` | `list_workspace_runs` | routes/workspace_runs.py |
+| GET | `/workspaces/{workspace_id}/dag` | `get_workspace_dag` | routes/workspace_runs.py |
+| GET | `/workspaces/{workspace_id}/settings` | `get_workspace_settings` | routes/workspace_settings.py |
+| PATCH | `/workspaces/{workspace_id}/settings/{section}` | `update_workspace_settings_section` | routes/workspace_settings.py |
+| POST | `/workspaces/{workspace_id}/settings/test-connection` | `test_workspace_connection` | routes/workspace_settings.py |
+| GET | `/workspaces` | `list_workspaces` | routes/workspaces.py |
+| POST | `/workspaces` | `create_workspace` | routes/workspaces.py |
+| GET | `/workspaces/{workspace_id}` | `get_workspace` | routes/workspaces.py |
+| PATCH | `/workspaces/{workspace_id}` | `update_workspace` | routes/workspaces.py |
+| DELETE | `/workspaces/{workspace_id}` | `delete_workspace` | routes/workspaces.py |
+| GET | `/workspaces/{workspace_id}/stats` | `get_workspace_stats` | routes/workspaces.py |
 
 ### 数据模型
 
 | 模型 | 类型 | 字段 | 文件 |
 |------|------|------|------|
+| LocalCapabilityConfig | BaseModel | handler: str | app/executors/config.py |
+| PiCapabilityConfig | BaseModel | skill: str, tools: tuple[str, ...] | app/executors/config.py |
+| OpenClawCapabilityConfig | BaseModel | skill: str | app/executors/config.py |
+| LocalExecutorConfig | BaseModel | kind: Literal['local'], global_capacity: int, capabilities: dict[str, LocalCa... | app/executors/config.py |
+| PiExecutorConfig | BaseModel | kind: Literal['pi'], global_capacity: int, capabilities: dict[str, PiCapabili... | app/executors/config.py |
+| OpenClawExecutorConfig | BaseModel | kind: Literal['openclaw'], agent_id: str, global_capacity: int, capabilities:... | app/executors/config.py |
+| PiRuntimeConfig | BaseModel | binary: str, provider: str, model: str, thinking: str, timeout_seconds: int, ... | app/executors/runtime_config.py |
+| OpenClawSkillSafetyRuntimeConfig | BaseModel | enabled: bool, repos: list[dict[str, str]] | app/executors/runtime_config.py |
+| OpenClawRuntimeConfig | BaseModel | command_template: tuple[str, ...], cwd: str, timeout_seconds: int, cancellati... | app/executors/runtime_config.py |
+| WorkflowsRuntimeConfig | BaseModel | enabled: bool, pi: PiRuntimeConfig | app/executors/runtime_config.py |
+| ExecutorRuntimeConfig | BaseModel | cancellation_grace_seconds: int, workflows: WorkflowsRuntimeConfig, openclaw:... | app/executors/runtime_config.py |
 | VideoRecord | TypedDict | id: str, source_url: str, title: str, content_type: str, external_id: str, kn... | app/records.py |
 | PhaseRunRecord | TypedDict | id: int, video_id: str, phase_key: str, status: str, started_at: str, finishe... | app/records.py |
 | AgentStatusResponse | BaseModel | id: str, name: str, busy: bool, current_video_id: str | None, current_title: ... | app/routes/agents.py |
 | AgentsResponse | BaseModel | agents: list[AgentStatusResponse] | app/routes/agents.py |
-| AgentAssignmentResponse | BaseModel | agent_id: str, workspace_id: str, concurrency_limit: int | app/routes/agents.py |
-| AgentUnassignmentResponse | BaseModel | agent_id: str, workspace_id: str, removed: bool | app/routes/agents.py |
 | HealthResponse | BaseModel | ok: bool | app/routes/common.py |
-| JobBatchRequest | BaseModel | pipeline_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/jobs.py |
-| JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/jobs.py |
-| JobsResponse | BaseModel | jobs: list[dict[str, Any]] | app/routes/jobs.py |
-| PipelineResponse | BaseModel | pipeline: dict[str, Any] | app/routes/jobs.py |
-| PipelinesListResponse | BaseModel | pipelines: list[dict[str, Any]] | app/routes/jobs.py |
-| WorkspaceCreateRequest | BaseModel | name: str, default_pipeline_key: str, default_entity: str, cms_config: dict[s... | app/routes/jobs.py |
-| WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_pipeline_key: str | None, ... | app/routes/jobs.py |
-| WorkspaceSettingsResponse | BaseModel | settings: dict[str, Any] | app/routes/jobs.py |
-| WorkspaceSettingsSectionRequest | BaseModel | cmsUrl: str | None, cmsToken: str | None, entityType: str | None, intakeModes... | app/routes/jobs.py |
-| WorkspaceSettingsTestResponse | BaseModel | ok: bool, message: str | app/routes/jobs.py |
-| WorkspaceResponse | BaseModel | workspace: dict[str, Any] | app/routes/jobs.py |
-| WorkspacesResponse | BaseModel | workspaces: list[dict[str, Any]] | app/routes/jobs.py |
-| WorkspaceAgentsResponse | BaseModel | agents: list[dict[str, Any]] | app/routes/jobs.py |
-| WorkspaceAgentAssignmentResponse | BaseModel | agent_id: str, workspace_id: str, concurrency_limit: int | app/routes/jobs.py |
-| DeleteJobResponse | BaseModel | deleted: str | app/routes/jobs.py |
-| JobDetailResponse | BaseModel | job: dict[str, Any], nodes: list[dict[str, Any]], runs: list[dict[str, Any]],... | app/routes/jobs.py |
-| ArtifactResponse | BaseModel | name: str, content: str | app/routes/jobs.py |
-| RerunNodeResponse | BaseModel | job_id: str, node_key: str, stale_nodes: list[str] | app/routes/jobs.py |
-| BatchJobRequest | BaseModel | job_ids: list[str] | app/routes/jobs.py |
-| BatchJobResponse | BaseModel | results: list[dict[str, Any]] | app/routes/jobs.py |
-| WorkspaceRunsResponse | BaseModel | runs: list[dict[str, Any]] | app/routes/jobs.py |
-| WorkspaceDagResponse | BaseModel | pipeline: dict[str, Any], nodes: list[dict[str, Any]] | app/routes/jobs.py |
-| WorkspaceAgentConfig | BaseModel | agent_id: str, concurrency_limit: int | app/routes/jobs.py |
-| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/jobs.py |
-| WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/jobs.py |
-| WorkspaceConfigurationResponse | BaseModel | workspace: dict[str, Any], settings: dict[str, Any], agents: list[dict[str, A... | app/routes/jobs.py |
-| WorkspaceAgentStatus | BaseModel | id: str, name: str, busy: bool | app/routes/jobs.py |
-| WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, pipeline_key: str, pipeline_label: str, job_sta... | app/routes/jobs.py |
-| DeleteWorkspaceResponse | BaseModel | deleted: str | app/routes/jobs.py |
-| ResourceProvidersResponse | BaseModel | providers: list[dict[str, Any]] | app/routes/jobs.py |
-| GlobalServicesResponse | BaseModel | cms: dict[str, Any] | app/routes/jobs.py |
+| ExecutorDefinitionResponse | BaseModel | id: str, kind: Literal['local', 'pi', 'openclaw'], global_capacity: int, capa... | app/routes/executor_contracts.py |
+| ExecutorCatalogResponse | BaseModel | executors: list[ExecutorDefinitionResponse] | app/routes/executor_contracts.py |
+| ExecutorAllocationRequest | BaseModel | executor_id: str, concurrency_limit: int | app/routes/executor_contracts.py |
+| NodeBindingRequest | BaseModel | workflow_key: str, node_key: str, executor_id: str | app/routes/executor_contracts.py |
+| NodeLimitRequest | BaseModel | workflow_key: str, node_key: str, concurrency_limit: int | app/routes/executor_contracts.py |
+| WorkspaceExecutorConfigurationResponse | BaseModel | allocations: list[ExecutorAllocationResponse], bindings: list[NodeBindingRequ... | app/routes/executor_contracts.py |
+| WorkspaceSettingsPayload | BaseModel | entityType: str, intakeModes: list[str], labelOverrides: dict[str, str], work... | app/routes/executor_contracts.py |
+| WorkspaceConfigurationSettingsRequest | BaseModel | entityType: str | None, intakeModes: list[str] | None, labelOverrides: dict[s... | app/routes/executor_contracts.py |
+| WorkspaceConfigurationRequest | BaseModel | name: str | None, description: str | None, settings: WorkspaceConfigurationSe... | app/routes/executor_contracts.py |
+| WorkspaceConfigurationResponse | BaseModel | workspace: dict[str, Any], settings: WorkspaceSettingsPayload, executor_confi... | app/routes/executor_contracts.py |
+| JobBatchRequest | BaseModel | workflow_key: str, entity: str | None, source_kind: str, question_ids: list[s... | app/routes/job_contracts.py |
+| JobBatchResponse | BaseModel | batch: dict[str, Any], created_count: int, jobs: list[dict[str, Any]] | app/routes/job_contracts.py |
+| WorkspaceCreateRequest | BaseModel | name: str, default_workflow_key: str, default_entity: str, cms_config: dict[s... | app/routes/job_contracts.py |
+| WorkspaceUpdateRequest | BaseModel | name: str | None, description: str | None, default_workflow_key: str | None, ... | app/routes/job_contracts.py |
+| WorkspaceSettingsResponse | BaseModel | settings: dict[str, Any] | app/routes/job_contracts.py |
+| WorkspaceSettingsSectionRequest | BaseModel | cmsUrl: str | None, cmsToken: str | None, entityType: str | None, intakeModes... | app/routes/job_contracts.py |
+| WorkspaceSettingsTestResponse | BaseModel | ok: bool, message: str | app/routes/job_contracts.py |
+| WorkspaceResponse | BaseModel | workspace: dict[str, Any] | app/routes/job_contracts.py |
+| WorkspacesResponse | BaseModel | workspaces: list[dict[str, Any]] | app/routes/job_contracts.py |
+| DeleteJobResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
+| ArtifactResponse | BaseModel | name: str, content: str | app/routes/job_contracts.py |
+| WorkspaceRunsResponse | BaseModel | runs: list[dict[str, Any]] | app/routes/job_contracts.py |
+| WorkspaceDagResponse | BaseModel | workflow: dict[str, Any], nodes: list[dict[str, Any]] | app/routes/job_contracts.py |
+| ExecutorRuntimeStatus | BaseModel | executor_id: str, kind: str, global_capacity: int, workspace_limit: int, runn... | app/routes/job_contracts.py |
+| ExecutorStatusSummary | BaseModel | executors: list[ExecutorRuntimeStatus] | app/routes/job_contracts.py |
+| WorkspaceStatsResponse | BaseModel | workspace_id: str, name: str, workflow_key: str, workflow_label: str, job_sta... | app/routes/job_contracts.py |
+| DeleteWorkspaceResponse | BaseModel | deleted: str | app/routes/job_contracts.py |
+| ResourceProvidersResponse | BaseModel | providers: list[dict[str, Any]] | app/routes/job_contracts.py |
+| GlobalServicesResponse | BaseModel | cms: dict[str, Any] | app/routes/job_contracts.py |
+| JobMutationResultResponse | BaseModel | job_id: str, operation: Literal['rerun', 'run_to', 'continue', 'delete', 'pac... | app/routes/job_operation_contracts.py |
+| BatchJobMutationResponse | BaseModel | results: list[JobMutationResultResponse] | app/routes/job_operation_contracts.py |
+| JobBatchRerunRequest | BaseModel | job_ids: list[str], node_key: str | app/routes/job_operation_contracts.py |
+| BatchJobIdsRequest | BaseModel | job_ids: list[str] | app/routes/job_operation_contracts.py |
+| WorkspacePackageRequest | BaseModel | job_ids: list[str] | app/routes/job_operation_contracts.py |
+| WorkspacePackageResultResponse | BaseModel | job_id: str, status: Literal['succeeded', 'failed'], reason_code: str | None,... | app/routes/job_operation_contracts.py |
+| WorkspacePackageResponse | BaseModel | results: list[WorkspacePackageResultResponse], succeeded_count: int, failed_c... | app/routes/job_operation_contracts.py |
+| RunToRequest | BaseModel | target_node_key: str, start_node_key: str | None | app/routes/job_operation_contracts.py |
+| ContinueJobRequest | BaseModel | — | app/routes/job_operation_contracts.py |
+| BatchRunToRequest | BaseModel | job_ids: list[str], target_node_key: str, start_node_key: str | None | app/routes/job_operation_contracts.py |
+| ExecutionControlSummaryResponse | BaseModel | mode: Literal['full', 'until_node'], target_node_key: str | None, paused: boo... | app/routes/job_view_contracts.py |
+| JobNodeSummaryResponse | BaseModel | node_key: str, label: str, status: str, error_message: str | app/routes/job_view_contracts.py |
+| JobSummaryResponse | BaseModel | id: str, workspace_id: str, workflow_key: str, source_type: str, source_id: s... | app/routes/job_view_contracts.py |
+| JobsResponse | BaseModel | jobs: list[JobSummaryResponse] | app/routes/job_view_contracts.py |
+| JobNodeResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, stale_reason: str, error_me... | app/routes/job_view_contracts.py |
+| NodeRunResponse | BaseModel | id: int, job_id: str, node_key: str, status: str, started_at: str, finished_a... | app/routes/job_view_contracts.py |
+| JobLogResponse | BaseModel | run_id: int, log: str, truncated: bool | app/routes/job_view_contracts.py |
+| JobDetailResponse | BaseModel | job: JobSummaryResponse, nodes: list[JobNodeResponse], runs: list[NodeRunResp... | app/routes/job_view_contracts.py |
 | PackageRequest | BaseModel | video_ids: list[str] | None, name: str | None | app/routes/packages.py |
 | PackageUpdate | BaseModel | name: str | None, locked: bool | None | app/routes/packages.py |
 | PackageResponse | BaseModel | accepted: bool | app/routes/packages.py |
@@ -200,6 +227,15 @@ server/app/
 | RunToSingleResponse | BaseModel | result: RunToResult, video: dict[str, Any] | None | app/routes/videos.py |
 | BatchRunToResponse | BaseModel | results: list[RunToResult] | app/routes/videos.py |
 | WorkerStatusResponse | BaseModel | paused: bool | app/routes/worker.py |
+| WorkflowSummaryResponse | BaseModel | key: str, label: str | app/routes/workflow_contracts.py |
+| WorkflowIntakeModeResponse | BaseModel | key: str, label: str, input_field: str, resource: str | app/routes/workflow_contracts.py |
+| WorkflowIntakeResponse | BaseModel | modes: list[WorkflowIntakeModeResponse] | app/routes/workflow_contracts.py |
+| WorkflowNodeResponse | BaseModel | key: str, label: str, capability: str, after: list[str], inputs: list[str], o... | app/routes/workflow_contracts.py |
+| WorkflowResponse | BaseModel | workflow: WorkflowDefinitionResponse | app/routes/workflow_contracts.py |
+| WorkflowsListResponse | BaseModel | workflows: list[WorkflowSummaryResponse] | app/routes/workflow_contracts.py |
+| JobDeleteResult | TypedDict | job_id: str, operation: str, status: str, reason_code: str | None, message: s... | app/services/job_deletion.py |
+| JobPackageItemResult | TypedDict | job_id: str, status: str, reason_code: str | None, message: str | None | app/services/job_packages.py |
+| JobPackageResult | TypedDict | results: list[JobPackageItemResult], succeeded_count: int, failed_count: int,... | app/services/job_packages.py |
 
 <!-- END AUTO-GENERATED -->
 

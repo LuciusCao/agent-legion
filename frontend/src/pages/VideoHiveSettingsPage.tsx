@@ -176,7 +176,7 @@ export function VideoHiveSettingsPage() {
             }}
           >
             <md-icon>stream</md-icon>
-            <span>流水线信息</span>
+            <span>工作流信息</span>
           </div>
           <div style={{ padding: '0 16px 16px' }}>
             {config ? (

@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { JobActionBar } from './JobActionBar'
 import { makeJob } from '../testing/fixtures'
-import type { PipelineDefinitionRecord } from '../types'
+import type { WorkflowDefinitionRecord } from '../types'
 
-const pipeline: PipelineDefinitionRecord = {
+const pipeline: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
@@ -36,7 +36,7 @@ const pipeline: PipelineDefinitionRecord = {
   ],
 }
 
-const pipelineNodesByKey: Record<string, PipelineDefinitionRecord> = {
+const workflowNodesByKey: Record<string, WorkflowDefinitionRecord> = {
   question_content: pipeline,
   other_pipeline: {
     key: 'other_pipeline',
@@ -72,7 +72,7 @@ describe('JobActionBar', () => {
     render(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'queued' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onPackage={vi.fn()}
@@ -91,7 +91,7 @@ describe('JobActionBar', () => {
     render(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'running' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onPackage={vi.fn()}
@@ -110,7 +110,7 @@ describe('JobActionBar', () => {
     render(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'completed' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onPackage={vi.fn()}
@@ -126,7 +126,7 @@ describe('JobActionBar', () => {
     render(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onPackage={vi.fn()}
@@ -142,7 +142,7 @@ describe('JobActionBar', () => {
     render(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'paused' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onPackage={vi.fn()}
@@ -159,7 +159,7 @@ describe('JobActionBar', () => {
     render(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'completed' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onPackage={onPackage}
@@ -177,7 +177,7 @@ describe('JobActionBar', () => {
     render(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onPackage={vi.fn()}
@@ -198,16 +198,16 @@ describe('JobActionBar', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
           makeJob({
             id: 'j2',
             status: 'completed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
-        pipelineNodesByKey={pipelineNodesByKey}
+        workflowDefinition={pipeline}
+        workflowNodesByKey={workflowNodesByKey}
         mode="batch"
         filters={[{ key: 'clear', label: '取消选择', onClick: vi.fn() }]}
         onExitSelectMode={vi.fn()}
@@ -231,7 +231,7 @@ describe('JobActionBar', () => {
     render(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'completed' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         loading
         onRerun={vi.fn()}
@@ -252,11 +252,11 @@ describe('JobActionBar', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
-        pipelineNodesByKey={pipelineNodesByKey}
+        workflowDefinition={pipeline}
+        workflowNodesByKey={workflowNodesByKey}
         mode="single"
         onRerun={vi.fn()}
         onRunTo={onRunTo}
@@ -290,7 +290,7 @@ describe('JobActionBar', () => {
             },
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onPackage={vi.fn()}
@@ -319,7 +319,7 @@ describe('JobActionBar', () => {
             },
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onContinue={onContinue}
@@ -339,7 +339,7 @@ describe('JobActionBar', () => {
     render(
       <JobActionBar
         jobs={[makeJob({ id: 'j1', status: 'paused' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         mode="single"
         onRerun={vi.fn()}
         onPackage={vi.fn()}

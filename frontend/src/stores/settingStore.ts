@@ -3,7 +3,7 @@ import type {
   WorkspaceSettings,
   GlobalServiceStatus,
   ResourceProviderDefinition,
-  PipelineDefinitionRecord,
+  WorkflowDefinitionRecord,
 } from '../types'
 import type {
   ExecutorDefinition,
@@ -34,7 +34,7 @@ export type SettingState = {
   saveError: string | null
   globalServices: GlobalServiceStatus | null
   resourceProviders: ResourceProviderDefinition[]
-  pipelineDefinition: PipelineDefinitionRecord | null
+  workflowDefinition: WorkflowDefinitionRecord | null
   testStatus: TestStatus
   executorCatalog: ExecutorDefinition[]
   executorConfiguration: WorkspaceExecutorConfiguration
@@ -49,19 +49,19 @@ export type SettingState = {
   confirmExecutorRemoval: () => void
   cancelExecutorRemoval: () => void
   setNodeBinding: (
-    pipelineKey: string,
+    workflowKey: string,
     nodeKey: string,
     executorId: string | null
   ) => void
   setNodeLimit: (
-    pipelineKey: string,
+    workflowKey: string,
     nodeKey: string,
     limit: number | null
   ) => void
   fetchSettings: (workspaceId: string) => Promise<void>
   fetchGlobalServices: () => Promise<void>
   fetchResourceProviders: () => Promise<void>
-  fetchPipelineDefinition: () => Promise<void>
+  fetchWorkflowDefinition: () => Promise<void>
   saveAll: () => Promise<void>
   testConnection: () => Promise<void>
   resetTestStatus: () => void
@@ -71,7 +71,7 @@ const defaultSettings: WorkspaceSettings = {
   entityType: 'question',
   intakeModes: [],
   labelOverrides: {},
-  pipelineKey: '',
+  workflowKey: '',
   resources: {},
 }
 
@@ -119,7 +119,7 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   isDirty: false,
   globalServices: null,
   resourceProviders: [],
-  pipelineDefinition: null,
+  workflowDefinition: null,
   testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
@@ -149,10 +149,10 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   setSettings(s) {
     set((state) => {
       const nextSettings = { ...state.settings, ...s }
-      const pipelineChanged =
-        s.pipelineKey !== undefined &&
-        s.pipelineKey !== state.settings.pipelineKey
-      const nextExecutorConfiguration = pipelineChanged
+      const workflowChanged =
+        s.workflowKey !== undefined &&
+        s.workflowKey !== state.settings.workflowKey
+      const nextExecutorConfiguration = workflowChanged
         ? {
             ...state.executorConfiguration,
             bindings: [],
@@ -162,7 +162,7 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       const nextState = {
         ...state,
         settings: nextSettings,
-        pipelineDefinition: pipelineChanged ? null : state.pipelineDefinition,
+        workflowDefinition: workflowChanged ? null : state.workflowDefinition,
         executorConfiguration: nextExecutorConfiguration,
       }
       return { ...nextState, isDirty: computeDirty(nextState) }
@@ -205,10 +205,10 @@ export const useSettingStore = create<SettingState>((set, get) => ({
       const removedBindingKeys = new Set(
         state.executorConfiguration.bindings
           .filter((b) => b.executor_id === executorId)
-          .map((b) => `${b.pipeline_key}:${b.node_key}`)
+          .map((b) => `${b.workflow_key}:${b.node_key}`)
       )
       const node_limits = state.executorConfiguration.node_limits.filter(
-        (l) => !removedBindingKeys.has(`${l.pipeline_key}:${l.node_key}`)
+        (l) => !removedBindingKeys.has(`${l.workflow_key}:${l.node_key}`)
       )
       const nextConfiguration = {
         ...state.executorConfiguration,
@@ -229,20 +229,20 @@ export const useSettingStore = create<SettingState>((set, get) => ({
     set({ pendingAllocationRemoval: null })
   },
 
-  setNodeBinding(pipelineKey, nodeKey, executorId) {
+  setNodeBinding(workflowKey, nodeKey, executorId) {
     set((state) => {
       const bindings = state.executorConfiguration.bindings.filter(
-        (b) => !(b.pipeline_key === pipelineKey && b.node_key === nodeKey)
+        (b) => !(b.workflow_key === workflowKey && b.node_key === nodeKey)
       )
       let node_limits = state.executorConfiguration.node_limits
       if (executorId === null) {
         node_limits = node_limits.filter(
-          (l) => !(l.pipeline_key === pipelineKey && l.node_key === nodeKey)
+          (l) => !(l.workflow_key === workflowKey && l.node_key === nodeKey)
         )
       }
       if (executorId !== null) {
         bindings.push({
-          pipeline_key: pipelineKey,
+          workflow_key: workflowKey,
           node_key: nodeKey,
           executor_id: executorId,
         })
@@ -257,14 +257,14 @@ export const useSettingStore = create<SettingState>((set, get) => ({
     })
   },
 
-  setNodeLimit(pipelineKey, nodeKey, limit) {
+  setNodeLimit(workflowKey, nodeKey, limit) {
     set((state) => {
       const node_limits = state.executorConfiguration.node_limits.filter(
-        (l) => !(l.pipeline_key === pipelineKey && l.node_key === nodeKey)
+        (l) => !(l.workflow_key === workflowKey && l.node_key === nodeKey)
       )
       if (limit !== null) {
         node_limits.push({
-          pipeline_key: pipelineKey,
+          workflow_key: workflowKey,
           node_key: nodeKey,
           concurrency_limit: limit,
         })
@@ -365,20 +365,20 @@ export const useSettingStore = create<SettingState>((set, get) => ({
     }
   },
 
-  async fetchPipelineDefinition() {
+  async fetchWorkflowDefinition() {
     const { settings } = get()
-    const pipelineKey = settings.pipelineKey || 'question_content'
+    const workflowKey = settings.workflowKey || 'question_content'
     try {
-      const result = await api<{ pipeline: PipelineDefinitionRecord }>(
-        `/api/pipelines/${encodeURIComponent(pipelineKey)}`
+      const result = await api<{ workflow: WorkflowDefinitionRecord }>(
+        `/api/workflows/${encodeURIComponent(workflowKey)}`
       )
       if (
         result &&
         typeof result === 'object' &&
-        'pipeline' in result &&
-        get().settings.pipelineKey === pipelineKey
+        'workflow' in result &&
+        get().settings.workflowKey === workflowKey
       ) {
-        set({ pipelineDefinition: result.pipeline })
+        set({ workflowDefinition: result.workflow })
       }
     } catch {
       // Silently fail

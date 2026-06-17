@@ -1,10 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act, fireEvent } from '@testing-library/react'
 import { JobRunToDialog } from './JobRunToDialog'
-import type { PipelineDefinitionRecord } from '../types'
+import type { WorkflowDefinitionRecord } from '../types'
 import { makeJob } from '../testing/fixtures'
 
-const pipeline: PipelineDefinitionRecord = {
+const pipeline: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
@@ -67,10 +67,10 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={onConfirm}
         onClose={vi.fn()}
       />
@@ -96,10 +96,10 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={onConfirm}
         onClose={vi.fn()}
       />
@@ -128,10 +128,10 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />
@@ -159,10 +159,10 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={onConfirm}
         onClose={vi.fn()}
       />
@@ -197,10 +197,10 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={vi.fn()}
         onClose={onClose}
       />
@@ -221,10 +221,10 @@ describe('JobRunToDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />

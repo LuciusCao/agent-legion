@@ -1,12 +1,12 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useUiStore } from '../stores/uiStore'
-import { api, fetchPipelineDefinition } from '../api'
+import { api, fetchWorkflowDefinition } from '../api'
 import { parseResourceInputs } from '../helpers'
 import type {
   AddResult,
   ContentType,
-  PipelineDefinitionRecord,
-  PipelineIntakeModeRecord,
+  WorkflowDefinitionRecord,
+  WorkflowIntakeModeRecord,
   VideoItem,
   WorkspaceRecord,
 } from '../types'
@@ -29,7 +29,7 @@ export function AddDialog({
   const [results, setResults] = useState<AddResult[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [workspace, setWorkspace] = useState<WorkspaceRecord | null>(null)
-  const [pipeline, setPipeline] = useState<PipelineDefinitionRecord | null>(
+  const [workflow, setWorkflow] = useState<WorkflowDefinitionRecord | null>(
     null
   )
   const [selectedModeKey, setSelectedModeKey] = useState('')
@@ -41,20 +41,20 @@ export function AddDialog({
   const hasInput = inputValue.trim().length > 0
   const submitDisabled = !hasInput || isSubmitting || loadingModes
 
-  const modes = useMemo<PipelineIntakeModeRecord[]>(() => {
-    if (!pipeline?.intake?.modes) return []
+  const modes = useMemo<WorkflowIntakeModeRecord[]>(() => {
+    if (!workflow?.intake?.modes) return []
     const enabledModes = workspace?.intake_config?.enabled_modes || []
-    if (enabledModes.length === 0) return pipeline.intake.modes
-    const filtered = pipeline.intake.modes.filter((mode) =>
+    if (enabledModes.length === 0) return workflow.intake.modes
+    const filtered = workflow.intake.modes.filter((mode) =>
       enabledModes.includes(mode.key)
     )
-    // If enabled_modes doesn't match any pipeline modes (e.g. after pipeline
-    // switch), fall back to all pipeline modes rather than showing nothing.
-    return filtered.length > 0 ? filtered : pipeline.intake.modes
-  }, [pipeline, workspace])
+    // If enabled_modes doesn't match any workflow modes (e.g. after workflow
+    // switch), fall back to all workflow modes rather than showing nothing.
+    return filtered.length > 0 ? filtered : workflow.intake.modes
+  }, [workflow, workspace])
 
   const getEffectiveLabel = useCallback(
-    (mode: PipelineIntakeModeRecord): string => {
+    (mode: WorkflowIntakeModeRecord): string => {
       const override = workspace?.intake_config?.label_overrides?.[mode.key]
       return override || mode.label
     },
@@ -72,8 +72,8 @@ export function AddDialog({
       .then(({ workspace: ws }) => {
         if (cancelled) return
         setWorkspace(ws)
-        const pipelineKey = ws.default_pipeline_key || 'question_content'
-        return fetchPipelineDefinition(pipelineKey).then((result) => ({
+        const workflowKey = ws.default_workflow_key || 'question_content'
+        return fetchWorkflowDefinition(workflowKey).then((result) => ({
           ws,
           result,
         }))
@@ -81,8 +81,8 @@ export function AddDialog({
       .then((data) => {
         if (cancelled || !data) return
         const { ws, result } = data
-        setPipeline(result.pipeline)
-        const availableModes = result.pipeline.intake?.modes || []
+        setWorkflow(result.workflow)
+        const availableModes = result.workflow.intake?.modes || []
         const enabledModes = ws.intake_config?.enabled_modes || []
         const filtered =
           enabledModes.length === 0
@@ -140,7 +140,7 @@ export function AddDialog({
         }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/job-batches`, {
           method: 'POST',
           body: JSON.stringify({
-            pipeline_key: workspace?.default_pipeline_key || 'question_content',
+            workflow_key: workspace?.default_workflow_key || 'question_content',
             entity: workspace?.default_entity || 'question',
             source_kind: selectedMode.key,
             [selectedMode.input_field]: values,
@@ -175,7 +175,7 @@ export function AddDialog({
   const handleClose = useCallback(() => {
     setResults([])
     setWorkspace(null)
-    setPipeline(null)
+    setWorkflow(null)
     setSelectedModeKey('')
     setInputValue('')
     onClose()

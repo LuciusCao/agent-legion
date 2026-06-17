@@ -6,7 +6,7 @@ function createProps(overrides = {}) {
   return {
     id: 'ws-1',
     name: 'Test Workspace',
-    pipelineLabel: 'Test Pipeline',
+    workflowLabel: 'Test Workflow',
     jobStats: { running: 2, completed: 5, failed: 1 },
     executorStatus: [
       {
@@ -32,7 +32,7 @@ describe('WorkspaceCard', () => {
   it('renders name and pipeline label', () => {
     render(<WorkspaceCard {...createProps()} />)
     expect(screen.getByText('Test Workspace')).toBeInTheDocument()
-    expect(screen.getByText('Test Pipeline')).toBeInTheDocument()
+    expect(screen.getByText('Test Workflow')).toBeInTheDocument()
   })
 
   it('renders job stats correctly', () => {

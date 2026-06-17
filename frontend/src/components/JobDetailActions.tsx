@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import type { JobSummary, PipelineDefinitionRecord } from '../types'
-import { JobRerunDialog, type PipelineNodesByKey } from './JobRerunDialog'
+import type { JobSummary, WorkflowDefinitionRecord } from '../types'
+import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobDeleteDialog } from './JobDeleteDialog'
 import { canRerunJob, canPackageJob, canContinueJob } from './JobActionBar'
@@ -8,8 +8,8 @@ import styles from './JobDetailActions.module.css'
 
 export type JobDetailActionsProps = {
   jobs: JobSummary[]
-  pipelineDefinition?: PipelineDefinitionRecord | null
-  pipelineNodesByKey?: PipelineNodesByKey | null
+  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowNodesByKey?: WorkflowNodesByKey | null
   loading?: boolean
   onRerun: (nodeKey: string) => void | Promise<void>
   onRunTo?: (targetKey: string, startKey?: string) => void | Promise<void>
@@ -21,8 +21,8 @@ export type JobDetailActionsProps = {
 
 export function JobDetailActions({
   jobs,
-  pipelineDefinition,
-  pipelineNodesByKey,
+  workflowDefinition,
+  workflowNodesByKey,
   loading = false,
   onRerun,
   onRunTo,
@@ -128,16 +128,16 @@ export function JobDetailActions({
       <JobRerunDialog
         open={rerunOpen}
         jobs={jobs}
-        pipelineDefinition={pipelineDefinition}
-        pipelineNodesByKey={pipelineNodesByKey}
+        workflowDefinition={workflowDefinition}
+        workflowNodesByKey={workflowNodesByKey}
         onClose={() => setRerunOpen(false)}
         onConfirm={handleRerun}
       />
       <JobRunToDialog
         open={runToOpen}
         jobs={jobs}
-        pipelineDefinition={pipelineDefinition}
-        pipelineNodesByKey={pipelineNodesByKey}
+        workflowDefinition={workflowDefinition}
+        workflowNodesByKey={workflowNodesByKey}
         onClose={() => setRunToOpen(false)}
         onConfirm={handleRunTo}
       />

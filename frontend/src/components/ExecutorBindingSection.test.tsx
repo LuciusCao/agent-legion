@@ -24,7 +24,7 @@ const catalog = [
   },
 ]
 
-const pipelineDefinition = {
+const workflowDefinition = {
   key: 'reading_analysis',
   label: '阅读分析',
   concurrency: { local: 8, agent: 2, nodes: {} },
@@ -86,7 +86,7 @@ describe('ExecutorBindingSection', () => {
     useSettingStore.setState({
       workspaceId: 'ws1',
       executorCatalog: catalog,
-      pipelineDefinition,
+      workflowDefinition,
       executorConfiguration: {
         allocations: [
           {
@@ -115,7 +115,7 @@ describe('ExecutorBindingSection', () => {
   it('includes an explicit unbound option for each pipeline node', () => {
     render(<ExecutorBindingSection />)
 
-    for (const node of pipelineDefinition.nodes) {
+    for (const node of workflowDefinition.nodes) {
       const select = getSelectForNode(node.key)
       expect(select).toBeTruthy()
       const options = getOptions(select)
@@ -160,7 +160,7 @@ describe('ExecutorBindingSection', () => {
       expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
         [
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'review_keywords',
             executor_id: 'pi-review',
           },
@@ -180,7 +180,7 @@ describe('ExecutorBindingSection', () => {
       expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
         [
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'review_keywords',
             executor_id: 'openclaw-generate',
           },

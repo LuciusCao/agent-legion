@@ -31,8 +31,8 @@ export function ExecutorAllocationRemovalDialog() {
         <p>移除执行器会同时清除以下节点绑定</p>
         <ul>
           {affectedBindings.map((binding) => (
-            <li key={`${binding.pipeline_key}:${binding.node_key}`}>
-              {binding.pipeline_key} / {binding.node_key}
+            <li key={`${binding.workflow_key}:${binding.node_key}`}>
+              {binding.workflow_key} / {binding.node_key}
             </li>
           ))}
         </ul>

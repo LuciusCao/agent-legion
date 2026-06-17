@@ -7,16 +7,16 @@ import type { SettingState } from '../stores/settingStore'
 import type { WorkspaceSettings } from '../types'
 import { useUiStore } from '../stores/uiStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
-import { api, fetchPipelines } from '../api'
+import { api, fetchWorkflows } from '../api'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
-  fetchPipelines: vi.fn(),
+  fetchWorkflows: vi.fn(),
   fetchWorkspaces: vi.fn(),
 }))
 
 const mockApi = vi.mocked(api)
-const mockFetchPipelines = vi.mocked(fetchPipelines)
+const mockFetchWorkflows = vi.mocked(fetchWorkflows)
 
 // Capture the real store actions before beforeEach replaces them with mocks.
 const originalActions = { ...useSettingStore.getState() }
@@ -29,7 +29,7 @@ const defaultState: SettingState = {
     entityType: 'question',
     intakeModes: [],
     labelOverrides: {},
-    pipelineKey: '',
+    workflowKey: '',
     resources: {},
   },
   originalWorkspaceName: '测试空间',
@@ -46,7 +46,7 @@ const defaultState: SettingState = {
     },
   },
   resourceProviders: [],
-  pipelineDefinition: null,
+  workflowDefinition: null,
   testStatus: { state: 'idle' },
   isSaving: false,
   saveError: null,
@@ -81,7 +81,7 @@ const defaultState: SettingState = {
   fetchSettings: vi.fn().mockResolvedValue(undefined),
   fetchGlobalServices: vi.fn().mockResolvedValue(undefined),
   fetchResourceProviders: vi.fn().mockResolvedValue(undefined),
-  fetchPipelineDefinition: vi.fn().mockResolvedValue(undefined),
+  fetchWorkflowDefinition: vi.fn().mockResolvedValue(undefined),
   saveAll: vi.fn().mockResolvedValue(undefined),
   testConnection: vi.fn().mockResolvedValue(undefined),
   resetTestStatus: vi.fn(),
@@ -117,7 +117,7 @@ describe('SettingsPage', () => {
           id: 'ws1',
           name: '测试空间',
           description: '测试描述',
-          default_pipeline_key: 'question_content',
+          default_workflow_key: 'question_content',
           default_entity: 'question',
         },
       ],
@@ -128,13 +128,13 @@ describe('SettingsPage', () => {
     })
     mockApi.mockReset()
     mockApi.mockResolvedValue({})
-    mockFetchPipelines.mockReset()
-    mockFetchPipelines.mockResolvedValue({ pipelines: [] })
+    mockFetchWorkflows.mockReset()
+    mockFetchWorkflows.mockResolvedValue({ workflows: [] })
   })
 
   it('renders all six sections in order', () => {
     useSettingStore.setState({
-      pipelineDefinition: {
+      workflowDefinition: {
         key: 'question_content',
         label: '题目内容生成',
         intake: {
@@ -176,7 +176,7 @@ describe('SettingsPage', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
@@ -191,7 +191,7 @@ describe('SettingsPage', () => {
     expect(headings.map((h) => h.textContent)).toEqual([
       '基本信息',
       '接入与资源',
-      'Pipeline',
+      '工作流',
       '执行器分配',
       '节点绑定',
       '本地节点并发',
@@ -332,7 +332,7 @@ describe('SettingsPage', () => {
 
   it('renders resource provider params when intake mode is checked', async () => {
     useSettingStore.setState({
-      pipelineDefinition: {
+      workflowDefinition: {
         key: 'question_content',
         label: '题目内容生成',
         intake: {
@@ -378,7 +378,7 @@ describe('SettingsPage', () => {
 
   it('renders executor binding section between allocation and local limit sections', () => {
     useSettingStore.setState({
-      pipelineDefinition: {
+      workflowDefinition: {
         key: 'question_content',
         label: '题目内容生成',
         intake: { modes: [] },
@@ -411,7 +411,7 @@ describe('SettingsPage', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
@@ -437,7 +437,7 @@ describe('SettingsPage', () => {
       entityType: 'question',
       intakeModes: [],
       labelOverrides: {},
-      pipelineKey: 'reading_analysis',
+      workflowKey: 'reading_analysis',
       resources: {},
     }
     useSettingStore.setState({
@@ -456,7 +456,7 @@ describe('SettingsPage', () => {
           global_capacity: 4,
         },
       ],
-      pipelineDefinition: {
+      workflowDefinition: {
         key: 'reading_analysis',
         label: '阅读分析',
         intake: { modes: [] },
@@ -502,14 +502,14 @@ describe('SettingsPage', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
         ],
         node_limits: [
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'fetch_questions',
             concurrency_limit: 2,
           },
@@ -566,7 +566,7 @@ describe('SettingsPage', () => {
         useSettingStore.getState().executorConfiguration.node_limits
       ).toEqual([
         {
-          pipeline_key: 'reading_analysis',
+          workflow_key: 'reading_analysis',
           node_key: 'fetch_questions',
           concurrency_limit: 2,
         },
@@ -592,14 +592,14 @@ describe('SettingsPage', () => {
       ],
       node_bindings: [
         {
-          pipeline_key: 'reading_analysis',
+          workflow_key: 'reading_analysis',
           node_key: 'fetch_questions',
           executor_id: 'local-default',
         },
       ],
       node_limits: [
         {
-          pipeline_key: 'reading_analysis',
+          workflow_key: 'reading_analysis',
           node_key: 'fetch_questions',
           concurrency_limit: 2,
         },
@@ -618,7 +618,7 @@ describe('SettingsPage', () => {
           global_capacity: 4,
         },
       ],
-      pipelineDefinition: {
+      workflowDefinition: {
         key: 'reading_analysis',
         label: '阅读分析',
         intake: { modes: [] },
@@ -643,7 +643,7 @@ describe('SettingsPage', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
@@ -661,7 +661,7 @@ describe('SettingsPage', () => {
         ],
         bindings: [
           {
-            pipeline_key: 'reading_analysis',
+            workflow_key: 'reading_analysis',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },

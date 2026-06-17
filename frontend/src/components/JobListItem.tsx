@@ -44,7 +44,7 @@ function progressText(job: JobRecord): string {
 function currentNodeSummary(job: JobRecord): JobNodeSummary | undefined {
   const summaries = job.node_summaries ?? []
 
-  // Empty summaries but pipeline has nodes: show a pending placeholder
+  // Empty summaries but workflow has nodes: show a pending placeholder
   if (summaries.length === 0 && (job.total_nodes ?? 0) > 0) {
     return {
       node_key: 'pending-start',

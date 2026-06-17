@@ -15,7 +15,7 @@ const mockDetail = {
   job: {
     id: 'j1',
     workspace_id: 'ws1',
-    pipeline_key: 'question_content',
+    workflow_key: 'question_content',
     source_id: 'Q100',
     source_type: 'knowledge',
     title: 'Algebra Problem',

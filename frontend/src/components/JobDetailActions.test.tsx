@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { JobDetailActions } from './JobDetailActions'
 import { makeJob } from '../testing/fixtures'
-import type { PipelineDefinitionRecord } from '../types'
+import type { WorkflowDefinitionRecord } from '../types'
 
-const pipeline: PipelineDefinitionRecord = {
+const pipeline: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
@@ -34,9 +34,9 @@ function renderActions(
   return render(
     <JobDetailActions
       jobs={[
-        makeJob({ id: 'j1', status: 'failed', pipeline_key: pipeline.key }),
+        makeJob({ id: 'j1', status: 'failed', workflow_key: pipeline.key }),
       ]}
-      pipelineDefinition={pipeline}
+      workflowDefinition={pipeline}
       onRerun={vi.fn()}
       onPackage={vi.fn()}
       onDelete={vi.fn()}

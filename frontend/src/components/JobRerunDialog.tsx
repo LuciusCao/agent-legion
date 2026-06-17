@@ -1,19 +1,19 @@
 import { useMemo, useState } from 'react'
-import type { JobSummary, PipelineDefinitionRecord } from '../types'
+import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import {
   computeOrderedNodes,
   excludedJobs,
-  type PipelineNodesByKey,
-} from '../lib/pipelineNodes'
+  type WorkflowNodesByKey,
+} from '../lib/workflowNodes'
 import styles from './JobRerunDialog.module.css'
 
-export type { PipelineNodesByKey }
+export type { WorkflowNodesByKey }
 
 export type JobRerunDialogProps = {
   open: boolean
   jobs: JobSummary[]
-  pipelineDefinition?: PipelineDefinitionRecord | null
-  pipelineNodesByKey?: PipelineNodesByKey | null
+  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowNodesByKey?: WorkflowNodesByKey | null
   itemLabel?: string
   onConfirm: (nodeKey: string) => void | Promise<void>
   onClose: () => void
@@ -22,15 +22,15 @@ export type JobRerunDialogProps = {
 export function JobRerunDialog({
   open,
   jobs,
-  pipelineDefinition,
-  pipelineNodesByKey,
+  workflowDefinition,
+  workflowNodesByKey,
   itemLabel = '任务',
   onConfirm,
   onClose,
 }: JobRerunDialogProps) {
   const orderedNodes = useMemo(
-    () => computeOrderedNodes(jobs, pipelineDefinition, pipelineNodesByKey),
-    [jobs, pipelineDefinition, pipelineNodesByKey]
+    () => computeOrderedNodes(jobs, workflowDefinition, workflowNodesByKey),
+    [jobs, workflowDefinition, workflowNodesByKey]
   )
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(
     orderedNodes[0]?.key ?? null
@@ -47,8 +47,8 @@ export function JobRerunDialog({
     ? excludedJobs(
         jobs,
         effectiveNodeKey,
-        pipelineNodesByKey,
-        pipelineDefinition
+        workflowNodesByKey,
+        workflowDefinition
       )
     : []
 

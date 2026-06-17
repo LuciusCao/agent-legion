@@ -8,7 +8,7 @@ describe('EmptyStateGuide', () => {
     {
       icon: 'settings',
       title: '配置资源',
-      description: '绑定 CMS 与流水线所需资源。',
+      description: '绑定 CMS 与工作流所需资源。',
       unlocked: true,
       actionLabel: '去配置',
       onAction: vi.fn(),
@@ -38,7 +38,7 @@ describe('EmptyStateGuide', () => {
     render(<EmptyStateGuide steps={steps} />)
 
     expect(screen.getByText('配置资源')).toBeInTheDocument()
-    expect(screen.getByText('绑定 CMS 与流水线所需资源。')).toBeInTheDocument()
+    expect(screen.getByText('绑定 CMS 与工作流所需资源。')).toBeInTheDocument()
     expect(screen.getByText('创建任务')).toBeInTheDocument()
     expect(screen.getByText('选择接入模式并批量创建任务。')).toBeInTheDocument()
   })

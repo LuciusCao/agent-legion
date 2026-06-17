@@ -6,7 +6,7 @@ import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
-import { api, fetchJobs, fetchPipelineDefinition } from '../api'
+import { api, fetchJobs, fetchWorkflowDefinition } from '../api'
 import {
   batchRerunJobs,
   batchDeleteJobs,
@@ -18,7 +18,7 @@ import { makeJob } from '../testing/fixtures'
 
 const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
-const mockFetchPipelineDefinition = vi.fn()
+const mockFetchWorkflowDefinition = vi.fn()
 const mockBatchRerunJobs = vi.fn()
 const mockBatchDeleteJobs = vi.fn()
 const mockPackageJobs = vi.fn()
@@ -27,9 +27,9 @@ const mockBatchRunToJobs = vi.fn()
 vi.mock('../api', () => ({
   api: (...args: Parameters<typeof api>) => mockApi(...args),
   fetchJobs: (...args: Parameters<typeof fetchJobs>) => mockFetchJobs(...args),
-  fetchPipelineDefinition: (
-    ...args: Parameters<typeof fetchPipelineDefinition>
-  ) => mockFetchPipelineDefinition(...args),
+  fetchWorkflowDefinition: (
+    ...args: Parameters<typeof fetchWorkflowDefinition>
+  ) => mockFetchWorkflowDefinition(...args),
 }))
 
 vi.mock('../jobApi', () => ({
@@ -59,8 +59,8 @@ function renderPage(workspaceId = 'ws1') {
 const baseStats: WorkspaceStats = {
   workspace_id: 'ws1',
   name: 'WS One',
-  pipeline_key: 'question_content',
-  pipeline_label: 'Question Content',
+  workflow_key: 'question_content',
+  workflow_label: 'Question Content',
   job_stats: { pending: 1, running: 2, completed: 3, failed: 1 },
   executor_status: {
     executors: [
@@ -78,7 +78,7 @@ const baseStats: WorkspaceStats = {
   latest_run: null,
 }
 
-const pipelineDefinition = {
+const workflowDefinition = {
   key: 'question_content',
   label: 'Question Content',
   nodes: [
@@ -113,15 +113,15 @@ describe('WorkspaceMainPage', () => {
   beforeEach(() => {
     mockApi.mockReset()
     mockFetchJobs.mockReset()
-    mockFetchPipelineDefinition.mockReset()
+    mockFetchWorkflowDefinition.mockReset()
     mockBatchRerunJobs.mockReset()
     mockBatchDeleteJobs.mockReset()
     mockPackageJobs.mockReset()
     mockBatchRunToJobs.mockReset()
 
     mockFetchJobs.mockResolvedValue({ jobs: [] })
-    mockFetchPipelineDefinition.mockResolvedValue({
-      pipeline: pipelineDefinition,
+    mockFetchWorkflowDefinition.mockResolvedValue({
+      workflow: workflowDefinition,
     })
     mockApi.mockImplementation((path: string) => {
       if (path === '/api/workspaces/ws1/stats') {
@@ -179,7 +179,7 @@ describe('WorkspaceMainPage', () => {
         entityType: 'question',
         intakeModes: [],
         labelOverrides: {},
-        pipelineKey: '',
+        workflowKey: '',
         resources: {},
       },
       originalWorkspaceName: 'WS One',
@@ -190,7 +190,7 @@ describe('WorkspaceMainPage', () => {
         entityType: 'question',
         intakeModes: [],
         labelOverrides: {},
-        pipelineKey: '',
+        workflowKey: '',
         resources: {},
       },
       isDirty: false,
@@ -206,7 +206,7 @@ describe('WorkspaceMainPage', () => {
       },
       originalExecutorConfiguration: null,
       pendingAllocationRemoval: null,
-      pipelineDefinition: null,
+      workflowDefinition: null,
     })
   })
 
@@ -339,7 +339,7 @@ describe('WorkspaceMainPage', () => {
         makeJob({
           id: 'j1',
           status: 'failed',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
       ],
     })
@@ -348,7 +348,7 @@ describe('WorkspaceMainPage', () => {
         makeJob({
           id: 'j1',
           status: 'failed',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
       ],
       selectedIds: new Set(['j1']),
@@ -360,7 +360,7 @@ describe('WorkspaceMainPage', () => {
     })
 
     await waitFor(() =>
-      expect(mockFetchPipelineDefinition).toHaveBeenCalledWith(
+      expect(mockFetchWorkflowDefinition).toHaveBeenCalledWith(
         'question_content'
       )
     )
@@ -452,7 +452,7 @@ describe('WorkspaceMainPage', () => {
         makeJob({
           id: 'j1',
           status: 'failed',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
       ],
     })
@@ -461,7 +461,7 @@ describe('WorkspaceMainPage', () => {
         makeJob({
           id: 'j1',
           status: 'failed',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
       ],
       selectedIds: new Set(['j1']),
@@ -473,7 +473,7 @@ describe('WorkspaceMainPage', () => {
     })
 
     await waitFor(() =>
-      expect(mockFetchPipelineDefinition).toHaveBeenCalledWith(
+      expect(mockFetchWorkflowDefinition).toHaveBeenCalledWith(
         'question_content'
       )
     )
@@ -515,13 +515,13 @@ describe('WorkspaceMainPage', () => {
         makeJob({
           id: 'j1',
           status: 'failed',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
         makeJob({
           id: 'j2',
           status: 'failed',
           source_id: 'Q2',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
       ],
     })
@@ -530,13 +530,13 @@ describe('WorkspaceMainPage', () => {
         makeJob({
           id: 'j1',
           status: 'failed',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
         makeJob({
           id: 'j2',
           status: 'failed',
           source_id: 'Q2',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
       ],
       selectedIds: new Set(['j1', 'j2']),
@@ -577,7 +577,7 @@ describe('WorkspaceMainPage', () => {
         makeJob({
           id: 'j1',
           status: 'failed',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
       ],
     })
@@ -586,7 +586,7 @@ describe('WorkspaceMainPage', () => {
         makeJob({
           id: 'j1',
           status: 'failed',
-          pipeline_key: 'question_content',
+          workflow_key: 'question_content',
         }),
       ],
       selectedIds: new Set(['j1']),

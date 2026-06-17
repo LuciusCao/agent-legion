@@ -22,7 +22,7 @@ video-hive/
 ├── pyproject.toml              # Python project metadata, dependencies, tool config
 ├── uv.lock                     # Locked Python dependency tree
 ├── config/
-│   └── pipeline.yaml           # Runtime configuration (ASR providers, openclaw)
+│   └── workflow.yaml           # Runtime configuration (ASR providers, openclaw, workflows)
 ├── server/
 │   ├── app/
 │   │   ├── main.py             # FastAPI app factory + lifespan worker threads
@@ -36,7 +36,7 @@ video-hive/
 │   │   ├── executors/          # Phase 5 executor runtime (registry, runtime, config, pi, openclaw, local, leases, scheduling, legacy_migration)
 │   │   │   ├── runtime_config.py # Executor runtime configuration loader
 │   │   ├── cms/                # CMS API integration (auth, client, knowledge, question)
-│   │   ├── jobs/               # Job queries for Agent Legion pipeline
+│   │   ├── jobs/               # Job queries for Agent Legion workflow
 │   │   ├── services/           # Business logic services
 │   │   │   ├── intake.py       # Video intake (add, URL resolution)
 │   │   │   ├── video_actions.py # Batch rerun, delete, package selection
@@ -47,7 +47,7 @@ video-hive/
 │   │   ├── worker_control.py   # Worker pause/resume control
 │   │   ├── worker_thread.py    # Background worker thread lifecycle
 │   │   ├── worker_scheduler.py # Worker scheduling logic
-│   │   ├── pipeline_worker_thread.py # Agent Legion pipeline worker thread
+│   │   ├── workflow_worker_thread.py # Agent Legion workflow worker thread
 │   │   ├── events.py           # SSE event broadcaster
 │   │   ├── agents.py           # OpenClaw agent discovery and status tracking
 │   │   ├── records.py          # TypedDict type definitions for DB records
@@ -71,13 +71,13 @@ video-hive/
 │   │   │       ├── phase-04-chapter-generate.md
 │   │   │       ├── phase-05-interaction-generate.md
 │   │   │       └── phase-06-content-review.md
-│   │   └── pipelines/          # Agent Legion DAG pipeline definitions
-│   │       ├── definition.py   # Pipeline definition loader
-│   │       ├── executor.py     # Pipeline node executor
+│   │   └── workflows/          # Agent Legion DAG workflow definitions
+│   │       ├── definition.py   # Workflow definition loader
+│   │       ├── executor.py     # Workflow node executor
 │   │       ├── scheduler.py    # DAG scheduling and downstream node resolution
-│   │       ├── registry.py     # Pipeline definition registry by key
+│   │       ├── registry.py     # Workflow definition registry by key
 │   │       ├── reading_analysis.py # Reading analysis local node handlers
-│   │       ├── question_content.py # Question content pipeline presets
+│   │       ├── question_content.py # Question content workflow presets
 │   │       ├── pi_runner.py    # Pi CLI runner for agent nodes
 │   │       ├── artifacts.py    # Artifact validation and rerun cleanup
 │   │       ├── skills.py       # Repository-owned skill resolution
@@ -259,11 +259,11 @@ UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migrati
 - `--check` is read-only and emits a deterministic JSON report. An empty `issues` list means the
   destructive cleanup migration can proceed safely.
 - `--apply` creates a timestamped SQLite backup beside `data/video_hive.sqlite` and then migrates
-  legacy Workspace Agent/Pipeline settings into Executor allocations, bindings, and local Node
+  legacy Workspace Agent/Workflow settings into Executor allocations, bindings, and local Node
   limits.
 
 If the report lists unknown legacy Agent IDs, either configure an equivalent Executor in
-`config/pipeline.yaml` or manually remediate the `workspace_agent_assignments` rows before
+`config/workflow.yaml` or manually remediate the `workspace_agent_assignments` rows before
 retrying. The app aborts startup with the report and the exact `--check` command when finalization
 is blocked.
 
@@ -296,7 +296,7 @@ is blocked.
 - `server.app.main:create_app(data_dir, start_worker)` is the application factory.
 - When `start_worker=True`, two daemon threads may start on app lifespan:
   - `WorkerThread` polls the database every 1–3 seconds for videos in `queued` or `running` status.
-  - `PipelineWorkerThread` polls for Agent Legion DAG jobs when `pipelines.enabled` is true in `config/pipeline.yaml`.
+  - `WorkflowWorkerThread` polls for Agent Legion DAG jobs when `workflows.enabled` is true in `config/workflow.yaml`.
 - The video worker starts in a **paused** state by default; call `POST /api/worker/resume` to begin processing.
 - Each video has a `content_type` (`knowledge` or `question`) and progresses through a **type-specific pipeline**:
 
@@ -344,7 +344,7 @@ is blocked.
 - A global `Toast` component displays feedback messages (e.g., "该资源正在被处理中").
 - A **删除** button in the toolbar prompts for confirmation (`DeleteDialog` / `BatchDeleteDialog`) before calling `DELETE /api/videos/{video_id}` and clearing the selection.
 - **Batch operations**: select multiple videos in the list to batch rerun, batch delete, or batch package.
-- **Workspaces page** (`WorkspacesPage`): workspace selector, job batch creation, and job list for the Agent Legion pipeline. The workspace resources page (`WorkspaceResources`) allows configuring resource bindings, selecting the default entity (`question` / `video`), enabling/disabling intake modes, and overriding mode labels.
+- **Workspaces page** (`WorkspacesPage`): workspace selector, job batch creation, and job list for the Agent Legion workflow. The workspace resources page (`WorkspaceResources`) allows configuring resource bindings, selecting the default entity (`question` / `video`), enabling/disabling intake modes, and overriding mode labels.
 
 ### Frontend Tooling
 
@@ -354,23 +354,23 @@ is blocked.
 
 ### Database
 
-- SQLite with tables for both the video pipeline and the Agent Legion pipeline:
+- SQLite with tables for both the video pipeline and the Agent Legion workflow:
   - `videos` — video queue entries. Columns include `content_type` (`knowledge`|`question`), `external_id`, `knowledge_code`, `question_id`, `source_uuid`, `source_url`, `title`, `current_phase`, `status`, `duration`, `storage_dir`.
   - `phase_runs` — per-phase execution history for video pipeline
   - `transcription_runs` — transcription attempt history (whisper / SenseVoice)
   - `packages` — created package paths
-  - `workspaces` — Agent Legion workspace definitions. Columns include `default_pipeline_key`, `cms_config_json`, `resource_config_json`, `default_entity` (default `'question'`), `intake_config_json`.
+  - `workspaces` — Agent Legion workspace definitions. Columns include `default_workflow_key`, `cms_config_json`, `resource_config_json`, `default_entity` (default `'question'`), `intake_config_json`.
   - `job_batches` — batches of jobs created within a workspace
-  - `jobs` — Agent Legion job entries with `pipeline_key`, `workspace_id`, `source_type`, `source_id`, `status`, `storage_dir`
+  - `jobs` — Agent Legion job entries with `workflow_key`, `workspace_id`, `source_type`, `source_id`, `status`, `storage_dir`
   - `job_nodes` — per-job node execution status (`pending`, `running`, `completed`, `failed`, `stale`)
-  - `node_runs` — per-node execution history for Agent Legion pipeline
+  - `node_runs` — per-node execution history for Agent Legion workflow
 - The DB initializer runs lightweight migrations (`alter table add column`) so existing tables gain new columns without data loss.
 - `VideoQueries.connect()` and `JobQueries.connect()` are context managers (`@contextmanager`) that yield a `sqlite3.Connection` and ensure `conn.close()` is called after use.
 - `delete_video()` performs cascading deletes: it removes matching rows from `phase_runs` and `transcription_runs` before deleting the `videos` row.
 
 ## Configuration
 
-Edit `config/pipeline.yaml`:
+Edit `config/workflow.yaml`:
 
 - `asr.provider`: `auto`, `whisper`, or `sensevoice`.
 - `asr.whisper.binary`: path to local `whisper-cli`.
@@ -384,9 +384,9 @@ Edit `config/pipeline.yaml`:
 - `openclaw.runners`: explicit list of runner definitions. Each item can include:
   - `command_template`: the argument list for this runner (same placeholders as above).
   - `count` (optional, default `1`): how many identical runners to create from this template. Use this to scale concurrency without duplicating the entire configuration block.
-- `pipelines.enabled`: set to `true` to enable the Agent Legion DAG pipeline worker.
+- `workflows.enabled`: set to `true` to enable the Agent Legion DAG workflow worker.
 
-Pipeline definitions live in `config/pipelines/` (e.g., `question_content.yaml`). Each definition specifies:
+Workflow definitions live in `config/workflows/` (e.g., `question_content.yaml`). Each definition specifies:
 - `key` and `label`
 - `nodes` — DAG nodes declaring only `capability`, `after` (dependencies), `inputs`, `outputs`, and optional `label`. They never declare a `runner`, `agent`, `skill`, or command template.
 - `intake` — optional intake configuration with `modes` mapping. Each mode has `label`, `input_field`, and optional `resource` (for CMS resolver lookups). The backend resolves `(entity, mode_key)` to a resolver at runtime via `RESOLVER_MAP`.
@@ -414,7 +414,7 @@ Question explanation videos do not produce interaction nodes. Their `metadata.js
 - Coverage is enforced in `check-quick.sh` with `fail_under = 85` (configured in `pyproject.toml`).
 - API tests use `fastapi.testclient.TestClient` with a temporary `data_dir`. The `client` fixture must use `with TestClient(app) as c:` to ensure lifespan resources are properly closed.
 - Worker tests inject mock `TranscriptionProvider` implementations to avoid requiring real ASR binaries.
-- Core tests validate SRT parsing, artifact cleanup, openclaw runner behavior, ZIP packaging, type-specific pipeline routing, pipeline definition loading, DAG scheduling, and job API endpoints.
+- Core tests validate SRT parsing, artifact cleanup, openclaw runner behavior, ZIP packaging, type-specific pipeline routing, workflow definition loading, DAG scheduling, and job API endpoints.
 
 Run the full suite with:
 
@@ -431,7 +431,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ## Security Considerations
 
 - The backend downloads arbitrary URLs via `requests`; only run with trusted input.
-- OpenClaw commands are executed via `subprocess.run` with user-defined templates in `config/pipeline.yaml`. Ensure the configuration file is not writable by untrusted users.
+- OpenClaw commands are executed via `subprocess.run` with user-defined templates in `config/workflow.yaml`. Ensure the configuration file is not writable by untrusted users.
 - The SQLite database and video storage are local; there is no authentication layer. Do not expose the dev server to untrusted networks.
 - `data/` is gitignored; never commit runtime data or secrets.
 
@@ -447,26 +447,26 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 
 The required extension order is:
 
-1. Add or reuse a business `capability` on the Pipeline Node.
+1. Add or reuse a business `capability` on the Workflow Node.
 2. Add an implementation under a typed Executor definition.
 3. Allocate the Executor to the Workspace with a Workspace upper limit.
 4. Bind the Node to one compatible allocated Executor.
 5. Add a local Node limit only when the bound Executor kind is local.
 
 Do not put OpenClaw skill names, Pi skill directories, command templates, or Agent kinds in a
-Pipeline Node. Do not read `_futures` or create per-Workspace pools to make capacity decisions.
+Workflow Node. Do not read `_futures` or create per-Workspace pools to make capacity decisions.
 Routes must declare Pydantic response models; frontend transport types come from
 `frontend/src/generated/api.ts` and are never handwritten twice.
 
-Wrong and correct Pipeline Node declarations:
+Wrong and correct Workflow Node declarations:
 
 ```yaml
-# Wrong: Pipeline leaks Agent implementation details.
+# Wrong: Workflow leaks Agent implementation details.
 review_keywords:
   runner: pi
   skill: reading_analysis/review_keywords
 
-# Correct: Pipeline declares business capability only.
+# Correct: Workflow declares business capability only.
 review_keywords:
   capability: review_keywords
 ```
@@ -475,7 +475,7 @@ Other wrong patterns the architecture gate rejects:
 
 ```python
 # Wrong: Scheduler imports a concrete agent runner.
-from server.app.pipelines.pi_runner import PiRunner
+from server.app.workflows.pi_runner import PiRunner
 ```
 
 ```yaml
@@ -575,7 +575,7 @@ LocalExecutor(...).execute(context)
 
 ```python
 # Wrong: Route module traverses the DAG or deletes files.
-from server.app.pipelines.scheduler import downstream_nodes
+from server.app.workflows.scheduler import downstream_nodes
 shutil.rmtree(storage_dir)
 ```
 

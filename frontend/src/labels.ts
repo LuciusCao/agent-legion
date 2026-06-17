@@ -89,7 +89,7 @@ export const WORKSPACE_LABELS = {
   executors: '执行器',
   resources: '资源接口',
   intake: '接入模式',
-  pipeline: '流水线',
+  workflow: '工作流',
   packages: '打包',
   enter: '进入',
   createWorkspace: '新建 Workspace',

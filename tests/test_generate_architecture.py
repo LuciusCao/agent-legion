@@ -149,11 +149,13 @@ QUESTION_PHASES = ["download", "transcribe", "assemble"]
 def test_extract_config(tmp_path: Path):
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / "pipeline.yaml").write_text("""
+    (config_dir / "workflow.yaml").write_text("""
 asr:
   provider: auto
 openclaw:
   timeout_seconds: 600
+workflows:
+  enabled: true
 """)
 
     result = extract_config(tmp_path)

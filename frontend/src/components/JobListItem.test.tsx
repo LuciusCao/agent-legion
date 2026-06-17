@@ -7,7 +7,7 @@ import type { JobRecord } from '../types'
 const mockJob: JobRecord = {
   id: 'j1',
   workspace_id: 'ws1',
-  pipeline_key: 'question_content',
+  workflow_key: 'question_content',
   source_id: 'Q100',
   source_type: 'question',
   title: 'Algebra Problem',

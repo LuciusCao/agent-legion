@@ -2,9 +2,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { JobRerunDialog } from './JobRerunDialog'
 import { makeJob } from '../testing/fixtures'
-import type { PipelineDefinitionRecord } from '../types'
+import type { WorkflowDefinitionRecord } from '../types'
 
-const pipeline: PipelineDefinitionRecord = {
+const pipeline: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
@@ -36,7 +36,7 @@ const pipeline: PipelineDefinitionRecord = {
   ],
 }
 
-const pipelineNodesByKey: Record<string, PipelineDefinitionRecord> = {
+const workflowNodesByKey: Record<string, WorkflowDefinitionRecord> = {
   question_content: pipeline,
   other_pipeline: {
     key: 'other_pipeline',
@@ -76,10 +76,10 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />
@@ -101,16 +101,16 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
           makeJob({
             id: 'j2',
             status: 'completed',
-            pipeline_key: 'other_pipeline',
+            workflow_key: 'other_pipeline',
           }),
         ]}
-        pipelineDefinition={pipeline}
-        pipelineNodesByKey={pipelineNodesByKey}
+        workflowDefinition={pipeline}
+        workflowNodesByKey={workflowNodesByKey}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />
@@ -129,18 +129,18 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
             source_id: 'Q1',
           }),
           makeJob({
             id: 'j2',
             status: 'completed',
-            pipeline_key: 'unknown',
+            workflow_key: 'unknown',
             source_id: 'Q2',
           }),
         ]}
-        pipelineDefinition={pipeline}
-        pipelineNodesByKey={pipelineNodesByKey}
+        workflowDefinition={pipeline}
+        workflowNodesByKey={workflowNodesByKey}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />
@@ -165,10 +165,10 @@ describe('JobRerunDialog', () => {
           makeJob({
             id: 'j1',
             status: 'failed',
-            pipeline_key: 'question_content',
+            workflow_key: 'question_content',
           }),
         ]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={onConfirm}
         onClose={onClose}
       />
@@ -193,7 +193,7 @@ describe('JobRerunDialog', () => {
       <JobRerunDialog
         open
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={vi.fn()}
         onClose={onClose}
       />
@@ -210,7 +210,7 @@ describe('JobRerunDialog', () => {
       <JobRerunDialog
         open={false}
         jobs={[makeJob({ id: 'j1', status: 'failed' })]}
-        pipelineDefinition={pipeline}
+        workflowDefinition={pipeline}
         onConfirm={vi.fn()}
         onClose={vi.fn()}
       />

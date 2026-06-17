@@ -23,7 +23,7 @@ type WorkspaceState = {
     fields: {
       name?: string
       description?: string
-      default_pipeline_key?: string
+      default_workflow_key?: string
       default_entity?: string
       cms_config?: Record<string, unknown>
       resource_config?: Record<string, unknown>

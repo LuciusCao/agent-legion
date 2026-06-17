@@ -1,18 +1,18 @@
 import { useMemo, useState } from 'react'
-import type { JobSummary, PipelineDefinitionRecord } from '../types'
+import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import { ancestorClosure, validateRunTo } from '../lib/jobDag'
 import {
   computeOrderedNodes,
   excludedJobs,
-  type PipelineNodesByKey,
-} from '../lib/pipelineNodes'
+  type WorkflowNodesByKey,
+} from '../lib/workflowNodes'
 import styles from './JobRunToDialog.module.css'
 
 export type JobRunToDialogProps = {
   open: boolean
   jobs: JobSummary[]
-  pipelineDefinition?: PipelineDefinitionRecord | null
-  pipelineNodesByKey?: PipelineNodesByKey | null
+  workflowDefinition?: WorkflowDefinitionRecord | null
+  workflowNodesByKey?: WorkflowNodesByKey | null
   itemLabel?: string
   onConfirm: (targetKey: string, startKey?: string) => void | Promise<void>
   onClose: () => void
@@ -21,15 +21,15 @@ export type JobRunToDialogProps = {
 export function JobRunToDialog({
   open,
   jobs,
-  pipelineDefinition,
-  pipelineNodesByKey,
+  workflowDefinition,
+  workflowNodesByKey,
   itemLabel = '任务',
   onConfirm,
   onClose,
 }: JobRunToDialogProps) {
   const orderedNodes = useMemo(
-    () => computeOrderedNodes(jobs, pipelineDefinition, pipelineNodesByKey),
-    [jobs, pipelineDefinition, pipelineNodesByKey]
+    () => computeOrderedNodes(jobs, workflowDefinition, workflowNodesByKey),
+    [jobs, workflowDefinition, workflowNodesByKey]
   )
 
   const [targetKey, setTargetKey] = useState<string | null>(
@@ -66,8 +66,8 @@ export function JobRunToDialog({
     ? excludedJobs(
         jobs,
         effectiveTargetKey,
-        pipelineNodesByKey,
-        pipelineDefinition
+        workflowNodesByKey,
+        workflowDefinition
       )
     : []
 
