@@ -55,17 +55,17 @@ def make_pipeline_worker(
     tmp_path: Path,
     queries: JobQueries,
     *,
-    pipeline_key: str = "reading_analysis",
+    workflow_key: str = "reading_analysis",
     pi_binary: str | None = "echo",
     pi_timeout: int = 1,
 ) -> tuple[WorkflowWorkerThread, WorkflowDefinition]:
-    """Build a configured WorkflowWorkerThread for *pipeline_key*."""
+    """Build a configured WorkflowWorkerThread for *workflow_key*."""
     from server.app import main as app_main
     from server.app.executors.leases import ExecutorLeaseRepository
     from server.app.executors.legacy_migration import finalize_legacy_executor_schema
     from server.app.executors.runtime import ExecutionRuntime
 
-    definition = load_registered_workflow(Path("."), pipeline_key)
+    definition = load_registered_workflow(Path("."), workflow_key)
     settings = app_main.load_settings(data_dir=tmp_path)
     # Avoid real CMS/network calls in tests; isolated child processes re-import
     # modules and do not inherit parent monkeypatches.

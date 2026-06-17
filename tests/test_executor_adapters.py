@@ -33,7 +33,7 @@ def context(tmp_path: Path) -> ExecutionContext:
         job={
             "id": "job-1",
             "workspace_id": "ws-a",
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "source_type": "question",
             "source_id": "q-1",
             "batch_id": "",
@@ -84,7 +84,7 @@ def record_runtime_handler(
             "expected_outputs",
             "capability",
             "node_key",
-            "pipeline_key",
+            "workflow_key",
             "execution_id",
             "workspace_id",
         }
@@ -146,7 +146,7 @@ def test_local_executor_runtime_includes_expected_keys(context: ExecutionContext
     assert captured["expected_outputs"] == ["out.json"]
     assert captured["capability"] == "fetch"
     assert captured["node_key"] == context.node_key
-    assert captured["pipeline_key"] == context.pipeline_key
+    assert captured["workflow_key"] == context.workflow_key
     assert captured["execution_id"] == context.execution_id
     assert captured["workspace_id"] == context.workspace_id
 

@@ -12,7 +12,7 @@ from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository, _sqlite_timestamp
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
 
 
@@ -345,7 +345,7 @@ def test_rerun_broadcasts_job_updated(manager):
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_node.return_value = False
     settings = MagicMock(spec=Settings)
-    pipelines = MagicMock(spec=PipelineCatalogService)
+    pipelines = MagicMock(spec=WorkflowCatalogService)
     pipelines.definition.return_value = WorkflowDefinition(
         key="p1",
         label="P1",
@@ -380,7 +380,7 @@ def test_continue_job_broadcasts_job_updated(manager):
     job_db = FakeJobDB()
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     artifact_mutation = MagicMock(spec=JobArtifactMutationService)
-    pipelines = MagicMock(spec=PipelineCatalogService)
+    pipelines = MagicMock(spec=WorkflowCatalogService)
     service = JobExecutionService(
         job_db,
         artifact_mutation,
@@ -468,7 +468,7 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
     artifact_mutation = MagicMock(spec=JobArtifactMutationService)
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_job.return_value = False
-    pipelines = MagicMock(spec=PipelineCatalogService)
+    pipelines = MagicMock(spec=WorkflowCatalogService)
 
     service = JobExecutionService(
         job_db,
@@ -518,7 +518,7 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_node.return_value = False
     settings = MagicMock()
-    pipelines = MagicMock(spec=PipelineCatalogService)
+    pipelines = MagicMock(spec=WorkflowCatalogService)
     pipelines.definition.return_value = WorkflowDefinition(
         key="p1",
         label="P1",

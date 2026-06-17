@@ -13,7 +13,7 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q003"],
                 "knowledge_codes": [],
@@ -45,7 +45,7 @@ def test_job_detail_includes_pi_run_trace(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q100"],
                 "knowledge_codes": [],
@@ -84,7 +84,7 @@ def test_job_detail_includes_node_dependencies(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q202"],
                 "knowledge_codes": [],
@@ -111,7 +111,7 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q203"],
                 "knowledge_codes": [],
@@ -126,12 +126,12 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
             ],
             bindings=[
                 {
-                    "pipeline_key": "question_content",
+                    "workflow_key": "question_content",
                     "node_key": "question_understanding",
                     "executor_id": "pi-default",
                 },
                 {
-                    "pipeline_key": "question_content",
+                    "workflow_key": "question_content",
                     "node_key": "assemble_package",
                     "executor_id": "local-default",
                 },
@@ -173,7 +173,7 @@ def test_delete_job_rejects_running_job(tmp_path):
         c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q601"],
                 "knowledge_codes": [],
@@ -211,7 +211,7 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
         c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q602"],
                 "knowledge_codes": [],
@@ -243,7 +243,7 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
         batch = c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q001"],
                 "knowledge_codes": [],
@@ -283,7 +283,7 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
         batch = c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q001"],
                 "knowledge_codes": [],
@@ -316,7 +316,7 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
         c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q001", "Q002"],
                 "knowledge_codes": [],
@@ -326,7 +326,7 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["pipeline"]["key"] == "reading_analysis"
+    assert body["workflow"]["key"] == "reading_analysis"
     assert all("label" in node for node in body["nodes"])
     first = body["nodes"][0]
     assert first["key"] == "fetch_questions"
@@ -362,7 +362,7 @@ def test_get_job_run_log_returns_redacted_tail(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -398,7 +398,7 @@ def test_get_job_run_log_returns_404_for_missing_run(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -421,7 +421,7 @@ def test_get_job_run_log_rejects_escape(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -462,7 +462,7 @@ def test_job_detail_includes_node_inputs_outputs(tmp_path):
         batch = c.post(
             "/api/workspaces/ws/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],

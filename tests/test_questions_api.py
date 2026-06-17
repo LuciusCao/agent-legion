@@ -48,7 +48,7 @@ def test_question_detail_success(tmp_path, monkeypatch):
         c.post(
             "/api/workspaces/math/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q001"],
                 "knowledge_codes": [],
@@ -116,7 +116,7 @@ def test_question_detail_no_cms_config_returns_empty_normalized(tmp_path):
         c.post(
             "/api/workspaces/math/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q001"],
                 "knowledge_codes": [],

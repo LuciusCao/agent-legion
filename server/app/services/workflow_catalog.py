@@ -12,29 +12,29 @@ from server.app.workflows.resources import RESOURCE_PARAM_KEYS, RESOURCE_PROVIDE
 logger = logging.getLogger(__name__)
 
 
-class PipelineCatalogService:
+class WorkflowCatalogService:
     def __init__(self, settings: Settings):
         self.settings = settings
 
-    def definition(self, pipeline_key: str) -> WorkflowDefinition:
+    def definition(self, workflow_key: str) -> WorkflowDefinition:
         try:
-            return load_registered_workflow(self.settings.root_dir, pipeline_key)
+            return load_registered_workflow(self.settings.root_dir, workflow_key)
         except KeyError as exc:
-            raise NotFoundError("Unknown pipeline") from exc
+            raise NotFoundError("Unknown workflow") from exc
 
-    def list_pipelines(self) -> list[dict[str, Any]]:
-        pipelines: list[dict[str, Any]] = []
+    def list_workflows(self) -> list[dict[str, Any]]:
+        workflows: list[dict[str, Any]] = []
         for definition in list_registered_workflows(self.settings.root_dir):
-            pipelines.append(
+            workflows.append(
                 {
                     "key": definition.key,
                     "label": definition.label,
                 }
             )
-        return pipelines
+        return workflows
 
-    def pipeline(self, pipeline_key: str) -> dict[str, Any]:
-        definition = self.definition(pipeline_key)
+    def workflow(self, workflow_key: str) -> dict[str, Any]:
+        definition = self.definition(workflow_key)
         nodes: list[dict[str, Any]] = []
         for node in definition.nodes.values():
             nodes.append(

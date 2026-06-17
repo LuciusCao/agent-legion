@@ -18,7 +18,7 @@ def test_execution_context_carries_persisted_identity(tmp_path: Path) -> None:
         job={
             "id": "job-1",
             "workspace_id": "ws-a",
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "source_type": "question",
             "source_id": "q-1",
             "batch_id": "",

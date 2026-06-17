@@ -3,12 +3,12 @@ from pathlib import Path
 import yaml
 
 
-def check_pipeline_definitions(root: Path) -> list[str]:
+def check_workflow_definitions(root: Path) -> list[str]:
     errors: list[str] = []
-    pipelines_dir = root / "config/pipelines"
-    if not pipelines_dir.is_dir():
+    workflows_dir = root / "config/workflows"
+    if not workflows_dir.is_dir():
         return errors
-    for path in sorted(pipelines_dir.glob("*.yaml")):
+    for path in sorted(workflows_dir.glob("*.yaml")):
         relative_path = path.relative_to(root).as_posix()
         try:
             raw = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -16,7 +16,7 @@ def check_pipeline_definitions(root: Path) -> list[str]:
             errors.append(f"{relative_path}: invalid YAML ({exc})")
             continue
         if not isinstance(raw, dict):
-            errors.append(f"{relative_path}: pipeline definition must be a mapping")
+            errors.append(f"{relative_path}: workflow definition must be a mapping")
             continue
         if "concurrency" in raw:
             errors.append(
@@ -25,7 +25,7 @@ def check_pipeline_definitions(root: Path) -> list[str]:
             )
         nodes = raw.get("nodes")
         if not isinstance(nodes, dict):
-            errors.append(f"{relative_path}: pipeline nodes must be a mapping")
+            errors.append(f"{relative_path}: workflow nodes must be a mapping")
             continue
         for node_key, node in nodes.items():
             if not isinstance(node, dict):

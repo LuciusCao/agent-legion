@@ -12,7 +12,7 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
         created = c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q604"],
                 "knowledge_codes": [],
@@ -47,7 +47,7 @@ def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
             "/api/workspaces",
             json={
                 "name": "intake-filtered",
-                "default_pipeline_key": "question_content",
+                "default_workflow_key": "question_content",
                 "intake_config": {"enabled_modes": ["direct_ids"]},
             },
         )
@@ -56,7 +56,7 @@ def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
         response = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "by_knowledge",
                 "question_ids": [],
                 "knowledge_codes": ["K001"],
@@ -81,7 +81,7 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
             "/api/workspaces",
             json={
                 "name": "video-default",
-                "default_pipeline_key": "question_content",
+                "default_workflow_key": "question_content",
                 "default_entity": "video",
                 "intake_config": {"enabled_modes": ["direct_ids"]},
             },
@@ -91,7 +91,7 @@ def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
         response = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["v001"],
                 "knowledge_codes": [],
@@ -117,7 +117,7 @@ def test_batch_with_entity_question(tmp_path):
         response = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "entity": "question",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q001", "Q002"],
@@ -146,7 +146,7 @@ def test_batch_unsupported_entity_mode(tmp_path):
         response = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "entity": "knowledge",
                 "source_kind": "direct_ids",
                 "question_ids": ["K001"],
@@ -169,7 +169,7 @@ def test_batch_video_resolver_not_implemented(tmp_path):
         response = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "entity": "video",
                 "source_kind": "by_knowledge",
                 "question_ids": [],
@@ -192,7 +192,7 @@ def test_batch_with_entity_video_direct_ids(tmp_path):
         response = c.post(
             "/api/workspaces/default/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "entity": "video",
                 "source_kind": "direct_ids",
                 "question_ids": ["v1", "v2"],
@@ -221,11 +221,11 @@ def test_pipeline_response_no_task_entity(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        response = c.get("/api/pipelines/question_content")
+        response = c.get("/api/workflows/question_content")
 
     assert response.status_code == 200
     body = response.json()
-    for mode in body["pipeline"]["intake"]["modes"]:
+    for mode in body["workflow"]["intake"]["modes"]:
         assert "task_entity" not in mode
         assert "resolver" not in mode
         assert "key" in mode
@@ -246,7 +246,7 @@ def test_batch_delete_skips_not_found_and_running_jobs(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -277,7 +277,7 @@ def test_batch_delete_skips_running_job(tmp_path):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -315,7 +315,7 @@ def test_batch_run_to_returns_results_in_order(tmp_path):
         created = c.post(
             "/api/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q805"],
                 "knowledge_codes": [],

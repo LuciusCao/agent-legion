@@ -19,8 +19,8 @@ from server.app.routes.job_view_contracts import (
 EXPECTED_OPERATIONS = {
     ("get", "/api/resource-providers"): "ResourceProvidersResponse",
     ("get", "/api/global-services"): "GlobalServicesResponse",
-    ("get", "/api/pipelines"): "PipelinesListResponse",
-    ("get", "/api/pipelines/{pipeline_key}"): "PipelineResponse",
+    ("get", "/api/workflows"): "WorkflowsListResponse",
+    ("get", "/api/workflows/{workflow_key}"): "WorkflowResponse",
     ("get", "/api/workspaces"): "WorkspacesResponse",
     ("post", "/api/workspaces"): "WorkspaceResponse",
     ("get", "/api/workspaces/{workspace_id}"): "WorkspaceResponse",
@@ -119,7 +119,7 @@ def _create_test_job(client):
     response = client.post(
         "/api/job-batches",
         json={
-            "pipeline_key": "question_content",
+            "workflow_key": "question_content",
             "source_kind": "direct_ids",
             "question_ids": ["Q001"],
             "knowledge_codes": [],

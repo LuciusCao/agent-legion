@@ -22,7 +22,7 @@ from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.main import create_app
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.definition import load_workflow_definition
 
@@ -191,7 +191,7 @@ def _node_statuses(detail: dict[str, Any]) -> dict[str, str]:
 
 def test_workspace_job_control_flow(tmp_path, monkeypatch):
     pipeline_path = _write_test_pipeline(tmp_path)
-    _original_definition = PipelineCatalogService.definition
+    _original_definition = WorkflowCatalogService.definition
 
     def _patched_definition(self, pipeline_key: str):
         if pipeline_key == PIPELINE_KEY:
@@ -199,7 +199,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         return _original_definition(self, pipeline_key)
 
     monkeypatch.setattr(
-        "server.app.services.pipeline_catalog.PipelineCatalogService.definition",
+        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
         _patched_definition,
     )
 
@@ -216,7 +216,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         batch_response = client.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "pipeline_key": PIPELINE_KEY,
+                "workflow_key": PIPELINE_KEY,
                 "source_kind": "direct_ids",
                 "question_ids": ["C1"],
                 "knowledge_codes": [],
@@ -234,7 +234,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
         assert job_summary["total_nodes"] == 4
         assert job_summary["completed_nodes"] == 0
 
-        definition = PipelineCatalogService(app.state.settings).definition(PIPELINE_KEY)
+        definition = WorkflowCatalogService(app.state.settings).definition(PIPELINE_KEY)
         registry = _make_registry()
         leases = ExecutorLeaseRepository(app.state.job_db.path)
         worker = _make_worker(app.state.job_db, leases, registry, app.state.settings, definition)
@@ -342,7 +342,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
 def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     pipeline_path = _write_test_pipeline(tmp_path)
-    _original_definition = PipelineCatalogService.definition
+    _original_definition = WorkflowCatalogService.definition
 
     def _patched_definition(self, pipeline_key: str):
         if pipeline_key == PIPELINE_KEY:
@@ -350,7 +350,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
         return _original_definition(self, pipeline_key)
 
     monkeypatch.setattr(
-        "server.app.services.pipeline_catalog.PipelineCatalogService.definition",
+        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
         _patched_definition,
     )
 
@@ -366,7 +366,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
         batch_response = client.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "pipeline_key": PIPELINE_KEY,
+                "workflow_key": PIPELINE_KEY,
                 "source_kind": "direct_ids",
                 "question_ids": ["T1"],
                 "knowledge_codes": [],
@@ -392,7 +392,7 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
 
 def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     pipeline_path = _write_test_pipeline(tmp_path)
-    _original_definition = PipelineCatalogService.definition
+    _original_definition = WorkflowCatalogService.definition
 
     def _patched_definition(self, pipeline_key: str):
         if pipeline_key == PIPELINE_KEY:
@@ -400,7 +400,7 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
         return _original_definition(self, pipeline_key)
 
     monkeypatch.setattr(
-        "server.app.services.pipeline_catalog.PipelineCatalogService.definition",
+        "server.app.services.workflow_catalog.WorkflowCatalogService.definition",
         _patched_definition,
     )
 
@@ -416,7 +416,7 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
         batch_response = client.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "pipeline_key": PIPELINE_KEY,
+                "workflow_key": PIPELINE_KEY,
                 "source_kind": "direct_ids",
                 "question_ids": ["P1"],
                 "knowledge_codes": [],

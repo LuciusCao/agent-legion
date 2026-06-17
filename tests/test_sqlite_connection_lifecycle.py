@@ -58,14 +58,14 @@ def test_executor_lease_repository_closes_connections(tmp_path: Path) -> None:
         executor_allocations=[{"executor_id": "local", "concurrency_limit": 1}],
         node_bindings=[
             {
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "node_key": "extract_keywords",
                 "executor_id": "local",
             }
         ],
         node_limits=[
             {
-                "pipeline_key": "reading_analysis",
+                "workflow_key": "reading_analysis",
                 "node_key": "extract_keywords",
                 "concurrency_limit": 1,
             }

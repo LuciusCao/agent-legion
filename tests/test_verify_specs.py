@@ -19,12 +19,12 @@ def test_extract_refs_finds_code_paths():
     content = """
 位于 `server/app/routes/videos.py` 的视频路由。
 前端在 `frontend/src/pages/ListPage.tsx` 中调用。
-配置见 `config/pipeline.yaml`。
+配置见 `config/workflow.yaml`。
 """
     refs = extract_refs(content)
     assert "server/app/routes/videos.py" in refs
     assert "frontend/src/pages/ListPage.tsx" in refs
-    assert "config/pipeline.yaml" in refs
+    assert "config/workflow.yaml" in refs
 
 
 def test_extract_refs_ignores_urls():

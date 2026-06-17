@@ -45,7 +45,7 @@ def test_disabled_pipelines_require_no_pi_binary(tmp_path, monkeypatch):
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += "\npipelines:\n  enabled: false\n  pi:\n    binary: /no/such/pi\n"
+    config += "\nworkflows:\n  enabled: false\n  pi:\n    binary: /no/such/pi\n"
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
@@ -55,13 +55,13 @@ def test_enabled_pipelines_require_pi_binary(tmp_path, monkeypatch):
     model = tmp_path / "model.bin"
     model.write_text("model", encoding="utf-8")
     config = _minimal_config().format(binary=binary, model=model, cwd=tmp_path)
-    config += "\npipelines:\n  enabled: true\n  pi:\n    binary: /no/such/pi\n"
+    config += "\nworkflows:\n  enabled: true\n  pi:\n    binary: /no/such/pi\n"
 
     with pytest.raises(StartupValidationError) as exc_info:
         _load_and_validate(tmp_path, monkeypatch, config)
 
     fields = [loc for loc, _ in exc_info.value.fields]
-    assert "pipelines.pi.binary" in fields
+    assert "workflows.pi.binary" in fields
 
 
 def test_enabled_pipelines_accept_pi_command_from_path(tmp_path, monkeypatch):
@@ -71,7 +71,7 @@ def test_enabled_pipelines_accept_pi_command_from_path(tmp_path, monkeypatch):
     _make_executable(tmp_path / "pi")
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ.get('PATH', '')}")
     config = _minimal_config().format(binary=whisper, model=model, cwd=tmp_path)
-    config += "\npipelines:\n  enabled: true\n  pi:\n    binary: pi\n"
+    config += "\nworkflows:\n  enabled: true\n  pi:\n    binary: pi\n"
 
     _load_and_validate(tmp_path, monkeypatch, config)
 
@@ -279,7 +279,7 @@ openclaw:
   command_template:
     - openclaw
     - agent
-pipelines:
+workflows:
   enabled: true
   pi:
     binary: /no/pi
@@ -292,7 +292,7 @@ pipelines:
     assert "asr.whisper.binary" in fields
     assert "asr.whisper.model" in fields
     assert "openclaw.cwd" in fields
-    assert "pipelines.pi.binary" in fields
+    assert "workflows.pi.binary" in fields
 
 
 def test_validation_diagnostics_do_not_leak_secret_values(tmp_path, monkeypatch):

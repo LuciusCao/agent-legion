@@ -9,7 +9,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_execution import JobExecutionService
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.workflows.registry import load_registered_workflow
 
 
@@ -19,7 +19,7 @@ def execution_service(job_db: JobQueries, settings):
         job_db,
         JobArtifactMutationService(settings.jobs_dir),
         ExecutorLeaseRepository(job_db.path),
-        PipelineCatalogService(settings),
+        WorkflowCatalogService(settings),
     )
 
 

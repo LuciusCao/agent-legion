@@ -42,7 +42,7 @@ def create_jobs_router(
     @router.get("/workspaces/{workspace_id}/jobs", response_model=JobsResponse)
     def list_workspace_jobs(
         workspace_id: str,
-        pipeline_key: str | None = None,
+        workflow_key: str | None = None,
         status: str | None = None,
     ) -> JobsResponse:
         require_pipelines_enabled(settings)
@@ -50,7 +50,7 @@ def create_jobs_router(
             return JobsResponse(
                 jobs=cast(
                     list[JobSummaryResponse],
-                    job_queries.list_jobs(workspace_id, workflow_key=pipeline_key, status=status),
+                    job_queries.list_jobs(workspace_id, workflow_key=workflow_key, status=status),
                 )
             )
         except JobServiceError as exc:
@@ -82,13 +82,13 @@ def create_jobs_router(
         )
 
     @router.get("/jobs", response_model=JobsResponse)
-    def list_jobs(pipeline_key: str | None = None, status: str | None = None) -> JobsResponse:
+    def list_jobs(workflow_key: str | None = None, status: str | None = None) -> JobsResponse:
         require_pipelines_enabled(settings)
         try:
             return JobsResponse(
                 jobs=cast(
                     list[JobSummaryResponse],
-                    job_queries.list_jobs("default", workflow_key=pipeline_key, status=status),
+                    job_queries.list_jobs("default", workflow_key=workflow_key, status=status),
                 )
             )
         except JobServiceError as exc:

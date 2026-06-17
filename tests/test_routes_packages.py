@@ -15,7 +15,7 @@ def _create_completed_job(client: TestClient, workspace_id: str, question_id: st
     created = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",
         json={
-            "pipeline_key": "question_content",
+            "workflow_key": "question_content",
             "source_kind": "direct_ids",
             "question_ids": [question_id],
             "knowledge_codes": [],
@@ -91,7 +91,7 @@ def test_create_workspace_package_job_rejects_incomplete_jobs(workspace_client):
     created = workspace_client.post(
         f"/api/workspaces/{ws_id}/job-batches",
         json={
-            "pipeline_key": "question_content",
+            "workflow_key": "question_content",
             "source_kind": "direct_ids",
             "question_ids": ["Q201"],
             "knowledge_codes": [],

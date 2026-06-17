@@ -15,7 +15,7 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                     "entityType": "video",
                     "intakeModes": ["direct_ids"],
                     "labelOverrides": {"direct_ids": "Video IDs"},
-                    "pipelineKey": "question_content",
+                    "workflowKey": "question_content",
                     "resources": {"question_detail": {"enabled": True, "config": {}}},
                 },
                 "executor_allocations": [
@@ -23,14 +23,14 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                 ],
                 "node_bindings": [
                     {
-                        "pipeline_key": "question_content",
+                        "workflow_key": "question_content",
                         "node_key": "fetch_question_context",
                         "executor_id": "local-default",
                     },
                 ],
                 "node_limits": [
                     {
-                        "pipeline_key": "question_content",
+                        "workflow_key": "question_content",
                         "node_key": "fetch_question_context",
                         "concurrency_limit": 3,
                     },
@@ -47,14 +47,14 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     ]
     assert body["executor_configuration"]["bindings"] == [
         {
-            "pipeline_key": "question_content",
+            "workflow_key": "question_content",
             "node_key": "fetch_question_context",
             "executor_id": "local-default",
         },
     ]
     assert body["executor_configuration"]["node_limits"] == [
         {
-            "pipeline_key": "question_content",
+            "workflow_key": "question_content",
             "node_key": "fetch_question_context",
             "concurrency_limit": 3,
         },
@@ -74,13 +74,13 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
             "/api/workspaces/default/configuration",
             json={
                 "name": "Must Roll Back",
-                "settings": {"pipelineKey": "question_content"},
+                "settings": {"workflowKey": "question_content"},
                 "executor_allocations": [
                     {"executor_id": "local-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
-                        "pipeline_key": "question_content",
+                        "workflow_key": "question_content",
                         "node_key": "unknown_node",
                         "executor_id": "local-default",
                     },
@@ -100,24 +100,24 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
     ]
     assert config["bindings"] == [
         {
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "node_key": "clean_and_parse",
             "executor_id": "local-default",
         },
         {
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "node_key": "fetch_questions",
             "executor_id": "local-default",
         },
     ]
     assert config["node_limits"] == [
         {
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "node_key": "clean_and_parse",
             "concurrency_limit": 1,
         },
         {
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "node_key": "fetch_questions",
             "concurrency_limit": 1,
         },

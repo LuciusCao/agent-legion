@@ -3,7 +3,7 @@ from typing import Any
 from server.app.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
@@ -19,12 +19,12 @@ class WorkspaceConfigurationService:
         job_db: JobQueries,
         settings: Settings,
         agent_manager: AgentStatusManager,
-        pipelines: PipelineCatalogService,
+        workflows: WorkflowCatalogService,
     ):
         self.job_db = job_db
         self.settings = settings
         self.agent_manager = agent_manager
-        self.pipelines = pipelines
+        self.workflows = workflows
 
     def _workspace(self, workspace_id: str) -> dict[str, Any]:
         workspace = self.job_db.get_workspace(workspace_id)
@@ -36,12 +36,11 @@ class WorkspaceConfigurationService:
         return self.job_db.list_workspaces()
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
-        self.pipelines.definition(payload["default_pipeline_key"])
+        self.workflows.definition(payload["default_workflow_key"])
         try:
             return self.job_db.create_workspace(
                 payload["name"],
-                # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
-                default_workflow_key=payload["default_pipeline_key"],
+                default_workflow_key=payload["default_workflow_key"],
                 default_entity=payload.get("default_entity", "question"),
                 cms_config=payload.get("cms_config", {}),
                 resource_config=payload.get("resource_config", {}),
@@ -55,15 +54,14 @@ class WorkspaceConfigurationService:
 
     def update(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         self._workspace(workspace_id)
-        if payload.get("default_pipeline_key") is not None:
-            self.pipelines.definition(payload["default_pipeline_key"])
+        if payload.get("default_workflow_key") is not None:
+            self.workflows.definition(payload["default_workflow_key"])
         try:
             return self.job_db.update_workspace(
                 workspace_id,
                 name=payload.get("name"),
                 description=payload.get("description"),
-                # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
-                default_workflow_key=payload.get("default_pipeline_key"),
+                default_workflow_key=payload.get("default_workflow_key"),
                 default_entity=payload.get("default_entity"),
                 cms_config=payload.get("cms_config"),
                 resource_config=payload.get("resource_config"),
@@ -95,23 +93,15 @@ class WorkspaceConfigurationService:
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         current = workspace_settings_payload(workspace)
-        # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
-        pipeline_key = settings_patch.get("pipelineKey") or str(current["pipelineKey"])
-        pipeline = self.pipelines.definition(pipeline_key)
-
-        # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
-        def _map_binding(row: dict[str, Any]) -> dict[str, Any]:
-            return {"workflow_key" if k == "pipeline_key" else k: v for k, v in row.items()}
-
-        mapped_bindings = [_map_binding(b) for b in node_bindings]
-        mapped_limits = [_map_binding(n) for n in node_limits]
+        workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
+        workflow = self.workflows.definition(workflow_key)
 
         validate_workspace_executor_configuration(
-            pipeline=pipeline,
+            pipeline=workflow,
             executor_definitions=self.settings.executor_definitions,
             allocations=executor_allocations,
-            bindings=mapped_bindings,
-            node_limits=mapped_limits,
+            bindings=node_bindings,
+            node_limits=node_limits,
         )
         name_value = workspace_patch.get("name")
         name: str = name_value if name_value is not None else str(workspace["name"])
@@ -126,8 +116,7 @@ class WorkspaceConfigurationService:
                 workspace_id,
                 name=name,
                 description=description,
-                # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
-                default_workflow_key=pipeline_key,
+                default_workflow_key=workflow_key,
                 default_entity=settings_patch.get("entityType") or str(current["entityType"]),
                 resource_config={
                     "resources": settings_patch.get("resources")
@@ -143,8 +132,8 @@ class WorkspaceConfigurationService:
                     else current["labelOverrides"],
                 },
                 executor_allocations=executor_allocations,
-                node_bindings=mapped_bindings,
-                node_limits=mapped_limits,
+                node_bindings=node_bindings,
+                node_limits=node_limits,
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
@@ -203,12 +192,11 @@ class WorkspaceConfigurationService:
                 intake_config=next_intake_config,
             )
         elif section == "pipeline":
-            if patch.get("pipelineKey") is not None:
-                self.pipelines.definition(patch["pipelineKey"])
+            if patch.get("workflowKey") is not None:
+                self.workflows.definition(patch["workflowKey"])
             workspace = self.job_db.update_workspace(
                 workspace_id,
-                # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
-                default_workflow_key=patch.get("pipelineKey"),
+                default_workflow_key=patch.get("workflowKey"),
             )
         else:
             raise NotFoundError("Unknown settings section")
@@ -223,7 +211,7 @@ class WorkspaceConfigurationService:
 
     def stats(self, workspace_id: str) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        pipeline_key = workspace.get("default_workflow_key", "question_content")
+        workflow_key = workspace.get("default_workflow_key", "question_content")
         latest_run = self.job_db.get_latest_node_run_for_workspace(workspace_id)
         executors = []
         for count in self.job_db.get_workspace_executor_runtime_counts(workspace_id):
@@ -245,8 +233,8 @@ class WorkspaceConfigurationService:
         return {
             "workspace_id": workspace_id,
             "name": workspace.get("name", ""),
-            "pipeline_key": pipeline_key,
-            "pipeline_label": self.pipelines.definition(pipeline_key).label,
+            "workflow_key": workflow_key,
+            "workflow_label": self.workflows.definition(str(workflow_key)).label,
             "job_stats": self.job_db.count_jobs_by_status(workspace_id),
             "executor_status": {"executors": executors},
             "latest_run": dict(latest_run) if latest_run else None,

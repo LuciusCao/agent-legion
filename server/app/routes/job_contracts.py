@@ -4,7 +4,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 
 class JobBatchRequest(BaseModel):
-    pipeline_key: str = "question_comprehension_info"
+    workflow_key: str = "question_comprehension_info"
     entity: str | None = None
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
@@ -21,7 +21,7 @@ class WorkspaceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    default_pipeline_key: str = "question_comprehension_info"
+    default_workflow_key: str = "question_comprehension_info"
     default_entity: str = "question"
     cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)
@@ -33,7 +33,7 @@ class WorkspaceUpdateRequest(BaseModel):
 
     name: str | None = None
     description: str | None = None
-    default_pipeline_key: str | None = None
+    default_workflow_key: str | None = None
     default_entity: str | None = None
     cms_config: dict[str, Any] | None = None
     resource_config: dict[str, Any] | None = None
@@ -52,7 +52,7 @@ class WorkspaceSettingsSectionRequest(BaseModel):
     entityType: str | None = None
     intakeModes: list[str] | None = None
     labelOverrides: dict[str, str] | None = None
-    pipelineKey: str | None = None
+    workflowKey: str | None = None
     resources: dict[str, Any] | None = None
 
 
@@ -83,7 +83,7 @@ class WorkspaceRunsResponse(BaseModel):
 
 
 class WorkspaceDagResponse(BaseModel):
-    pipeline: dict[str, Any]
+    workflow: dict[str, Any]
     nodes: list[dict[str, Any]]
 
 
@@ -104,8 +104,8 @@ class ExecutorStatusSummary(BaseModel):
 class WorkspaceStatsResponse(BaseModel):
     workspace_id: str
     name: str
-    pipeline_key: str
-    pipeline_label: str
+    workflow_key: str
+    workflow_label: str
     job_stats: dict[str, int]
     executor_status: ExecutorStatusSummary
     latest_run: dict[str, Any] | None

@@ -8,7 +8,7 @@ def test_startup_creates_question_comprehension_workspace(client):
 
     assert "question_comprehension" in by_id
     assert by_id["question_comprehension"]["name"] == "题目审题信息"
-    assert by_id["question_comprehension"]["default_pipeline_key"] == "question_comprehension_info"
+    assert by_id["question_comprehension"]["default_workflow_key"] == "question_comprehension_info"
 
 
 def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
@@ -24,7 +24,7 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
         created = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q001"],
                 "knowledge_codes": [],
@@ -82,7 +82,7 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q501"],
                 "knowledge_codes": [],
@@ -110,7 +110,7 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "pipeline_key": "question_content",
+                "workflow_key": "question_content",
                 "source_kind": "direct_ids",
                 "question_ids": ["Q601"],
                 "knowledge_codes": [],
