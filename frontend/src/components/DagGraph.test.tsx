@@ -57,4 +57,19 @@ describe('DagGraph', () => {
     fireEvent.click(screen.getByText('查看日志'))
     expect(onViewLogs).toHaveBeenCalledWith('a')
   })
+
+  it('reflects controlled selected node and calls onSelectedNodeChange when a different node is clicked', () => {
+    const onSelectedNodeChange = vi.fn()
+    render(
+      <DagGraph
+        nodes={nodes}
+        edges={edges}
+        selectedNode="b"
+        onSelectedNodeChange={onSelectedNodeChange}
+      />
+    )
+    expect(screen.getByRole('heading', { name: '生成' })).toBeInTheDocument()
+    fireEvent.click(screen.getByText('提取'))
+    expect(onSelectedNodeChange).toHaveBeenCalledWith('a')
+  })
 })
