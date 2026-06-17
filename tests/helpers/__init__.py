@@ -10,10 +10,10 @@ from typing import Any
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.pipeline.transcribe import TranscriptionProvider
-from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.definition import PipelineDefinition
-from server.app.pipelines.registry import load_registered_pipeline
 from server.app.settings import Settings
+from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.registry import load_registered_workflow
 
 _LEGACY_AGENT_TABLE_SQL = """
 create table if not exists workspace_agent_assignments (
@@ -58,14 +58,14 @@ def make_pipeline_worker(
     pipeline_key: str = "reading_analysis",
     pi_binary: str | None = "echo",
     pi_timeout: int = 1,
-) -> tuple[PipelineWorkerThread, PipelineDefinition]:
-    """Build a configured PipelineWorkerThread for *pipeline_key*."""
+) -> tuple[WorkflowWorkerThread, WorkflowDefinition]:
+    """Build a configured WorkflowWorkerThread for *pipeline_key*."""
     from server.app import main as app_main
     from server.app.executors.leases import ExecutorLeaseRepository
     from server.app.executors.legacy_migration import finalize_legacy_executor_schema
     from server.app.executors.runtime import ExecutionRuntime
 
-    definition = load_registered_pipeline(Path("."), pipeline_key)
+    definition = load_registered_workflow(Path("."), pipeline_key)
     settings = app_main.load_settings(data_dir=tmp_path)
     # Avoid real CMS/network calls in tests; isolated child processes re-import
     # modules and do not inherit parent monkeypatches.
@@ -73,7 +73,7 @@ def make_pipeline_worker(
     settings.config.pop("resource_providers", None)
     settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
         {
-            "pipelines": {
+            "workflows": {
                 "enabled": True,
                 "pi": {"binary": pi_binary, "timeout_seconds": pi_timeout}
                 if pi_binary is not None
@@ -92,7 +92,7 @@ def make_pipeline_worker(
         lease_ttl_seconds=5,
     )
 
-    worker = PipelineWorkerThread(
+    worker = WorkflowWorkerThread(
         job_db=queries,
         leases=leases,
         registry=registry,
@@ -103,7 +103,7 @@ def make_pipeline_worker(
     with queries.connect() as conn:
         definitions = [definition]
         with contextlib.suppress(KeyError, FileNotFoundError):
-            definitions.append(load_registered_pipeline(Path("."), "question_comprehension_info"))
+            definitions.append(load_registered_workflow(Path("."), "question_comprehension_info"))
         finalize_legacy_executor_schema(conn, definitions, settings.executor_definitions)
 
     return worker, definition
@@ -189,8 +189,8 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
     import shutil
 
     real_root = Path(__file__).resolve().parents[2]
-    pipelines_src = real_root / "config" / "pipelines"
-    pipelines_dst = root_dir / "config" / "pipelines"
+    pipelines_src = real_root / "config" / "workflows"
+    pipelines_dst = root_dir / "config" / "workflows"
     pipelines_dst.mkdir(parents=True, exist_ok=True)
     for src_file in pipelines_src.iterdir():
         if src_file.is_file():

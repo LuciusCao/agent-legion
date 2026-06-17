@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from server.app.pipelines.skills.reading_analysis._shared.review import validate_review_result
-from server.app.pipelines.skills.reading_analysis._shared.validation import (
+from server.app.workflows.skills.reading_analysis._shared.review import validate_review_result
+from server.app.workflows.skills.reading_analysis._shared.validation import (
     ContractError,
     load_json_object,
     load_single_question,

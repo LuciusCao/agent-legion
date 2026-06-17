@@ -12,13 +12,13 @@ from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs.queries import JobQueries
-from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.definition import (
-    PipelineDefinition,
-    PipelineIntake,
-    PipelineNode,
-)
 from server.app.settings import Settings
+from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflows.definition import (
+    WorkflowDefinition,
+    WorkflowIntake,
+    WorkflowNode,
+)
 
 
 @pytest.fixture
@@ -40,8 +40,8 @@ def repo(tmp_db: Path) -> ExecutorLeaseRepository:
     return ExecutorLeaseRepository(tmp_db)
 
 
-def _local_node(key: str) -> PipelineNode:
-    return PipelineNode(
+def _local_node(key: str) -> WorkflowNode:
+    return WorkflowNode(
         key=key,
         label=key,
         capability=key,
@@ -49,11 +49,11 @@ def _local_node(key: str) -> PipelineNode:
     )
 
 
-def _make_definition() -> PipelineDefinition:
-    return PipelineDefinition(
+def _make_definition() -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="recovery_test",
         label="Recovery Test",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={"fetch": _local_node("fetch")},
     )
 
@@ -81,14 +81,14 @@ def _setup_workspace(queries: JobQueries, name: str) -> tuple[str, str]:
         )
         conn.execute(
             """
-            insert into workspace_node_bindings(workspace_id, pipeline_key, node_key, executor_id)
+            insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
             values (?, ?, ?, ?)
             """,
             (workspace_id, "recovery_test", "fetch", "local-default"),
         )
         conn.execute(
             """
-            insert into workspace_node_limits(workspace_id, pipeline_key, node_key, concurrency_limit)
+            insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
             values (?, ?, ?, ?)
             """,
             (workspace_id, "recovery_test", "fetch", 1),
@@ -154,7 +154,7 @@ class _NoOpExecutor:
 
 def _make_worker(
     tmp_path: Path, queries: JobQueries, repo: ExecutorLeaseRepository
-) -> PipelineWorkerThread:
+) -> WorkflowWorkerThread:
     executor_def = LocalExecutorConfig(
         kind="local",
         global_capacity=1,
@@ -178,10 +178,10 @@ def _make_worker(
         logs_dir=tmp_path / "logs",
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True}},
+        config={"workflows": {"enabled": True}},
         executor_definitions=registry.definitions(),
     )
-    worker = PipelineWorkerThread(
+    worker = WorkflowWorkerThread(
         job_db=queries,
         leases=repo,
         registry=registry,

@@ -1,6 +1,6 @@
 import pytest
 
-from server.app.pipelines.resources import resolve_cms_resource
+from server.app.workflows.resources import resolve_cms_resource
 
 
 @pytest.fixture

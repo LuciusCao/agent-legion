@@ -94,15 +94,15 @@ def test_route_import_baseline_allows_only_recorded_modules(tmp_path):
 
 
 def test_scheduler_import_baseline_allows_only_recorded_modules(tmp_path):
-    path = tmp_path / "server/app/pipelines/scheduler.py"
-    write(path, "from server.app.pipelines.pi_runner import PiRunner\n")
+    path = tmp_path / "server/app/workflows/scheduler.py"
+    write(path, "from server.app.workflows.pi_runner import PiRunner\n")
     write(tmp_path / "config/architecture-budgets.json", '{"files": {}}')
     write_exemptions(
         tmp_path,
         [
             {
                 "check": "architecture.scheduler_import_boundary",
-                "path": "server/app/pipelines/scheduler.py:server.app.pipelines.pi_runner",
+                "path": "server/app/workflows/scheduler.py:server.app.workflows.pi_runner",
                 "reason": "Test exemption for scheduler pi_runner import.",
                 "owner": "test",
                 "remove_when": "issues/open/032-P2-event-driven-worker.md",
@@ -118,7 +118,7 @@ def test_scheduler_import_baseline_allows_only_recorded_modules(tmp_path):
 
 
 def test_scheduler_threadpool_baseline_allows_only_recorded_targets_and_counts(tmp_path):
-    path = tmp_path / "server/app/pipelines/scheduler.py"
+    path = tmp_path / "server/app/workflows/scheduler.py"
     write(
         path,
         "from concurrent.futures import ThreadPoolExecutor\n"
@@ -132,7 +132,7 @@ def test_scheduler_threadpool_baseline_allows_only_recorded_targets_and_counts(t
         [
             {
                 "check": "architecture.scheduler_threadpool",
-                "path": "server/app/pipelines/scheduler.py:self._local_executor",
+                "path": "server/app/workflows/scheduler.py:self._local_executor",
                 "reason": "Single shared executor pool bounded by capacity.",
                 "owner": "test",
                 "remove_when": "issues/open/032-P2-event-driven-worker.md",
@@ -185,7 +185,7 @@ def test_jobs_router_is_not_a_router_aggregator(tmp_path):
 
 def test_scheduler_executor_id_indexed_pool_is_allowed(tmp_path):
     write(
-        tmp_path / "server/app/pipeline_worker_thread.py",
+        tmp_path / "server/app/workflow_worker_thread.py",
         "from concurrent.futures import ThreadPoolExecutor\n"
         "class Worker:\n"
         "    def build(self, executor_id):\n"
@@ -197,7 +197,7 @@ def test_scheduler_executor_id_indexed_pool_is_allowed(tmp_path):
         [
             {
                 "check": "architecture.scheduler_threadpool",
-                "path": "server/app/pipeline_worker_thread.py:self._pools[executor_id]",
+                "path": "server/app/workflow_worker_thread.py:self._pools[executor_id]",
                 "reason": "Executor-id keyed shared pool bounded by capacity.",
                 "owner": "test",
                 "remove_when": "issues/open/032-P2-event-driven-worker.md",
@@ -212,9 +212,9 @@ def test_scheduler_executor_id_indexed_pool_is_allowed(tmp_path):
 
 def test_pipeline_yaml_capability_node_is_allowed(tmp_path):
     (tmp_path / "server/app").mkdir(parents=True)
-    (tmp_path / "config/pipelines").mkdir(parents=True)
+    (tmp_path / "config/workflows").mkdir(parents=True)
     write(
-        tmp_path / "config/pipelines/example.yaml",
+        tmp_path / "config/workflows/example.yaml",
         "key: example\nlabel: Example\nnodes:\n  review:\n    capability: review\n",
     )
     write(

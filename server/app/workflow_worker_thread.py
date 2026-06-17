@@ -20,18 +20,18 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
-from server.app.pipeline_worker_agent_status import agent_status_scope
-from server.app.pipelines.definition import PipelineDefinition, PipelineNode
-from server.app.pipelines.execution_control import allowed_nodes
-from server.app.pipelines.registry import list_registered_pipelines
-from server.app.pipelines.scheduler import _node_statuses, find_ready_nodes
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflow_worker_agent_status import agent_status_scope
+from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
+from server.app.workflows.execution_control import allowed_nodes
+from server.app.workflows.registry import list_registered_workflows
+from server.app.workflows.scheduler import _node_statuses, find_ready_nodes
 
 logger = logging.getLogger(__name__)
 
 
-class PipelineWorkerThread:
+class WorkflowWorkerThread:
     def __init__(
         self,
         job_db: JobQueries,
@@ -52,14 +52,14 @@ class PipelineWorkerThread:
         self.agent_manager = agent_manager
         self.stop_event = threading.Event()
         self._thread: threading.Thread | None = None
-        self._definitions: list[PipelineDefinition] = []
+        self._definitions: list[WorkflowDefinition] = []
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult]] = {}
         self._round_robin = WorkspaceRoundRobin()
 
     @staticmethod
     def is_enabled(settings: Settings) -> bool:
-        return settings.executor_runtime.pipelines.enabled
+        return settings.executor_runtime.workflows.enabled
 
     def _ensure_pools(self) -> None:
         for executor_id in self.registry.definitions():
@@ -68,11 +68,11 @@ class PipelineWorkerThread:
                 self._pools[executor_id] = ThreadPoolExecutor(max_workers=capacity)
 
     def start(self) -> None:
-        self._definitions = list_registered_pipelines(self.settings.root_dir)
+        self._definitions = list_registered_workflows(self.settings.root_dir)
         self._ensure_pools()
         expired = self.leases.expire_stale(datetime.now(UTC))
         if expired:
-            logger.warning("expired stale pipeline executions on startup: %s", ", ".join(expired))
+            logger.warning("expired stale workflow executions on startup: %s", ", ".join(expired))
         recovered = self.leases.recover_orphaned_running_jobs(datetime.now(UTC))
         if recovered:
             logger.warning("recovered orphaned running jobs on startup: %s", ", ".join(recovered))
@@ -82,7 +82,7 @@ class PipelineWorkerThread:
                 try:
                     processed = self._poll()
                 except Exception:
-                    logger.exception("pipeline worker poll failed")
+                    logger.exception("workflow worker poll failed")
                     processed = False
                 self.stop_event.wait(0.2 if processed else 3)
 
@@ -99,7 +99,7 @@ class PipelineWorkerThread:
         self._reap_futures()
         expired = self.leases.expire_stale(datetime.now(UTC))
         if expired:
-            logger.warning("expired stale pipeline executions: %s", ", ".join(expired))
+            logger.warning("expired stale workflow executions: %s", ", ".join(expired))
         recovered = self.leases.recover_orphaned_running_jobs(datetime.now(UTC))
         if recovered:
             logger.warning("recovered orphaned running jobs: %s", ", ".join(recovered))
@@ -126,11 +126,11 @@ class PipelineWorkerThread:
 
     def _runnable_workspaces(
         self,
-    ) -> tuple[list[str], dict[str, list[tuple[PipelineDefinition, dict[str, Any]]]]]:
+    ) -> tuple[list[str], dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]]]:
         workspace_ids: list[str] = []
-        jobs_by_workspace: dict[str, list[tuple[PipelineDefinition, dict[str, Any]]]] = {}
+        jobs_by_workspace: dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]] = {}
         for definition in self._definitions:
-            for job in self.job_db.list_jobs(workspace_id=None, pipeline_key=definition.key):
+            for job in self.job_db.list_jobs(workspace_id=None, workflow_key=definition.key):
                 if job.get("status") in ("completed", "failed"):
                     continue
                 workspace_id = str(job.get("workspace_id") or "default")
@@ -143,7 +143,7 @@ class PipelineWorkerThread:
     def _schedule_workspace(
         self,
         workspace_id: str,
-        jobs: list[tuple[PipelineDefinition, dict[str, Any]]],
+        jobs: list[tuple[WorkflowDefinition, dict[str, Any]]],
     ) -> bool:
         workspace = self.job_db.get_workspace(workspace_id)
         if workspace is None:
@@ -180,25 +180,25 @@ class PipelineWorkerThread:
     def _try_claim_and_submit(
         self,
         workspace: dict[str, Any],
-        definition: PipelineDefinition,
+        definition: WorkflowDefinition,
         job: dict[str, Any],
-        node: PipelineNode,
+        node: WorkflowNode,
         job_dir: Path,
         control_snapshot: dict[str, Any] | None = None,
         allowed_node_keys: frozenset[str] | None = None,
     ) -> bool:
         workspace_id = workspace["id"]
-        pipeline_key = definition.key
+        workflow_key = definition.key
         node_key = node.key
         log_path = self._log_path(job_dir, f"{job['id']}-{node_key}")
 
-        binding = self._get_binding(workspace_id, pipeline_key, node_key)
+        binding = self._get_binding(workspace_id, workflow_key, node_key)
         if binding is None:
             self.leases.fail_without_lease(
                 ConfigurationFailureRequest(
                     workspace_id=workspace_id,
                     job_id=job["id"],
-                    pipeline_key=pipeline_key,
+                    workflow_key=workflow_key,
                     node_key=node_key,
                     capability=node.capability,
                     log_path=str(log_path),
@@ -215,7 +215,7 @@ class PipelineWorkerThread:
                 ConfigurationFailureRequest(
                     workspace_id=workspace_id,
                     job_id=job["id"],
-                    pipeline_key=pipeline_key,
+                    workflow_key=workflow_key,
                     node_key=node_key,
                     capability=node.capability,
                     log_path=str(log_path),
@@ -226,13 +226,13 @@ class PipelineWorkerThread:
 
         local_node_limit: int | None = None
         if executor.kind == "local":
-            local_node_limit = self._get_local_node_limit(workspace_id, pipeline_key, node_key)
-        elif self._has_local_node_limit(workspace_id, pipeline_key, node_key):
+            local_node_limit = self._get_local_node_limit(workspace_id, workflow_key, node_key)
+        elif self._has_local_node_limit(workspace_id, workflow_key, node_key):
             self.leases.fail_without_lease(
                 ConfigurationFailureRequest(
                     workspace_id=workspace_id,
                     job_id=job["id"],
-                    pipeline_key=pipeline_key,
+                    workflow_key=workflow_key,
                     node_key=node_key,
                     capability=node.capability,
                     log_path=str(log_path),
@@ -251,7 +251,7 @@ class PipelineWorkerThread:
                 global_capacity=global_capacity,
                 workspace_id=workspace_id,
                 job_id=job["id"],
-                pipeline_key=pipeline_key,
+                workflow_key=workflow_key,
                 node_key=node_key,
                 capability=node.capability,
                 local_node_limit=local_node_limit,
@@ -276,7 +276,7 @@ class PipelineWorkerThread:
             executor_id=claim.executor_id,
             workspace_id=claim.workspace_id,
             job_id=claim.job_id,
-            pipeline_key=claim.pipeline_key,
+            workflow_key=claim.workflow_key,
             node_key=claim.node_key,
             capability=claim.capability,
             workspace=dict(workspace),
@@ -297,7 +297,7 @@ class PipelineWorkerThread:
             try:
                 return self.runtime.run(claim, context)
             except Exception as exc:
-                logger.exception("pipeline execution %s failed", claim.execution_id)
+                logger.exception("workflow execution %s failed", claim.execution_id)
                 result = ExecutionResult(
                     status="failed",
                     exit_code=1,
@@ -320,48 +320,48 @@ class PipelineWorkerThread:
     def _get_binding(
         self,
         workspace_id: str,
-        pipeline_key: str,
+        workflow_key: str,
         node_key: str,
     ) -> dict[str, Any] | None:
         with self.job_db._connect_read() as conn:
             row = conn.execute(
                 """
                 select executor_id from workspace_node_bindings
-                where workspace_id=? and pipeline_key=? and node_key=?
+                where workspace_id=? and workflow_key=? and node_key=?
                 """,
-                (workspace_id, pipeline_key, node_key),
+                (workspace_id, workflow_key, node_key),
             ).fetchone()
         return dict(row) if row else None
 
     def _get_local_node_limit(
         self,
         workspace_id: str,
-        pipeline_key: str,
+        workflow_key: str,
         node_key: str,
     ) -> int | None:
         with self.job_db._connect_read() as conn:
             row = conn.execute(
                 """
                 select concurrency_limit from workspace_node_limits
-                where workspace_id=? and pipeline_key=? and node_key=?
+                where workspace_id=? and workflow_key=? and node_key=?
                 """,
-                (workspace_id, pipeline_key, node_key),
+                (workspace_id, workflow_key, node_key),
             ).fetchone()
         return int(row["concurrency_limit"]) if row else None
 
     def _has_local_node_limit(
         self,
         workspace_id: str,
-        pipeline_key: str,
+        workflow_key: str,
         node_key: str,
     ) -> bool:
         with self.job_db._connect_read() as conn:
             row = conn.execute(
                 """
                 select 1 from workspace_node_limits
-                where workspace_id=? and pipeline_key=? and node_key=?
+                where workspace_id=? and workflow_key=? and node_key=?
                 """,
-                (workspace_id, pipeline_key, node_key),
+                (workspace_id, workflow_key, node_key),
             ).fetchone()
         return row is not None
 

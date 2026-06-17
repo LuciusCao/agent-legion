@@ -7,7 +7,7 @@ def test_rerun_node_marks_downstream_stale(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/job-batches",
@@ -46,7 +46,7 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/workspaces/default/job-batches",
@@ -88,7 +88,7 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -117,7 +117,7 @@ def test_rerun_node_errors(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -147,7 +147,7 @@ def test_rerun_node_rejects_running_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -176,7 +176,7 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -208,7 +208,7 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -242,7 +242,7 @@ def test_rerun_node_preserves_ancestors(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         created = c.post(
             "/api/job-batches",
@@ -269,7 +269,7 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -307,7 +307,7 @@ def test_batch_rerun_mixed_pipelines(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -349,7 +349,7 @@ def test_batch_rerun_request_order_preserved(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -386,7 +386,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -440,7 +440,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(
@@ -495,7 +495,7 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.post("/api/workspaces", json={"name": "Test"})
         c.post(

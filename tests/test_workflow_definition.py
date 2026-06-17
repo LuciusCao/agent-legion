@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.pipelines.definition import PipelineDefinitionError, load_pipeline_definition
+from server.app.workflows.definition import WorkflowDefinitionError, load_workflow_definition
 
 
 def write_pipeline(tmp_path: Path, node_body: str) -> Path:
@@ -22,8 +22,8 @@ nodes:
 
 def test_pipeline_node_requires_non_empty_capability(tmp_path: Path) -> None:
     path = write_pipeline(tmp_path, node_body="label: Fetch\noutputs: [out.json]")
-    with pytest.raises(PipelineDefinitionError, match="capability"):
-        load_pipeline_definition(path)
+    with pytest.raises(WorkflowDefinitionError, match="capability"):
+        load_workflow_definition(path)
 
 
 def test_pipeline_node_loads_capability(tmp_path: Path) -> None:
@@ -31,11 +31,11 @@ def test_pipeline_node_loads_capability(tmp_path: Path) -> None:
         tmp_path,
         node_body="label: Fetch\ncapability: fetch_questions\noutputs: [out.json]",
     )
-    assert load_pipeline_definition(path).nodes["one"].capability == "fetch_questions"
+    assert load_workflow_definition(path).nodes["one"].capability == "fetch_questions"
 
 
 def test_load_question_content_definition():
-    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
 
     assert definition.key == "question_content"
     assert definition.label == "题目内容生成"
@@ -64,10 +64,10 @@ def test_load_question_content_definition():
 
 
 def test_load_reading_analysis_capabilities():
-    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
 
     assert definition.key == "reading_analysis"
-    assert definition.label == "题目审题分析 Pipeline"
+    assert definition.label == "题目审题分析 工作流"
     assert set(definition.intake.modes) == {"batch_by_knowledge", "batch_by_ids"}
 
     node = definition.nodes["extract_keywords"]
@@ -92,8 +92,8 @@ nodes:
         encoding="utf-8",
     )
 
-    with pytest.raises(PipelineDefinitionError, match="Unknown dependency"):
-        load_pipeline_definition(config)
+    with pytest.raises(WorkflowDefinitionError, match="Unknown dependency"):
+        load_workflow_definition(config)
 
 
 def test_reject_cycle(tmp_path):
@@ -113,8 +113,8 @@ nodes:
         encoding="utf-8",
     )
 
-    with pytest.raises(PipelineDefinitionError, match="cycle"):
-        load_pipeline_definition(config)
+    with pytest.raises(WorkflowDefinitionError, match="cycle"):
+        load_workflow_definition(config)
 
 
 def test_reject_pipeline_concurrency(tmp_path):
@@ -132,8 +132,8 @@ nodes:
         encoding="utf-8",
     )
 
-    with pytest.raises(PipelineDefinitionError, match="Pipeline field 'concurrency' was removed"):
-        load_pipeline_definition(config)
+    with pytest.raises(WorkflowDefinitionError, match="Pipeline field 'concurrency' was removed"):
+        load_workflow_definition(config)
 
 
 def test_reject_node_runner(tmp_path):
@@ -150,8 +150,8 @@ nodes:
         encoding="utf-8",
     )
 
-    with pytest.raises(PipelineDefinitionError, match="Node field 'runner' was removed"):
-        load_pipeline_definition(config)
+    with pytest.raises(WorkflowDefinitionError, match="Node field 'runner' was removed"):
+        load_workflow_definition(config)
 
 
 def test_reject_node_agent(tmp_path):
@@ -170,8 +170,8 @@ nodes:
         encoding="utf-8",
     )
 
-    with pytest.raises(PipelineDefinitionError, match="Node field 'agent' was removed"):
-        load_pipeline_definition(config)
+    with pytest.raises(WorkflowDefinitionError, match="Node field 'agent' was removed"):
+        load_workflow_definition(config)
 
 
 def test_node_label_fallback_to_key(tmp_path):
@@ -186,7 +186,7 @@ nodes:
 """,
         encoding="utf-8",
     )
-    definition = load_pipeline_definition(config)
+    definition = load_workflow_definition(config)
     assert definition.nodes["one"].label == "one"
 
 
@@ -203,12 +203,12 @@ nodes:
 """,
         encoding="utf-8",
     )
-    definition = load_pipeline_definition(config)
+    definition = load_workflow_definition(config)
     assert definition.nodes["one"].label == "步骤一"
 
 
 def test_load_question_comprehension_info_capabilities():
-    definition = load_pipeline_definition(Path("config/pipelines/question_comprehension_info.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
 
     assert definition.key == "question_comprehension_info"
     assert definition.label == "题目审题信息生成 DAG"

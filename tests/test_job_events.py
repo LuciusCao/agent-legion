@@ -23,7 +23,7 @@ class FakeJobDB:
                 "id": "j1",
                 "workspace_id": "ws1",
                 "storage_dir": "jobs/j1",
-                "pipeline_key": "p1",
+                "workflow_key": "p1",
             }
         }
         self._nodes = {"j1": [{"job_id": "j1", "node_key": "n1", "status": "pending"}]}
@@ -73,7 +73,7 @@ def _insert_workspace_job(conn):
     )
     conn.execute(
         """
-        insert into jobs(id, workspace_id, pipeline_key, source_type, source_id)
+        insert into jobs(id, workspace_id, workflow_key, source_type, source_id)
         values ('j1', 'ws1', 'p1', 'test', 's1')
         on conflict(id) do nothing
         """
@@ -96,7 +96,7 @@ def _insert_lease(conn, lease_id, expires_at, status="active"):
     conn.execute(
         """
         insert into executor_leases(
-            id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+            id, execution_id, executor_id, workspace_id, job_id, workflow_key,
             node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
         ) values (?, ?, 'e1', 'ws1', 'j1', 'p1', 'n1', ?, ?, ?, ?, ?)
         """,
@@ -338,19 +338,19 @@ def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
 
 
 def test_rerun_broadcasts_job_updated(manager):
-    from server.app.pipelines.definition import PipelineDefinition, PipelineIntake, PipelineNode
     from server.app.services.job_rerun import JobRerunService
+    from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
     job_db = FakeJobDB()
     lease_repo = MagicMock(spec=ExecutorLeaseRepository)
     lease_repo.has_active_for_node.return_value = False
     settings = MagicMock(spec=Settings)
     pipelines = MagicMock(spec=PipelineCatalogService)
-    pipelines.definition.return_value = PipelineDefinition(
+    pipelines.definition.return_value = WorkflowDefinition(
         key="p1",
         label="P1",
-        intake=PipelineIntake(),
-        nodes={"n1": PipelineNode(key="n1", label="N1", capability="c1")},
+        intake=WorkflowIntake(),
+        nodes={"n1": WorkflowNode(key="n1", label="N1", capability="c1")},
     )
     artifact_service = MagicMock()
     staged = MagicMock()
@@ -439,8 +439,8 @@ def test_dead_queue_stops_streaming():
 
 def test_run_to_broadcasts_job_updated(manager, tmp_path):
     from server.app.jobs import JobQueries
-    from server.app.pipelines.definition import PipelineDefinition, PipelineIntake, PipelineNode
     from server.app.services.job_execution import JobExecutionService
+    from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
     db_path = tmp_path / "jobs.sqlite"
     jobs_dir = tmp_path / "jobs"
@@ -451,7 +451,7 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
         conn.execute(
             """
             insert into jobs(
-                id, workspace_id, pipeline_key, source_type, source_id,
+                id, workspace_id, workflow_key, source_type, source_id,
                 batch_id, title, storage_dir
             )
             values ('j1', 'ws1', 'p1', 'test', 's1', 'b1', 'J1', ?)
@@ -477,16 +477,16 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
         pipelines,
         job_event_manager=manager,
     )
-    simple_definition = PipelineDefinition(
+    simple_definition = WorkflowDefinition(
         key="p1",
         label="P1",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "node_a": PipelineNode(key="node_a", label="A", capability="cap_a"),
-            "node_b": PipelineNode(key="node_b", label="B", capability="cap_b", after=["node_a"]),
+            "node_a": WorkflowNode(key="node_a", label="A", capability="cap_a"),
+            "node_b": WorkflowNode(key="node_b", label="B", capability="cap_b", after=["node_a"]),
         },
     )
-    service._definition = lambda _pipeline_key: simple_definition
+    service._definition = lambda _workflow_key: simple_definition
 
     queue = _ws1_queue(manager)
     result = service.run_to("ws1", "j1", "node_b")
@@ -502,8 +502,8 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
     from contextlib import contextmanager
 
     from server.app.jobs.atomic_mutations import JobMutationConflict
-    from server.app.pipelines.definition import PipelineDefinition, PipelineIntake, PipelineNode
     from server.app.services.job_rerun import JobRerunService
+    from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
     job_db = FakeJobDB()
     job_db._nodes = {"j1": [{"job_id": "j1", "node_key": "node_a", "status": "pending"}]}
@@ -519,11 +519,11 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
     lease_repo.has_active_for_node.return_value = False
     settings = MagicMock()
     pipelines = MagicMock(spec=PipelineCatalogService)
-    pipelines.definition.return_value = PipelineDefinition(
+    pipelines.definition.return_value = WorkflowDefinition(
         key="p1",
         label="P1",
-        intake=PipelineIntake(),
-        nodes={"node_a": PipelineNode(key="node_a", label="A", capability="cap_a")},
+        intake=WorkflowIntake(),
+        nodes={"node_a": WorkflowNode(key="node_a", label="A", capability="cap_a")},
     )
 
     service = JobRerunService(

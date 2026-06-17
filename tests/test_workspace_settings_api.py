@@ -7,7 +7,7 @@ from server.app.main import create_app
 
 def test_workspace_settings_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         connection = c.patch(
             "/api/workspaces/default/settings/connection",
@@ -50,7 +50,7 @@ def test_workspace_settings_round_trip(tmp_path):
 
 def test_workspace_settings_pipeline_rejects_legacy_concurrency_fields(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.patch(
             "/api/workspaces/default/settings/pipeline",
@@ -77,8 +77,8 @@ def test_pipeline_openapi_contract_is_capability_only(tmp_path: Path) -> None:
     app = create_app(data_dir=tmp_path, start_worker=False)
     schemas = app.openapi()["components"]["schemas"]
 
-    node = schemas["PipelineNodeResponse"]["properties"]
-    detail = schemas["PipelineDefinitionResponse"]["properties"]
+    node = schemas["WorkflowNodeResponse"]["properties"]
+    detail = schemas["WorkflowDefinitionResponse"]["properties"]
     summary = schemas["PipelineSummaryResponse"]["properties"]
 
     assert "capability" in node

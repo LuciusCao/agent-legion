@@ -1,7 +1,6 @@
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.pipelines.definition import PipelineDefinition
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_node_executor_resolver import resolve_node_executors
 from server.app.services.pipeline_catalog import PipelineCatalogService
@@ -10,6 +9,7 @@ from server.app.services.workspace_executor_configuration import (
 )
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflows.definition import WorkflowDefinition
 
 
 class JobQueryService:
@@ -31,14 +31,14 @@ class JobQueryService:
             raise NotFoundError("Job not found")
         return job
 
-    def _definition(self, workflow_key: str) -> PipelineDefinition:
+    def _definition(self, workflow_key: str) -> WorkflowDefinition:
         return self.pipelines.definition(workflow_key)
 
     def _job_nodes_with_definition(
         self,
         job: dict[str, Any],
         nodes: list[dict[str, Any]],
-        definition: PipelineDefinition,
+        definition: WorkflowDefinition,
     ) -> list[dict[str, Any]]:
         return [
             {
@@ -65,7 +65,7 @@ class JobQueryService:
     def _node_summary(
         self,
         node: dict[str, Any],
-        definition: PipelineDefinition,
+        definition: WorkflowDefinition,
     ) -> dict[str, Any]:
         node_key = str(node["node_key"])
         label = definition.nodes[node_key].label if node_key in definition.nodes else node_key
@@ -80,7 +80,7 @@ class JobQueryService:
         self,
         job: dict[str, Any],
         nodes: list[dict[str, Any]],
-        definition: PipelineDefinition,
+        definition: WorkflowDefinition,
     ) -> dict[str, Any]:
         summaries = [self._node_summary(node, definition) for node in nodes]
         completed_nodes = sum(1 for summary in summaries if summary["status"] == "completed")
@@ -142,7 +142,7 @@ class JobQueryService:
         job_ids = [str(job["id"]) for job in jobs]
         nodes_by_job = self.job_db.list_job_nodes_for_jobs(job_ids)
 
-        definitions: dict[str, PipelineDefinition] = {}
+        definitions: dict[str, WorkflowDefinition] = {}
         for job in jobs:
             key = str(job["workflow_key"])
             if key not in definitions:

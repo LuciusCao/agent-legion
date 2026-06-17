@@ -2,8 +2,8 @@ import shutil
 
 import pytest
 
-from server.app.pipelines.definition import PipelineDefinition, PipelineIntake, PipelineNode
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
 
 @pytest.fixture
@@ -13,14 +13,14 @@ def mutation_service(tmp_path):
 
 @pytest.fixture
 def definition():
-    return PipelineDefinition(
+    return WorkflowDefinition(
         key="test_pipeline",
         label="Test Pipeline",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "a": PipelineNode(key="a", label="A", capability="a", outputs=["a.json"]),
-            "b": PipelineNode(key="b", label="B", capability="b", after=["a"], outputs=["b.json"]),
-            "c": PipelineNode(key="c", label="C", capability="c", after=["b"], outputs=["c.json"]),
+            "a": WorkflowNode(key="a", label="A", capability="a", outputs=["a.json"]),
+            "b": WorkflowNode(key="b", label="B", capability="b", after=["a"], outputs=["b.json"]),
+            "c": WorkflowNode(key="c", label="C", capability="c", after=["b"], outputs=["c.json"]),
         },
     )
 
@@ -96,12 +96,12 @@ def test_stage_outputs_preserves_inputs_and_unrelated_files(tmp_path, mutation_s
 
 
 def test_stage_outputs_rejects_escape_paths(tmp_path, mutation_service):
-    definition = PipelineDefinition(
+    definition = WorkflowDefinition(
         key="test_pipeline",
         label="Test Pipeline",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "a": PipelineNode(key="a", label="A", capability="a", outputs=["../escape.json"]),
+            "a": WorkflowNode(key="a", label="A", capability="a", outputs=["../escape.json"]),
         },
     )
     storage_dir = tmp_path / "job"

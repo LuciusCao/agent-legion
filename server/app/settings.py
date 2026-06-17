@@ -14,7 +14,7 @@ from server.app.executors.config import (
 from server.app.executors.runtime_config import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
-    PipelinesRuntimeConfig,
+    WorkflowsRuntimeConfig,
     validate_runtime,
 )
 
@@ -31,7 +31,7 @@ class Settings:
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
-            pipelines=PipelinesRuntimeConfig(),
+            workflows=WorkflowsRuntimeConfig(),
             openclaw=OpenClawRuntimeConfig(command_template=("openclaw",)),
         )
     )
@@ -72,7 +72,7 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "VIDEO_HIVE_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
     "VIDEO_HIVE_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
     "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
-    "VIDEO_HIVE_PI_BINARY": (("pipelines", "pi", "binary"), _path_parser),
+    "VIDEO_HIVE_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
     "VIDEO_HIVE_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
 }
 
@@ -132,7 +132,7 @@ def _normalize_cms_config(config: dict[str, Any]) -> None:
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
     root_dir = Path(__file__).resolve().parents[2]
     load_env_file(root_dir / ".env")
-    config_file = config_path or root_dir / "config" / "pipeline.yaml"
+    config_file = config_path or root_dir / "config" / "workflow.yaml"
     config: dict[str, Any] = {}
     if config_file.exists():
         loaded = yaml.safe_load(config_file.read_text(encoding="utf-8"))

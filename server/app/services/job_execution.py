@@ -9,12 +9,12 @@ from server.app.events import JobEventManager, broadcast_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
-from server.app.pipelines.definition import PipelineDefinition
-from server.app.pipelines.execution_control import ExecutionControlError, ancestor_closure
-from server.app.pipelines.scheduler import downstream_nodes
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.pipeline_catalog import PipelineCatalogService
+from server.app.workflows.definition import WorkflowDefinition
+from server.app.workflows.execution_control import ExecutionControlError, ancestor_closure
+from server.app.workflows.scheduler import downstream_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -64,7 +64,7 @@ class JobExecutionService:
     def _has_active_lease(self, job_id: str) -> bool:
         return self.lease_repo.has_active_for_job(job_id, self._now())
 
-    def _definition(self, workflow_key: str) -> PipelineDefinition:
+    def _definition(self, workflow_key: str) -> WorkflowDefinition:
         return self.pipelines.definition(workflow_key)
 
     def run_to(
@@ -129,7 +129,7 @@ class JobExecutionService:
     def _run_to_without_start(
         self,
         job: dict[str, Any],
-        definition: PipelineDefinition,
+        definition: WorkflowDefinition,
         target_node_key: str,
         closure: frozenset[str],
     ) -> dict[str, Any]:
@@ -175,7 +175,7 @@ class JobExecutionService:
     def _run_to_with_start(
         self,
         job: dict[str, Any],
-        definition: PipelineDefinition,
+        definition: WorkflowDefinition,
         target_node_key: str,
         start_node_key: str,
         closure: frozenset[str],

@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from server.app.jobs import JobQueries
-from server.app.pipelines.pi_runner import PiConfig, PiRunner
+from server.app.workflows.pi_runner import PiConfig, PiRunner
 
 
 def test_build_pi_command_uses_fresh_session_and_one_explicit_skill(tmp_path):

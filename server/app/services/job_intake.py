@@ -5,7 +5,6 @@ from server.app.cms.client import get_token
 from server.app.cms.question import list_questions_by_knowledge
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
-from server.app.pipelines.resources import resolve_cms_resource
 from server.app.services.job_errors import (
     InvalidOperationError,
     NotFoundError,
@@ -13,6 +12,7 @@ from server.app.services.job_errors import (
 )
 from server.app.services.pipeline_catalog import PipelineCatalogService
 from server.app.settings import Settings
+from server.app.workflows.resources import resolve_cms_resource
 
 logger = logging.getLogger(__name__)
 

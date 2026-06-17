@@ -66,7 +66,7 @@ def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypa
     monkeypatch.setenv("BASECMS_NONCE", "basecms-nonce")
     monkeypatch.setenv("BASECMS_SECRET", "basecms-secret")
     monkeypatch.setenv("BASECMS_TOKEN_URL", "http://basecms/token")
-    config_path = tmp_path / "pipeline.yaml"
+    config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
         "cms:\n"
@@ -99,7 +99,7 @@ def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypa
 
 
 def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
-    config_path = tmp_path / "pipeline.yaml"
+    config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
         "executors:\n"
@@ -119,7 +119,7 @@ def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
 
 
 def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
-    config_path = tmp_path / "pipeline.yaml"
+    config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
         "executors:\n"
@@ -140,10 +140,10 @@ def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
 
 
 def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
-    config_path = tmp_path / "pipeline.yaml"
+    config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
-        "pipelines:\n"
+        "workflows:\n"
         "  enabled: true\n"
         "  pi:\n"
         "    binary: pi\n"
@@ -169,9 +169,9 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
 
     settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
-    assert settings.executor_runtime.pipelines.enabled is True
-    assert settings.executor_runtime.pipelines.pi.binary == "pi"
-    assert settings.executor_runtime.pipelines.pi.thinking == "low"
+    assert settings.executor_runtime.workflows.enabled is True
+    assert settings.executor_runtime.workflows.pi.binary == "pi"
+    assert settings.executor_runtime.workflows.pi.thinking == "low"
     assert settings.executor_runtime.openclaw.cwd == "."
     assert settings.executor_runtime.openclaw.timeout_seconds == 600
     assert settings.executor_runtime.openclaw.command_template == ("openclaw", "agent")
@@ -179,11 +179,11 @@ def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
     assert settings.executor_runtime.openclaw.skill_safety.repos == [
         {"path": "~/.openclaw/workspace/skills/s1", "ref": "v1.0.0"}
     ]
-    assert settings.config["pipelines"]["pi"]["thinking"] == "low"
+    assert settings.config["workflows"]["pi"]["thinking"] == "low"
 
 
 def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeypatch):
-    config_path = tmp_path / "pipeline.yaml"
+    config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\nopenclaw:\n  command_template: []\n",
         encoding="utf-8",
@@ -196,7 +196,7 @@ def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeyp
 
 
 def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
-    config_path = tmp_path / "pipeline.yaml"
+    config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
         "data_dir: data\n"
         "executors:\n"
@@ -247,7 +247,7 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
             "/tmp/sensevoice",
             "/tmp/sensevoice",
         ),
-        ("VIDEO_HIVE_PI_BINARY", ["pipelines", "pi", "binary"], "/tmp/pi", "/tmp/pi"),
+        ("VIDEO_HIVE_PI_BINARY", ["workflows", "pi", "binary"], "/tmp/pi", "/tmp/pi"),
         ("VIDEO_HIVE_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
     ],
 )
@@ -255,7 +255,7 @@ def test_env_override_precedes_yaml(
     tmp_path, monkeypatch, env_var, config_path, env_value, expected
 ):
     monkeypatch.setenv(env_var, env_value)
-    config_path_file = tmp_path / "pipeline.yaml"
+    config_path_file = tmp_path / "workflow.yaml"
     config_path_file.write_text(
         "data_dir: data\n"
         "cms:\n"
@@ -269,7 +269,7 @@ def test_env_override_precedes_yaml(
         "    model: yaml-model\n"
         "  sensevoice:\n"
         "    model_dir: yaml-dir\n"
-        "pipelines:\n"
+        "workflows:\n"
         "  enabled: false\n"
         "  pi:\n"
         "    binary: yaml-pi\n"

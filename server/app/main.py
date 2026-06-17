@@ -24,13 +24,13 @@ from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
 from server.app.pipeline.recovery import recover_interrupted_videos
 from server.app.pipeline.runners import RunnerPool
-from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.registry import list_registered_pipelines
 from server.app.routes import create_router
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
 from server.app.worker_control import WorkerControl, WorkspaceWorkerControl
 from server.app.worker_thread import WorkerThread
+from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflows.registry import list_registered_workflows
 
 
 def _build_local_handlers(settings: Settings) -> dict[str, LocalHandler]:
@@ -44,7 +44,7 @@ def _build_local_handlers(settings: Settings) -> dict[str, LocalHandler]:
             if handler_key in handlers or "." not in handler_key:
                 continue
             module_name, func_name = handler_key.rsplit(".", 1)
-            full_module_name = f"server.app.pipelines.{module_name}"
+            full_module_name = f"server.app.workflows.{module_name}"
             try:
                 module = importlib.import_module(full_module_name)
                 func = getattr(module, func_name)
@@ -71,8 +71,8 @@ def build_executor_registry(
     """
     runtime = RuntimeDependencies(
         local_handlers=_build_local_handlers(settings),
-        pi_runtime=settings.executor_runtime.pipelines.pi,
-        pi_skill_root=settings.root_dir / "server" / "app" / "pipelines" / "skills",
+        pi_runtime=settings.executor_runtime.workflows.pi,
+        pi_skill_root=settings.root_dir / "server" / "app" / "workflows" / "skills",
         openclaw_runtime=settings.executor_runtime.openclaw,
         settings_config=settings.config,
         job_db=job_db,
@@ -101,7 +101,7 @@ def create_app(
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
     executor_registry = build_executor_registry(settings, job_db)
 
-    definitions = list_registered_pipelines(settings.root_dir)
+    definitions = list_registered_workflows(settings.root_dir)
     with job_db.connect() as conn:
         try:
             finalize_legacy_executor_schema(
@@ -126,11 +126,11 @@ def create_app(
             ) from exc
 
     worker_thread: WorkerThread | None = None
-    pipeline_worker_thread: PipelineWorkerThread | None = None
+    workflow_worker_thread: WorkflowWorkerThread | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal pipeline_worker_thread, worker_thread
+        nonlocal workflow_worker_thread, worker_thread
         video_event_manager._loop = asyncio.get_running_loop()
         job_event_manager._loop = asyncio.get_running_loop()
         if start_worker:
@@ -151,12 +151,12 @@ def create_app(
                 db, settings, runner_pool, agent_manager, worker_control, max_workers
             )
             worker_thread.start()
-            if PipelineWorkerThread.is_enabled(settings):
+            if WorkflowWorkerThread.is_enabled(settings):
                 executor_leases = ExecutorLeaseRepository(
                     job_db.path, job_db=job_db, job_event_manager=job_event_manager
                 )
                 execution_runtime = ExecutionRuntime(executor_leases, executor_registry)
-                pipeline_worker_thread = PipelineWorkerThread(
+                workflow_worker_thread = WorkflowWorkerThread(
                     job_db=job_db,
                     leases=executor_leases,
                     registry=executor_registry,
@@ -166,12 +166,12 @@ def create_app(
                     agent_manager=agent_manager,
                 )
                 try:
-                    pipeline_worker_thread.start()
+                    workflow_worker_thread.start()
                 except Exception:
                     logging.getLogger(__name__).exception("pipeline worker failed to start")
         yield
-        if pipeline_worker_thread is not None:
-            pipeline_worker_thread.stop()
+        if workflow_worker_thread is not None:
+            workflow_worker_thread.stop()
         if worker_thread is not None:
             worker_thread.stop()
 

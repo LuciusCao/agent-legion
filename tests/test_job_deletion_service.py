@@ -81,7 +81,7 @@ def _insert_active_lease(
         conn.execute(
             """
             insert into executor_leases(
-                id, execution_id, executor_id, workspace_id, job_id, pipeline_key,
+                id, execution_id, executor_id, workspace_id, job_id, workflow_key,
                 node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
             )
             values (?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?, ?)

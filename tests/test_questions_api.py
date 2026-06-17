@@ -6,7 +6,7 @@ from server.app.main import create_app
 
 def test_question_detail_success(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config.setdefault("workflows", {})["enabled"] = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "question_detail_url": "https://cms.example/question/detail",
@@ -67,7 +67,7 @@ def test_question_detail_success(tmp_path, monkeypatch):
 
 def test_question_detail_workspace_not_found(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config.setdefault("workflows", {})["enabled"] = True
     with TestClient(app) as c:
         response = c.get("/api/workspaces/nonexistent/questions/Q001")
     assert response.status_code == 404
@@ -75,7 +75,7 @@ def test_question_detail_workspace_not_found(tmp_path):
 
 def test_question_detail_cms_failure(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config.setdefault("workflows", {})["enabled"] = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "question_detail_url": "https://cms.example/question/detail",
@@ -108,7 +108,7 @@ def test_question_detail_cms_failure(tmp_path, monkeypatch):
 
 def test_question_detail_no_cms_config_returns_empty_normalized(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config.setdefault("workflows", {})["enabled"] = True
     app.state.settings.config["cms"] = {}
 
     with TestClient(app) as c:
@@ -134,7 +134,7 @@ def test_question_detail_no_cms_config_returns_empty_normalized(tmp_path):
 
 def test_question_detail_parses_nested_answer_and_analysis(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config.setdefault("workflows", {})["enabled"] = True
     app.state.settings.config["cms"] = {
         "env": "prod",
         "question_detail_url": "https://cms.example/question/detail",

@@ -23,7 +23,7 @@ from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.pipeline.openclaw import OpenClawRunner
-from server.app.pipelines.pi_runner import PiConfig
+from server.app.workflows.pi_runner import PiConfig
 
 
 class TestCancellationToken:
@@ -422,7 +422,7 @@ def _make_context(claim: Any, job_dir: Path) -> ExecutionContext:
         executor_id=claim.executor_id,
         workspace_id=claim.workspace_id,
         job_id=claim.job_id,
-        workflow_key=claim.pipeline_key,
+        workflow_key=claim.workflow_key,
         node_key=claim.node_key,
         capability=claim.capability,
         workspace={},

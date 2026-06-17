@@ -51,7 +51,7 @@ def test_rejects_route_importing_cms_client(tmp_path):
     "source,expected_error",
     [
         (
-            "from server.app.pipelines.pi_runner import PiRunner\n",
+            "from server.app.workflows.pi_runner import PiRunner\n",
             "scheduler boundary",
         ),
         (
@@ -59,15 +59,15 @@ def test_rejects_route_importing_cms_client(tmp_path):
             "scheduler boundary",
         ),
         (
-            "from server.app.pipelines.pi_runner import PiRunner\n",
+            "from server.app.workflows.pi_runner import PiRunner\n",
             "pi_runner",
         ),
         (
-            "from server.app.pipelines.skills import resolve_pipeline_skill\n",
+            "from server.app.workflows.skills import resolve_workflow_skill\n",
             "skills",
         ),
         (
-            "from server.app.pipelines.reading_analysis import fetch_questions\n",
+            "from server.app.workflows.reading_analysis import fetch_questions\n",
             "reading_analysis",
         ),
         (
@@ -77,7 +77,7 @@ def test_rejects_route_importing_cms_client(tmp_path):
     ],
 )
 def test_rejects_scheduler_boundary_forbidden_imports(tmp_path, source, expected_error):
-    write(tmp_path / "server/app/pipeline_worker_thread.py", source)
+    write(tmp_path / "server/app/workflow_worker_thread.py", source)
     write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     errors = check_repository(tmp_path)
@@ -87,7 +87,7 @@ def test_rejects_scheduler_boundary_forbidden_imports(tmp_path, source, expected
 
 def test_rejects_scheduler_threadpool_construction(tmp_path):
     write(
-        tmp_path / "server/app/pipelines/scheduler.py",
+        tmp_path / "server/app/workflows/scheduler.py",
         "from concurrent.futures import ThreadPoolExecutor\n"
         "def build():\n"
         "    return ThreadPoolExecutor(max_workers=1)\n",
@@ -95,7 +95,7 @@ def test_rejects_scheduler_threadpool_construction(tmp_path):
     write(
         tmp_path / "config/architecture-budgets.json",
         '{"route_exemptions": [], "scheduler_threadpool_baselines": '
-        '{"server/app/pipelines/scheduler.py": {"self._local_executor": 1}}, "files": {}}',
+        '{"server/app/workflows/scheduler.py": {"self._local_executor": 1}}, "files": {}}',
     )
 
     errors = check_repository(tmp_path)
@@ -109,7 +109,7 @@ def test_rejects_scheduler_threadpool_construction(tmp_path):
 
 def test_accepts_scheduler_legacy_executor_assignment(tmp_path):
     write(
-        tmp_path / "server/app/pipelines/scheduler.py",
+        tmp_path / "server/app/workflows/scheduler.py",
         "from concurrent.futures import ThreadPoolExecutor\n"
         "class Worker:\n"
         "    def __init__(self):\n"
@@ -124,7 +124,7 @@ def test_accepts_scheduler_legacy_executor_assignment(tmp_path):
         [
             {
                 "check": "architecture.scheduler_threadpool",
-                "path": "server/app/pipelines/scheduler.py:self._local_executor",
+                "path": "server/app/workflows/scheduler.py:self._local_executor",
                 "reason": "Single shared executor pool bounded by capacity.",
                 "owner": "test",
                 "remove_when": "issues/open/032-P2-event-driven-worker.md",
@@ -214,7 +214,7 @@ def test_accepts_compliant_route(tmp_path):
 
 def test_accepts_scheduler_legacy_executor_assignment_with_annotation(tmp_path):
     write(
-        tmp_path / "server/app/pipelines/scheduler.py",
+        tmp_path / "server/app/workflows/scheduler.py",
         "from concurrent.futures import ThreadPoolExecutor\n"
         "class Worker:\n"
         "    def __init__(self):\n"
@@ -229,7 +229,7 @@ def test_accepts_scheduler_legacy_executor_assignment_with_annotation(tmp_path):
         [
             {
                 "check": "architecture.scheduler_threadpool",
-                "path": "server/app/pipelines/scheduler.py:self._local_executor",
+                "path": "server/app/workflows/scheduler.py:self._local_executor",
                 "reason": "Single shared executor pool bounded by capacity.",
                 "owner": "test",
                 "remove_when": "issues/open/032-P2-event-driven-worker.md",
@@ -245,12 +245,12 @@ def test_accepts_scheduler_legacy_executor_assignment_with_annotation(tmp_path):
 def test_imported_modules_records_from_submodule_names(tmp_path):
     from scripts.check_architecture import imported_modules
 
-    source = "from server.app.pipelines import pi_runner\n"
+    source = "from server.app.workflows import pi_runner\n"
     tree = __import__("ast").parse(source)
 
     modules = imported_modules(tree)
 
-    assert modules == {"server.app.pipelines": 1, "server.app.pipelines.pi_runner": 1}
+    assert modules == {"server.app.workflows": 1, "server.app.workflows.pi_runner": 1}
 
 
 def test_route_imported_submodule_is_forbidden(tmp_path):
@@ -271,8 +271,8 @@ def test_forbidden_imports_submodule_match():
     assert result == [("server.app.cms.client", 3)]
 
 
-def test_is_scheduler_path_pipeline_worker_thread():
-    assert is_scheduler_path("server/app/pipeline_worker_thread.py")
+def test_is_scheduler_path_workflow_worker_thread():
+    assert is_scheduler_path("server/app/workflow_worker_thread.py")
 
 
 def test_rejects_file_growth_above_recorded_budget(tmp_path):
@@ -333,7 +333,7 @@ def test_default_budget_enforced_for_new_files(tmp_path):
 
 def test_rejects_pipeline_worker_accessing_runner_attribute(tmp_path):
     write(
-        tmp_path / "server/app/pipeline_worker_thread.py",
+        tmp_path / "server/app/workflow_worker_thread.py",
         "class Worker:\n    def run(self, node):\n        if node.runner == 'local':\n            pass\n",
     )
     write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
@@ -345,7 +345,7 @@ def test_rejects_pipeline_worker_accessing_runner_attribute(tmp_path):
 
 def test_rejects_pipeline_worker_accessing_agent_attribute(tmp_path):
     write(
-        tmp_path / "server/app/pipeline_worker_thread.py",
+        tmp_path / "server/app/workflow_worker_thread.py",
         "class Worker:\n    def run(self, node):\n        if node.agent is not None:\n            pass\n",
     )
     write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
@@ -357,7 +357,7 @@ def test_rejects_pipeline_worker_accessing_agent_attribute(tmp_path):
 
 def test_rejects_scheduler_using_futures_length_for_capacity(tmp_path):
     write(
-        tmp_path / "server/app/pipelines/scheduler.py",
+        tmp_path / "server/app/workflows/scheduler.py",
         "class Worker:\n    def has_capacity(self):\n        return len(self._futures) < 10\n",
     )
     write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
@@ -369,7 +369,7 @@ def test_rejects_scheduler_using_futures_length_for_capacity(tmp_path):
 
 def test_rejects_scheduler_threadpool_keyed_by_workspace(tmp_path):
     write(
-        tmp_path / "server/app/pipeline_worker_thread.py",
+        tmp_path / "server/app/workflow_worker_thread.py",
         "from concurrent.futures import ThreadPoolExecutor\n"
         "class Worker:\n"
         "    def build(self, workspace_id):\n"
@@ -378,7 +378,7 @@ def test_rejects_scheduler_threadpool_keyed_by_workspace(tmp_path):
     write(
         tmp_path / "config/architecture-budgets.json",
         '{"route_exemptions": [], "scheduler_threadpool_baselines": '
-        '{"server/app/pipeline_worker_thread.py": {"self._pools[workspace_id]": 1}}, "files": {}}',
+        '{"server/app/workflow_worker_thread.py": {"self._pools[workspace_id]": 1}}, "files": {}}',
     )
 
     errors = check_repository(tmp_path)
@@ -424,8 +424,8 @@ def test_rejects_executor_module_reading_raw_executors_config(tmp_path):
 )
 def test_rejects_invalid_pipeline_yaml(tmp_path, yaml_content, expected_error):
     (tmp_path / "server/app").mkdir(parents=True)
-    (tmp_path / "config/pipelines").mkdir(parents=True)
-    write(tmp_path / "config/pipelines/example.yaml", yaml_content)
+    (tmp_path / "config/workflows").mkdir(parents=True)
+    write(tmp_path / "config/workflows/example.yaml", yaml_content)
     write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     errors = check_repository(tmp_path)
@@ -447,7 +447,7 @@ def test_rejects_legacy_module_present(tmp_path):
 
 def test_rejects_forbidden_pattern_in_source(tmp_path):
     write(
-        tmp_path / "server/app/pipelines/example.py",
+        tmp_path / "server/app/workflows/example.py",
         'node["runner"]\n',
     )
     write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')

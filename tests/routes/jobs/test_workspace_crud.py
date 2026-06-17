@@ -17,7 +17,7 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         workspace_response = c.post("/api/workspaces", json={"name": "Math Sprint"})
         workspace_id = workspace_response.json()["workspace"]["id"]
@@ -30,8 +30,8 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
                 "knowledge_codes": [],
             },
         )
-        workspace_jobs = c.get(f"/api/workspaces/{workspace_id}/jobs?pipeline_key=question_content")
-        default_jobs = c.get("/api/jobs?pipeline_key=question_content")
+        workspace_jobs = c.get(f"/api/workspaces/{workspace_id}/jobs?workflow_key=question_content")
+        default_jobs = c.get("/api/jobs?workflow_key=question_content")
 
     assert workspace_response.status_code == 200
     assert workspace_id == "math_sprint"
@@ -50,7 +50,7 @@ def test_delete_workspace_hidden_when_pipelines_disabled(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = False
+    app.state.settings.executor_runtime.workflows.enabled = False
     with TestClient(app) as c:
         response = c.delete("/api/workspaces/some_ws")
     assert response.status_code == 404
@@ -62,7 +62,7 @@ def test_delete_workspace_rejects_default(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.delete("/api/workspaces/default")
     assert response.status_code == 400
@@ -75,7 +75,7 @@ def test_delete_workspace_rejects_when_jobs_running(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         ws = c.post("/api/workspaces", json={"name": "Running WS"}).json()
         ws_id = ws["workspace"]["id"]
@@ -103,7 +103,7 @@ def test_delete_workspace_cascades_and_returns_deleted_id(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         ws = c.post("/api/workspaces", json={"name": "Delete Me"}).json()
         ws_id = ws["workspace"]["id"]
@@ -152,7 +152,7 @@ def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.delete("/api/workspaces/nonexistent")
     assert response.status_code == 404
@@ -210,7 +210,7 @@ def test_create_workspace_with_intake_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces",
@@ -233,7 +233,7 @@ def test_update_workspace_intake_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         created = c.post("/api/workspaces", json={"name": "Update Intake"}).json()
         workspace_id = created["workspace"]["id"]

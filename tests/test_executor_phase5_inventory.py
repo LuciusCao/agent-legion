@@ -11,8 +11,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 
 LEGACY_PATHS: dict[str, tuple[str, str]] = {
-    "pipeline runner": ("server/app/pipelines/definition.py", "RunnerKind"),
-    "pipeline concurrency": ("server/app/pipelines/definition.py", "PipelineConcurrency"),
+    "pipeline runner": ("server/app/workflows/definition.py", "RunnerKind"),
+    "pipeline concurrency": ("server/app/workflows/definition.py", "PipelineConcurrency"),
 }
 
 REPLACEMENTS: dict[str, str] = {
@@ -51,8 +51,8 @@ def test_inventory_includes_replacement_for_every_legacy_path() -> None:
 # Concrete replacement tokens that demonstrate the legacy concepts were replaced.
 REPLACEMENT_TOKENS: dict[str, list[tuple[str, str]]] = {
     "pipeline runner": [
-        ("server/app/pipelines/definition.py", "capability"),
-        ("server/app/pipeline_worker_thread.py", "workspace_node_bindings"),
+        ("server/app/workflows/definition.py", "capability"),
+        ("server/app/workflow_worker_thread.py", "workspace_node_bindings"),
     ],
     "pipeline concurrency": [
         ("server/app/db/migrations/v001_executor_core.py", "workspace_executor_allocations"),

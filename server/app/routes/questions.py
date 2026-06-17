@@ -9,8 +9,8 @@ from pydantic import BaseModel
 from server.app.cms.client import get_token
 from server.app.cms.question import fetch_question_detail
 from server.app.jobs import JobQueries
-from server.app.pipelines.resources import resolve_cms_resource
 from server.app.settings import Settings
+from server.app.workflows.resources import resolve_cms_resource
 
 logger = logging.getLogger(__name__)
 

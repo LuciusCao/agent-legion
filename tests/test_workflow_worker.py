@@ -7,23 +7,23 @@ from fastapi.testclient import TestClient
 
 from server.app.cms.question import CmsQuestionDetail
 from server.app.jobs import JobQueries
-from server.app.pipelines.definition import (
-    PipelineDefinition,
-    PipelineIntake,
-    PipelineNode,
-    load_pipeline_definition,
+from server.app.workflows.definition import (
+    WorkflowDefinition,
+    WorkflowIntake,
+    WorkflowNode,
+    load_workflow_definition,
 )
-from server.app.pipelines.executor import (
+from server.app.workflows.executor import (
     _execute_node_wrapped,
     execute_node_once,
-    process_ready_pipeline_node,
+    process_ready_workflow_node,
 )
-from server.app.pipelines.pi_runner import PiRunner
+from server.app.workflows.pi_runner import PiRunner
 
 
 def test_execute_fetch_question_context_writes_artifact(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     job = queries.create_job(
         workflow_key="question_content",
         source_type="question_id",
@@ -56,7 +56,7 @@ def test_execute_fetch_question_context_writes_artifact(tmp_path):
 
 def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monkeypatch):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     workspace = queries.create_workspace(
         "Math V5",
         cms_config={"question_detail_url": "https://cms.example/question/detail?subject_id=5"},
@@ -93,11 +93,11 @@ def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monke
         )
 
     monkeypatch.setattr(
-        "server.app.pipelines.question_content.fetch_question_detail",
+        "server.app.workflows.question_content.fetch_question_detail",
         fake_fetch_question_detail,
     )
     monkeypatch.setattr(
-        "server.app.pipelines.question_content.get_token", lambda env, config: "token"
+        "server.app.workflows.question_content.get_token", lambda env, config: "token"
     )
 
     completed = execute_node_once(
@@ -130,7 +130,7 @@ def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monke
 
 def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, monkeypatch):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     workspace = queries.create_workspace(
         "Resource Math",
         resource_config={
@@ -172,11 +172,11 @@ def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, 
         )
 
     monkeypatch.setattr(
-        "server.app.pipelines.question_content.fetch_question_detail",
+        "server.app.workflows.question_content.fetch_question_detail",
         fake_fetch_question_detail,
     )
     monkeypatch.setattr(
-        "server.app.pipelines.question_content.get_token", lambda env, config: "token"
+        "server.app.workflows.question_content.get_token", lambda env, config: "token"
     )
 
     completed = execute_node_once(
@@ -206,9 +206,9 @@ def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, 
     ]
 
 
-def test_process_ready_pipeline_node_runs_root(tmp_path):
+def test_process_ready_workflow_node_runs_root(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     job = queries.create_job(
         workflow_key="question_content",
         source_type="question_id",
@@ -218,7 +218,7 @@ def test_process_ready_pipeline_node_runs_root(tmp_path):
         node_keys=list(definition.nodes),
     )
 
-    processed = process_ready_pipeline_node(
+    processed = process_ready_workflow_node(
         job_db=queries,
         definition=definition,
         logs_dir=tmp_path / "logs",
@@ -231,7 +231,7 @@ def test_process_ready_pipeline_node_runs_root(tmp_path):
 
 def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_pipeline_definition(Path("config/pipelines/question_content.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     job = queries.create_job(
         workflow_key="question_content",
         source_type="question_id",
@@ -241,7 +241,7 @@ def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
         node_keys=list(definition.nodes),
     )
 
-    from server.app.pipelines.executor import execute_local_node_once
+    from server.app.workflows.executor import execute_local_node_once
 
     with pytest.raises(ValueError, match="No local handler"):
         execute_local_node_once(
@@ -285,7 +285,7 @@ def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
     _make_fake_skill(skill_dir)
 
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -336,7 +336,7 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
     _make_fake_skill(skill_dir)
 
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -373,7 +373,7 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
 
 def test_execute_node_once_raises_when_pi_runner_missing_for_agent_node(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_pipeline_definition(Path("config/pipelines/reading_analysis.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -403,7 +403,7 @@ def test_pipeline_worker_does_not_start_when_app_worker_disabled(tmp_path, monke
 
     started: list[bool] = []
 
-    class FakePipelineWorkerThread:
+    class FakeWorkflowWorkerThread:
         def __init__(self, *args, **kwargs):
             pass
 
@@ -413,9 +413,9 @@ def test_pipeline_worker_does_not_start_when_app_worker_disabled(tmp_path, monke
         def stop(self, timeout: float = 3):
             pass
 
-    monkeypatch.setattr(app_main, "PipelineWorkerThread", FakePipelineWorkerThread)
+    monkeypatch.setattr(app_main, "WorkflowWorkerThread", FakeWorkflowWorkerThread)
     app = app_main.create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.config.setdefault("pipelines", {})["enabled"] = True
+    app.state.settings.config.setdefault("workflows", {})["enabled"] = True
 
     with TestClient(app):
         pass
@@ -423,11 +423,11 @@ def test_pipeline_worker_does_not_start_when_app_worker_disabled(tmp_path, monke
     assert started == []
 
 
-def _make_test_definition(nodes: list[PipelineNode]) -> PipelineDefinition:
-    return PipelineDefinition(
+def _make_test_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="test",
         label="Test",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={n.key: n for n in nodes},
     )
 
@@ -439,7 +439,7 @@ def test_execute_node_wrapped_falls_back_to_direct_update_when_no_run_exists():
     job = {"id": "job_1"}
 
     with patch(
-        "server.app.pipelines.executor.execute_node_once",
+        "server.app.workflows.executor.execute_node_once",
         side_effect=RuntimeError("boom"),
     ):
         result = _execute_node_wrapped(
@@ -472,7 +472,7 @@ def test_execute_node_wrapped_finishes_latest_running_run_when_one_exists():
     job = {"id": "job_1"}
 
     with patch(
-        "server.app.pipelines.executor.execute_node_once",
+        "server.app.workflows.executor.execute_node_once",
         side_effect=RuntimeError("boom"),
     ):
         result = _execute_node_wrapped(
@@ -492,10 +492,10 @@ def test_execute_node_wrapped_finishes_latest_running_run_when_one_exists():
     job_db.update_job_status.assert_called_once_with("job_1", "failed", "boom")
 
 
-def test_process_ready_pipeline_node_refreshes_job_status_when_no_local_nodes_ready():
+def test_process_ready_workflow_node_refreshes_job_status_when_no_local_nodes_ready():
     definition = _make_test_definition(
         [
-            PipelineNode(
+            WorkflowNode(
                 key="agent_node",
                 label="Agent",
                 capability="agent_node",
@@ -510,16 +510,16 @@ def test_process_ready_pipeline_node_refreshes_job_status_when_no_local_nodes_re
 
     with (
         patch(
-            "server.app.pipelines.executor.find_ready_nodes",
+            "server.app.workflows.executor.find_ready_nodes",
             return_value=[ready_node],
         ) as mock_find,
-        patch("server.app.pipelines.executor._refresh_job_status") as mock_refresh,
+        patch("server.app.workflows.executor._refresh_job_status") as mock_refresh,
         patch(
-            "server.app.pipelines.executor._node_statuses",
+            "server.app.workflows.executor._node_statuses",
             return_value={"agent_node": "pending"},
         ),
     ):
-        result = process_ready_pipeline_node(
+        result = process_ready_workflow_node(
             job_db, definition, Path("/tmp/logs"), jobs_dir=Path("/tmp")
         )
 

@@ -47,9 +47,9 @@ class TestWorkspaceVideoHiveBoundary:
     def test_allows_generic_pipeline_imports_in_workspace_services(self, tmp_path):
         write(
             tmp_path / "server/app/services/job_execution.py",
-            "from server.app.pipelines.definition import PipelineDefinition\n"
-            "from server.app.pipelines.scheduler import downstream_nodes\n"
-            "from server.app.pipelines.execution_control import ancestor_closure\n"
+            "from server.app.workflows.definition import WorkflowDefinition\n"
+            "from server.app.workflows.scheduler import downstream_nodes\n"
+            "from server.app.workflows.execution_control import ancestor_closure\n"
             "class JobExecutionService:\n"
             "    pass\n",
         )
@@ -108,7 +108,7 @@ class TestRouteDagAndDeletionBoundary:
             (
                 "DAG traversal",
                 "from fastapi import APIRouter\n"
-                "from server.app.pipelines.scheduler import downstream_nodes\n"
+                "from server.app.workflows.scheduler import downstream_nodes\n"
                 "router = APIRouter()\n"
                 "@router.post('/x')\n"
                 "def x():\n"

@@ -7,8 +7,8 @@ from server.app.executors.runtime_config import (
     ExecutorRuntimeConfig,
     OpenClawRuntimeConfig,
     OpenClawSkillSafetyRuntimeConfig,
-    PipelinesRuntimeConfig,
     PiRuntimeConfig,
+    WorkflowsRuntimeConfig,
 )
 
 
@@ -134,14 +134,14 @@ def test_openclaw_runtime_config_ignores_extra_fields():
     assert "runners" not in config.model_dump()
 
 
-def test_pipelines_runtime_config_defaults():
-    config = PipelinesRuntimeConfig()
+def test_workflows_runtime_config_defaults():
+    config = WorkflowsRuntimeConfig()
     assert config.enabled is False
     assert config.pi.binary == "pi"
 
 
-def test_pipelines_runtime_config_valid_overrides():
-    config = PipelinesRuntimeConfig(
+def test_workflows_runtime_config_valid_overrides():
+    config = WorkflowsRuntimeConfig(
         enabled=True,
         pi=PiRuntimeConfig(binary="/usr/local/bin/pi", thinking="low"),
     )
@@ -153,7 +153,7 @@ def test_pipelines_runtime_config_valid_overrides():
 def test_executor_runtime_config_from_full_config():
     raw = {
         "data_dir": "data",
-        "pipelines": {
+        "workflows": {
             "enabled": True,
             "pi": {
                 "binary": "pi",
@@ -184,8 +184,8 @@ def test_executor_runtime_config_from_full_config():
         },
     }
     config = ExecutorRuntimeConfig.model_validate(raw)
-    assert config.pipelines.enabled is True
-    assert config.pipelines.pi.thinking == "low"
+    assert config.workflows.enabled is True
+    assert config.workflows.pi.thinking == "low"
     assert config.openclaw.command_template == (
         "openclaw",
         "agent",
@@ -198,7 +198,7 @@ def test_executor_runtime_config_from_full_config():
 
 
 def test_executor_runtime_config_rejects_missing_command_template():
-    raw = {"pipelines": {"enabled": True}, "openclaw": {"cwd": "."}}
+    raw = {"workflows": {"enabled": True}, "openclaw": {"cwd": "."}}
     with pytest.raises(ValidationError) as exc_info:
         ExecutorRuntimeConfig.model_validate(raw)
     assert "command_template" in str(exc_info.value)
@@ -206,7 +206,7 @@ def test_executor_runtime_config_rejects_missing_command_template():
 
 def test_executor_runtime_config_rejects_wrong_timeout_scalar_type():
     raw = {
-        "pipelines": {"enabled": True, "pi": {"timeout_seconds": "fast"}},
+        "workflows": {"enabled": True, "pi": {"timeout_seconds": "fast"}},
         "openclaw": {"command_template": ["openclaw"], "timeout_seconds": "slow"},
     }
     with pytest.raises(ValidationError) as exc_info:
@@ -218,8 +218,8 @@ def test_executor_runtime_config_rejects_wrong_timeout_scalar_type():
 def test_executor_runtime_config_ignores_unknown_top_level_keys():
     raw = {
         "executors": {"local-default": {"kind": "unknown"}},
-        "pipelines": {"enabled": False},
+        "workflows": {"enabled": False},
         "openclaw": {"command_template": ["openclaw"]},
     }
     config = ExecutorRuntimeConfig.model_validate(raw)
-    assert config.pipelines.enabled is False
+    assert config.workflows.enabled is False

@@ -15,4 +15,4 @@ def test_rejects_frontend_pipeline_concurrency_contract(tmp_path):
 
     errors = check_repository(tmp_path)
 
-    assert any("PipelineDefinition.concurrency attribute" in error for error in errors)
+    assert any("WorkflowDefinition.concurrency attribute" in error for error in errors)

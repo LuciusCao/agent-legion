@@ -4,7 +4,7 @@ def test_create_workspace_stores_cms_config_override(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.post(
             "/api/workspaces",
@@ -32,7 +32,7 @@ def test_update_workspace_cms_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         created = c.post("/api/workspaces", json={"name": "Math V5"}).json()
         workspace_id = created["workspace"]["id"]
@@ -65,7 +65,7 @@ def test_update_workspace_resource_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         created = c.post("/api/workspaces", json={"name": "Math Resources"}).json()
         workspace_id = created["workspace"]["id"]
@@ -106,7 +106,7 @@ def test_workspace_settings_without_cms_fields(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.get("/api/workspaces/default/settings")
 
@@ -123,7 +123,7 @@ def test_workspace_settings_returns_resource_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         c.patch(
             "/api/workspaces/default",
@@ -152,7 +152,7 @@ def test_patch_settings_connection_saves_resource_config(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
         response = c.patch(
             "/api/workspaces/default/settings/connection",
@@ -170,7 +170,7 @@ def test_test_connection_uses_global_cms_url(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["cms"] = {
         "question_detail_url": "http://cms.example/detail",
         "token": "global_token",
@@ -188,7 +188,7 @@ def test_test_connection_fails_when_global_url_missing(tmp_path):
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.pipelines.enabled = True
+    app.state.settings.executor_runtime.workflows.enabled = True
     app.state.settings.config["cms"] = {}
     with TestClient(app) as c:
         response = c.post("/api/workspaces/default/settings/test-connection")

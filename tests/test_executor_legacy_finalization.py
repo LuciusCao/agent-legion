@@ -18,10 +18,10 @@ from server.app.executors.config import (
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.jobs.queries import JobQueries
 from server.app.main import create_app
-from server.app.pipelines.definition import (
-    PipelineDefinition,
-    PipelineIntake,
-    PipelineNode,
+from server.app.workflows.definition import (
+    WorkflowDefinition,
+    WorkflowIntake,
+    WorkflowNode,
 )
 from tests.helpers import ensure_legacy_workspace_tables
 
@@ -59,7 +59,7 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
     }
 
 
-def _sample_pipelines() -> list[PipelineDefinition]:
+def _sample_pipelines() -> list[WorkflowDefinition]:
     return [
         _sample_pipeline(),
         _legacy_unconfigured_agent_pipeline(),
@@ -97,23 +97,23 @@ def _list_legacy_agent_assignments(queries: JobQueries, workspace_id: str) -> li
     return [{"agent_id": r["agent_id"], "concurrency_limit": r["concurrency_limit"]} for r in rows]
 
 
-def _sample_pipeline() -> PipelineDefinition:
-    return PipelineDefinition(
+def _sample_pipeline() -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="reading_analysis",
         label="Reading Analysis",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "local_a": PipelineNode(
+            "local_a": WorkflowNode(
                 key="local_a",
                 label="Local A",
                 capability="local_a",
             ),
-            "local_b": PipelineNode(
+            "local_b": WorkflowNode(
                 key="local_b",
                 label="Local B",
                 capability="local_b",
             ),
-            "pi_a": PipelineNode(
+            "pi_a": WorkflowNode(
                 key="pi_a",
                 label="Pi A",
                 capability="pi_a",
@@ -122,18 +122,18 @@ def _sample_pipeline() -> PipelineDefinition:
     )
 
 
-def _legacy_unconfigured_agent_pipeline() -> PipelineDefinition:
-    return PipelineDefinition(
+def _legacy_unconfigured_agent_pipeline() -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="question_content",
         label="Question Content",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "fetch": PipelineNode(
+            "fetch": WorkflowNode(
                 key="fetch",
                 label="Fetch",
                 capability="local_a",
             ),
-            "understand": PipelineNode(
+            "understand": WorkflowNode(
                 key="understand",
                 label="Understand",
                 capability="understand",
@@ -142,13 +142,13 @@ def _legacy_unconfigured_agent_pipeline() -> PipelineDefinition:
     )
 
 
-def _question_comprehension_info_pipeline() -> PipelineDefinition:
-    return PipelineDefinition(
+def _question_comprehension_info_pipeline() -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="question_comprehension_info",
         label="Question Comprehension Info",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "local_a": PipelineNode(
+            "local_a": WorkflowNode(
                 key="local_a",
                 label="Local A",
                 capability="local_a",
@@ -169,7 +169,7 @@ def _fetch_all_allocations(queries: JobQueries) -> list[dict]:
 def _fetch_all_bindings(queries: JobQueries) -> list[dict]:
     with queries._connect_read() as conn:
         rows = conn.execute(
-            "select workspace_id, pipeline_key, node_key, executor_id "
+            "select workspace_id, workflow_key, node_key, executor_id "
             "from workspace_node_bindings order by node_key"
         ).fetchall()
         return [dict(row) for row in rows]
@@ -178,7 +178,7 @@ def _fetch_all_bindings(queries: JobQueries) -> list[dict]:
 def _fetch_all_node_limits(queries: JobQueries) -> list[dict]:
     with queries._connect_read() as conn:
         rows = conn.execute(
-            "select workspace_id, pipeline_key, node_key, concurrency_limit "
+            "select workspace_id, workflow_key, node_key, concurrency_limit "
             "from workspace_node_limits order by node_key"
         ).fetchall()
         return [dict(row) for row in rows]
@@ -210,13 +210,13 @@ def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> Non
     assert bindings == [
         {
             "workspace_id": workspace_id,
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "node_key": "local_a",
             "executor_id": "local-default",
         },
         {
             "workspace_id": workspace_id,
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "node_key": "local_b",
             "executor_id": "local-default",
         },
@@ -226,13 +226,13 @@ def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> Non
     assert limits == [
         {
             "workspace_id": workspace_id,
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "node_key": "local_a",
             "concurrency_limit": 1,
         },
         {
             "workspace_id": workspace_id,
-            "pipeline_key": "reading_analysis",
+            "workflow_key": "reading_analysis",
             "node_key": "local_b",
             "concurrency_limit": 1,
         },
@@ -376,7 +376,7 @@ def test_finalizer_blocks_on_missing_pipeline_definition(queries: JobQueries) ->
         finalize_legacy_executor_schema(conn, _sample_pipelines(), _sample_executors())
 
     issues = {issue.constraint for issue in exc_info.value.report.issues}
-    assert "default_pipeline_key" in issues
+    assert "default_workflow_key" in issues
 
 
 def test_finalizer_is_idempotent_after_v005(queries: JobQueries) -> None:
@@ -418,7 +418,7 @@ def test_finalizer_does_not_bind_unallocated_agent_nodes(queries: JobQueries) ->
     assert bindings == [
         {
             "workspace_id": workspace_id,
-            "pipeline_key": "question_content",
+            "workflow_key": "question_content",
             "node_key": "fetch",
             "executor_id": "local-default",
         }

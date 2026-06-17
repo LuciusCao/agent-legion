@@ -16,18 +16,18 @@ from server.app.executors.models import (
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
-from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.definition import (
-    PipelineDefinition,
-    PipelineIntake,
-    PipelineNode,
+from server.app.settings import Settings
+from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflows.definition import (
+    WorkflowDefinition,
+    WorkflowIntake,
+    WorkflowNode,
 )
-from server.app.pipelines.execution_control import (
+from server.app.workflows.execution_control import (
     ExecutionControlError,
     allowed_nodes,
     ancestor_closure,
 )
-from server.app.settings import Settings
 
 
 @pytest.fixture
@@ -49,20 +49,20 @@ def repo(tmp_db: Path) -> ExecutorLeaseRepository:
     return ExecutorLeaseRepository(tmp_db)
 
 
-def _branched_definition() -> PipelineDefinition:
+def _branched_definition() -> WorkflowDefinition:
     """root -> left -> target, root -> right -> after_right."""
-    return PipelineDefinition(
+    return WorkflowDefinition(
         key="branched",
         label="Branched",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={
-            "root": PipelineNode(key="root", label="Root", capability="root"),
-            "left": PipelineNode(key="left", label="Left", capability="left", after=["root"]),
-            "target": PipelineNode(
+            "root": WorkflowNode(key="root", label="Root", capability="root"),
+            "left": WorkflowNode(key="left", label="Left", capability="left", after=["root"]),
+            "target": WorkflowNode(
                 key="target", label="Target", capability="target", after=["left"]
             ),
-            "right": PipelineNode(key="right", label="Right", capability="right", after=["root"]),
-            "after_right": PipelineNode(
+            "right": WorkflowNode(key="right", label="Right", capability="right", after=["root"]),
+            "after_right": WorkflowNode(
                 key="after_right",
                 label="After Right",
                 capability="after_right",
@@ -122,7 +122,7 @@ def _claim_request(
     local_node_limit: int | None = 1,
     ttl: int = 60,
     log_path: str = "/tmp/run.log",
-    pipeline_key: str = "branched",
+    workflow_key: str = "branched",
     capability: str = "root",
 ) -> LeaseClaimRequest:
     return LeaseClaimRequest(
@@ -130,7 +130,7 @@ def _claim_request(
         global_capacity=global_capacity,
         workspace_id=workspace_id,
         job_id=job_id,
-        workflow_key=pipeline_key,
+        workflow_key=workflow_key,
         node_key=node_key,
         capability=capability,
         local_node_limit=local_node_limit,
@@ -144,7 +144,7 @@ def _claim_request(
 
 def _setup_workspace(
     queries: JobQueries,
-    definition: PipelineDefinition,
+    definition: WorkflowDefinition,
     target_node_key: str | None = None,
     executor_id: str = "local-default",
 ) -> tuple[str, str]:
@@ -167,9 +167,9 @@ def _setup_workspace(
         for node in definition.nodes.values():
             conn.execute(
                 """
-                insert into workspace_node_bindings(workspace_id, pipeline_key, node_key, executor_id)
+                insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
                 values (?, ?, ?, ?)
-                on conflict(workspace_id, pipeline_key, node_key) do update set
+                on conflict(workspace_id, workflow_key, node_key) do update set
                   executor_id=excluded.executor_id
                 """,
                 (workspace_id, "branched", node.key, executor_id),
@@ -186,9 +186,9 @@ def _setup_workspace(
         for node in definition.nodes.values():
             conn.execute(
                 """
-                insert into workspace_node_limits(workspace_id, pipeline_key, node_key, concurrency_limit)
+                insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
                 values (?, ?, ?, ?)
-                on conflict(workspace_id, pipeline_key, node_key) do update set
+                on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
                 (workspace_id, "branched", node.key, 1),
@@ -364,8 +364,8 @@ def test_target_completion_pauses_job_atomically(
 def _make_worker(
     tmp_path: Path,
     queries: JobQueries,
-    definitions: list[PipelineDefinition],
-) -> PipelineWorkerThread:
+    definitions: list[WorkflowDefinition],
+) -> WorkflowWorkerThread:
     executor_def = LocalExecutorConfig(
         kind="local",
         global_capacity=2,
@@ -397,7 +397,7 @@ def _make_worker(
         config={},
         executor_definitions=registry.definitions(),
     )
-    return PipelineWorkerThread(
+    return WorkflowWorkerThread(
         job_db=queries,
         leases=leases,
         registry=registry,
@@ -454,9 +454,9 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
         for node in definition.nodes.values():
             conn.execute(
                 """
-                insert into workspace_node_bindings(workspace_id, pipeline_key, node_key, executor_id)
+                insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
                 values (?, ?, ?, ?)
-                on conflict(workspace_id, pipeline_key, node_key) do update set
+                on conflict(workspace_id, workflow_key, node_key) do update set
                   executor_id=excluded.executor_id
                 """,
                 (workspace_id, "branched", node.key, "local-default"),
@@ -473,9 +473,9 @@ def test_worker_runs_only_target_closure_in_until_node_mode(
         for node in definition.nodes.values():
             conn.execute(
                 """
-                insert into workspace_node_limits(workspace_id, pipeline_key, node_key, concurrency_limit)
+                insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit)
                 values (?, ?, ?, ?)
-                on conflict(workspace_id, pipeline_key, node_key) do update set
+                on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
                 (workspace_id, "branched", node.key, 1),

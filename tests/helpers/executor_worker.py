@@ -9,13 +9,13 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
-from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.definition import PipelineDefinition, PipelineIntake, PipelineNode
 from server.app.settings import Settings
+from server.app.workflow_worker_thread import WorkflowWorkerThread
+from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
 
-def local_node(key: str, outputs: list[str] | None = None) -> PipelineNode:
-    return PipelineNode(
+def local_node(key: str, outputs: list[str] | None = None) -> WorkflowNode:
+    return WorkflowNode(
         key=key,
         label=key,
         capability=key,
@@ -23,11 +23,11 @@ def local_node(key: str, outputs: list[str] | None = None) -> PipelineNode:
     )
 
 
-def make_definition(nodes: list[PipelineNode]) -> PipelineDefinition:
-    return PipelineDefinition(
+def make_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
+    return WorkflowDefinition(
         key="test",
         label="Test",
-        intake=PipelineIntake(),
+        intake=WorkflowIntake(),
         nodes={n.key: n for n in nodes},
     )
 
@@ -119,13 +119,13 @@ def make_worker(
     tmp_path: Path,
     db_path: Path,
     registry: ExecutorRegistry,
-    definitions: list[PipelineDefinition],
+    definitions: list[WorkflowDefinition],
     *,
     heartbeat_interval_seconds: float = 1,
     lease_ttl_seconds: float = 5,
     cancellation_grace_seconds: float = 0.5,
     executor_runtime: ExecutorRuntimeConfig | None = None,
-) -> PipelineWorkerThread:
+) -> WorkflowWorkerThread:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     leases = ExecutorLeaseRepository(db_path)
     runtime = ExecutionRuntime(
@@ -142,14 +142,14 @@ def make_worker(
         logs_dir=tmp_path / "logs",
         packages_dir=tmp_path / "packages",
         jobs_dir=tmp_path / "jobs",
-        config={"pipelines": {"enabled": True}},
+        config={"workflows": {"enabled": True}},
         executor_definitions=registry.definitions(),
         executor_runtime=executor_runtime
         or ExecutorRuntimeConfig.model_validate(
-            {"pipelines": {"enabled": True}, "openclaw": {"command_template": ["openclaw"]}}
+            {"workflows": {"enabled": True}, "openclaw": {"command_template": ["openclaw"]}}
         ),
     )
-    worker = PipelineWorkerThread(
+    worker = WorkflowWorkerThread(
         job_db=job_db,
         leases=leases,
         registry=registry,

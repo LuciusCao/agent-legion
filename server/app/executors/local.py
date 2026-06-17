@@ -34,7 +34,7 @@ def _resolve_handler(handler_key: str) -> LocalHandler:
     """Resolve a handler by its importable path.
 
     Repository handlers are registered as ``module.function`` under
-    ``server.app.pipelines``; tests and other callers may use a fully-qualified
+    ``server.app.workflows``; tests and other callers may use a fully-qualified
     module path.
     """
     if "." not in handler_key:
@@ -45,7 +45,7 @@ def _resolve_handler(handler_key: str) -> LocalHandler:
     try:
         module = importlib.import_module(module_path)
     except ModuleNotFoundError:
-        module = importlib.import_module(f"server.app.pipelines.{module_path}")
+        module = importlib.import_module(f"server.app.workflows.{module_path}")
     handler = getattr(module, func_name)
     if not callable(handler):
         raise ValueError(f"Handler {handler_key!r} is not callable")

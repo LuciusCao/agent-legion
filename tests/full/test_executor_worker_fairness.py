@@ -7,7 +7,7 @@ import pytest
 
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.jobs import JobQueries
-from server.app.pipeline_worker_thread import PipelineWorkerThread
+from server.app.workflow_worker_thread import WorkflowWorkerThread
 from tests.helpers.executor_worker import (
     allocate,
     bind,
@@ -50,7 +50,7 @@ class PerWorkspaceBlockingExecutor:
         self._cancelled.add(execution_id)
 
 
-def _active_counts(worker: PipelineWorkerThread, executor_id: str) -> dict[str, int]:
+def _active_counts(worker: WorkflowWorkerThread, executor_id: str) -> dict[str, int]:
     return worker.leases.active_counts(executor_id)
 
 
@@ -92,7 +92,7 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
 
     for i in range(8):
         job_db.create_job(
-            pipeline_key="test",
+            workflow_key="test",
             source_type="question",
             source_id=f"A{i}",
             batch_id="",
@@ -120,7 +120,7 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
     for i in range(10):
         for ws in (ws_b, ws_c):
             job_db.create_job(
-                pipeline_key="test",
+                workflow_key="test",
                 source_type="question",
                 source_id=f"{ws['id']}_{i}",
                 batch_id="",
