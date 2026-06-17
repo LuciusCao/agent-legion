@@ -9,7 +9,7 @@ import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
 import DeleteWorkspaceDialog from '../components/DeleteWorkspaceDialog'
 
 function WorkspaceEventSubscriber({ workspaceId }: { workspaceId: string }) {
-  useWorkspaceEvents(workspaceId)
+  useWorkspaceEvents(workspaceId, true, true)
   return null
 }
 

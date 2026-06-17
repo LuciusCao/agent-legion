@@ -13,7 +13,8 @@ interface WorkspaceEventPayload {
 
 export function useWorkspaceEvents(
   workspaceId: string | undefined,
-  enabled = true
+  enabled = true,
+  statsOnly = false
 ) {
   const setJobs = useJobStore((state) => state.setJobs)
   const setWorkspaceStats = useWorkspaceStore(
@@ -32,13 +33,14 @@ export function useWorkspaceEvents(
 
     const refresh = async () => {
       try {
-        const [jobsData, stats] = await Promise.all([
-          fetchJobs(workspaceId),
-          fetchWorkspaceStats(workspaceId),
-        ])
+        const stats = await fetchWorkspaceStats(workspaceId)
         if (stale || closed) return
-        setJobs(jobsData.jobs)
         setWorkspaceStats(workspaceId, stats)
+        if (!statsOnly) {
+          const jobsData = await fetchJobs(workspaceId)
+          if (stale || closed) return
+          setJobs(jobsData.jobs)
+        }
       } catch {
         // ignore refresh errors
       }
@@ -97,5 +99,5 @@ export function useWorkspaceEvents(
         source.close()
       }
     }
-  }, [enabled, workspaceId, setJobs, setWorkspaceStats])
+  }, [enabled, workspaceId, statsOnly, setJobs, setWorkspaceStats])
 }
