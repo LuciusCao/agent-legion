@@ -16,7 +16,7 @@ function makeNode(key: string, after: string[] = [], label = key): DagNode {
 
 describe('jobDag', () => {
   describe('ancestorClosure', () => {
-    it('returns the target and all transitive ancestors in a linear pipeline', () => {
+    it('returns the target and all transitive ancestors in a linear workflow', () => {
       const nodes = [
         makeNode('a'),
         makeNode('b', ['a']),

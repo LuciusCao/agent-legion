@@ -114,7 +114,7 @@ describe('settingStore', () => {
     )
   })
 
-  it('clears stale node configuration when the pipeline changes', () => {
+  it('clears stale node configuration when the workflow changes', () => {
     useSettingStore.setState({
       workflowDefinition: {
         key: 'question_content',

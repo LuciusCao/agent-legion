@@ -28,7 +28,7 @@ function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
   }
 }
 
-const pipeline: WorkflowDefinitionRecord = {
+const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
@@ -61,7 +61,7 @@ const pipeline: WorkflowDefinitionRecord = {
 }
 
 const otherWorkflow: WorkflowDefinitionRecord = {
-  key: 'other_pipeline',
+  key: 'other_workflow',
   label: 'Other',
   intake: { modes: [] },
   nodes: [
@@ -85,65 +85,65 @@ const otherWorkflow: WorkflowDefinitionRecord = {
 }
 
 const workflowNodesByKey: WorkflowNodesByKey = {
-  question_content: pipeline,
-  other_pipeline: otherWorkflow,
+  question_content: workflow,
+  other_workflow: otherWorkflow,
 }
 
 describe('workflowNodes', () => {
   describe('nodesForJob', () => {
     it('returns nodes from workflowNodesByKey when available', () => {
       const job = makeJob({ workflow_key: 'question_content' })
-      expect(nodesForJob(job, workflowNodesByKey, null)).toEqual(pipeline.nodes)
+      expect(nodesForJob(job, workflowNodesByKey, null)).toEqual(workflow.nodes)
     })
 
     it('falls back to workflowDefinition when key matches', () => {
       const job = makeJob({ workflow_key: 'question_content' })
-      expect(nodesForJob(job, null, pipeline)).toEqual(pipeline.nodes)
+      expect(nodesForJob(job, null, workflow)).toEqual(workflow.nodes)
     })
 
     it('prefers workflowNodesByKey over workflowDefinition', () => {
       const job = makeJob({ workflow_key: 'question_content' })
       expect(nodesForJob(job, workflowNodesByKey, otherWorkflow)).toEqual(
-        pipeline.nodes
+        workflow.nodes
       )
     })
 
-    it('returns null when pipeline is unknown', () => {
+    it('returns null when workflow is unknown', () => {
       const job = makeJob({ workflow_key: 'unknown' })
-      expect(nodesForJob(job, workflowNodesByKey, pipeline)).toBeNull()
+      expect(nodesForJob(job, workflowNodesByKey, workflow)).toBeNull()
     })
   })
 
   describe('computeOrderedNodes', () => {
     it('returns an empty array when no jobs are provided', () => {
-      expect(computeOrderedNodes([], pipeline, null)).toEqual([])
+      expect(computeOrderedNodes([], workflow, null)).toEqual([])
     })
 
-    it('returns all nodes for a single known pipeline', () => {
+    it('returns all nodes for a single known workflow', () => {
       const jobs = [makeJob({ workflow_key: 'question_content' })]
-      expect(computeOrderedNodes(jobs, pipeline, null)).toEqual(pipeline.nodes)
+      expect(computeOrderedNodes(jobs, workflow, null)).toEqual(workflow.nodes)
     })
 
     it('returns nodes from workflowNodesByKey when definition is omitted', () => {
       const jobs = [makeJob({ workflow_key: 'question_content' })]
       expect(computeOrderedNodes(jobs, null, workflowNodesByKey)).toEqual(
-        pipeline.nodes
+        workflow.nodes
       )
     })
 
-    it('returns an empty array when no job has a known pipeline', () => {
+    it('returns an empty array when no job has a known workflow', () => {
       const jobs = [makeJob({ workflow_key: 'unknown' })]
-      expect(computeOrderedNodes(jobs, pipeline, workflowNodesByKey)).toEqual(
+      expect(computeOrderedNodes(jobs, workflow, workflowNodesByKey)).toEqual(
         []
       )
     })
 
-    it('returns the intersection of common nodes across multiple pipelines', () => {
+    it('returns the intersection of common nodes across multiple workflows', () => {
       const jobs = [
         makeJob({ id: 'j1', workflow_key: 'question_content' }),
-        makeJob({ id: 'j2', workflow_key: 'other_pipeline' }),
+        makeJob({ id: 'j2', workflow_key: 'other_workflow' }),
       ]
-      const result = computeOrderedNodes(jobs, pipeline, workflowNodesByKey)
+      const result = computeOrderedNodes(jobs, workflow, workflowNodesByKey)
       expect(result).toHaveLength(1)
       expect(result[0].key).toBe('extract')
     })
@@ -151,28 +151,28 @@ describe('workflowNodes', () => {
     it('preserves the order of the first job’s nodes', () => {
       const jobs = [
         makeJob({ id: 'j1', workflow_key: 'question_content' }),
-        makeJob({ id: 'j2', workflow_key: 'other_pipeline' }),
+        makeJob({ id: 'j2', workflow_key: 'other_workflow' }),
       ]
-      const result = computeOrderedNodes(jobs, pipeline, workflowNodesByKey)
+      const result = computeOrderedNodes(jobs, workflow, workflowNodesByKey)
       expect(result.map((n) => n.key)).toEqual(['extract'])
     })
   })
 
   describe('excludedJobs', () => {
-    it('returns jobs whose pipeline does not contain the node key', () => {
+    it('returns jobs whose workflow does not contain the node key', () => {
       const jobs = [
         makeJob({
           id: 'j1',
           workflow_key: 'question_content',
           source_id: 'Q1',
         }),
-        makeJob({ id: 'j2', workflow_key: 'other_pipeline', source_id: 'Q2' }),
+        makeJob({ id: 'j2', workflow_key: 'other_workflow', source_id: 'Q2' }),
       ]
       const result = excludedJobs(
         jobs,
         'generate',
         workflowNodesByKey,
-        pipeline
+        workflow
       )
       expect(result).toHaveLength(1)
       expect(result[0].id).toBe('j2')
@@ -181,27 +181,27 @@ describe('workflowNodes', () => {
     it('returns all jobs when the node key is unknown', () => {
       const jobs = [
         makeJob({ id: 'j1', workflow_key: 'question_content' }),
-        makeJob({ id: 'j2', workflow_key: 'other_pipeline' }),
+        makeJob({ id: 'j2', workflow_key: 'other_workflow' }),
       ]
-      const result = excludedJobs(jobs, 'unknown', workflowNodesByKey, pipeline)
+      const result = excludedJobs(jobs, 'unknown', workflowNodesByKey, workflow)
       expect(result).toHaveLength(2)
     })
 
     it('returns no jobs when every job contains the node key', () => {
       const jobs = [
         makeJob({ id: 'j1', workflow_key: 'question_content' }),
-        makeJob({ id: 'j2', workflow_key: 'other_pipeline' }),
+        makeJob({ id: 'j2', workflow_key: 'other_workflow' }),
       ]
-      const result = excludedJobs(jobs, 'extract', workflowNodesByKey, pipeline)
+      const result = excludedJobs(jobs, 'extract', workflowNodesByKey, workflow)
       expect(result).toHaveLength(0)
     })
 
-    it('excludes jobs with unknown pipelines', () => {
+    it('excludes jobs with unknown workflows', () => {
       const jobs = [
         makeJob({ id: 'j1', workflow_key: 'question_content' }),
         makeJob({ id: 'j2', workflow_key: 'unknown' }),
       ]
-      const result = excludedJobs(jobs, 'extract', workflowNodesByKey, pipeline)
+      const result = excludedJobs(jobs, 'extract', workflowNodesByKey, workflow)
       expect(result).toHaveLength(1)
       expect(result[0].id).toBe('j2')
     })

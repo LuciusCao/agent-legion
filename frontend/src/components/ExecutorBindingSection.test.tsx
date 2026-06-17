@@ -112,7 +112,7 @@ describe('ExecutorBindingSection', () => {
     })
   })
 
-  it('includes an explicit unbound option for each pipeline node', () => {
+  it('includes an explicit unbound option for each workflow node', () => {
     render(<ExecutorBindingSection />)
 
     for (const node of workflowDefinition.nodes) {
