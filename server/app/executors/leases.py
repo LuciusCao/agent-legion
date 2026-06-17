@@ -8,6 +8,7 @@ from server.app.db.connection import connect_sqlite
 from server.app.db.schema import init_db
 from server.app.events import JobEventManager
 from server.app.executors._lease_claims import claim_lease
+from server.app.executors._lease_control import _sync_job_status
 from server.app.executors._lease_lifecycle import (
     active_lease_counts,
     expire_stale_leases,
@@ -228,14 +229,6 @@ class ExecutorLeaseRepository:
             )
             conn.execute(
                 f"""
-                update jobs
-                set status='queued', updated_at=?
-                where id in ({placeholders})
-                """,
-                (now_str, *recovered),
-            )
-            conn.execute(
-                f"""
                 update node_runs
                 set status='failed',
                     error_message='orphaned recovery',
@@ -244,6 +237,8 @@ class ExecutorLeaseRepository:
                 """,
                 (now_str, *recovered),
             )
+            for job_id in recovered:
+                _sync_job_status(conn, job_id)
             conn.execute("commit")
             for job_id in recovered:
                 self._broadcast_job_update(job_id)

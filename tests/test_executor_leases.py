@@ -907,6 +907,38 @@ def test_recover_orphaned_running_jobs_returns_them_to_queued(
     assert node["status"] == "pending"
 
 
+def test_recover_orphaned_running_jobs_preserves_failed_job_status(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-orphan-failed", "exec-orphan-failed", 1, node_keys=["node_a", "node_b"]
+    )
+    with queries.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='failed' where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        )
+        conn.execute(
+            "update job_nodes set status='running' where job_id=? and node_key=?",
+            (job_id, "node_b"),
+        )
+        conn.execute(
+            "update jobs set status='running' where id=?",
+            (job_id,),
+        )
+        conn.execute("commit")
+
+    recovered = repo_a.recover_orphaned_running_jobs(datetime.now(UTC))
+
+    assert recovered == [job_id]
+    job = queries.get_job(job_id)
+    assert job is not None
+    assert job["status"] == "failed"
+    node = queries.get_job_node(job_id, "node_b")
+    assert node is not None
+    assert node["status"] == "pending"
+
+
 def test_recover_skips_jobs_with_active_lease(
     repo_a: ExecutorLeaseRepository, queries: JobQueries
 ) -> None:
