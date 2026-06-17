@@ -359,6 +359,7 @@ export default function JobDetailPage() {
       )}
       <DagFullscreenDialog
         open={dagDialogOpen}
+        jobId={jobId}
         nodes={dagNodes}
         edges={dagEdges}
         runs={detail?.runs}
