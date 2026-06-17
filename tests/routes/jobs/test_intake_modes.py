@@ -213,7 +213,7 @@ def test_batch_with_entity_video_direct_ids(tmp_path):
     assert [c["entity_type"] for c in payload["task_candidates"]] == ["video", "video"]
 
 
-def test_pipeline_response_no_task_entity(tmp_path):
+def test_workflow_response_no_task_entity(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
