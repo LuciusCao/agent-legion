@@ -59,7 +59,7 @@ invariants:
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_api.py::test_video_detail_read_only_does_not_update_video
+        target: tests/routes/test_video_intake.py::test_video_detail_read_only_does_not_update_video
         gate: quick
       - kind: integration
         target: tests/test_video_read_service.py
@@ -77,7 +77,7 @@ invariants:
         target: tests/test_workspace_configuration_service.py::test_executor_stats_does_not_consult_agent_status_manager
         gate: quick
       - kind: integration
-        target: tests/test_jobs_api.py::test_workspace_stats_executor_status_reflects_allocations_and_leases
+        target: tests/routes/jobs/test_workspace_stats.py::test_workspace_stats_executor_status_reflects_allocations_and_leases
         gate: quick
 
   - id: DB-LIFECYCLE-001

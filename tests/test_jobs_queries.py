@@ -169,8 +169,6 @@ def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: P
 
 
 def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
-    import time
-
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = db.create_workspace("UpdatedAt Workspace")
     job = db.create_job(
@@ -182,33 +180,40 @@ def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
         node_keys=["node_a", "node_b"],
         workspace_id=workspace["id"],
     )
-    original_updated_at = job["updated_at"]
+    past_updated_at = "2000-01-01 00:00:00"
 
-    time.sleep(1.1)
+    def reset_updated_at_to_past() -> None:
+        with db.connect() as conn:
+            conn.execute(
+                "update jobs set updated_at=? where id=?",
+                (past_updated_at, job["id"]),
+            )
+
+    reset_updated_at_to_past()
     db.set_job_execution_target(job["id"], "node_b")
     updated_job = db.get_job(job["id"])
     assert updated_job is not None
-    assert updated_job["updated_at"] > original_updated_at
+    assert updated_job["updated_at"] > past_updated_at
 
-    time.sleep(1.1)
+    reset_updated_at_to_past()
     db.clear_job_execution_target(job["id"])
     updated_job = db.get_job(job["id"])
     assert updated_job is not None
-    assert updated_job["updated_at"] > original_updated_at
+    assert updated_job["updated_at"] > past_updated_at
 
-    time.sleep(1.1)
+    reset_updated_at_to_past()
     db.pause_job(job["id"], "testing")
     with db.connect() as conn:
         conn.execute("update jobs set status='paused' where id=?", (job["id"],))
     updated_job = db.get_job(job["id"])
     assert updated_job is not None
-    assert updated_job["updated_at"] > original_updated_at
+    assert updated_job["updated_at"] > past_updated_at
 
-    time.sleep(1.1)
+    reset_updated_at_to_past()
     db.resume_job(job["id"])
     updated_job = db.get_job(job["id"])
     assert updated_job is not None
-    assert updated_job["updated_at"] > original_updated_at
+    assert updated_job["updated_at"] > past_updated_at
 
 
 def test_get_job_execution_control_returns_none_for_missing_job(tmp_path: Path) -> None:

@@ -3,10 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from server.app.executors.config import LocalExecutorConfig
+from server.app.executors.config import ExecutorConfig, LocalExecutorConfig, PiExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
+from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
 from server.app.pipeline_worker_thread import PipelineWorkerThread
 from server.app.pipelines.definition import PipelineDefinition, PipelineIntake, PipelineNode
@@ -39,19 +40,43 @@ def local_def(capacity: int, capabilities: set[str]) -> Any:
     }
 
 
+def pi_def(capacity: int, capabilities: dict[str, str]) -> Any:
+    return {
+        "kind": "pi",
+        "global_capacity": capacity,
+        "capabilities": {cap: {"skill": skill} for cap, skill in capabilities.items()},
+    }
+
+
+def make_pi_skill(skill_root: Path, skill: str) -> None:
+    """Create a minimal Pi skill directory tree for tests."""
+    skill_dir = skill_root / skill
+    skill_dir.mkdir(parents=True, exist_ok=True)
+    (skill_dir / "SKILL.md").write_text("# skill", encoding="utf-8")
+    (skill_dir / "references").mkdir(parents=True, exist_ok=True)
+    (skill_dir / "references" / "output-contract.md").write_text("contract", encoding="utf-8")
+    (skill_dir / "scripts").mkdir(parents=True, exist_ok=True)
+    (skill_dir / "scripts" / "validate_output.py").write_text(
+        "import sys; sys.exit(0)", encoding="utf-8"
+    )
+
+
 def make_registry(
     executors: dict[str, Any],
     definitions: dict[str, Any],
 ) -> ExecutorRegistry:
-    """Build an ExecutorRegistry using only local executor definitions.
+    """Build an ExecutorRegistry from local and/or pi executor definitions."""
 
-    These tests exercise the local executor path; using LocalExecutorConfig
-    directly keeps the registry construction simple and correct.
-    """
+    def _build_config(eid: str) -> ExecutorConfig:
+        kind = definitions[eid]["kind"]
+        if kind == "pi":
+            return PiExecutorConfig(**definitions[eid])
+        return LocalExecutorConfig(**definitions[eid])
+
     return ExecutorRegistry(
         executors=executors,
         global_capacities={eid: definitions[eid]["global_capacity"] for eid in definitions},
-        definitions={eid: LocalExecutorConfig(**definitions[eid]) for eid in definitions},
+        definitions={eid: _build_config(eid) for eid in definitions},
     )
 
 
@@ -95,14 +120,20 @@ def make_worker(
     db_path: Path,
     registry: ExecutorRegistry,
     definitions: list[PipelineDefinition],
+    *,
+    heartbeat_interval_seconds: float = 1,
+    lease_ttl_seconds: float = 5,
+    cancellation_grace_seconds: float = 0.5,
+    executor_runtime: ExecutorRuntimeConfig | None = None,
 ) -> PipelineWorkerThread:
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     leases = ExecutorLeaseRepository(db_path)
     runtime = ExecutionRuntime(
         leases=leases,
         registry=registry,
-        heartbeat_interval_seconds=1,
-        lease_ttl_seconds=5,
+        heartbeat_interval_seconds=heartbeat_interval_seconds,
+        lease_ttl_seconds=lease_ttl_seconds,
+        cancellation_grace_seconds=cancellation_grace_seconds,
     )
     settings = Settings(
         root_dir=tmp_path,
@@ -113,6 +144,10 @@ def make_worker(
         jobs_dir=tmp_path / "jobs",
         config={"pipelines": {"enabled": True}},
         executor_definitions=registry.definitions(),
+        executor_runtime=executor_runtime
+        or ExecutorRuntimeConfig.model_validate(
+            {"pipelines": {"enabled": True}, "openclaw": {"command_template": ["openclaw"]}}
+        ),
     )
     worker = PipelineWorkerThread(
         job_db=job_db,

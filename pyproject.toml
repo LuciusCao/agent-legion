@@ -30,6 +30,7 @@ testpaths = ["tests"]
 markers = [
   "full_gate: deterministic higher-fidelity architecture scenarios",
   "ci_extended: repeated stress scenarios for CI",
+  "slow: tests involving real subprocesses or long sleeps",
 ]
 filterwarnings = [
   "error::ResourceWarning:sqlite3",

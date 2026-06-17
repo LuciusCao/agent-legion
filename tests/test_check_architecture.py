@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts.check_architecture import check_repository, forbidden_imports, is_scheduler_path
 
 
@@ -33,18 +35,6 @@ def test_rejects_new_route_without_response_model(tmp_path):
     assert any("response_model" in error and "example.py" in error for error in errors)
 
 
-def test_rejects_scheduler_agent_runtime_import(tmp_path):
-    write(
-        tmp_path / "server/app/pipelines/scheduler.py",
-        "from server.app.pipelines.pi_runner import PiRunner\n",
-    )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
-
-    errors = check_repository(tmp_path)
-
-    assert any("scheduler boundary" in error for error in errors)
-
-
 def test_rejects_route_importing_cms_client(tmp_path):
     write(
         tmp_path / "server/app/routes/example.py",
@@ -55,6 +45,44 @@ def test_rejects_route_importing_cms_client(tmp_path):
     errors = check_repository(tmp_path)
 
     assert any("route boundary" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "source,expected_error",
+    [
+        (
+            "from server.app.pipelines.pi_runner import PiRunner\n",
+            "scheduler boundary",
+        ),
+        (
+            "from server.app.pipeline.openclaw import OpenClawRunner\n",
+            "scheduler boundary",
+        ),
+        (
+            "from server.app.pipelines.pi_runner import PiRunner\n",
+            "pi_runner",
+        ),
+        (
+            "from server.app.pipelines.skills import resolve_pipeline_skill\n",
+            "skills",
+        ),
+        (
+            "from server.app.pipelines.reading_analysis import fetch_questions\n",
+            "reading_analysis",
+        ),
+        (
+            "import subprocess\n",
+            "subprocess",
+        ),
+    ],
+)
+def test_rejects_scheduler_boundary_forbidden_imports(tmp_path, source, expected_error):
+    write(tmp_path / "server/app/pipeline_worker_thread.py", source)
+    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+
+    errors = check_repository(tmp_path)
+
+    assert any("scheduler boundary" in error and expected_error in error for error in errors)
 
 
 def test_rejects_scheduler_threadpool_construction(tmp_path):
@@ -303,66 +331,6 @@ def test_default_budget_enforced_for_new_files(tmp_path):
     )
 
 
-def test_rejects_pipeline_worker_importing_openclaw_runner(tmp_path):
-    write(
-        tmp_path / "server/app/pipeline_worker_thread.py",
-        "from server.app.pipeline.openclaw import OpenClawRunner\n",
-    )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
-
-    errors = check_repository(tmp_path)
-
-    assert any("scheduler boundary" in error and "openclaw" in error for error in errors)
-
-
-def test_rejects_pipeline_worker_importing_pi_runner(tmp_path):
-    write(
-        tmp_path / "server/app/pipeline_worker_thread.py",
-        "from server.app.pipelines.pi_runner import PiRunner\n",
-    )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
-
-    errors = check_repository(tmp_path)
-
-    assert any("scheduler boundary" in error and "pi_runner" in error for error in errors)
-
-
-def test_rejects_pipeline_worker_importing_skills(tmp_path):
-    write(
-        tmp_path / "server/app/pipeline_worker_thread.py",
-        "from server.app.pipelines.skills import resolve_pipeline_skill\n",
-    )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
-
-    errors = check_repository(tmp_path)
-
-    assert any("scheduler boundary" in error and "skills" in error for error in errors)
-
-
-def test_rejects_pipeline_worker_importing_local_handlers(tmp_path):
-    write(
-        tmp_path / "server/app/pipeline_worker_thread.py",
-        "from server.app.pipelines.reading_analysis import fetch_questions\n",
-    )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
-
-    errors = check_repository(tmp_path)
-
-    assert any("scheduler boundary" in error and "reading_analysis" in error for error in errors)
-
-
-def test_rejects_pipeline_worker_importing_subprocess(tmp_path):
-    write(
-        tmp_path / "server/app/pipeline_worker_thread.py",
-        "import subprocess\n",
-    )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
-
-    errors = check_repository(tmp_path)
-
-    assert any("scheduler boundary" in error and "subprocess" in error for error in errors)
-
-
 def test_rejects_pipeline_worker_accessing_runner_attribute(tmp_path):
     write(
         tmp_path / "server/app/pipeline_worker_thread.py",
@@ -432,61 +400,37 @@ def test_rejects_executor_module_reading_raw_executors_config(tmp_path):
     assert any("raw settings.config['executors']" in error for error in errors)
 
 
-def test_rejects_pipeline_yaml_node_without_capability(tmp_path):
+@pytest.mark.parametrize(
+    "yaml_content,expected_error",
+    [
+        (
+            "key: example\nlabel: Example\nnodes:\n  fetch:\n    label: Fetch\n",
+            "non-empty capability",
+        ),
+        (
+            "key: example\nlabel: Example\nnodes:\n  fetch:\n    capability: fetch\n    runner: local\n",
+            "field 'runner' was removed",
+        ),
+        (
+            "key: example\nlabel: Example\nnodes:\n  review:\n    capability: review\n    agent:\n      engine: pi\n",
+            "field 'agent' was removed",
+        ),
+        (
+            "key: example\nlabel: Example\nconcurrency:\n  nodes:\n    review: 2\n"
+            "nodes:\n  review:\n    capability: review\n",
+            "top-level 'concurrency' was removed",
+        ),
+    ],
+)
+def test_rejects_invalid_pipeline_yaml(tmp_path, yaml_content, expected_error):
     (tmp_path / "server/app").mkdir(parents=True)
     (tmp_path / "config/pipelines").mkdir(parents=True)
-    write(
-        tmp_path / "config/pipelines/example.yaml",
-        "key: example\nlabel: Example\nnodes:\n  fetch:\n    label: Fetch\n",
-    )
+    write(tmp_path / "config/pipelines/example.yaml", yaml_content)
     write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     errors = check_repository(tmp_path)
 
-    assert any("non-empty capability" in error for error in errors)
-
-
-def test_rejects_pipeline_yaml_node_with_runner(tmp_path):
-    (tmp_path / "server/app").mkdir(parents=True)
-    (tmp_path / "config/pipelines").mkdir(parents=True)
-    write(
-        tmp_path / "config/pipelines/example.yaml",
-        "key: example\nlabel: Example\nnodes:\n  fetch:\n    capability: fetch\n    runner: local\n",
-    )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
-
-    errors = check_repository(tmp_path)
-
-    assert any("field 'runner' was removed" in error for error in errors)
-
-
-def test_rejects_pipeline_yaml_node_with_agent(tmp_path):
-    (tmp_path / "server/app").mkdir(parents=True)
-    (tmp_path / "config/pipelines").mkdir(parents=True)
-    write(
-        tmp_path / "config/pipelines/example.yaml",
-        "key: example\nlabel: Example\nnodes:\n  review:\n    capability: review\n    agent:\n      engine: pi\n",
-    )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
-
-    errors = check_repository(tmp_path)
-
-    assert any("field 'agent' was removed" in error for error in errors)
-
-
-def test_rejects_pipeline_yaml_with_concurrency(tmp_path):
-    (tmp_path / "server/app").mkdir(parents=True)
-    (tmp_path / "config/pipelines").mkdir(parents=True)
-    write(
-        tmp_path / "config/pipelines/example.yaml",
-        "key: example\nlabel: Example\nconcurrency:\n  nodes:\n    review: 2\n"
-        "nodes:\n  review:\n    capability: review\n",
-    )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
-
-    errors = check_repository(tmp_path)
-
-    assert any("top-level 'concurrency' was removed" in error for error in errors)
+    assert any(expected_error in error for error in errors)
 
 
 def test_rejects_legacy_module_present(tmp_path):

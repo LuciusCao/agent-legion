@@ -8,23 +8,21 @@ from typing import Any
 import pytest
 
 from server.app.executors.config import (
-    LocalCapabilityConfig,
-    LocalExecutorConfig,
     PiCapabilityConfig,
-    PiExecutorConfig,
 )
-from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.local import LocalExecutor
 from server.app.executors.pi import PiExecutor
-from server.app.executors.registry import ExecutorRegistry
-from server.app.executors.runtime import ExecutionRuntime
-from server.app.executors.runtime_config import ExecutorRuntimeConfig
 from server.app.jobs import JobQueries
-from server.app.pipeline_worker_thread import PipelineWorkerThread
-from server.app.pipelines.definition import PipelineNode
 from server.app.pipelines.pi_runner import PiConfig
-from server.app.settings import Settings
-from tests.helpers.executor_worker import allocate, bind, make_definition
+from tests.helpers.executor_worker import (
+    allocate,
+    bind,
+    local_node,
+    make_definition,
+    make_pi_skill,
+    make_registry,
+    make_worker,
+)
 
 GRACE = 0.5
 
@@ -64,15 +62,7 @@ def _local_executor() -> LocalExecutor:
 
 
 def _pi_executor(fake_pi: Path, skill_root: Path) -> PiExecutor:
-    skill_dir = skill_root / "reading_analysis" / "blocked_pi"
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text("# skill", encoding="utf-8")
-    (skill_dir / "references").mkdir(parents=True, exist_ok=True)
-    (skill_dir / "references" / "output-contract.md").write_text("contract", encoding="utf-8")
-    (skill_dir / "scripts").mkdir(parents=True, exist_ok=True)
-    (skill_dir / "scripts" / "validate_output.py").write_text(
-        "#!/usr/bin/env python3\nimport sys\n", encoding="utf-8"
-    )
+    make_pi_skill(skill_root, "reading_analysis/blocked_pi")
     return PiExecutor(
         "pi-default",
         PiConfig(binary=str(fake_pi), cancellation_grace_seconds=GRACE),
@@ -81,57 +71,40 @@ def _pi_executor(fake_pi: Path, skill_root: Path) -> PiExecutor:
     )
 
 
-def _make_registry(local_executor: LocalExecutor, pi_executor: PiExecutor) -> ExecutorRegistry:
-    return ExecutorRegistry(
+def _make_registry(local_executor: LocalExecutor, pi_executor: PiExecutor) -> Any:
+    return make_registry(
         executors={"local-default": local_executor, "pi-default": pi_executor},
-        global_capacities={"local-default": 3, "pi-default": 1},
         definitions={
-            "local-default": LocalExecutorConfig(
-                kind="local",
-                global_capacity=3,
-                capabilities={
-                    "cooperative": LocalCapabilityConfig(
-                        handler="tests.full.test_executor_cancellation_recovery.cooperative_handler"
-                    ),
-                    "blocked": LocalCapabilityConfig(
-                        handler="tests.full.test_executor_cancellation_recovery.blocked_handler"
-                    ),
+            "local-default": {
+                "kind": "local",
+                "global_capacity": 3,
+                "capabilities": {
+                    "cooperative": {
+                        "handler": "tests.full.test_executor_cancellation_recovery.cooperative_handler"
+                    },
+                    "blocked": {
+                        "handler": "tests.full.test_executor_cancellation_recovery.blocked_handler"
+                    },
                 },
-            ),
-            "pi-default": PiExecutorConfig(
-                kind="pi",
-                global_capacity=1,
-                capabilities={
-                    "blocked_pi": PiCapabilityConfig(skill="reading_analysis/blocked_pi")
-                },
-            ),
+            },
+            "pi-default": {
+                "kind": "pi",
+                "global_capacity": 1,
+                "capabilities": {"blocked_pi": {"skill": "reading_analysis/blocked_pi"}},
+            },
         },
     )
 
 
-def _make_nodes() -> list[PipelineNode]:
+def _make_nodes() -> list[Any]:
     return [
-        PipelineNode(
-            key="cooperative",
-            label="Cooperative",
-            capability="cooperative",
-            outputs=["output.json"],
-        ),
-        PipelineNode(
-            key="blocked",
-            label="Blocked",
-            capability="blocked",
-            outputs=["output.json"],
-        ),
-        PipelineNode(
-            key="blocked_pi",
-            label="Blocked Pi",
-            capability="blocked_pi",
-            outputs=["output.json"],
-        ),
+        local_node("cooperative"),
+        local_node("blocked"),
+        local_node("blocked_pi"),
     ]
 
 
+@pytest.mark.slow
 @pytest.mark.full_gate
 def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
@@ -168,33 +141,14 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
         workspace_id=ws["id"],
     )
 
-    leases = ExecutorLeaseRepository(db_path)
-    runtime = ExecutionRuntime(
-        leases=leases,
-        registry=registry,
+    worker = make_worker(
+        tmp_path,
+        db_path,
+        registry,
+        [],
         heartbeat_interval_seconds=0.1,
         lease_ttl_seconds=2,
         cancellation_grace_seconds=GRACE,
-    )
-    settings = Settings(
-        root_dir=tmp_path,
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={},
-        executor_definitions=registry.definitions(),
-        executor_runtime=ExecutorRuntimeConfig.model_validate(
-            {"pipelines": {"enabled": True}, "openclaw": {"command_template": ["openclaw"]}}
-        ),
-    )
-    worker = PipelineWorkerThread(
-        job_db=job_db,
-        leases=leases,
-        registry=registry,
-        runtime=runtime,
-        settings=settings,
     )
 
     worker.start()
@@ -202,23 +156,23 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     try:
         deadline = time.monotonic() + 10
         while time.monotonic() < deadline:
-            local_counts = leases.active_counts("local-default")
-            pi_counts = leases.active_counts("pi-default")
+            local_counts = worker.leases.active_counts("local-default")
+            pi_counts = worker.leases.active_counts("pi-default")
             if local_counts.get("global", 0) >= 2 and pi_counts.get("global", 0) >= 1:
                 break
             time.sleep(0.05)
 
-        local_counts = leases.active_counts("local-default")
-        pi_counts = leases.active_counts("pi-default")
+        local_counts = worker.leases.active_counts("local-default")
+        pi_counts = worker.leases.active_counts("pi-default")
         assert local_counts.get("global", 0) >= 2
         assert pi_counts.get("global", 0) == 1
 
         # Force lease loss: heartbeats will report inactive, triggering cancellation.
-        leases.heartbeat = lambda lease_id, ttl_seconds: False  # type: ignore[method-assign]
+        worker.leases.heartbeat = lambda lease_id, ttl_seconds: False  # type: ignore[method-assign]
 
         deadline = time.monotonic() + 5
         while time.monotonic() < deadline:
-            if leases.active_counts("local-default").get("global", 0) == 0:
+            if worker.leases.active_counts("local-default").get("global", 0) == 0:
                 break
             time.sleep(0.05)
     finally:
@@ -229,8 +183,8 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
     assert stop_elapsed < GRACE + 2, "worker shutdown was unbounded"
 
     # All leases finalized and capacity released.
-    assert leases.active_counts("local-default").get("global", 0) == 0
-    assert leases.active_counts("pi-default").get("global", 0) == 0
+    assert worker.leases.active_counts("local-default").get("global", 0) == 0
+    assert worker.leases.active_counts("pi-default").get("global", 0) == 0
 
     # Active process maps drained.
     assert pi_executor._tracker.active() == []
@@ -255,37 +209,17 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
         workspace_id=ws["id"],
     )
 
-    leases2 = ExecutorLeaseRepository(db_path)
-    runtime2 = ExecutionRuntime(
-        leases=leases2,
-        registry=registry,
+    worker2 = make_worker(
+        tmp_path,
+        db_path,
+        registry,
+        [definition],
         heartbeat_interval_seconds=1,
         lease_ttl_seconds=5,
         cancellation_grace_seconds=GRACE,
     )
-    settings2 = Settings(
-        root_dir=tmp_path,
-        data_dir=tmp_path,
-        videos_dir=tmp_path / "videos",
-        logs_dir=tmp_path / "logs",
-        packages_dir=tmp_path / "packages",
-        jobs_dir=tmp_path / "jobs",
-        config={},
-        executor_definitions=registry.definitions(),
-        executor_runtime=ExecutorRuntimeConfig.model_validate(
-            {"pipelines": {"enabled": True}, "openclaw": {"command_template": ["openclaw"]}}
-        ),
-    )
-    worker2 = PipelineWorkerThread(
-        job_db=job_db,
-        leases=leases2,
-        registry=registry,
-        runtime=runtime2,
-        settings=settings2,
-    )
-    worker2._definitions = [definition]
     worker2._poll()
-    assert leases2.active_counts("local-default").get("global", 0) == 1
+    assert worker2.leases.active_counts("local-default").get("global", 0) == 1
     for future in list(worker2._futures.values()):
         future.result(timeout=10)
     node2 = job_db.get_job_node(job2["id"], "cooperative")

@@ -56,6 +56,7 @@ class TestSubprocessTracker:
         proc.kill()
         proc.wait()
 
+    @pytest.mark.slow
     @pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups require POSIX")
     def test_cancel_terminates_then_kills_blocked_child(self) -> None:
         tracker = SubprocessTracker(grace_seconds=0.2)
@@ -71,6 +72,7 @@ class TestSubprocessTracker:
         assert elapsed < 1.0
         assert tracker.active() == []
 
+    @pytest.mark.slow
     def test_wait_for_returns_when_process_exits(self) -> None:
         tracker = SubprocessTracker(grace_seconds=0.1)
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(0.1)"])
@@ -145,6 +147,7 @@ class TestLocalExecutorIsolation:
         with pytest.raises(ValueError, match="must be importable"):
             LocalExecutor("local-default", {"unsafe": handler})
 
+    @pytest.mark.slow
     def test_local_executor_runs_handler_in_isolated_child(self, tmp_path: Path) -> None:
         executor = LocalExecutor(
             "local-default",
@@ -156,6 +159,7 @@ class TestLocalExecutorIsolation:
         assert result.status == "completed"
         assert (ctx.job_dir / "out.json").is_file()
 
+    @pytest.mark.slow
     def test_local_executor_cancels_blocked_child(self, tmp_path: Path) -> None:
         executor = LocalExecutor(
             "local-default",
@@ -176,6 +180,7 @@ class TestLocalExecutorIsolation:
         assert not thread.is_alive()
         assert result_holder["result"].status == "cancelled"
 
+    @pytest.mark.slow
     def test_local_executor_pre_start_cancellation(self, tmp_path: Path) -> None:
         executor = LocalExecutor(
             "local-default",
@@ -202,6 +207,7 @@ def _pi_skill(skill_dir: Path) -> None:
 
 
 class TestPiExecutorCancellation:
+    @pytest.mark.slow
     @pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups require POSIX")
     def test_pi_executor_cancels_active_subprocess(self, tmp_path: Path) -> None:
         fake_pi = tmp_path / "fake_pi"
@@ -257,6 +263,7 @@ class TestPiExecutorCancellation:
 
 
 class TestOpenClawExecutorCancellation:
+    @pytest.mark.slow
     def test_openclaw_executor_cancels_active_subprocess(self, tmp_path: Path) -> None:
         command = [
             sys.executable,
