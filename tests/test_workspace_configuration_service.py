@@ -10,10 +10,8 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import LeaseClaimRequest
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.pipeline_catalog import PipelineCatalogService
-from server.app.services.workspace_configuration import (
-    WorkspaceConfigurationService,
-    sync_workspace_pi_agents,
-)
+from server.app.services.workspace_configuration import WorkspaceConfigurationService
+from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 
 
 @pytest.fixture

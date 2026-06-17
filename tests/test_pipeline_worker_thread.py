@@ -1,9 +1,15 @@
 import threading
 from pathlib import Path
 from types import SimpleNamespace
+from typing import Any
 from unittest.mock import MagicMock
 
-from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+from server.app.executors.config import (
+    LocalCapabilityConfig,
+    LocalExecutorConfig,
+    PiCapabilityConfig,
+    PiExecutorConfig,
+)
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.registry import ExecutorRegistry
@@ -478,3 +484,183 @@ def test_make_pipeline_worker_runs_reading_analysis_local_node(tmp_path: Path, m
     assert (Path(job["storage_dir"]) / "questions.json").exists()
 
     worker.stop()
+
+
+class RecordingPiExecutor:
+    kind = "pi"
+
+    def __init__(self, executor_id: str, block_event: threading.Event | None = None):
+        self.id = executor_id
+        self.kind = "pi"
+        self.block_event = block_event or threading.Event()
+        self.contexts: list[ExecutionContext] = []
+
+    def supports(self, capability: str) -> bool:
+        return True
+
+    def execute(self, context: ExecutionContext) -> ExecutionResult:
+        self.contexts.append(context)
+        self.block_event.wait(timeout=10)
+        for output in context.expected_outputs:
+            (context.job_dir / output).write_text('{"done": true}', encoding="utf-8")
+        return ExecutionResult(
+            status="completed",
+            exit_code=0,
+            produced_artifacts=tuple(context.expected_outputs),
+        )
+
+    def cancel(self, execution_id: str) -> None:
+        pass
+
+
+def _make_pi_worker(
+    tmp_path: Path,
+    db_path: Path,
+    executor: RecordingPiExecutor,
+    definitions: list[PipelineDefinition],
+    agent_manager: Any | None = None,
+) -> PipelineWorkerThread:
+    executor_def = PiExecutorConfig(
+        kind="pi",
+        global_capacity=2,
+        capabilities={"fetch": PiCapabilityConfig(skill="test_skill")},
+    )
+    registry = ExecutorRegistry(
+        executors={"pi-default": executor},
+        global_capacities={"pi-default": 2},
+        definitions={"pi-default": executor_def},
+    )
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    leases = ExecutorLeaseRepository(db_path)
+    runtime = ExecutionRuntime(
+        leases=leases,
+        registry=registry,
+        heartbeat_interval_seconds=1,
+        lease_ttl_seconds=5,
+    )
+    settings = Settings(
+        root_dir=tmp_path,
+        data_dir=tmp_path,
+        videos_dir=tmp_path / "videos",
+        logs_dir=tmp_path / "logs",
+        packages_dir=tmp_path / "packages",
+        jobs_dir=tmp_path / "jobs",
+        config={},
+        executor_definitions=registry.definitions(),
+    )
+    settings.executor_runtime = ExecutorRuntimeConfig.model_validate(
+        {
+            "pipelines": {"enabled": True},
+            "openclaw": {"command_template": ["openclaw"]},
+        }
+    )
+    worker = PipelineWorkerThread(
+        job_db=job_db,
+        leases=leases,
+        registry=registry,
+        runtime=runtime,
+        settings=settings,
+        agent_manager=agent_manager,
+    )
+    worker._definitions = definitions
+    return worker
+
+
+def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS")
+    block_event = threading.Event()
+    executor = RecordingPiExecutor("pi-default", block_event=block_event)
+    definition = _make_definition([_local_node("fetch")])
+    agent_manager = MagicMock()
+
+    job = job_db.create_job(
+        pipeline_key="test",
+        source_type="question",
+        source_id="Q1",
+        batch_id="",
+        title="Q1",
+        node_keys=["fetch"],
+        workspace_id=ws["id"],
+    )
+    with job_db.connect() as conn:
+        conn.execute(
+            """
+            insert into workspace_node_bindings
+            (workspace_id, pipeline_key, node_key, executor_id)
+            values (?, ?, ?, ?)
+            """,
+            (ws["id"], "test", "fetch", "pi-default"),
+        )
+        conn.execute(
+            """
+            insert into workspace_executor_allocations
+            (workspace_id, executor_id, concurrency_limit)
+            values (?, ?, ?)
+            """,
+            (ws["id"], "pi-default", 2),
+        )
+
+    worker = _make_pi_worker(tmp_path, db_path, executor, [definition], agent_manager)
+    worker._poll()
+
+    agent_manager.set_busy.assert_called_once()
+    args, kwargs = agent_manager.set_busy.call_args
+    assert args[0] == "pi"
+    assert kwargs["workspace_id"] == ws["id"]
+    assert args[1]["id"] == job["id"]
+    assert args[1]["title"] == "Q1"
+    assert args[1]["external_id"] == "Q1"
+    assert args[1]["current_phase"] == "fetch"
+
+    block_event.set()
+    worker.stop()
+
+    agent_manager.set_idle.assert_called_once_with("pi", workspace_id=ws["id"])
+
+
+def test_poll_does_not_update_agent_status_for_local_executor(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS")
+    executor = RecordingExecutor("local-default")
+    definition = _make_definition([_local_node("fetch")])
+    agent_manager = MagicMock()
+
+    job_db.create_job(
+        pipeline_key="test",
+        source_type="question",
+        source_id="Q1",
+        batch_id="",
+        title="Q1",
+        node_keys=["fetch"],
+        workspace_id=ws["id"],
+    )
+    with job_db.connect() as conn:
+        conn.execute(
+            """
+            insert into workspace_node_bindings
+            (workspace_id, pipeline_key, node_key, executor_id)
+            values (?, ?, ?, ?)
+            """,
+            (ws["id"], "test", "fetch", "local-default"),
+        )
+        conn.execute(
+            """
+            insert into workspace_executor_allocations
+            (workspace_id, executor_id, concurrency_limit)
+            values (?, ?, ?)
+            """,
+            (ws["id"], "local-default", 2),
+        )
+
+    worker = _make_worker(tmp_path, db_path, executor, [definition])
+    worker.agent_manager = agent_manager
+    worker._poll()
+
+    executor.block_event.set()
+    worker.stop()
+
+    agent_manager.set_busy.assert_not_called()
+    agent_manager.set_idle.assert_not_called()

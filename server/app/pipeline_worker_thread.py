@@ -20,6 +20,7 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
+from server.app.pipeline_worker_agent_status import agent_status_scope
 from server.app.pipelines.definition import PipelineDefinition, PipelineNode
 from server.app.pipelines.execution_control import allowed_nodes
 from server.app.pipelines.registry import list_registered_pipelines
@@ -286,18 +287,19 @@ class PipelineWorkerThread:
         return True
 
     def _run_claim(self, claim: ClaimedExecution, context: ExecutionContext) -> ExecutionResult:
-        try:
-            return self.runtime.run(claim, context)
-        except Exception as exc:
-            logger.exception("pipeline execution %s failed", claim.execution_id)
-            result = ExecutionResult(
-                status="failed",
-                exit_code=1,
-                error_message=str(exc),
-                log_path=str(context.log_path),
-            )
-            self.leases.finish(claim.lease_id, result)
-            return result
+        with agent_status_scope(self.agent_manager, self.registry, claim, context):
+            try:
+                return self.runtime.run(claim, context)
+            except Exception as exc:
+                logger.exception("pipeline execution %s failed", claim.execution_id)
+                result = ExecutionResult(
+                    status="failed",
+                    exit_code=1,
+                    error_message=str(exc),
+                    log_path=str(context.log_path),
+                )
+                self.leases.finish(claim.lease_id, result)
+                return result
 
     def _reap_futures(self) -> None:
         for execution_id in list(self._futures):

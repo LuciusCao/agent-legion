@@ -8,6 +8,8 @@ from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
 from server.app.services.workspace_executor_warnings import configuration_with_warnings
+from server.app.services.workspace_pi_agents import sync_pi_agents_for_workspace
+from server.app.services.workspace_settings_payload import workspace_settings_payload
 from server.app.settings import Settings
 
 
@@ -29,26 +31,6 @@ class WorkspaceConfigurationService:
         if workspace is None:
             raise NotFoundError("Workspace not found")
         return workspace
-
-    def _settings_payload(self, workspace: dict[str, Any]) -> dict[str, Any]:
-        intake_config = workspace.get("intake_config")
-        if not isinstance(intake_config, dict):
-            intake_config = {}
-        enabled_modes = intake_config.get("enabled_modes")
-        label_overrides = intake_config.get("label_overrides")
-        resource_config = workspace.get("resource_config")
-        if not isinstance(resource_config, dict):
-            resource_config = {}
-        resources = resource_config.get("resources")
-        if not isinstance(resources, dict):
-            resources = {}
-        return {
-            "entityType": str(workspace.get("default_entity") or "question"),
-            "intakeModes": enabled_modes if isinstance(enabled_modes, list) else [],
-            "labelOverrides": label_overrides if isinstance(label_overrides, dict) else {},
-            "pipelineKey": str(workspace.get("default_pipeline_key") or "question_content"),
-            "resources": resources,
-        }
 
     def list_workspaces(self) -> list[dict[str, Any]]:
         return self.job_db.list_workspaces()
@@ -98,7 +80,7 @@ class WorkspaceConfigurationService:
 
     def settings_payload(self, workspace_id: str) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        return self._settings_payload(workspace)
+        return workspace_settings_payload(workspace)
 
     def replace_configuration(
         self,
@@ -110,7 +92,7 @@ class WorkspaceConfigurationService:
         node_limits: list[dict[str, Any]],
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        current = self._settings_payload(workspace)
+        current = workspace_settings_payload(workspace)
         pipeline_key = settings_patch.get("pipelineKey") or str(current["pipelineKey"])
         pipeline = self.pipelines.definition(pipeline_key)
 
@@ -155,11 +137,16 @@ class WorkspaceConfigurationService:
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
-        self._sync_pi_agents(workspace_id, executor_allocations)
+        sync_pi_agents_for_workspace(
+            workspace_id,
+            executor_allocations,
+            self.settings.executor_definitions,
+            self.agent_manager,
+        )
         executor_configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
         return {
             "workspace": saved_workspace,
-            "settings": self._settings_payload(saved_workspace),
+            "settings": workspace_settings_payload(saved_workspace),
             "executor_configuration": configuration_with_warnings(
                 self.job_db, workspace_id, executor_configuration
             ),
@@ -213,7 +200,7 @@ class WorkspaceConfigurationService:
             )
         else:
             raise NotFoundError("Unknown settings section")
-        return self._settings_payload(workspace)
+        return workspace_settings_payload(workspace)
 
     def test_connection(self, workspace_id: str) -> dict[str, Any]:
         self._workspace(workspace_id)
@@ -221,25 +208,6 @@ class WorkspaceConfigurationService:
         if not (cms_config.get("question_detail_url") or cms_config.get("question_list_url")):
             raise InvalidOperationError("Global CMS URL is not configured")
         return {"ok": True, "message": "全局配置已就绪"}
-
-    def _sync_pi_agents(
-        self,
-        workspace_id: str,
-        executor_allocations: list[dict[str, Any]],
-    ) -> None:
-        pi_allocation: dict[str, Any] | None = None
-        for allocation in executor_allocations:
-            executor_id = allocation.get("executor_id", "")
-            definition = self.settings.executor_definitions.get(executor_id)
-            if definition is not None and definition.kind == "pi":
-                pi_allocation = allocation
-                break
-        if pi_allocation is not None:
-            self.agent_manager.add_pi_agent_for_workspace(
-                workspace_id, int(pi_allocation.get("concurrency_limit", 1))
-            )
-        else:
-            self.agent_manager.remove_pi_agent_for_workspace(workspace_id)
 
     def stats(self, workspace_id: str) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
@@ -271,27 +239,3 @@ class WorkspaceConfigurationService:
             "executor_status": {"executors": executors},
             "latest_run": dict(latest_run) if latest_run else None,
         }
-
-
-def sync_workspace_pi_agents(
-    job_db: JobQueries,
-    settings: Settings,
-    agent_manager: AgentStatusManager,
-) -> None:
-    """Register pi agents for all workspaces that currently allocate a pi executor."""
-    for workspace in job_db.list_workspaces():
-        workspace_id = str(workspace["id"])
-        config = job_db.get_workspace_executor_configuration(workspace_id)
-        pi_allocation: dict[str, Any] | None = None
-        for allocation in config.get("allocations", []):
-            executor_id = allocation.get("executor_id", "")
-            definition = settings.executor_definitions.get(executor_id)
-            if definition is not None and definition.kind == "pi":
-                pi_allocation = allocation
-                break
-        if pi_allocation is not None:
-            agent_manager.add_pi_agent_for_workspace(
-                workspace_id, int(pi_allocation.get("concurrency_limit", 1))
-            )
-        else:
-            agent_manager.remove_pi_agent_for_workspace(workspace_id)
