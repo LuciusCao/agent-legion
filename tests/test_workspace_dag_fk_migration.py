@@ -247,7 +247,9 @@ def test_v004_rebuilds_tables_with_pre_existing_indexes(tmp_path: Path) -> None:
     with conn:
         # Indexes that may already exist on a real database from prior schema init.
         conn.execute("create index idx_jobs_workflow_status on jobs(workflow_key, status)")
-        conn.execute("create index idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id)")
+        conn.execute(
+            "create index idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id)"
+        )
         conn.execute(
             "create index idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status)"
         )

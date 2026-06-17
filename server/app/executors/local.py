@@ -174,7 +174,7 @@ class LocalExecutor:
             "expected_outputs": context.expected_outputs,
             "capability": context.capability,
             "node_key": context.node_key,
-            "pipeline_key": context.workflow_key,
+            "workflow_key": context.workflow_key,
             "execution_id": context.execution_id,
             "workspace_id": context.workspace_id,
             "workspace": dict(context.workspace),

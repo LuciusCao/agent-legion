@@ -226,6 +226,7 @@ class JobIntakeService:
             "resource": mode.resource,
         }
         source_payload["task_candidates"] = candidates
+        # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
         batch = self.job_db.create_batch(
             payload["pipeline_key"],
             payload["source_kind"],
@@ -236,6 +237,7 @@ class JobIntakeService:
         for candidate in candidates:
             jobs.append(
                 self.job_db.create_job(
+                    # TODO(Task C): remove mapping once API contracts rename pipeline_key -> workflow_key
                     workflow_key=payload["pipeline_key"],
                     source_type=str(candidate["entity_type"]),
                     source_id=str(candidate["entity_id"]),

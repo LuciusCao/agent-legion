@@ -29,7 +29,8 @@ def run_migrations(
         ensure_foreign_keys(conn)
         applied = load_applied(conn)
         check_history(applied, registry)
-        for migration in sorted(migration_tuple, key=lambda m: m.version):
+        sorted_migrations = sorted(migration_tuple, key=lambda m: m.version)
+        for migration in sorted_migrations:
             if migration.version in applied:
                 continue
             logger.info("Applying migration %d: %s", migration.version, migration.name)
