@@ -7,11 +7,11 @@ def test_list_executors_endpoint(client):
         "kind": "local",
         "global_capacity": 16,
         "capabilities": [
+            "assemble_comprehension_info",
             "assemble_package",
             "clean_and_parse",
             "fetch_question_context",
             "fetch_questions",
-            "mark_question",
         ],
     }
 

@@ -15,10 +15,10 @@ def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogSer
         "kind": "local",
         "global_capacity": 16,
         "capabilities": [
+            "assemble_comprehension_info",
             "assemble_package",
             "clean_and_parse",
             "fetch_question_context",
             "fetch_questions",
-            "mark_question",
         ],
     }
