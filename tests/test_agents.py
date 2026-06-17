@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 from server.app.agents import AgentStatus, AgentStatusManager
@@ -314,3 +315,24 @@ def test_idle_pops_correct_video_id():
     agent = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
     assert agent["task_count"] == 1
     assert agent["current_video_id"] == "video_a"
+
+
+def test_set_busy_and_idle_are_thread_safe():
+    manager = AgentStatusManager()
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=5)
+
+    def _busy_idle_loop() -> None:
+        for i in range(50):
+            manager.set_busy("pi", {"id": f"job_{i}"}, workspace_id="ws-1")
+            manager.set_idle("pi", workspace_id="ws-1")
+
+    threads = [threading.Thread(target=_busy_idle_loop) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    agents = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"]
+    assert len(agents) == 1
+    assert agents[0]["task_count"] == 0
+    assert agents[0]["busy"] is False
