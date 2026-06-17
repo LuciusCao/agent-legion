@@ -187,7 +187,7 @@ def resume_job(conn: sqlite3.Connection, job_id: str) -> None:
         cursor = conn.execute(
             """
             update jobs
-            set status='running',
+            set status='queued',
                 execution_paused=0,
                 execution_mode='full',
                 target_node_key=null,
@@ -201,7 +201,7 @@ def resume_job(conn: sqlite3.Connection, job_id: str) -> None:
         cursor = conn.execute(
             """
             update jobs
-            set status='running',
+            set status='queued',
                 execution_paused=0,
                 pause_reason='',
                 updated_at=current_timestamp

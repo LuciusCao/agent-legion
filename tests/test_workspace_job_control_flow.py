@@ -432,6 +432,6 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert response.json()["status"] == "succeeded"
-    assert detail["job"]["status"] == "running"
+    assert detail["job"]["status"] == "queued"
     assert detail["job"]["execution_control"]["paused"] is False
     assert detail["job"]["execution_control"]["mode"] == "full"
