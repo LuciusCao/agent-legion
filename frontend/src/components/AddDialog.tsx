@@ -34,8 +34,12 @@ export function AddDialog({
   )
   const [selectedModeKey, setSelectedModeKey] = useState('')
   const [loadingModes, setLoadingModes] = useState(false)
+  const [inputValue, setInputValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
+
+  const hasInput = inputValue.trim().length > 0
+  const submitDisabled = !hasInput || isSubmitting || loadingModes
 
   const modes = useMemo<PipelineIntakeModeRecord[]>(() => {
     if (!pipeline?.intake?.modes) return []
@@ -95,7 +99,7 @@ export function AddDialog({
   }, [open, context, workspaceId])
 
   const handleSubmit = useCallback(async () => {
-    const input = textareaRef.current?.value || ''
+    const input = inputValue.trim()
     if (context === 'video') {
       const items = parseResourceInputs(input)
       if (items.length === 0) return
@@ -115,7 +119,7 @@ export function AddDialog({
           }),
         })
         setResults(response.results)
-        if (textareaRef.current) textareaRef.current.value = ''
+        setInputValue('')
       } finally {
         setIsSubmitting(false)
       }
@@ -153,18 +157,27 @@ export function AddDialog({
           message: job.title,
         }))
         setResults(mappedResults)
-        if (textareaRef.current) textareaRef.current.value = ''
+        setInputValue('')
       } finally {
         setIsSubmitting(false)
       }
     }
-  }, [context, addContentType, workspaceId, selectedModeKey, workspace, modes])
+  }, [
+    context,
+    addContentType,
+    workspaceId,
+    selectedModeKey,
+    workspace,
+    modes,
+    inputValue,
+  ])
 
   const handleClose = useCallback(() => {
     setResults([])
     setWorkspace(null)
     setPipeline(null)
     setSelectedModeKey('')
+    setInputValue('')
     onClose()
   }, [onClose])
 
@@ -253,6 +266,10 @@ export function AddDialog({
             rows={8}
             label={textareaLabel}
             placeholder={placeholder}
+            value={inputValue}
+            onInput={(event: React.FormEvent<HTMLInputElement>) =>
+              setInputValue((event.target as HTMLInputElement).value)
+            }
           />
           {results.length > 0 && (
             <div className={styles.addResults}>
@@ -273,7 +290,7 @@ export function AddDialog({
         </md-text-button>
         <md-filled-button
           onClick={handleSubmit}
-          disabled={isSubmitting || loadingModes || undefined}
+          disabled={submitDisabled || undefined}
         >
           {isSubmitting ? '处理中...' : '加入队列'}
         </md-filled-button>
