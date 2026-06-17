@@ -73,6 +73,9 @@ class PipelineWorkerThread:
         expired = self.leases.expire_stale(datetime.now(UTC))
         if expired:
             logger.warning("expired stale pipeline executions on startup: %s", ", ".join(expired))
+        recovered = self.leases.recover_orphaned_running_jobs(datetime.now(UTC))
+        if recovered:
+            logger.warning("recovered orphaned running jobs on startup: %s", ", ".join(recovered))
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -97,6 +100,9 @@ class PipelineWorkerThread:
         expired = self.leases.expire_stale(datetime.now(UTC))
         if expired:
             logger.warning("expired stale pipeline executions: %s", ", ".join(expired))
+        recovered = self.leases.recover_orphaned_running_jobs(datetime.now(UTC))
+        if recovered:
+            logger.warning("recovered orphaned running jobs: %s", ", ".join(recovered))
 
         claimed_any = False
         while True:

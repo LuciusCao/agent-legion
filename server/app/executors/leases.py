@@ -182,3 +182,74 @@ class ExecutorLeaseRepository:
             return row is not None
         finally:
             conn.close()
+
+    def recover_orphaned_running_jobs(self, now: datetime) -> list[str]:
+        """Return jobs stuck in 'running' with no active lease back to 'queued'.
+
+        A job is orphaned when jobs.status='running' but no executor_leases
+        row exists with the same job_id and status='active'. Any job_nodes
+        still marked 'running' for that job are reset to 'pending' so the
+        scheduler can re-evaluate which node to run next.
+        """
+        conn = connect_sqlite(self.path)
+        conn.isolation_level = None
+        recovered: list[str] = []
+        now_str = _sqlite_timestamp(now)
+        try:
+            conn.execute("begin immediate")
+            rows = conn.execute(
+                """
+                select j.id
+                from jobs j
+                where j.status='running'
+                  and not exists (
+                      select 1 from executor_leases l
+                      where l.job_id = j.id and l.status='active'
+                  )
+                """
+            ).fetchall()
+            recovered = [str(row["id"]) for row in rows]
+            if not recovered:
+                conn.execute("commit")
+                return recovered
+
+            placeholders = ",".join("?" * len(recovered))
+            conn.execute(
+                f"""
+                update job_nodes
+                set status='pending',
+                    stale_reason='',
+                    error_message='',
+                    started_at=null,
+                    finished_at=null
+                where job_id in ({placeholders}) and status='running'
+                """,
+                recovered,
+            )
+            conn.execute(
+                f"""
+                update jobs
+                set status='queued', updated_at=?
+                where id in ({placeholders})
+                """,
+                (now_str, *recovered),
+            )
+            conn.execute(
+                f"""
+                update node_runs
+                set status='failed',
+                    error_message='orphaned recovery',
+                    finished_at=?
+                where job_id in ({placeholders}) and status='running'
+                """,
+                (now_str, *recovered),
+            )
+            conn.execute("commit")
+            for job_id in recovered:
+                self._broadcast_job_update(job_id)
+            return recovered
+        except Exception:
+            _rollback(conn)
+            raise
+        finally:
+            conn.close()
