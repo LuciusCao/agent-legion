@@ -1,12 +1,27 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.pipelines.definition import PipelineDefinition
-from server.app.pipelines.local_handlers import LOCAL_HANDLERS
 from server.app.pipelines.pi_runner import PiRunner
+from server.app.pipelines.question_comprehension_info import (
+    assemble_comprehension_info as qci_assemble_comprehension_info,
+)
+from server.app.pipelines.question_comprehension_info import (
+    clean_and_parse as qci_clean_and_parse,
+)
+from server.app.pipelines.question_comprehension_info import (
+    fetch_questions as qci_fetch_questions,
+)
+from server.app.pipelines.question_content import fetch_question_context
+from server.app.pipelines.reading_analysis import (
+    clean_and_parse,
+    fetch_questions,
+    mark_question,
+)
 from server.app.pipelines.scheduler import (
     _node_statuses,
     _refresh_job_status,
@@ -14,6 +29,23 @@ from server.app.pipelines.scheduler import (
 )
 from server.app.pipelines.skills import resolve_pipeline_skill
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
+
+LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
+LOCAL_HANDLERS: dict[str, dict[str, LocalHandler]] = {
+    "question_content": {
+        "fetch_question_context": fetch_question_context,
+    },
+    "reading_analysis": {
+        "fetch_questions": fetch_questions,
+        "clean_and_parse": clean_and_parse,
+        "mark_question": mark_question,
+    },
+    "question_comprehension_info": {
+        "fetch_questions": qci_fetch_questions,
+        "clean_and_parse": qci_clean_and_parse,
+        "assemble_comprehension_info": qci_assemble_comprehension_info,
+    },
+}
 
 
 def _resolve_job_dir(job: dict[str, Any], jobs_dir: Path | None) -> Path:
@@ -112,7 +144,6 @@ def _execute_node_wrapped(
     skill_root: Path | None = None,
     jobs_dir: Path | None = None,
 ) -> bool:
-    """Run a single pipeline node and mark the job/node failed on unhandled exceptions."""
     try:
         return execute_node_once(
             job_db,
@@ -128,14 +159,11 @@ def _execute_node_wrapped(
     except Exception as exc:
         error_message = str(exc)
         runs = job_db.list_node_runs(job["id"])
-        latest_run = next(
-            (
-                run
-                for run in reversed(runs)
-                if run["node_key"] == node_key and run["status"] == "running"
-            ),
-            None,
-        )
+        latest_run = None
+        for run in reversed(runs):
+            if run["node_key"] == node_key and run["status"] == "running":
+                latest_run = run
+                break
         if latest_run is not None:
             job_db.finish_node_run(latest_run["id"], "failed", 1, error_message)
         else:
