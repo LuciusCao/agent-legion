@@ -11,35 +11,24 @@ from pathlib import Path
 
 from scripts.architecture.helpers import imported_modules
 
-# Generic Workspace modules must not depend on Video Hive video pipeline phases.
 _WORKSPACE_MODULE_PREFIXES = tuple(
-    """server/app/routes/jobs.py server/app/routes/job_artifacts.py
-    server/app/routes/job_batches.py server/app/routes/workspace_ server/app/services/job_
-    server/app/services/workspace_ server/app/services/executor_catalog.py
-    server/app/services/workflow_catalog.py""".split()
+    """server/app/routes/jobs.py server/app/routes/job_artifacts.py server/app/routes/job_batches.py server/app/routes/workspace_ server/app/services/job_ server/app/services/workspace_ server/app/services/executor_catalog.py server/app/services/workflow_catalog.py""".split()
 )
 
-# Video Hive imports forbidden in generic Workspace code, except shared packaging.
 _VIDEO_HIVE_MODULE_PREFIXES = tuple(
-    """server.app.pipeline. server.app.services.video_actions server.app.services.intake
-    server.app.services.manual_run server.app.services.interaction_stats""".split()
+    """server.app.pipeline. server.app.services.video_actions server.app.services.intake server.app.services.manual_run server.app.services.interaction_stats""".split()
 )
 
 _VIDEO_HIVE_EXACT = frozenset({"server.app.pipeline"})
 _VIDEO_HIVE_EXCEPTIONS: set[tuple[str, str]] = set()
 
-# Job execution services must claim capacity through leases.
 _JOB_SERVICE_PREFIX = "server/app/services/job_"
 _DIRECT_EXECUTOR_MODULE_PREFIXES = tuple(
-    """server.app.executors.local server.app.executors.pi server.app.executors.openclaw
-    server.app.executors.runtime server.app.executors.registry server.app.executors.protocol
-    server.app.executors.config""".split()
+    """server.app.executors.local server.app.executors.pi server.app.executors.openclaw server.app.executors.runtime server.app.executors.registry server.app.executors.protocol server.app.executors.config""".split()
 )
 
 _WORKSPACE_ROUTE_PREFIXES = tuple(
-    """server/app/routes/jobs.py server/app/routes/job_artifacts.py
-    server/app/routes/job_batches.py server/app/routes/packages.py
-    server/app/routes/workspace_""".split()
+    """server/app/routes/jobs.py server/app/routes/job_artifacts.py server/app/routes/job_batches.py server/app/routes/packages.py server/app/routes/workspace_""".split()
 )
 _DAG_TRAVERSAL_NAMES = frozenset(
     {"downstream_nodes", "ancestor_closure", "find_ready_nodes", "allowed_nodes"}
@@ -48,18 +37,9 @@ _FILESYSTEM_DELETION_IMPORTS = {
     "os": frozenset({"remove", "rmdir", "unlink"}),
     "shutil": frozenset({"move", "rmtree"}),
 }
-_PATH_DELETION_ATTRS = frozenset({"rmdir", "unlink"})
 
-# Matching frontend types must derive from generated OpenAPI schemas.
 _GENERATED_JOB_TRANSPORT_NAMES = frozenset(
-    """ArtifactResponse BatchJobIdsRequest BatchJobMutationResponse BatchRunToRequest
-    ContinueJobRequest DeleteJobResponse ExecutionControlSummaryResponse JobBatchRequest
-    JobBatchRerunRequest JobBatchResponse JobDetailResponse JobLogResponse
-    JobMutationResultResponse JobNodeResponse JobNodeSummaryResponse JobSummaryResponse
-    JobsResponse NodeRunResponse RunToRequest WorkspaceDagResponse WorkspacePackageRequest
-    WorkspacePackageResponse WorkspacePackageResultResponse WorkspaceResponse WorkspaceRunsResponse
-    WorkspaceSettingsResponse WorkspaceSettingsSectionRequest WorkspaceSettingsTestResponse
-    WorkspaceStatsResponse WorkspacesResponse""".split()
+    """ArtifactResponse BatchJobIdsRequest BatchJobMutationResponse BatchRunToRequest ContinueJobRequest DeleteJobResponse ExecutionControlSummaryResponse JobBatchRequest JobBatchRerunRequest JobBatchResponse JobDetailResponse JobLogResponse JobMutationResultResponse JobNodeResponse JobNodeSummaryResponse JobSummaryResponse JobsResponse NodeRunResponse RunToRequest WorkspaceDagResponse WorkspacePackageRequest WorkspacePackageResponse WorkspacePackageResultResponse WorkspaceResponse WorkspaceRunsResponse WorkspaceSettingsResponse WorkspaceSettingsSectionRequest WorkspaceSettingsTestResponse WorkspaceStatsResponse WorkspacesResponse""".split()
 )
 
 _DDL_PATTERN = re.compile(
@@ -162,12 +142,18 @@ class _DeletionCallVisitor(ast.NodeVisitor):
     def _origin(self, node: ast.expr) -> str | None:
         if isinstance(node, ast.Name):
             return self.origins.get(node.id)
+        if isinstance(node, ast.Call):
+            if self._origin(node.func) == "path/class":
+                return "path/instance"
+            return None
         if not isinstance(node, ast.Attribute):
             return None
-        if node.attr in _PATH_DELETION_ATTRS:
-            return f"delete/{node.attr}"
         base = self._origin(node.value)
-        if base and base.startswith("module/"):
+        if base in {"path/class", "path/instance"} and node.attr in {"rmdir", "unlink"}:
+            return f"delete/{node.attr}"
+        if base == "module/pathlib" and node.attr == "Path":
+            return "path/class"
+        if base in {"module/os", "module/shutil"}:
             module = base.removeprefix("module/")
             if node.attr in _FILESYSTEM_DELETION_IMPORTS[module]:
                 return f"delete/{node.attr}"
@@ -175,24 +161,38 @@ class _DeletionCallVisitor(ast.NodeVisitor):
 
     def visit_Import(self, node: ast.Import) -> None:
         for alias in node.names:
-            if alias.name in _FILESYSTEM_DELETION_IMPORTS:
+            if alias.name in {*_FILESYSTEM_DELETION_IMPORTS, "pathlib"}:
                 self.origins[alias.asname or alias.name] = f"module/{alias.name}"
 
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module == "pathlib":
+            for alias in node.names:
+                if alias.name == "Path":
+                    self.origins[alias.asname or alias.name] = "path/class"
+            return
         allowed = _FILESYSTEM_DELETION_IMPORTS.get(node.module or "", frozenset())
         for alias in node.names:
             if alias.name in allowed:
                 self.origins[alias.asname or alias.name] = f"delete/{alias.name}"
 
+    def _bind(self, target: ast.expr, value: ast.expr | None) -> None:
+        if not isinstance(target, ast.Name):
+            return
+        origin = self._origin(value) if value is not None else None
+        if origin is None:
+            self.origins.pop(target.id, None)
+        else:
+            self.origins[target.id] = origin
+
     def visit_Assign(self, node: ast.Assign) -> None:
         self.visit(node.value)
-        origin = self._origin(node.value)
         for target in node.targets:
-            if isinstance(target, ast.Name):
-                if origin is None:
-                    self.origins.pop(target.id, None)
-                else:
-                    self.origins[target.id] = origin
+            self._bind(target, node.value)
+
+    def visit_AnnAssign(self, node: ast.AnnAssign) -> None:
+        if node.value is not None:
+            self.visit(node.value)
+        self._bind(node.target, node.value)
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         self.origins.pop(node.name, None)

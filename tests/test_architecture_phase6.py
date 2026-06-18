@@ -126,7 +126,15 @@ class TestRouteDagAndDeletionBoundary:
             ("from os import remove", "remove('/tmp/package.zip')", True),
             ("from shutil import rmtree as drop", "drop('/tmp/package')", True),
             ("", "items = []\n    items.remove('value')", False),
+            ("", "client.unlink()", False),
             ("import os", "delete = os.remove\n    delete('/tmp/package.zip')", True),
+            ("import os", "delete: object = os.remove\n    delete('/tmp/x')", True),
+            ("from pathlib import Path as LocalPath", "LocalPath.unlink(path)", True),
+            (
+                "import os\ndef local_fn(value):\n    return value",
+                "delete = os.remove\n    delete: object = local_fn\n    delete('/tmp/x')",
+                False,
+            ),
             ("import os as operating_system", "operating_system.remove('/tmp/x')", True),
             (
                 "from os import remove\ndef remove(value):\n    return value",
@@ -173,9 +181,7 @@ class TestRouteDagAndDeletionBoundary:
     def test_rejects_dag_or_deletion_in_route(self, tmp_path, expected_error, source):
         write(tmp_path / "server/app/routes/jobs.py", source)
         _empty_budgets(tmp_path)
-
         errors = check_repository(tmp_path)
-
         assert any(expected_error in error for error in errors)
 
     def test_allows_deletion_in_services(self, tmp_path):
@@ -188,9 +194,7 @@ class TestRouteDagAndDeletionBoundary:
             "        shutil.rmtree(Path('/tmp/x'))\n",
         )
         _empty_budgets(tmp_path)
-
         errors = check_repository(tmp_path)
-
         assert not any("filesystem deletion" in error for error in errors)
 
 
