@@ -115,12 +115,16 @@ export function buildHighlightedStemHtml(
   }
 
   function escapeHtml(s: string): string {
-    return s.replace(/[&<>"]/g, (c) => ({
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-    })[c] as string)
+    return s.replace(
+      /[&<>"]/g,
+      (c) =>
+        ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+        })[c] as string
+    )
   }
 
   let html = ''
@@ -129,7 +133,9 @@ export function buildHighlightedStemHtml(
     if (start > cursor) {
       html += escapeHtml(plain.slice(cursor, start))
     }
-    const dataAttr = ids.length ? ` data-ids="${escapeHtml(ids.join(','))}"` : ''
+    const dataAttr = ids.length
+      ? ` data-ids="${escapeHtml(ids.join(','))}"`
+      : ''
     html += `<span class="highlight"${dataAttr}>${escapeHtml(plain.slice(start, end))}</span>`
     cursor = end
   }

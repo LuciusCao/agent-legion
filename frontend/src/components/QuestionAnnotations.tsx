@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { renderLatexInHtml } from '../lib/latex'
 import type { KeyInfoItem } from '../types'
 import styles from './QuestionAnnotations.module.css'
@@ -8,10 +8,21 @@ export interface QuestionAnnotationsProps {
   hiddenItems: KeyInfoItem[]
 }
 
-interface AnnotationLayout {
+interface Measurement {
+  id: string
+  height: number
+  targetTop: number
+  targetRight: number
+  targetHeight: number
+}
+
+interface FinalLayout {
   item: KeyInfoItem
   top: number
-  targetRect: DOMRect
+  height: number
+  targetTop: number
+  targetRight: number
+  targetHeight: number
 }
 
 const GAP = 12
@@ -31,14 +42,23 @@ export function QuestionAnnotations({
   hiddenItems,
 }: QuestionAnnotationsProps) {
   const layerRef = useRef<HTMLDivElement>(null)
-  const [layouts, setLayouts] = useState<AnnotationLayout[]>([])
-  const [paths, setPaths] = useState<string[]>([])
-  const measuredRef = useRef(false)
-  const lastTypesetKeyRef = useRef('')
+  const [measurements, setMeasurements] = useState<Measurement[]>([])
+  const [wrapperHeight, setWrapperHeight] = useState(0)
   const [recalcTick, setRecalcTick] = useState(0)
   const [mathJaxTick, setMathJaxTick] = useState(0)
+  const lastTypesetKeyRef = useRef('')
 
   const hiddenKey = hiddenItems.map((i) => i.key_info_id).join(',')
+  const measureKey = `${hiddenKey}:${recalcTick}:${mathJaxTick}`
+
+  // Reset cached measurements whenever the items, window size, or typeset output
+  // changes. Updating state inside an effect is normally discouraged, but it is
+  // the simplest way to invalidate DOM-derived measurements when the inputs change.
+  useEffect(() => {
+    lastTypesetKeyRef.current = ''
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMeasurements([])
+  }, [measureKey])
 
   useEffect(() => {
     function handleResize() {
@@ -48,20 +68,24 @@ export function QuestionAnnotations({
     return () => window.removeEventListener('resize', handleResize)
   }, [])
 
-  // First pass: locate highlighted spans and compute initial card positions.
-  useLayoutEffect(() => {
+  // Measure rendered card heights and highlight-span positions relative to the
+  // annotation layer. DOM measurements can only happen after paint, so we update
+  // React state from within an effect guarded by the measureKey.
+  useEffect(() => {
     const wrapper = wrapperRef.current
     const layer = layerRef.current
     if (!wrapper || !layer || hiddenItems.length === 0) {
-      setLayouts([])
-      setPaths([])
-      measuredRef.current = false
       return
     }
 
-    const wrapperRect = wrapper.getBoundingClientRect()
+    // Already measured for the current measureKey.
+    if (measurements.length === hiddenItems.length) {
+      return
+    }
+
+    const layerRect = layer.getBoundingClientRect()
     const spans = Array.from(wrapper.querySelectorAll('.highlight'))
-    const next: AnnotationLayout[] = []
+    const next: Measurement[] = []
 
     for (const item of hiddenItems) {
       const targetSpan = spans.find((span) => {
@@ -72,90 +96,113 @@ export function QuestionAnnotations({
           .filter(Boolean)
         return ids.includes(item.key_info_id)
       })
-      if (!targetSpan) continue
+      const card = document.getElementById(`annotation-${item.key_info_id}`)
+      if (!targetSpan || !card) continue
 
-      const rect = targetSpan.getBoundingClientRect()
+      const spanRect = targetSpan.getBoundingClientRect()
+      const cardRect = card.getBoundingClientRect()
       next.push({
-        item,
-        top: rect.top - wrapperRect.top,
-        targetRect: rect,
+        id: item.key_info_id,
+        height: cardRect.height,
+        targetTop: spanRect.top - layerRect.top,
+        targetRight: spanRect.right - layerRect.left,
+        targetHeight: spanRect.height,
       })
     }
 
-    next.sort((a, b) => a.targetRect.top - b.targetRect.top)
-    setLayouts(next)
-    measuredRef.current = false
-  }, [wrapperRef, hiddenKey, recalcTick, mathJaxTick])
-
-  // Second pass: measure rendered card heights, resolve overlaps, and draw curves.
-  useLayoutEffect(() => {
-    const wrapper = wrapperRef.current
-    const layer = layerRef.current
-    if (!wrapper || !layer || layouts.length === 0) {
-      setPaths([])
+    if (next.length !== hiddenItems.length) {
+      // DOM is not fully ready yet; wait for the next effect cycle.
       return
     }
-    if (measuredRef.current) return
 
     const wrapperRect = wrapper.getBoundingClientRect()
-    const layerRect = layer.getBoundingClientRect()
+    // Updating state from an effect is normally discouraged, but here it is the
+    // only way to turn post-paint DOM measurements (card heights and highlight
+    // positions) into rendered layout positions and SVG paths.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setMeasurements(next)
+    setWrapperHeight(wrapperRect.height)
+  }, [
+    hiddenItems,
+    measurements.length,
+    recalcTick,
+    mathJaxTick,
+    wrapperHeight,
+    wrapperRef,
+  ])
 
-    const elements = layouts
-      .map((l) => document.getElementById(`annotation-${l.item.key_info_id}`))
-      .filter((el): el is HTMLElement => el !== null)
-    const heights = elements.map((el) => el.getBoundingClientRect().height)
+  const itemMap = useMemo(
+    () => new Map(hiddenItems.map((item) => [item.key_info_id, item])),
+    [hiddenItems]
+  )
 
-    const adjusted: AnnotationLayout[] = []
+  const finalLayouts = useMemo<FinalLayout[]>(() => {
+    if (measurements.length !== hiddenItems.length) {
+      return []
+    }
+
+    const sorted = measurements
+      .map((m) => ({
+        ...m,
+        center: m.targetTop + m.targetHeight / 2,
+        item: itemMap.get(m.id)!,
+      }))
+      .sort((a, b) => a.center - b.center)
+
+    const layouts: FinalLayout[] = []
     let prevBottom = -Infinity
-    let maxBottom = 0
 
-    for (let i = 0; i < layouts.length; i++) {
-      const layout = layouts[i]
-      const height = heights[i] ?? 0
-      let top = layout.top
+    for (const m of sorted) {
+      let top = m.center - m.height / 2
       if (top < prevBottom + GAP) {
         top = prevBottom + GAP
       }
-      adjusted.push({ ...layout, top })
-      prevBottom = top + height
-      maxBottom = Math.max(maxBottom, prevBottom)
+      layouts.push({
+        item: m.item,
+        top,
+        height: m.height,
+        targetTop: m.targetTop,
+        targetRight: m.targetRight,
+        targetHeight: m.targetHeight,
+      })
+      prevBottom = top + m.height
     }
 
-    const changed = adjusted.some((l, i) => l.top !== layouts[i].top)
-    if (changed) {
-      setLayouts(adjusted)
-    }
-    measuredRef.current = true
+    return layouts
+  }, [measurements, hiddenItems, itemMap])
 
-    // Make the layer tall enough for both the stem and the cards.
-    layer.style.height = `${Math.max(wrapperRect.height, maxBottom + GAP)}px`
+  const paths = useMemo(() => {
+    return finalLayouts.map((layout) => {
+      const startX = layout.targetRight
+      const startY = layout.targetTop + layout.targetHeight / 2
+      const endX = 0
+      const endY = layout.top + layout.height / 2
+      const midX = startX / 2
 
-    const nextPaths: string[] = []
-    for (let i = 0; i < adjusted.length; i++) {
-      const layout = adjusted[i]
-      const height = heights[i] ?? 0
-      const startX = layout.targetRect.right - wrapperRect.left
-      const startY =
-        layout.targetRect.top - wrapperRect.top + layout.targetRect.height / 2
-      const endX = layerRect.left - wrapperRect.left
-      const endY = layout.top + height / 2
-      const midX = (startX + endX) / 2
-
-      nextPaths.push(
+      return (
         `M ${startX.toFixed(1)} ${startY.toFixed(1)} ` +
-          `C ${midX.toFixed(1)} ${startY.toFixed(1)}, ` +
-          `${midX.toFixed(1)} ${endY.toFixed(1)}, ` +
-          `${endX.toFixed(1)} ${endY.toFixed(1)}`
+        `C ${midX.toFixed(1)} ${startY.toFixed(1)}, ` +
+        `${midX.toFixed(1)} ${endY.toFixed(1)}, ` +
+        `${endX.toFixed(1)} ${endY.toFixed(1)}`
       )
+    })
+  }, [finalLayouts])
+
+  const layerHeight = useMemo(() => {
+    if (finalLayouts.length === 0) {
+      return wrapperHeight || undefined
     }
-    setPaths(nextPaths)
-  }, [layouts, wrapperRef])
+    const last = finalLayouts[finalLayouts.length - 1]
+    const cardsBottom = last.top + last.height + GAP
+    return Math.max(wrapperHeight, cardsBottom)
+  }, [finalLayouts, wrapperHeight])
 
-  // Typeset LaTeX in the cards, then remeasure because rendered math changes size.
+  // Typeset LaTeX in the cards, then remeasure because rendered math can change
+  // card sizes.
   useEffect(() => {
-    if (layouts.length === 0) return
+    if (finalLayouts.length === 0) return
 
-    const typesetKey = layouts.map((l) => l.item.key_info_id).join(',')
+    const typesetKey = finalLayouts.map((l) => l.item.key_info_id).join(',')
     if (lastTypesetKeyRef.current === typesetKey) return
     lastTypesetKeyRef.current = typesetKey
 
@@ -174,34 +221,47 @@ export function QuestionAnnotations({
           // MathJax failures should not break the UI.
         })
         .then(() => {
-          measuredRef.current = false
           setMathJaxTick((t) => t + 1)
         })
     }
-  }, [layouts])
+  }, [finalLayouts])
 
   if (hiddenItems.length === 0) return null
 
+  const isReady = finalLayouts.length === hiddenItems.length
+
   return (
-    <div ref={layerRef} className={styles.annotationLayer}>
+    <div
+      ref={layerRef}
+      className={styles.annotationLayer}
+      style={{ height: layerHeight }}
+    >
       <svg className={styles.connectionSvg}>
         {paths.map((d, idx) => (
           <path key={idx} className={styles.connectionLine} d={d} />
         ))}
       </svg>
-      {layouts.map((layout) => (
-        <div
-          key={layout.item.key_info_id}
-          id={`annotation-${layout.item.key_info_id}`}
-          className={styles.annotationCard}
-          style={{ top: layout.top }}
-          dangerouslySetInnerHTML={{
-            __html: renderLatexInHtml(
-              escapeHtml(layout.item.content.derivation || '')
-            ),
-          }}
-        />
-      ))}
+      {hiddenItems.map((item) => {
+        const layout = finalLayouts.find(
+          (l) => l.item.key_info_id === item.key_info_id
+        )
+        return (
+          <div
+            key={item.key_info_id}
+            id={`annotation-${item.key_info_id}`}
+            className={styles.annotationCard}
+            style={{
+              top: layout?.top ?? 0,
+              opacity: isReady ? 1 : 0,
+            }}
+            dangerouslySetInnerHTML={{
+              __html: renderLatexInHtml(
+                escapeHtml(item.content.derivation || '')
+              ),
+            }}
+          />
+        )
+      })}
     </div>
   )
 }

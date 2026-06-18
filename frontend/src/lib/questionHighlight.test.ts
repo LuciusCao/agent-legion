@@ -43,7 +43,10 @@ describe('adjustHighlightBoundaries', () => {
 
   it('expands start boundary inside inline latex formula', () => {
     const text = '已知 $f(x)=x^2$ 求值'
-    expect(adjustHighlightBoundaries(text, 5, 14)).toEqual({ start: 3, end: 14 })
+    expect(adjustHighlightBoundaries(text, 5, 14)).toEqual({
+      start: 3,
+      end: 14,
+    })
   })
 
   it('expands boundary to include full display formula', () => {
@@ -53,7 +56,10 @@ describe('adjustHighlightBoundaries', () => {
 
   it('clamps out of range indices', () => {
     const text = 'short'
-    expect(adjustHighlightBoundaries(text, -1, 100)).toEqual({ start: 0, end: 5 })
+    expect(adjustHighlightBoundaries(text, -1, 100)).toEqual({
+      start: 0,
+      end: 5,
+    })
   })
 })
 
