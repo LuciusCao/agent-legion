@@ -28,7 +28,7 @@ describe('DagStepper', () => {
     expect(bars[2].className).toContain('pending')
   })
 
-  it('maps stale status to stale class', () => {
+  it('maps stale status to pending class', () => {
     const { container } = render(
       <DagStepper
         nodes={
@@ -51,6 +51,7 @@ describe('DagStepper', () => {
       />
     )
     const bar = container.querySelector('[class*="stepBar"]')
-    expect(bar?.className).toContain('stale')
+    expect(bar?.className).toContain('pending')
+    expect(bar?.className).not.toContain('stale')
   })
 })

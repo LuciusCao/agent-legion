@@ -7,7 +7,8 @@ function getStepState(status: string): StepState {
   if (status === 'completed') return 'completed'
   if (status === 'running') return 'running'
   if (status === 'failed') return 'failed'
-  if (status === 'stale') return 'stale'
+  // stale is visually treated as pending; only failed is red
+  if (status === 'stale') return 'pending'
   return 'pending'
 }
 

@@ -116,12 +116,12 @@
 .timelineContent {
   flex: 1;
   min-width: 0;
-  padding: 4px 0 8px;
+  padding: 0 0 8px;
   display: grid;
   gap: 4px;
 }
 
-.timelineContent.statusRunning .nodeName {
+.nodeNameRunning {
   color: var(--md-sys-color-primary);
   font-weight: 600;
 }
@@ -131,6 +131,7 @@
   justify-content: space-between;
   align-items: center;
   gap: 8px;
+  min-height: 24px;
 }
 
 .nodeName {
