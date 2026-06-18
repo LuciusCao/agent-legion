@@ -176,3 +176,158 @@
 .stepTitle :global(p) {
   margin: 0;
 }
+
+.stemWrapper {
+  position: relative;
+  display: flex;
+  gap: 24px;
+  align-items: flex-start;
+}
+
+.stemMain {
+  flex: 1;
+  min-width: 0;
+}
+
+.highlight {
+  background: var(--md-sys-color-tertiary-container);
+  color: var(--md-sys-color-on-tertiary-container);
+  border-radius: 4px;
+  padding: 1px 2px;
+}
+
+.comprehensionChips {
+  margin-top: 16px;
+}
+
+.chipsHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.chipsCount {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.chipRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface);
+  color: var(--md-sys-color-on-surface);
+  font-size: 13px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  user-select: none;
+}
+
+.chip:hover {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.chipSelected {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+  border-color: var(--md-sys-color-secondary-container);
+}
+
+.chipIndex {
+  font-size: 11px;
+  color: var(--md-sys-color-on-surface-variant);
+  background: var(--md-sys-color-surface-container-high);
+  border-radius: 999px;
+  width: 18px;
+  height: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.chipSelected .chipIndex {
+  background: rgba(103, 80, 164, 0.15);
+  color: var(--md-sys-color-on-secondary-container);
+}
+
+.detailPanel {
+  margin-top: 16px;
+}
+
+.detailCard {
+  background: var(--md-sys-color-surface);
+  border: 1px solid var(--md-sys-color-outline-variant);
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 10px;
+}
+
+.detailCardHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.typeBadge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-weight: 500;
+}
+
+.typeBadgeGiven {
+  background: var(--md-sys-color-secondary-container);
+  color: var(--md-sys-color-on-secondary-container);
+}
+
+.typeBadgeHidden {
+  background: var(--md-sys-color-error-container);
+  color: var(--md-sys-color-on-error-container);
+}
+
+.detailId {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.detailText {
+  font-size: 15px;
+  line-height: 1.7;
+  margin-bottom: 10px;
+}
+
+.detailSection {
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface-variant);
+  margin-top: 8px;
+}
+
+.detailSection strong {
+  color: var(--md-sys-color-on-surface);
+}
+
+.abilityList {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.abilityTag {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--md-sys-color-surface-container-high);
+  color: var(--md-sys-color-on-surface-variant);
+}
