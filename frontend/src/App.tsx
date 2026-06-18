@@ -9,8 +9,6 @@ import {
 } from 'react-router-dom'
 import { useUiStore } from './stores/uiStore'
 import Toast from './components/Toast'
-import WorkspaceJobList from './views/WorkspaceJobList'
-import { VIDEO_HIVE_ID } from './layouts/WorkspaceLayout'
 import JobDetailPage from './pages/JobDetailPage'
 import { PackageHistoryDialog } from './components/PackageHistoryDialog'
 
@@ -36,10 +34,6 @@ const SettingsPage = lazy(() =>
 const WorkspaceMainPage = lazy(() =>
   import('./pages/WorkspaceMainPage').then((m) => ({ default: m.default }))
 )
-function WorkspaceJobListWrapper() {
-  const { workspaceId } = useParams()
-  return <WorkspaceJobList isVideoHive={workspaceId === VIDEO_HIVE_ID} />
-}
 
 function WorkspacePackagesPage() {
   const { workspaceId } = useParams()
@@ -82,7 +76,6 @@ export default function App() {
           <Route path="/workspaces" element={<Navigate to="/" replace />} />
           <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
             <Route index element={<WorkspaceMainPage />} />
-            <Route path="jobs" element={<WorkspaceJobListWrapper />} />
             <Route path="jobs/:jobId" element={<JobDetailPage />} />
             <Route path="packages" element={<WorkspacePackagesPage />} />
           </Route>
