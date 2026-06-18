@@ -259,7 +259,7 @@ export default function JobDetailPage() {
     setActionLoading(true)
     try {
       await deleteJob(jobId)
-      navigate(`/workspaces/${encodeURIComponent(workspaceId)}/jobs`)
+      navigate(`/workspaces/${encodeURIComponent(workspaceId)}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err))
       setActionLoading(false)
