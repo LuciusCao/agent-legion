@@ -132,7 +132,7 @@ describe('SettingsPage', () => {
     mockFetchWorkflows.mockResolvedValue({ workflows: [] })
   })
 
-  it('renders all six sections in order', () => {
+  it('renders all six sections in order', async () => {
     useSettingStore.setState({
       workflowDefinition: {
         key: 'question_content',
@@ -186,6 +186,7 @@ describe('SettingsPage', () => {
       },
     })
     renderPage()
+    await act(async () => {})
 
     const headings = screen.getAllByRole('heading', { level: 2 })
     expect(headings.map((h) => h.textContent)).toEqual([
@@ -198,8 +199,9 @@ describe('SettingsPage', () => {
     ])
   })
 
-  it('renders workspace name in header', () => {
+  it('renders workspace name in header', async () => {
     renderPage()
+    await act(async () => {})
     expect(screen.getByText('测试空间 / 设置')).toBeInTheDocument()
   })
 
@@ -376,7 +378,7 @@ describe('SettingsPage', () => {
     ).toBeTruthy()
   })
 
-  it('renders executor binding section between allocation and local limit sections', () => {
+  it('renders executor binding section between allocation and local limit sections', async () => {
     useSettingStore.setState({
       workflowDefinition: {
         key: 'question_content',
@@ -421,6 +423,7 @@ describe('SettingsPage', () => {
       },
     })
     renderPage()
+    await act(async () => {})
 
     const headings = screen.getAllByRole('heading', { level: 2 })
     const labels = headings.map((h) => h.textContent)
@@ -718,8 +721,9 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('does not expose the legacy workflow local concurrency control', () => {
+  it('does not expose the legacy workflow local concurrency control', async () => {
     renderPage()
+    await act(async () => {})
 
     expect(screen.queryByText('本地并发限制')).not.toBeInTheDocument()
   })

@@ -222,7 +222,7 @@ def test_runtime_periodic_heartbeat(job_dir: Path) -> None:
 
     thread, holder = _run_in_thread(runtime, claim, context)
     try:
-        executor.execute_started.wait(timeout=1.0)
+        assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
         # Wait long enough for at least one heartbeat to fire.
         time.sleep(0.05)
         assert len(leases.heartbeats) >= 1
@@ -255,7 +255,7 @@ def test_runtime_lost_lease_cancels_and_fails(job_dir: Path) -> None:
 
     thread, holder = _run_in_thread(runtime, claim, context)
     try:
-        executor.execute_started.wait(timeout=1.0)
+        assert executor.execute_started.wait(timeout=1.0), "executor did not start in time"
         # Wait for the heartbeat thread to detect the lost lease and cancel.
         thread.join(timeout=1.0)
     finally:
