@@ -18,9 +18,6 @@ vi.mock('react-router-dom', async () => {
 vi.mock('../views/WorkspaceOverview', () => ({
   default: () => <div data-testid="overview">Workspace Overview</div>,
 }))
-vi.mock('../views/WorkspaceJobList', () => ({
-  default: () => <div data-testid="job-list">JobList</div>,
-}))
 vi.mock('../views/WorkspaceJobDetail', () => ({
   default: () => <div data-testid="job-detail">JobDetail</div>,
 }))
