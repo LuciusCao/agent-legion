@@ -490,4 +490,38 @@ describe('JobDetailPage', () => {
       screen.queryByText('重跑', { selector: 'md-outlined-button' })
     ).not.toBeInTheDocument()
   })
+
+  it('opens artifact list after opening and closing fullscreen DAG dialog', async () => {
+    vi.stubGlobal('fetch', createFetchMock({ detailStatus: 'completed' }))
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+    })
+
+    // Open fullscreen DAG dialog
+    await act(async () => {
+      screen.getByLabelText('查看 DAG').click()
+    })
+    expect(await screen.findByLabelText('关闭')).toBeInTheDocument()
+
+    // Close fullscreen DAG dialog
+    await act(async () => {
+      screen.getByLabelText('关闭').click()
+    })
+    await waitFor(() => {
+      expect(screen.queryByLabelText('关闭')).not.toBeInTheDocument()
+    })
+
+    // Click artifact folder button in app-bar actions
+    await act(async () => {
+      screen.getByLabelText('产物文件').click()
+    })
+
+    // Artifact list dialog should open
+    expect(
+      screen.getByText('产物文件', { selector: '[slot="headline"]' })
+    ).toBeInTheDocument()
+    expect(screen.getByText('question.json')).toBeInTheDocument()
+  })
 })

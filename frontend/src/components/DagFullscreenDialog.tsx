@@ -33,6 +33,32 @@ export function DagFullscreenDialog({
   const [selectedNode, setSelectedNode] = useState<string | null>(null)
   const [logNodeKey, setLogNodeKey] = useState<string | null>(null)
 
+  const handleClose = useCallback(() => {
+    setSelectedNode(null)
+    setLogNodeKey(null)
+    // Clear focus so that any focus captured inside the DAG (e.g. ReactFlow
+    // nodes or Material Web buttons) is released before the overlay is removed.
+    // This prevents the app-bar buttons from becoming unresponsive after the
+    // dialog is closed.
+    if (document.activeElement instanceof HTMLElement) {
+      document.activeElement.blur()
+    }
+    onClose()
+  }, [onClose])
+
+  const handleBackdropClick = useCallback(
+    (event: React.MouseEvent<HTMLDivElement>) => {
+      if (event.target === event.currentTarget) {
+        handleClose()
+      }
+    },
+    [handleClose]
+  )
+
+  const handleCloseLogDialog = useCallback(() => {
+    setLogNodeKey(null)
+  }, [])
+
   const selectedRun = useMemo(
     () =>
       runs
@@ -49,21 +75,17 @@ export function DagFullscreenDialog({
     return nodes.find((node) => node.key === logNodeKey)?.label || logNodeKey
   }, [nodes, logNodeKey])
 
-  const handleClose = useCallback(() => {
-    setSelectedNode(null)
-    setLogNodeKey(null)
-    onClose()
-  }, [onClose])
-
-  const handleCloseLogDialog = useCallback(() => {
-    setLogNodeKey(null)
-  }, [])
-
   if (!open) return null
 
   return (
-    <div className={styles.overlay} onClick={handleClose}>
-      <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+    <div
+      className={styles.overlay}
+      role="dialog"
+      aria-modal="true"
+      aria-label="DAG 视图"
+      onClick={handleBackdropClick}
+    >
+      <div className={styles.dialog}>
         <div className={styles.header}>
           <span className={styles.title}>DAG 视图</span>
           <div className={styles.actions}>
