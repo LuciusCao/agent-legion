@@ -233,6 +233,49 @@ export type AnalysisStep = {
   step: number
 }
 
+export type KeyInfoPosition = {
+  start: number
+  end: number
+}
+
+export type KeyInfoContent = {
+  text?: string
+  derived_text?: string
+  derivation?: string
+  position: KeyInfoPosition
+}
+
+export type KeyInfoItem = {
+  key_info_id: string
+  type: 'given' | 'hidden'
+  content: KeyInfoContent
+  question: {
+    text: string
+    options: QuestionOption[]
+  }
+  question_comprehension_abilities: string[]
+}
+
+export type PossibleErrorItem = {
+  error_id: string
+  error_type: 'question_comprehension'
+  error_answer: string
+  error_description: string
+  related_key_info_ids: string[]
+}
+
+export type ComprehensionInfo = {
+  question_id: string
+  fingerprint?: string | null
+  fingerprint_source?: string
+  fingerprint_missing?: boolean
+  comprehension_data: {
+    comprehension_difficulty?: number
+    key_info_list: KeyInfoItem[]
+    possible_error_list: PossibleErrorItem[]
+  }
+}
+
 export type QuestionNormalized = {
   stem?: string
   options?: QuestionOption[]
