@@ -10,7 +10,7 @@ const STATUS_ICONS: Record<string, string> = {
   completed: 'check',
   running: 'sync',
   failed: 'error',
-  stale: 'warning',
+  stale: 'schedule',
   pending: 'schedule',
 }
 
@@ -18,7 +18,7 @@ const NODE_STATUS_CLASS: Record<string, string> = {
   completed: styles.statusCompleted,
   running: styles.statusRunning,
   failed: styles.statusFailed,
-  stale: styles.statusStale,
+  stale: styles.statusPending,
   pending: styles.statusPending,
 }
 
@@ -26,23 +26,23 @@ const BADGE_STATUS_CLASS: Record<string, string> = {
   completed: styles.badgeCompleted,
   running: styles.badgeRunning,
   failed: styles.badgeFailed,
-  stale: styles.badgeStale,
+  stale: styles.badgePending,
   pending: styles.badgePending,
-}
-
-const CONTENT_STATUS_CLASS: Record<string, string> = {
-  completed: styles.statusCompleted,
-  running: styles.statusRunning,
-  failed: styles.statusFailed,
-  stale: styles.statusStale,
 }
 
 function formatDuration(seconds?: number): string {
   if (seconds === undefined) return '—'
   if (seconds < 60) return `${seconds}s`
-  const m = Math.floor(seconds / 60)
-  const s = seconds % 60
-  return `${m}m${s}s`
+  if (seconds < 3600) {
+    const m = Math.floor(seconds / 60)
+    const s = seconds % 60
+    return `${m}m${s}s`
+  }
+  const h = Math.floor(seconds / 3600)
+  const remainder = seconds % 3600
+  const m = Math.floor(remainder / 60)
+  const s = remainder % 60
+  return `${h}h${m}m${s}s`
 }
 
 function computeWaitTime(
@@ -54,7 +54,7 @@ function computeWaitTime(
   const started = new Date(startedAt).getTime()
   if (Number.isNaN(created) || Number.isNaN(started)) return undefined
   const seconds = Math.max(0, Math.floor((started - created) / 1000))
-  return `等待 ${formatDuration(seconds)}`
+  return formatDuration(seconds)
 }
 
 interface JobProgressPanelProps {
@@ -139,11 +139,13 @@ export function JobProgressPanel({
                   )}
                 </div>
 
-                <div
-                  className={`${styles.timelineContent} ${CONTENT_STATUS_CLASS[node.status] || ''}`}
-                >
+                <div className={styles.timelineContent}>
                   <div className={styles.timelineHeader}>
-                    <span className={styles.nodeName}>{node.label}</span>
+                    <span
+                      className={`${styles.nodeName} ${node.status === 'running' ? styles.nodeNameRunning : ''}`}
+                    >
+                      {node.label}
+                    </span>
                     <span
                       className={`${styles.statusBadge} ${BADGE_STATUS_CLASS[node.status] || ''}`}
                     >

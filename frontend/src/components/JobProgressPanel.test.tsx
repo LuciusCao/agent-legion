@@ -145,7 +145,7 @@ describe('JobProgressPanel', () => {
     expect(container.textContent).not.toContain('阶段明细')
   })
 
-  it('renders stale node with warning icon and label', () => {
+  it('renders stale node with pending visual and label', () => {
     const staleNodes = [
       {
         ...mockNodes[0],
@@ -179,7 +179,9 @@ describe('JobProgressPanel', () => {
         onOpenDagDialog={vi.fn()}
       />
     )
-    expect(screen.getAllByText(/等待/).length).toBeGreaterThanOrEqual(1)
+    expect(
+      screen.getAllByText(/\d+h\d+m\d+s|\d+m\d+s|\d+s/).length
+    ).toBeGreaterThanOrEqual(1)
     expect(screen.queryByText(/2026\/6\/9 08:00:00/)).not.toBeInTheDocument()
   })
 })
