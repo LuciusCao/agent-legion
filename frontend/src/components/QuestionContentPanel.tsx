@@ -1,8 +1,12 @@
-import { useMemo } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import { useJobQuestion } from '../hooks/useJobQuestion'
+import { useJobComprehensionInfo } from '../hooks/useJobComprehensionInfo'
 import { renderLatexInHtml } from '../lib/latex'
+import { buildHighlightedStemHtml } from '../lib/questionHighlight'
+import { QuestionAnnotations } from './QuestionAnnotations'
 import { LaTeXText } from './LaTeXText'
 import styles from './QuestionContentPanel.module.css'
+import type { KeyInfoItem, PossibleErrorItem } from '../types'
 
 const ALLOWED_TAGS = new Set([
   'P',
@@ -89,12 +93,35 @@ export function QuestionContentPanel({
   refreshKey,
 }: QuestionContentPanelProps) {
   const { question, loading, error } = useJobQuestion(jobId, refreshKey)
+  const { info: comprehensionInfo } = useJobComprehensionInfo(jobId, refreshKey)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const stemWrapperRef = useRef<HTMLDivElement>(null)
+
+  const keyInfoList = useMemo(
+    () => comprehensionInfo?.comprehension_data?.key_info_list ?? [],
+    [comprehensionInfo]
+  )
+  const possibleErrorList = useMemo(
+    () => comprehensionInfo?.comprehension_data?.possible_error_list ?? [],
+    [comprehensionInfo]
+  )
 
   const stem = question?.stem
   const stemHtml = useMemo(() => {
     if (!stem) return ''
     return renderLatexInHtml(sanitizeHtml(stem))
   }, [stem])
+
+  const selectedKeyInfos = useMemo(() => {
+    return Array.from(selectedIds)
+      .map((id) => keyInfoList.find((k) => k.key_info_id === id))
+      .filter((k): k is KeyInfoItem => Boolean(k))
+  }, [selectedIds, keyInfoList])
+
+  const highlightedStemHtml = useMemo(() => {
+    if (!stem || selectedKeyInfos.length === 0) return stemHtml
+    return renderLatexInHtml(buildHighlightedStemHtml(stem, selectedKeyInfos))
+  }, [stem, stemHtml, selectedKeyInfos])
 
   const analysis = question?.analysis
   const analysisHtml = useMemo(() => {
@@ -124,13 +151,136 @@ export function QuestionContentPanel({
     <div className={styles.panel}>
       <section className={styles.card}>
         <h2 className={styles.sectionTitle}>题干</h2>
-        {question.stem ? (
-          <div
-            className={styles.richText}
-            dangerouslySetInnerHTML={{ __html: stemHtml }}
+        <div ref={stemWrapperRef} className={styles.stemWrapper}>
+          <div className={styles.stemMain}>
+            {question.stem ? (
+              <div
+                className={styles.richText}
+                dangerouslySetInnerHTML={{
+                  __html:
+                    selectedKeyInfos.length > 0
+                      ? highlightedStemHtml
+                      : stemHtml,
+                }}
+              />
+            ) : (
+              <p className={styles.empty}>无题干</p>
+            )}
+          </div>
+          <QuestionAnnotations
+            wrapperRef={stemWrapperRef}
+            hiddenItems={selectedKeyInfos.filter((k) => k.type === 'hidden')}
           />
-        ) : (
-          <p className={styles.empty}>无题干</p>
+        </div>
+
+        {keyInfoList.length > 0 && (
+          <div className={styles.comprehensionChips}>
+            <div className={styles.chipsHeader}>
+              <h3 className={styles.sectionTitle} style={{ margin: 0 }}>
+                审题信息
+              </h3>
+              <span className={styles.chipsCount}>
+                {keyInfoList.length} 个信息点
+              </span>
+            </div>
+            <div className={styles.chipRow}>
+              {keyInfoList.map((info, idx) => {
+                const isSelected = selectedIds.has(info.key_info_id)
+                const labelSource =
+                  info.content.text ||
+                  info.content.derived_text ||
+                  `信息点 ${idx + 1}`
+                const label =
+                  labelSource.length > 12
+                    ? labelSource.slice(0, 12) + '…'
+                    : labelSource
+                return (
+                  <button
+                    key={info.key_info_id}
+                    className={`${styles.chip} ${
+                      isSelected ? styles.chipSelected : ''
+                    }`}
+                    onClick={() => {
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev)
+                        if (next.has(info.key_info_id)) {
+                          next.delete(info.key_info_id)
+                        } else {
+                          next.add(info.key_info_id)
+                        }
+                        return next
+                      })
+                    }}
+                  >
+                    <span className={styles.chipIndex}>{idx + 1}</span>
+                    <LaTeXText>{label}</LaTeXText>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
+        {selectedKeyInfos.length > 0 && (
+          <div className={styles.detailPanel}>
+            {selectedKeyInfos.map((info) => {
+              const typeLabel = info.type === 'given' ? '题干信息' : '隐含信息'
+              const errors = possibleErrorList.filter((e: PossibleErrorItem) =>
+                e.related_key_info_ids.includes(info.key_info_id)
+              )
+              return (
+                <div key={info.key_info_id} className={styles.detailCard}>
+                  <div className={styles.detailCardHeader}>
+                    <span
+                      className={`${styles.typeBadge} ${
+                        info.type === 'given'
+                          ? styles.typeBadgeGiven
+                          : styles.typeBadgeHidden
+                      }`}
+                    >
+                      {typeLabel}
+                    </span>
+                    <span className={styles.detailId}>{info.key_info_id}</span>
+                  </div>
+                  <div className={styles.detailText}>
+                    <LaTeXText>
+                      {info.content.text || info.content.derived_text || ''}
+                    </LaTeXText>
+                  </div>
+                  {info.type === 'hidden' && (
+                    <div
+                      className={styles.detailSection}
+                      style={{ color: 'var(--md-sys-color-tertiary)' }}
+                    >
+                      👉 推导过程见题干右侧批注
+                    </div>
+                  )}
+                  <div className={styles.detailSection}>
+                    <strong>关联能力</strong>
+                    <div className={styles.abilityList}>
+                      {info.question_comprehension_abilities.map((ability) => (
+                        <span key={ability} className={styles.abilityTag}>
+                          {ability}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  {errors.length > 0 && (
+                    <div className={styles.detailSection}>
+                      <strong>常见审题错误</strong>
+                      <ul>
+                        {errors.map((err) => (
+                          <li key={err.error_id}>
+                            <LaTeXText>{err.error_description}</LaTeXText>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
         )}
       </section>
 
