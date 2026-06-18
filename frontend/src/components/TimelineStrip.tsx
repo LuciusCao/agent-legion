@@ -1,3 +1,4 @@
+import React, { useCallback } from 'react'
 import type { Chapter, InteractionNode } from '../types'
 import { INTERACTION_TYPE_LABELS } from '../labels'
 import { parseTimeSeconds } from '../helpers'
@@ -11,28 +12,31 @@ interface TimelineStripProps {
   onReplayInteraction?: (index: number) => void
 }
 
-export function TimelineStrip({
+function formatTime(seconds: number) {
+  const m = Math.floor(seconds / 60)
+  const s = Math.floor(seconds % 60)
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
+export const TimelineStrip = React.memo(function TimelineStrip({
   chapters,
   interactions,
   currentTime,
   onSeek,
   onReplayInteraction,
 }: TimelineStripProps) {
-  const formatTime = (seconds: number) => {
-    const m = Math.floor(seconds / 60)
-    const s = Math.floor(seconds % 60)
-    return `${m}:${s.toString().padStart(2, '0')}`
-  }
+  const seekInteraction = useCallback(
+    (time: number, index: number) => {
+      onSeek(time)
+      onReplayInteraction?.(index)
+    },
+    [onSeek, onReplayInteraction]
+  )
 
-  const seekInteraction = (time: number, index: number) => {
-    onSeek(time)
-    onReplayInteraction?.(index)
-  }
-
-  const getInteractionLabel = (node: InteractionNode) => {
+  const getInteractionLabel = useCallback((node: InteractionNode) => {
     const type = String(node.type ?? '')
     return INTERACTION_TYPE_LABELS[type] || type || '交互节点'
-  }
+  }, [])
 
   return (
     <div className={styles.timelineContainer}>
@@ -85,4 +89,4 @@ export function TimelineStrip({
       </div>
     </div>
   )
-}
+})

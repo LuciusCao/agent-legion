@@ -4,6 +4,12 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from server.app.storage_paths import (
+    ManagedPathError,
+    resolve_job_dir,
+    resolve_video_dir,
+)
+
 PACKAGE_FILES = [
     "metadata.json",
     "chapters.json",
@@ -14,9 +20,42 @@ PACKAGE_FILES = [
 ]
 
 
+def create_workspace_package(
+    jobs: list[Any], packages_dir: Path, jobs_base_dir: Path
+) -> tuple[Path, int]:
+    packages_dir.mkdir(parents=True, exist_ok=True)
+    package_path = (
+        packages_dir / f"workspace-jobs-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}.zip"
+    )
+    manifest = {
+        "created_at": datetime.now(UTC).isoformat(),
+        "jobs": [
+            {
+                "id": job["id"],
+                "source_id": job.get("source_id", ""),
+                "workflow_key": job.get("workflow_key", ""),
+                "status": job.get("status", ""),
+            }
+            for job in jobs
+        ],
+    }
+    job_count = 0
+    with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
+        for job in jobs:
+            job_dir = resolve_job_dir(job, jobs_base_dir)
+            if job_dir.exists():
+                for f in job_dir.rglob("*"):
+                    if f.is_file():
+                        arcname = f"{job['id']}/{f.relative_to(job_dir)}"
+                        zf.write(f, arcname)
+            job_count += 1
+    return package_path, job_count
+
+
 def create_package(
     videos: list[Any], packages_dir: Path, videos_base_dir: Path | None = None
-) -> Path:
+) -> tuple[Path, int]:
     packages_dir.mkdir(parents=True, exist_ok=True)
     package_path = packages_dir / f"video-hive-{datetime.now(UTC).strftime('%Y%m%d%H%M%S%f')}.zip"
     manifest = {
@@ -36,15 +75,15 @@ def create_package(
             for video in videos
         ],
     }
+    video_count = 0
     with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         for video in videos:
-            storage_dir = video.get("storage_dir", "")
-            if storage_dir:
-                video_dir = Path(storage_dir)
-            elif videos_base_dir is not None:
-                video_dir = videos_base_dir / video["id"]
-            else:
+            if videos_base_dir is None:
+                continue
+            try:
+                video_dir = resolve_video_dir(video, videos_base_dir)
+            except ManagedPathError:
                 continue
             for name in PACKAGE_FILES:
                 path = video_dir / name
@@ -56,4 +95,5 @@ def create_package(
                 zf.write(reviewed_srt, f"{video['id']}/subtitles.srt")
             elif srt.exists():
                 zf.write(srt, f"{video['id']}/subtitles.srt")
-    return package_path
+            video_count += 1
+    return package_path, video_count

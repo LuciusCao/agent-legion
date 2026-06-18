@@ -1,5 +1,6 @@
 import json
 import subprocess
+import threading
 from pathlib import Path
 
 from server.app.agents import AgentStatus, AgentStatusManager
@@ -11,6 +12,7 @@ def _agent_dict(**kwargs):
         "busy": False,
         "task_count": 0,
         "max_tasks": 1,
+        "workspace_id": "",
         "current_video_id": None,
         "current_title": "",
         "current_content_type": "",
@@ -237,3 +239,100 @@ def test_openclaw_runner_extracts_agent_id_at_end_of_list():
         timeout_seconds=600,
     )
     assert runner.agent_id == "ops"
+
+
+def test_workspace_isolated_pi_status():
+    manager = AgentStatusManager()
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+    manager.add_pi_agent_for_workspace("ws-2", max_tasks=3)
+
+    manager.set_busy("pi", "video_1", workspace_id="ws-1")
+
+    ws1 = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    ws2 = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-2"][0]
+
+    assert ws1["task_count"] == 1
+    assert ws1["busy"] is True
+    assert ws1["current_video_id"] == "video_1"
+    assert ws2["task_count"] == 0
+    assert ws2["busy"] is False
+    assert ws2["current_video_id"] is None
+
+    manager.set_idle("pi", workspace_id="ws-1")
+
+    ws1 = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    assert ws1["task_count"] == 0
+    assert ws1["busy"] is False
+    assert ws1["current_video_id"] is None
+
+
+def test_remove_pi_agent_for_workspace():
+    manager = AgentStatusManager()
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+    manager.add_pi_agent_for_workspace("ws-2", max_tasks=3)
+
+    manager.remove_pi_agent_for_workspace("ws-1")
+
+    assert [a["workspace_id"] for a in manager.to_dicts() if a["id"] == "pi"] == ["ws-2"]
+
+
+def test_remove_pi_agent_for_workspace_is_noop_when_missing():
+    manager = AgentStatusManager()
+    manager.remove_pi_agent_for_workspace("ws-missing")
+    assert manager.to_dicts() == []
+
+
+def test_add_pi_agent_for_workspace_broadcasts_capacity_changes(monkeypatch):
+    manager = AgentStatusManager()
+    broadcast_count = 0
+
+    def fake_broadcast():
+        nonlocal broadcast_count
+        broadcast_count += 1
+
+    monkeypatch.setattr(manager, "_broadcast", fake_broadcast)
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=5)
+
+    agent = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    assert agent["max_tasks"] == 5
+    assert broadcast_count == 2
+
+
+def test_idle_pops_correct_video_id():
+    manager = AgentStatusManager()
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+
+    manager.set_busy("pi", "video_a", workspace_id="ws-1")
+    manager.set_busy("pi", "video_b", workspace_id="ws-1")
+
+    agent = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    assert agent["task_count"] == 2
+    assert agent["current_video_id"] == "video_b"
+
+    manager.set_idle("pi", workspace_id="ws-1")
+
+    agent = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"][0]
+    assert agent["task_count"] == 1
+    assert agent["current_video_id"] == "video_a"
+
+
+def test_set_busy_and_idle_are_thread_safe():
+    manager = AgentStatusManager()
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=5)
+
+    def _busy_idle_loop() -> None:
+        for i in range(50):
+            manager.set_busy("pi", {"id": f"job_{i}"}, workspace_id="ws-1")
+            manager.set_idle("pi", workspace_id="ws-1")
+
+    threads = [threading.Thread(target=_busy_idle_loop) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    agents = [a for a in manager.to_dicts() if a["workspace_id"] == "ws-1"]
+    assert len(agents) == 1
+    assert agents[0]["task_count"] == 0
+    assert agents[0]["busy"] is False

@@ -1,0 +1,22 @@
+{
+  "question_id": "Q100",
+  "dimensions": {
+    "knowledge_complexity": 50,
+    "reasoning_steps": 50,
+    "calculation_load": 40,
+    "reading_filter_load": 45
+  },
+  "weights": {
+    "knowledge_complexity": 0.3,
+    "reasoning_steps": 0.3,
+    "calculation_load": 0.2,
+    "reading_filter_load": 0.2
+  },
+  "reading_difficulty": 48,
+  "evidence": {
+    "knowledge_complexity": ["需要理解往返概念和乘法关系"],
+    "reasoning_steps": ["识别单程与往返的映射关系"],
+    "calculation_load": ["1400 × 2 的基本乘法"],
+    "reading_filter_load": ["从题干中提取距离数值和往返要求"]
+  }
+}

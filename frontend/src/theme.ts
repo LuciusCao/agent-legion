@@ -14,6 +14,11 @@ export const applyTheme = (): void => {
     '--md-sys-color-on-secondary-container': '#1a1c1e',
     '--md-sys-color-surface': '#fafafa',
     '--md-sys-color-surface-variant': '#e2e2e5',
+    '--md-sys-color-surface-container-lowest': '#ffffff',
+    '--md-sys-color-surface-container-low': '#ffffff',
+    '--md-sys-color-surface-container': '#ffffff',
+    '--md-sys-color-surface-container-high': '#ffffff',
+    '--md-sys-color-surface-container-highest': '#ffffff',
     '--md-sys-color-on-surface': '#1a1c1e',
     '--md-sys-color-on-surface-variant': '#43474e',
     '--md-sys-color-error': '#ba1a1a',
@@ -23,6 +28,16 @@ export const applyTheme = (): void => {
     '--md-sys-color-outline-variant': '#c3c6cf',
     '--md-ref-typeface-brand': 'Roboto, sans-serif',
     '--md-ref-typeface-plain': 'Roboto, sans-serif',
+    '--md-sys-elevation-level1':
+      '0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 1px 3px 1px rgba(0, 0, 0, 0.15)',
+    '--md-sys-elevation-level2':
+      '0px 1px 2px 0px rgba(0, 0, 0, 0.3), 0px 2px 6px 2px rgba(0, 0, 0, 0.15)',
+    '--md-sys-elevation-level3':
+      '0px 1px 3px 0px rgba(0, 0, 0, 0.3), 0px 4px 8px 3px rgba(0, 0, 0, 0.15)',
+    '--md-sys-elevation-level4':
+      '0px 2px 3px 0px rgba(0, 0, 0, 0.3), 0px 6px 10px 4px rgba(0, 0, 0, 0.15)',
+    '--md-sys-elevation-level5':
+      '0px 4px 4px 0px rgba(0, 0, 0, 0.3), 0px 8px 12px 6px rgba(0, 0, 0, 0.15)',
   }
   Object.entries(tokens).forEach(([key, value]) => {
     root.style.setProperty(key, value)

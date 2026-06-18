@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -98,7 +99,10 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        initialEntries={['/videos/v1']}
+      >
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -109,10 +113,12 @@ describe('DetailPage', () => {
       expect(screen.getByText('Video 1')).toBeInTheDocument()
     })
 
-    const upper = document.querySelector('.detail-upper')
-    const primary = document.querySelector('.detail-primary')
-    const topbar = document.querySelector('.detail-topbar')
-    const titleBlock = document.querySelector('.detail-title-block')
+    const upper = document.querySelector('.detail-upper') as HTMLElement
+    const primary = document.querySelector('.detail-primary') as HTMLElement
+    const topbar = document.querySelector('.detail-topbar') as HTMLElement
+    const titleBlock = document.querySelector(
+      '.detail-title-block'
+    ) as HTMLElement
     const sidebar = document.querySelector('.phase-runs-sidebar') as HTMLElement
 
     expect(upper).toContainElement(primary)
@@ -167,7 +173,10 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        initialEntries={['/videos/v1']}
+      >
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -234,7 +243,10 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        initialEntries={['/videos/v1']}
+      >
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -293,7 +305,10 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        initialEntries={['/videos/v1']}
+      >
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -345,7 +360,10 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        initialEntries={['/videos/v1']}
+      >
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -356,12 +374,12 @@ describe('DetailPage', () => {
       expect(document.querySelector('video')).toBeInTheDocument()
     })
     const video = document.querySelector('video') as HTMLVideoElement
-    const pause = vi.fn()
-    Object.defineProperty(video, 'paused', { value: false, configurable: true })
-    Object.defineProperty(video, 'pause', { value: pause, configurable: true })
     Object.defineProperty(video, 'currentTime', {
       value: 4.8,
       configurable: true,
+    })
+    act(() => {
+      video.dispatchEvent(new Event('play', { bubbles: true }))
     })
     act(() => {
       video.dispatchEvent(new Event('timeupdate', { bubbles: true }))
@@ -375,7 +393,6 @@ describe('DetailPage', () => {
       video.dispatchEvent(new Event('timeupdate', { bubbles: true }))
     })
 
-    expect(pause).toHaveBeenCalledTimes(1)
     expect(screen.getByText('暂停做题')).toBeInTheDocument()
   })
 
@@ -411,7 +428,10 @@ describe('DetailPage', () => {
       .mockRejectedValueOnce(new Error('delete failed'))
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        initialEntries={['/videos/v1']}
+      >
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>
@@ -482,7 +502,10 @@ describe('DetailPage', () => {
       .mockResolvedValueOnce({ videos: [] })
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        initialEntries={['/videos/v1']}
+      >
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>

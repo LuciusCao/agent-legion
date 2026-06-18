@@ -3,10 +3,18 @@ import { render, screen, act, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 import { ListPage } from './ListPage'
 import { useVideoStore } from '../stores/videoStore'
+import { api } from '../api'
 
 const mockApi = vi.fn()
 vi.mock('../api', () => ({
-  api: (...args: any[]) => mockApi(...args),
+  api: (...args: Parameters<typeof api>) => mockApi(...args),
+}))
+
+vi.mock('../layouts/AppShell', () => ({
+  useAppShellScroll: () => ({
+    reportScrolled: vi.fn(),
+    resetReportedScroll: vi.fn(),
+  }),
 }))
 
 describe('ListPage', () => {
@@ -19,7 +27,6 @@ describe('ListPage', () => {
       searchQuery: '',
       packedFilter: 'all',
       selectMode: false,
-      packageSelectMode: false,
       selectedIds: new Set(),
       isLoading: false,
       sseConnected: true,
@@ -34,11 +41,16 @@ describe('ListPage', () => {
       return Promise.resolve({ videos: [] })
     })
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ListPage />
       </MemoryRouter>
     )
     expect(screen.getByText('知识点')).toBeInTheDocument()
+    expect(screen.queryByTitle('刷新')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('打包')).not.toBeInTheDocument()
+    expect(screen.getByTitle('多选')).toBeInTheDocument()
   })
 
   it('filters list by content type when tab changes', async () => {
@@ -69,7 +81,9 @@ describe('ListPage', () => {
       })
     })
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ListPage />
       </MemoryRouter>
     )
@@ -123,7 +137,9 @@ describe('ListPage', () => {
     })
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
         <ListPage />
       </MemoryRouter>
     )

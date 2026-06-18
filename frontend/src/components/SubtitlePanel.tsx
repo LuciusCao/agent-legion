@@ -1,7 +1,8 @@
-import { useMemo } from 'react'
+import React, { useMemo } from 'react'
 import { useArtifactStore } from '../stores/artifactStore'
+import { LaTeXText } from './LaTeXText'
 
-export function SubtitlePanel({
+export const SubtitlePanel = React.memo(function SubtitlePanel({
   currentTime,
   onSeek,
 }: {
@@ -32,12 +33,14 @@ export function SubtitlePanel({
           >
             {formatTime(sub.start)} → {formatTime(sub.end)}
           </div>
-          <div slot="supporting-text">{sub.text}</div>
+          <div slot="supporting-text">
+            <LaTeXText>{sub.text}</LaTeXText>
+          </div>
         </md-list-item>
       ))}
     </md-list>
   )
-}
+})
 
 function formatTime(seconds: number) {
   const m = Math.floor(seconds / 60)

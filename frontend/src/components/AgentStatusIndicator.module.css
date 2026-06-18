@@ -1,0 +1,74 @@
+.root {
+  position: relative;
+}
+
+.indicator {
+  position: absolute;
+  right: 7px;
+  bottom: 7px;
+  width: 8px;
+  height: 8px;
+  border: 2px solid var(--md-sys-color-surface);
+  border-radius: 50%;
+  background: var(--md-sys-color-outline);
+}
+
+.active {
+  background: var(--md-sys-color-primary);
+}
+
+.popover {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  display: none;
+  min-width: 240px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--md-sys-color-surface-container-high);
+  box-shadow: var(--md-sys-elevation-level3);
+}
+
+.root:focus-within .popover,
+.root:hover .popover {
+  display: block;
+}
+
+.controlRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 4px 0;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+}
+
+.controlLabel {
+  font-size: 14px;
+}
+
+.divider {
+  height: 1px;
+  margin: 8px 0;
+  background: var(--md-sys-color-outline-variant);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+}
+
+.status {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.empty {
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+}

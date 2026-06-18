@@ -1,0 +1,99 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 32px 16px;
+}
+
+.header {
+  text-align: center;
+  margin-bottom: 24px;
+}
+
+.rocket {
+  font-size: 48px;
+  width: 48px;
+  height: 48px;
+  color: var(--md-sys-color-primary);
+}
+
+.title {
+  margin: 12px 0 4px;
+  font-size: 22px;
+}
+
+.subtitle {
+  margin: 0;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 14px;
+}
+
+.steps {
+  display: grid;
+  gap: 12px;
+  width: 100%;
+  max-width: 560px;
+}
+
+.stepCard {
+  display: flex;
+  gap: 16px;
+  padding: 16px;
+  border-radius: 12px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface);
+}
+
+.locked {
+  opacity: 0.55;
+  background: var(--md-sys-color-surface-container-low);
+}
+
+.stepIcon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  flex-shrink: 0;
+}
+
+.locked .stepIcon {
+  background: var(--md-sys-color-surface-container-highest);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.stepBody {
+  flex: 1;
+}
+
+.stepTitle {
+  margin: 0 0 4px;
+  font-size: 16px;
+}
+
+.stepDesc {
+  margin: 0 0 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.stepAction {
+  padding: 6px 14px;
+  border-radius: 8px;
+  border: 0;
+  background: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.stepAction:disabled {
+  background: var(--md-sys-color-outline);
+  color: var(--md-sys-color-surface);
+  cursor: not-allowed;
+}

@@ -1,3 +1,7 @@
+import type { components } from './generated/api'
+
+type ApiSchemas = components['schemas']
+
 export type ContentType = 'knowledge' | 'question'
 export type DetailTab = 'nodes' | 'subtitles' | 'logs' | 'metadata'
 export type RunToMode = 'continue' | 'rerun'
@@ -29,6 +33,7 @@ export type VideoItem = {
 export type AgentStatus = {
   id: string
   name: string
+  workspace_id: string
   busy: boolean
   task_count: number
   max_tasks: number
@@ -37,6 +42,29 @@ export type AgentStatus = {
   current_content_type?: ContentType | ''
   current_external_id?: string
   current_phase?: string
+}
+
+export type GlobalServiceStatus = {
+  cms: {
+    baseUrl: string
+    tokenConfigured: boolean
+    env: string
+    healthy: boolean | null
+    lastCheckedAt: string | null
+  }
+}
+
+export type ResourceProviderDefinition = {
+  key: string
+  provider: string
+  path: string
+  defaultParams: Record<string, string>
+  paramKeys: string[]
+}
+
+export type ResourceBinding = {
+  enabled: boolean
+  config: Record<string, string>
 }
 
 export type Chapter = {
@@ -120,4 +148,100 @@ export type TranscriptionRun = {
   srt_entry_count: number
   validation_summary: string
   fallback_reason: string
+}
+
+import type {
+  JobSummary,
+  JobNodeSummary,
+  JobDetail,
+  JobNode,
+  NodeRun,
+  JobsResponse,
+  JobBatchResponse,
+} from './jobTypes'
+
+export type {
+  JobSummary,
+  JobNodeSummary,
+  JobDetail,
+  JobNode,
+  NodeRun,
+  JobsResponse,
+  JobBatchResponse,
+}
+
+/** @deprecated use {@link JobSummary} directly */
+export type JobRecord = JobSummary
+/** @deprecated use {@link JobNode} directly */
+export type JobNodeRecord = JobNode
+/** @deprecated use {@link NodeRun} directly */
+export type NodeRunRecord = NodeRun
+/** @deprecated use {@link JobDetail} directly */
+export type JobDetailResponse = JobDetail
+
+export type WorkspaceRecord = {
+  id: string
+  name: string
+  description?: string
+  default_workflow_key: string
+  default_entity: string
+  cms_config?: Record<string, unknown>
+  resource_config?: Record<string, unknown>
+  intake_config?: {
+    enabled_modes?: string[]
+    label_overrides?: Record<string, string>
+  }
+}
+
+export type WorkspaceSettings = {
+  entityType: 'question' | 'knowledge' | 'video'
+  intakeModes: string[]
+  labelOverrides: Record<string, string>
+  workflowKey: string
+  resources: Record<string, ResourceBinding>
+  cmsUrl?: string
+  cmsToken?: string
+}
+
+export type WorkflowNodeRecord = ApiSchemas['WorkflowNodeResponse']
+export type WorkflowIntakeModeRecord = ApiSchemas['WorkflowIntakeModeResponse']
+export type WorkflowDefinitionRecord = ApiSchemas['WorkflowDefinitionResponse']
+export type WorkflowResponse = ApiSchemas['WorkflowResponse']
+export type WorkflowsListResponse = ApiSchemas['WorkflowsListResponse']
+
+export type ArtifactResponse = ApiSchemas['ArtifactResponse']
+
+export type CreateJobBatchInput = {
+  workspaceId: string
+  workflowKey?: string
+  entity?: string
+  sourceKind: string
+  inputField: string
+  values: string[]
+}
+
+export type QuestionOption = Record<string, unknown>
+
+export type AnswerBlank = {
+  alternatives: string[]
+  is_latex: boolean
+}
+
+export type AnalysisStep = {
+  content: string
+  title?: string
+  step: number
+}
+
+export type QuestionNormalized = {
+  stem?: string
+  options?: QuestionOption[]
+  answer?: unknown
+  analysis?: unknown
+  answer_blanks?: AnswerBlank[]
+  analysis_steps?: AnalysisStep[][]
+}
+
+export type WorkspacesResponse = ApiSchemas['WorkspacesResponse'] & {
+  workspaces: WorkspaceRecord[]
 }

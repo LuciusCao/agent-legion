@@ -1,0 +1,115 @@
+.row {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding: 12px 16px;
+  background: var(--md-sys-color-surface);
+  cursor: pointer;
+  transition:
+    background 200ms ease,
+    box-shadow 200ms ease,
+    transform 200ms ease;
+  border-radius: 12px;
+  margin: 4px 8px;
+}
+
+.row:hover {
+  background: var(--md-sys-color-surface-container);
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.08),
+    0 8px 24px rgba(0, 0, 0, 0.08);
+  transform: translateY(-1px);
+}
+
+.row:not(:last-child) {
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.checkbox {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.main {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 120px;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+.sourceId {
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.badge {
+  font-size: 12px;
+  padding: 4px 8px;
+  border-radius: 999px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.pending {
+  background: var(--status-partial-bg);
+  color: var(--status-partial-text);
+}
+
+.running {
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
+}
+
+.completed {
+  background: var(--status-completed-bg);
+  color: var(--status-completed-text);
+}
+
+.failed {
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
+}
+
+.statusEnd {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.statusEndRow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.activeLabel {
+  font-size: 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  min-width: 64px;
+  max-width: 96px;
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.activeLabel.running {
+  color: var(--status-running-text);
+}
+
+.errorSummary {
+  font-size: 11px;
+  color: var(--md-sys-color-error);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}

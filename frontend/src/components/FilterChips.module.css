@@ -1,0 +1,31 @@
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.chip {
+  padding: 6px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface);
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--md-sys-color-on-surface);
+}
+
+.count {
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.active {
+  background: var(--md-sys-color-primary-container);
+  border-color: var(--md-sys-color-primary);
+  color: var(--md-sys-color-on-primary-container);
+}
+
+.active .count {
+  color: inherit;
+  opacity: 0.8;
+}

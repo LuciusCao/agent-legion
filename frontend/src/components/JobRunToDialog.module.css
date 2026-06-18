@@ -1,0 +1,80 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  padding: 8px 0;
+}
+
+.sectionLabel {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--md-sys-color-on-surface);
+  margin-bottom: 8px;
+}
+
+.nodeGrid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.empty {
+  color: var(--md-sys-color-on-surface-variant);
+  margin: 0;
+}
+
+.closureBox {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--md-sys-color-surface-variant);
+}
+
+.closureTitle {
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  margin-bottom: 8px;
+}
+
+.closureChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.closureChip {
+  font-size: 13px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--md-sys-color-surface-container-highest);
+  color: var(--md-sys-color-on-surface);
+}
+
+.excludedBox {
+  padding: 12px;
+  border-radius: 8px;
+  background: var(--md-sys-color-surface-variant);
+}
+
+.excludedTitle {
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+  margin-bottom: 8px;
+}
+
+.excludedList {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface);
+}
+
+.error {
+  margin: 0;
+  font-size: 14px;
+  color: var(--md-sys-color-error);
+}
+
+.summary {
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+}

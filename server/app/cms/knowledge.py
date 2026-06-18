@@ -1,75 +1,85 @@
+from __future__ import annotations
+
 from typing import Any
 
 from server.app.cms.client import DEFAULT_KNOWLEDGE_URL, CmsVideoLookup, _fetch_json
 
-
-def _iter_knowledge_items(payload: dict) -> Any:
-    if isinstance(payload, list):
-        yield from payload
-        return
-
-    data = payload.get("data", payload) if isinstance(payload, dict) else payload
-    if isinstance(data, list):
-        yield from data
-        return
-    if not isinstance(data, dict):
-        return
-
-    if "resource" in data or "knowledge_code" in data or "knowledge_name" in data:
-        yield data
-        return
-
-    if "list" in data and isinstance(data["list"], list):
-        yield from data["list"]
-        return
-
-    for v in data.values():
-        if isinstance(v, dict):
-            yield v
-        elif isinstance(v, list):
-            yield from v
+# ---------------------------------------------------------------------------
+# Schema helpers – strict field access matching the actual CMS API contract
+# ---------------------------------------------------------------------------
 
 
-def _first_knowledge_item(payload: dict) -> dict[str, Any] | None:
-    for item in _iter_knowledge_items(payload):
-        if isinstance(item, dict):
-            return item
-    return None
+def _parse_knowledge_payload(payload: dict[str, Any]) -> dict[str, Any] | None:
+    """Parse /v2/knowledge/detail response.
+
+    Expected schema::
+
+        {
+            "code": 0,
+            "message": "success",
+            "data": {
+                "knowledge_code": "...",
+                "knowledge_name": "...",
+                "resource": [
+                    {
+                        "resource_type": 1,
+                        "video_data": {
+                            "source_url": "...",
+                            "source_uuid": "..."
+                        }
+                    }
+                ]
+            }
+        }
+    """
+    data = payload.get("data") if isinstance(payload, dict) else {}
+    if not isinstance(data, dict) or not data:
+        return None
+    if not data.get("knowledge_code"):
+        return None
+    return data
 
 
-def _extract_knowledge_title(item: dict[str, Any] | None, code: str) -> str:
-    if not item:
-        return code
+def _knowledge_title(data: dict[str, Any]) -> str:
     return str(
-        item.get("knowledge_name")
-        or item.get("name")
-        or item.get("title")
-        or item.get("knowledge_code")
-        or code
+        data.get("knowledge_name")
+        or data.get("name")
+        or data.get("title")
+        or data.get("knowledge_code")
+        or ""
     )
 
 
-def _extract_knowledge_url(code: str, payload: dict) -> tuple[str | None, str | None]:
-    for item in _iter_knowledge_items(payload):
-        if not isinstance(item, dict):
+def _extract_knowledge_video_url(data: dict[str, Any]) -> tuple[str | None, str | None]:
+    for res in data.get("resource", []) or []:
+        if not isinstance(res, dict):
             continue
-        for res in item.get("resource", []) or []:
-            try:
-                rtype = int(res.get("resource_type"))
-            except (TypeError, ValueError):
-                continue
-            if rtype not in {1, 2}:
-                continue
-            video_data = res.get("video_data") or {}
-            source_url = (
-                video_data.get("source_url", "")
-                or video_data.get("source", "")
-                or video_data.get("source_v2", "")
-            )
-            source_uuid = video_data.get("source_uuid", "")
-            if source_url:
-                return source_url, source_uuid
+        rtype_val = res.get("resource_type")
+        if rtype_val is None:
+            continue
+        try:
+            rtype = int(rtype_val)
+        except (TypeError, ValueError):
+            continue
+        if rtype not in {1, 2}:
+            continue
+        video_data = res.get("video_data") or {}
+        if not isinstance(video_data, dict):
+            continue
+        source_url = (
+            video_data.get("source_url", "")
+            or video_data.get("source", "")
+            or video_data.get("source_v2", "")
+        )
+        source_uuid = video_data.get("source_uuid", "")
+        if source_url:
+            return source_url, source_uuid
     return None, None
+
+
+# ---------------------------------------------------------------------------
+# Public functions
+# ---------------------------------------------------------------------------
 
 
 def lookup_knowledge_video(
@@ -77,11 +87,11 @@ def lookup_knowledge_video(
 ) -> CmsVideoLookup:
     url = api_url or DEFAULT_KNOWLEDGE_URL
     payload = _fetch_json(url, {"code": code}, token)
-    item = _first_knowledge_item(payload)
-    if item is None:
+    data = _parse_knowledge_payload(payload)
+    if data is None:
         return CmsVideoLookup("not_found", payload=payload)
-    video_url, source_uuid = _extract_knowledge_url(code, payload)
+    video_url, source_uuid = _extract_knowledge_video_url(data)
     status = "found" if video_url else "missing_url"
     return CmsVideoLookup(
-        status, video_url or "", _extract_knowledge_title(item, code), source_uuid or "", payload
+        status, video_url or "", _knowledge_title(data), source_uuid or "", payload
     )

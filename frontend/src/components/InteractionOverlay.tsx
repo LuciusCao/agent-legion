@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
+import { useRef, useState } from 'react'
 import type { InteractionNode } from '../types'
+import { LaTeXText } from './LaTeXText'
 import styles from './InteractionOverlay.module.css'
 
 type InteractionOption = NonNullable<InteractionNode['options']>[number]
@@ -24,12 +25,6 @@ export function InteractionOverlay({
   )
   const [draggedOptionId, setDraggedOptionId] = useState<string | null>(null)
   const draggedOptionIdRef = useRef<string | null>(null)
-
-  useEffect(() => {
-    setSelectedOptions([])
-    setDraggedOptionId(null)
-    draggedOptionIdRef.current = null
-  }, [node])
 
   if (!node) return null
 
@@ -100,8 +95,14 @@ export function InteractionOverlay({
     return (
       <div className={styles.practiceToast}>
         <span className={styles.badge}>例题试做</span>
-        <p className={styles.cardTitle}>{node.instruction || '先试做'}</p>
-        {node.hint && <p className={styles.hintText}>{node.hint}</p>}
+        <p className={styles.cardTitle}>
+          <LaTeXText>{node.instruction || '先试做'}</LaTeXText>
+        </p>
+        {node.hint && (
+          <p className={styles.hintText}>
+            <LaTeXText>{node.hint}</LaTeXText>
+          </p>
+        )}
         <div className={styles.actionRow}>
           <button
             className={styles.textButton}
@@ -128,10 +129,12 @@ export function InteractionOverlay({
         <div className={styles.summaryPanel}>
           <div className={styles.summaryBody} aria-label="互动小结内容">
             <p className={styles.cardTitle}>
-              {node.instruction || '按顺序选择'}
+              <LaTeXText>{node.instruction || '按顺序选择'}</LaTeXText>
             </p>
             {node.reference_sentence && (
-              <p className={styles.hintText}>{node.reference_sentence}</p>
+              <p className={styles.hintText}>
+                <LaTeXText>{node.reference_sentence}</LaTeXText>
+              </p>
             )}
             <div className={styles.optionGrid}>
               {options.map((option) => {
@@ -150,7 +153,7 @@ export function InteractionOverlay({
                     aria-pressed={selected}
                     onClick={() => toggleSummaryOption(option)}
                   >
-                    {option.text}
+                    <LaTeXText>{option.text}</LaTeXText>
                   </button>
                 )
               })}
@@ -178,7 +181,9 @@ export function InteractionOverlay({
                   }}
                 >
                   <span className={styles.summaryOrderIndex}>{index + 1}</span>
-                  <span className={styles.summaryOrderText}>{option.text}</span>
+                  <span className={styles.summaryOrderText}>
+                    <LaTeXText>{option.text}</LaTeXText>
+                  </span>
                   <span className={styles.summaryOrderControls}>
                     <button
                       className={styles.iconButton}
@@ -249,9 +254,13 @@ export function InteractionOverlay({
     return (
       <div className={styles.interactionOverlay}>
         <div className={styles.practiceCard}>
-          <p className={styles.cardTitle}>{node.instruction || '互动'}</p>
+          <p className={styles.cardTitle}>
+            <LaTeXText>{node.instruction || '互动'}</LaTeXText>
+          </p>
           {node.reference_sentence && (
-            <p className={styles.hintText}>{node.reference_sentence}</p>
+            <p className={styles.hintText}>
+              <LaTeXText>{node.reference_sentence}</LaTeXText>
+            </p>
           )}
           <div className={styles.optionGrid}>
             {options.map((opt, i) => (
@@ -261,7 +270,7 @@ export function InteractionOverlay({
                 key={i}
                 onClick={onContinue}
               >
-                {opt.text}
+                <LaTeXText>{opt.text}</LaTeXText>
               </button>
             ))}
           </div>
@@ -275,7 +284,9 @@ export function InteractionOverlay({
   return (
     <div className={styles.interactionOverlay}>
       <div className={styles.sentenceCard}>
-        <p>{node.instruction || '连词成句'}</p>
+        <p>
+          <LaTeXText>{node.instruction || '连词成句'}</LaTeXText>
+        </p>
         <div className={styles.sentenceBox}>{currentSentence.join(' ')}</div>
         {words.length > 0 && (
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>

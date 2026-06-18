@@ -16,6 +16,8 @@ class VideoRecord(TypedDict):
     duration: float
     error_message: str
     packed: int
+    interaction_stats_json: str
+    interaction_review_status: str
     created_at: str
     updated_at: str
 

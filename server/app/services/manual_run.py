@@ -1,3 +1,6 @@
+import atexit
+from concurrent.futures import ThreadPoolExecutor
+
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.pipeline.artifacts import clear_artifacts_from
@@ -9,6 +12,9 @@ from server.app.records import VideoRecord
 from server.app.services.video_actions import has_running_phase_run
 from server.app.settings import Settings
 from server.app.worker import process_video_once
+
+_background_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="manual-run-")
+atexit.register(_background_executor.shutdown, wait=False)
 
 
 def _result(video_id: str, status: str, phase: str, message: str = "") -> dict[str, str]:
@@ -127,17 +133,15 @@ def _run_loop(
             return _result(video_id, "failed", target_phase, message)
 
 
-def run_to_phase(
+def _validate_run_to(
     db: Database,
     settings: Settings,
     video_id: str,
-    *,
     target_phase: str,
-    start_phase: str | None = None,
-    providers: list[TranscriptionProvider] | None = None,
-    openclaw_runner: OpenClawRunner | None = None,
-    agent_manager: AgentStatusManager | None = None,
-) -> dict[str, str]:
+    start_phase: str | None,
+    agent_manager: AgentStatusManager | None,
+) -> dict[str, str] | None:
+    """Synchronous validation for run-to. Returns error dict or None if valid."""
     video = db.get_video(video_id)
     if not video:
         return _result(video_id, "not_found", target_phase, "Video not found")
@@ -151,7 +155,6 @@ def run_to_phase(
         return _invalid_phase(video_id, target_phase, target_error)
 
     target_index = _phase_index(phases, target_phase)
-    mode_status = "run_to"
     if start_phase is None:
         current_phase = video["current_phase"]
         if not _is_waiting_for_url(video):
@@ -166,7 +169,6 @@ def run_to_phase(
             return _invalid_phase(video_id, target_phase, start_error)
         if _phase_index(phases, start_phase) > target_index:
             return _invalid_phase(video_id, target_phase, "起始阶段晚于目标阶段，无法重跑")
-        mode_status = "rerun_to"
         try:
             normalized_start, _ = _prepare_rerun(db, settings, video, start_phase)
         except ValueError as exc:
@@ -174,6 +176,25 @@ def run_to_phase(
         if _phase_index(phases, normalized_start) > target_index:
             return _invalid_phase(video_id, target_phase, "起始阶段晚于目标阶段，无法重跑")
 
+    return None
+
+
+def run_to_phase(
+    db: Database,
+    settings: Settings,
+    video_id: str,
+    *,
+    target_phase: str,
+    start_phase: str | None = None,
+    providers: list[TranscriptionProvider] | None = None,
+    openclaw_runner: OpenClawRunner | None = None,
+    agent_manager: AgentStatusManager | None = None,
+) -> dict[str, str]:
+    error = _validate_run_to(db, settings, video_id, target_phase, start_phase, agent_manager)
+    if error is not None:
+        return error
+
+    mode_status = "rerun_to" if start_phase is not None else "run_to"
     return _run_loop(
         db,
         settings,
@@ -219,4 +240,77 @@ def batch_run_to_phase(
                 agent_manager=agent_manager,
             )
         )
+    return results
+
+
+def submit_run_to_phase(
+    db: Database,
+    settings: Settings,
+    video_id: str,
+    *,
+    target_phase: str,
+    start_phase: str | None = None,
+    providers: list[TranscriptionProvider] | None = None,
+    openclaw_runner: OpenClawRunner | None = None,
+    agent_manager: AgentStatusManager | None = None,
+) -> dict[str, str]:
+    """Validate synchronously, then execute run-to in a background thread."""
+    error = _validate_run_to(db, settings, video_id, target_phase, start_phase, agent_manager)
+    if error is not None:
+        return error
+
+    _background_executor.submit(
+        run_to_phase,
+        db,
+        settings,
+        video_id,
+        target_phase=target_phase,
+        start_phase=start_phase,
+        providers=providers,
+        openclaw_runner=openclaw_runner,
+        agent_manager=agent_manager,
+    )
+    return _result(video_id, "accepted", target_phase)
+
+
+def batch_submit_run_to_phase(
+    db: Database,
+    settings: Settings,
+    video_ids: list[str],
+    *,
+    target_phase: str,
+    start_phase: str | None = None,
+    providers: list[TranscriptionProvider] | None = None,
+    openclaw_runner: OpenClawRunner | None = None,
+    agent_manager: AgentStatusManager | None = None,
+) -> list[dict[str, str]]:
+    """Validate each video synchronously, then submit all to background threads."""
+    results = []
+    for video_id in video_ids:
+        video = db.get_video(video_id)
+        if video:
+            target_error = _validate_phase(video, target_phase, "目标阶段")
+            start_error = _validate_phase(video, start_phase, "起始阶段") if start_phase else None
+            if target_error or start_error:
+                results.append(
+                    _result(video_id, "skipped", target_phase, target_error or start_error or "")
+                )
+                continue
+        error = _validate_run_to(db, settings, video_id, target_phase, start_phase, agent_manager)
+        if error is not None:
+            results.append(error)
+            continue
+
+        _background_executor.submit(
+            run_to_phase,
+            db,
+            settings,
+            video_id,
+            target_phase=target_phase,
+            start_phase=start_phase,
+            providers=providers,
+            openclaw_runner=openclaw_runner,
+            agent_manager=agent_manager,
+        )
+        results.append(_result(video_id, "accepted", target_phase))
     return results

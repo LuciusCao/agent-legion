@@ -10,6 +10,9 @@ DEFAULT_KNOWLEDGE_URL = (
 DEFAULT_QUESTION_URL = (
     "http://cms.internal.example.com/v2/question/detail?bank_version=v5&country_id=1&subject_id=2"
 )
+DEFAULT_QUESTION_LIST_URL = (
+    "http://cms.internal.example.com/v2/question/list?bank_version=v5&country_id=1&subject_id=2"
+)
 
 
 def _build_headers(token: str | None) -> dict[str, str]:
@@ -41,13 +44,13 @@ def get_token(env: str, config: dict[str, Any] | None = None) -> str | None:
     from server.app.cms.auth import _generate_prod_token
 
     config = config or {}
+    token = os.environ.get("BASECMS_TOKEN")
+    if token:
+        return token
     token = config.get("token")
     if token:
         result: str = str(token)
         return result
-    token = os.environ.get("BASECMS_TOKEN")
-    if token:
-        return token
     if env == "prod":
         return _generate_prod_token(config)
     return None

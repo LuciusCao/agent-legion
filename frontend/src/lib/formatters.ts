@@ -41,19 +41,6 @@ export function parseTimeSeconds(value: unknown): number {
   return Number.NaN
 }
 
-export function escapeHtml(value: string): string {
-  return value.replace(/[&<>"']/g, (char) => {
-    const map: Record<string, string> = {
-      '&': '&amp;',
-      '<': '&lt;',
-      '>': '&gt;',
-      '"': '&quot;',
-      "'": '&#039;',
-    }
-    return map[char] ?? char
-  })
-}
-
 export function formatDuration(ms: number): string {
   if (ms <= 0) return '—'
   const sec = Math.floor(ms / 1000)
@@ -64,6 +51,32 @@ export function formatDuration(ms: number): string {
     return `${h}时${m % 60}分${s}秒`
   }
   return m > 0 ? `${m}分${s}秒` : `${s}秒`
+}
+
+export function formatRelativeTime(isoDate: string): string {
+  const date = new Date(isoDate)
+  const now = new Date()
+  const seconds = Math.floor((now.getTime() - date.getTime()) / 1000)
+  if (seconds < 60) return '刚刚'
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes} 分钟前`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 24) return `${hours} 小时前`
+  const days = Math.floor(hours / 24)
+  if (days < 30) return `${days} 天前`
+  return date.toLocaleDateString('zh-CN')
+}
+
+export function durationSeconds(
+  start?: string | null,
+  end?: string | null
+): number | undefined {
+  if (!start || !end) return undefined
+  const s = new Date(start).getTime()
+  const e = new Date(end).getTime()
+  if (Number.isNaN(s) || Number.isNaN(e)) return undefined
+  const diff = Math.round((e - s) / 1000)
+  return diff >= 0 ? diff : 0
 }
 
 export function formatInteractionStats(

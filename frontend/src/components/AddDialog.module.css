@@ -17,9 +17,14 @@
 
 .add-result {
   display: grid;
-  grid-template-columns: 120px 140px 1fr;
+  grid-template-columns: minmax(0, 120px) minmax(0, 140px) minmax(0, 1fr);
   gap: 8px;
   padding: 8px;
   border: 1px solid var(--md-sys-color-outline-variant);
   border-radius: 8px;
+}
+
+.add-result > span {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }

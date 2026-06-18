@@ -1,6 +1,53 @@
 import contextlib
 import json
 from pathlib import Path
+from typing import Any
+
+
+def _enrich_video(video: Any) -> None:
+    """Enrich video dict with interaction_stats from DB cache fields.
+
+    Strips the raw DB columns so they are never exposed in API responses.
+    """
+    stats_json = video.pop("interaction_stats_json", None)
+    review_status = video.pop("interaction_review_status", None)
+    if video.get("content_type") != "knowledge":
+        return
+    if stats_json:
+        with contextlib.suppress(json.JSONDecodeError):
+            video["interaction_stats"] = json.loads(stats_json)
+    if review_status:
+        video["interaction_review_status"] = review_status
+
+
+def _backfill_interaction_stats(video: Any, video_dir: Path) -> None:
+    """Backfill interaction_stats from disk when DB cache is empty.
+
+    Every code path that returns a video to the client must go through
+    _enrich_video() followed by _backfill_interaction_stats() to ensure
+    the list API, detail API, and SSE push identical data.
+    """
+    if video.get("content_type") != "knowledge":
+        return
+    if "interaction_stats" in video:
+        return
+    stats = compute_interaction_stats(video_dir)
+    if stats:
+        video["interaction_stats"] = stats
+    review_status = compute_interaction_review_status(video_dir)
+    if review_status:
+        video["interaction_review_status"] = review_status
+
+
+def cache_interaction_stats(db: Any, video_id: str, video_dir: Path) -> None:
+    """Compute interaction stats from disk and write them to the DB cache."""
+    stats = compute_interaction_stats(video_dir)
+    review_status = compute_interaction_review_status(video_dir)
+    db.update_video(
+        video_id,
+        interaction_stats_json=json.dumps(stats, ensure_ascii=False) if stats else "",
+        interaction_review_status=review_status or "",
+    )
 
 
 def _load_interactions(video_dir: Path) -> list[dict] | None:
@@ -39,7 +86,7 @@ def compute_interaction_review_status(video_dir: Path) -> str | None:
     """Compute overall interaction review status.
 
     Returns 'all_passed', 'partial', 'all_failed', or None when no interactions
-    or no review result exists.
+    exist. Missing or invalid review results are treated as review failures.
     """
     interactions = _load_interactions(video_dir)
     if not interactions:
@@ -47,7 +94,7 @@ def compute_interaction_review_status(video_dir: Path) -> str | None:
 
     review_data = _load_review(video_dir)
     if review_data is None:
-        return None
+        return "all_failed"
     review_map, global_status = review_data
 
     total = 0
@@ -63,7 +110,7 @@ def compute_interaction_review_status(video_dir: Path) -> str | None:
             passed += 1
 
     if total == 0:
-        return None
+        return "all_failed"
     if passed == total:
         return "all_passed"
     if passed == 0:

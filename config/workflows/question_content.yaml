@@ -1,0 +1,118 @@
+key: question_content
+label: 题目内容生成
+intake:
+  modes:
+    direct_ids:
+      label: 直接输入 ID
+      input_field: question_ids
+    by_knowledge:
+      label: 按知识点查询
+      input_field: knowledge_codes
+      resource: by_knowledge
+nodes:
+  fetch_question_context:
+    label: 获取题目上下文
+    capability: fetch_question_context
+    outputs:
+      - question_context.json
+  question_understanding:
+    label: 题目理解
+    capability: question_understanding
+    after:
+      - fetch_question_context
+    inputs:
+      - question_context.json
+    outputs:
+      - understanding.json
+  misconception_analysis:
+    label: 易错点分析
+    capability: misconception_analysis
+    after:
+      - question_understanding
+    inputs:
+      - question_context.json
+      - understanding.json
+    outputs:
+      - misconceptions.json
+  natural_language_reading:
+    label: 自然语言阅读
+    capability: natural_language_reading
+    after:
+      - question_understanding
+    inputs:
+      - question_context.json
+      - understanding.json
+    outputs:
+      - natural_reading.md
+  solution_decomposition:
+    label: 解题步骤分解
+    capability: solution_decomposition
+    after:
+      - question_understanding
+    inputs:
+      - question_context.json
+      - understanding.json
+    outputs:
+      - solution_steps.json
+  faq_generation:
+    label: FAQ 生成
+    capability: faq_generation
+    after:
+      - solution_decomposition
+    inputs:
+      - solution_steps.json
+    outputs:
+      - faq.json
+  content_graph_generation:
+    label: 内容图谱生成
+    capability: content_graph_generation
+    after:
+      - solution_decomposition
+    inputs:
+      - question_context.json
+      - understanding.json
+      - solution_steps.json
+    outputs:
+      - content_graph.json
+  interactive_template_generation:
+    label: 交互模板生成
+    capability: interactive_template_generation
+    after:
+      - misconception_analysis
+      - solution_decomposition
+    inputs:
+      - misconceptions.json
+      - solution_steps.json
+    outputs:
+      - interactive_template.json
+  content_review:
+    label: 内容审核
+    capability: content_review
+    after:
+      - faq_generation
+      - content_graph_generation
+      - interactive_template_generation
+    inputs:
+      - faq.json
+      - content_graph.json
+      - interactive_template.json
+    outputs:
+      - review_result.json
+  assemble_package:
+    label: 打包组装
+    capability: assemble_package
+    after:
+      - content_review
+    inputs:
+      - question_context.json
+      - understanding.json
+      - natural_reading.md
+      - misconceptions.json
+      - solution_steps.json
+      - faq.json
+      - content_graph.json
+      - interactive_template.json
+      - review_result.json
+    outputs:
+      - upload_params.json
+      - manifest.json

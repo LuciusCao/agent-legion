@@ -86,6 +86,26 @@ def test_build_openclaw_runners_with_runners_config(tmp_path):
     assert runners[1].agent_id == "r2"
 
 
+def test_build_openclaw_runners_with_runners_config_count(tmp_path):
+    settings = load_settings(data_dir=tmp_path)
+    settings.config["openclaw"] = {
+        "runners": [
+            {"command_template": ["openclaw", "--agent", "r1"], "count": 3},
+            {"command_template": ["openclaw", "--agent", "r2"], "count": 2},
+        ]
+    }
+    runners = build_openclaw_runners(settings)
+    assert len(runners) == 5
+    assert runners[0].agent_id == "r1"
+    assert runners[1].agent_id == "r1"
+    assert runners[2].agent_id == "r1"
+    assert runners[3].agent_id == "r2"
+    assert runners[4].agent_id == "r2"
+    # 每个 runner 应该是独立实例（模板列表互不影响）
+    runners[0].command_template.append("--extra")
+    assert "--extra" not in runners[1].command_template
+
+
 def test_build_openclaw_runners_with_discovered_agents(monkeypatch, tmp_path):
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 0, stdout=json.dumps([{"id": "agent1"}]), stderr="")

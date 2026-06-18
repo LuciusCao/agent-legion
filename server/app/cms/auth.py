@@ -11,10 +11,10 @@ import requests
 def _token_gen_config(config: dict[str, Any]) -> dict[str, str]:
     cfg = config.get("token_gen") or {}
     return {
-        "app_id": str(cfg.get("app_id") or os.environ.get("BASECMS_APP_ID") or ""),
-        "nonce": str(cfg.get("nonce") or os.environ.get("BASECMS_NONCE") or ""),
-        "secret": str(cfg.get("secret") or os.environ.get("BASECMS_SECRET") or ""),
-        "url": str(cfg.get("url") or os.environ.get("BASECMS_TOKEN_URL") or ""),
+        "app_id": str(os.environ.get("BASECMS_APP_ID") or cfg.get("app_id") or ""),
+        "nonce": str(os.environ.get("BASECMS_NONCE") or cfg.get("nonce") or ""),
+        "secret": str(os.environ.get("BASECMS_SECRET") or cfg.get("secret") or ""),
+        "url": str(os.environ.get("BASECMS_TOKEN_URL") or cfg.get("url") or ""),
     }
 
 

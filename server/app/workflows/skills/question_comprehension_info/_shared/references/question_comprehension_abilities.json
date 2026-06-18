@@ -1,0 +1,98 @@
+{
+  "version": "1.0",
+  "description": "审题能力维度标准定义，供 question_comprehension_info Agent 使用",
+  "abilities": [
+    {
+      "id": "task_understanding",
+      "name": "任务理解",
+      "core_question": "这道题到底让我做什么？",
+      "boundary": "只关注任务目标，不关注怎么解",
+      "sub_abilities": [
+        {
+          "id": "goal_identification",
+          "name": "问题目标识别",
+          "definition": "能准确判断题目要求的行为类型（求值、判断、证明、选择、概括、解释、比较）"
+        },
+        {
+          "id": "answer_type_recognition",
+          "name": "答案形式识别",
+          "definition": "能预判答案的格式、单位和类型"
+        },
+        {
+          "id": "instruction_recognition",
+          "name": "题目指令识别",
+          "definition": "能区分题目中操作要求的细微差别"
+        }
+      ]
+    },
+    {
+      "id": "information_extraction",
+      "name": "信息提取",
+      "core_question": "题目给了哪些信息？哪些有用？哪些没用？",
+      "boundary": "只关注找到信息，不关注理解信息含义",
+      "sub_abilities": [
+        {
+          "id": "information_locating",
+          "name": "关键信息定位",
+          "definition": "能从题干中识别解题必须使用的显性信息"
+        },
+        {
+          "id": "information_filtering",
+          "name": "无关信息过滤",
+          "definition": "能识别并排除干扰解题的冗余信息"
+        },
+        {
+          "id": "inference",
+          "name": "隐含信息提取",
+          "definition": "能发现题目未直接给出、但可从题目材料中推导的必要信息"
+        }
+      ]
+    },
+    {
+      "id": "language_comprehension",
+      "name": "语言理解",
+      "core_question": "题目这句话到底是什么意思？",
+      "boundary": "只关注理解表述，不关注提取信息",
+      "sub_abilities": [
+        {
+          "id": "keyword_comprehension",
+          "name": "关键词理解",
+          "definition": "能准确理解题干中的限定词、比较词、否定词和逻辑词"
+        },
+        {
+          "id": "complex_sentence_parsing",
+          "name": "长句结构理解",
+          "definition": "能拆解复杂句的主干和修饰关系"
+        },
+        {
+          "id": "reference_resolution",
+          "name": "指代还原",
+          "definition": "能判断代词或指代词具体指代的内容"
+        }
+      ]
+    },
+    {
+      "id": "relational_reasoning",
+      "name": "关系建构",
+      "core_question": "这些信息之间是什么关系？",
+      "boundary": "只关注信息之间的关系，不关注单个信息是什么",
+      "sub_abilities": [
+        {
+          "id": "relationship_identification",
+          "name": "关系识别",
+          "definition": "能识别条件之间的数量、逻辑、因果、包含、比较关系"
+        },
+        {
+          "id": "constraint_identification",
+          "name": "约束识别",
+          "definition": "能识别答案必须满足的限制条件"
+        },
+        {
+          "id": "condition_sequencing",
+          "name": "条件使用顺序判断",
+          "definition": "能判断解题时条件的先后使用次序"
+        }
+      ]
+    }
+  ]
+}

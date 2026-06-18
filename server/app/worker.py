@@ -18,6 +18,7 @@ from server.app.pipeline.transcribe import (
     WhisperCppProvider,
     run_transcription_with_providers,
 )
+from server.app.services.interaction_cache import InteractionCacheService
 from server.app.settings import Settings
 
 from .pipeline.validators import phase_outputs_sufficient, validate_phase_outputs
@@ -40,11 +41,13 @@ def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
 
         if not Path(vad_model).expanduser().exists():
             raise FileNotFoundError(f"Configured VAD model not found: {vad_model}")
+    timeout = int(asr.get("timeout_seconds", 900))
     providers: list[TranscriptionProvider] = [
         WhisperCppProvider(
             binary=str(whisper.get("binary", "")),
             model=str(whisper.get("model", "")),
             vad_model=vad_model,
+            timeout=timeout,
         ),
         SenseVoiceProvider(
             script=str(
@@ -53,6 +56,7 @@ def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
             model_dir=str(
                 settings.root_dir / str(sensevoice.get("model_dir", "models/SenseVoiceSmall"))
             ),
+            timeout=timeout,
         ),
     ]
     return providers
@@ -102,10 +106,14 @@ def _handle_agent_phase(ctx: PhaseContext) -> None:
         if result.status != "completed":
             raise RuntimeError(result.error_message)
     validate_phase_outputs(ctx.video_dir, phase)
+    if phase == "content_review" and ctx.video.get("content_type") == "knowledge":
+        InteractionCacheService(ctx.db, ctx.settings).refresh(ctx.video["id"])
 
 
 def _handle_assemble(ctx: PhaseContext) -> None:
     assemble_video(ctx.video, ctx.video_dir)
+    if ctx.video.get("content_type") == "knowledge":
+        InteractionCacheService(ctx.db, ctx.settings).refresh(ctx.video["id"])
 
 
 _default_registry = PhaseExecutorRegistry()
@@ -219,8 +227,8 @@ def process_video_once(
                 mp4_path.unlink()
             except OSError as exc:
                 if log_path.exists():
-                    existing = log_path.read_text(encoding="utf-8")
-                    log_path.write_text(f"{existing}\nCleanup warning: {exc}", encoding="utf-8")
+                    with log_path.open("a", encoding="utf-8") as f:
+                        f.write(f"\nCleanup warning: {exc}")
 
     return True
 

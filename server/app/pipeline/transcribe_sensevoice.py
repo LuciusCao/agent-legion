@@ -135,11 +135,14 @@ def merge_short_segments(segments: list, min_duration: float = 0.8) -> list:
     return merged
 
 
-def transcribe_with_sensevoice(wav_path: str, language: str = "auto") -> list:
+def transcribe_with_sensevoice(
+    wav_path: str, language: str = "auto", model_dir: str | None = None
+) -> list:
     """Transcribe audio using SenseVoice model."""
-    logger.info("Loading SenseVoice model: %s", SENSEVOICE_MODEL)
+    model_path = model_dir if model_dir and Path(model_dir).exists() else SENSEVOICE_MODEL
+    logger.info("Loading SenseVoice model: %s", model_path)
     model = AutoModel(
-        model=SENSEVOICE_MODEL,
+        model=model_path,
         device="cpu",
         disable_update=True,
     )
@@ -218,6 +221,7 @@ def main():
     parser.add_argument(
         "--language", default="auto", choices=["auto", "zh", "en", "ja", "ko", "yue"]
     )
+    parser.add_argument("--model-dir", default=None, help="Local SenseVoice model directory")
 
     args = parser.parse_args()
 
@@ -233,7 +237,9 @@ def main():
     convert_to_wav(str(video_path), str(wav_path))
 
     # Transcribe
-    segments = transcribe_with_sensevoice(str(wav_path), language=args.language)
+    segments = transcribe_with_sensevoice(
+        str(wav_path), language=args.language, model_dir=args.model_dir
+    )
 
     # Write SRT
     write_srt(segments, str(srt_path))

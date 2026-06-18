@@ -1,9 +1,22 @@
 import os
-from dataclasses import dataclass
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlencode
 
 import yaml
+
+from server.app.executors.config import (
+    ExecutorConfig,
+    load_executor_definitions,
+)
+from server.app.executors.runtime_config import (
+    ExecutorRuntimeConfig,
+    OpenClawRuntimeConfig,
+    WorkflowsRuntimeConfig,
+    validate_runtime,
+)
 
 
 @dataclass
@@ -13,7 +26,15 @@ class Settings:
     videos_dir: Path
     logs_dir: Path
     packages_dir: Path
+    jobs_dir: Path
     config: dict[str, Any]
+    executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
+    executor_runtime: ExecutorRuntimeConfig = field(
+        default_factory=lambda: ExecutorRuntimeConfig(
+            workflows=WorkflowsRuntimeConfig(),
+            openclaw=OpenClawRuntimeConfig(command_template=("openclaw",)),
+        )
+    )
 
 
 def load_env_file(path: Path) -> None:
@@ -34,26 +55,114 @@ def load_env_file(path: Path) -> None:
             os.environ[key] = value
 
 
+def _str_parser(value: str) -> str:
+    return value
+
+
+def _path_parser(value: str) -> str:
+    """Expand ``~`` in path overrides while preserving command names unchanged."""
+    return os.path.expanduser(value)
+
+
+# Reviewed mapping from environment variable to config path and parser.
+# Do not add arbitrary double-underscore mutation; every override is listed here.
+_ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
+    "VIDEO_HIVE_CMS_TOKEN": (("cms", "token"), _str_parser),
+    "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
+    "VIDEO_HIVE_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
+    "VIDEO_HIVE_ASR_WHISPER_MODEL": (("asr", "whisper", "model"), _path_parser),
+    "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
+    "VIDEO_HIVE_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
+    "VIDEO_HIVE_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
+}
+
+
+def _apply_env_overrides(config: dict[str, Any]) -> None:
+    """Apply known environment variable overrides before typed validation."""
+    for env_var, (path, parser) in _ENV_OVERRIDES.items():
+        raw = os.environ.get(env_var)
+        if raw is None:
+            continue
+        node = config
+        for key in path[:-1]:
+            if not isinstance(node.get(key), dict):
+                node[key] = {}
+            node = node[key]
+        node[path[-1]] = parser(raw)
+
+
+def _apply_basecms_env_overrides(config: dict[str, Any]) -> None:
+    """Apply BASECMS_* overrides that predate the VIDEO_HIVE_* overrides."""
+    cms = config.setdefault("cms", {})
+    if not isinstance(cms, dict):
+        return
+    base_url = os.environ.get("BASECMS_BASE_URL")
+    if base_url:
+        cms["base_url"] = base_url
+
+
+def _normalize_cms_config(config: dict[str, Any]) -> None:
+    """Derive legacy URL fields from base_url when present."""
+    cms = config.get("cms")
+    if not isinstance(cms, dict):
+        return
+    base_url = str(cms.get("base_url", "")).rstrip("/")
+    if not base_url:
+        return
+    params: dict[str, str] = {
+        "bank_version": str(cms.get("bank_version", "v5")),
+        "country_id": str(cms.get("country_id", "1")),
+        "subject_id": str(cms.get("subject_id", "2")),
+    }
+    if not cms.get("knowledge_url"):
+        cms["knowledge_url"] = f"{base_url}/knowledge/detail?" + urlencode(params)
+    if not cms.get("question_url"):
+        cms["question_url"] = f"{base_url}/question/detail?" + urlencode(params)
+    if not cms.get("question_detail_url"):
+        cms["question_detail_url"] = cms["question_url"]
+    list_params = {**params}
+    if "page_size" in cms and cms["page_size"] not in (None, ""):
+        list_params["page_size"] = str(cms["page_size"])
+    else:
+        list_params["page_size"] = "50"
+    if not cms.get("question_list_url"):
+        cms["question_list_url"] = f"{base_url}/question/list?" + urlencode(list_params)
+
+
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
     root_dir = Path(__file__).resolve().parents[2]
     load_env_file(root_dir / ".env")
-    config_file = config_path or root_dir / "config" / "pipeline.yaml"
+    config_file = config_path or root_dir / "config" / "workflow.yaml"
     config: dict[str, Any] = {}
     if config_file.exists():
         loaded = yaml.safe_load(config_file.read_text(encoding="utf-8"))
         if isinstance(loaded, dict):
             config = loaded
+    _apply_env_overrides(config)
+    _apply_basecms_env_overrides(config)
+    _normalize_cms_config(config)
     resolved_data_dir = data_dir or root_dir / str(config.get("data_dir", "data"))
     videos_dir = resolved_data_dir / "videos"
     logs_dir = resolved_data_dir / "logs"
     packages_dir = resolved_data_dir / "packages"
-    for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir]:
+    jobs_dir = resolved_data_dir / "jobs"
+    for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
+    executor_definitions = load_executor_definitions(config.get("executors", {}))
+    executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     return Settings(
         root_dir=root_dir,
         data_dir=resolved_data_dir,
         videos_dir=videos_dir,
         logs_dir=logs_dir,
         packages_dir=packages_dir,
+        jobs_dir=jobs_dir,
         config=config,
+        executor_definitions=executor_definitions,
+        executor_runtime=executor_runtime,
     )
+
+
+def validate_settings(settings: Settings) -> None:
+    """Validate runtime dependencies after settings are constructed."""
+    validate_runtime(settings.executor_runtime, settings.config)
