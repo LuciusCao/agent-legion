@@ -66,4 +66,22 @@ describe('ArtifactListDialog', () => {
     fireEvent.click(screen.getByText('关闭'))
     expect(onClose).toHaveBeenCalledTimes(1)
   })
+
+  it('calls onClose when the md-dialog open attribute is removed externally', async () => {
+    render(
+      <ArtifactListDialog
+        open={true}
+        artifacts={['metadata.json']}
+        onClose={onClose}
+        onSelect={onSelect}
+      />
+    )
+
+    const dialog = document.querySelector('md-dialog')
+    expect(dialog).toBeTruthy()
+    dialog!.removeAttribute('open')
+
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
 })
