@@ -34,6 +34,6 @@ class PackageDeletionService:
             record_id=str(package_id),
             root_kind="package",
         )
-        if package_path.is_file():
+        if package_path.exists():
             package_path.unlink()
         self.db.delete_package(package_id)
