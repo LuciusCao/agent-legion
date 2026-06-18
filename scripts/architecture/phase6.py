@@ -1,9 +1,9 @@
 """Phase 6 architecture ratchets for Workspace Capability Parity.
 
-These checks protect the boundary between generic Workspace job surfaces and
-Video Hive video pipeline phases, keep route modules thin, and enforce derived
-generated types for job/workspace transport shapes.
+Protect generic Workspace boundaries, thin routes, and generated transport types.
 """
+
+# ruff: noqa: SIM905
 
 import ast
 import re
@@ -12,96 +12,54 @@ from pathlib import Path
 from scripts.architecture.helpers import imported_modules
 
 # Generic Workspace modules must not depend on Video Hive video pipeline phases.
-_WORKSPACE_MODULE_PREFIXES = (
-    "server/app/routes/jobs.py",
-    "server/app/routes/job_artifacts.py",
-    "server/app/routes/job_batches.py",
-    "server/app/routes/workspace_",
-    "server/app/services/job_",
-    "server/app/services/workspace_",
-    "server/app/services/executor_catalog.py",
-    "server/app/services/workflow_catalog.py",
+_WORKSPACE_MODULE_PREFIXES = tuple(
+    """server/app/routes/jobs.py server/app/routes/job_artifacts.py
+    server/app/routes/job_batches.py server/app/routes/workspace_ server/app/services/job_
+    server/app/services/workspace_ server/app/services/executor_catalog.py
+    server/app/services/workflow_catalog.py""".split()
 )
 
-# Video Hive (singular `pipeline`) modules and video-specific services that must
-# not leak into generic Workspace code.  `server.app.pipeline.package` is shared
-# by workspace packaging and is therefore exempt.
-_VIDEO_HIVE_MODULE_PREFIXES = (
-    "server.app.pipeline.",
-    "server.app.services.video_actions",
-    "server.app.services.intake",
-    "server.app.services.manual_run",
-    "server.app.services.interaction_stats",
+# Video Hive imports forbidden in generic Workspace code, except shared packaging.
+_VIDEO_HIVE_MODULE_PREFIXES = tuple(
+    """server.app.pipeline. server.app.services.video_actions server.app.services.intake
+    server.app.services.manual_run server.app.services.interaction_stats""".split()
 )
 
 _VIDEO_HIVE_EXACT = frozenset({"server.app.pipeline"})
 _VIDEO_HIVE_EXCEPTIONS: set[tuple[str, str]] = set()
 
-# Job execution services must claim capacity through leases, never by invoking
-# Executor adapters directly.
+# Job execution services must claim capacity through leases.
 _JOB_SERVICE_PREFIX = "server/app/services/job_"
-_DIRECT_EXECUTOR_MODULE_PREFIXES = (
-    "server.app.executors.local",
-    "server.app.executors.pi",
-    "server.app.executors.openclaw",
-    "server.app.executors.runtime",
-    "server.app.executors.registry",
-    "server.app.executors.protocol",
-    "server.app.executors.config",
+_DIRECT_EXECUTOR_MODULE_PREFIXES = tuple(
+    """server.app.executors.local server.app.executors.pi server.app.executors.openclaw
+    server.app.executors.runtime server.app.executors.registry server.app.executors.protocol
+    server.app.executors.config""".split()
 )
 
-# Workspace route modules must not perform DAG traversal or filesystem mutation.
-_WORKSPACE_ROUTE_PREFIXES = (
-    "server/app/routes/jobs.py",
-    "server/app/routes/job_artifacts.py",
-    "server/app/routes/job_batches.py",
-    "server/app/routes/packages.py",
-    "server/app/routes/workspace_",
+_WORKSPACE_ROUTE_PREFIXES = tuple(
+    """server/app/routes/jobs.py server/app/routes/job_artifacts.py
+    server/app/routes/job_batches.py server/app/routes/packages.py
+    server/app/routes/workspace_""".split()
 )
 _DAG_TRAVERSAL_NAMES = frozenset(
     {"downstream_nodes", "ancestor_closure", "find_ready_nodes", "allowed_nodes"}
 )
-_FILESYSTEM_DELETION_ATTRS = frozenset({"rmtree", "rmdir", "remove", "unlink", "move"})
 _FILESYSTEM_DELETION_IMPORTS = {
     "os": frozenset({"remove", "rmdir", "unlink"}),
     "shutil": frozenset({"move", "rmtree"}),
 }
+_PATH_DELETION_ATTRS = frozenset({"rmdir", "unlink"})
 
-# Frontend types whose names match generated OpenAPI schemas must be derived from
-# those schemas rather than handwritten.
+# Matching frontend types must derive from generated OpenAPI schemas.
 _GENERATED_JOB_TRANSPORT_NAMES = frozenset(
-    {
-        "ArtifactResponse",
-        "BatchJobIdsRequest",
-        "BatchJobMutationResponse",
-        "BatchRunToRequest",
-        "ContinueJobRequest",
-        "DeleteJobResponse",
-        "ExecutionControlSummaryResponse",
-        "JobBatchRequest",
-        "JobBatchRerunRequest",
-        "JobBatchResponse",
-        "JobDetailResponse",
-        "JobLogResponse",
-        "JobMutationResultResponse",
-        "JobNodeResponse",
-        "JobNodeSummaryResponse",
-        "JobSummaryResponse",
-        "JobsResponse",
-        "NodeRunResponse",
-        "RunToRequest",
-        "WorkspaceDagResponse",
-        "WorkspacePackageRequest",
-        "WorkspacePackageResponse",
-        "WorkspacePackageResultResponse",
-        "WorkspaceResponse",
-        "WorkspaceRunsResponse",
-        "WorkspaceSettingsResponse",
-        "WorkspaceSettingsSectionRequest",
-        "WorkspaceSettingsTestResponse",
-        "WorkspaceStatsResponse",
-        "WorkspacesResponse",
-    }
+    """ArtifactResponse BatchJobIdsRequest BatchJobMutationResponse BatchRunToRequest
+    ContinueJobRequest DeleteJobResponse ExecutionControlSummaryResponse JobBatchRequest
+    JobBatchRerunRequest JobBatchResponse JobDetailResponse JobLogResponse
+    JobMutationResultResponse JobNodeResponse JobNodeSummaryResponse JobSummaryResponse
+    JobsResponse NodeRunResponse RunToRequest WorkspaceDagResponse WorkspacePackageRequest
+    WorkspacePackageResponse WorkspacePackageResultResponse WorkspaceResponse WorkspaceRunsResponse
+    WorkspaceSettingsResponse WorkspaceSettingsSectionRequest WorkspaceSettingsTestResponse
+    WorkspaceStatsResponse WorkspacesResponse""".split()
 )
 
 _DDL_PATTERN = re.compile(
@@ -196,6 +154,67 @@ def check_job_execution_direct_executor_calls(root: Path) -> list[str]:
     return errors
 
 
+class _DeletionCallVisitor(ast.NodeVisitor):
+    def __init__(self, origins: dict[str, str] | None = None) -> None:
+        self.origins = dict(origins or {})
+        self.calls: list[tuple[ast.Call, str]] = []
+
+    def _origin(self, node: ast.expr) -> str | None:
+        if isinstance(node, ast.Name):
+            return self.origins.get(node.id)
+        if not isinstance(node, ast.Attribute):
+            return None
+        if node.attr in _PATH_DELETION_ATTRS:
+            return f"delete/{node.attr}"
+        base = self._origin(node.value)
+        if base and base.startswith("module/"):
+            module = base.removeprefix("module/")
+            if node.attr in _FILESYSTEM_DELETION_IMPORTS[module]:
+                return f"delete/{node.attr}"
+        return None
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            if alias.name in _FILESYSTEM_DELETION_IMPORTS:
+                self.origins[alias.asname or alias.name] = f"module/{alias.name}"
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        allowed = _FILESYSTEM_DELETION_IMPORTS.get(node.module or "", frozenset())
+        for alias in node.names:
+            if alias.name in allowed:
+                self.origins[alias.asname or alias.name] = f"delete/{alias.name}"
+
+    def visit_Assign(self, node: ast.Assign) -> None:
+        self.visit(node.value)
+        origin = self._origin(node.value)
+        for target in node.targets:
+            if isinstance(target, ast.Name):
+                if origin is None:
+                    self.origins.pop(target.id, None)
+                else:
+                    self.origins[target.id] = origin
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.origins.pop(node.name, None)
+        child = type(self)(self.origins)
+        for argument in (*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs):
+            child.origins.pop(argument.arg, None)
+        for argument in filter(None, (node.args.vararg, node.args.kwarg)):
+            if isinstance(argument, ast.arg):
+                child.origins.pop(argument.arg, None)
+        for statement in node.body:
+            child.visit(statement)
+        self.calls.extend(child.calls)
+
+    visit_AsyncFunctionDef = visit_FunctionDef
+
+    def visit_Call(self, node: ast.Call) -> None:
+        origin = self._origin(node.func)
+        if origin and origin.startswith("delete/"):
+            self.calls.append((node, origin.removeprefix("delete/")))
+        self.generic_visit(node)
+
+
 def check_route_dag_and_deletion(root: Path) -> list[str]:
     errors: list[str] = []
     for path in _source_files(root, "server/app/**/*.py"):
@@ -208,16 +227,13 @@ def check_route_dag_and_deletion(root: Path) -> list[str]:
         except SyntaxError as exc:
             errors.append(f"{rel_path}: syntax error ({exc})")
             continue
-        imported_deletion_names: dict[str, str] = {}
-        for import_node in ast.walk(tree):
-            if not isinstance(import_node, ast.ImportFrom):
-                continue
-            allowed_names = _FILESYSTEM_DELETION_IMPORTS.get(import_node.module or "")
-            if allowed_names is None:
-                continue
-            for alias in import_node.names:
-                if alias.name in allowed_names:
-                    imported_deletion_names[alias.asname or alias.name] = alias.name
+        deletion_visitor = _DeletionCallVisitor()
+        deletion_visitor.visit(tree)
+        for node, deletion_name in deletion_visitor.calls:
+            errors.append(
+                f"{rel_path}:{node.lineno}: filesystem deletion {deletion_name!r} belongs in "
+                "services; routes must call orchestration services"
+            )
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -227,19 +243,6 @@ def check_route_dag_and_deletion(root: Path) -> list[str]:
                 errors.append(
                     f"{rel_path}:{node.lineno}: DAG traversal {base_name!r} belongs in services; "
                     "routes must call orchestration services"
-                )
-            deletion_name = None
-            if isinstance(node.func, ast.Name):
-                deletion_name = imported_deletion_names.get(node.func.id)
-            elif (
-                isinstance(node.func, ast.Attribute)
-                and node.func.attr in _FILESYSTEM_DELETION_ATTRS
-            ):
-                deletion_name = node.func.attr
-            if deletion_name is not None:
-                errors.append(
-                    f"{rel_path}:{node.lineno}: filesystem deletion {deletion_name!r} belongs in "
-                    "services; routes must call orchestration services"
                 )
     return errors
 

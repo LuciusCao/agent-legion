@@ -121,34 +121,31 @@ class TestRouteDagAndDeletionBoundary:
         assert any("filesystem deletion" in error for error in errors)
 
     @pytest.mark.parametrize(
-        "import_line,call",
+        "setup,body,expected",
         [
-            ("from os import remove", "remove('/tmp/package.zip')"),
-            ("from shutil import rmtree as delete_tree", "delete_tree('/tmp/package')"),
+            ("from os import remove", "remove('/tmp/package.zip')", True),
+            ("from shutil import rmtree as drop", "drop('/tmp/package')", True),
+            ("", "items = []\n    items.remove('value')", False),
+            ("import os", "delete = os.remove\n    delete('/tmp/package.zip')", True),
+            ("import os as operating_system", "operating_system.remove('/tmp/x')", True),
+            (
+                "from os import remove\ndef remove(value):\n    return value",
+                "remove(package_id)",
+                False,
+            ),
         ],
     )
-    def test_rejects_imported_deletion(self, tmp_path, import_line, call):
+    def test_resolves_filesystem_deletion_origins(self, tmp_path, setup, body, expected):
         source = (
-            f"from fastapi import APIRouter\n{import_line}\nrouter = APIRouter()\n"
+            f"from fastapi import APIRouter\n{setup}\nrouter = APIRouter()\n"
             "@router.delete('/packages/{package_id}')\n"
-            f"def delete_package(package_id: int):\n    {call}\n"
+            f"def delete_package(package_id: int):\n    {body}\n"
         )
         write(tmp_path / "server/app/routes/packages.py", source)
         _empty_budgets(tmp_path)
         errors = check_repository(tmp_path)
-        assert any("filesystem deletion" in error for error in errors)
-
-    def test_allows_unrelated_local_function_named_remove(self, tmp_path):
-        write(
-            tmp_path / "server/app/routes/packages.py",
-            "from fastapi import APIRouter\nrouter = APIRouter()\n"
-            "def remove(value):\n    return value\n"
-            "@router.delete('/packages/{package_id}')\ndef delete_package(package_id: int):\n"
-            "    return remove(package_id)\n",
-        )
-        _empty_budgets(tmp_path)
-        errors = check_repository(tmp_path)
-        assert not any("filesystem deletion" in error for error in errors)
+        found = any("filesystem deletion" in error for error in errors)
+        assert found is expected
 
     @pytest.mark.parametrize(
         "expected_error,source",
