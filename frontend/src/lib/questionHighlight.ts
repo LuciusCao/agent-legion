@@ -76,10 +76,10 @@ export function adjustHighlightBoundaries(
 export function buildHighlightedStemHtml(
   stem: string,
   items: KeyInfoItem[]
-): string {
+): string | null {
   const plain = extractPlainText(stem)
   if (!plain || items.length === 0) {
-    return stem
+    return null
   }
 
   const ranges = items
@@ -101,7 +101,7 @@ export function buildHighlightedStemHtml(
     .filter((r): r is { start: number; end: number; id: string } => r !== null)
     .sort((a, b) => a.start - b.start)
 
-  if (ranges.length === 0) return stem
+  if (ranges.length === 0) return null
 
   const merged: { start: number; end: number; ids: string[] }[] = []
   for (const { start, end, id } of ranges) {

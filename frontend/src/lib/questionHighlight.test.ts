@@ -64,9 +64,9 @@ describe('adjustHighlightBoundaries', () => {
 })
 
 describe('buildHighlightedStemHtml', () => {
-  it('returns original stem when no items', () => {
+  it('returns null when no items', () => {
     const stem = '<p>hello</p>'
-    expect(buildHighlightedStemHtml(stem, [])).toBe(stem)
+    expect(buildHighlightedStemHtml(stem, [])).toBeNull()
   })
 
   it('wraps single range with highlight span', () => {
@@ -91,7 +91,7 @@ describe('buildHighlightedStemHtml', () => {
   it('ignores invalid positions', () => {
     const stem = 'abc'
     const html = buildHighlightedStemHtml(stem, [makeKeyInfo(5, 10)])
-    expect(html).toBe('abc')
+    expect(html).toBeNull()
   })
 
   it('escapes html in plain text segments', () => {
