@@ -63,7 +63,7 @@ describe('JobListItem', () => {
     )
 
     expect(screen.getByText('Algebra Problem')).toBeInTheDocument()
-    expect(screen.getByText(/question · Q100/)).toBeInTheDocument()
+    expect(screen.getByText(/题目 · Q100/)).toBeInTheDocument()
     expect(screen.getByText('运行中')).toBeInTheDocument()
   })
 
@@ -80,7 +80,7 @@ describe('JobListItem', () => {
     )
 
     expect(screen.getByText('未命名')).toBeInTheDocument()
-    expect(screen.getByText(/question · Q100/)).toBeInTheDocument()
+    expect(screen.getByText(/题目 · Q100/)).toBeInTheDocument()
   })
 
   it('checkbox checked state matches prop', () => {
@@ -184,6 +184,8 @@ describe('JobListItem', () => {
       </MemoryRouter>
     )
     expect(screen.getByText('assemble failed')).toBeInTheDocument()
+    const errorSpan = screen.getByText('assemble failed')
+    expect(errorSpan).toHaveAttribute('title', 'assemble failed')
   })
 
   it('passes totalNodes to JobNodeStepper for empty summaries', () => {
