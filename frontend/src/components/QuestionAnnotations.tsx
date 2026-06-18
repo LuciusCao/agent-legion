@@ -46,18 +46,39 @@ export function QuestionAnnotations({
   const [wrapperHeight, setWrapperHeight] = useState(0)
   const [recalcTick, setRecalcTick] = useState(0)
   const [mathJaxTick, setMathJaxTick] = useState(0)
+  const [measureRetryTick, setMeasureRetryTick] = useState(0)
   const lastTypesetKeyRef = useRef('')
+  const mountedRef = useRef(true)
+  const measureRetryCountRef = useRef(0)
+  const measureRafRef = useRef<number | null>(null)
+
+  const MAX_MEASURE_RETRIES = 5
 
   const hiddenKey = hiddenItems.map((i) => i.key_info_id).join(',')
-  const measureKey = `${hiddenKey}:${recalcTick}:${mathJaxTick}`
+  const measureKey = `${hiddenKey}:${recalcTick}:${mathJaxTick}:${measureRetryTick}`
+
+  useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
 
   // Reset cached measurements whenever the items, window size, or typeset output
-  // changes. Updating state inside an effect is normally discouraged, but it is
-  // the simplest way to invalidate DOM-derived measurements when the inputs change.
+  // changes. Clearing state via requestAnimationFrame keeps the update out of
+  // the effect body while still invalidating DOM-derived measurements.
   useEffect(() => {
     lastTypesetKeyRef.current = ''
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMeasurements([])
+    measureRetryCountRef.current = 0
+    if (measureRafRef.current !== null) {
+      cancelAnimationFrame(measureRafRef.current)
+      measureRafRef.current = null
+    }
+    requestAnimationFrame(() => {
+      if (mountedRef.current) {
+        setMeasurements([])
+      }
+    })
   }, [measureKey])
 
   useEffect(() => {
@@ -72,15 +93,27 @@ export function QuestionAnnotations({
   // annotation layer. DOM measurements can only happen after paint, so we update
   // React state from within an effect guarded by the measureKey.
   useEffect(() => {
+    if (measureRafRef.current !== null) {
+      cancelAnimationFrame(measureRafRef.current)
+      measureRafRef.current = null
+    }
+
+    const cleanup = () => {
+      if (measureRafRef.current !== null) {
+        cancelAnimationFrame(measureRafRef.current)
+        measureRafRef.current = null
+      }
+    }
+
     const wrapper = wrapperRef.current
     const layer = layerRef.current
     if (!wrapper || !layer || hiddenItems.length === 0) {
-      return
+      return cleanup
     }
 
     // Already measured for the current measureKey.
     if (measurements.length === hiddenItems.length) {
-      return
+      return cleanup
     }
 
     const layerRect = layer.getBoundingClientRect()
@@ -111,22 +144,38 @@ export function QuestionAnnotations({
     }
 
     if (next.length !== hiddenItems.length) {
-      // DOM is not fully ready yet; wait for the next effect cycle.
-      return
+      // Some cards or highlighted spans are not in the DOM yet. Retry on the
+      // next animation frame, but cap retries to avoid an infinite loop.
+      if (measureRetryCountRef.current < MAX_MEASURE_RETRIES) {
+        measureRetryCountRef.current += 1
+        measureRafRef.current = requestAnimationFrame(() => {
+          measureRafRef.current = null
+          setMeasureRetryTick((t) => t + 1)
+        })
+      }
+      return cleanup
     }
 
+    measureRetryCountRef.current = 0
     const wrapperRect = wrapper.getBoundingClientRect()
-    // Updating state from an effect is normally discouraged, but here it is the
-    // only way to turn post-paint DOM measurements (card heights and highlight
-    // positions) into rendered layout positions and SVG paths.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setMeasurements(next)
-    setWrapperHeight(wrapperRect.height)
+    // Updating state from an effect is normally discouraged; defer the update
+    // to requestAnimationFrame so it does not happen synchronously inside the
+    // effect body.
+    measureRafRef.current = requestAnimationFrame(() => {
+      measureRafRef.current = null
+      if (mountedRef.current) {
+        setMeasurements(next)
+        setWrapperHeight(wrapperRect.height)
+      }
+    })
+
+    return cleanup
   }, [
     hiddenItems,
     measurements.length,
     recalcTick,
     mathJaxTick,
+    measureRetryTick,
     wrapperHeight,
     wrapperRef,
   ])
@@ -221,6 +270,7 @@ export function QuestionAnnotations({
           // MathJax failures should not break the UI.
         })
         .then(() => {
+          if (!mountedRef.current) return
           setMathJaxTick((t) => t + 1)
         })
     }
