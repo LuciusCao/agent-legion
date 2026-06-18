@@ -63,7 +63,7 @@ describe('JobListItem', () => {
     )
 
     expect(screen.getByText('Algebra Problem - Q100')).toBeInTheDocument()
-    expect(screen.getByText('处理中')).toBeInTheDocument()
+    expect(screen.getByText('运行中')).toBeInTheDocument()
   })
 
   it('shows source_id when title is missing', () => {

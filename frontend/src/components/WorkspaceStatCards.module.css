@@ -28,3 +28,9 @@
   border-color: var(--md-sys-color-primary);
   font-weight: 600;
 }
+
+.pill md-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+}

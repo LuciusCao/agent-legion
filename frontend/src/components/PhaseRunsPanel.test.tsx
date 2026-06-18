@@ -188,7 +188,7 @@ describe('PhaseRunsPanel', () => {
         contentType="knowledge"
       />
     )
-    const badges = screen.getAllByText('处理中')
+    const badges = screen.getAllByText('运行中')
     expect(badges.length).toBeGreaterThanOrEqual(1)
   })
 
@@ -311,7 +311,7 @@ describe('PhaseRunsPanel', () => {
 
     expect(screen.getByText('下载')).toBeInTheDocument()
     expect(screen.getByText('转录')).toBeInTheDocument()
-    expect(screen.getByText('排队中')).toBeInTheDocument()
+    expect(screen.getByText('等待中')).toBeInTheDocument()
     expect(screen.queryByText(/排队 \d+时/)).not.toBeInTheDocument()
     expect(screen.getAllByText('排队 —').length).toBeGreaterThanOrEqual(2)
     expect(screen.queryByText('字幕审核')).not.toBeInTheDocument()

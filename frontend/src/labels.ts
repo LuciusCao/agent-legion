@@ -7,11 +7,11 @@ export const TYPE_LABELS: Record<ContentType, string> = {
 
 export const STATUS_LABELS: Record<string, string> = {
   missing_url: '未获取到视频',
-  queued: '排队中',
-  running: '处理中',
+  queued: '等待中',
+  running: '运行中',
   failed: '失败',
   completed: '已完成',
-  pending: '待处理',
+  pending: '等待中',
 }
 
 export const STATUS_ICONS: Record<string, string> = {
@@ -20,6 +20,20 @@ export const STATUS_ICONS: Record<string, string> = {
   failed: 'error',
   queued: 'schedule',
   pending: 'radio_button_unchecked',
+}
+
+export const STATUS_FILTER_CONFIG: Record<
+  string,
+  { label: string; icon: string }
+> = {
+  all: { label: '全部', icon: 'list' },
+  queued: { label: STATUS_LABELS.queued, icon: 'schedule' },
+  pending: { label: STATUS_LABELS.pending, icon: 'schedule' },
+  running: { label: STATUS_LABELS.running, icon: 'sync' },
+  failed: { label: STATUS_LABELS.failed, icon: 'error' },
+  completed: { label: STATUS_LABELS.completed, icon: 'check_circle' },
+  packed: { label: '已打包', icon: 'archive' },
+  unpacked: { label: '未打包', icon: 'inventory_2' },
 }
 
 export const PHASE_LABELS: Record<string, string> = {
@@ -65,21 +79,8 @@ export const INTERACTION_REVIEW_STATUS_LABELS: Record<string, string> = {
   all_failed: '失败',
 }
 
-export const JOB_STATUS_LABELS: Record<string, string> = {
-  queued: '排队中',
-  running: '处理中',
-  failed: '失败',
-  completed: '已完成',
-  pending: '待处理',
-}
-
-export const JOB_STATUS_ICONS: Record<string, string> = {
-  queued: 'schedule',
-  running: 'sync',
-  failed: 'error',
-  completed: 'check_circle',
-  pending: 'radio_button_unchecked',
-}
+export const JOB_STATUS_LABELS = STATUS_LABELS
+export const JOB_STATUS_ICONS = STATUS_ICONS
 
 export const WORKSPACE_LABELS = {
   overview: '概览',
