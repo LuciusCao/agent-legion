@@ -27,4 +27,30 @@ describe('DagStepper', () => {
     expect(bars[1].className).toContain('running')
     expect(bars[2].className).toContain('pending')
   })
+
+  it('maps stale status to stale class', () => {
+    const { container } = render(
+      <DagStepper
+        nodes={
+          [
+            {
+              id: 0,
+              job_id: 'job-1',
+              node_key: 'stale-node',
+              label: 'Stale Node',
+              status: 'stale',
+              after: [],
+              capability: 'test',
+              error_message: '',
+              inputs: [],
+              outputs: [],
+              stale_reason: '',
+            },
+          ] as unknown as JobNodeRecord[]
+        }
+      />
+    )
+    const bar = container.querySelector('[class*="stepBar"]')
+    expect(bar?.className).toContain('stale')
+  })
 })

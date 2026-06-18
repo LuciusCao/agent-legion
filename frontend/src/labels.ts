@@ -12,6 +12,7 @@ export const STATUS_LABELS: Record<string, string> = {
   failed: '失败',
   completed: '已完成',
   pending: '等待中',
+  stale: '已过期',
 }
 
 export const STATUS_ICONS: Record<string, string> = {

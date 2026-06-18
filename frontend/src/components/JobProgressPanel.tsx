@@ -10,6 +10,7 @@ const STATUS_ICONS: Record<string, string> = {
   completed: 'check',
   running: 'sync',
   failed: 'error',
+  stale: 'warning',
   pending: 'schedule',
 }
 
@@ -17,6 +18,7 @@ const NODE_STATUS_CLASS: Record<string, string> = {
   completed: styles.statusCompleted,
   running: styles.statusRunning,
   failed: styles.statusFailed,
+  stale: styles.statusStale,
   pending: styles.statusPending,
 }
 
@@ -24,7 +26,15 @@ const BADGE_STATUS_CLASS: Record<string, string> = {
   completed: styles.badgeCompleted,
   running: styles.badgeRunning,
   failed: styles.badgeFailed,
+  stale: styles.badgeStale,
   pending: styles.badgePending,
+}
+
+const CONTENT_STATUS_CLASS: Record<string, string> = {
+  completed: styles.statusCompleted,
+  running: styles.statusRunning,
+  failed: styles.statusFailed,
+  stale: styles.statusStale,
 }
 
 function formatDuration(seconds?: number): string {
@@ -35,14 +45,21 @@ function formatDuration(seconds?: number): string {
   return `${m}m${s}s`
 }
 
-function formatTime(iso?: string | null): string {
-  if (!iso) return '—'
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString('zh-CN')
+function computeWaitTime(
+  jobCreatedAt: string | undefined,
+  startedAt: string | null | undefined
+): string | undefined {
+  if (!jobCreatedAt || !startedAt) return undefined
+  const created = new Date(jobCreatedAt).getTime()
+  const started = new Date(startedAt).getTime()
+  if (Number.isNaN(created) || Number.isNaN(started)) return undefined
+  const seconds = Math.max(0, Math.floor((started - created) / 1000))
+  return `等待 ${formatDuration(seconds)}`
 }
 
 interface JobProgressPanelProps {
   jobId: string
+  jobCreatedAt?: string
   nodes: JobNodeRecord[]
   runs: NodeRunRecord[]
   onOpenDagDialog?: () => void
@@ -50,6 +67,7 @@ interface JobProgressPanelProps {
 
 export function JobProgressPanel({
   jobId,
+  jobCreatedAt,
   nodes,
   runs,
   onOpenDagDialog,
@@ -94,7 +112,6 @@ export function JobProgressPanel({
       </div>
 
       <div>
-        <h3 className={styles.panelTitle}>阶段明细</h3>
         {nodes.length === 0 && <p className={styles.emptyState}>暂无节点</p>}
         <div className={styles.timeline}>
           {nodes.map((node, idx) => {
@@ -104,6 +121,10 @@ export function JobProgressPanel({
             const hasError = !!(run?.error_message || node.error_message)
             const isExpanded = expandedErrors.has(node.node_key)
             const dur = durationSeconds(node.started_at, node.finished_at)
+            const waitLabel =
+              node.status === 'pending'
+                ? '等待中'
+                : (computeWaitTime(jobCreatedAt, node.started_at) ?? '—')
 
             return (
               <div key={node.node_key} className={styles.timelineItem}>
@@ -118,7 +139,9 @@ export function JobProgressPanel({
                   )}
                 </div>
 
-                <div className={styles.timelineContent}>
+                <div
+                  className={`${styles.timelineContent} ${CONTENT_STATUS_CLASS[node.status] || ''}`}
+                >
                   <div className={styles.timelineHeader}>
                     <span className={styles.nodeName}>{node.label}</span>
                     <span
@@ -128,10 +151,10 @@ export function JobProgressPanel({
                     </span>
                   </div>
 
-                  <div className={styles.timelineMeta}>
+                  <div className={styles.timelineTimes}>
                     <span>
                       <md-icon className={styles.metaIcon}>schedule</md-icon>
-                      {formatTime(node.started_at)}
+                      {waitLabel}
                     </span>
                     <span>
                       <md-icon className={styles.metaIcon}>timer</md-icon>

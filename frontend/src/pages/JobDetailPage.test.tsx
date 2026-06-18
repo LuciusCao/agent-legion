@@ -20,6 +20,8 @@ const mockDetail = {
     source_type: 'knowledge',
     title: 'Algebra Problem',
     status: 'running',
+    created_at: '2026-06-09T07:59:00Z',
+    updated_at: '2026-06-09T08:00:00Z',
   },
   nodes: [
     {
@@ -214,7 +216,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
 
-    expect(await screen.findByText('阶段明细')).toBeInTheDocument()
+    expect(await screen.findByText('提取')).toBeInTheDocument()
     expect(screen.getAllByText('提取').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('生成').length).toBeGreaterThanOrEqual(1)
   })
@@ -245,7 +247,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -329,7 +331,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
@@ -345,7 +347,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     expect(screen.getByLabelText('重跑')).toHaveAttribute('disabled')
@@ -359,7 +361,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -390,7 +392,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -419,7 +421,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -447,7 +449,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -482,7 +484,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     await act(async () => {
@@ -546,7 +548,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     expect(screen.getByLabelText('重跑')).toBeInTheDocument()
@@ -563,7 +565,7 @@ describe('JobDetailPage', () => {
 
     renderPage()
     await waitFor(() => {
-      expect(screen.getByText('阶段明细')).toBeInTheDocument()
+      expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
     // Open fullscreen DAG dialog

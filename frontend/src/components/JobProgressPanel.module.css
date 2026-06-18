@@ -23,13 +23,6 @@
   gap: 8px;
 }
 
-.panelTitle {
-  font-size: 14px;
-  font-weight: 600;
-  margin: 0 0 8px 0;
-  color: var(--md-sys-color-on-surface, #111827);
-}
-
 .timeline {
   display: flex;
   flex-direction: column;
@@ -39,7 +32,7 @@
 .timelineItem {
   display: flex;
   gap: 10px;
-  padding: 10px 0;
+  padding: 4px 0;
 }
 
 .timelineLeft {
@@ -48,35 +41,56 @@
   align-items: center;
   gap: 2px;
   flex-shrink: 0;
+  width: 28px;
 }
 
 .timelineNode {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   display: flex;
   align-items: center;
   justify-content: center;
-  font-size: 14px;
-  color: #fff;
   flex-shrink: 0;
+  background: var(--md-sys-color-surface);
+  border: 2px solid var(--md-sys-color-outline-variant);
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.timelineNode md-icon {
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
 }
 
 .statusCompleted {
-  background: var(--md-sys-color-primary, #2563eb);
+  background: var(--status-completed-bg);
+  border-color: var(--status-completed-border);
+  color: var(--status-completed-text);
 }
 
 .statusRunning {
-  background: var(--md-sys-color-tertiary, #f59e0b);
+  background: var(--status-running-bg);
+  border-color: var(--status-running-border);
+  color: var(--status-running-text);
 }
 
 .statusFailed {
-  background: var(--md-sys-color-error, #dc2626);
+  background: var(--status-failed-bg);
+  border-color: var(--status-failed-border);
+  color: var(--status-failed-text);
+}
+
+.statusStale {
+  background: var(--status-failed-bg);
+  border-color: var(--status-failed-border);
+  color: var(--status-failed-text);
 }
 
 .statusPending {
-  background: var(--md-sys-color-surface-variant, #e5e7eb);
-  color: var(--md-sys-color-on-surface-variant, #6b7280);
+  background: var(--md-sys-color-surface);
+  border-color: var(--md-sys-color-outline-variant);
+  color: var(--md-sys-color-on-surface-variant);
 }
 
 .spinning {
@@ -95,60 +109,71 @@
 .timelineLine {
   width: 2px;
   flex: 1;
-  min-height: 20px;
+  min-height: 16px;
   background: var(--md-sys-color-outline-variant, #e5e7eb);
 }
 
 .timelineContent {
   flex: 1;
   min-width: 0;
-  display: flex;
-  flex-direction: column;
+  padding: 4px 0 8px;
+  display: grid;
   gap: 4px;
+}
+
+.timelineContent.statusRunning .nodeName {
+  color: var(--md-sys-color-primary);
+  font-weight: 600;
 }
 
 .timelineHeader {
   display: flex;
+  justify-content: space-between;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  padding: 4px;
 }
 
 .nodeName {
-  font-size: 13px;
   font-weight: 500;
+  font-size: 14px;
   color: var(--md-sys-color-on-surface, #111827);
 }
 
 .statusBadge {
   font-size: 11px;
-  padding: 1px 8px;
-  border-radius: 999px;
+  padding: 4px 8px;
+  border-radius: 12px;
+  white-space: nowrap;
+  flex-shrink: 0;
   font-weight: 500;
 }
 
 .badgeCompleted {
-  background: #dbeafe;
-  color: #1e40af;
+  background: var(--status-completed-bg);
+  color: var(--status-completed-text);
 }
 
 .badgeRunning {
-  background: #fef3c7;
-  color: #92400e;
+  background: var(--status-running-bg);
+  color: var(--status-running-text);
 }
 
 .badgeFailed {
-  background: #fee2e2;
-  color: #b91c1c;
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
+}
+
+.badgeStale {
+  background: var(--status-failed-bg);
+  color: var(--status-failed-text);
 }
 
 .badgePending {
-  background: #f3f4f6;
-  color: #374151;
+  background: var(--md-sys-color-surface-variant);
+  color: var(--md-sys-color-on-surface-variant);
 }
 
-.timelineMeta {
+.timelineTimes {
   display: flex;
   align-items: center;
   gap: 12px;
@@ -157,11 +182,18 @@
   flex-wrap: wrap;
 }
 
+.timelineTimes span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  line-height: 14px;
+}
+
 .metaIcon {
-  font-size: 13px;
-  width: 13px;
-  height: 13px;
-  color: var(--md-sys-color-on-surface-variant, #6b7280);
+  font-size: 14px;
+  width: 14px;
+  height: 14px;
+  color: inherit;
 }
 
 .detailToggle {

@@ -345,6 +345,7 @@ export default function JobDetailPage() {
           {detail && (
             <JobProgressPanel
               jobId={jobId}
+              jobCreatedAt={detail.job.created_at}
               nodes={detail.nodes}
               runs={detail.runs}
               onOpenDagDialog={() => setDagDialogOpen(true)}
