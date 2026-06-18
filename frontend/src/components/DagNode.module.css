@@ -30,11 +30,7 @@
   border-color: #b91c1c;
 }
 
-.node.stale {
-  background: #fff7ed;
-  border-color: #c2410c;
-}
-
+.node.stale,
 .node.pending {
   background: #f9fafb;
   border-color: #d1d5db;
@@ -64,10 +60,7 @@
   color: #b91c1c;
 }
 
-.iconstale {
-  color: #c2410c;
-}
-
+.iconstale,
 .iconpending {
   color: #9ca3af;
 }
