@@ -262,15 +262,6 @@ export function QuestionContentPanel({
           )}
         </section>
       )}
-
-      {detail?.cms_payload && (
-        <details className={styles.card}>
-          <summary>原始 CMS 数据</summary>
-          <pre className={styles.pre}>
-            {JSON.stringify(detail.cms_payload, null, 2)}
-          </pre>
-        </details>
-      )}
     </div>
   )
 }
