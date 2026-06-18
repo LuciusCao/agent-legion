@@ -35,7 +35,8 @@ def write_exemptions(exemptions_root: Path):
     """Write an exemptions YAML into the temporary root and return the loaded exemptions."""
 
     def _write(data: dict) -> tuple[ArchitectureExemption, ...]:
-        path = exemptions_root / "config" / "architecture-exemptions.yaml"
+        path = exemptions_root / "config" / "architecture" / "architecture-exemptions.yaml"
+        path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml.safe_dump(data))
         return load_exemptions(path)
 

@@ -13,7 +13,10 @@ def write(path: Path, content: str) -> None:
 
 
 def _empty_budgets(path: Path) -> None:
-    write(path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
+    write(
+        path / "config/architecture/architecture-budgets.json",
+        '{"route_exemptions": [], "files": {}}',
+    )
 
 
 class TestWorkspaceVideoHiveBoundary:

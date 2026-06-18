@@ -9,7 +9,7 @@ def test_rejects_frontend_workflow_concurrency_contract(tmp_path):
         "export const read = (workflow: Workflow) => workflow.concurrency\n",
         encoding="utf-8",
     )
-    config = tmp_path / "config/architecture-budgets.json"
+    config = tmp_path / "config/architecture/architecture-budgets.json"
     config.parent.mkdir(parents=True)
     config.write_text('{"route_exemptions": [], "files": {}}', encoding="utf-8")
 
