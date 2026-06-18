@@ -1,6 +1,5 @@
-import { useEffect, useMemo, useState } from 'react'
-import { fetchQuestionDetail } from '../api'
-import type { QuestionDetailResponse } from '../types'
+import { useMemo } from 'react'
+import { useJobQuestion } from '../hooks/useJobQuestion'
 import { renderLatexInHtml } from '../lib/latex'
 import { LaTeXText } from './LaTeXText'
 import styles from './QuestionContentPanel.module.css'
@@ -81,55 +80,29 @@ function hasLatex(text: string): boolean {
 }
 
 export interface QuestionContentPanelProps {
-  workspaceId: string
-  questionId: string
+  jobId: string
 }
 
-export function QuestionContentPanel({
-  workspaceId,
-  questionId,
-}: QuestionContentPanelProps) {
-  const [detail, setDetail] = useState<QuestionDetailResponse | null>(null)
-  const [error, setError] = useState('')
-  const [loading, setLoading] = useState(true)
+export function QuestionContentPanel({ jobId }: QuestionContentPanelProps) {
+  const { question, loading, error } = useJobQuestion(jobId)
 
-  useEffect(() => {
-    let cancelled = false
-    fetchQuestionDetail(workspaceId, questionId)
-      .then((data) => {
-        if (!cancelled) {
-          setDetail(data)
-        }
-      })
-      .catch((err) => {
-        if (!cancelled)
-          setError(err instanceof Error ? err.message : String(err))
-      })
-      .finally(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [workspaceId, questionId])
-
-  const stem = detail?.normalized.stem
+  const stem = question?.stem
   const stemHtml = useMemo(() => {
     if (!stem) return ''
     return renderLatexInHtml(sanitizeHtml(stem))
   }, [stem])
 
-  const analysis = detail?.normalized.analysis
+  const analysis = question?.analysis
   const analysisHtml = useMemo(() => {
     if (!analysis || typeof analysis !== 'string') return ''
     return renderLatexInHtml(sanitizeHtml(analysis))
   }, [analysis])
 
-  const analysisSteps = detail?.normalized.analysis_steps
+  const analysisSteps = question?.analysis_steps
 
-  const rawAnswer = detail?.normalized.answer
+  const rawAnswer = question?.answer
   const answerItems = rawAnswer ? extractAnswerItems(rawAnswer) : null
-  const answer_blanks = detail?.normalized.answer_blanks
+  const answer_blanks = question?.answer_blanks
 
   if (loading) {
     return <p className={styles.loading}>加载题目中...</p>
@@ -139,25 +112,29 @@ export function QuestionContentPanel({
     return <p className={styles.error}>{error}</p>
   }
 
+  if (!question) {
+    return <p className={styles.empty}>题目数据尚未生成</p>
+  }
+
   return (
     <div className={styles.panel}>
       <section className={styles.card}>
         <h2 className={styles.sectionTitle}>题干</h2>
-        {detail?.normalized.stem ? (
+        {question.stem ? (
           <div
             className={styles.richText}
             dangerouslySetInnerHTML={{ __html: stemHtml }}
           />
         ) : (
-          <p className={styles.empty}>未在 CMS 找到该题</p>
+          <p className={styles.empty}>无题干</p>
         )}
       </section>
 
-      {detail?.normalized.options && detail.normalized.options.length > 0 && (
+      {question.options && question.options.length > 0 && (
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>选项</h2>
           <ul className={styles.optionList}>
-            {detail.normalized.options.map((opt, idx) => {
+            {question.options.map((opt, idx) => {
               const label = String(opt.label || String.fromCharCode(65 + idx))
               const content = String(opt.content || '')
               const isCorrect =
@@ -221,7 +198,7 @@ export function QuestionContentPanel({
         </section>
       )}
 
-      {(detail?.normalized.analysis != null ||
+      {(question.analysis != null ||
         (analysisSteps != null && analysisSteps.length > 0)) && (
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>解析</h2>
@@ -250,14 +227,14 @@ export function QuestionContentPanel({
                 </div>
               ))}
             </div>
-          ) : typeof detail!.normalized.analysis === 'string' ? (
+          ) : typeof question.analysis === 'string' ? (
             <div
               className={styles.richText}
               dangerouslySetInnerHTML={{ __html: analysisHtml }}
             />
           ) : (
             <pre className={styles.pre}>
-              {JSON.stringify(detail!.normalized.analysis, null, 2)}
+              {JSON.stringify(question.analysis, null, 2)}
             </pre>
           )}
         </section>

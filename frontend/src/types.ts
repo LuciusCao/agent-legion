@@ -242,14 +242,6 @@ export type QuestionNormalized = {
   analysis_steps?: AnalysisStep[][]
 }
 
-export type QuestionDetailResponse = {
-  question_id: string
-  title: string
-  normalized: QuestionNormalized
-  cms_payload: Record<string, unknown> | null
-  jobs: JobRecord[]
-}
-
 export type WorkspacesResponse = ApiSchemas['WorkspacesResponse'] & {
   workspaces: WorkspaceRecord[]
 }

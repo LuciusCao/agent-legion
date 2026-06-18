@@ -323,11 +323,8 @@ export default function JobDetailPage() {
 
       <div className={styles.columns}>
         <div className={styles.left}>
-          {detail?.job.source_type === 'question' && workspaceId && (
-            <QuestionContentPanel
-              workspaceId={workspaceId}
-              questionId={detail.job.source_id}
-            />
+          {detail?.job.source_type === 'question' && jobId && (
+            <QuestionContentPanel key={jobId} jobId={jobId} />
           )}
         </div>
 
