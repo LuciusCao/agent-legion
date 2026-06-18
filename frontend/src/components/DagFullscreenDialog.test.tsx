@@ -9,8 +9,18 @@ vi.mock('../jobApi')
 const mockFetchJobLog = vi.mocked(jobApi.fetchJobLog)
 
 const nodes: DagGraphNode[] = [
-  { key: 'a', label: '提取', status: 'completed' },
-  { key: 'b', label: '生成', status: 'running' },
+  {
+    key: 'a',
+    label: '提取',
+    status: 'completed',
+    created_at: '2026-06-17T00:00:00Z',
+  },
+  {
+    key: 'b',
+    label: '生成',
+    status: 'running',
+    created_at: '2026-06-17T00:00:00Z',
+  },
 ]
 const edges: DagGraphEdge[] = [{ from: 'a', to: 'b' }]
 

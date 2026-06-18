@@ -1,6 +1,6 @@
 import { useState, useCallback } from 'react'
 import { DagStepper } from './DagStepper'
-import { durationSeconds } from '../helpers'
+import { durationSeconds, filterRelevantRuns } from '../helpers'
 import type { JobNodeRecord, NodeRunRecord } from '../types'
 import { JOB_STATUS_LABELS } from '../labels'
 import { JobLogDialog } from './JobLogDialog'
@@ -88,8 +88,9 @@ export function JobProgressPanel({
     })
   }, [])
 
+  const relevantRuns = filterRelevantRuns(runs, nodes)
   const runByNodeKey = new Map<string, NodeRunRecord>()
-  for (const run of runs) {
+  for (const run of relevantRuns) {
     const existing = runByNodeKey.get(run.node_key)
     if (!existing || run.id > existing.id) {
       runByNodeKey.set(run.node_key, run)
