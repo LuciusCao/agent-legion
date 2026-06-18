@@ -2,77 +2,77 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { QuestionContentPanel } from './QuestionContentPanel'
 
-const mockFetchQuestionDetail = vi.fn()
+const mockFetchJobArtifact = vi.fn()
 
 vi.mock('../api', async (importOriginal) => {
   const mod = await importOriginal<typeof import('../api')>()
   return {
     ...mod,
-    fetchQuestionDetail: (...args: unknown[]) =>
-      mockFetchQuestionDetail(...args),
+    fetchJobArtifact: (...args: unknown[]) => mockFetchJobArtifact(...args),
   }
 })
 
+function makeQuestionsJson(normalized: Record<string, unknown>) {
+  return {
+    content: JSON.stringify({
+      questions: [
+        {
+          question_id: 'Q1',
+          normalized,
+        },
+      ],
+    }),
+  }
+}
+
 describe('QuestionContentPanel', () => {
   beforeEach(() => {
-    mockFetchQuestionDetail.mockReset()
+    mockFetchJobArtifact.mockReset()
   })
 
   it('renders answer badges for array answer', async () => {
-    mockFetchQuestionDetail.mockResolvedValue({
-      question_id: 'Q1',
-      title: 'Test',
-      normalized: {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
         stem: '<p>What is 1+1?</p>',
         options: [
           { label: 'A', content: '1' },
           { label: 'B', content: '2' },
         ],
         answer: ['B'],
-      },
-      cms_payload: null,
-      jobs: [],
-    })
+      })
+    )
 
-    render(<QuestionContentPanel workspaceId="ws1" questionId="Q1" />)
+    render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText('B')).toBeInTheDocument()
   })
 
   it('renders answer badge with LaTeX', async () => {
-    mockFetchQuestionDetail.mockResolvedValue({
-      question_id: 'Q2',
-      title: 'Test',
-      normalized: {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
         stem: '<p>What is x?</p>',
         answer: ['$x = 2$'],
-      },
-      cms_payload: null,
-      jobs: [],
-    })
+      })
+    )
 
-    render(<QuestionContentPanel workspaceId="ws1" questionId="Q2" />)
+    render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(document.querySelector('.katex')).toBeInTheDocument()
   })
 
   it('shows check icon for correct option', async () => {
-    mockFetchQuestionDetail.mockResolvedValue({
-      question_id: 'Q3',
-      title: 'Test',
-      normalized: {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
         stem: '<p>Pick one</p>',
         options: [
           { label: 'A', content: 'Wrong' },
           { label: 'B', content: 'Right' },
         ],
         answer: ['B'],
-      },
-      cms_payload: null,
-      jobs: [],
-    })
+      })
+    )
 
-    render(<QuestionContentPanel workspaceId="ws1" questionId="Q3" />)
+    render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('选项')).toBeInTheDocument())
     const listItems = screen.getAllByRole('listitem')
     expect(listItems).toHaveLength(2)
@@ -80,60 +80,48 @@ describe('QuestionContentPanel', () => {
   })
 
   it('falls back to raw data for complex answer', async () => {
-    mockFetchQuestionDetail.mockResolvedValue({
-      question_id: 'Q4',
-      title: 'Test',
-      normalized: {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
         stem: '<p>Complex</p>',
         answer: { nested: { value: 'deep' } },
-      },
-      cms_payload: null,
-      jobs: [],
-    })
+      })
+    )
 
-    render(<QuestionContentPanel workspaceId="ws1" questionId="Q4" />)
+    render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText('无答案')).toBeInTheDocument()
   })
 
   it('marks correct option for single-string answer', async () => {
-    mockFetchQuestionDetail.mockResolvedValue({
-      question_id: 'Q5',
-      title: 'Test',
-      normalized: {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
         stem: '<p>Pick one</p>',
         options: [
           { label: 'A', content: 'Wrong' },
           { label: 'B', content: 'Right' },
         ],
         answer: 'B',
-      },
-      cms_payload: null,
-      jobs: [],
-    })
+      })
+    )
 
-    render(<QuestionContentPanel workspaceId="ws1" questionId="Q5" />)
+    render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('选项')).toBeInTheDocument())
     const listItems = screen.getAllByRole('listitem')
     expect(listItems[1].querySelector('md-icon')).toHaveTextContent('check')
   })
 
   it('renders structured answer blanks with alternatives', async () => {
-    mockFetchQuestionDetail.mockResolvedValue({
-      question_id: 'Q6',
-      title: 'Test',
-      normalized: {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
         stem: '<p>Fill blanks</p>',
         answer_blanks: [
           { alternatives: ['\\[68\\]', '36'], is_latex: true },
           { alternatives: ['52'], is_latex: false },
         ],
-      },
-      cms_payload: null,
-      jobs: [],
-    })
+      })
+    )
 
-    render(<QuestionContentPanel workspaceId="ws1" questionId="Q6" />)
+    render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText(/第1空/)).toBeInTheDocument()
     expect(screen.getByText(/第2空/)).toBeInTheDocument()
@@ -142,27 +130,21 @@ describe('QuestionContentPanel', () => {
   })
 
   it('falls back to old extractAnswerItems when answer_blanks missing', async () => {
-    mockFetchQuestionDetail.mockResolvedValue({
-      question_id: 'Q7',
-      title: 'Test',
-      normalized: {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
         stem: '<p>Simple</p>',
         answer: ['B'],
-      },
-      cms_payload: null,
-      jobs: [],
-    })
+      })
+    )
 
-    render(<QuestionContentPanel workspaceId="ws1" questionId="Q7" />)
+    render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
     expect(screen.getByText('B')).toBeInTheDocument()
   })
 
   it('renders structured analysis steps', async () => {
-    mockFetchQuestionDetail.mockResolvedValue({
-      question_id: 'Q8',
-      title: 'Test',
-      normalized: {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
         stem: '<p>Problem</p>',
         analysis_steps: [
           [
@@ -170,12 +152,10 @@ describe('QuestionContentPanel', () => {
             { content: '<p>Second step</p>', title: '', step: 1 },
           ],
         ],
-      },
-      cms_payload: null,
-      jobs: [],
-    })
+      })
+    )
 
-    render(<QuestionContentPanel workspaceId="ws1" questionId="Q8" />)
+    render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('解析')).toBeInTheDocument())
     expect(screen.getByText('Hint')).toBeInTheDocument()
     expect(screen.getByText('First step')).toBeInTheDocument()
@@ -183,18 +163,14 @@ describe('QuestionContentPanel', () => {
   })
 
   it('falls back to raw analysis when analysis_steps missing', async () => {
-    mockFetchQuestionDetail.mockResolvedValue({
-      question_id: 'Q9',
-      title: 'Test',
-      normalized: {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
         stem: '<p>Problem</p>',
         analysis: 'Plain text analysis.',
-      },
-      cms_payload: null,
-      jobs: [],
-    })
+      })
+    )
 
-    render(<QuestionContentPanel workspaceId="ws1" questionId="Q9" />)
+    render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('解析')).toBeInTheDocument())
     expect(screen.getByText('Plain text analysis.')).toBeInTheDocument()
   })
