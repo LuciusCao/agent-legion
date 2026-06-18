@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { JobNodeStepper } from './JobNodeStepper'
+import styles from './JobNodeStepper.module.css'
 import type { JobNodeSummary } from '../jobTypes'
 
 const summaries: JobNodeSummary[] = [
@@ -66,7 +67,7 @@ describe('JobNodeStepper', () => {
     render(<JobNodeStepper nodeSummaries={summaries} />)
 
     const staleSegment = screen.getByTitle('内容审核')
-    const bar = staleSegment.firstElementChild
+    const bar = staleSegment.querySelector(`.${styles.bar}`)
     expect(bar).toHaveAttribute('data-status', 'stale')
   })
 
