@@ -4,6 +4,7 @@ import contextlib
 import importlib
 import logging
 import multiprocessing
+import os
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -60,6 +61,17 @@ def _run_handler(
     conn: Any,
 ) -> None:
     """Target run in an isolated multiprocessing child."""
+    log_path = runtime.get("log_path")
+    if log_path:
+        try:
+            log_fd = os.open(str(log_path), os.O_WRONLY | os.O_CREAT | os.O_TRUNC)
+            os.dup2(log_fd, 1)
+            os.dup2(log_fd, 2)
+            os.close(log_fd)
+        except Exception:
+            # If redirection fails, continue with inherited stdout/stderr.
+            pass
+
     error_message = ""
     try:
         handler = _resolve_handler(handler_key)
