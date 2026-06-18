@@ -256,6 +256,73 @@ describe('JobDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it('reloads questions.json when its producer node completes', async () => {
+    let detailRequests = 0
+    let artifactRequests = 0
+    const fetchMock = vi.fn().mockImplementation((url: string) => {
+      if (url === '/api/jobs/j1') {
+        detailRequests += 1
+        const completed = detailRequests > 1
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            ...mockDetail,
+            job: {
+              ...mockDetail.job,
+              source_type: 'question',
+              status: completed ? 'completed' : 'running',
+            },
+            nodes: [
+              {
+                ...mockDetail.nodes[0],
+                node_key: 'fetch_questions',
+                capability: 'fetch_questions',
+                outputs: ['questions.json'],
+                status: completed ? 'completed' : 'running',
+                finished_at: completed ? '2026-06-18T10:00:00Z' : undefined,
+              },
+            ],
+          }),
+        })
+      }
+      if (url === '/api/jobs/j1/artifacts/questions.json') {
+        artifactRequests += 1
+        if (artifactRequests === 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 404,
+            text: async () => JSON.stringify({ detail: 'Artifact not found' }),
+          })
+        }
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({
+            content: JSON.stringify({
+              questions: [
+                {
+                  question_id: 'Q100',
+                  normalized: { stem: '<p>Generated later</p>' },
+                },
+              ],
+            }),
+          }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({}) })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderPage()
+    expect(await screen.findByText('Artifact not found')).toBeInTheDocument()
+
+    await act(async () => {
+      vi.advanceTimersByTime(5000)
+    })
+
+    expect(await screen.findByText('Generated later')).toBeInTheDocument()
+    expect(artifactRequests).toBe(2)
+  })
+
   it('does not poll detail when job is completed', async () => {
     const fetchMock = createFetchMock({ detailStatus: 'completed' })
     vi.stubGlobal('fetch', fetchMock)

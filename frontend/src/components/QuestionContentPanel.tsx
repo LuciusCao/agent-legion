@@ -81,10 +81,14 @@ function hasLatex(text: string): boolean {
 
 export interface QuestionContentPanelProps {
   jobId: string
+  refreshKey?: string
 }
 
-export function QuestionContentPanel({ jobId }: QuestionContentPanelProps) {
-  const { question, loading, error } = useJobQuestion(jobId)
+export function QuestionContentPanel({
+  jobId,
+  refreshKey,
+}: QuestionContentPanelProps) {
+  const { question, loading, error } = useJobQuestion(jobId, refreshKey)
 
   const stem = question?.stem
   const stemHtml = useMemo(() => {
