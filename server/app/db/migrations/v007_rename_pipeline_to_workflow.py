@@ -53,6 +53,10 @@ def _index_exists(conn: sqlite3.Connection, index: str) -> bool:
     return row is not None
 
 
+def _needs_backup(conn: sqlite3.Connection) -> bool:
+    return any(_column_exists(conn, table, old_col) for table, old_col, _ in _OLD_COLUMNS)
+
+
 def _apply(conn: sqlite3.Connection) -> None:
     for table, old_col, new_col in _OLD_COLUMNS:
         if _column_exists(conn, table, old_col):
@@ -69,4 +73,6 @@ MIGRATION = Migration(
     version=7,
     name="rename_pipeline_to_workflow",
     apply=_apply,
+    backup_label="v007",
+    backup_when=_needs_backup,
 )

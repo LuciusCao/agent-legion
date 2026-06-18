@@ -2,6 +2,7 @@ import logging
 import sqlite3
 from collections.abc import Callable
 
+from server.app.db.migrations.backup import backup_if_requested
 from server.app.db.migrations.execution import apply_migration
 from server.app.db.migrations.history import check_history, load_applied
 from server.app.db.migrations.hooks import (
@@ -33,6 +34,7 @@ def run_migrations(
         for migration in sorted_migrations:
             if migration.version in applied:
                 continue
+            backup_if_requested(conn, migration)
             logger.info("Applying migration %d: %s", migration.version, migration.name)
             _call_phase_hook(f"pre:{migration.name}")
             apply_migration(conn, migration)
