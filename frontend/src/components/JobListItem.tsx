@@ -144,7 +144,9 @@ export function JobListItem({
           {job.error_summary ? (
             <>
               {' · '}
-              <span className={styles.errorText}>{job.error_summary}</span>
+              <span className={styles.errorText} title={job.error_summary}>
+                {job.error_summary}
+              </span>
             </>
           ) : null}
         </div>
