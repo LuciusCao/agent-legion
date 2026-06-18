@@ -279,6 +279,7 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   },
 
   async fetchSettings(workspaceId) {
+    set({ saveError: null })
     try {
       const [
         workspaceResult,

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act, waitFor } from '@testing-library/react'
-import { MemoryRouter } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { ListPage } from './ListPage'
 import { useVideoStore } from '../stores/videoStore'
 import { api } from '../api'

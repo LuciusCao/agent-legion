@@ -1,6 +1,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import VideoHiveLayout from './VideoHiveLayout'
 import { createMockUiState } from '../testing/fixtures'
 

@@ -53,13 +53,13 @@ def worker_thread(db, settings, runner_pool, agent_manager, worker_control):
 
 def test_worker_advances_download_to_transcribe(db, worker_thread, worker_control, monkeypatch):
     """Worker loop drives a real video record through the download phase."""
-    import server.app.worker as worker_module
+    import server.app.services.video_execution as video_execution
 
     def noop_download(ctx):
         # No actual download is needed for this integration test.
         pass
 
-    monkeypatch.setitem(worker_module._default_registry._handlers, "download", noop_download)
+    monkeypatch.setitem(video_execution._default_registry._handlers, "download", noop_download)
 
     video = db.create_video(
         "https://example.com/v1.mp4",

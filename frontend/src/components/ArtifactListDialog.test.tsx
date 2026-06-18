@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { ArtifactListDialog } from './ArtifactListDialog'
 
 describe('ArtifactListDialog', () => {
@@ -81,7 +81,8 @@ describe('ArtifactListDialog', () => {
     expect(dialog).toBeTruthy()
     dialog!.removeAttribute('open')
 
-    await new Promise((resolve) => setTimeout(resolve, 50))
-    expect(onClose).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect(onClose).toHaveBeenCalledTimes(1)
+    })
   })
 })

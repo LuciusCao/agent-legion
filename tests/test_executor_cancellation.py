@@ -332,7 +332,7 @@ class FakeCancellingExecutor:
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         token = (context.runtime or {}).get("cancellation")
         self.tokens.append(token)
-        token.wait(timeout=10)
+        assert token.wait(timeout=10), "cancellation token was not set in time"
         return ExecutionResult(
             status="cancelled",
             exit_code=-1,

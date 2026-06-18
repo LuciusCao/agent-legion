@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { ExpandedJobPanel } from './ExpandedJobPanel'
 import type { JobRecord } from '../types'
 

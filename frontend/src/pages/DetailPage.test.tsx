@@ -1,7 +1,8 @@
 /// <reference types="node" />
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { DetailPage } from './DetailPage'
 import { useDetailStore } from '../stores/detailStore'
 import { useArtifactStore } from '../stores/artifactStore'

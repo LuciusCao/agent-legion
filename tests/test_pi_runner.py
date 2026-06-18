@@ -265,6 +265,53 @@ def test_run_fails_when_output_missing(tmp_path, monkeypatch):
     assert result.exit_code != 0
 
 
+def test_run_fails_with_model_error_when_pi_exits_zero(tmp_path):
+    """Pi can exit 0 while the upstream model call fails (e.g. provider 400).
+
+    The runner must report the model error, not a misleading missing-output error.
+    """
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        "#!/bin/bash\n"
+        "cat <<'JSONL'\n"
+        '{"type":"session","version":3,"id":"test-session","timestamp":"2026-06-18T10:00:00.000Z"}\n'
+        '{"type":"message_start","message":{"role":"assistant","content":[],"api":"openai-completions","provider":"gateway","model":"your-model-a","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"400 status code (no body)"}}\n'
+        '{"type":"message_end","message":{"role":"assistant","content":[],"api":"openai-completions","provider":"gateway","model":"your-model-a","usage":{"input":0,"output":0},"stopReason":"error","errorMessage":"400 status code (no body)"}}\n'
+        "JSONL\n"
+    )
+    fake_pi.chmod(0o755)
+
+    runner = PiRunner.from_config(
+        {"binary": str(fake_pi), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text("#!/usr/bin/env python3\nimport sys\n")
+    validator.chmod(0o755)
+
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+
+    result = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json", "keywords_report.json"],
+        job_db=None,
+        job_dir=job_dir,
+    )
+
+    assert result.status == "failed"
+    assert result.exit_code != 0
+    assert "Pi model call failed" in result.error_message
+    assert "400 status code (no body)" in result.error_message
+
+
 def test_run_fails_when_binary_missing(tmp_path):
     runner = PiRunner.from_config(
         {"binary": str(tmp_path / "nonexistent"), "timeout_seconds": 10},

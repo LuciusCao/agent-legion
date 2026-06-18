@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { MemoryRouter, useNavigate } from 'react-router-dom'
+import { useNavigate } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { AppBar } from './AppBar'
 import styles from './AppBar.module.css'
 

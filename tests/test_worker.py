@@ -339,12 +339,14 @@ def test_missing_url_video_is_not_processed(db, settings):
 def test_missing_url_fetch_error_is_visible(db, settings, monkeypatch):
     db.create_video("", "Knowledge 1", content_type="knowledge", external_id="K001")
 
-    monkeypatch.setattr("server.app.worker.get_token", lambda env, config: "token")
+    monkeypatch.setattr(
+        "server.app.services.video_execution.get_token", lambda env, config: "token"
+    )
 
     def fail_fetch(code, api_url, token):
         raise RuntimeError("cms timeout")
 
-    monkeypatch.setattr("server.app.worker.lookup_knowledge_video", fail_fetch)
+    monkeypatch.setattr("server.app.services.video_execution.lookup_knowledge_video", fail_fetch)
 
     assert process_video_once(db, settings, "knowledge_K001") is False
     video = db.get_video("knowledge_K001")
@@ -356,9 +358,11 @@ def test_missing_url_fetch_error_is_visible(db, settings, monkeypatch):
 def test_worker_retries_missing_url_video_from_cms(db, settings, monkeypatch):
     db.create_video("", "Question 1", content_type="question", external_id="Q001")
 
-    monkeypatch.setattr("server.app.worker.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.worker.lookup_question_video",
+        "server.app.services.video_execution.get_token", lambda env, config: "token"
+    )
+    monkeypatch.setattr(
+        "server.app.services.video_execution.lookup_question_video",
         lambda uuid, api_url, token: type(
             "Lookup",
             (),
@@ -371,7 +375,7 @@ def test_worker_retries_missing_url_video_from_cms(db, settings, monkeypatch):
         )(),
     )
     monkeypatch.setattr(
-        "server.app.worker.download_video",
+        "server.app.services.video_execution.download_video",
         lambda url, output_path: output_path.write_bytes(b"fake"),
     )
 

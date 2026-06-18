@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
-import { BrowserRouter } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { DashboardPage } from './DashboardPage'
 
 vi.mock('../stores/workspaceStore', () => ({
@@ -22,18 +22,18 @@ vi.mock('../stores/videoStore', () => ({
 describe('DashboardPage', () => {
   it('renders Agent Legion title', () => {
     render(
-      <BrowserRouter>
+      <MemoryRouter>
         <DashboardPage />
-      </BrowserRouter>
+      </MemoryRouter>
     )
     expect(screen.getByText('Agent Legion')).toBeInTheDocument()
   })
 
   it('renders Video Hive card', () => {
     render(
-      <BrowserRouter>
+      <MemoryRouter>
         <DashboardPage />
-      </BrowserRouter>
+      </MemoryRouter>
     )
     expect(screen.getByText('Video Hive')).toBeInTheDocument()
   })

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
-import { MemoryRouter, Route, Routes } from 'react-router-dom'
+import { Route, Routes } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { SettingsPage } from './SettingsPage'
 import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'

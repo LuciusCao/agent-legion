@@ -35,6 +35,10 @@ markers = [
 ]
 filterwarnings = [
   "error::ResourceWarning:sqlite3",
+  "error::DeprecationWarning",
+  # Uvicorn's WebSocket protocol imports these deprecated compatibility APIs.
+  "ignore:^websockets\\.legacy is deprecated; see .*:DeprecationWarning:websockets\\.legacy$",
+  "ignore:^websockets\\.server\\.WebSocketServerProtocol is deprecated$:DeprecationWarning:uvicorn\\.protocols\\.websockets\\.websockets_impl$",
 ]
 
 [tool.ruff]
