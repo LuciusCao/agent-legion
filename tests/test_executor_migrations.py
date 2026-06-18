@@ -35,6 +35,48 @@ def test_empty_database_migrates_to_latest_version(tmp_path: Path) -> None:
         assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7]
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
+    assert list(tmp_path.glob("empty-before-v007-*.sqlite")) == []
+
+
+def test_v007_creates_pre_migration_backup_for_pipeline_columns(tmp_path: Path) -> None:
+    path = tmp_path / "upgrade.sqlite"
+    init_db(path)
+
+    with closing(connect_sqlite(path)) as conn, conn:
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
+            "values ('job1', 'default', 'reading_analysis', 'question', 'Q1')"
+        )
+        conn.execute("delete from schema_migrations where version=7")
+        for table, new_name, old_name in (
+            ("workspaces", "default_workflow_key", "default_pipeline_key"),
+            ("job_batches", "workflow_key", "pipeline_key"),
+            ("jobs", "workflow_key", "pipeline_key"),
+            ("workspace_node_bindings", "workflow_key", "pipeline_key"),
+            ("workspace_node_limits", "workflow_key", "pipeline_key"),
+            ("executor_leases", "workflow_key", "pipeline_key"),
+        ):
+            conn.execute(f"alter table {table} rename column {new_name} to {old_name}")
+
+    init_db(path)
+
+    backups = list(tmp_path.glob("upgrade-before-v007-*.sqlite"))
+    assert len(backups) == 1
+    with closing(connect_sqlite(backups[0])) as backup, backup:
+        backup_columns = {
+            row["name"] for row in backup.execute("pragma table_info(jobs)").fetchall()
+        }
+        assert "pipeline_key" in backup_columns
+        assert "workflow_key" not in backup_columns
+        assert backup.execute("select pipeline_key from jobs where id='job1'").fetchone()[0] == (
+            "reading_analysis"
+        )
+
+    with closing(connect_sqlite(path)) as conn, conn:
+        live_columns = {row["name"] for row in conn.execute("pragma table_info(jobs)").fetchall()}
+        assert "workflow_key" in live_columns
+        assert "pipeline_key" not in live_columns
+
 
 def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
     """A pre-Phase-3 database with workspace_agent_assignments is upgraded cleanly."""
