@@ -95,20 +95,22 @@ export function buildHighlightedStemHtml(
       ) {
         return null
       }
-      return adjustHighlightBoundaries(plain, pos.start, pos.end)
+      const bounds = adjustHighlightBoundaries(plain, pos.start, pos.end)
+      return { ...bounds, id: item.key_info_id }
     })
-    .filter((r): r is { start: number; end: number } => r !== null)
+    .filter((r): r is { start: number; end: number; id: string } => r !== null)
     .sort((a, b) => a.start - b.start)
 
   if (ranges.length === 0) return stem
 
-  const merged: { start: number; end: number }[] = []
-  for (const range of ranges) {
+  const merged: { start: number; end: number; ids: string[] }[] = []
+  for (const { start, end, id } of ranges) {
     const last = merged[merged.length - 1]
-    if (last && range.start <= last.end) {
-      last.end = Math.max(last.end, range.end)
+    if (last && start <= last.end) {
+      last.end = Math.max(last.end, end)
+      last.ids.push(id)
     } else {
-      merged.push({ ...range })
+      merged.push({ start, end, ids: [id] })
     }
   }
 
@@ -123,11 +125,12 @@ export function buildHighlightedStemHtml(
 
   let html = ''
   let cursor = 0
-  for (const { start, end } of merged) {
+  for (const { start, end, ids } of merged) {
     if (start > cursor) {
       html += escapeHtml(plain.slice(cursor, start))
     }
-    html += `<span class="highlight">${escapeHtml(plain.slice(start, end))}</span>`
+    const dataAttr = ids.length ? ` data-ids="${escapeHtml(ids.join(','))}"` : ''
+    html += `<span class="highlight"${dataAttr}>${escapeHtml(plain.slice(start, end))}</span>`
     cursor = end
   }
   if (cursor < plain.length) {

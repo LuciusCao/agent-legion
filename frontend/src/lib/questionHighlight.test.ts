@@ -66,7 +66,9 @@ describe('buildHighlightedStemHtml', () => {
   it('wraps single range with highlight span', () => {
     const stem = '若关于 x 的方程'
     const html = buildHighlightedStemHtml(stem, [makeKeyInfo(2, 7)])
-    expect(html).toContain('<span class="highlight">于 x 的</span>')
+    expect(html).toContain(
+      '<span class="highlight" data-ids="ki_2_7">于 x 的</span>'
+    )
   })
 
   it('merges overlapping ranges', () => {
@@ -75,7 +77,9 @@ describe('buildHighlightedStemHtml', () => {
       makeKeyInfo(1, 3),
       makeKeyInfo(2, 5),
     ])
-    expect(html).toBe('a<span class="highlight">bcde</span>f')
+    expect(html).toBe(
+      'a<span class="highlight" data-ids="ki_1_3,ki_2_5">bcde</span>f'
+    )
   })
 
   it('ignores invalid positions', () => {
@@ -87,6 +91,8 @@ describe('buildHighlightedStemHtml', () => {
   it('escapes html in plain text segments', () => {
     const stem = 'a < b & c'
     const html = buildHighlightedStemHtml(stem, [makeKeyInfo(0, 1)])
-    expect(html).toBe('<span class="highlight">a</span> &lt; b &amp; c')
+    expect(html).toBe(
+      '<span class="highlight" data-ids="ki_0_1">a</span> &lt; b &amp; c'
+    )
   })
 })
