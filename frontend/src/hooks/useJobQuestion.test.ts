@@ -81,4 +81,37 @@ describe('useJobQuestion', () => {
     expect(result.current.error).toContain('JSON')
     expect(result.current.question).toBeNull()
   })
+
+  it('refetches when the question artifact refresh key changes', async () => {
+    mockFetchJobArtifact
+      .mockRejectedValueOnce(new Error('not found'))
+      .mockResolvedValueOnce({
+        content: JSON.stringify({
+          questions: [
+            {
+              question_id: 'Q1',
+              normalized: { stem: '<p>Generated later</p>' },
+            },
+          ],
+        }),
+      })
+
+    const hookWithRefreshKey = useJobQuestion as unknown as (
+      jobId: string,
+      refreshKey: string
+    ) => ReturnType<typeof useJobQuestion>
+    const { result, rerender } = renderHook(
+      ({ refreshKey }) => hookWithRefreshKey('job1', refreshKey),
+      { initialProps: { refreshKey: 'running' } }
+    )
+
+    await waitFor(() => expect(result.current.error).toBe('not found'))
+
+    rerender({ refreshKey: 'completed:2026-06-18T10:00:00Z' })
+
+    await waitFor(() =>
+      expect(result.current.question?.stem).toBe('<p>Generated later</p>')
+    )
+    expect(mockFetchJobArtifact).toHaveBeenCalledTimes(2)
+  })
 })

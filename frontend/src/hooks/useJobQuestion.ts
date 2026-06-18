@@ -29,7 +29,10 @@ function extractFirstQuestion(
   return normalized as QuestionNormalized
 }
 
-export function useJobQuestion(jobId: string): UseJobQuestionReturn {
+export function useJobQuestion(
+  jobId: string,
+  refreshKey = ''
+): UseJobQuestionReturn {
   const [question, setQuestion] = useState<QuestionNormalized | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -56,7 +59,7 @@ export function useJobQuestion(jobId: string): UseJobQuestionReturn {
     return () => {
       cancelled = true
     }
-  }, [jobId])
+  }, [jobId, refreshKey])
 
   return { question, loading, error }
 }

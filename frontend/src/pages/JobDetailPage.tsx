@@ -181,6 +181,15 @@ export default function JobDetailPage() {
     () => toWorkflowDefinition(detail),
     [detail]
   )
+  const questionArtifactRefreshKey = useMemo(() => {
+    const producer = detail?.nodes.find((node) =>
+      node.outputs?.includes('questions.json')
+    )
+    if (!producer) return ''
+    return [producer.status, producer.started_at, producer.finished_at].join(
+      ':'
+    )
+  }, [detail])
 
   const [actionLoading, setActionLoading] = useState(false)
 
@@ -324,7 +333,11 @@ export default function JobDetailPage() {
       <div className={styles.columns}>
         <div className={styles.left}>
           {detail?.job.source_type === 'question' && jobId && (
-            <QuestionContentPanel key={jobId} jobId={jobId} />
+            <QuestionContentPanel
+              key={jobId}
+              jobId={jobId}
+              refreshKey={questionArtifactRefreshKey}
+            />
           )}
         </div>
 
