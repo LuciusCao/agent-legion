@@ -1,16 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { QuestionContentPanel } from './QuestionContentPanel'
 
 const mockFetchJobArtifact = vi.fn()
-
-vi.mock('../api', async (importOriginal) => {
-  const mod = await importOriginal<typeof import('../api')>()
-  return {
-    ...mod,
-    fetchJobArtifact: (...args: unknown[]) => mockFetchJobArtifact(...args),
-  }
-})
 
 function makeQuestionsJson(normalized: Record<string, unknown>) {
   return {
@@ -25,9 +17,75 @@ function makeQuestionsJson(normalized: Record<string, unknown>) {
   }
 }
 
+function makeComprehensionJson(info: Record<string, unknown>) {
+  return { content: JSON.stringify(info) }
+}
+
+const mockComprehensionInfo = {
+  question_id: 'Q1',
+  fingerprint: 'fp1',
+  fingerprint_source: 'cms',
+  fingerprint_missing: false,
+  comprehension_data: {
+    comprehension_difficulty: 42,
+    key_info_list: [
+      {
+        key_info_id: 'ki_001',
+        type: 'given',
+        content: {
+          text: '方程 $x^2+mx+1=0$',
+          position: { start: 9, end: 28 },
+        },
+        question: { text: '', options: [] },
+        question_comprehension_abilities: ['识别方程结构'],
+      },
+      {
+        key_info_id: 'ki_002',
+        type: 'hidden',
+        content: {
+          derived_text: '判别式大于零',
+          derivation: '有两个不等实根 $\\Leftrightarrow \\Delta>0$',
+          position: { start: 44, end: 48 },
+        },
+        question: { text: '', options: [] },
+        question_comprehension_abilities: ['应用判别式'],
+      },
+    ],
+    possible_error_list: [
+      {
+        error_id: 'pe_001',
+        error_type: 'question_comprehension',
+        error_answer: 'C',
+        error_description: '区间写反',
+        related_key_info_ids: ['ki_002'],
+      },
+    ],
+  },
+}
+
+let comprehensionArtifactEnabled = true
+
+vi.mock('../api', async (importOriginal) => {
+  const mod = await importOriginal<typeof import('../api')>()
+  return {
+    ...mod,
+    fetchJobArtifact: (...args: unknown[]) => {
+      const artifactName = args[1] as string
+      if (artifactName === 'comprehension_info.json') {
+        if (!comprehensionArtifactEnabled) {
+          return Promise.reject(new Error('not found'))
+        }
+        return Promise.resolve(makeComprehensionJson(mockComprehensionInfo))
+      }
+      return mockFetchJobArtifact(...args)
+    },
+  }
+})
+
 describe('QuestionContentPanel', () => {
   beforeEach(() => {
     mockFetchJobArtifact.mockReset()
+    comprehensionArtifactEnabled = true
   })
 
   it('renders answer badges for array answer', async () => {
@@ -173,5 +231,53 @@ describe('QuestionContentPanel', () => {
     render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('解析')).toBeInTheDocument())
     expect(screen.getByText('Plain text analysis.')).toBeInTheDocument()
+  })
+
+  it('renders comprehension chips after data loads', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
+    )
+
+    render(<QuestionContentPanel jobId="job1" />)
+    await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
+    expect(screen.getByText('审题信息')).toBeInTheDocument()
+    expect(screen.getByText('2 个信息点')).toBeInTheDocument()
+    const chips = screen.getAllByRole('button')
+    expect(chips.length).toBeGreaterThan(0)
+    expect(chips[0]).toHaveTextContent('1')
+    expect(chips[1]).toHaveTextContent('2')
+  })
+
+  it('toggles chip selection and expands detail card', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
+    )
+
+    render(<QuestionContentPanel jobId="job1" />)
+    await waitFor(() =>
+      expect(screen.getByText('审题信息')).toBeInTheDocument()
+    )
+    const chips = screen.getAllByRole('button')
+    fireEvent.click(chips[0])
+    await waitFor(() =>
+      expect(screen.getByText('题干信息')).toBeInTheDocument()
+    )
+    expect(screen.getByText('识别方程结构')).toBeInTheDocument()
+
+    fireEvent.click(chips[0])
+    await waitFor(() =>
+      expect(screen.queryByText('题干信息')).not.toBeInTheDocument()
+    )
+  })
+
+  it('does not render chips when comprehension_info.json is missing', async () => {
+    comprehensionArtifactEnabled = false
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>Simple</p>' })
+    )
+
+    render(<QuestionContentPanel jobId="job1" />)
+    await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
+    expect(screen.queryByText('审题信息')).not.toBeInTheDocument()
   })
 })
