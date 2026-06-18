@@ -27,12 +27,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--registry",
-        default="config/architecture-invariants.yaml",
+        default="config/architecture/architecture-invariants.yaml",
         help="Path to the invariant registry YAML file.",
     )
     parser.add_argument(
         "--exemptions",
-        default="config/architecture-exemptions.yaml",
+        default="config/architecture/architecture-exemptions.yaml",
         help="Path to the exemption registry YAML file.",
     )
     args = parser.parse_args(argv)

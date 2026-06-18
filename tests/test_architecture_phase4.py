@@ -1,15 +1,21 @@
-from pathlib import Path
+import pytest
 
 from scripts.check_architecture import check_repository
 
+_EMPTY_BUDGETS = '{"route_exemptions": [], "files": {}}'
 
-def write(path: Path, content: str) -> None:
+
+def write(path, content):
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(content, encoding="utf-8")
 
 
+@pytest.fixture(autouse=True)
+def _budgets(tmp_path):
+    write(tmp_path / "config/architecture/architecture-budgets.json", _EMPTY_BUDGETS)
+
+
 def test_rejects_executor_response_field_typed_as_dict_any(tmp_path):
-    (tmp_path / "server/app").mkdir(parents=True)
     write(
         tmp_path / "server/app/routes/executor_contracts.py",
         "from typing import Any\n"
@@ -17,7 +23,6 @@ def test_rejects_executor_response_field_typed_as_dict_any(tmp_path):
         "class WorkspaceExecutorConfigurationResponse(BaseModel):\n"
         "    allocations: dict[str, Any]\n",
     )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     errors = check_repository(tmp_path)
 
@@ -25,7 +30,6 @@ def test_rejects_executor_response_field_typed_as_dict_any(tmp_path):
 
 
 def test_accepts_executor_response_field_typed_as_model_list(tmp_path):
-    (tmp_path / "server/app").mkdir(parents=True)
     write(
         tmp_path / "server/app/routes/executor_contracts.py",
         "from pydantic import BaseModel\n"
@@ -34,7 +38,6 @@ def test_accepts_executor_response_field_typed_as_model_list(tmp_path):
         "class WorkspaceExecutorConfigurationResponse(BaseModel):\n"
         "    allocations: list[ExecutorAllocationResponse]\n",
     )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     assert check_repository(tmp_path) == []
 
@@ -48,7 +51,6 @@ def test_rejects_settings_store_legacy_agent_import(tmp_path):
         "  save: () => setWorkspaceAgent('x', 'pi', 1),\n"
         "}))\n",
     )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     errors = check_repository(tmp_path)
 
@@ -62,7 +64,6 @@ def test_rejects_workspace_save_calling_replace_executor_configuration(tmp_path)
         "    def save(self):\n"
         "        self.job_db.replace_workspace_executor_configuration('w', [], [], [])\n",
     )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     errors = check_repository(tmp_path)
 
@@ -75,7 +76,6 @@ def test_rejects_frontend_handwritten_executor_definition(tmp_path):
         "export type ExecutorDefinition = { id: string; kind: string }\n"
         "export type ExecutorAllocation = { executor_id: string; concurrency_limit: number }\n",
     )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     errors = check_repository(tmp_path)
 
@@ -98,6 +98,5 @@ def test_accepts_frontend_executor_types_derived_from_generated_api(tmp_path):
         "ApiSchemas['WorkspaceExecutorConfigurationResponse']\n"
         "export type ExecutorCatalogResponse = ApiSchemas['ExecutorCatalogResponse']\n",
     )
-    write(tmp_path / "config/architecture-budgets.json", '{"route_exemptions": [], "files": {}}')
 
     assert check_repository(tmp_path) == []

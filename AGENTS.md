@@ -215,9 +215,9 @@ boundaries, concurrency, security, or long-lived data must include a `Quality Im
 that names the affected architecture invariant IDs and any new exemptions.
 
 - **Registry impact**: Before adding code that crosses a layer boundary or increases a module
-  budget, update `config/architecture-invariants.yaml` with the new invariant and its owner.
+  budget, update `config/architecture/architecture-invariants.yaml` with the new invariant and its owner.
   If the change needs a temporary allowance, add a governed exemption to
-  `config/architecture-exemptions.yaml` instead of editing `config/architecture-budgets.json`
+  `config/architecture/architecture-exemptions.yaml` instead of editing `config/architecture/architecture-budgets.json`
   directly.
 
 - **Required `Quality Impact` section**: Specs and plans under `docs/superpowers/` must include

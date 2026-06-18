@@ -63,7 +63,9 @@ def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
         if path.startswith("/api")
     }
     exemptions = yaml.safe_load(
-        (PROJECT_ROOT / "config/architecture-exemptions.yaml").read_text(encoding="utf-8")
+        (PROJECT_ROOT / "config/architecture/architecture-exemptions.yaml").read_text(
+            encoding="utf-8"
+        )
     ) or {"exemptions": []}
     exempt_operation_names = {
         ex["path"].rsplit(":", 1)[-1]

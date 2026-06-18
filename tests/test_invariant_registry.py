@@ -65,7 +65,7 @@ def write_registry(registry_root: Path):
     """Write a registry YAML into the temporary root and return the loaded invariants."""
 
     def _write(data: dict) -> tuple[ArchitectureInvariant, ...]:
-        path = registry_root / "config" / "architecture-invariants.yaml"
+        path = registry_root / "config" / "architecture" / "architecture-invariants.yaml"
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(yaml.safe_dump(data))
         return load_registry(path)

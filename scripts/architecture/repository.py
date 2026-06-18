@@ -43,7 +43,7 @@ def _load_exemptions(root: Path) -> tuple:
     """Load governed architecture exemptions from the YAML registry."""
     from server.app.quality.exemptions import load_exemptions
 
-    path = root / "config/architecture-exemptions.yaml"
+    path = root / "config/architecture/architecture-exemptions.yaml"
     if not path.exists():
         return ()
     return load_exemptions(path)
@@ -93,7 +93,9 @@ def _categorize_exemptions(exemptions: tuple):
 
 
 def check_repository(root: Path) -> list[str]:
-    config = json.loads((root / "config/architecture-budgets.json").read_text(encoding="utf-8"))
+    config = json.loads(
+        (root / "config/architecture/architecture-budgets.json").read_text(encoding="utf-8")
+    )
     errors: list[str] = []
 
     exemptions = _load_exemptions(root)
