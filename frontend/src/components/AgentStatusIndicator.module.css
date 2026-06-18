@@ -19,14 +19,14 @@
 
 .popover {
   position: absolute;
-  z-index: 20;
+  z-index: 100;
   top: calc(100% + 4px);
   right: 0;
   display: none;
   min-width: 240px;
   padding: 12px;
   border-radius: 12px;
-  background: var(--md-sys-color-surface-container-high);
+  background-color: var(--md-sys-color-surface-container-high, #ffffff);
   box-shadow: var(--md-sys-elevation-level3);
 }
 
