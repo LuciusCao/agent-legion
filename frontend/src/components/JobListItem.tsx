@@ -132,10 +132,21 @@ export function JobListItem({
         />
       )}
       <div className={styles.main}>
-        <div className={styles.sourceId}>
+        <div className={styles.title}>
           {job.title
-            ? `${job.title.length > TITLE_MAX_LEN ? job.title.slice(0, TITLE_MAX_LEN) + '…' : job.title} - ${job.source_id}`
-            : job.source_id}
+            ? job.title.length > TITLE_MAX_LEN
+              ? job.title.slice(0, TITLE_MAX_LEN) + '…'
+              : job.title
+            : '未命名'}
+        </div>
+        <div className={styles.description}>
+          {job.source_type} · {job.source_id}
+          {job.error_summary ? (
+            <>
+              {' · '}
+              <span className={styles.errorText}>{job.error_summary}</span>
+            </>
+          ) : null}
         </div>
       </div>
       <div className={styles.statusEnd}>
@@ -157,9 +168,6 @@ export function JobListItem({
             {JOB_STATUS_LABELS[job.status] || job.status}
           </span>
         </div>
-        {job.error_summary ? (
-          <div className={styles.errorSummary}>{job.error_summary}</div>
-        ) : null}
       </div>
     </div>
   )

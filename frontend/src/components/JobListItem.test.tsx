@@ -50,7 +50,7 @@ const mockJob: JobRecord = {
 }
 
 describe('JobListItem', () => {
-  it('renders source_id, title, and status badge', () => {
+  it('renders title and description with source type and id', () => {
     render(
       <MemoryRouter>
         <JobListItem
@@ -62,11 +62,12 @@ describe('JobListItem', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText('Algebra Problem - Q100')).toBeInTheDocument()
+    expect(screen.getByText('Algebra Problem')).toBeInTheDocument()
+    expect(screen.getByText(/question · Q100/)).toBeInTheDocument()
     expect(screen.getByText('运行中')).toBeInTheDocument()
   })
 
-  it('shows source_id when title is missing', () => {
+  it('shows "未命名" title when title is missing', () => {
     render(
       <MemoryRouter>
         <JobListItem
@@ -78,7 +79,8 @@ describe('JobListItem', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText('Q100')).toBeInTheDocument()
+    expect(screen.getByText('未命名')).toBeInTheDocument()
+    expect(screen.getByText(/question · Q100/)).toBeInTheDocument()
   })
 
   it('checkbox checked state matches prop', () => {
