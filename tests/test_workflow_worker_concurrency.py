@@ -47,7 +47,7 @@ class FakeExecutor:
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
         self.contexts.append(context)
-        self.block_event.wait(timeout=10)
+        assert self.block_event.wait(timeout=10), "executor was not released in time"
         for output in context.expected_outputs:
             (context.job_dir / output).write_text('{"done": true}', encoding="utf-8")
         return ExecutionResult(

@@ -136,11 +136,7 @@ class TestRouteDagAndDeletionBoundary:
                 False,
             ),
             ("import os as operating_system", "operating_system.remove('/tmp/x')", True),
-            (
-                "from os import remove\ndef remove(value):\n    return value",
-                "remove(package_id)",
-                False,
-            ),
+            ("from os import remove\ndef remove(x): return x", "remove(package_id)", False),
         ],
     )
     def test_resolves_filesystem_deletion_origins(self, tmp_path, setup, body, expected):

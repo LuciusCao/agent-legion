@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { waitFor } from '@testing-library/react'
 import { useVideoStore } from './videoStore'
 import { makeVideo } from '../testing/fixtures'
 
@@ -383,7 +384,9 @@ describe('videoStore', () => {
         }),
       ],
     })
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => {
+      expect(useVideoStore.getState()._counts.all).toBe(2)
+    })
     const state = useVideoStore.getState()
     expect(Array.isArray(state._filteredVideos)).toBe(true)
     expect(state._counts.all).toBe(2)
@@ -412,12 +415,16 @@ describe('videoStore', () => {
         }),
       ],
     })
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => {
+      expect(useVideoStore.getState()._filteredVideos).toHaveLength(2)
+    })
     const state1 = useVideoStore.getState()
     expect(state1._filteredVideos.length).toBe(2)
 
     useVideoStore.getState().setSearchQuery('Alpha')
-    await new Promise((r) => setTimeout(r, 10))
+    await waitFor(() => {
+      expect(useVideoStore.getState()._filteredVideos).toHaveLength(1)
+    })
     const state2 = useVideoStore.getState()
     expect(state2._filteredVideos.length).toBe(1)
     expect(state2._filteredVideos[0].title).toBe('Alpha')

@@ -168,9 +168,11 @@ def test_run_to_phase_fetches_missing_url_before_running_to_target(db, settings,
     video = db.create_video("", content_type="knowledge", external_id="K001")
     settings.config["cms"] = {"env": "test", "knowledge_url": "https://cms.example/knowledge"}
 
-    monkeypatch.setattr("server.app.worker.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.worker.lookup_knowledge_video",
+        "server.app.services.video_execution.get_token", lambda env, config: "token"
+    )
+    monkeypatch.setattr(
+        "server.app.services.video_execution.lookup_knowledge_video",
         lambda code, api_url, token: type(
             "Lookup",
             (),
@@ -183,7 +185,7 @@ def test_run_to_phase_fetches_missing_url_before_running_to_target(db, settings,
         )(),
     )
     monkeypatch.setattr(
-        "server.app.worker.download_video",
+        "server.app.services.video_execution.download_video",
         lambda url, output_path: output_path.write_bytes(b"fake"),
     )
 
@@ -203,9 +205,11 @@ def test_run_to_phase_reports_unresolved_missing_url(db, settings, monkeypatch):
     video = db.create_video("", content_type="knowledge", external_id="K001")
     settings.config["cms"] = {"env": "test", "knowledge_url": "https://cms.example/knowledge"}
 
-    monkeypatch.setattr("server.app.worker.get_token", lambda env, config: "token")
     monkeypatch.setattr(
-        "server.app.worker.lookup_knowledge_video",
+        "server.app.services.video_execution.get_token", lambda env, config: "token"
+    )
+    monkeypatch.setattr(
+        "server.app.services.video_execution.lookup_knowledge_video",
         lambda code, api_url, token: type(
             "Lookup",
             (),
@@ -439,7 +443,7 @@ def test_run_to_phase_start_transcribe_downgrades_and_runs_with_mock(db, setting
     )
 
     monkeypatch.setattr(
-        "server.app.worker.download_video",
+        "server.app.services.video_execution.download_video",
         lambda url, output_path: output_path.write_bytes(b"fake"),
     )
 

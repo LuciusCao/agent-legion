@@ -306,6 +306,65 @@ describe('settingStore', () => {
     expect(useSettingStore.getState().saveError).toBeNull()
   })
 
+  it('fetchSettings clears stale saveError on success', async () => {
+    useSettingStore.setState({ saveError: 'HTTP 500: Internal Server Error' })
+    mockApi.mockImplementation((path: string) => {
+      if (path === '/api/workspaces/ws1') {
+        return Promise.resolve({
+          workspace: { name: 'Test Workspace', description: 'A workspace' },
+        })
+      }
+      if (path === '/api/workspaces/ws1/settings') {
+        return Promise.resolve({
+          entityType: 'question',
+          intakeModes: [],
+          labelOverrides: {},
+          workflowKey: 'question_content',
+          resources: {},
+        })
+      }
+      return Promise.resolve({})
+    })
+    mockGetExecutorCatalog.mockResolvedValue({ executors: [catalogExecutor] })
+    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
+      allocations: [],
+      bindings: [],
+      node_limits: [],
+      migration_warnings: [],
+    })
+    await useSettingStore.getState().fetchSettings('ws1')
+    expect(useSettingStore.getState().saveError).toBeNull()
+  })
+
+  it('fetchSettings surfaces non-404 errors as saveError', async () => {
+    mockApi.mockImplementation((path: string) => {
+      if (path === '/api/workspaces/ws1') {
+        return Promise.resolve({
+          workspace: { name: 'Test Workspace', description: 'A workspace' },
+        })
+      }
+      if (path === '/api/workspaces/ws1/settings') {
+        return Promise.reject(
+          Object.assign(new Error('HTTP 500: Internal Server Error'), {
+            status: 500,
+          })
+        )
+      }
+      return Promise.resolve({})
+    })
+    mockGetExecutorCatalog.mockResolvedValue({ executors: [catalogExecutor] })
+    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
+      allocations: [],
+      bindings: [],
+      node_limits: [],
+      migration_warnings: [],
+    })
+    await useSettingStore.getState().fetchSettings('ws1')
+    expect(useSettingStore.getState().saveError).toBe(
+      'HTTP 500: Internal Server Error'
+    )
+  })
+
   it('fetchSettings keeps defaults on empty response', async () => {
     mockApi.mockResolvedValue({})
     await useSettingStore.getState().fetchSettings('ws1')

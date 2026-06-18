@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceMainPage from './WorkspaceMainPage'
 import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'

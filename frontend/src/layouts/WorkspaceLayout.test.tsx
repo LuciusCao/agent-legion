@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
-import { MemoryRouter, Routes, Route } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
+import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceLayout from './WorkspaceLayout'
 import appBarStyles from '../components/AppBar.module.css'
 import { createMockUiState } from '../testing/fixtures'
