@@ -1,0 +1,248 @@
+import { useMemo } from 'react'
+import { useJobQuestion } from '../hooks/useJobQuestion'
+import { renderLatexInHtml } from '../lib/latex'
+import { LaTeXText } from './LaTeXText'
+import styles from './QuestionContentPanel.module.css'
+
+const ALLOWED_TAGS = new Set([
+  'P',
+  'BR',
+  'STRONG',
+  'EM',
+  'UL',
+  'OL',
+  'LI',
+  'SPAN',
+  'DIV',
+])
+
+function sanitizeHtml(html: string): string {
+  const parser = new DOMParser()
+  const doc = parser.parseFromString(html, 'text/html')
+  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
+  const toRemove: Element[] = []
+  while (walker.nextNode()) {
+    const el = walker.currentNode as Element
+    if (!ALLOWED_TAGS.has(el.tagName)) {
+      toRemove.push(el)
+    }
+  }
+  toRemove.forEach((el) => {
+    const parent = el.parentNode
+    if (!parent) return
+    while (el.firstChild) {
+      parent.insertBefore(el.firstChild, el)
+    }
+    parent.removeChild(el)
+  })
+  const attrWalker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
+  while (attrWalker.nextNode()) {
+    const el = attrWalker.currentNode as Element
+    if (ALLOWED_TAGS.has(el.tagName)) {
+      while (el.attributes.length > 0) {
+        el.removeAttribute(el.attributes[0].name)
+      }
+    }
+  }
+  return doc.body.innerHTML
+}
+
+function extractAnswerItems(answer: unknown): string[] | null {
+  if (answer == null) return null
+  if (typeof answer === 'string') return [answer]
+  if (Array.isArray(answer) && answer.every((a) => typeof a === 'string')) {
+    return answer
+  }
+  if (typeof answer === 'object') {
+    const obj = answer as Record<string, unknown>
+    if (typeof obj.value === 'string') return [obj.value]
+    if (typeof obj.answer === 'string') return [obj.answer]
+    if (
+      Array.isArray(obj.value) &&
+      obj.value.every((a) => typeof a === 'string')
+    ) {
+      return obj.value
+    }
+    if (
+      Array.isArray(obj.answer) &&
+      obj.answer.every((a) => typeof a === 'string')
+    ) {
+      return obj.answer
+    }
+  }
+  return null
+}
+
+function hasLatex(text: string): boolean {
+  return /(\$\$[\s\S]*?\$\$)|(\$[^$\r\n]*?\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))/.test(
+    text
+  )
+}
+
+export interface QuestionContentPanelProps {
+  jobId: string
+  refreshKey?: string
+}
+
+export function QuestionContentPanel({
+  jobId,
+  refreshKey,
+}: QuestionContentPanelProps) {
+  const { question, loading, error } = useJobQuestion(jobId, refreshKey)
+
+  const stem = question?.stem
+  const stemHtml = useMemo(() => {
+    if (!stem) return ''
+    return renderLatexInHtml(sanitizeHtml(stem))
+  }, [stem])
+
+  const analysis = question?.analysis
+  const analysisHtml = useMemo(() => {
+    if (!analysis || typeof analysis !== 'string') return ''
+    return renderLatexInHtml(sanitizeHtml(analysis))
+  }, [analysis])
+
+  const analysisSteps = question?.analysis_steps
+
+  const rawAnswer = question?.answer
+  const answerItems = rawAnswer ? extractAnswerItems(rawAnswer) : null
+  const answer_blanks = question?.answer_blanks
+
+  if (loading) {
+    return <p className={styles.loading}>加载题目中...</p>
+  }
+
+  if (error) {
+    return <p className={styles.error}>{error}</p>
+  }
+
+  if (!question) {
+    return <p className={styles.empty}>题目数据尚未生成</p>
+  }
+
+  return (
+    <div className={styles.panel}>
+      <section className={styles.card}>
+        <h2 className={styles.sectionTitle}>题干</h2>
+        {question.stem ? (
+          <div
+            className={styles.richText}
+            dangerouslySetInnerHTML={{ __html: stemHtml }}
+          />
+        ) : (
+          <p className={styles.empty}>无题干</p>
+        )}
+      </section>
+
+      {question.options && question.options.length > 0 && (
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>选项</h2>
+          <ul className={styles.optionList}>
+            {question.options.map((opt, idx) => {
+              const label = String(opt.label || String.fromCharCode(65 + idx))
+              const content = String(opt.content || '')
+              const isCorrect =
+                answerItems != null && answerItems.includes(label)
+              return (
+                <li
+                  key={idx}
+                  className={`${styles.optionItem} ${
+                    isCorrect ? styles.correct : ''
+                  }`}
+                >
+                  {isCorrect && (
+                    <md-icon className={styles.checkIcon} aria-hidden="true">
+                      check
+                    </md-icon>
+                  )}
+                  <span className={styles.optionLabel}>{label}.</span>
+                  <span className={styles.optionContent}>
+                    <LaTeXText>{content}</LaTeXText>
+                  </span>
+                </li>
+              )
+            })}
+          </ul>
+        </section>
+      )}
+
+      {(answer_blanks != null || answerItems != null || rawAnswer != null) && (
+        <section className={`${styles.card} ${styles.answerCard}`}>
+          <h2 className={styles.sectionTitle}>答案</h2>
+          {answer_blanks != null && answer_blanks.length > 0 ? (
+            <div className={styles.answerBlankList}>
+              {answer_blanks.map((blank, idx) => (
+                <div key={idx} className={styles.answerBlank}>
+                  <span className={styles.blankLabel}>第{idx + 1}空：</span>
+                  <span className={styles.blankAlternatives}>
+                    {blank.alternatives.map((alt, aidx) => (
+                      <span key={aidx} className={styles.answerBadge}>
+                        {blank.is_latex && hasLatex(alt) ? (
+                          <LaTeXText>{alt}</LaTeXText>
+                        ) : (
+                          alt
+                        )}
+                      </span>
+                    ))}
+                  </span>
+                </div>
+              ))}
+            </div>
+          ) : answerItems != null && answerItems.length > 0 ? (
+            <div className={styles.answerBadges}>
+              {answerItems.map((item, idx) => (
+                <span key={idx} className={styles.answerBadge}>
+                  {hasLatex(item) ? <LaTeXText>{item}</LaTeXText> : item}
+                </span>
+              ))}
+            </div>
+          ) : (
+            <p className={styles.empty}>无答案</p>
+          )}
+        </section>
+      )}
+
+      {(question.analysis != null ||
+        (analysisSteps != null && analysisSteps.length > 0)) && (
+        <section className={styles.card}>
+          <h2 className={styles.sectionTitle}>解析</h2>
+          {analysisSteps != null && analysisSteps.length > 0 ? (
+            <div className={styles.analysisGroups}>
+              {analysisSteps.map((group, gidx) => (
+                <div key={gidx} className={styles.analysisGroup}>
+                  {group.map((step, sidx) => (
+                    <div key={sidx} className={styles.analysisStep}>
+                      {step.title ? (
+                        <h4
+                          className={styles.stepTitle}
+                          dangerouslySetInnerHTML={{
+                            __html: renderLatexInHtml(sanitizeHtml(step.title)),
+                          }}
+                        />
+                      ) : null}
+                      <div
+                        className={styles.richText}
+                        dangerouslySetInnerHTML={{
+                          __html: renderLatexInHtml(sanitizeHtml(step.content)),
+                        }}
+                      />
+                    </div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : typeof question.analysis === 'string' ? (
+            <div
+              className={styles.richText}
+              dangerouslySetInnerHTML={{ __html: analysisHtml }}
+            />
+          ) : (
+            <pre className={styles.pre}>
+              {JSON.stringify(question.analysis, null, 2)}
+            </pre>
+          )}
+        </section>
+      )}
+    </div>
+  )
+}

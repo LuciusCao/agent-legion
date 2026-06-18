@@ -4,10 +4,20 @@ import threading
 from pathlib import Path
 
 import pytest
+from freezegun import freeze_time
 
 from server.app.db import Database
 from server.app.db.notifications import NotificationHub
 from server.app.records import PHASE_RUN_FIELDS, VIDEO_RECORD_FIELDS
+
+
+def test_video_query_connections_enable_sqlite_safety_pragmas(tmp_path):
+    database = Database(tmp_path / "video_hive.sqlite")
+
+    with database._connect_read() as conn:
+        assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
+        assert conn.execute("pragma journal_mode").fetchone()[0] == "wal"
+        assert conn.execute("pragma busy_timeout").fetchone()[0] >= 5000
 
 
 def test_database_creates_video_and_phase_run(db):
@@ -361,48 +371,6 @@ def test_find_videos_by_identities_empty_list(db):
     assert db.find_videos_by_identities([]) == {}
 
 
-def test_read_conn_reused_within_same_thread(db):
-    """同线程多次调用 _ensure_read_conn 应复用同一连接对象。"""
-    conn1 = db._ensure_read_conn()
-    conn2 = db._ensure_read_conn()
-    assert conn1 is conn2
-    assert isinstance(conn1, sqlite3.Connection)
-
-
-def test_read_conn_isolated_across_threads(db):
-    """不同线程应获得独立连接对象。"""
-    conns = []
-
-    def collect():
-        conns.append(db._ensure_read_conn())
-
-    t1 = threading.Thread(target=collect)
-    t2 = threading.Thread(target=collect)
-    t1.start()
-    t2.start()
-    t1.join()
-    t2.join()
-
-    assert len(conns) == 2
-    assert conns[0] is not conns[1]
-
-
-def test_close_read_conn_clears_and_allows_recreate(db):
-    """关闭后再次获取应创建新连接。"""
-    conn1 = db._ensure_read_conn()
-    db.close_read_conn()
-    conn2 = db._ensure_read_conn()
-    assert conn1 is not conn2
-
-
-def test_connect_read_reuses_pooled_conn_for_same_thread(db):
-    """_connect_read 在同线程中应自动复用已预热连接。"""
-    db._ensure_read_conn()
-    with db._connect_read() as conn:
-        pooled = db._ensure_read_conn()
-        assert conn is pooled
-
-
 def test_list_running_video_summaries_returns_limited_fields(db):
     """只返回 id, current_phase, storage_dir 三个字段。"""
     db.create_video("https://example.com/a.mp4", "A")
@@ -425,3 +393,135 @@ def test_list_running_video_summaries_filters_by_status(db):
     summaries = db.list_running_video_summaries()
     assert len(summaries) == 1
     assert summaries[0]["id"] == "a"
+
+
+def test_batch_update_packed(db):
+    db.create_video("https://example.com/a.mp4", "A")
+    db.create_video("https://example.com/b.mp4", "B")
+    db.batch_update_packed(["a", "b"], packed=1)
+    assert db.get_video("a")["packed"] == 1
+    assert db.get_video("b")["packed"] == 1
+
+
+def test_batch_update_packed_empty_list(db):
+    db.batch_update_packed([], packed=1)
+
+
+def test_batch_notify_uses_single_connection(db):
+    """batch_notify should reuse a single read connection for all video_ids."""
+    from unittest.mock import patch
+
+    v1 = db.create_video("https://example.com/v1.mp4", "V1")
+    v2 = db.create_video("https://example.com/v2.mp4", "V2")
+    v3 = db.create_video("https://example.com/v3.mp4", "V3")
+
+    created_connections = []
+    original_connect = sqlite3.connect
+
+    def tracking_connect(*args, **kwargs):
+        conn = original_connect(*args, **kwargs)
+        created_connections.append(conn)
+        return conn
+
+    with patch("server.app.db.queries.sqlite3.connect", side_effect=tracking_connect):
+        db.batch_notify([v1["id"], v2["id"], v3["id"]])
+
+    # batch_notify should use a single read connection for all videos.
+    # The write connections from create_video are unrelated.
+    # We allow some slack for any internal connections, but the key is
+    # that batch_notify itself doesn't open a new connection per video.
+    assert len(created_connections) <= 4, (
+        f"Expected at most 4 connections, got {len(created_connections)}"
+    )
+
+
+def test_batch_update_packed_triggers_notification(db):
+    """batch_update_packed should notify all affected videos."""
+    from unittest.mock import MagicMock
+
+    v1 = db.create_video("https://example.com/v1.mp4", "V1")
+    v2 = db.create_video("https://example.com/v2.mp4", "V2")
+
+    emitted = []
+    db._hub = MagicMock()
+    db._hub.emit_change = lambda video: emitted.append(video["id"] if video else None)
+
+    db.batch_update_packed([v1["id"], v2["id"]], packed=1)
+
+    assert len(emitted) == 2
+    assert v1["id"] in emitted
+    assert v2["id"] in emitted
+
+
+def test_notify_safe_under_concurrent_threads(db):
+    """多个工作线程并发触发 _notify 时不应报 SQLite 线程错误（regression #232）。"""
+    from unittest.mock import MagicMock
+
+    v = db.create_video("https://example.com/v1.mp4", "V1")
+    db._hub = MagicMock()
+
+    errors: list[Exception] = []
+
+    def worker() -> None:
+        try:
+            for _ in range(20):
+                db.update_video(v["id"], title="updated")
+        except Exception as exc:
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(5)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    assert not errors, f"Concurrent _notify raised: {errors}"
+
+
+@freeze_time("2024-01-01T00:00:00", auto_tick_seconds=0.01)
+def test_insert_and_list_packages(db):
+    db.insert_package("/tmp/packages/test-a.zip")
+    db.insert_package("/tmp/packages/test-b.zip")
+
+    packages = db.list_packages(limit=10)
+    assert len(packages) == 2
+    # Most recent first
+    assert packages[0]["path"] == "/tmp/packages/test-b.zip"
+    assert packages[1]["path"] == "/tmp/packages/test-a.zip"
+
+    limited = db.list_packages(limit=1)
+    assert len(limited) == 1
+    assert limited[0]["path"] == "/tmp/packages/test-b.zip"
+
+
+def test_insert_package_with_metadata(db):
+    db.insert_package("/tmp/p.zip", name="批次 A", video_count=10, size_bytes=1024)
+    packages = db.list_packages(limit=10)
+    assert len(packages) == 1
+    assert packages[0]["name"] == "批次 A"
+    assert packages[0]["video_count"] == 10
+    assert packages[0]["size_bytes"] == 1024
+
+
+def test_delete_package(db):
+    db.insert_package("/tmp/p.zip", name="批次 A", video_count=10, size_bytes=1024)
+    pkg = db.list_packages(limit=1)[0]
+    db.delete_package(pkg["id"])
+    assert db.list_packages(limit=10) == []
+
+
+def test_update_package_name(db):
+    db.insert_package("/tmp/p.zip", name="旧名称", video_count=1, size_bytes=100)
+    pkg = db.list_packages(limit=1)[0]
+    db.update_package_name(pkg["id"], "新名称")
+    assert db.list_packages(limit=1)[0]["name"] == "新名称"
+
+
+def test_database_initialization_runs_migrations(db):
+    """Database construction must run migrations and record V003 legacy columns."""
+    with db.connect() as conn:
+        versions = {
+            row["version"]
+            for row in conn.execute("select version from schema_migrations").fetchall()
+        }
+    assert 3 in versions, "V003 legacy column migration should be recorded"

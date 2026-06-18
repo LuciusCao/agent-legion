@@ -1,3 +1,4 @@
+/// <reference types="node" />
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor } from '@testing-library/react'
 import { MemoryRouter, Route, Routes } from 'react-router-dom'
@@ -93,7 +94,10 @@ describe('DetailPage package button', () => {
       .mockResolvedValueOnce({ log: 'ok' })
 
     render(
-      <MemoryRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }} initialEntries={['/videos/v1']}>
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+        initialEntries={['/videos/v1']}
+      >
         <Routes>
           <Route path="/videos/:id" element={<DetailPage />} />
         </Routes>

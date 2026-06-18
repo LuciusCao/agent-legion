@@ -1,19 +1,19 @@
 import json
 import sqlite3
-import threading
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from server.app.db.connection import connect_sqlite
 from server.app.db.notifications import NotificationHub
 from server.app.db.schema import init_db
 from server.app.pipeline.common import make_record_id, resolve_video_dir
 from server.app.pipeline.openclaw import extract_openclaw_arg
 from server.app.records import PhaseRunRecord, VideoRecord
 from server.app.services.interaction_stats import (
-    compute_interaction_review_status,
-    compute_interaction_stats,
+    _backfill_interaction_stats,
+    _enrich_video,
 )
 
 
@@ -54,6 +54,8 @@ VIDEO_UPDATE_FIELDS = {
     "duration",
     "error_message",
     "packed",
+    "interaction_stats_json",
+    "interaction_review_status",
 }
 
 
@@ -74,28 +76,11 @@ class VideoQueries:
         self.path = path
         self._hub = hub
         self._videos_dir = videos_dir
-        self._read_conn: sqlite3.Connection | None = None
-        self._read_conn_thread_id: int | None = None
         init_db(path)
-
-    def _ensure_read_conn(self) -> sqlite3.Connection:
-        current_tid = threading.current_thread().ident
-        if self._read_conn is None or self._read_conn_thread_id != current_tid:
-            self._read_conn = sqlite3.connect(self.path)
-            self._read_conn.row_factory = sqlite3.Row
-            self._read_conn_thread_id = current_tid
-        return self._read_conn
-
-    def close_read_conn(self) -> None:
-        if self._read_conn is not None:
-            self._read_conn.close()
-            self._read_conn = None
-            self._read_conn_thread_id = None
 
     @contextmanager
     def connect(self):
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        conn = connect_sqlite(self.path)
         try:
             with conn:
                 yield conn
@@ -104,18 +89,8 @@ class VideoQueries:
 
     @contextmanager
     def _connect_read(self):
-        """Read-only connection context that does not implicitly commit.
-
-        If the current thread has already warmed up a persistent read
-        connection via _ensure_read_conn(), it is reused. Otherwise a
-        fresh connection is created and closed on exit.
-        """
-        current_tid = threading.current_thread().ident
-        if self._read_conn is not None and self._read_conn_thread_id == current_tid:
-            yield self._read_conn
-            return
-        conn = sqlite3.connect(self.path)
-        conn.row_factory = sqlite3.Row
+        """Read-only connection context that does not implicitly commit."""
+        conn = connect_sqlite(self.path)
         try:
             yield conn
         finally:
@@ -124,24 +99,72 @@ class VideoQueries:
     def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
         return cast(VideoRecord, dict(row)) if row else None
 
-    def _notify(self, video_id: str) -> None:
+    def _list_phase_runs_with_conn(
+        self, conn: sqlite3.Connection, video_id: str
+    ) -> list[PhaseRunRecord]:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                "select * from phase_runs where video_id=? order by id", (video_id,)
+            )
+        ]
+        for row in rows:
+            row["started_at"] = _iso(row["started_at"]) or ""
+            row["finished_at"] = _iso(row["finished_at"])
+            _phase_run_with_agent_session(row)
+        return cast(list[PhaseRunRecord], rows)
+
+    def _list_transcription_runs_with_conn(
+        self, conn: sqlite3.Connection, video_id: str
+    ) -> list[dict[str, Any]]:
+        rows = [
+            dict(row)
+            for row in conn.execute(
+                "select * from transcription_runs where video_id=? order by id", (video_id,)
+            )
+        ]
+        for row in rows:
+            row["started_at"] = _iso(row["started_at"]) or ""
+            row["finished_at"] = _iso(row["finished_at"])
+        return rows
+
+    def _notify_with_conn(self, video_id: str, conn: sqlite3.Connection) -> None:
         if self._hub is None:
             return
-        video = self.get_video(video_id)
+        row = conn.execute("select * from videos where id=?", (video_id,)).fetchone()
+        video = self._row(row)
         if video is None:
             self._hub.emit_change(None)
             self._hub.emit_detail_change(video_id, cast(VideoRecord, {}), [], [])
             return
-        if video.get("content_type") == "knowledge" and self._videos_dir is not None:
+        _enrich_video(video)
+        if (
+            video.get("content_type") == "knowledge"
+            and "interaction_stats" not in video
+            and self._videos_dir is not None
+        ):
             video_dir = resolve_video_dir(video, self._videos_dir)
-            stats = compute_interaction_stats(video_dir)
-            if stats:
-                video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
-            video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
+            _backfill_interaction_stats(video, video_dir)
         self._hub.emit_change(video)
-        phase_runs = self.list_phase_runs(video_id)
-        transcription_runs = self.list_transcription_runs(video_id)
+        phase_runs = self._list_phase_runs_with_conn(conn, video_id)
+        transcription_runs = self._list_transcription_runs_with_conn(conn, video_id)
         self._hub.emit_detail_change(video_id, video, phase_runs, transcription_runs)
+
+    def _notify(self, video_id: str) -> None:
+        with self._connect_read() as conn:
+            self._notify_with_conn(video_id, conn)
+
+    def batch_notify(self, video_ids: list[str]) -> None:
+        if self._hub is None or not video_ids:
+            return
+        with self._connect_read() as conn:
+            for vid in video_ids:
+                try:
+                    self._notify_with_conn(vid, conn)
+                except Exception:
+                    import logging
+
+                    logging.getLogger(__name__).exception("batch_notify failed for %s", vid)
 
     def create_video(
         self,
@@ -306,6 +329,20 @@ class VideoQueries:
                         )
             conn.execute(sql, values)
         self._notify(video_id)
+
+    def batch_update_packed(
+        self, video_ids: list[str], packed: int = 1, *, notify: bool = True
+    ) -> None:
+        if not video_ids:
+            return
+        placeholders = ",".join("?" * len(video_ids))
+        sql = (
+            f"update videos set packed=?, updated_at=current_timestamp where id in ({placeholders})"
+        )
+        with self.connect() as conn:
+            conn.execute(sql, [packed] + video_ids)
+        if notify:
+            self.batch_notify(video_ids)
 
     def start_phase(
         self, video_id: str, phase_key: str, command: list[str], log_path: str = ""
@@ -492,6 +529,69 @@ class VideoQueries:
                     f"select * from videos where id in ({placeholders})", video_ids
                 )
             ]
+
+    def insert_package(
+        self,
+        path: str,
+        name: str = "",
+        video_count: int = 0,
+        size_bytes: int = 0,
+        locked: int = 0,
+    ) -> None:
+        from datetime import UTC, datetime
+
+        with self.connect() as conn:
+            conn.execute(
+                "insert into packages(path, name, video_count, size_bytes, locked, created_at) values (?, ?, ?, ?, ?, ?)",
+                (path, name, video_count, size_bytes, locked, datetime.now(UTC).isoformat()),
+            )
+
+    def list_packages(self, limit: int = 5) -> list[dict[str, Any]]:
+        with self._connect_read() as conn:
+            return [
+                cast(dict[str, Any], dict(row))
+                for row in conn.execute(
+                    "select * from packages order by created_at desc limit ?",
+                    (limit,),
+                )
+            ]
+
+    def delete_package(self, package_id: int) -> None:
+        with self.connect() as conn:
+            conn.execute("delete from packages where id = ?", (package_id,))
+
+    def update_package_name(self, package_id: int, name: str) -> None:
+        with self.connect() as conn:
+            conn.execute("update packages set name = ? where id = ?", (name, package_id))
+
+    def update_package_stats(
+        self,
+        package_id: int,
+        *,
+        name: str | None = None,
+        video_count: int | None = None,
+        size_bytes: int | None = None,
+        locked: int | None = None,
+    ) -> None:
+        fields: list[str] = []
+        values: list[Any] = []
+        if name is not None:
+            fields.append("name = ?")
+            values.append(name)
+        if video_count is not None:
+            fields.append("video_count = ?")
+            values.append(video_count)
+        if size_bytes is not None:
+            fields.append("size_bytes = ?")
+            values.append(size_bytes)
+        if locked is not None:
+            fields.append("locked = ?")
+            values.append(locked)
+        if not fields:
+            return
+        sql = f"update packages set {', '.join(fields)} where id = ?"
+        with self.connect() as conn:
+            conn.execute(sql, values + [package_id])
 
     def batch_delete_videos(self, video_ids: list[str]) -> None:
         if not video_ids:

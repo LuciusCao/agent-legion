@@ -2,7 +2,11 @@ import requests
 
 from server.app.cms.client import get_token
 from server.app.cms.knowledge import lookup_knowledge_video
-from server.app.cms.question import lookup_question_video
+from server.app.cms.question import (
+    fetch_question_detail,
+    list_questions_by_knowledge,
+    lookup_question_video,
+)
 
 
 class FakeResponse:
@@ -18,7 +22,14 @@ class FakeResponse:
 
 def test_get_token_uses_configured_token_generator(monkeypatch):
     calls = []
-    monkeypatch.delenv("BASECMS_TOKEN", raising=False)
+    for env_key in (
+        "BASECMS_TOKEN",
+        "BASECMS_APP_ID",
+        "BASECMS_NONCE",
+        "BASECMS_SECRET",
+        "BASECMS_TOKEN_URL",
+    ):
+        monkeypatch.delenv(env_key, raising=False)
 
     def fake_post(url, json, headers, timeout):
         calls.append({"url": url, "json": json, "headers": headers, "timeout": timeout})
@@ -104,7 +115,7 @@ def test_lookup_question_video_found_with_url(monkeypatch):
     payload = {
         "data": {
             "question_uuid": "Q001",
-            "title": "题目一",
+            "body": {"content": "题目一"},
             "video_data": [{"source": "https://example.com/q001.mp4"}],
         }
     }
@@ -118,7 +129,7 @@ def test_lookup_question_video_found_with_url(monkeypatch):
 
 
 def test_lookup_question_video_found_without_url(monkeypatch):
-    payload = {"data": {"question_uuid": "Q001", "title": "题目一", "video_data": []}}
+    payload = {"data": {"question_uuid": "Q001", "body": {"content": "题目一"}, "video_data": []}}
     monkeypatch.setattr("server.app.cms.question._fetch_json", lambda *args, **kwargs: payload)
     result = lookup_question_video("Q001", "https://cms.example/question", "token")
     assert result.status == "missing_url"
@@ -191,7 +202,7 @@ def test_lookup_question_video_extracts_source_uuid_from_video_data(monkeypatch)
     payload = {
         "data": {
             "question_uuid": "Q001",
-            "title": "题目一",
+            "body": {"content": "题目一"},
             "video_data": [
                 {
                     "source": "https://example.com/q001.mp4",
@@ -211,7 +222,7 @@ def test_lookup_question_video_source_uuid_empty_when_not_present(monkeypatch):
     payload = {
         "data": {
             "question_uuid": "Q001",
-            "title": "题目一",
+            "body": {"content": "题目一"},
             "video_data": [{"source": "https://example.com/q001.mp4"}],
         }
     }
@@ -219,3 +230,88 @@ def test_lookup_question_video_source_uuid_empty_when_not_present(monkeypatch):
     result = lookup_question_video("Q001", "https://cms.example/question", "token")
     assert result.status == "found"
     assert result.source_uuid == ""
+
+
+def test_list_questions_by_knowledge_fetches_all_pages(monkeypatch):
+    calls = []
+    payloads = [
+        {
+            "data": {
+                "question_list": [
+                    {"question_uuid": "Q001", "body": {"content": "题目一"}},
+                    {"question_uuid": "Q002", "body": {"content": "题目二"}},
+                ],
+                "total": 3,
+            }
+        },
+        {
+            "data": {
+                "question_list": [
+                    {"question_uuid": "Q003", "body": {"content": "题目三"}},
+                ],
+                "total": 3,
+            }
+        },
+    ]
+
+    def fake_fetch(url, params, token):
+        calls.append({"url": url, "params": params, "token": token})
+        return payloads[len(calls) - 1]
+
+    monkeypatch.setattr("server.app.cms.question._fetch_json", fake_fetch)
+
+    result = list_questions_by_knowledge(
+        "K001",
+        "https://cms.example/question/list?bank_version=v5&page_size=2",
+        "token",
+    )
+
+    assert [item.question_id for item in result] == ["Q001", "Q002", "Q003"]
+    assert [item.title for item in result] == ["题目一", "题目二", "题目三"]
+    assert calls[0]["params"] == {"knowledge": "K001", "page": 1}
+    assert calls[1]["params"] == {"knowledge": "K001", "page": 2}
+
+
+def test_list_questions_by_knowledge_strips_dynamic_query_params(monkeypatch):
+    calls = []
+    payload = {
+        "data": {
+            "question_list": [{"question_uuid": "Q001", "body": {"content": "题目一"}}],
+            "total": 1,
+        }
+    }
+
+    def fake_fetch(url, params, token):
+        calls.append({"url": url, "params": params, "token": token})
+        return payload
+
+    monkeypatch.setattr("server.app.cms.question._fetch_json", fake_fetch)
+
+    list_questions_by_knowledge(
+        "K001",
+        "https://cms.example/question/list?bank_version=v5&knowledge=OLD&page=1&page_size=50",
+        "token",
+    )
+
+    assert calls[0]["url"] == "https://cms.example/question/list?bank_version=v5&page_size=50"
+    assert calls[0]["params"] == {"knowledge": "K001", "page": 1}
+
+
+def test_fetch_question_detail_returns_structured_context(monkeypatch):
+    payload = {
+        "data": {
+            "question_uuid": "Q001",
+            "body": {"content": "1 + 1 = ?"},
+            "option": [{"key": "A", "content": "2"}],
+            "analyze": "加法",
+        }
+    }
+    monkeypatch.setattr("server.app.cms.question._fetch_json", lambda *args, **kwargs: payload)
+
+    result = fetch_question_detail("Q001", "https://cms.example/question/detail", "token")
+
+    assert result.question_id == "Q001"
+    assert result.title == "1 + 1 = ?"
+    assert result.normalized["stem"] == "1 + 1 = ?"
+    assert result.normalized["options"] == [{"key": "A", "content": "2"}]
+    assert result.payload == payload

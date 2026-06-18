@@ -7,8 +7,9 @@ Local processing console for educational videos. It queues knowledge videos and 
 - Backend: FastAPI, SQLite, background worker.
 - Python tooling: `uv` for dependency/runtime management, `ruff` for lint/format, `mypy` for type checking.
 - Frontend: Vite + TypeScript, ESLint + Prettier.
-- Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`.
-- Queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
+- Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`, `data/jobs/`.
+- Video queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
+- Agent Legion workflow model: workspace-scoped DAG jobs with configurable workflow definitions (`config/workflows/`).
 
 ## Setup
 
@@ -24,11 +25,11 @@ When running inside a restricted sandbox, keep the uv cache in the project:
 UV_CACHE_DIR=.uv-cache uv sync
 ```
 
-> For full build commands, quality gates, and development workflow, see [AGENTS.md](AGENTS.md).
+> For architecture details, code style, and testing conventions, see [AGENTS.md](AGENTS.md).
 
 ## Configuration
 
-Edit `config/pipeline.yaml`.
+Edit `config/workflow.yaml`.
 
 - `asr.provider`: `auto`, `whisper`, or `sensevoice`.
 - `asr.whisper.binary`: local `whisper-cli`.
@@ -80,7 +81,30 @@ cd frontend
 npm run dev
 ```
 
-Open the Vite URL shown by npm. The frontend calls the backend API on the same origin in production; for development, use a proxy if the browser blocks cross-origin API calls.
+Open the Vite URL shown by npm.
+
+Generated frontend transport types are committed to `frontend/src/generated/api.ts`. After changing
+any Pydantic response model, regenerate them before committing:
+
+```bash
+cd frontend
+npm run api:generate
+```
+
+The frontend calls the backend API on the same origin in production; during development, Vite proxies `/api` to `VITE_API_TARGET` from `frontend/.env` and defaults to `http://127.0.0.1:8000`.
+
+For multiple coding agents working in separate git worktrees, give each worktree its own backend/frontend ports and local frontend env:
+
+```bash
+# worktree A
+UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8001
+cd frontend
+cp .env.example .env
+printf 'VITE_API_TARGET=http://127.0.0.1:8001\n' > .env
+npm run dev -- --port 5174
+```
+
+Use different ports for each additional worktree, and keep each worktree's default `data/` directory separate so SQLite state, logs, videos, packages, and jobs do not overlap.
 
 Production-style frontend build:
 
@@ -91,7 +115,34 @@ npm run build
 
 After `frontend/dist` exists, the FastAPI backend serves it from `http://127.0.0.1:8000`.
 
-> See [AGENTS.md](AGENTS.md) for full quality gates, test commands, and pre-commit hooks.
+## Quality Gates
+
+Quick gate (for daily development):
+
+```bash
+./scripts/check-quick.sh
+```
+
+Runs Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy, architecture
+contract checks (`scripts/check_architecture.py`), generated API type drift check
+(`npm run api:check`), frontend Prettier + ESLint + typecheck + Vitest, and the spec health check
+(`scripts/verify_specs.py --check`).
+
+Full gate (before committing or handing off):
+
+```bash
+./scripts/check.sh
+```
+
+Runs the quick gate plus the frontend production build.
+
+Install the optional pre-commit hook:
+
+```bash
+./scripts/install-git-hooks.sh
+```
+
+> See [AGENTS.md](AGENTS.md) for architecture details, code style conventions, and security notes.
 
 ## Pipeline
 
@@ -112,6 +163,89 @@ Final phase:
 7. `assemble`: writes `metadata.json` and `report.md`.
 
 The package endpoint creates a zip with per-video JSON plus `manifest.json`. The manifest includes `content_type`, `external_id`, `knowledge_code`, and `question_id`.
+
+## Pi Agent Runner
+
+Video Hive can execute `reading_analysis` workflow agent nodes through the Pi CLI (`@earendil-works/pi-coding-agent`).
+
+### Installation
+
+```bash
+npm install -g --ignore-scripts @earendil-works/pi-coding-agent
+pi
+# Follow the login prompt to authenticate
+./scripts/check-pi.sh
+```
+
+### Configuration
+
+Pi settings live in `config/workflow.yaml` under `workflows.pi`:
+
+```yaml
+workflows:
+  enabled: true
+  pi:
+    binary: pi
+    provider: ""        # empty = use Pi default
+    model: ""           # empty = use Pi default
+    thinking: low
+    timeout_seconds: 600
+    environment:
+      PI_SKIP_VERSION_CHECK: "1"
+      PI_TELEMETRY: "0"
+```
+
+- `provider` / `model`: leave empty to use Pi's configured default.
+- `timeout_seconds`: per-node timeout. Pi is terminated if it exceeds this.
+- `environment`: merged into Pi's subprocess environment.
+
+### Repository Skills
+
+Each agent node in `reading_analysis` maps to one repository-owned skill under `server/app/workflows/skills/reading_analysis/{node_key}/`. Every skill contains:
+
+- `SKILL.md` — execution workflow and I/O contract
+- `references/output-contract.md` — field-level artifact specification
+- `scripts/validate_output.py` — node-specific validator
+
+Pi loads **only** the declared skill. Automatic skill discovery, extensions, prompt templates, and context files are disabled.
+
+### Run Directory Layout
+
+Every Pi execution creates a fresh trace under `{job_dir}/runs/{node_key}/{run_token}/`:
+
+```
+runs/extract_keywords/550e8400-e29b-41d4-a716-446655440000/
+  prompt.md          # orchestration prompt passed to Pi
+  events.jsonl       # Pi JSON event stream (stdout)
+  stderr.log         # Pi diagnostic output (stderr)
+  run.json           # metadata: command, start/end time, exit code, error
+  session/           # Pi session directory
+```
+
+Previous runs are preserved. Rerunning a node deletes that node's and all downstream nodes' declared outputs, but never touches `runs/` history.
+
+### Authentication
+
+Do not pass API keys on the command line. Pi inherits authentication from its environment or existing login store. Set provider credentials through Pi's standard environment variables if needed.
+
+## Phase 5 Workspace Executor Migration
+
+If you are upgrading from a pre-Phase-5 database that still contains Workspace Agent
+assignments or `pipeline_config_json`, run the one-time finalizer before starting the server:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --check
+UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --apply
+```
+
+- `--check` is read-only and prints a JSON report. An empty `issues` list means finalization can
+  proceed safely.
+- `--apply` creates a timestamped SQLite backup beside `data/video_hive.sqlite` and then migrates
+  legacy Agent/Workflow settings into Executor allocations, bindings, and local Node limits.
+
+If the report lists unknown legacy Agent IDs, either configure an equivalent Executor in
+`config/workflow.yaml` or manually remediate the `workspace_agent_assignments` rows before
+retrying. The server refuses to start until `--check` reports zero issues.
 
 ## API Notes
 
@@ -145,7 +279,7 @@ Add a question explanation record before its URL is available:
 }
 ```
 
-Useful endpoints:
+Useful endpoints (video pipeline):
 
 - `POST /api/videos`
 - `GET /api/videos`
@@ -156,3 +290,26 @@ Useful endpoints:
 - `GET /api/videos/{video_id}/logs`
 - `POST /api/worker/tick` processes one local non-agent phase; agent phases are handled by the background worker runner pool.
 - `POST /api/package`
+
+Agent Legion workflow (workspace / job) endpoints:
+
+- `GET /api/workflows/{workflow_key}` — workflow definition metadata (includes `intake.modes` without `task_entity` / `resolver`)
+- `GET /api/workspaces` — list workspaces
+- `POST /api/workspaces` — create workspace (supports `default_entity` and `intake_config`)
+- `GET /api/workspaces/{workspace_id}` — get workspace (returns `default_entity` and `intake_config`)
+- `PATCH /api/workspaces/{workspace_id}` — update workspace (supports `default_entity` and `intake_config`)
+- `POST /api/workspaces/{workspace_id}/job-batches` — create a batch of jobs (supports `entity`; defaults to workspace `default_entity`)
+- `GET /api/workspaces/{workspace_id}/jobs` — list jobs in workspace
+- `GET /api/jobs/{job_id}` — job detail with nodes, runs, artifacts
+- `GET /api/jobs/{job_id}/artifacts/{artifact_name}` — read job artifact
+- `GET /api/jobs/{job_id}/runs/{run_id}/log` — safe run log content
+- `POST /api/jobs/{job_id}/nodes/{node_key}/rerun` — rerun a node and mark downstream nodes stale
+- `POST /api/jobs/{job_id}/run-to` — run only the ancestor closure up to a target node
+- `POST /api/jobs/{job_id}/continue` — continue a paused job after a run-to target was reached
+- `DELETE /api/jobs/{job_id}` — delete job records, storage, and logs
+- `POST /api/workspaces/{workspace_id}/jobs/package` — package completed jobs
+
+Generic Workspace Job code follows the boundary: UI reads persisted Node state, mutations call
+services, and the scheduler claims Nodes through Executor leases. See [AGENTS.md](AGENTS.md) for
+Phase 6 architecture rules and wrong examples.
+

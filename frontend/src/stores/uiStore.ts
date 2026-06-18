@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import type { ReactNode } from 'react'
 import { api } from '../api'
 import type { AgentStatus, ContentType } from '../types'
 
@@ -7,18 +8,27 @@ interface Toast {
   type: 'success' | 'error'
 }
 
-interface UiState {
+export interface UiState {
   agents: AgentStatus[]
   addDialogOpen: boolean
   addContentType: ContentType
+  addDialogContext: 'video' | 'workspace'
+  addDialogWorkspaceId: string | undefined
   rerunDialogOpen: boolean
   deleteDialogOpen: boolean
   workerPaused: boolean
+  workerPausedByWorkspace: Record<string, boolean>
   toast: Toast | null
-  connectAgentsWs: () => void
-  fetchWorkerStatus: () => Promise<void>
-  setWorkerPaused: (paused: boolean) => Promise<void>
-  openAddDialog: () => void
+  pageTitle: string | null
+  detailPageActions: ReactNode | null
+  getWorkerPaused: (workspaceId?: string) => boolean
+  connectAgentsWs: () => () => void
+  fetchWorkerStatus: (workspaceId?: string) => Promise<void>
+  setWorkerPaused: (paused: boolean, workspaceId?: string) => Promise<void>
+  openAddDialog: (opts?: {
+    context?: 'video' | 'workspace'
+    workspaceId?: string
+  }) => void
   closeAddDialog: () => void
   setAddContentType: (type: ContentType) => void
   openRerunDialog: () => void
@@ -27,21 +37,41 @@ interface UiState {
   closeDeleteDialog: () => void
   showToast: (message: string, type: 'success' | 'error') => void
   clearToast: () => void
+  setPageTitle: (title: string | null) => void
+  setDetailPageActions: (actions: ReactNode | null) => void
 }
 
 let wsInstance: WebSocket | null = null
+let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+const workerStatusKey = (workspaceId?: string) => workspaceId || 'video-hive'
 
-export const useUiStore = create<UiState>((set) => ({
+export const useUiStore = create<UiState>((set, get) => ({
   agents: [],
   addDialogOpen: false,
   addContentType: 'knowledge',
+  addDialogContext: 'video',
+  addDialogWorkspaceId: undefined,
   rerunDialogOpen: false,
   deleteDialogOpen: false,
-  workerPaused: false,
+  workerPaused: true,
+  workerPausedByWorkspace: {},
   toast: null,
+  pageTitle: null,
+  detailPageActions: null,
+
+  getWorkerPaused: (workspaceId) => {
+    const key = workerStatusKey(workspaceId)
+    const paused = get().workerPausedByWorkspace[key]
+    if (paused !== undefined) return paused
+    return key === 'video-hive' ? get().workerPaused : true
+  },
 
   connectAgentsWs: () => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
+    if (reconnectTimer) {
+      clearTimeout(reconnectTimer)
+      reconnectTimer = null
+    }
     if (wsInstance) {
       wsInstance.onclose = null
       wsInstance.close()
@@ -56,28 +86,65 @@ export const useUiStore = create<UiState>((set) => ({
       }
     }
     wsInstance.onclose = () => {
-      setTimeout(() => {
+      reconnectTimer = setTimeout(() => {
+        reconnectTimer = null
         const { connectAgentsWs } = useUiStore.getState()
         connectAgentsWs()
       }, 3000)
     }
+    return () => {
+      if (reconnectTimer) {
+        clearTimeout(reconnectTimer)
+        reconnectTimer = null
+      }
+      if (wsInstance) {
+        wsInstance.onclose = null
+        wsInstance.close()
+        wsInstance = null
+      }
+    }
   },
 
-  fetchWorkerStatus: async () => {
-    const data = await api<{ paused: boolean }>('/api/worker/status')
-    set({ workerPaused: data.paused })
+  fetchWorkerStatus: async (workspaceId) => {
+    const query = workspaceId
+      ? `?workspace_id=${encodeURIComponent(workspaceId)}`
+      : ''
+    const data = await api<{ paused: boolean }>(`/api/worker/status${query}`)
+    const key = workerStatusKey(workspaceId)
+    set((state) => ({
+      workerPaused: key === 'video-hive' ? data.paused : state.workerPaused,
+      workerPausedByWorkspace: {
+        ...state.workerPausedByWorkspace,
+        [key]: data.paused,
+      },
+    }))
   },
 
-  setWorkerPaused: async (paused) => {
+  setWorkerPaused: async (paused, workspaceId) => {
+    const query = workspaceId
+      ? `?workspace_id=${encodeURIComponent(workspaceId)}`
+      : ''
     const data = await api<{ paused: boolean }>(
-      paused ? '/api/worker/pause' : '/api/worker/resume',
+      `${paused ? '/api/worker/pause' : '/api/worker/resume'}${query}`,
       { method: 'POST' }
     )
-    set({ workerPaused: data.paused })
+    const key = workerStatusKey(workspaceId)
+    set((state) => ({
+      workerPaused: key === 'video-hive' ? data.paused : state.workerPaused,
+      workerPausedByWorkspace: {
+        ...state.workerPausedByWorkspace,
+        [key]: data.paused,
+      },
+    }))
   },
 
-  openAddDialog: () =>
-    set({ addDialogOpen: true, addContentType: 'knowledge' }),
+  openAddDialog: (opts) =>
+    set({
+      addDialogOpen: true,
+      addContentType: 'knowledge',
+      addDialogContext: opts?.context || 'video',
+      addDialogWorkspaceId: opts?.workspaceId,
+    }),
   closeAddDialog: () => set({ addDialogOpen: false }),
   setAddContentType: (type) => set({ addContentType: type }),
   openRerunDialog: () => set({ rerunDialogOpen: true }),
@@ -86,4 +153,6 @@ export const useUiStore = create<UiState>((set) => ({
   closeDeleteDialog: () => set({ deleteDialogOpen: false }),
   showToast: (message, type) => set({ toast: { message, type } }),
   clearToast: () => set({ toast: null }),
+  setPageTitle: (title) => set({ pageTitle: title }),
+  setDetailPageActions: (actions) => set({ detailPageActions: actions }),
 }))

@@ -12,11 +12,11 @@ export default tseslint.config(
     },
     rules: {
       ...reactHooks.configs.recommended.rules,
-      '@typescript-eslint/no-explicit-any': 'warn',
+      '@typescript-eslint/no-explicit-any': 'error',
     },
   },
   {
-    files: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/types/**/*.d.ts'],
+    files: ['src/types/**/*.d.ts'],
     rules: {
       '@typescript-eslint/no-explicit-any': 'off',
     },

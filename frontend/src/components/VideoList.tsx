@@ -1,44 +1,45 @@
-import { useMemo, useRef, useEffect } from 'react'
+import { useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { useVirtualizer } from '@tanstack/react-virtual'
 import { useVideoStore } from '../stores/videoStore'
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from '../labels'
-import { statusGroup, filterVideos, formatInteractionStats } from '../helpers'
+import { statusGroup, formatInteractionStats } from '../helpers'
 import { PhaseStepper } from './PhaseStepper'
 import { InteractionReviewBadge } from './InteractionReviewBadge'
+import { useAppShellScroll } from '../layouts/AppShell'
 import styles from './VideoList.module.css'
 
 export function VideoList() {
   const navigate = useNavigate()
-  const {
-    videos,
-    selectedType,
-    statusFilter,
-    searchQuery,
-    packedFilter,
-    selectMode,
-    packageSelectMode,
-    selectedIds,
-    toggleVideoSelection,
-  } = useVideoStore()
-  const checkboxRefs = useRef<Map<string, HTMLElement>>(new Map())
+  const { reportScrolled, resetReportedScroll } = useAppShellScroll()
+  const filtered = useVideoStore((state) => state._filteredVideos)
+  const selectedType = useVideoStore((state) => state.selectedType)
+  const selectMode = useVideoStore((state) => state.selectMode)
+  const selectedIds = useVideoStore((state) => state.selectedIds)
+  const toggleVideoSelection = useVideoStore(
+    (state) => state.toggleVideoSelection
+  )
 
-  const filtered = useMemo(() => {
-    return filterVideos(videos, {
-      selectedType,
-      statusFilter,
-      searchQuery,
-      packedFilter,
-    })
-  }, [videos, selectedType, statusFilter, searchQuery, packedFilter])
+  const parentRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    filtered.forEach((v) => {
-      const el = checkboxRefs.current.get(v.id)
-      if (el) {
-        ;(el as HTMLInputElement).checked = selectedIds.has(v.id)
-      }
-    })
-  }, [selectedIds, filtered])
+    const el = parentRef.current
+    if (!el) return
+    const onScroll = () => reportScrolled(el.scrollTop > 0)
+    el.addEventListener('scroll', onScroll, { passive: true })
+    onScroll()
+    return () => {
+      el.removeEventListener('scroll', onScroll)
+      resetReportedScroll()
+    }
+  }, [reportScrolled, resetReportedScroll])
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is known to be safe here
+  const virtualizer = useVirtualizer({
+    count: filtered.length,
+    getScrollElement: () => parentRef.current,
+    estimateSize: () => 72,
+    overscan: 5,
+  })
 
   if (filtered.length === 0) {
     return (
@@ -65,88 +66,96 @@ export function VideoList() {
 
   return (
     <div className={styles.videoList}>
-      <md-list>
-        {filtered.map((video) => {
-          const isSelected = selectedIds.has(video.id)
-          return (
-            <md-list-item
-              key={video.id}
-              type="button"
-              className={`${isSelected ? 'active' : ''} ${packageSelectMode && video.status !== 'completed' ? 'dimmed' : ''}`}
-              onClick={() => {
-                if (selectMode) {
-                  toggleVideoSelection(video.id)
-                } else if (packageSelectMode) {
-                  if (video.status === 'completed') {
-                    toggleVideoSelection(video.id)
-                  }
-                } else {
-                  navigate(`/videos/${video.id}`)
-                }
-              }}
-            >
-              {(selectMode || packageSelectMode) && (
-                <md-checkbox
-                  slot="start"
-                  disabled={
-                    (packageSelectMode && video.status !== 'completed') ||
-                    undefined
-                  }
-                  ref={(el: HTMLElement | null) => {
-                    if (el) checkboxRefs.current.set(video.id, el)
-                    else checkboxRefs.current.delete(video.id)
+      <div ref={parentRef} className={styles.scrollContainer}>
+        <div
+          style={{ height: virtualizer.getTotalSize(), position: 'relative' }}
+        >
+          {virtualizer.getVirtualItems().map((virtualItem) => {
+            const video = filtered[virtualItem.index]
+            const isSelected = selectedIds.has(video.id)
+            return (
+              <div
+                key={virtualItem.key}
+                style={{
+                  position: 'absolute',
+                  top: 0,
+                  left: 0,
+                  width: '100%',
+                  transform: `translateY(${virtualItem.start}px)`,
+                }}
+              >
+                <md-list-item
+                  type="button"
+                  className={isSelected ? 'active' : ''}
+                  onClick={() => {
+                    if (selectMode) {
+                      toggleVideoSelection(video.id)
+                    } else {
+                      navigate(`/videos/${video.id}`)
+                    }
                   }}
-                  onClick={(e: React.MouseEvent) => {
-                    e.stopPropagation()
-                    toggleVideoSelection(video.id)
-                  }}
-                />
-              )}
-              <div slot="headline">
-                <strong>{video.title || '未命名'}</strong>
-              </div>
-              <div slot="supporting-text">
-                <small>
-                  {TYPE_LABELS[video.content_type]} ·{' '}
-                  {video.external_id || '未填 ID'}
-                </small>
-                {video.error_message && (
-                  <small className="error-text" title={video.error_message}>
-                    {video.error_message}
-                  </small>
-                )}
-              </div>
-              <div slot="end" className={styles.statusEnd}>
-                {video.content_type === 'knowledge' &&
-                  video.interaction_stats && (
-                    <span
-                      className={styles.interactionStats}
-                      title="互动节点通过状态"
-                    >
-                      {formatInteractionStats(video.interaction_stats)}
-                    </span>
-                  )}
-                <span
-                  className={`phase-name ${video.status === 'running' ? 'running' : ''}`}
                 >
-                  {PHASE_LABELS[video.current_phase]}
-                </span>
-                <PhaseStepper video={video} />
-                <span className={`status-badge ${statusGroup(video)}`}>
-                  {STATUS_LABELS[statusGroup(video)] || video.status}
-                </span>
-                {video.content_type === 'knowledge' &&
-                  video.status === 'completed' && (
-                    <InteractionReviewBadge
-                      status={video.interaction_review_status}
+                  {selectMode && (
+                    <md-checkbox
+                      slot="start"
+                      checked={isSelected || undefined}
+                      onClick={(e: React.MouseEvent) => {
+                        e.stopPropagation()
+                        toggleVideoSelection(video.id)
+                      }}
                     />
                   )}
-                {!!video.packed && <span className="packed-badge">已打包</span>}
+                  <div slot="headline">
+                    <strong>{video.title || '未命名'}</strong>
+                  </div>
+                  <div slot="supporting-text">
+                    <small>
+                      {TYPE_LABELS[video.content_type]} ·{' '}
+                      {video.external_id || '未填 ID'}
+                    </small>
+                    {video.error_message && (
+                      <small className="error-text" title={video.error_message}>
+                        {video.error_message}
+                      </small>
+                    )}
+                  </div>
+                  <div slot="end" className={styles.statusEnd}>
+                    {video.content_type === 'knowledge' &&
+                      video.interaction_stats && (
+                        <span
+                          className={styles.interactionStats}
+                          title="互动节点通过状态"
+                        >
+                          {formatInteractionStats(video.interaction_stats)}
+                        </span>
+                      )}
+                    <span
+                      className={`phase-name ${video.status === 'running' ? 'running' : ''}`}
+                    >
+                      {PHASE_LABELS[video.current_phase]}
+                    </span>
+                    <PhaseStepper video={video} />
+                    <span className={`status-badge ${statusGroup(video)}`}>
+                      {STATUS_LABELS[statusGroup(video)] || video.status}
+                    </span>
+                    {video.content_type === 'knowledge' &&
+                      video.status === 'completed' && (
+                        <InteractionReviewBadge
+                          status={
+                            video.interaction_review_status ?? 'all_failed'
+                          }
+                        />
+                      )}
+                    {!!video.packed && (
+                      <span className="packed-badge">已打包</span>
+                    )}
+                  </div>
+                </md-list-item>
               </div>
-            </md-list-item>
-          )
-        })}
-      </md-list>
+            )
+          })}
+        </div>
+      </div>
     </div>
   )
 }

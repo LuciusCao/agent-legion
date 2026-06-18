@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest'
-import { render, screen, within } from '@testing-library/react'
+import { render, screen, within, fireEvent } from '@testing-library/react'
 import { VideoPlayer } from './VideoPlayer'
 import type { VideoArtifacts, VideoItem } from '../types'
 
@@ -58,5 +58,56 @@ describe('VideoPlayer', () => {
     expect(
       within(playerWrap).getByText('先暂停完成这道例题')
     ).toBeInTheDocument()
+  })
+
+  it('updates subtitle text via state on timeupdate', () => {
+    const subtitleArtifacts: VideoArtifacts = {
+      ...artifacts,
+      subtitles: [
+        { index: 1, start: 0, end: 5, text: 'First subtitle' },
+        { index: 2, start: 5, end: 10, text: 'Second subtitle' },
+      ],
+    }
+
+    render(
+      <VideoPlayer
+        video={{ ...video, storage_dir: '/tmp/video' }}
+        artifacts={subtitleArtifacts}
+        onTimeUpdate={vi.fn()}
+      />
+    )
+
+    const videoEl = document.getElementById('player') as HTMLVideoElement
+
+    videoEl.currentTime = 3
+    fireEvent.timeUpdate(videoEl)
+    expect(screen.getByText('First subtitle')).toBeInTheDocument()
+
+    videoEl.currentTime = 7
+    fireEvent.timeUpdate(videoEl)
+    expect(screen.getByText('Second subtitle')).toBeInTheDocument()
+  })
+
+  it('calls onPlay and onPause callbacks', () => {
+    const onPlay = vi.fn()
+    const onPause = vi.fn()
+
+    render(
+      <VideoPlayer
+        video={{ ...video, storage_dir: '/tmp/video' }}
+        artifacts={artifacts}
+        onTimeUpdate={vi.fn()}
+        onPlay={onPlay}
+        onPause={onPause}
+      />
+    )
+
+    const videoEl = document.getElementById('player') as HTMLVideoElement
+
+    fireEvent.play(videoEl)
+    expect(onPlay).toHaveBeenCalledTimes(1)
+
+    fireEvent.pause(videoEl)
+    expect(onPause).toHaveBeenCalledTimes(1)
   })
 })

@@ -5,7 +5,6 @@ import {
   canRerunFrom,
   canRerunTo,
   computeProgress,
-  escapeHtml,
   filterVideos,
   formatInteractionStats,
   getInteractionQuestion,
@@ -30,6 +29,9 @@ const video = (overrides: Partial<VideoItem>): VideoItem => ({
   status: 'queued',
   current_phase: 'download',
   error_message: '',
+  storage_dir: '',
+  duration: 0,
+  packed: false,
   ...overrides,
 })
 
@@ -45,6 +47,9 @@ const makeVideo = (overrides: Partial<VideoItem> = {}): VideoItem => ({
   status: 'queued',
   current_phase: 'download',
   error_message: '',
+  storage_dir: '',
+  duration: 0,
+  packed: false,
   ...overrides,
 })
 
@@ -130,14 +135,6 @@ describe('getInteractionQuestion', () => {
     const node = { instruction: '暂停思考', hint: '提示' }
 
     expect(getInteractionQuestion(node)).toEqual(node)
-  })
-})
-
-describe('escapeHtml', () => {
-  it('escapes text before it is placed into HTML strings', () => {
-    expect(escapeHtml(`<img src=x onerror="alert('x')">`)).toBe(
-      '&lt;img src=x onerror=&quot;alert(&#039;x&#039;)&quot;&gt;'
-    )
   })
 })
 

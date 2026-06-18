@@ -1,0 +1,109 @@
+.panel {
+  background: var(--md-sys-color-surface-container-low, #f8f9fa);
+  border: 1px solid var(--md-sys-color-outline-variant, #e5e7eb);
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.empty {
+  color: var(--md-sys-color-on-surface-variant, #6b7280);
+  font-size: 14px;
+  text-align: center;
+  padding: 24px 0;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--md-sys-color-on-surface, #111827);
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.completed {
+  background: #dcfce7;
+  color: #15803d;
+}
+
+.running {
+  background: #dbeafe;
+  color: #1d4ed8;
+}
+
+.failed {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+
+.pending,
+.queued {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.unknown {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
+.rows {
+  display: grid;
+  grid-template-columns: 80px 1fr;
+  gap: 8px 12px;
+  margin: 0 0 16px 0;
+}
+
+.row {
+  display: contents;
+  font-size: 14px;
+}
+
+.row dt {
+  color: var(--md-sys-color-on-surface-variant, #6b7280);
+}
+
+.row dd {
+  margin: 0;
+  color: var(--md-sys-color-on-surface, #111827);
+}
+
+.actions {
+  display: flex;
+  gap: 10px;
+}
+
+.btn {
+  flex: 1;
+  padding: 8px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--md-sys-color-outline, #d1d5db);
+  background: var(--md-sys-color-surface, #ffffff);
+  color: var(--md-sys-color-on-surface, #111827);
+  font-size: 14px;
+  cursor: pointer;
+}
+
+.btn:hover {
+  background: var(--md-sys-color-surface-container, #f3f4f6);
+}
+
+.errorText {
+  color: var(--md-sys-color-error, #b91c1c);
+  white-space: pre-wrap;
+  word-break: break-word;
+}

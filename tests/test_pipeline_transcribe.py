@@ -1,14 +1,16 @@
+from subprocess import TimeoutExpired
 from unittest.mock import patch
 
 import pytest
 
 from server.app.pipeline.transcribe import (
+    SenseVoiceProvider,
     TranscriptionProvider,
     WhisperCppProvider,
     run_transcription_with_providers,
     validate_srt,
 )
-from tests.conftest import BadProvider, GoodProvider
+from tests.helpers import BadProvider, GoodProvider
 
 
 def test_transcribe_auto_falls_back_to_sensevoice(tmp_path):
@@ -246,3 +248,90 @@ def test_whisper_provider_with_missing_vad_model_raises(tmp_path):
         pytest.raises(FileNotFoundError, match="VAD model not found"),
     ):
         provider.transcribe(video_path, output_path, "Test")
+
+
+def test_whisper_provider_timeout_cleans_temp_wav(tmp_path):
+    provider = _make_fake_whisper_provider(tmp_path)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+    wav_path = output_path.with_suffix(".wav")
+
+    def _fake_run(cmd, **kwargs):
+        # Simulate ffmpeg creating the wav file
+        if cmd[0] == "ffmpeg":
+            wav_path.write_bytes(b"fake wav")
+            return
+        # Simulate whisper timing out
+        raise TimeoutExpired(cmd, timeout=900)
+
+    with (
+        patch("server.app.pipeline.transcribe.subprocess.run", side_effect=_fake_run),
+        pytest.raises(TimeoutExpired),
+    ):
+        provider.transcribe(video_path, output_path, "Test")
+
+    assert not wav_path.exists(), "temporary wav should be cleaned on timeout"
+
+
+def _make_fake_sensevoice_provider(tmp_path, model_dir=None):
+    script = tmp_path / "transcribe_sensevoice.py"
+    script.write_bytes(b"fake script")
+    return SenseVoiceProvider(script=str(script), model_dir=str(model_dir) if model_dir else None)
+
+
+def test_sensevoice_provider_includes_model_dir_when_present(tmp_path):
+    model_dir = tmp_path / "SenseVoiceSmall"
+    model_dir.mkdir()
+    provider = _make_fake_sensevoice_provider(tmp_path, model_dir=str(model_dir))
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+    expected_output = tmp_path / "video" / "subtitles.srt"
+
+    def _fake_run(cmd, **kwargs):
+        expected_output.parent.mkdir(parents=True, exist_ok=True)
+        expected_output.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+
+    with patch("server.app.pipeline.transcribe.subprocess.run", side_effect=_fake_run) as mock_run:
+        provider.transcribe(video_path, output_path, "Test")
+
+    cmd = mock_run.call_args[0][0]
+    assert "--model-dir" in cmd
+    assert str(model_dir) in cmd
+
+
+def test_sensevoice_provider_omits_model_dir_when_missing(tmp_path):
+    provider = _make_fake_sensevoice_provider(tmp_path, model_dir=str(tmp_path / "missing"))
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+    expected_output = tmp_path / "video" / "subtitles.srt"
+
+    def _fake_run(cmd, **kwargs):
+        expected_output.parent.mkdir(parents=True, exist_ok=True)
+        expected_output.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+
+    with patch("server.app.pipeline.transcribe.subprocess.run", side_effect=_fake_run) as mock_run:
+        provider.transcribe(video_path, output_path, "Test")
+
+    cmd = mock_run.call_args[0][0]
+    assert "--model-dir" not in cmd
+
+
+def test_sensevoice_provider_omits_model_dir_when_none(tmp_path):
+    provider = _make_fake_sensevoice_provider(tmp_path, model_dir=None)
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+    expected_output = tmp_path / "video" / "subtitles.srt"
+
+    def _fake_run(cmd, **kwargs):
+        expected_output.parent.mkdir(parents=True, exist_ok=True)
+        expected_output.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+
+    with patch("server.app.pipeline.transcribe.subprocess.run", side_effect=_fake_run) as mock_run:
+        provider.transcribe(video_path, output_path, "Test")
+
+    cmd = mock_run.call_args[0][0]
+    assert "--model-dir" not in cmd

@@ -9,6 +9,7 @@ export {
   getPhases,
   getSharedPhases,
   canRerunFrom,
+  canRerunFromFailedPhase,
   canContinueTo,
   canRerunTo,
 } from './lib/phases'
@@ -20,7 +21,9 @@ export {
 export {
   seconds,
   parseTimeSeconds,
-  escapeHtml,
+  formatDuration,
   formatInteractionStats,
+  formatRelativeTime,
+  durationSeconds,
 } from './lib/formatters'
 export { triggerDownload } from './lib/download'

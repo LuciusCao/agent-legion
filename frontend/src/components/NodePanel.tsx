@@ -2,6 +2,7 @@ import { useArtifactStore } from '../stores/artifactStore'
 import { useInteractionStore } from '../stores/interactionStore'
 import { INTERACTION_TYPE_LABELS } from '../labels'
 import { parseTimeSeconds } from '../helpers'
+import { LaTeXText } from './LaTeXText'
 import styles from './NodePanel.module.css'
 
 interface ReviewEntry {
@@ -91,7 +92,9 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
               >
                 {formatTime(triggerTime)}
               </span>
-              <span>{node.instruction || '交互节点'}</span>
+              <span>
+                <LaTeXText>{node.instruction || '交互节点'}</LaTeXText>
+              </span>
               <md-assist-chip label={typeLabel} />
             </div>
             {node.options && node.options.length > 0 && (
@@ -109,7 +112,7 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
                     key={opt.id ?? j}
                     disabled={answered || undefined}
                   >
-                    {opt.text}
+                    <LaTeXText>{opt.text}</LaTeXText>
                   </md-outlined-button>
                 ))}
               </div>

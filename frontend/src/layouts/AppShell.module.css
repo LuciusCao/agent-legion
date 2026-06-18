@@ -1,0 +1,17 @@
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+}
+
+.appBarWrap {
+  flex-shrink: 0;
+}
+
+.main {
+  flex: 1;
+  overflow: auto;
+  min-height: 0;
+}

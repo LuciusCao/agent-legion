@@ -16,16 +16,26 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+  "freezegun>=1.5.5",
   "httpx",
   "mypy>=2.1.0",
   "pytest",
   "pytest-cov>=7.1.0",
+  "pytest-xdist>=3.8.0",
   "ruff",
 ]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+  "full_gate: deterministic higher-fidelity architecture scenarios",
+  "ci_extended: repeated stress scenarios for CI",
+  "slow: tests involving real subprocesses or long sleeps",
+]
+filterwarnings = [
+  "error::ResourceWarning:sqlite3",
+]
 
 [tool.ruff]
 line-length = 100
@@ -46,7 +56,7 @@ source = ["server"]
 omit = ["*/__pycache__/*"]
 
 [tool.coverage.report]
-fail_under = 75
+fail_under = 85
 show_missing = true
 skip_covered = false
 

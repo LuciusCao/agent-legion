@@ -12,17 +12,17 @@ from ..events import VideoEventManager
 from ..pipeline.common import resolve_video_dir
 from ..pipeline.openclaw_sessions import render_openclaw_session, resolve_openclaw_session_path
 from ..services.intake import add_video_items
-from ..services.interaction_stats import (
-    compute_interaction_review_status,
-    compute_interaction_stats,
+from ..services.manual_run import (
+    batch_submit_run_to_phase,
+    submit_run_to_phase,
 )
-from ..services.manual_run import batch_run_to_phase, run_to_phase
 from ..services.video_actions import (
     batch_delete_video_records,
     batch_rerun_video_records,
     delete_video_record,
     rerun_video_record,
 )
+from ..services.video_read import VideoReadService
 from ..settings import Settings
 
 
@@ -111,30 +111,20 @@ def create_videos_router(
     def add_videos(request: AddVideosRequest) -> dict[str, Any]:
         return add_video_items(db, settings, request.items)
 
+    read_service = VideoReadService(db, settings)
+
     @router.get("")
     def list_videos() -> dict[str, Any]:
-        videos = db.list_videos()
+        videos = read_service.list_videos()
         for video in videos:
             video["packed"] = bool(video.get("packed", 0))
-            if video.get("content_type") == "knowledge":
-                video_dir = resolve_video_dir(video, settings.videos_dir)
-                stats = compute_interaction_stats(video_dir)
-                if stats:
-                    video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
-                video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
         return {"videos": videos}
 
     @router.get("/{video_id}")
     def get_video(video_id: str) -> dict[str, Any]:
-        video = db.get_video(video_id)
+        video = read_service.get_video_detail(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")
-        if video.get("content_type") == "knowledge":
-            video_dir = resolve_video_dir(video, settings.videos_dir)
-            stats = compute_interaction_stats(video_dir)
-            if stats:
-                video["interaction_stats"] = stats  # type: ignore[typeddict-unknown-key]
-            video["interaction_review_status"] = compute_interaction_review_status(video_dir)  # type: ignore[typeddict-unknown-key]
         return {
             "video": {**video, "packed": bool(video.get("packed", 0))},
             "phase_runs": db.list_phase_runs(video_id),
@@ -156,7 +146,7 @@ def create_videos_router(
     @router.post("/batch/run-to", response_model=BatchRunToResponse)
     def batch_run_to_videos(request: BatchRunToRequest) -> dict[str, Any]:
         return {
-            "results": batch_run_to_phase(
+            "results": batch_submit_run_to_phase(
                 db,
                 settings,
                 request.video_ids,
@@ -168,7 +158,7 @@ def create_videos_router(
 
     @router.post("/{video_id}/run-to", response_model=RunToSingleResponse)
     def run_video_to_phase(video_id: str, request: RunToRequest) -> dict[str, Any]:
-        result = run_to_phase(
+        result = submit_run_to_phase(
             db,
             settings,
             video_id,
@@ -218,7 +208,12 @@ def create_videos_router(
         log_path = Path(runs[-1]["log_path"])
         if not log_path.exists():
             return {"log": ""}
-        return {"log": _sanitize_log(log_path.read_text(encoding="utf-8")[-8000:])}
+        with log_path.open("rb") as f:
+            f.seek(0, 2)
+            size = f.tell()
+            f.seek(max(0, size - 12000), 0)
+            tail = f.read().decode("utf-8", errors="ignore")
+        return {"log": _sanitize_log(tail[-8000:])}
 
     @router.get("/{video_id}/phase-runs/{run_id}/session")
     def phase_run_session(video_id: str, run_id: int) -> dict[str, str]:
@@ -232,6 +227,7 @@ def create_videos_router(
         return {"session_id": session_id, "log": render_openclaw_session(path)}
 
     @router.get("/{video_id}/video")
+    @router.head("/{video_id}/video")
     def video_file(video_id: str):
         video = db.get_video(video_id)
         if not video:

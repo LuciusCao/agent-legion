@@ -1,9 +1,9 @@
-import time
 from concurrent.futures import Future
 from unittest.mock import MagicMock, patch
 
 from server.app.worker_control import WorkerControl
 from server.app.worker_thread import WorkerThread
+from tests.helpers import wait_for_predicate
 
 
 def test_worker_thread_start_and_stop():
@@ -23,8 +23,6 @@ def test_worker_thread_start_and_stop():
     assert wt.executor is not None
     assert wt._thread is not None
     assert wt._thread.is_alive()
-
-    time.sleep(0.3)
 
     wt.stop(timeout=2)
     assert not wt._thread.is_alive()
@@ -97,6 +95,30 @@ def test_worker_thread_local_done_callback_cleans_counts():
     wt.stop(timeout=2)
 
 
+def test_worker_thread_consumes_tick_signal():
+    """Worker loop consumes tick signal to reduce sleep time."""
+    db = MagicMock()
+    db.list_videos.return_value = []
+    settings = MagicMock()
+    settings.config = {}
+    runner_pool = MagicMock()
+    runner_pool.size.return_value = 1
+    runner_pool.acquire.side_effect = RuntimeError("no slot")
+    agent_manager = MagicMock()
+    worker_control = WorkerControl()
+    worker_control.resume()
+    worker_control.request_tick()
+
+    wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
+    wt.start()
+
+    wait_for_predicate(lambda: not worker_control.has_tick())
+
+    assert not worker_control.has_tick()
+
+    wt.stop(timeout=2)
+
+
 def test_worker_thread_executes_local_work():
     """Worker loop submits local work and cleans up on completion."""
     db = MagicMock()
@@ -105,16 +127,17 @@ def test_worker_thread_executes_local_work():
     settings.config = {}
     runner_pool = MagicMock()
     runner_pool.size.return_value = 1
-    runner_pool.acquire.return_value = None
+    runner_pool.acquire.side_effect = RuntimeError("Runners not initialized.")
     agent_manager = MagicMock()
     worker_control = WorkerControl()
     worker_control.resume()
+    worker_control.request_tick()
 
     wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
 
-    with patch("server.app.worker.process_video_once", return_value=True):
+    with patch("server.app.worker.process_video_once", return_value=True) as mock_once:
         wt.start()
-        time.sleep(0.6)
+        wait_for_predicate(lambda: mock_once.called)
 
     wt.stop(timeout=2)
     assert not wt._thread.is_alive()
@@ -136,12 +159,13 @@ def test_worker_thread_executes_agent_work():
     agent_manager = MagicMock()
     worker_control = WorkerControl()
     worker_control.resume()
+    worker_control.request_tick()
 
     wt = WorkerThread(db, settings, runner_pool, agent_manager, worker_control)
 
-    with patch("server.app.worker.process_video_once", return_value=True):
+    with patch("server.app.worker.process_video_once", return_value=True) as mock_once:
         wt.start()
-        time.sleep(0.6)
+        wait_for_predicate(lambda: mock_once.called)
 
     wt.stop(timeout=2)
     assert not wt._thread.is_alive()

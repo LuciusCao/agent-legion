@@ -9,6 +9,8 @@ interface DetailState {
   transcriptionRuns: TranscriptionRun[]
   activeTab: DetailTab
   isLoading: boolean
+  error: string | null
+  _loadSeq: number
   loadVideo: (id: string) => Promise<void>
   loadLog: (id: string) => Promise<void>
   loadPhaseRuns: (id: string) => Promise<void>
@@ -20,33 +22,44 @@ interface DetailState {
   setActiveTab: (tab: DetailTab) => void
 }
 
-export const useDetailStore = create<DetailState>((set) => ({
+export const useDetailStore = create<DetailState>((set, get) => ({
   currentVideo: null,
   log: '',
   phaseRuns: [],
   transcriptionRuns: [],
   activeTab: 'nodes',
   isLoading: false,
+  error: null,
+  _loadSeq: 0,
 
   loadVideo: async (id) => {
-    set({ isLoading: true })
+    const seq = get()._loadSeq + 1
+    set({ isLoading: true, error: null, _loadSeq: seq })
     try {
       const data = await api<{
         video: VideoItem
         phase_runs: PhaseRun[]
         transcription_runs: TranscriptionRun[]
       }>(`/api/videos/${id}`)
+      if (get()._loadSeq !== seq) return
       const video = data.video || null
       set({
         currentVideo: video,
         phaseRuns: data.phase_runs || [],
         transcriptionRuns: data.transcription_runs || [],
+        activeTab: video ? 'subtitles' : get().activeTab,
+        isLoading: false,
       })
-      if (video) {
-        set({ activeTab: 'subtitles' })
-      }
-    } finally {
-      set({ isLoading: false })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      if (get()._loadSeq !== seq) return
+      set({
+        error: message,
+        currentVideo: null,
+        phaseRuns: [],
+        transcriptionRuns: [],
+        isLoading: false,
+      })
     }
   },
 
@@ -54,8 +67,9 @@ export const useDetailStore = create<DetailState>((set) => ({
     try {
       const data = await api<{ log: string }>(`/api/videos/${id}/logs`)
       set({ log: data.log || '暂无日志' })
-    } catch {
-      set({ log: '加载日志失败' })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ log: '加载日志失败', error: message })
     }
   },
 
@@ -69,8 +83,9 @@ export const useDetailStore = create<DetailState>((set) => ({
         phaseRuns: data.phase_runs || [],
         transcriptionRuns: data.transcription_runs || [],
       })
-    } catch {
-      // ignore
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err)
+      set({ error: message })
     }
   },
 

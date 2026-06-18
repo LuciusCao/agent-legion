@@ -1,10 +1,33 @@
 import os
+from pathlib import Path
 
-from server.app.settings import load_env_file
+import pytest
+from pydantic import ValidationError
+
+from server.app.settings import load_env_file, load_settings
+
+
+@pytest.fixture(autouse=True)
+def _clear_video_hive_env(monkeypatch):
+    for key in (
+        "BASECMS_BASE_URL",
+        "BASECMS_TOKEN",
+        "BASECMS_APP_ID",
+        "BASECMS_NONCE",
+        "BASECMS_SECRET",
+        "BASECMS_TOKEN_URL",
+        "VIDEO_HIVE_CMS_TOKEN",
+        "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
+        "VIDEO_HIVE_ASR_WHISPER_BINARY",
+        "VIDEO_HIVE_ASR_WHISPER_MODEL",
+        "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR",
+        "VIDEO_HIVE_PI_BINARY",
+        "VIDEO_HIVE_OPENCLAW_CWD",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
 
 def test_load_env_file_preserves_quoted_secret_values(tmp_path, monkeypatch):
-    monkeypatch.delenv("BASECMS_SECRET", raising=False)
     monkeypatch.setenv("BASECMS_TOKEN", "already-set")
     env_file = tmp_path / ".env"
     env_file.write_text(
@@ -16,3 +39,251 @@ def test_load_env_file_preserves_quoted_secret_values(tmp_path, monkeypatch):
 
     assert os.environ["BASECMS_TOKEN"] == "already-set"
     assert os.environ["BASECMS_SECRET"] == "fake#secret$value"
+
+
+def test_env_example_lists_all_basecms_variables():
+    example_path = Path(__file__).resolve().parents[1] / ".env.example"
+    example = example_path.read_text(encoding="utf-8")
+    for key in (
+        "BASECMS_BASE_URL",
+        "BASECMS_TOKEN",
+        "BASECMS_APP_ID",
+        "BASECMS_NONCE",
+        "BASECMS_SECRET",
+        "BASECMS_TOKEN_URL",
+    ):
+        assert f"{key}=" in example, f"{key} is missing from .env.example"
+
+
+def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypatch):
+    from server.app.cms.auth import _token_gen_config
+    from server.app.cms.client import get_token
+
+    monkeypatch.setenv("VIDEO_HIVE_CMS_TOKEN", "video-hive-token")
+    monkeypatch.setenv("VIDEO_HIVE_CMS_TOKEN_GEN_SECRET", "video-hive-secret")
+    monkeypatch.setenv("BASECMS_TOKEN", "basecms-token")
+    monkeypatch.setenv("BASECMS_APP_ID", "basecms-app")
+    monkeypatch.setenv("BASECMS_NONCE", "basecms-nonce")
+    monkeypatch.setenv("BASECMS_SECRET", "basecms-secret")
+    monkeypatch.setenv("BASECMS_TOKEN_URL", "http://basecms/token")
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "cms:\n"
+        "  token: yaml-token\n"
+        "  token_gen:\n"
+        "    app_id: yaml-app\n"
+        "    nonce: yaml-nonce\n"
+        "    secret: yaml-secret\n"
+        "    url: http://yaml/token\n"
+        "openclaw:\n"
+        "  cwd: .\n"
+        "  command_template:\n"
+        "    - openclaw\n"
+        "    - agent\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    # VIDEO_HIVE_* still wins in the parsed config (generic YAML override).
+    assert settings.config["cms"]["token"] == "video-hive-token"
+    assert settings.config["cms"]["token_gen"]["secret"] == "video-hive-secret"
+    # BASECMS_* wins at the CMS client/auth layer.
+    assert get_token("dev", settings.config) == "basecms-token"
+    token_gen = _token_gen_config(settings.config)
+    assert token_gen["app_id"] == "basecms-app"
+    assert token_gen["nonce"] == "basecms-nonce"
+    assert token_gen["secret"] == "basecms-secret"
+    assert token_gen["url"] == "http://basecms/token"
+
+
+def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "executors:\n"
+        "  bad-exec:\n"
+        "    kind: local\n"
+        "    global_capacity: 0\n"
+        "    capabilities: {}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    message = str(exc_info.value)
+    assert "bad-exec" in message
+    assert "global_capacity" in message
+
+
+def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "executors:\n"
+        "  local-default:\n"
+        "    kind: local\n"
+        "    global_capacity: 4\n"
+        "    capabilities:\n"
+        "      fetch_questions:\n"
+        "        handler: reading_analysis.fetch_questions\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert "local-default" in settings.executor_definitions
+    assert settings.executor_definitions["local-default"].kind == "local"
+    assert settings.executor_definitions["local-default"].global_capacity == 4
+
+
+def test_load_settings_exposes_executor_runtime(tmp_path, monkeypatch):
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "workflows:\n"
+        "  enabled: true\n"
+        "  pi:\n"
+        "    binary: pi\n"
+        '    provider: ""\n'
+        '    model: ""\n'
+        "    thinking: low\n"
+        "    timeout_seconds: 600\n"
+        "    environment:\n"
+        '      PI_SKIP_VERSION_CHECK: "1"\n'
+        "openclaw:\n"
+        "  cwd: .\n"
+        "  timeout_seconds: 600\n"
+        "  skill_safety:\n"
+        "    enabled: true\n"
+        "    repos:\n"
+        "      - path: ~/.openclaw/workspace/skills/s1\n"
+        "        ref: v1.0.0\n"
+        "  command_template:\n"
+        "    - openclaw\n"
+        "    - agent\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.executor_runtime.workflows.enabled is True
+    assert settings.executor_runtime.workflows.pi.binary == "pi"
+    assert settings.executor_runtime.workflows.pi.thinking == "low"
+    assert settings.executor_runtime.openclaw.cwd == "."
+    assert settings.executor_runtime.openclaw.timeout_seconds == 600
+    assert settings.executor_runtime.openclaw.command_template == ("openclaw", "agent")
+    assert settings.executor_runtime.openclaw.skill_safety.enabled is True
+    assert settings.executor_runtime.openclaw.skill_safety.repos == [
+        {"path": "~/.openclaw/workspace/skills/s1", "ref": "v1.0.0"}
+    ]
+    assert settings.config["workflows"]["pi"]["thinking"] == "low"
+
+
+def test_load_settings_rejects_empty_openclaw_command_template(tmp_path, monkeypatch):
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\nopenclaw:\n  command_template: []\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert "command_template" in str(exc_info.value)
+
+
+def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "data_dir: data\n"
+        "executors:\n"
+        "  weird-exec:\n"
+        "    kind: unknown\n"
+        "    global_capacity: 1\n"
+        "    capabilities: {}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValidationError) as exc_info:
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert "weird-exec" in str(exc_info.value)
+
+
+@pytest.mark.parametrize(
+    ("env_var", "config_path", "env_value", "expected"),
+    [
+        (
+            "BASECMS_BASE_URL",
+            ["cms", "base_url"],
+            "http://cms.example.com/v2",
+            "http://cms.example.com/v2",
+        ),
+        ("VIDEO_HIVE_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
+        (
+            "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
+            ["cms", "token_gen", "secret"],
+            "env-secret",
+            "env-secret",
+        ),
+        (
+            "VIDEO_HIVE_ASR_WHISPER_BINARY",
+            ["asr", "whisper", "binary"],
+            "/tmp/whisper-cli",
+            "/tmp/whisper-cli",
+        ),
+        (
+            "VIDEO_HIVE_ASR_WHISPER_MODEL",
+            ["asr", "whisper", "model"],
+            "/tmp/model.bin",
+            "/tmp/model.bin",
+        ),
+        (
+            "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR",
+            ["asr", "sensevoice", "model_dir"],
+            "/tmp/sensevoice",
+            "/tmp/sensevoice",
+        ),
+        ("VIDEO_HIVE_PI_BINARY", ["workflows", "pi", "binary"], "/tmp/pi", "/tmp/pi"),
+        ("VIDEO_HIVE_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
+    ],
+)
+def test_env_override_precedes_yaml(
+    tmp_path, monkeypatch, env_var, config_path, env_value, expected
+):
+    monkeypatch.setenv(env_var, env_value)
+    config_path_file = tmp_path / "workflow.yaml"
+    config_path_file.write_text(
+        "data_dir: data\n"
+        "cms:\n"
+        "  token: yaml-token\n"
+        "  token_gen:\n"
+        "    secret: yaml-secret\n"
+        "asr:\n"
+        "  provider: whisper\n"
+        "  whisper:\n"
+        "    binary: yaml-binary\n"
+        "    model: yaml-model\n"
+        "  sensevoice:\n"
+        "    model_dir: yaml-dir\n"
+        "workflows:\n"
+        "  enabled: false\n"
+        "  pi:\n"
+        "    binary: yaml-pi\n"
+        "openclaw:\n"
+        "  cwd: yaml-cwd\n"
+        "  command_template:\n"
+        "    - openclaw\n"
+        "    - agent\n",
+        encoding="utf-8",
+    )
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path_file)
+
+    node = settings.config
+    for key in config_path[:-1]:
+        node = node[key]
+    assert node[config_path[-1]] == expected

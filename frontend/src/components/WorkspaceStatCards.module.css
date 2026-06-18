@@ -1,0 +1,36 @@
+.pills {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 12px;
+  border-radius: 16px;
+  border: 1px solid var(--md-sys-color-outline-variant);
+  background: var(--md-sys-color-surface);
+  cursor: pointer;
+  font-size: 14px;
+  color: var(--md-sys-color-on-surface-variant);
+}
+
+.pill:hover {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.active {
+  background: var(--md-sys-color-primary-container);
+  color: var(--md-sys-color-on-primary-container);
+  border-color: var(--md-sys-color-primary);
+  font-weight: 600;
+}
+
+.pill md-icon {
+  font-size: 16px;
+  width: 16px;
+  height: 16px;
+}

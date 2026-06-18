@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, useMemo } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useDetailStore } from '../stores/detailStore'
 import { useArtifactStore } from '../stores/artifactStore'
@@ -6,8 +6,9 @@ import { useInteractionStore } from '../stores/interactionStore'
 import { useUiStore } from '../stores/uiStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useVideoPhaseEvents } from './useVideoPhaseEvents'
+import { binarySearchTriggerIndex, prepareIndexedTriggers } from '../lib/search'
 import { api } from '../api'
-import { parseTimeSeconds, triggerDownload } from '../helpers'
+import { parseTimeSeconds } from '../helpers'
 import type {
   VideoItem,
   PhaseRun,
@@ -34,6 +35,8 @@ export interface UseDetailPageReturn {
   currentSentence: string[]
   activeNode: InteractionNode | null
   detailTitle: string
+  isPlaying: boolean
+  setIsPlaying: (v: boolean) => void
   handleTimeUpdate: (time: number) => void
   handleSeek: (time: number) => void
   handleContinue: () => void
@@ -60,19 +63,19 @@ export function useDetailPage(): UseDetailPageReturn {
   const navigate = useNavigate()
   const playerRef = useRef<HTMLVideoElement>(null)
   const previousPlaybackTimeRef = useRef<number | null>(null)
+  const lastTimeRef = useRef(0)
   const [currentTime, setCurrentTime] = useState(0)
   const [moreDialogOpen, setMoreDialogOpen] = useState(false)
   const [moreDialogType, setMoreDialogType] = useState<MoreDialogType>(null)
   const [runToDialogOpen, setRunToDialogOpen] = useState(false)
+  const [isPlaying, setIsPlaying] = useState(false)
 
-  const {
-    currentVideo,
-    phaseRuns,
-    transcriptionRuns,
-    loadVideo,
-    loadLog,
-    isLoading,
-  } = useDetailStore()
+  const currentVideo = useDetailStore((state) => state.currentVideo)
+  const phaseRuns = useDetailStore((state) => state.phaseRuns)
+  const transcriptionRuns = useDetailStore((state) => state.transcriptionRuns)
+  const loadVideo = useDetailStore((state) => state.loadVideo)
+  const loadLog = useDetailStore((state) => state.loadLog)
+  const isLoading = useDetailStore((state) => state.isLoading)
 
   const { artifacts, loadArtifacts } = useArtifactStore()
 
@@ -92,6 +95,11 @@ export function useDetailPage(): UseDetailPageReturn {
   const { openRerunDialog, openDeleteDialog, showToast } = useUiStore()
   const { fetchVideos } = useVideoStore()
 
+  const indexedTriggers = useMemo(
+    () => prepareIndexedTriggers(artifacts.interactions),
+    [artifacts.interactions]
+  )
+
   const checkFetchError = useCallback(() => {
     const err = useVideoStore.getState().error
     if (err) {
@@ -106,9 +114,15 @@ export function useDetailPage(): UseDetailPageReturn {
     if (!id) return
     clearInteractions()
     previousPlaybackTimeRef.current = null
-    loadVideo(id)
-    loadArtifacts(id)
-    loadLog(id)
+    let stale = false
+    const load = async () => {
+      await Promise.all([loadVideo(id), loadArtifacts(id), loadLog(id)])
+      if (stale) return
+    }
+    load()
+    return () => {
+      stale = true
+    }
   }, [id, clearInteractions, loadVideo, loadArtifacts, loadLog])
 
   const prevPhaseRef = useRef<string | null>(null)
@@ -132,34 +146,44 @@ export function useDetailPage(): UseDetailPageReturn {
 
   const handleTimeUpdate = useCallback(
     (time: number) => {
-      setCurrentTime(time)
-      const player = playerRef.current
-      if (!player) return
+      if (time - lastTimeRef.current >= 0.1) {
+        lastTimeRef.current = time
+        setCurrentTime(time)
+      }
       const previousTime = previousPlaybackTimeRef.current
 
-      artifacts.interactions.forEach((node, index) => {
-        const trigger = parseTimeSeconds(node.trigger_time ?? 0)
-        if (!Number.isFinite(trigger)) return
+      const idx = binarySearchTriggerIndex(time, indexedTriggers)
+      if (idx === -1) {
+        previousPlaybackTimeRef.current = time
+        return
+      }
 
-        const crossedTrigger =
-          previousTime !== null && previousTime < trigger && time >= trigger
-        const reachedTriggerWindow = time >= trigger && time < trigger + 1.5
-        if (
-          !triggeredNodeIndexes.has(index) &&
-          !dismissedNodeIndexes.has(index) &&
-          !player.paused &&
-          (crossedTrigger || reachedTriggerWindow)
-        ) {
-          player.pause()
-          triggerInteraction(index)
-        }
-      })
+      const node = artifacts.interactions[idx]
+      const trigger = parseTimeSeconds(node.trigger_time ?? 0)
+      if (!Number.isFinite(trigger)) {
+        previousPlaybackTimeRef.current = time
+        return
+      }
+
+      const crossedTrigger =
+        previousTime !== null && previousTime < trigger && time >= trigger
+      const reachedTriggerWindow = time >= trigger && time < trigger + 1.5
+      if (
+        !triggeredNodeIndexes.has(idx) &&
+        !dismissedNodeIndexes.has(idx) &&
+        isPlaying &&
+        (crossedTrigger || reachedTriggerWindow)
+      ) {
+        triggerInteraction(idx)
+      }
       previousPlaybackTimeRef.current = time
     },
     [
+      indexedTriggers,
       artifacts.interactions,
       triggeredNodeIndexes,
       dismissedNodeIndexes,
+      isPlaying,
       triggerInteraction,
     ]
   )
@@ -201,14 +225,12 @@ export function useDetailPage(): UseDetailPageReturn {
 
   const handlePackage = useCallback(async () => {
     if (!id) return
-    const result = await api<{ download_url: string }>('/api/package', {
+    await api<{ accepted: boolean }>('/api/package', {
       method: 'POST',
       body: JSON.stringify({ video_ids: [id] }),
     })
-    await Promise.all([fetchVideos(), loadVideo(id)])
-    checkFetchError()
-    await triggerDownload(result.download_url)
-  }, [id, fetchVideos, loadVideo, checkFetchError])
+    showToast('打包已提交，完成后将自动下载', 'success')
+  }, [id, showToast])
 
   const handleRerun = useCallback(
     async (phase: string) => {
@@ -228,7 +250,8 @@ export function useDetailPage(): UseDetailPageReturn {
         ) {
           showToast('该资源正在被处理中，请等待当前阶段完成后再重跑。', 'error')
         } else {
-          throw err
+          const message = err instanceof Error ? err.message : String(err)
+          showToast(`重跑失败: ${message}`, 'error')
         }
       }
     },
@@ -290,6 +313,8 @@ export function useDetailPage(): UseDetailPageReturn {
     currentSentence,
     activeNode,
     detailTitle,
+    isPlaying,
+    setIsPlaying,
     handleTimeUpdate,
     handleSeek,
     handleContinue,

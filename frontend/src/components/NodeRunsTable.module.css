@@ -1,0 +1,22 @@
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+
+.headerRow {
+  background: var(--md-sys-color-surface-container-high);
+}
+
+.table th {
+  text-align: left;
+  padding: 8px 12px;
+  color: var(--md-sys-color-on-surface-variant);
+  font-weight: 600;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}
+
+.table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--md-sys-color-outline-variant);
+}

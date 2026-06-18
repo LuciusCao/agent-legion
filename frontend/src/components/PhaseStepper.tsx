@@ -1,3 +1,4 @@
+import React from 'react'
 import { KNOWLEDGE_PHASES, PHASE_LABELS, QUESTION_PHASES } from '../labels'
 import type { VideoItem } from '../types'
 import styles from './PhaseStepper.module.css'
@@ -21,7 +22,11 @@ function getStepState(
   return 'pending'
 }
 
-export function PhaseStepper({ video }: { video: VideoItem }) {
+export const PhaseStepper = React.memo(function PhaseStepper({
+  video,
+}: {
+  video: VideoItem
+}) {
   const phases =
     video.content_type === 'question' ? QUESTION_PHASES : KNOWLEDGE_PHASES
   const currentIndex = phases.indexOf(video.current_phase)
@@ -32,10 +37,13 @@ export function PhaseStepper({ video }: { video: VideoItem }) {
         const state = getStepState(video, index, currentIndex)
         return (
           <div key={phase} className={styles.step} title={PHASE_LABELS[phase]}>
-            <div className={`${styles.stepBar} ${styles[state]}`} />
+            <div
+              /* .pulse-blue is a global utility class defined in styles.css */
+              className={`${styles.stepBar} ${styles[state]} ${state === 'running' ? 'pulse-blue' : ''}`}
+            />
           </div>
         )
       })}
     </div>
   )
-}
+})

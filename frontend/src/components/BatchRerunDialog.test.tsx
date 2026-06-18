@@ -1,58 +1,47 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { BatchRerunDialog } from './BatchRerunDialog'
-import { useVideoStore } from '../stores/videoStore'
 
-const mockApi = vi.fn()
-vi.mock('../api', () => ({
-  api: (...args: any[]) => mockApi(...args),
-}))
+const phases = [
+  'download',
+  'transcribe',
+  'subtitle_review',
+  'chapter_generate',
+  'interaction_generate',
+  'content_review',
+  'assemble',
+]
+
+const items = [
+  {
+    id: 'v1',
+    name: 'K001',
+    currentPhase: 'package',
+    status: 'completed',
+  },
+  {
+    id: 'v2',
+    name: 'K002',
+    currentPhase: 'subtitle_review',
+    status: 'failed',
+  },
+]
 
 describe('BatchRerunDialog', () => {
   beforeEach(() => {
-    mockApi.mockReset()
-    useVideoStore.setState({
-      videos: [
-        {
-          id: 'v1',
-          title: 'Video 1',
-          source_url: '',
-          content_type: 'knowledge',
-          external_id: 'K001',
-          knowledge_code: 'K001',
-          question_id: '',
-          source_uuid: '',
-          status: 'completed',
-          current_phase: 'package',
-          error_message: '',
-        },
-        {
-          id: 'v2',
-          title: 'Video 2',
-          source_url: '',
-          content_type: 'knowledge',
-          external_id: 'K002',
-          knowledge_code: 'K002',
-          question_id: '',
-          source_uuid: '',
-          status: 'failed',
-          current_phase: 'subtitle_review',
-          error_message: '',
-        },
-      ],
-      selectedType: 'knowledge',
-      statusFilter: 'all',
-      searchQuery: '',
-      selectMode: true,
-      packageSelectMode: false,
-      selectedIds: new Set(['v1', 'v2']),
-      isLoading: false,
-    })
+    vi.clearAllMocks()
   })
 
   it('renders chips and video list', () => {
     const { container } = render(
-      <BatchRerunDialog open videoIds={['v1', 'v2']} onClose={() => {}} />
+      <BatchRerunDialog
+        open
+        items={items}
+        phases={phases}
+        itemLabel="视频"
+        onConfirm={vi.fn()}
+        onClose={() => {}}
+      />
     )
 
     expect(screen.getByText('选择重跑阶段')).toBeInTheDocument()
@@ -68,7 +57,14 @@ describe('BatchRerunDialog', () => {
 
   it('marks non-rerunnable videos when selecting a later phase', () => {
     const { container } = render(
-      <BatchRerunDialog open videoIds={['v1', 'v2']} onClose={() => {}} />
+      <BatchRerunDialog
+        open
+        items={items}
+        phases={phases}
+        itemLabel="视频"
+        onConfirm={vi.fn()}
+        onClose={() => {}}
+      />
     )
 
     // By default "download" is selected, both videos can rerun
@@ -84,27 +80,80 @@ describe('BatchRerunDialog', () => {
     expect(screen.getByText(/当前处于 字幕审核/)).toBeInTheDocument()
   })
 
-  it('calls batchRerun on confirm', async () => {
-    mockApi
-      .mockResolvedValueOnce({ results: [] })
-      .mockResolvedValueOnce({ videos: [] })
-
+  it('calls onConfirm on confirm', async () => {
+    const onConfirm = vi.fn()
     const onClose = vi.fn()
-    render(<BatchRerunDialog open videoIds={['v1', 'v2']} onClose={onClose} />)
+    render(
+      <BatchRerunDialog
+        open
+        items={items}
+        phases={phases}
+        itemLabel="视频"
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />
+    )
 
     await act(async () => {
       screen.getByText('重跑 2 个视频').click()
     })
 
-    expect(mockApi).toHaveBeenCalledWith(
-      '/api/videos/batch/rerun',
-      expect.objectContaining({
-        method: 'POST',
-        body: JSON.stringify({ video_ids: ['v1', 'v2'], phase: 'download' }),
-      })
-    )
+    expect(onConfirm).toHaveBeenCalledWith(['v1', 'v2'], 'download')
     expect(onClose).toHaveBeenCalled()
-    expect(useVideoStore.getState().selectedIds.size).toBe(0)
-    expect(useVideoStore.getState().selectMode).toBe(false)
+  })
+
+  it('renders failed-phase chip and filters runnable videos', () => {
+    const { container } = render(
+      <BatchRerunDialog
+        open
+        items={items}
+        phases={phases}
+        itemLabel="视频"
+        onConfirm={vi.fn()}
+        onClose={() => {}}
+      />
+    )
+
+    // Click "失败的阶段" chip
+    const failedChip = container.querySelector(
+      'md-filter-chip[label="失败的阶段"]'
+    )
+    expect(failedChip).toBeInTheDocument()
+    act(() => {
+      ;(failedChip as HTMLElement).click()
+    })
+
+    // v1 is completed, v2 is failed — only v2 should be runnable
+    expect(screen.getByText('未失败，跳过')).toBeInTheDocument()
+    expect(screen.getByText('重跑 1 个视频')).toBeInTheDocument()
+  })
+
+  it('calls onConfirm with __failed__ phase when failed-phase chip selected', async () => {
+    const onConfirm = vi.fn()
+    const onClose = vi.fn()
+    const { container } = render(
+      <BatchRerunDialog
+        open
+        items={items}
+        phases={phases}
+        itemLabel="视频"
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />
+    )
+
+    const failedChip = container.querySelector(
+      'md-filter-chip[label="失败的阶段"]'
+    )
+    act(() => {
+      ;(failedChip as HTMLElement).click()
+    })
+
+    await act(async () => {
+      screen.getByText('重跑 1 个视频').click()
+    })
+
+    expect(onConfirm).toHaveBeenCalledWith(['v1', 'v2'], '__failed__')
+    expect(onClose).toHaveBeenCalled()
   })
 })

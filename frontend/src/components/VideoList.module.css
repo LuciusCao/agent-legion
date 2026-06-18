@@ -1,5 +1,11 @@
 .video-list {
   margin-top: 12px;
+  height: 100%;
+}
+
+.scrollContainer {
+  height: 100%;
+  overflow-y: auto;
 }
 
 .status-end {
