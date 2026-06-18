@@ -203,4 +203,41 @@ describe('JobProgressPanel', () => {
     // Wait time should be 1s (from node created_at to started_at), not ~29h.
     expect(screen.getByText('1s')).toBeInTheDocument()
   })
+
+  it('hides old run errors and logs after a node rerun', () => {
+    const rerunNodes = [
+      {
+        ...mockNodes[0],
+        node_key: 'generate',
+        label: '生成',
+        status: 'stale',
+        created_at: '2026-06-10T08:00:00Z',
+        started_at: null,
+        finished_at: null,
+        error_message: '',
+      },
+    ]
+    const oldFailedRuns = [
+      {
+        ...mockRuns[0],
+        id: 2,
+        node_key: 'generate',
+        status: 'failed',
+        started_at: '2026-06-09T08:00:00Z',
+        finished_at: '2026-06-09T08:00:05Z',
+        error_message: 'previous failure',
+        log_path: '/logs/old.log',
+      },
+    ]
+    render(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={rerunNodes}
+        runs={oldFailedRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    expect(screen.queryByText('错误详情')).not.toBeInTheDocument()
+    expect(screen.queryByText('查看日志')).not.toBeInTheDocument()
+  })
 })

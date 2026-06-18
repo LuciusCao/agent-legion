@@ -54,6 +54,7 @@ function toDagNodes(nodes: JobNodeRecord[]): DagGraphNode[] {
     key: n.node_key,
     label: n.label || n.node_key,
     status: normalizeStatus(n.status),
+    created_at: n.created_at,
     inputs: n.inputs,
     outputs: n.outputs,
     duration: computeNodeDuration(n.started_at, n.finished_at),

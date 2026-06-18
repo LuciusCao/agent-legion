@@ -27,3 +27,4 @@ export {
   durationSeconds,
 } from './lib/formatters'
 export { triggerDownload } from './lib/download'
+export { filterRelevantRuns } from './lib/jobRuns'

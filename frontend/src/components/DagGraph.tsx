@@ -15,12 +15,14 @@ import * as dagre from 'dagre'
 import { DagNode as DagNodeComponent } from './DagNode'
 import type { DagNodeData } from './DagNode'
 import { NodeDetailsPanel } from './NodeDetailsPanel'
+import { filterRelevantRuns } from '../helpers'
 import styles from './DagGraph.module.css'
 
 export interface DagGraphNode {
   key: string
   label: string
   status: 'pending' | 'running' | 'completed' | 'failed' | 'stale'
+  created_at: string
   duration?: number
   executorKind?: 'local' | 'pi' | 'openclaw' | null
   inputs?: string[]
@@ -277,11 +279,16 @@ export function DagGraph({
     return { highlightedEdges, highlightedNodes }
   }, [rfEdges, rfNodes, selectedNode, hoveredNode])
 
+  const relevantRuns = useMemo(
+    () => filterRelevantRuns(runs, nodes),
+    [runs, nodes]
+  )
+
   const selectedData = useMemo(() => {
     if (!selectedNode) return null
     const node = rfNodes.find((n) => n.id === selectedNode)
     if (!node) return null
-    const latestRun = runs
+    const latestRun = relevantRuns
       .filter((run) => run.node_key === selectedNode)
       .sort(
         (a, b) =>
@@ -294,7 +301,7 @@ export function DagGraph({
         ? { ...latestRun, error_message: latestRun.error_message ?? '' }
         : null,
     }
-  }, [rfNodes, runs, selectedNode])
+  }, [rfNodes, relevantRuns, selectedNode])
 
   return (
     <div className={styles.graphContainer}>
