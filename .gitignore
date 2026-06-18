@@ -13,5 +13,6 @@ frontend/dist/
 .workspaces/
 .superpowers/
 .coverage
+.coverage.*
 coverage/
 .DS_Store
