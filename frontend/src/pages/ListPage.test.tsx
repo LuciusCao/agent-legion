@@ -34,7 +34,7 @@ describe('ListPage', () => {
     })
   })
 
-  it('renders list page', () => {
+  it('renders list page', async () => {
     mockApi.mockImplementation((path: string) => {
       if (path === '/api/worker/status')
         return Promise.resolve({ paused: false })
@@ -47,6 +47,7 @@ describe('ListPage', () => {
         <ListPage />
       </MemoryRouter>
     )
+    await act(async () => {})
     expect(screen.getByText('知识点')).toBeInTheDocument()
     expect(screen.queryByTitle('刷新')).not.toBeInTheDocument()
     expect(screen.queryByTitle('打包')).not.toBeInTheDocument()

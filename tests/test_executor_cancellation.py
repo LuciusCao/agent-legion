@@ -90,10 +90,8 @@ def cooperative_handler(
 ) -> None:
     runtime = runtime or {}
     token = runtime.get("cancellation")
-    for _ in range(1000):
-        if token is not None:
-            token.raise_if_cancelled()
-        time.sleep(0.005)
+    if token is not None:
+        token.raise_if_cancelled()
     (job_dir / "out.json").write_text("{}", encoding="utf-8")
 
 

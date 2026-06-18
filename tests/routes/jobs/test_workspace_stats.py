@@ -1,23 +1,11 @@
-def test_workspace_stats_hidden_when_workflows_disabled(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = False
-    with TestClient(app) as c:
+def test_workspace_stats_hidden_when_workflows_disabled(client_factory):
+    with client_factory(workflows_enabled=False) as c:
         response = c.get("/api/workspaces/default/stats")
     assert response.status_code == 404
 
 
-def test_workspace_stats_returns_counts_and_executor_status(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+def test_workspace_stats_returns_counts_and_executor_status(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
         ws_id = ws["workspace"]["id"]
         c.post(
@@ -43,16 +31,11 @@ def test_workspace_stats_returns_counts_and_executor_status(tmp_path):
     assert body["latest_run"] is None
 
 
-def test_workspace_stats_executor_status_reflects_allocations_and_leases(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    job_db = app.state.job_db
-
-    with TestClient(app) as c:
+def test_workspace_stats_executor_status_reflects_allocations_and_leases(
+    client_factory,
+):
+    with client_factory(workflows_enabled=True) as c:
+        job_db = c.app.state.job_db
         ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
         ws_id = ws["workspace"]["id"]
         job_db.replace_workspace_executor_configuration(
@@ -91,14 +74,8 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(tmp_pat
     assert executors[0]["binding_count"] == 1
 
 
-def test_workspace_stats_latest_run_reflects_node_runs(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         created = c.post(
             "/api/job-batches",
             json={
@@ -109,7 +86,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(tmp_path):
             },
         ).json()
         job_id = created["jobs"][0]["id"]
-        job_db = app.state.job_db
+        job_db = c.app.state.job_db
         run = job_db.start_node_run(job_id, "question_understanding", ["echo", "hi"], "/dev/null")
         job_db.finish_node_run(run["id"], "completed", 0, "")
         stats = c.get("/api/workspaces/default/stats")
@@ -122,13 +99,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(tmp_path):
     assert body["latest_run"]["status"] == "completed"
 
 
-def test_workspace_stats_returns_404_for_unknown_workspace(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+def test_workspace_stats_returns_404_for_unknown_workspace(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         resp = c.get("/api/workspaces/nonexistent/stats")
     assert resp.status_code == 404

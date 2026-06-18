@@ -1,11 +1,5 @@
-def test_create_workspace_stores_cms_config_override(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+def test_create_workspace_stores_cms_config_override(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         response = c.post(
             "/api/workspaces",
             json={
@@ -26,14 +20,8 @@ def test_create_workspace_stores_cms_config_override(tmp_path):
     )
 
 
-def test_update_workspace_cms_config(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+def test_update_workspace_cms_config(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         created = c.post("/api/workspaces", json={"name": "Math V5"}).json()
         workspace_id = created["workspace"]["id"]
         response = c.patch(
@@ -59,14 +47,8 @@ def test_update_workspace_cms_config(tmp_path):
     assert fetched.json()["workspace"]["cms_config"] == workspace["cms_config"]
 
 
-def test_update_workspace_resource_config(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+def test_update_workspace_resource_config(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         created = c.post("/api/workspaces", json={"name": "Math Resources"}).json()
         workspace_id = created["workspace"]["id"]
         response = c.patch(
@@ -100,14 +82,8 @@ def test_update_workspace_resource_config(tmp_path):
     assert resources["by_knowledge"]["config"]["page_size"] == 50
 
 
-def test_workspace_settings_without_cms_fields(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+def test_workspace_settings_without_cms_fields(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         response = c.get("/api/workspaces/default/settings")
 
     assert response.status_code == 200
@@ -117,14 +93,8 @@ def test_workspace_settings_without_cms_fields(tmp_path):
     assert "resources" in settings
 
 
-def test_workspace_settings_returns_resource_config(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+def test_workspace_settings_returns_resource_config(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         c.patch(
             "/api/workspaces/default",
             json={
@@ -146,14 +116,8 @@ def test_workspace_settings_returns_resource_config(tmp_path):
     assert settings["resources"]["question_detail"]["config"]["bank_version"] == "v6"
 
 
-def test_patch_settings_connection_saves_resource_config(tmp_path):
-    from fastapi.testclient import TestClient
-
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    with TestClient(app) as c:
+def test_patch_settings_connection_saves_resource_config(client_factory):
+    with client_factory(workflows_enabled=True) as c:
         response = c.patch(
             "/api/workspaces/default/settings/connection",
             json={"resources": {"question_detail": {"enabled": False, "config": {}}}},
@@ -164,33 +128,25 @@ def test_patch_settings_connection_saves_resource_config(tmp_path):
     assert fetched.json()["settings"]["resources"]["question_detail"]["enabled"] is False
 
 
-def test_test_connection_uses_global_cms_url(tmp_path):
-    from fastapi.testclient import TestClient
+def test_test_connection_uses_global_cms_url(client_factory):
+    def configure(app):
+        app.state.settings.config["cms"] = {
+            "question_detail_url": "http://cms.example/detail",
+            "token": "global_token",
+        }
 
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    app.state.settings.config["cms"] = {
-        "question_detail_url": "http://cms.example/detail",
-        "token": "global_token",
-    }
-    with TestClient(app) as c:
+    with client_factory(workflows_enabled=True, configure=configure) as c:
         response = c.post("/api/workspaces/default/settings/test-connection")
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
 
 
-def test_test_connection_fails_when_global_url_missing(tmp_path):
-    from fastapi.testclient import TestClient
+def test_test_connection_fails_when_global_url_missing(client_factory):
+    def configure(app):
+        app.state.settings.config["cms"] = {}
 
-    from server.app.main import create_app
-
-    app = create_app(data_dir=tmp_path, start_worker=False)
-    app.state.settings.executor_runtime.workflows.enabled = True
-    app.state.settings.config["cms"] = {}
-    with TestClient(app) as c:
+    with client_factory(workflows_enabled=True, configure=configure) as c:
         response = c.post("/api/workspaces/default/settings/test-connection")
 
     assert response.status_code == 400

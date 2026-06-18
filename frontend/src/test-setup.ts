@@ -1,6 +1,34 @@
-import { vi } from 'vitest'
+import { afterEach, beforeEach, vi } from 'vitest'
 import '@testing-library/jest-dom/vitest'
 import { EventSourceMock } from './testing/eventSourceMock'
+
+let unexpectedConsoleErrors: unknown[][] = []
+let expectedConsoleErrors: RegExp[] = []
+
+export function expectConsoleError(pattern: RegExp) {
+  expectedConsoleErrors.push(pattern)
+}
+
+beforeEach(() => {
+  unexpectedConsoleErrors = []
+  expectedConsoleErrors = []
+  vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => {
+    unexpectedConsoleErrors.push(args)
+  })
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+  const messages = unexpectedConsoleErrors.map((args) =>
+    args.map(String).join(' ')
+  )
+  const unmatchedMessages = messages.filter(
+    (message) => !expectedConsoleErrors.some((pattern) => pattern.test(message))
+  )
+  if (unmatchedMessages.length === 0) return
+  const details = unmatchedMessages.join('\n')
+  throw new Error(`Unexpected console.error during test:\n${details}`)
+})
 
 class ResizeObserverMock {
   callback: ResizeObserverCallback

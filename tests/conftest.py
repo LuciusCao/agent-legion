@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -34,7 +36,30 @@ def agent_manager():
 
 
 @pytest.fixture
-def client(tmp_path):
-    app = create_app(data_dir=tmp_path)
-    with TestClient(app) as c:
+def app_factory(tmp_path):
+    def factory(*, workflows_enabled=None, configure=None):
+        app = create_app(data_dir=tmp_path, start_worker=False)
+        if workflows_enabled is not None:
+            app.state.settings.executor_runtime.workflows.enabled = workflows_enabled
+        if configure is not None:
+            configure(app)
+        return app
+
+    return factory
+
+
+@pytest.fixture
+def client_factory(app_factory):
+    @contextmanager
+    def factory(**app_options):
+        app = app_factory(**app_options)
+        with TestClient(app) as client:
+            yield client
+
+    return factory
+
+
+@pytest.fixture
+def client(client_factory):
+    with client_factory() as c:
         yield c
