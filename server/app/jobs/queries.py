@@ -332,8 +332,8 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
             for node_key in node_keys:
                 conn.execute(
                     """
-                    insert or ignore into job_nodes(job_id, node_key, status)
-                    values (?, ?, 'pending')
+                    insert or ignore into job_nodes(job_id, node_key, status, created_at)
+                    values (?, ?, 'pending', current_timestamp)
                     """,
                     (job_id, node_key),
                 )
@@ -432,7 +432,8 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
                     stale_reason='',
                     error_message='',
                     started_at=null,
-                    finished_at=null
+                    finished_at=null,
+                    created_at=current_timestamp
                 where job_id=? and node_key=?
                 """,
                 (job_id, node_key),
@@ -445,7 +446,8 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
                     update job_nodes
                     set status='stale',
                         stale_reason=?,
-                        error_message=''
+                        error_message='',
+                        created_at=current_timestamp
                     where job_id=? and node_key=?
                     """,
                     (f"upstream {node_key} rerun", job_id, downstream_key),

@@ -88,7 +88,7 @@ def apply_run_to(
         f"""
         update job_nodes
         set status='pending', stale_reason='', error_message='',
-            started_at=null, finished_at=null
+            started_at=null, finished_at=null, created_at=current_timestamp
         where job_id=? and node_key in ({placeholders}) and status != 'completed'
         """,
         (job_id, *sorted(closure)),
@@ -124,7 +124,7 @@ def mark_nodes_for_rerun(
             """
             update job_nodes
             set status='pending', stale_reason='', error_message='',
-                started_at=null, finished_at=null
+                started_at=null, finished_at=null, created_at=current_timestamp
             where job_id=? and node_key=?
             """,
             (job_id, node_key),
@@ -142,7 +142,8 @@ def mark_nodes_for_rerun(
         conn.execute(
             """
             update job_nodes
-            set status='stale', stale_reason='upstream rerun', error_message=''
+            set status='stale', stale_reason='upstream rerun', error_message='',
+                created_at=current_timestamp
             where job_id=? and node_key=?
             """,
             (job_id, descendant),

@@ -54,6 +54,7 @@ create table job_nodes__v004 (
   error_message text not null default '',
   started_at text,
   finished_at text,
+  created_at text not null default current_timestamp,
   unique(job_id, node_key),
   foreign key(job_id) references jobs(id) on delete cascade
 )
@@ -382,6 +383,18 @@ def _apply(conn: sqlite3.Connection) -> None:
             column,
             f"alter table jobs add column {column} {ddl_fragment}",
         )
+
+    # Ensure V008 columns exist on legacy job_nodes tables before the rebuild.
+    add_column_if_missing(
+        conn,
+        "job_nodes",
+        "created_at",
+        "alter table job_nodes add column created_at text",
+    )
+    conn.execute(
+        "update job_nodes set created_at = coalesce(started_at, current_timestamp) "
+        "where created_at is null"
+    )
 
     # Rebuild tables.  jobs and node_runs keep their old copies because
     # executor_leases references them and must be rebuilt while the old

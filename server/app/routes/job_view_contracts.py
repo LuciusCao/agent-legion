@@ -53,6 +53,7 @@ class JobNodeResponse(BaseModel):
     error_message: str
     started_at: str | None = None
     finished_at: str | None = None
+    created_at: str
     label: str
     capability: str
     after: list[str]

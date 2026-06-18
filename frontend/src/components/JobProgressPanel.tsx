@@ -46,11 +46,11 @@ function formatDuration(seconds?: number): string {
 }
 
 function computeWaitTime(
-  jobCreatedAt: string | undefined,
+  nodeCreatedAt: string | undefined,
   startedAt: string | null | undefined
 ): string | undefined {
-  if (!jobCreatedAt || !startedAt) return undefined
-  const created = new Date(jobCreatedAt).getTime()
+  if (!nodeCreatedAt || !startedAt) return undefined
+  const created = new Date(nodeCreatedAt).getTime()
   const started = new Date(startedAt).getTime()
   if (Number.isNaN(created) || Number.isNaN(started)) return undefined
   const seconds = Math.max(0, Math.floor((started - created) / 1000))
@@ -59,7 +59,6 @@ function computeWaitTime(
 
 interface JobProgressPanelProps {
   jobId: string
-  jobCreatedAt?: string
   nodes: JobNodeRecord[]
   runs: NodeRunRecord[]
   onOpenDagDialog?: () => void
@@ -67,7 +66,6 @@ interface JobProgressPanelProps {
 
 export function JobProgressPanel({
   jobId,
-  jobCreatedAt,
   nodes,
   runs,
   onOpenDagDialog,
@@ -124,7 +122,7 @@ export function JobProgressPanel({
             const waitLabel =
               node.status === 'pending'
                 ? '等待中'
-                : (computeWaitTime(jobCreatedAt, node.started_at) ?? '—')
+                : (computeWaitTime(node.created_at, node.started_at) ?? '—')
 
             return (
               <div key={node.node_key} className={styles.timelineItem}>

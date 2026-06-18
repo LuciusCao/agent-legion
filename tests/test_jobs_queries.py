@@ -43,6 +43,73 @@ def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
         )
 
 
+def _looks_like_timestamp(value: str) -> bool:
+    """Return True for SQLite current_timestamp style strings."""
+    return len(value) >= 19 and value[4] == "-" and value[10] in (" ", "T")
+
+
+def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = db.create_workspace("Created At Workspace")
+    job = db.create_job(
+        workflow_key="question_content",
+        source_type="question_id",
+        source_id="Q-CREATED",
+        batch_id="",
+        title="Created At Job",
+        node_keys=["fetch_question_context"],
+        workspace_id=workspace["id"],
+    )
+
+    node = db.get_job_node(job["id"], "fetch_question_context")
+    assert node is not None
+    assert _looks_like_timestamp(node["created_at"])
+
+
+def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = db.create_workspace("Rerun Workspace")
+    job = db.create_job(
+        workflow_key="question_content",
+        source_type="question_id",
+        source_id="Q-RERUN",
+        batch_id="",
+        title="Rerun Job",
+        node_keys=["fetch_question_context", "question_understanding"],
+        workspace_id=workspace["id"],
+    )
+
+    # Simulate the node having run and completed with an old created_at.
+    db.start_node_run(job["id"], "fetch_question_context", ["local"], "run.log")
+    db.update_job_node(
+        job["id"],
+        "fetch_question_context",
+        status="completed",
+        started_at="2026-06-09T00:00:00Z",
+        finished_at="2026-06-09T00:00:10Z",
+    )
+    old_created_at = "2026-06-09T00:00:00Z"
+    with db.connect() as conn:
+        conn.execute(
+            "update job_nodes set created_at=? where job_id=? and node_key=?",
+            (old_created_at, job["id"], "fetch_question_context"),
+        )
+
+    db.mark_node_for_rerun(job["id"], "fetch_question_context", ["question_understanding"])
+
+    rerun_node = db.get_job_node(job["id"], "fetch_question_context")
+    assert rerun_node is not None
+    assert rerun_node["status"] == "pending"
+    assert rerun_node["created_at"] != old_created_at
+    assert _looks_like_timestamp(rerun_node["created_at"])
+
+    downstream = db.get_job_node(job["id"], "question_understanding")
+    assert downstream is not None
+    assert downstream["status"] == "stale"
+    assert downstream["created_at"] != old_created_at
+    assert _looks_like_timestamp(downstream["created_at"])
+
+
 def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = db.create_workspace("Target Workspace")
