@@ -105,8 +105,8 @@ function renderPage(initialEntry = '/workspaces/ws1/jobs/j1') {
           element={<JobDetailPage />}
         />
         <Route
-          path="/workspaces/:workspaceId/jobs"
-          element={<div data-testid="job-list-page">Job List</div>}
+          path="/workspaces/:workspaceId"
+          element={<div data-testid="workspace-main-page">Workspace Main</div>}
         />
       </Routes>
     </MemoryRouter>
@@ -415,7 +415,7 @@ describe('JobDetailPage', () => {
     openSpy.mockRestore()
   })
 
-  it('deletes the job after confirm and navigates back to the list', async () => {
+  it('deletes the job after confirm and navigates back to the workspace main page', async () => {
     const fetchMock = createFetchMock()
     vi.stubGlobal('fetch', fetchMock)
 
@@ -440,7 +440,7 @@ describe('JobDetailPage', () => {
         expect.objectContaining({ method: 'DELETE' })
       )
     })
-    expect(screen.getByTestId('job-list-page')).toBeInTheDocument()
+    expect(screen.getByTestId('workspace-main-page')).toBeInTheDocument()
   })
 
   it('runs to a selected target and refreshes detail', async () => {
