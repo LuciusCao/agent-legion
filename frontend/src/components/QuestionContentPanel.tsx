@@ -113,9 +113,11 @@ export function QuestionContentPanel({
   }, [selectedIds, keyInfoList])
 
   const highlightedStemHtml = useMemo(() => {
-    if (!stem || selectedKeyInfos.length === 0) return stemHtml
-    return renderLatexInHtml(buildHighlightedStemHtml(stem, selectedKeyInfos))
-  }, [stem, stemHtml, selectedKeyInfos])
+    if (!stem || selectedKeyInfos.length === 0) return null
+    const highlighted = buildHighlightedStemHtml(stem, selectedKeyInfos)
+    if (!highlighted) return null
+    return renderLatexInHtml(highlighted)
+  }, [stem, selectedKeyInfos])
 
   const hiddenKeyInfos = useMemo(
     () => selectedKeyInfos.filter((k) => k.type === 'hidden'),
@@ -159,10 +161,7 @@ export function QuestionContentPanel({
               <div
                 className={styles.richText}
                 dangerouslySetInnerHTML={{
-                  __html:
-                    selectedKeyInfos.length > 0
-                      ? highlightedStemHtml
-                      : stemHtml,
+                  __html: highlightedStemHtml ?? stemHtml,
                 }}
               />
             ) : (
