@@ -103,7 +103,6 @@ export const WORKSPACE_LABELS = {
   createJob: '创建任务',
   jobList: '任务列表',
   confirmDeleteJob: '确认删除任务',
-  backToJobList: '返回任务列表',
   refresh: '刷新',
   nodes: '节点',
   globalServices: '全局服务',
