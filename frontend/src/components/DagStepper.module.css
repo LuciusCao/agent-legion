@@ -36,6 +36,10 @@
   background: var(--status-failed-border);
 }
 
+.stale {
+  background: var(--status-failed-border);
+}
+
 .pending {
   background: var(--md-sys-color-outline-variant);
 }

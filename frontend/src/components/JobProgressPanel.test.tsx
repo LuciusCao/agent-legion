@@ -131,4 +131,55 @@ describe('JobProgressPanel', () => {
       expect(mockFetchJobLog).toHaveBeenCalledWith('j1', 1)
     })
   })
+
+  it('does not render stage title', () => {
+    const { container } = render(
+      <JobProgressPanel
+        jobId="j1"
+        jobCreatedAt="2026-06-09T07:59:00Z"
+        nodes={mockNodes}
+        runs={mockRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    expect(container.textContent).not.toContain('阶段明细')
+  })
+
+  it('renders stale node with warning icon and label', () => {
+    const staleNodes = [
+      {
+        ...mockNodes[0],
+        node_key: 'review',
+        label: '审核',
+        status: 'stale',
+        started_at: '2026-06-09T08:00:00Z',
+        finished_at: '2026-06-09T08:00:05Z',
+      },
+    ]
+    render(
+      <JobProgressPanel
+        jobId="j1"
+        jobCreatedAt="2026-06-09T07:59:00Z"
+        nodes={staleNodes}
+        runs={[]}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    expect(screen.getByText('审核')).toBeInTheDocument()
+    expect(screen.getByText('已过期')).toBeInTheDocument()
+  })
+
+  it('shows wait time instead of full datetime', () => {
+    render(
+      <JobProgressPanel
+        jobId="j1"
+        jobCreatedAt="2026-06-09T07:59:00Z"
+        nodes={mockNodes}
+        runs={mockRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    expect(screen.getAllByText(/等待/).length).toBeGreaterThanOrEqual(1)
+    expect(screen.queryByText(/2026\/6\/9 08:00:00/)).not.toBeInTheDocument()
+  })
 })

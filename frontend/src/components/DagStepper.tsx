@@ -1,12 +1,13 @@
 import type { JobNodeRecord } from '../types'
 import styles from './DagStepper.module.css'
 
-type StepState = 'completed' | 'running' | 'failed' | 'pending'
+type StepState = 'completed' | 'running' | 'failed' | 'stale' | 'pending'
 
 function getStepState(status: string): StepState {
   if (status === 'completed') return 'completed'
   if (status === 'running') return 'running'
   if (status === 'failed') return 'failed'
+  if (status === 'stale') return 'stale'
   return 'pending'
 }
 
