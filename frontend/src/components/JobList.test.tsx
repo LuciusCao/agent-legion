@@ -77,8 +77,10 @@ describe('JobList', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText('Algebra - Q100')).toBeInTheDocument()
-    expect(screen.getByText('Geometry - Q200')).toBeInTheDocument()
+    expect(screen.getByText('Algebra')).toBeInTheDocument()
+    expect(screen.getByText('Geometry')).toBeInTheDocument()
+    expect(screen.getByText(/question · Q100/)).toBeInTheDocument()
+    expect(screen.getByText(/question · Q200/)).toBeInTheDocument()
     expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 
