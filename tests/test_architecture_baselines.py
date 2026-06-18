@@ -29,9 +29,7 @@ def test_rejects_none_response_model(tmp_path):
         tmp_path / "config/architecture/architecture-budgets.json",
         '{"route_exemptions": [], "files": {}}',
     )
-
     errors = check_repository(tmp_path)
-
     assert any("named response_model" in error for error in errors)
 
 
@@ -48,9 +46,7 @@ def test_rejects_builtin_generic_response_model(tmp_path):
         tmp_path / "config/architecture/architecture-budgets.json",
         '{"route_exemptions": [], "files": {}}',
     )
-
     errors = check_repository(tmp_path)
-
     assert any("named response_model" in error for error in errors)
 
 
@@ -68,9 +64,7 @@ def test_accepts_imported_named_response_model(tmp_path):
         tmp_path / "config/architecture/architecture-budgets.json",
         '{"route_exemptions": [], "files": {}}',
     )
-
     errors = check_repository(tmp_path)
-
     assert errors == []
 
 
@@ -90,15 +84,12 @@ def test_route_import_baseline_allows_only_recorded_modules(tmp_path):
             }
         ],
     )
-
     assert not any("route boundary" in error for error in check_repository(tmp_path))
-
     write(
         path,
         "from server.app.cms.client import CmsClient\n"
         "from server.app.cms.question import fetch_question_detail\n",
     )
-
     assert any("server.app.cms.question" in error for error in check_repository(tmp_path))
 
 
@@ -118,11 +109,8 @@ def test_scheduler_import_baseline_allows_only_recorded_modules(tmp_path):
             }
         ],
     )
-
     assert not any("scheduler boundary" in error for error in check_repository(tmp_path))
-
     write(path, path.read_text(encoding="utf-8") + "import subprocess\n")
-
     assert any("forbids import subprocess" in error for error in check_repository(tmp_path))
 
 
@@ -148,17 +136,14 @@ def test_scheduler_threadpool_baseline_allows_only_recorded_targets_and_counts(t
             }
         ],
     )
-
     assert not any(
         "ThreadPoolExecutor construction" in error for error in check_repository(tmp_path)
     )
-
     write(
         path,
         path.read_text(encoding="utf-8")
         + "        self._agent_executor = ThreadPoolExecutor(max_workers=1)\n",
     )
-
     assert any("self._agent_executor" in error for error in check_repository(tmp_path))
 
 
@@ -171,10 +156,26 @@ def test_services_do_not_import_fastapi_regardless_of_filename(tmp_path):
         tmp_path / "config/architecture/architecture-budgets.json",
         '{"route_exemptions": [], "files": {}}',
     )
-
     errors = check_repository(tmp_path)
-
     assert any("service boundary forbids import fastapi" in error for error in errors)
+
+
+def test_services_do_not_import_worker_entrypoints(tmp_path):
+    write(
+        tmp_path / "server/app/services/manual_run.py",
+        "from server.app.worker import process_video_once\nfrom ..worker import process_video_once\nfrom .. import worker\n",
+    )
+    write(
+        tmp_path / "server/app/services/feature/manual_run.py",
+        "from ..worker import process_video_once\nfrom ...worker import process_video_once\n",
+    )
+    write(tmp_path / "config/architecture/architecture-budgets.json", '{"files": {}}')
+    report = "\n".join(check_repository(tmp_path))
+    worker_error = "service boundary forbids import server.app.worker"
+    for line in (1, 2, 3):
+        assert f"services/manual_run.py:{line}: {worker_error}" in report
+    assert "feature/manual_run.py:1: service boundary" not in report
+    assert f"feature/manual_run.py:2: {worker_error}" in report
 
 
 def test_jobs_router_is_not_a_router_aggregator(tmp_path):

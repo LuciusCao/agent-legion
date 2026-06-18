@@ -17,8 +17,14 @@ from ..jobs import JobQueries
 from ..pipeline.package import create_package
 from ..security import validate_package_filename
 from ..services.job_packages import JobPackageService
+from ..services.package_deletion import (
+    PackageDeletionService,
+    PackageLockedError,
+    PackageNotFoundError,
+)
 from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
+from ..storage_paths import ManagedPathError
 from .job_operation_contracts import (
     WorkspacePackageRequest,
     WorkspacePackageResponse,
@@ -50,6 +56,7 @@ def create_packages_router(
     job_db: JobQueries,
     settings: Settings,
     video_event_manager: VideoEventManager,
+    package_deletion: PackageDeletionService,
     job_packages: JobPackageService | None = None,
 ) -> APIRouter:
     if job_packages is None:
@@ -124,16 +131,12 @@ def create_packages_router(
 
     @router.delete("/packages/{package_id:int}")
     def delete_package(package_id: int) -> dict[str, bool]:
-        packages = db.list_packages(limit=1000)
-        target = next((p for p in packages if p["id"] == package_id), None)
-        if target is None:
-            raise HTTPException(status_code=404, detail="Package not found")
-        if target.get("locked"):
-            raise HTTPException(status_code=400, detail="Package is locked")
-        package_path = Path(target["path"])
-        if package_path.exists():
-            package_path.unlink()
-        db.delete_package(package_id)
+        try:
+            package_deletion.delete(package_id)
+        except (PackageNotFoundError, ManagedPathError):
+            raise HTTPException(status_code=404, detail="Package not found") from None
+        except PackageLockedError:
+            raise HTTPException(status_code=400, detail="Package is locked") from None
         return {"deleted": True}
 
     @router.patch("/packages/{package_id:int}")

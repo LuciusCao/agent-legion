@@ -88,8 +88,8 @@ workflows:
   enabled: true
   pi:
     binary: pi
-    provider: ""
-    model: ""
+    provider: "kimi-coding"
+    model: "kimi-for-coding"
     thinking: low
     timeout_seconds: 600
     environment:

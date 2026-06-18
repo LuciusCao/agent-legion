@@ -55,25 +55,17 @@ _WORKSPACE_ROUTE_PREFIXES = (
     "server/app/routes/jobs.py",
     "server/app/routes/job_artifacts.py",
     "server/app/routes/job_batches.py",
+    "server/app/routes/packages.py",
     "server/app/routes/workspace_",
 )
 _DAG_TRAVERSAL_NAMES = frozenset(
-    {
-        "downstream_nodes",
-        "ancestor_closure",
-        "find_ready_nodes",
-        "allowed_nodes",
-    }
+    {"downstream_nodes", "ancestor_closure", "find_ready_nodes", "allowed_nodes"}
 )
-_FILESYSTEM_DELETION_ATTRS = frozenset(
-    {
-        "rmtree",
-        "rmdir",
-        "remove",
-        "unlink",
-        "move",
-    }
-)
+_FILESYSTEM_DELETION_ATTRS = frozenset({"rmtree", "rmdir", "remove", "unlink", "move"})
+_FILESYSTEM_DELETION_IMPORTS = {
+    "os": frozenset({"remove", "rmdir", "unlink"}),
+    "shutil": frozenset({"move", "rmtree"}),
+}
 
 # Frontend types whose names match generated OpenAPI schemas must be derived from
 # those schemas rather than handwritten.
@@ -216,6 +208,16 @@ def check_route_dag_and_deletion(root: Path) -> list[str]:
         except SyntaxError as exc:
             errors.append(f"{rel_path}: syntax error ({exc})")
             continue
+        imported_deletion_names: dict[str, str] = {}
+        for import_node in ast.walk(tree):
+            if not isinstance(import_node, ast.ImportFrom):
+                continue
+            allowed_names = _FILESYSTEM_DELETION_IMPORTS.get(import_node.module or "")
+            if allowed_names is None:
+                continue
+            for alias in import_node.names:
+                if alias.name in allowed_names:
+                    imported_deletion_names[alias.asname or alias.name] = alias.name
         for node in ast.walk(tree):
             if not isinstance(node, ast.Call):
                 continue
@@ -226,12 +228,17 @@ def check_route_dag_and_deletion(root: Path) -> list[str]:
                     f"{rel_path}:{node.lineno}: DAG traversal {base_name!r} belongs in services; "
                     "routes must call orchestration services"
                 )
-            if (
+            deletion_name = None
+            if isinstance(node.func, ast.Name):
+                deletion_name = imported_deletion_names.get(node.func.id)
+            elif (
                 isinstance(node.func, ast.Attribute)
                 and node.func.attr in _FILESYSTEM_DELETION_ATTRS
             ):
+                deletion_name = node.func.attr
+            if deletion_name is not None:
                 errors.append(
-                    f"{rel_path}:{node.lineno}: filesystem deletion {node.func.attr!r} belongs in "
+                    f"{rel_path}:{node.lineno}: filesystem deletion {deletion_name!r} belongs in "
                     "services; routes must call orchestration services"
                 )
     return errors

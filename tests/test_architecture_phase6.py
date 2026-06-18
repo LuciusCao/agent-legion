@@ -105,6 +105,51 @@ class TestJobExecutionExecutorBoundary:
 
 
 class TestRouteDagAndDeletionBoundary:
+    def test_rejects_filesystem_deletion_in_package_route(self, tmp_path):
+        write(
+            tmp_path / "server/app/routes/packages.py",
+            "from fastapi import APIRouter\n"
+            "from pathlib import Path\n"
+            "router = APIRouter()\n"
+            "@router.delete('/packages/{package_id}')\n"
+            "def delete_package(package_id: int):\n"
+            "    package_path = Path('/tmp/package.zip')\n"
+            "    package_path.unlink()\n",
+        )
+        _empty_budgets(tmp_path)
+        errors = check_repository(tmp_path)
+        assert any("filesystem deletion" in error for error in errors)
+
+    @pytest.mark.parametrize(
+        "import_line,call",
+        [
+            ("from os import remove", "remove('/tmp/package.zip')"),
+            ("from shutil import rmtree as delete_tree", "delete_tree('/tmp/package')"),
+        ],
+    )
+    def test_rejects_imported_deletion(self, tmp_path, import_line, call):
+        source = (
+            f"from fastapi import APIRouter\n{import_line}\nrouter = APIRouter()\n"
+            "@router.delete('/packages/{package_id}')\n"
+            f"def delete_package(package_id: int):\n    {call}\n"
+        )
+        write(tmp_path / "server/app/routes/packages.py", source)
+        _empty_budgets(tmp_path)
+        errors = check_repository(tmp_path)
+        assert any("filesystem deletion" in error for error in errors)
+
+    def test_allows_unrelated_local_function_named_remove(self, tmp_path):
+        write(
+            tmp_path / "server/app/routes/packages.py",
+            "from fastapi import APIRouter\nrouter = APIRouter()\n"
+            "def remove(value):\n    return value\n"
+            "@router.delete('/packages/{package_id}')\ndef delete_package(package_id: int):\n"
+            "    return remove(package_id)\n",
+        )
+        _empty_budgets(tmp_path)
+        errors = check_repository(tmp_path)
+        assert not any("filesystem deletion" in error for error in errors)
+
     @pytest.mark.parametrize(
         "expected_error,source",
         [
