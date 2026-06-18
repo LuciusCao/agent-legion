@@ -38,7 +38,7 @@ describe('WorkspaceStatCards', () => {
     expect(screen.getByText('全部（0）')).toBeInTheDocument()
   })
 
-  it('highlights the active filter with status color classes', () => {
+  it('highlights the active filter', () => {
     const { container } = render(
       <WorkspaceStatCards
         counts={{ all: 5, running: 2 }}
@@ -49,7 +49,6 @@ describe('WorkspaceStatCards', () => {
 
     const active = container.querySelector('[data-filter="running"]')
     expect(active).toHaveClass(styles.active)
-    expect(active).toHaveClass(styles.running)
   })
 
   it('does not highlight inactive filters', () => {

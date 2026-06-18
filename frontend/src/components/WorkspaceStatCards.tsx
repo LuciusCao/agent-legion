@@ -1,12 +1,7 @@
+import { STATUS_FILTER_CONFIG } from '../labels'
 import styles from './WorkspaceStatCards.module.css'
 
-const ITEMS = [
-  { key: 'all', label: '全部', color: 'default' },
-  { key: 'pending', label: '等待中', color: 'pending' },
-  { key: 'running', label: '运行中', color: 'running' },
-  { key: 'completed', label: '已完成', color: 'completed' },
-  { key: 'failed', label: '失败', color: 'failed' },
-]
+const ITEMS = ['all', 'pending', 'running', 'completed', 'failed']
 
 export interface WorkspaceStatCardsProps {
   counts: Record<string, number>
@@ -21,19 +16,25 @@ export function WorkspaceStatCards({
 }: WorkspaceStatCardsProps) {
   return (
     <div className={styles.pills}>
-      {ITEMS.map((item) => (
-        <button
-          key={item.key}
-          type="button"
-          data-filter={item.key}
-          className={`${styles.pill} ${styles[item.color]} ${
-            activeFilter === item.key ? styles.active : ''
-          }`}
-          onClick={() => onFilterChange(item.key)}
-        >
-          {item.label}（{counts[item.key] ?? 0}）
-        </button>
-      ))}
+      {ITEMS.map((key) => {
+        const config = STATUS_FILTER_CONFIG[key]
+        return (
+          <button
+            key={key}
+            type="button"
+            data-filter={key}
+            className={`${styles.pill} ${
+              activeFilter === key ? styles.active : ''
+            }`}
+            onClick={() => onFilterChange(key)}
+          >
+            <md-icon>{config.icon}</md-icon>
+            <span>
+              {config.label}（{counts[key] ?? 0}）
+            </span>
+          </button>
+        )
+      })}
     </div>
   )
 }
