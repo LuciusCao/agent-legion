@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState } from 'react'
 import { useJobQuestion } from '../hooks/useJobQuestion'
 import { useJobComprehensionInfo } from '../hooks/useJobComprehensionInfo'
-import { renderLatexInHtml } from '../lib/latex'
+import { extractLatexParts, renderLatexInHtml } from '../lib/latex'
 import { buildHighlightedStemHtml } from '../lib/questionHighlight'
 import { QuestionAnnotations } from './QuestionAnnotations'
 import { LaTeXText } from './LaTeXText'
@@ -77,12 +77,6 @@ function extractAnswerItems(answer: unknown): string[] | null {
   return null
 }
 
-function hasLatex(text: string): boolean {
-  return /(\$\$[\s\S]*?\$\$)|(\$[^$\r\n]*?\$)|(\\\[[\s\S]*?\\\])|(\\\([\s\S]*?\\\))/.test(
-    text
-  )
-}
-
 export interface QuestionContentPanelProps {
   jobId: string
   refreshKey?: string
@@ -123,6 +117,11 @@ export function QuestionContentPanel({
     return renderLatexInHtml(buildHighlightedStemHtml(stem, selectedKeyInfos))
   }, [stem, stemHtml, selectedKeyInfos])
 
+  const hiddenKeyInfos = useMemo(
+    () => selectedKeyInfos.filter((k) => k.type === 'hidden'),
+    [selectedKeyInfos]
+  )
+
   const analysis = question?.analysis
   const analysisHtml = useMemo(() => {
     if (!analysis || typeof analysis !== 'string') return ''
@@ -132,7 +131,10 @@ export function QuestionContentPanel({
   const analysisSteps = question?.analysis_steps
 
   const rawAnswer = question?.answer
-  const answerItems = rawAnswer ? extractAnswerItems(rawAnswer) : null
+  const answerItems = useMemo(
+    () => (rawAnswer ? extractAnswerItems(rawAnswer) : null),
+    [rawAnswer]
+  )
   const answer_blanks = question?.answer_blanks
 
   if (loading) {
@@ -169,7 +171,7 @@ export function QuestionContentPanel({
           </div>
           <QuestionAnnotations
             wrapperRef={stemWrapperRef}
-            hiddenItems={selectedKeyInfos.filter((k) => k.type === 'hidden')}
+            hiddenItems={hiddenKeyInfos}
           />
         </div>
 
@@ -327,7 +329,10 @@ export function QuestionContentPanel({
                   <span className={styles.blankAlternatives}>
                     {blank.alternatives.map((alt, aidx) => (
                       <span key={aidx} className={styles.answerBadge}>
-                        {blank.is_latex && hasLatex(alt) ? (
+                        {blank.is_latex &&
+                        extractLatexParts(alt).some(
+                          (p) => p.type === 'latex'
+                        ) ? (
                           <LaTeXText>{alt}</LaTeXText>
                         ) : (
                           alt
@@ -342,7 +347,11 @@ export function QuestionContentPanel({
             <div className={styles.answerBadges}>
               {answerItems.map((item, idx) => (
                 <span key={idx} className={styles.answerBadge}>
-                  {hasLatex(item) ? <LaTeXText>{item}</LaTeXText> : item}
+                  {extractLatexParts(item).some((p) => p.type === 'latex') ? (
+                    <LaTeXText>{item}</LaTeXText>
+                  ) : (
+                    item
+                  )}
                 </span>
               ))}
             </div>
