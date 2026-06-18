@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { JOB_STATUS_LABELS } from '../labels'
+import { JOB_STATUS_LABELS, JOB_SOURCE_TYPE_LABELS } from '../labels'
 import type { JobRecord } from '../types'
 import type { JobNodeSummary } from '../jobTypes'
 import { JobNodeStepper } from './JobNodeStepper'
@@ -140,7 +140,8 @@ export function JobListItem({
             : '未命名'}
         </div>
         <div className={styles.description}>
-          {job.source_type} · {job.source_id}
+          {JOB_SOURCE_TYPE_LABELS[job.source_type] ?? job.source_type} ·{' '}
+          {job.source_id}
           {job.error_summary ? (
             <>
               {' · '}

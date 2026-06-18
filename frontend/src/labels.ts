@@ -83,6 +83,11 @@ export const INTERACTION_REVIEW_STATUS_LABELS: Record<string, string> = {
 export const JOB_STATUS_LABELS = STATUS_LABELS
 export const JOB_STATUS_ICONS = STATUS_ICONS
 
+export const JOB_SOURCE_TYPE_LABELS: Record<string, string> = {
+  question: '题目',
+  knowledge: '知识点',
+}
+
 export const WORKSPACE_LABELS = {
   overview: '概览',
   jobs: '任务',
