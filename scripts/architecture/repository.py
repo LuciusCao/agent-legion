@@ -1,12 +1,14 @@
 import ast
 import json
 from collections import Counter, defaultdict
+from importlib.util import resolve_name
 from pathlib import Path
 
 from scripts.architecture.helpers import (
     ROUTE_FORBIDDEN,
     SCHEDULER_FORBIDDEN,
     _assignment_target,
+    accesses_runner_or_agent,
     annotation_contains_any,
     forbidden_imports,
     has_named_response_model,
@@ -58,7 +60,6 @@ def _categorize_exemptions(exemptions: tuple):
     scheduler_import_exempt_files: set[str] = set()
     scheduler_import_exempt_modules: dict[str, set[str]] = defaultdict(set)
     scheduler_threadpool_exempt_targets: dict[str, set[str]] = defaultdict(set)
-
     for ex in exemptions:
         if ex.check == "architecture.route_response_model":
             response_model_exemptions.add(ex.path)
@@ -80,7 +81,6 @@ def _categorize_exemptions(exemptions: tuple):
             file_part, _, target = ex.path.partition(":")
             if target:
                 scheduler_threadpool_exempt_targets[file_part].add(target)
-
     return (
         response_model_exemptions,
         annotation_exemptions,
@@ -97,7 +97,6 @@ def check_repository(root: Path) -> list[str]:
         (root / "config/architecture/architecture-budgets.json").read_text(encoding="utf-8")
     )
     errors: list[str] = []
-
     exemptions = _load_exemptions(root)
     (
         response_model_exemptions,
@@ -108,9 +107,7 @@ def check_repository(root: Path) -> list[str]:
         scheduler_import_exempt_modules,
         scheduler_threadpool_exempt_targets,
     ) = _categorize_exemptions(exemptions)
-
     server_root = root / "server/app"
-
     if server_root.exists():
         for path in sorted(server_root.rglob("*.py")):
             relative_path = path.relative_to(root).as_posix()
@@ -130,7 +127,6 @@ def check_repository(root: Path) -> list[str]:
                         errors.append(
                             f"{relative_path}:{lineno}: scheduler boundary forbids import {module}"
                         )
-
                 allowed_targets = scheduler_threadpool_exempt_targets.get(relative_path, set())
                 observed_targets: Counter[str] = Counter()
                 for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
@@ -155,14 +151,11 @@ def check_repository(root: Path) -> list[str]:
                         "_futures length for capacity decisions"
                     )
                 if relative_path == "server/app/workflow_worker_thread.py":
-                    from scripts.architecture.helpers import accesses_runner_or_agent
-
                     for lineno in accesses_runner_or_agent(tree):
                         errors.append(
                             f"{relative_path}:{lineno}: "
                             "WorkflowWorkerThread must branch on capability, not .runner or .agent"
                         )
-
             if (
                 relative_path.startswith("server/app/executors/")
                 and not relative_path.endswith("/__init__.py")
@@ -175,12 +168,37 @@ def check_repository(root: Path) -> list[str]:
                     )
 
             if is_service_path(relative_path):
+                package = ".".join(Path(relative_path).parent.parts)
+                for node in ast.walk(tree):
+                    if (
+                        not isinstance(node, ast.ImportFrom)
+                        or not node.level
+                        or node.level > package.count(".") + 1
+                    ):
+                        continue
+                    resolved = resolve_name("." * node.level + (node.module or ""), package)
+                    imports_worker = resolved == "server.app.worker" or resolved.startswith(
+                        "server.app.worker."
+                    )
+                    imports_worker = imports_worker or (
+                        node.module is None
+                        and resolved == "server.app"
+                        and any(alias.name == "worker" for alias in node.names)
+                    )
+                    if imports_worker:
+                        errors.append(
+                            f"{relative_path}:{node.lineno}: service boundary forbids import server.app.worker"
+                        )
                 for module, lineno in modules.items():
-                    if module == "fastapi" or module.startswith("fastapi."):
+                    if (
+                        module == "fastapi"
+                        or module.startswith("fastapi.")
+                        or module == "server.app.worker"
+                        or module.startswith("server.app.worker.")
+                    ):
                         errors.append(
                             f"{relative_path}:{lineno}: service boundary forbids import {module}"
                         )
-
             if relative_path == "server/app/routes/jobs.py":
                 for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
                     name = ast.unparse(call.func)

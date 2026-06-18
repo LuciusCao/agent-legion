@@ -10,8 +10,8 @@ from server.app.pipeline.phases import phase_sequence
 from server.app.pipeline.transcribe import TranscriptionProvider
 from server.app.records import VideoRecord
 from server.app.services.video_actions import has_running_phase_run
+from server.app.services.video_execution import process_video_once
 from server.app.settings import Settings
-from server.app.worker import process_video_once
 
 _background_executor = ThreadPoolExecutor(max_workers=8, thread_name_prefix="manual-run-")
 atexit.register(_background_executor.shutdown, wait=False)

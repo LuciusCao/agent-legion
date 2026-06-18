@@ -48,6 +48,7 @@ def create_router(
     from ..services.job_packages import JobPackageService
     from ..services.job_queries import JobQueryService
     from ..services.job_rerun import JobRerunService
+    from ..services.package_deletion import PackageDeletionService
     from ..services.workflow_catalog import WorkflowCatalogService
     from ..services.workspace_configuration import WorkspaceConfigurationService
     from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
@@ -82,6 +83,7 @@ def create_router(
     job_deletion = JobDeletionService(
         job_db, executor_leases, settings, job_event_manager=job_event_manager
     )
+    package_deletion = PackageDeletionService(db, settings.packages_dir)
     job_packages = JobPackageService(job_db, settings)
 
     router.include_router(create_common_router(db, settings, worker_control))
@@ -89,7 +91,9 @@ def create_router(
     router.include_router(create_videos_router(db, settings, agent_manager, video_event_manager))
     router.include_router(create_artifacts_router(db, settings))
     router.include_router(
-        create_packages_router(db, job_db, settings, video_event_manager, job_packages)
+        create_packages_router(
+            db, job_db, settings, video_event_manager, package_deletion, job_packages
+        )
     )
     router.include_router(create_worker_router(worker_control, workspace_worker_control))
     router.include_router(create_workflow_catalog_router(workflow_catalog, settings))

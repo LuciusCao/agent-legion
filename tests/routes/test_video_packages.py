@@ -316,11 +316,30 @@ def test_delete_package(tmp_path, client, monkeypatch):
 
     client.post("/api/package", json={"video_ids": [video_id]})
     pkg = client.app.state.db.list_packages(limit=1)[0]
+    package_path = Path(pkg["path"])
+    assert package_path.exists()
 
     response = client.delete(f"/api/packages/{pkg['id']}")
     assert response.status_code == 200
     assert response.json()["deleted"] is True
+    assert not package_path.exists()
     assert client.app.state.db.list_packages(limit=10) == []
+
+
+def test_delete_package_rejects_path_outside_packages_dir(tmp_path, client):
+    outside_path = tmp_path / "outside-package.zip"
+    outside_path.write_bytes(b"outside")
+    client.app.state.db.insert_package(str(outside_path), name="Outside Package")
+    package = client.app.state.db.list_packages(limit=1)[0]
+
+    response = client.delete(f"/api/packages/{package['id']}")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Package not found"
+    assert outside_path.exists()
+    assert any(
+        item["id"] == package["id"] for item in client.app.state.db.list_packages(limit=1000)
+    )
 
 
 def test_delete_package_not_found(client):
