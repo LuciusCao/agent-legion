@@ -22,7 +22,7 @@ echo "=== Architecture Invariant Registry ==="
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_invariants.py
 
 echo "=== Python Tests + Coverage ==="
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q --ignore=tests/full --ignore=tests/ci --cov=server --cov-report=term-missing
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q --ignore=tests/full --ignore=tests/ci -n auto --cov=server --cov-report=term-missing
 
 echo "=== MyPy Type Check ==="
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app
