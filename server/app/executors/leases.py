@@ -222,7 +222,8 @@ class ExecutorLeaseRepository:
                     stale_reason='',
                     error_message='',
                     started_at=null,
-                    finished_at=null
+                    finished_at=null,
+                    created_at=current_timestamp
                 where job_id in ({placeholders}) and status='running'
                 """,
                 recovered,

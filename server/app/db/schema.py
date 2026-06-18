@@ -121,6 +121,7 @@ def init_db(path: Path) -> None:
                   error_message text not null default '',
                   started_at text,
                   finished_at text,
+                  created_at text not null default current_timestamp,
                   unique(job_id, node_key),
                   foreign key(job_id) references jobs(id) on delete cascade
                 );

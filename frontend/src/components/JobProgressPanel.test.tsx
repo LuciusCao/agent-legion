@@ -15,6 +15,7 @@ const mockNodes = [
     label: '提取',
     status: 'completed',
     after: [],
+    created_at: '2026-06-09T07:59:00Z',
     started_at: '2026-06-09T08:00:00Z',
     finished_at: '2026-06-09T08:00:12Z',
     error_message: '',
@@ -30,6 +31,7 @@ const mockNodes = [
     label: '生成',
     status: 'running',
     after: ['extract'],
+    created_at: '2026-06-09T07:59:00Z',
     started_at: '2026-06-09T08:00:13Z',
     error_message: '',
     stale_reason: '',
@@ -136,7 +138,6 @@ describe('JobProgressPanel', () => {
     const { container } = render(
       <JobProgressPanel
         jobId="j1"
-        jobCreatedAt="2026-06-09T07:59:00Z"
         nodes={mockNodes}
         runs={mockRuns}
         onOpenDagDialog={vi.fn()}
@@ -159,7 +160,6 @@ describe('JobProgressPanel', () => {
     render(
       <JobProgressPanel
         jobId="j1"
-        jobCreatedAt="2026-06-09T07:59:00Z"
         nodes={staleNodes}
         runs={[]}
         onOpenDagDialog={vi.fn()}
@@ -173,7 +173,6 @@ describe('JobProgressPanel', () => {
     render(
       <JobProgressPanel
         jobId="j1"
-        jobCreatedAt="2026-06-09T07:59:00Z"
         nodes={mockNodes}
         runs={mockRuns}
         onOpenDagDialog={vi.fn()}
@@ -183,5 +182,25 @@ describe('JobProgressPanel', () => {
       screen.getAllByText(/\d+h\d+m\d+s|\d+m\d+s|\d+s/).length
     ).toBeGreaterThanOrEqual(1)
     expect(screen.queryByText(/2026\/6\/9 08:00:00/)).not.toBeInTheDocument()
+  })
+
+  it('uses node created_at instead of job created_at for wait time', () => {
+    const rerunNodes = [
+      {
+        ...mockNodes[0],
+        created_at: '2026-06-10T08:00:00Z',
+        started_at: '2026-06-10T08:00:01Z',
+      },
+    ]
+    render(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={rerunNodes}
+        runs={mockRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    // Wait time should be 1s (from node created_at to started_at), not ~29h.
+    expect(screen.getByText('1s')).toBeInTheDocument()
   })
 })

@@ -13,6 +13,9 @@ from server.app.db.migrations.v006_job_execution_control import (
 from server.app.db.migrations.v007_rename_pipeline_to_workflow import (
     MIGRATION as V007_RENAME_PIPELINE_TO_WORKFLOW,
 )
+from server.app.db.migrations.v008_job_node_created_at import (
+    MIGRATION as V008_JOB_NODE_CREATED_AT,
+)
 
 MIGRATIONS: tuple[Migration, ...] = (
     V001_EXECUTOR_CORE,
@@ -21,4 +24,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     V004_WORKSPACE_DAG_FOREIGN_KEYS,
     V006_JOB_EXECUTION_CONTROL,
     V007_RENAME_PIPELINE_TO_WORKFLOW,
+    V008_JOB_NODE_CREATED_AT,
 )

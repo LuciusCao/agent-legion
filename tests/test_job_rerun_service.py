@@ -127,6 +127,23 @@ def test_rerun_selected_node_and_descendants_are_stale(rerun_service, job):
     assert nodes["assemble_package"] == "stale"
 
 
+def test_rerun_resets_node_created_at(rerun_service, job):
+    old_created_at = "2026-06-09T00:00:00Z"
+    with rerun_service.job_db.connect() as conn:
+        conn.execute(
+            "update job_nodes set created_at=? where job_id=? and node_key=?",
+            (old_created_at, job["id"], "question_understanding"),
+        )
+
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+
+    assert result["status"] == "succeeded"
+    rerun_node = rerun_service.job_db.get_job_node(job["id"], "question_understanding")
+    assert rerun_node is not None
+    assert rerun_node["created_at"] != old_created_at
+    assert len(rerun_node["created_at"]) >= 19
+
+
 def test_rerun_preserves_ancestors(rerun_service, job):
     rerun_service.job_db.update_job_node(job["id"], "fetch_question_context", status="completed")
 

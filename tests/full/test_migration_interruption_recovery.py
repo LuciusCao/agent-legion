@@ -96,7 +96,7 @@ def test_v004_interruption_at_phase_boundary_recovers(tmp_path: Path, interrupt_
                 "select version from schema_migrations order by version"
             ).fetchall()
         ]
-        assert versions == [1, 2, 3, 4, 6, 7]
+        assert versions == [1, 2, 3, 4, 6, 7, 8]
         assert _foreign_key_relationships(conn) == _expected_fk_relationships()
         assert conn.execute("pragma integrity_check").fetchone()[0] == "ok"
         assert conn.execute("pragma foreign_key_check").fetchall() == []
