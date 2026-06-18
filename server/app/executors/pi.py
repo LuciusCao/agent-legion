@@ -4,6 +4,7 @@ import logging
 from collections.abc import Mapping
 from pathlib import Path
 
+from server.app.executors._log_utils import copy_pi_logs
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
@@ -92,16 +93,16 @@ class PiExecutor:
             tracker=self._tracker,
         )
 
-        produced = tuple(
-            name for name in context.expected_outputs if (context.job_dir / name).is_file()
-        )
+        copy_pi_logs(result.run_dir, context.log_path)
         return ExecutionResult(
             status=result.status,
             exit_code=result.exit_code,
             error_message=result.error_message,
             command=tuple(result.command),
             log_path=str(context.log_path),
-            produced_artifacts=produced,
+            produced_artifacts=tuple(
+                name for name in context.expected_outputs if (context.job_dir / name).is_file()
+            ),
         )
 
     def cancel(self, execution_id: str) -> None:

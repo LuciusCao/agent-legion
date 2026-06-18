@@ -69,6 +69,13 @@ def raising_local_handler(
     raise ValueError("boom")
 
 
+def logging_local_handler(
+    _job: dict[str, Any], job_dir: Path, _runtime: dict[str, Any] | None
+) -> None:
+    print("local handler log line")
+    (job_dir / "out.json").write_text("{}", encoding="utf-8")
+
+
 def record_runtime_handler(
     _job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None
 ) -> None:
@@ -119,6 +126,14 @@ def test_local_executor_catches_handler_exception(context: ExecutionContext) -> 
     result = executor.execute(replace(context, capability="fetch"))
     assert result.status == "failed"
     assert "boom" in result.error_message
+
+
+def test_local_executor_writes_logs_to_log_path(context: ExecutionContext) -> None:
+    executor = LocalExecutor("local-default", {"fetch": logging_local_handler})
+    result = executor.execute(replace(context, capability="fetch", expected_outputs=("out.json",)))
+    assert result.status == "completed"
+    assert context.log_path.is_file()
+    assert "local handler log line" in context.log_path.read_text(encoding="utf-8")
 
 
 def test_local_executor_cancel_records_intent(context: ExecutionContext) -> None:
@@ -222,6 +237,8 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert result.produced_artifacts == ("keywords_raw.json",)
     assert "fake_pi" in result.command[0]
+    assert ctx.log_path.is_file()
+    assert "event" in ctx.log_path.read_text(encoding="utf-8")
 
 
 def test_pi_executor_fails_when_output_missing(tmp_path: Path) -> None:
