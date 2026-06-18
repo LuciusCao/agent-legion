@@ -37,11 +37,11 @@
   background: var(--status-running-border);
 }
 
-.failed .bar,
-.stale .bar {
+.failed .bar {
   background: var(--status-failed-border);
 }
 
-.pending .bar {
+.pending .bar,
+.stale .bar {
   background: var(--md-sys-color-outline-variant);
 }

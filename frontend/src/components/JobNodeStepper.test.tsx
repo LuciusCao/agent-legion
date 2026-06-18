@@ -62,6 +62,14 @@ describe('JobNodeStepper', () => {
     )
   })
 
+  it('marks the inner bar of a stale segment with data-status="stale"', () => {
+    render(<JobNodeStepper nodeSummaries={summaries} />)
+
+    const staleSegment = screen.getByTitle('内容审核')
+    const bar = staleSegment.firstElementChild
+    expect(bar).toHaveAttribute('data-status', 'stale')
+  })
+
   it('sets accessible aria-label with node label and status', () => {
     render(<JobNodeStepper nodeSummaries={summaries} />)
 

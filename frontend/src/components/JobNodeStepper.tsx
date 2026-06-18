@@ -59,6 +59,7 @@ export function JobNodeStepper({
                 className={`${styles.bar} ${
                   summary.status === 'running' ? 'pulse-blue' : ''
                 }`.trim()}
+                data-status={summary.status}
               />
             </div>
           )
