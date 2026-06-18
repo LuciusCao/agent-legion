@@ -60,7 +60,6 @@ frontend/src/
 | `/video-hive/settings` | VideoHiveSettingsPage |
 | `/workspaces/:workspaceId` | WorkspaceLayout |
 | `(index)` | WorkspaceMainPage |
-| `jobs` | WorkspaceJobListWrapper |
 | `jobs/:jobId` | JobDetailPage |
 | `packages` | WorkspacePackagesPage |
 | `/workspaces/:workspaceId/settings` | SettingsPage |
