@@ -184,6 +184,19 @@ describe('JobProgressPanel', () => {
     expect(screen.queryByText(/2026\/6\/9 08:00:00/)).not.toBeInTheDocument()
   })
 
+  it('computes downstream wait time from dependency finish, not job creation', () => {
+    render(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={mockNodes}
+        runs={mockRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    // generate started 13s after job creation, but only 1s after extract finished.
+    expect(screen.getByText('1s')).toBeInTheDocument()
+  })
+
   it('uses node created_at instead of job created_at for wait time', () => {
     const rerunNodes = [
       {

@@ -48,14 +48,31 @@ function formatDuration(seconds?: number): string {
 }
 
 function computeWaitTime(
-  nodeCreatedAt: string | undefined,
-  startedAt: string | null | undefined
+  node: JobNodeRecord,
+  nodes: JobNodeRecord[]
 ): string | undefined {
-  if (!nodeCreatedAt || !startedAt) return undefined
-  const created = new Date(nodeCreatedAt).getTime()
-  const started = new Date(startedAt).getTime()
-  if (Number.isNaN(created) || Number.isNaN(started)) return undefined
-  const seconds = Math.max(0, Math.floor((started - created) / 1000))
+  if (!node.started_at) return undefined
+  const started = new Date(node.started_at).getTime()
+  if (Number.isNaN(started)) return undefined
+
+  let readySince: number | undefined = node.created_at
+    ? new Date(node.created_at).getTime()
+    : undefined
+  if (readySince !== undefined && Number.isNaN(readySince)) {
+    readySince = undefined
+  }
+
+  for (const depKey of node.after ?? []) {
+    const depNode = nodes.find((n) => n.node_key === depKey)
+    if (!depNode?.finished_at) continue
+    const depFinished = new Date(depNode.finished_at).getTime()
+    if (Number.isNaN(depFinished)) continue
+    readySince =
+      readySince === undefined ? depFinished : Math.max(readySince, depFinished)
+  }
+
+  if (readySince === undefined) return undefined
+  const seconds = Math.max(0, Math.floor((started - readySince) / 1000))
   return formatDuration(seconds)
 }
 
@@ -125,7 +142,7 @@ export function JobProgressPanel({
             const waitLabel =
               node.status === 'pending'
                 ? '等待中'
-                : (computeWaitTime(node.created_at, node.started_at) ?? '—')
+                : (computeWaitTime(node, nodes) ?? '—')
 
             return (
               <div key={node.node_key} className={styles.timelineItem}>
