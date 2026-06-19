@@ -1,4 +1,6 @@
 import json
+import os
+import subprocess
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -14,6 +16,7 @@ from server.app.executors.models import ExecutionContext
 from server.app.executors.openclaw import OpenClawExecutor
 from server.app.executors.pi import PiExecutor
 from server.app.pipeline.openclaw import OpenClawRunner
+from server.app.skills.manager import SkillManager
 from server.app.workflows.pi_runner import PiConfig
 
 
@@ -169,19 +172,59 @@ def test_local_executor_runtime_includes_expected_keys(context: ExecutionContext
 # PiExecutor
 
 
-def _make_pi_skill(skill_dir: Path) -> None:
-    skill_dir.mkdir(parents=True, exist_ok=True)
-    (skill_dir / "SKILL.md").write_text("# skill", encoding="utf-8")
-    (skill_dir / "references").mkdir(parents=True, exist_ok=True)
-    (skill_dir / "references" / "output-contract.md").write_text("contract", encoding="utf-8")
-    (skill_dir / "scripts").mkdir(parents=True, exist_ok=True)
+def _make_skill_manager(
+    tmp_path: Path,
+    skill_key: str,
+    validate_script: str | None = None,
+) -> SkillManager:
+    """Create a SkillManager backed by a temporary bare git repo for the given skill."""
+    repo = tmp_path / "remote.git"
+    repo.mkdir()
+    subprocess.run(["git", "init", "--bare", str(repo)], check=True)
+    work = tmp_path / "work"
+    work.mkdir()
+    subprocess.run(["git", "clone", str(repo), str(work / "clone")], check=True)
+    clone = work / "clone"
+    (clone / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    (clone / "references").mkdir()
+    (clone / "references" / "output-contract.md").write_text("contract\n", encoding="utf-8")
+    (clone / "scripts").mkdir()
+    if validate_script is not None:
+        (clone / "scripts" / "validate_output.py").write_text(validate_script, encoding="utf-8")
+    subprocess.run(["git", "-C", str(clone), "add", "."], check=True)
+    env = {
+        **dict(os.environ),
+        "GIT_AUTHOR_NAME": "t",
+        "GIT_AUTHOR_EMAIL": "t@t",
+        "GIT_COMMITTER_NAME": "t",
+        "GIT_COMMITTER_EMAIL": "t@t",
+    }
+    subprocess.run(
+        ["git", "-C", str(clone), "commit", "-m", "init", "--no-gpg-sign"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(clone), "push", "origin", "HEAD"], check=True)
+    repo_uri = f"file://{repo.resolve()}"
+
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  {skill_key}:\n    repo: {repo_uri}\n    ref: main\n",
+        encoding="utf-8",
+    )
+    return SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
 
 
 def test_pi_executor_supports_capability(tmp_path: Path) -> None:
     executor = PiExecutor(
         "pi-default",
         PiConfig(binary="pi"),
-        tmp_path / "skills",
+        _make_skill_manager(tmp_path, "reading_analysis/review_keywords"),
         {"review_keywords": PiCapabilityConfig(skill="reading_analysis/review_keywords")},
     )
     assert executor.supports("review_keywords")
@@ -195,20 +238,20 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
     )
     fake_pi.chmod(0o755)
 
-    skill_dir = tmp_path / "skills" / "reading_analysis" / "extract_keywords"
-    _make_pi_skill(skill_dir)
-    validator = skill_dir / "scripts" / "validate_output.py"
-    validator.write_text(
-        "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
-        "job_dir = Path(sys.argv[1])\n"
-        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+    skill_manager = _make_skill_manager(
+        tmp_path,
+        "reading_analysis/extract_keywords",
+        validate_script=(
+            "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
+            "job_dir = Path(sys.argv[1])\n"
+            "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+        ),
     )
-    validator.chmod(0o755)
 
     executor = PiExecutor(
         "pi-default",
         PiConfig(binary=str(fake_pi)),
-        tmp_path / "skills",
+        skill_manager,
         {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
     )
 
@@ -246,16 +289,16 @@ def test_pi_executor_fails_when_output_missing(tmp_path: Path) -> None:
     fake_pi.write_text('#!/bin/bash\necho \'{"event":"done"}\'\n')
     fake_pi.chmod(0o755)
 
-    skill_dir = tmp_path / "skills" / "reading_analysis" / "extract_keywords"
-    _make_pi_skill(skill_dir)
-    validator = skill_dir / "scripts" / "validate_output.py"
-    validator.write_text("#!/usr/bin/env python3\nimport sys\n")
-    validator.chmod(0o755)
+    skill_manager = _make_skill_manager(
+        tmp_path,
+        "reading_analysis/extract_keywords",
+        validate_script="#!/usr/bin/env python3\nimport sys\n",
+    )
 
     executor = PiExecutor(
         "pi-default",
         PiConfig(binary=str(fake_pi)),
-        tmp_path / "skills",
+        skill_manager,
         {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
     )
 
@@ -288,7 +331,7 @@ def test_pi_executor_cancel_records_intent(tmp_path: Path) -> None:
     executor = PiExecutor(
         "pi-default",
         PiConfig(binary="pi"),
-        tmp_path / "skills",
+        _make_skill_manager(tmp_path, "reading_analysis/extract_keywords"),
         {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
     )
     executor.cancel("exec-1")
