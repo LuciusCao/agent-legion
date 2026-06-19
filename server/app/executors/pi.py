@@ -46,6 +46,7 @@ class PiExecutor:
         )
         if early_result is not None:
             return early_result
+        assert capability_config is not None
 
         try:
             skill_dir = resolve_skill_dir(

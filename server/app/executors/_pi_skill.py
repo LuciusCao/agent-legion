@@ -15,7 +15,7 @@ def prepare_execution(
     cancelled: set[str],
     capabilities: dict[str, PiCapabilityConfig],
     context: ExecutionContext,
-) -> tuple[PiCapabilityConfig, ExecutionResult | None]:
+) -> tuple[PiCapabilityConfig | None, ExecutionResult | None]:
     """Return the capability config, or an early result if the run cannot start."""
     if context.execution_id in cancelled:
         cancelled.discard(context.execution_id)

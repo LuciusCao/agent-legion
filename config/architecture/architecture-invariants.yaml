@@ -180,7 +180,7 @@ invariants:
         target: tests/full/test_workspace_sse.py
         gate: full
 
-  - id: REPOSITORY-SIZE-001
+  - id: CONFIG-ARCH-001
     statement: |
       Source file line budgets are enforced by scripts/check_architecture.py.
       Temporary overruns must be recorded as architecture.file_budget exemptions
@@ -194,5 +194,5 @@ invariants:
         target: scripts/check_architecture.py
         gate: quick
       - kind: contract
-        target: config/architecture/architecture-exemptions.yaml
+        target: tests/test_check_architecture.py
         gate: quick
