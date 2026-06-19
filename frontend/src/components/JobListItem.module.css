@@ -14,7 +14,7 @@
 }
 
 .row:hover {
-  background: #1a1c1e;
+  background: #f5f5f5;
   box-shadow:
     0 4px 8px rgba(0, 0, 0, 0.08),
     0 8px 24px rgba(0, 0, 0, 0.08);
