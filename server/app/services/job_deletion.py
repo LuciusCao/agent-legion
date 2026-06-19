@@ -15,7 +15,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_managed_path
+from server.app.storage_paths import resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -102,19 +102,14 @@ class JobDeletionService:
             for log_path in glob.glob(str(self.settings.logs_dir / "jobs" / f"{job_id}-*.log"))
         ]
 
+        storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
+
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
         staged_storage: Path | None = None
         staged_logs: list[Path] = []
         restore_paths: list[tuple[Path, Path]] = []
 
         try:
-            storage_dir = resolve_managed_path(
-                self.settings.jobs_dir,
-                job["storage_dir"],
-                allow_missing=True,
-                record_id=job_id,
-                root_kind="job",
-            )
             with self.job_db.lease_guarded_mutation(
                 job_id,
                 self._now(),
