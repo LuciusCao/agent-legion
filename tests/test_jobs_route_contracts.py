@@ -172,3 +172,22 @@ def test_get_job_detail_returns_typed_job_summary(client):
     assert isinstance(body.nodes, list)
     assert isinstance(body.runs, list)
     assert isinstance(body.artifacts, list)
+
+
+def test_get_jobs_returns_absolute_storage_dir(client):
+    job_id = _create_test_job(client)
+    response = client.get("/api/jobs")
+    assert response.status_code == 200
+    body = response.json()
+    summary = next(job for job in body["jobs"] if job["id"] == job_id)
+    assert Path(summary["storage_dir"]).is_absolute()
+    assert summary["storage_dir"].endswith(f"default/{job_id}")
+
+
+def test_get_job_detail_returns_absolute_storage_dir(client):
+    job_id = _create_test_job(client)
+    response = client.get(f"/api/jobs/{job_id}")
+    assert response.status_code == 200
+    body = response.json()
+    assert Path(body["job"]["storage_dir"]).is_absolute()
+    assert body["job"]["storage_dir"].endswith(f"default/{job_id}")
