@@ -116,7 +116,10 @@ class JobIntakeService:
             raise InvalidOperationError("Unsupported intake mode")
         enabled_modes = self._enabled_intake_modes(workspace)
         if enabled_modes is not None and payload["source_kind"] not in enabled_modes:
-            raise InvalidOperationError("Intake mode is disabled for this workspace")
+            raise InvalidOperationError(
+                "Intake mode is disabled for this workspace; "
+                "configure enabled modes in workspace settings"
+            )
 
         raw_values = payload.get(mode.input_field)
         if not isinstance(raw_values, list):
