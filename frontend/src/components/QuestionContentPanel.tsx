@@ -318,7 +318,7 @@ export function QuestionContentPanel({
                     </div>
                     {errors.length > 0 && (
                       <div className={styles.detailSection}>
-                        <strong>常见审题错误</strong>
+                        <strong>关联常见错误</strong>
                         <ul>
                           {errors.map((err) => (
                             <li key={err.error_id}>
