@@ -19,6 +19,7 @@ export default function VideoHiveLayout() {
             <>
               <AgentStatusIndicator workspaceId="video-hive" />
               <IconButton
+                size="small"
                 aria-label="设置"
                 onClick={() => navigate('/video-hive/settings')}
               >

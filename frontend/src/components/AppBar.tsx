@@ -22,6 +22,7 @@ export function AppBar({
 
   const leftButton = backTo ? (
     <IconButton
+      size="small"
       onClick={() => navigate(backTo)}
       aria-label="返回"
       data-testid="app-bar-back"
@@ -30,6 +31,7 @@ export function AppBar({
     </IconButton>
   ) : home ? (
     <IconButton
+      size="small"
       onClick={() => navigate('/')}
       aria-label="主页"
       data-testid="app-bar-home"

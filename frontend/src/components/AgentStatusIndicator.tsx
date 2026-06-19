@@ -41,7 +41,7 @@ export function AgentStatusIndicator({
 
   return (
     <div className={styles.root}>
-      <IconButton aria-label="Agent 状态">
+      <IconButton size="small" aria-label="Agent 状态">
         <MaterialIcon name="smart_toy" />
         <span
           aria-hidden="true"
