@@ -8,6 +8,7 @@ from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
+from server.app.storage_paths import resolve_job_dir
 
 
 @pytest.fixture
@@ -114,6 +115,32 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
     for node in detail["nodes"]:
         assert node["executor_id"] is None
         assert node["executor_kind"] is None
+
+
+def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
+    query_service, job_db, settings
+):
+    workspace = job_db.create_workspace("default")
+    batch = job_db.create_batch(
+        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+    )
+    job = job_db.create_job(
+        workflow_key="question_content",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=["question_understanding"],
+        workspace_id=workspace["id"],
+    )
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+    (storage_dir / "result.json").write_text('{"ok": true}', encoding="utf-8")
+    (storage_dir / "nested").mkdir(parents=True, exist_ok=True)
+
+    detail = query_service.detail(job["id"])
+
+    assert detail["artifacts"] == ["result.json"]
 
 
 def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, job_db):

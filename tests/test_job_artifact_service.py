@@ -1,9 +1,8 @@
-from pathlib import Path
-
 import pytest
 
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.storage_paths import resolve_job_dir
 
 
 @pytest.fixture
@@ -28,8 +27,8 @@ def job(job_db):
     )
 
 
-def test_job_artifact_service_reads_file(artifact_service, job):
-    storage = Path(job["storage_dir"])
+def test_job_artifact_service_reads_file(artifact_service, job, job_db):
+    storage = resolve_job_dir(job, job_db.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "result.json").write_text('{"ok": true}', encoding="utf-8")
 
