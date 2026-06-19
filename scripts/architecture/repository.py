@@ -1,8 +1,9 @@
 import ast
 import json
-from collections import Counter, defaultdict
+from collections import Counter
 from pathlib import Path
 
+from scripts.architecture.exemptions import categorize_exemptions, load_exemptions
 from scripts.architecture.helpers import (
     ROUTE_FORBIDDEN,
     SCHEDULER_FORBIDDEN,
@@ -42,63 +43,12 @@ from scripts.architecture.service_boundaries import check_service_import_boundar
 from scripts.architecture.workflow import check_workflow_definitions
 
 
-def _load_exemptions(root: Path) -> tuple:
-    """Load governed architecture exemptions from the YAML registry."""
-    from server.app.quality.exemptions import load_exemptions
-
-    path = root / "config/architecture/architecture-exemptions.yaml"
-    if not path.exists():
-        return ()
-    return load_exemptions(path)
-
-
-def _categorize_exemptions(exemptions: tuple):
-    """Group exemptions by check name for efficient lookup."""
-    response_model_exemptions: set[str] = set()
-    annotation_exemptions: set[str] = set()
-    route_import_exempt_files: set[str] = set()
-    route_import_exempt_modules: dict[str, set[str]] = defaultdict(set)
-    scheduler_import_exempt_files: set[str] = set()
-    scheduler_import_exempt_modules: dict[str, set[str]] = defaultdict(set)
-    scheduler_threadpool_exempt_targets: dict[str, set[str]] = defaultdict(set)
-    for ex in exemptions:
-        if ex.check == "architecture.route_response_model":
-            response_model_exemptions.add(ex.path)
-        elif ex.check == "architecture.route_annotation_any":
-            annotation_exemptions.add(ex.path)
-        elif ex.check == "architecture.route_import_boundary":
-            file_part, _, module_part = ex.path.partition(":")
-            if module_part:
-                route_import_exempt_modules[file_part].add(module_part)
-            else:
-                route_import_exempt_files.add(file_part)
-        elif ex.check == "architecture.scheduler_import_boundary":
-            file_part, _, module_part = ex.path.partition(":")
-            if module_part:
-                scheduler_import_exempt_modules[file_part].add(module_part)
-            else:
-                scheduler_import_exempt_files.add(file_part)
-        elif ex.check == "architecture.scheduler_threadpool":
-            file_part, _, target = ex.path.partition(":")
-            if target:
-                scheduler_threadpool_exempt_targets[file_part].add(target)
-    return (
-        response_model_exemptions,
-        annotation_exemptions,
-        route_import_exempt_files,
-        route_import_exempt_modules,
-        scheduler_import_exempt_files,
-        scheduler_import_exempt_modules,
-        scheduler_threadpool_exempt_targets,
-    )
-
-
 def check_repository(root: Path) -> list[str]:
     config = json.loads(
         (root / "config/architecture/architecture-budgets.json").read_text(encoding="utf-8")
     )
     errors: list[str] = []
-    exemptions = _load_exemptions(root)
+    exemptions = load_exemptions(root)
     (
         response_model_exemptions,
         annotation_exemptions,
@@ -107,7 +57,8 @@ def check_repository(root: Path) -> list[str]:
         scheduler_import_exempt_files,
         scheduler_import_exempt_modules,
         scheduler_threadpool_exempt_targets,
-    ) = _categorize_exemptions(exemptions)
+        file_budget_exemptions,
+    ) = categorize_exemptions(exemptions)
     server_root = root / "server/app"
     if server_root.exists():
         for path in sorted(server_root.rglob("*.py")):
@@ -222,6 +173,8 @@ def check_repository(root: Path) -> list[str]:
 
     file_budgets = config.get("files", {})
     for relative_path, budget in file_budgets.items():
+        if relative_path in file_budget_exemptions:
+            continue
         path = root / relative_path
         if not path.exists():
             errors.append(f"{relative_path}: budgeted file does not exist")
@@ -241,7 +194,7 @@ def check_repository(root: Path) -> list[str]:
             continue
         for path in sorted(dir_path.rglob("*.py")):
             rel = path.relative_to(root).as_posix()
-            if rel in budgeted_paths:
+            if rel in budgeted_paths or rel in file_budget_exemptions:
                 continue
             if path.name == "__init__.py" or path.name.startswith("test_"):
                 continue
