@@ -213,7 +213,9 @@
 
 .chipsCount {
   font-size: 12px;
+  font-weight: 400;
   color: var(--md-sys-color-on-surface-variant);
+  margin-left: 8px;
 }
 
 .chipRow {
