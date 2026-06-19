@@ -37,9 +37,7 @@ class SkillManager:
         )
         self.git_command = git_command or ["git"]
         self._cache_locks: dict[str, FileLock] = {}
-        self._lockfile_lock_path = self.lock_path.with_suffix(
-            self.lock_path.suffix + ".lock"
-        )
+        self._lockfile_lock_path = self.lock_path.with_suffix(self.lock_path.suffix + ".lock")
         self._lockfile_lock = FileLock(str(self._lockfile_lock_path))
 
     def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
@@ -52,10 +50,10 @@ class SkillManager:
         with cache_lock:
             self._ensure_cached(source.repo, skill_key, cache_dir)
 
-        run_dir = self.runs_dir / execution_id / workflow / capability
-        if run_dir.exists():
-            shutil.rmtree(run_dir)
-        shutil.copytree(cache_dir, run_dir, ignore=shutil.ignore_patterns(".git"))
+            run_dir = self.runs_dir / execution_id / workflow / capability
+            if run_dir.exists():
+                shutil.rmtree(run_dir)
+            shutil.copytree(cache_dir, run_dir, ignore=shutil.ignore_patterns(".git"))
         return run_dir
 
     def _validate_execution_id(self, execution_id: str) -> None:
@@ -68,9 +66,7 @@ class SkillManager:
         if ".." in execution_id:
             raise SkillPathError(f"execution_id must not contain '..': {execution_id!r}")
         if not _EXECUTION_ID_RE.match(execution_id):
-            raise SkillPathError(
-                f"execution_id contains unsafe characters: {execution_id!r}"
-            )
+            raise SkillPathError(f"execution_id contains unsafe characters: {execution_id!r}")
 
     def _parse_skill_key(self, skill_key: str) -> tuple[str, str]:
         if not skill_key:
@@ -134,18 +130,14 @@ class SkillManager:
         self._run_git(["-C", str(cache_dir), "clean", "-fd"])
 
     def _has_commit(self, cache_dir: Path, commit: str) -> bool:
-        result = self._run_git(
-            ["-C", str(cache_dir), "cat-file", "-t", commit], check=False
-        )
+        result = self._run_git(["-C", str(cache_dir), "cat-file", "-t", commit], check=False)
         return result.returncode == 0 and "commit" in result.stdout
 
     def _rev_parse(self, cache_dir: Path, rev: str) -> str:
         result = self._run_git(["-C", str(cache_dir), "rev-parse", rev])
         return result.stdout.strip()
 
-    def _run_git(
-        self, args: list[str], check: bool = True
-    ) -> subprocess.CompletedProcess[str]:
+    def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
         cmd = self.git_command + args
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
@@ -160,7 +152,12 @@ class SkillManager:
         return SkillsLock.model_validate(data)
 
     def _atomic_write_lock(self, lock: SkillsLock) -> None:
-        lock.resolved_at = datetime.datetime.now(datetime.UTC).isoformat()
+        lock.resolved_at = (
+            datetime.datetime.now(datetime.UTC)
+            .replace(microsecond=0)
+            .isoformat()
+            .replace("+00:00", "Z")
+        )
         with self._lockfile_lock:
             payload = yaml.safe_dump(lock.model_dump(), sort_keys=False)
             tmp_path = self.lock_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
