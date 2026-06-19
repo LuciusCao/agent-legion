@@ -243,3 +243,22 @@ def test_malicious_or_absolute_or_empty_skill_key_rejected(skill_key: str, tmp_p
     )
     with pytest.raises((SkillPathError, SkillConfigError)):
         manager.get_skill_dir(skill_key, str(uuid.uuid4()))
+
+
+def test_lock_refresh_command_writes_lock(tmp_path: Path) -> None:
+    from server.app.skills.lock import refresh_lock
+
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: HEAD\n"
+    )
+    lock_path = tmp_path / "skills.lock"
+    base_dir = tmp_path / "skills"
+
+    refresh_lock(config_path, lock_path, base_dir)
+
+    assert lock_path.is_file()
+    content = lock_path.read_text()
+    assert "reading_analysis/extract_keywords" in content
+    assert "commit:" in content
