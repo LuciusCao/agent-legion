@@ -108,23 +108,24 @@ class SkillManager:
         elif not (cache_dir / ".git").is_dir():
             raise SkillRepoError(f"cache dir exists but is not a git repo: {cache_dir}")
 
-        lock = self._load_lock()
-        locked = lock.skills.get(skill_key)
-        if locked is not None and locked.commit:
-            commit = locked.commit
-            if not self._has_commit(cache_dir, commit):
-                self._run_git(["-C", str(cache_dir), "fetch", "origin", commit])
+        with self._lockfile_lock:
+            lock = self._load_lock()
+            locked = lock.skills.get(skill_key)
+            if locked is not None and locked.commit:
+                commit = locked.commit
+                if not self._has_commit(cache_dir, commit):
+                    self._run_git(["-C", str(cache_dir), "fetch", "origin", commit])
+                    commit = self._rev_parse(cache_dir, "FETCH_HEAD")
+                    locked.commit = commit
+                    lock.skills[skill_key] = locked
+                    self._atomic_write_lock(lock)
+            else:
+                ref = self._source_for(skill_key).ref
+                self._run_git(["-C", str(cache_dir), "fetch", "origin", ref])
                 commit = self._rev_parse(cache_dir, "FETCH_HEAD")
-                locked.commit = commit
+                locked = LockedSkillSource(repo=repo, ref=ref, commit=commit)
                 lock.skills[skill_key] = locked
                 self._atomic_write_lock(lock)
-        else:
-            ref = self._source_for(skill_key).ref
-            self._run_git(["-C", str(cache_dir), "fetch", "origin", ref])
-            commit = self._rev_parse(cache_dir, "FETCH_HEAD")
-            locked = LockedSkillSource(repo=repo, ref=ref, commit=commit)
-            lock.skills[skill_key] = locked
-            self._atomic_write_lock(lock)
 
         self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
         self._run_git(["-C", str(cache_dir), "clean", "-fd"])
