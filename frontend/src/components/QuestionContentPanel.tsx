@@ -80,11 +80,13 @@ function extractAnswerItems(answer: unknown): string[] | null {
 export interface QuestionContentPanelProps {
   jobId: string
   refreshKey?: string
+  comprehensionCompleted?: boolean
 }
 
 export function QuestionContentPanel({
   jobId,
   refreshKey,
+  comprehensionCompleted = false,
 }: QuestionContentPanelProps) {
   const { question, loading, error } = useJobQuestion(jobId, refreshKey)
   const { info: comprehensionInfo } = useJobComprehensionInfo(jobId, refreshKey)
@@ -173,13 +175,15 @@ export function QuestionContentPanel({
             hiddenItems={hiddenKeyInfos}
           />
         </div>
+      </section>
 
-        {keyInfoList.length > 0 && (
+      {comprehensionCompleted && keyInfoList.length > 0 && (
+        <section className={styles.card}>
           <div className={styles.comprehensionChips}>
             <div className={styles.chipsHeader}>
-              <h3 className={styles.sectionTitle} style={{ margin: 0 }}>
+              <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
                 审题信息
-              </h3>
+              </h2>
               <span className={styles.chipsCount}>
                 {keyInfoList.length} 个信息点
               </span>
@@ -220,70 +224,76 @@ export function QuestionContentPanel({
               })}
             </div>
           </div>
-        )}
 
-        {selectedKeyInfos.length > 0 && (
-          <div className={styles.detailPanel}>
-            {selectedKeyInfos.map((info) => {
-              const typeLabel = info.type === 'given' ? '题干信息' : '隐含信息'
-              const errors = possibleErrorList.filter((e: PossibleErrorItem) =>
-                e.related_key_info_ids.includes(info.key_info_id)
-              )
-              return (
-                <div key={info.key_info_id} className={styles.detailCard}>
-                  <div className={styles.detailCardHeader}>
-                    <span
-                      className={`${styles.typeBadge} ${
-                        info.type === 'given'
-                          ? styles.typeBadgeGiven
-                          : styles.typeBadgeHidden
-                      }`}
-                    >
-                      {typeLabel}
-                    </span>
-                    <span className={styles.detailId}>{info.key_info_id}</span>
-                  </div>
-                  <div className={styles.detailText}>
-                    <LaTeXText>
-                      {info.content.text || info.content.derived_text || ''}
-                    </LaTeXText>
-                  </div>
-                  {info.type === 'hidden' && (
-                    <div
-                      className={styles.detailSection}
-                      style={{ color: 'var(--md-sys-color-tertiary)' }}
-                    >
-                      👉 推导过程见题干右侧批注
+          {selectedKeyInfos.length > 0 && (
+            <div className={styles.detailPanel}>
+              {selectedKeyInfos.map((info) => {
+                const typeLabel =
+                  info.type === 'given' ? '题干信息' : '隐含信息'
+                const errors = possibleErrorList.filter(
+                  (e: PossibleErrorItem) =>
+                    e.related_key_info_ids.includes(info.key_info_id)
+                )
+                return (
+                  <div key={info.key_info_id} className={styles.detailCard}>
+                    <div className={styles.detailCardHeader}>
+                      <span
+                        className={`${styles.typeBadge} ${
+                          info.type === 'given'
+                            ? styles.typeBadgeGiven
+                            : styles.typeBadgeHidden
+                        }`}
+                      >
+                        {typeLabel}
+                      </span>
+                      <span className={styles.detailId}>
+                        {info.key_info_id}
+                      </span>
                     </div>
-                  )}
-                  <div className={styles.detailSection}>
-                    <strong>关联能力</strong>
-                    <div className={styles.abilityList}>
-                      {info.question_comprehension_abilities.map((ability) => (
-                        <span key={ability} className={styles.abilityTag}>
-                          {ability}
-                        </span>
-                      ))}
+                    <div className={styles.detailText}>
+                      <LaTeXText>
+                        {info.content.text || info.content.derived_text || ''}
+                      </LaTeXText>
                     </div>
-                  </div>
-                  {errors.length > 0 && (
+                    {info.type === 'hidden' && (
+                      <div
+                        className={styles.detailSection}
+                        style={{ color: 'var(--md-sys-color-tertiary)' }}
+                      >
+                        👉 推导过程见题干右侧批注
+                      </div>
+                    )}
                     <div className={styles.detailSection}>
-                      <strong>常见审题错误</strong>
-                      <ul>
-                        {errors.map((err) => (
-                          <li key={err.error_id}>
-                            <LaTeXText>{err.error_description}</LaTeXText>
-                          </li>
-                        ))}
-                      </ul>
+                      <strong>关联能力</strong>
+                      <div className={styles.abilityList}>
+                        {info.question_comprehension_abilities.map(
+                          (ability) => (
+                            <span key={ability} className={styles.abilityTag}>
+                              {ability}
+                            </span>
+                          )
+                        )}
+                      </div>
                     </div>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
-      </section>
+                    {errors.length > 0 && (
+                      <div className={styles.detailSection}>
+                        <strong>常见审题错误</strong>
+                        <ul>
+                          {errors.map((err) => (
+                            <li key={err.error_id}>
+                              <LaTeXText>{err.error_description}</LaTeXText>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </section>
+      )}
 
       {question.options && question.options.length > 0 && (
         <section className={styles.card}>
