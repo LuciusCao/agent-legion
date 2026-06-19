@@ -11,23 +11,18 @@ from server.app.executors._lease_control import (
     _read_job_execution_control,
 )
 from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._path_canonicalization import canonicalize_if_absolute
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
-from server.app.storage_paths import make_data_relative
 
 
 def claim_lease(
-    conn: sqlite3.Connection,
-    request: LeaseClaimRequest,
-    data_dir: Path | None = None,
+    conn: sqlite3.Connection, request: LeaseClaimRequest, data_dir: Path | None = None
 ) -> ClaimedExecution | None:
     """Attempt to claim a node run under capacity limits.
 
     Must run inside an active transaction. Returns None when capacity is
     exhausted or the node is not claimable; the caller is responsible for
     rolling back. Raises ValueError for configuration mismatches.
-
-    When ``data_dir`` is provided, the persisted ``log_path`` is canonicalized
-    relative to it.
     """
     lease_id = str(uuid.uuid4())
     execution_id = str(uuid.uuid4())
@@ -141,9 +136,7 @@ def claim_lease(
     if cursor.rowcount == 0:
         return None
 
-    log_path = request.log_path
-    if data_dir is not None and log_path and Path(log_path).is_absolute():
-        log_path = make_data_relative(Path(log_path), data_dir)
+    log_path = canonicalize_if_absolute(request.log_path, data_dir)
     cursor = conn.execute(
         """
         insert into node_runs(
@@ -151,18 +144,11 @@ def claim_lease(
         )
         values (?, ?, 'running', ?, ?, '', '', ?)
         """,
-        (
-            request.job_id,
-            request.node_key,
-            json.dumps([]),
-            log_path,
-            now_str,
-        ),
+        (request.job_id, request.node_key, json.dumps([]), log_path, now_str),
     )
     if cursor.lastrowid is None:
         raise sqlite3.OperationalError("node_runs insert did not produce a row id")
     node_run_id = cursor.lastrowid
-
     expires_at = now + timedelta(seconds=request.lease_ttl_seconds)
     conn.execute(
         """
@@ -188,11 +174,7 @@ def claim_lease(
     )
 
     conn.execute(
-        """
-        update jobs
-        set status='running', updated_at=?
-        where id=? and status != 'running'
-        """,
+        "update jobs set status='running', updated_at=? where id=? and status != 'running'",
         (now_str, request.job_id),
     )
 

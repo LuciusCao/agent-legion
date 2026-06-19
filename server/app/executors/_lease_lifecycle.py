@@ -10,8 +10,8 @@ from server.app.executors._lease_control import (
     _sync_job_status,
 )
 from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._path_canonicalization import canonicalize_if_absolute
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
-from server.app.storage_paths import make_data_relative
 
 
 def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -> bool:
@@ -35,47 +35,24 @@ def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -
 
 
 def finish_lease(
-    conn: sqlite3.Connection,
-    lease_id: str,
-    result: ExecutionResult,
-    data_dir: Path | None = None,
+    conn: sqlite3.Connection, lease_id: str, result: ExecutionResult, data_dir: Path | None = None
 ) -> bool:
-    """Finish a lease and persist the node run result.
-
-    When ``data_dir`` is provided, the persisted ``log_path`` is canonicalized
-    relative to it.
-    """
+    """Finish a lease and persist the node run result."""
     now = datetime.now(UTC)
     now_str = _sqlite_timestamp(now)
-    lease = conn.execute(
-        """
-        select *
-        from executor_leases
-        where id=?
-        """,
-        (lease_id,),
-    ).fetchone()
+    lease = conn.execute("select * from executor_leases where id=?", (lease_id,)).fetchone()
     if lease is None or lease["status"] != "active":
         return False
 
-    conn.execute(
-        """
-        update executor_leases
-        set status='released'
-        where id=?
-        """,
-        (lease_id,),
-    )
+    conn.execute("update executor_leases set status='released' where id=?", (lease_id,))
 
     node_run = conn.execute(
         "select log_path from node_runs where id=?", (lease["node_run_id"],)
     ).fetchone()
-    effective_log_path = result.log_path or (node_run["log_path"] if node_run is not None else "")
-    if data_dir is not None and effective_log_path and Path(effective_log_path).is_absolute():
-        effective_log_path = make_data_relative(Path(effective_log_path), data_dir)
-    session_dir = result.session_reference
-    if data_dir is not None and session_dir and Path(session_dir).is_absolute():
-        session_dir = make_data_relative(Path(session_dir), data_dir)
+    effective_log_path = canonicalize_if_absolute(
+        result.log_path or (node_run["log_path"] if node_run is not None else ""), data_dir
+    )
+    session_dir = canonicalize_if_absolute(result.session_reference, data_dir)
     conn.execute(
         """
         update node_runs
@@ -119,11 +96,7 @@ def fail_without_lease(
     error_message: str,
     data_dir: Path | None = None,
 ) -> int | None:
-    """Record a failed node run without claiming a lease.
-
-    When ``data_dir`` is provided, the persisted ``log_path`` is canonicalized
-    relative to it.
-    """
+    """Record a failed node run without claiming a lease."""
     now = datetime.now(UTC)
     now_str = _sqlite_timestamp(now)
     cursor = conn.execute(
@@ -137,9 +110,7 @@ def fail_without_lease(
     if cursor.rowcount == 0:
         return None
 
-    log_path = request.log_path
-    if data_dir is not None and log_path and Path(log_path).is_absolute():
-        log_path = make_data_relative(Path(log_path), data_dir)
+    log_path = canonicalize_if_absolute(request.log_path, data_dir)
     cursor = conn.execute(
         """
         insert into node_runs(
