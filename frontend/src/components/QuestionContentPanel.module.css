@@ -6,7 +6,7 @@
 }
 
 .card {
-  background: var(--md-sys-color-surface-container-low);
+  background: #fafafa;
   border-radius: 12px;
   padding: 16px;
 }
@@ -14,31 +14,31 @@
 .sectionTitle {
   font-size: 16px;
   font-weight: 600;
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
   margin: 0 0 12px 0;
 }
 
 .loading {
   padding: 24px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   text-align: center;
 }
 
 .error {
   padding: 12px 16px;
-  background: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
+  background: #fee2e2;
+  color: #b91c1c;
   border-radius: 8px;
 }
 
 .empty {
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   font-style: italic;
 }
 
 .richText {
   line-height: 1.6;
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
 }
 
 .richText :global(p) {
@@ -55,7 +55,7 @@
     transparent 60%,
     rgba(255, 235, 59, 0.85) 60%
   );
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
   border-radius: 2px;
   padding: 0 2px;
 }
@@ -75,13 +75,13 @@
   gap: 8px;
   padding: 8px 12px;
   border-radius: 8px;
-  background: var(--md-sys-color-surface);
+  background: #ffffff;
   transition: background 150ms ease;
 }
 
 .optionItem.correct {
-  background: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-on-secondary-container);
+  background: #f0f0f0;
+  color: #1a1c1e;
 }
 
 .optionLabel {
@@ -94,7 +94,7 @@
 }
 
 .pre {
-  background: var(--md-sys-color-surface);
+  background: #ffffff;
   padding: 12px;
   border-radius: 8px;
   overflow-x: auto;
@@ -104,7 +104,7 @@
 }
 
 .answerCard {
-  background: var(--md-sys-color-surface-container-low);
+  background: #fafafa;
 }
 
 .answerBadges {
@@ -118,8 +118,8 @@
   align-items: center;
   padding: 6px 12px;
   border-radius: 999px;
-  background: var(--md-sys-color-secondary);
-  color: var(--md-sys-color-on-secondary);
+  background: #5d5f61;
+  color: #ffffff;
   font-size: 14px;
   font-weight: 500;
   line-height: 1.4;
@@ -129,7 +129,7 @@
   font-size: 18px;
   width: 18px;
   height: 18px;
-  color: var(--md-sys-color-on-secondary-container);
+  color: #1a1c1e;
   flex-shrink: 0;
   margin-top: 1px;
 }
@@ -149,7 +149,7 @@
 
 .blankLabel {
   font-weight: 600;
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
   flex-shrink: 0;
 }
 
@@ -180,7 +180,7 @@
 .stepTitle {
   font-size: 14px;
   font-weight: 600;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   margin: 0;
 }
 
@@ -214,7 +214,7 @@
 .chipsCount {
   font-size: 12px;
   font-weight: 400;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   margin-left: 8px;
 }
 
@@ -230,9 +230,9 @@
   gap: 6px;
   padding: 6px 12px;
   border-radius: 999px;
-  border: 1px solid var(--md-sys-color-outline-variant);
-  background: var(--md-sys-color-surface);
-  color: var(--md-sys-color-on-surface);
+  border: 1px solid #e0e0e0;
+  background: #ffffff;
+  color: #1a1c1e;
   font-size: 13px;
   cursor: pointer;
   transition: all 0.2s ease;
@@ -240,19 +240,19 @@
 }
 
 .chip:hover {
-  background: var(--md-sys-color-surface-container-high);
+  background: #f5f5f5;
 }
 
 .chipSelected {
-  background: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-on-secondary-container);
-  border-color: var(--md-sys-color-secondary-container);
+  background: #f0f0f0;
+  color: #1a1c1e;
+  border-color: #f0f0f0;
 }
 
 .chipIndex {
   font-size: 11px;
-  color: var(--md-sys-color-on-surface-variant);
-  background: var(--md-sys-color-surface-container-high);
+  color: #43474e;
+  background: #f5f5f5;
   border-radius: 999px;
   width: 18px;
   height: 18px;
@@ -263,7 +263,7 @@
 
 .chipSelected .chipIndex {
   background: rgba(103, 80, 164, 0.15);
-  color: var(--md-sys-color-on-secondary-container);
+  color: #1a1c1e;
 }
 
 .detailPanel {
@@ -271,8 +271,8 @@
 }
 
 .detailCard {
-  background: var(--md-sys-color-surface);
-  border: 1px solid var(--md-sys-color-outline-variant);
+  background: #ffffff;
+  border: 1px solid #e0e0e0;
   border-radius: 12px;
   padding: 14px;
   margin-bottom: 10px;
@@ -293,18 +293,18 @@
 }
 
 .typeBadgeGiven {
-  background: var(--md-sys-color-secondary-container);
-  color: var(--md-sys-color-on-secondary-container);
+  background: #f0f0f0;
+  color: #1a1c1e;
 }
 
 .typeBadgeHidden {
-  background: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
+  background: #fee2e2;
+  color: #b91c1c;
 }
 
 .detailId {
   font-size: 12px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
 }
 
 .detailText {
@@ -315,12 +315,12 @@
 
 .detailSection {
   font-size: 13px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   margin-top: 8px;
 }
 
 .detailSection strong {
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
 }
 
 .abilityList {
@@ -334,8 +334,8 @@
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--md-sys-color-surface-container-high);
-  color: var(--md-sys-color-on-surface-variant);
+  background: #f5f5f5;
+  color: #43474e;
 }
 
 .errorAnswerBadge {
@@ -343,8 +343,8 @@
   align-items: center;
   padding: 4px 10px;
   border-radius: 999px;
-  background: var(--md-sys-color-error-container);
-  color: var(--md-sys-color-on-error-container);
+  background: #fee2e2;
+  color: #b91c1c;
   font-size: 13px;
   font-weight: 500;
   line-height: 1.4;
@@ -361,6 +361,6 @@
   font-size: 11px;
   padding: 2px 8px;
   border-radius: 999px;
-  background: var(--md-sys-color-surface-container-high);
-  color: var(--md-sys-color-on-surface-variant);
+  background: #f5f5f5;
+  color: #43474e;
 }

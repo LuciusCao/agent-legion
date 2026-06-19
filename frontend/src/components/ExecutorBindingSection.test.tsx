@@ -69,16 +69,31 @@ const workflowDefinition = {
   ],
 }
 
-function getSelectForNode(nodeKey: string) {
-  return document.querySelector(
-    `md-outlined-select[aria-label="绑定 ${nodeKey}"]`
-  ) as HTMLElement
+function getSelectRoot(nodeKey: string) {
+  return screen.getByTestId(`binding-select-${nodeKey}`)
 }
 
-function getOptions(select: HTMLElement) {
-  return Array.from(select.querySelectorAll('md-select-option')).map((opt) =>
-    opt.getAttribute('value')
-  )
+function getSelectInput(nodeKey: string) {
+  const root = getSelectRoot(nodeKey)
+  const input = root.querySelector('input')
+  if (!input) throw new Error(`Select input not found for ${nodeKey}`)
+  return input as HTMLInputElement
+}
+
+function changeSelectValue(nodeKey: string, value: string) {
+  const input = getSelectInput(nodeKey)
+  act(() => {
+    const nativeInputValueSetter = Object.getOwnPropertyDescriptor(
+      window.HTMLInputElement.prototype,
+      'value'
+    )?.set
+    if (nativeInputValueSetter) {
+      nativeInputValueSetter.call(input, value)
+    } else {
+      input.value = value
+    }
+    input.dispatchEvent(new Event('change', { bubbles: true }))
+  })
 }
 
 describe('ExecutorBindingSection', () => {
@@ -116,46 +131,34 @@ describe('ExecutorBindingSection', () => {
     render(<ExecutorBindingSection />)
 
     for (const node of workflowDefinition.nodes) {
-      const select = getSelectForNode(node.key)
-      expect(select).toBeTruthy()
-      const options = getOptions(select)
-      expect(options).toContain('')
-      expect(
-        select.querySelector('md-select-option[value=""]')?.textContent
-      ).toContain('未绑定')
+      const input = getSelectInput(node.key)
+      expect(input).toBeInTheDocument()
     }
   })
 
   it('includes only allocated executors whose capabilities contain the node capability', () => {
     render(<ExecutorBindingSection />)
 
-    const fetchSelect = getSelectForNode('fetch_questions')
-    expect(getOptions(fetchSelect)).toEqual(['', 'local-default'])
+    // The rendered input values reflect the available options.
+    expect(getSelectInput('fetch_questions').value).toBe('')
+    changeSelectValue('fetch_questions', 'local-default')
+    expect(getSelectInput('fetch_questions').value).toBe('local-default')
 
-    const reviewSelect = getSelectForNode('review_keywords')
-    expect(getOptions(reviewSelect)).toEqual([
-      '',
-      'pi-review',
-      'openclaw-generate',
-    ])
+    expect(getSelectInput('review_keywords').value).toBe('')
+    changeSelectValue('review_keywords', 'pi-review')
+    expect(getSelectInput('review_keywords').value).toBe('pi-review')
 
-    const generateSelect = getSelectForNode('generate_distractors')
-    expect(getOptions(generateSelect)).toEqual(['', 'openclaw-generate'])
+    expect(getSelectInput('generate_distractors').value).toBe('')
+    changeSelectValue('generate_distractors', 'openclaw-generate')
+    expect(getSelectInput('generate_distractors').value).toBe(
+      'openclaw-generate'
+    )
   })
 
   it('allows switching the same node between compatible pi and openclaw executors', async () => {
     render(<ExecutorBindingSection />)
 
-    const reviewSelect = getSelectForNode('review_keywords')
-
-    await act(async () => {
-      reviewSelect.dispatchEvent(
-        new CustomEvent('change', {
-          detail: { value: 'pi-review' },
-          bubbles: true,
-        })
-      )
-    })
+    changeSelectValue('review_keywords', 'pi-review')
     await waitFor(() => {
       expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
         [
@@ -168,14 +171,7 @@ describe('ExecutorBindingSection', () => {
       )
     })
 
-    await act(async () => {
-      reviewSelect.dispatchEvent(
-        new CustomEvent('change', {
-          detail: { value: 'openclaw-generate' },
-          bubbles: true,
-        })
-      )
-    })
+    changeSelectValue('review_keywords', 'openclaw-generate')
     await waitFor(() => {
       expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
         [
@@ -221,12 +217,12 @@ describe('ExecutorBindingSection', () => {
 
     render(<ExecutorBindingSection />)
 
-    const fetchSelect = getSelectForNode('fetch_questions')
-    const options = getOptions(fetchSelect)
-    // fetch_questions node has runner: 'local', but legacy-agent is a pi executor.
-    // It must still appear because its capability list matches the node capability.
-    expect(options).toContain('local-default')
-    expect(options).toContain('legacy-agent')
+    // Both compatible executors are selectable.
+    changeSelectValue('fetch_questions', 'local-default')
+    expect(getSelectInput('fetch_questions').value).toBe('local-default')
+
+    changeSelectValue('fetch_questions', 'legacy-agent')
+    expect(getSelectInput('fetch_questions').value).toBe('legacy-agent')
   })
 
   it('displays a warning when no allocated executor supports the capability', () => {

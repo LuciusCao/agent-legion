@@ -1,3 +1,5 @@
+import { IconButton, Button } from '@mui/material'
+import { MaterialIcon } from '../components/MaterialIcon'
 import { WORKSPACE_LABELS } from '../labels'
 import type { ExecutorRuntimeStatus } from '../workspaceTypes'
 
@@ -35,6 +37,7 @@ export default function WorkspaceCard({
 
   return (
     <div
+      data-testid="workspace-card"
       role="button"
       tabIndex={0}
       onClick={onClick}
@@ -47,9 +50,9 @@ export default function WorkspaceCard({
       style={{
         borderRadius: 16,
         padding: 20,
-        background: 'var(--md-sys-color-surface-container-low)',
+        background: '#f5f5f5',
         cursor: 'pointer',
-        border: '1px solid var(--md-sys-color-outline-variant)',
+        border: '1px solid #e0e0e0',
         transition: 'box-shadow 0.2s',
       }}
       onMouseEnter={(e) => {
@@ -71,8 +74,8 @@ export default function WorkspaceCard({
           <span
             style={{
               fontSize: 12,
-              color: 'var(--md-sys-color-on-surface-variant)',
-              background: 'var(--md-sys-color-surface-container-highest)',
+              color: '#616161',
+              background: '#eeeeee',
               padding: '2px 8px',
               borderRadius: 12,
             }}
@@ -81,39 +84,30 @@ export default function WorkspaceCard({
           </span>
         </div>
         {!isSystem && onDelete && (
-          <md-icon-button
-            onClick={(e: Event) => {
+          <IconButton
+            size="small"
+            aria-label="删除"
+            onClick={(e) => {
               e.stopPropagation()
               onDelete()
             }}
           >
-            <md-icon>delete</md-icon>
-          </md-icon-button>
+            <MaterialIcon name="delete" />
+          </IconButton>
         )}
       </div>
 
       <div style={{ marginTop: 16, display: 'flex', gap: 16, fontSize: 13 }}>
         <div>
-          <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-            {WORKSPACE_LABELS.jobs}
-          </div>
+          <div style={{ color: '#616161' }}>{WORKSPACE_LABELS.jobs}</div>
           <div style={{ fontWeight: 600 }}>
-            {total} |{' '}
-            <span style={{ color: 'var(--md-sys-color-primary)' }}>
-              {running}
-            </span>{' '}
-            |{' '}
-            <span style={{ color: 'var(--md-sys-color-tertiary)' }}>
-              {completed}
-            </span>{' '}
-            |{' '}
-            <span style={{ color: 'var(--md-sys-color-error)' }}>{failed}</span>
+            {total} | <span style={{ color: '#1976d2' }}>{running}</span> |{' '}
+            <span style={{ color: '#2e7d32' }}>{completed}</span> |{' '}
+            <span style={{ color: '#d32f2f' }}>{failed}</span>
           </div>
         </div>
         <div>
-          <div style={{ color: 'var(--md-sys-color-on-surface-variant)' }}>
-            {WORKSPACE_LABELS.executors}
-          </div>
+          <div style={{ color: '#616161' }}>{WORKSPACE_LABELS.executors}</div>
           <div style={{ fontWeight: 600 }}>
             {executorRunning}/{executorAvailable}
           </div>
@@ -121,9 +115,9 @@ export default function WorkspaceCard({
       </div>
 
       <div style={{ marginTop: 16 }}>
-        <md-filled-button style={{ width: '100%' }} onClick={onClick}>
+        <Button variant="contained" fullWidth onClick={onClick}>
           {WORKSPACE_LABELS.enter}
-        </md-filled-button>
+        </Button>
       </div>
     </div>
   )

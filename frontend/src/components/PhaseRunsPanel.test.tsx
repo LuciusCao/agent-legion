@@ -443,9 +443,8 @@ describe('PhaseRunsPanel', () => {
 
     fireEvent.click(screen.getByText('转录详情'))
 
-    expect(
-      screen.getByText('Provider').closest('md-dialog')
-    ).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+    expect(screen.getByText('Provider')).toBeInTheDocument()
   })
 
   it('opens the openclaw session in a dialog without showing the key in the panel', async () => {
@@ -496,9 +495,7 @@ describe('PhaseRunsPanel', () => {
     await waitFor(() =>
       expect(screen.getByText(/\[ASSISTANT\]/)).toBeInTheDocument()
     )
-    expect(
-      screen.getByText('会话 v1-123').closest('md-dialog')
-    ).toBeInTheDocument()
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
     expect(fetch).toHaveBeenCalledWith(
       '/api/videos/v1/phase-runs/3/session',
       expect.objectContaining({ cache: 'no-store' })

@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react'
-import type { CSSProperties } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import { fetchJobLog } from '../jobApi'
 import type { JobLogResponse } from '../jobApi'
 import styles from './JobLogDialog.module.css'
@@ -55,16 +61,14 @@ export function JobLogDialog({
       })
   }, [open, jobId, runId])
 
-  const dialogStyle = {
-    '--md-dialog-container-color': '#ffffff',
-    maxWidth: '760px',
-    width: '90vw',
-  } as CSSProperties
-
   return (
-    <md-dialog open={open} onClosed={onClose} style={dialogStyle}>
-      <div slot="headline">日志 — {nodeLabel}</div>
-      <div slot="content" className={styles.content}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      PaperProps={{ sx: { maxWidth: '760px', width: '90vw' } }}
+    >
+      <DialogTitle>日志 — {nodeLabel}</DialogTitle>
+      <DialogContent className={styles.content}>
         {loading && <p className={styles.empty}>加载中...</p>}
         {!loading && error && <p className={styles.error}>{error}</p>}
         {!loading && !error && log && log.log === '' && (
@@ -78,10 +82,12 @@ export function JobLogDialog({
             )}
           </>
         )}
-      </div>
-      <div slot="actions">
-        <md-text-button onClick={onClose}>关闭</md-text-button>
-      </div>
-    </md-dialog>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={onClose}>
+          关闭
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

@@ -1,4 +1,5 @@
-import { useEffect, useRef, useCallback, useState } from 'react'
+import { useEffect, useState, useCallback } from 'react'
+import { Tabs, Tab, TextField, IconButton } from '@mui/material'
 import { useVideoStore } from '../stores/videoStore'
 import { useUiStore } from '../stores/uiStore'
 import { useVideoEvents } from '../hooks/useVideoEvents'
@@ -16,6 +17,7 @@ import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
 import { RunToDialog } from '../components/RunToDialog'
 import { AddDialog } from '../components/AddDialog'
 import { PackageHistoryDialog } from '../components/PackageHistoryDialog'
+import { MaterialIcon } from '../components/MaterialIcon'
 
 export function ListPage() {
   const selectedType = useVideoStore((state) => state.selectedType)
@@ -48,6 +50,7 @@ export function ListPage() {
   const [rerunDialogOpen, setRerunDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [runToDialogOpen, setRunToDialogOpen] = useState(false)
+  const tabValue = selectedType === 'knowledge' ? 0 : 1
 
   const debouncedSetSearchQuery = useDebouncedCallback(setSearchQuery, 250)
 
@@ -59,9 +62,6 @@ export function ListPage() {
       useVideoStore.getState().clearError()
     }
   }, [fetchVideos, showToast])
-  const tabsRef = useRef<(HTMLElement & { activeTabIndex: number }) | null>(
-    null
-  )
 
   useEffect(() => {
     handleFetchVideos()
@@ -69,15 +69,9 @@ export function ListPage() {
 
   useVideoEvents()
 
-  useEffect(() => {
-    const tabs = tabsRef.current
-    if (!tabs) return
-    const handleChange = () => {
-      setSelectedType(tabs.activeTabIndex === 0 ? 'knowledge' : 'question')
-    }
-    tabs.addEventListener('change', handleChange)
-    return () => tabs.removeEventListener('change', handleChange)
-  }, [setSelectedType])
+  const handleTabChange = (_: React.SyntheticEvent, value: number) => {
+    setSelectedType(value === 0 ? 'knowledge' : 'question')
+  }
 
   const selectedVideos = videos.filter((video) => selectedIds.has(video.id))
   const count = selectedIds.size
@@ -185,20 +179,15 @@ export function ListPage() {
     <section className="view workbench-view">
       <div className="list-fixed-header">
         <section className="filters-row">
-          <md-tabs
-            ref={tabsRef}
-            active-tab-index={selectedType === 'knowledge' ? 0 : 1}
-          >
-            <md-primary-tab>知识点</md-primary-tab>
-            <md-primary-tab>题目</md-primary-tab>
-          </md-tabs>
-          <md-outlined-text-field
+          <Tabs value={tabValue} onChange={handleTabChange}>
+            <Tab label="知识点" />
+            <Tab label="题目" />
+          </Tabs>
+          <TextField
             type="search"
             placeholder="搜索 ID、标题或内部记录"
             value={searchQuery}
-            onInput={(e: React.FormEvent<HTMLElement>) =>
-              debouncedSetSearchQuery((e.target as HTMLInputElement).value)
-            }
+            onChange={(e) => debouncedSetSearchQuery(e.target.value)}
           />
         </section>
 
@@ -210,27 +199,25 @@ export function ListPage() {
                 className="sse-status"
                 title="实时连接已断开，正在尝试重连…"
               >
-                <md-icon style={{ color: 'var(--md-sys-color-error)' }}>
-                  cloud_off
-                </md-icon>
+                <MaterialIcon sx={{ color: '#d32f2f' }} name="cloud_off" />
               </span>
             )}
-            <md-icon-button
+            <IconButton
               onClick={toggleSelectMode}
               title={selectMode ? '完成' : '多选'}
               className={selectMode ? 'active-icon' : ''}
             >
-              <md-icon>{selectMode ? 'close' : 'checklist'}</md-icon>
-            </md-icon-button>
-            <md-icon-button onClick={openAddDialog} title="添加">
-              <md-icon>add</md-icon>
-            </md-icon-button>
-            <md-icon-button
+              <MaterialIcon name={selectMode ? 'close' : 'checklist'} />
+            </IconButton>
+            <IconButton onClick={() => openAddDialog()} title="添加">
+              <MaterialIcon name="add" />
+            </IconButton>
+            <IconButton
               onClick={() => setPackageDialogOpen(true)}
               title="包历史"
             >
-              <md-icon>inventory_2</md-icon>
-            </md-icon-button>
+              <MaterialIcon name="inventory_2" />
+            </IconButton>
           </div>
         </div>
       </div>

@@ -1,11 +1,11 @@
-import { useRef } from 'react'
+import {
+  FormControl,
+  InputLabel,
+  MenuItem,
+  Select,
+  type SelectChangeEvent,
+} from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
-import { getSelectedValue } from '../helpers'
-
-type SelectRefEntry = {
-  el: HTMLElement
-  handler: (event: Event) => void
-}
 
 export function ExecutorBindingSection() {
   const {
@@ -15,8 +15,6 @@ export function ExecutorBindingSection() {
     setNodeBinding,
   } = useSettingStore()
 
-  const selectRefs = useRef<Record<string, SelectRefEntry | null>>({})
-
   const allocatedIds = new Set(
     executorConfiguration.allocations.map((a) => a.executor_id)
   )
@@ -25,6 +23,11 @@ export function ExecutorBindingSection() {
 
   const workflowKey = workflowDefinition.key
 
+  const handleChange = (nodeKey: string) => (event: SelectChangeEvent) => {
+    const value = event.target.value
+    setNodeBinding(workflowKey, nodeKey, value === '' ? null : value)
+  }
+
   return (
     <div>
       <h3
@@ -32,7 +35,7 @@ export function ExecutorBindingSection() {
           fontSize: 14,
           fontWeight: 500,
           margin: '0 0 12px',
-          color: 'var(--md-sys-color-on-surface-variant)',
+          color: '#43474e',
         }}
       >
         节点绑定
@@ -57,6 +60,7 @@ export function ExecutorBindingSection() {
               executor.capabilities.includes(node.capability)
           )
           const hasSupport = compatibleExecutors.length > 0
+          const label = `绑定 ${node.key}`
 
           return (
             <li
@@ -65,7 +69,7 @@ export function ExecutorBindingSection() {
                 display: 'grid',
                 gap: 8,
                 padding: 12,
-                border: '1px solid var(--md-sys-color-outline-variant)',
+                border: '1px solid #c3c6cf',
                 borderRadius: 12,
               }}
             >
@@ -93,8 +97,8 @@ export function ExecutorBindingSection() {
                     fontSize: 12,
                     padding: '2px 8px',
                     borderRadius: 999,
-                    background: 'var(--md-sys-color-surface-variant)',
-                    color: 'var(--md-sys-color-on-surface-variant)',
+                    background: '#f0f0f0',
+                    color: '#43474e',
                     flexShrink: 0,
                   }}
                 >
@@ -102,47 +106,32 @@ export function ExecutorBindingSection() {
                 </span>
               </div>
 
-              <md-outlined-select
-                ref={(el: HTMLElement | null) => {
-                  const prev = selectRefs.current[node.key]
-                  if (prev && prev.el !== el) {
-                    prev.el.removeEventListener('change', prev.handler)
-                    selectRefs.current[node.key] = null
-                  }
-                  if (el) {
-                    const handler = (event: Event) => {
-                      const value = getSelectedValue(event)
-                      setNodeBinding(
-                        workflowKey,
-                        node.key,
-                        value === '' ? null : value
-                      )
-                    }
-                    el.addEventListener('change', handler)
-                    selectRefs.current[node.key] = { el, handler }
-                  }
-                }}
-                label={`绑定 ${node.key}`}
-                aria-label={`绑定 ${node.key}`}
-                value={currentBinding?.executor_id ?? ''}
-              >
-                <md-select-option value="">
-                  <div slot="headline">未绑定</div>
-                </md-select-option>
-                {compatibleExecutors.map((executor) => (
-                  <md-select-option key={executor.id} value={executor.id}>
-                    <div slot="headline">
+              <FormControl fullWidth>
+                <InputLabel id={`binding-label-${node.key}`}>
+                  {label}
+                </InputLabel>
+                <Select
+                  labelId={`binding-label-${node.key}`}
+                  label={label}
+                  aria-label={label}
+                  data-testid={`binding-select-${node.key}`}
+                  value={currentBinding?.executor_id ?? ''}
+                  onChange={handleChange(node.key)}
+                >
+                  <MenuItem value="">未绑定</MenuItem>
+                  {compatibleExecutors.map((executor) => (
+                    <MenuItem key={executor.id} value={executor.id}>
                       {executor.id} ({executor.kind})
-                    </div>
-                  </md-select-option>
-                ))}
-              </md-outlined-select>
+                    </MenuItem>
+                  ))}
+                </Select>
+              </FormControl>
 
               {!hasSupport && (
                 <div
                   style={{
                     fontSize: 12,
-                    color: 'var(--md-sys-color-error)',
+                    color: '#ba1a1a',
                   }}
                 >
                   没有已分配的执行器支持能力 {node.capability}

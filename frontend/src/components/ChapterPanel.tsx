@@ -1,3 +1,4 @@
+import { List, ListItemButton, ListItemText } from '@mui/material'
 import { useArtifactStore } from '../stores/artifactStore'
 
 export function ChapterPanel({ onSeek }: { onSeek: (time: number) => void }) {
@@ -9,23 +10,28 @@ export function ChapterPanel({ onSeek }: { onSeek: (time: number) => void }) {
   }
 
   return (
-    <md-list className="tab-panel">
+    <List className="tab-panel" dense>
       {chapters.map((chapter, index) => (
-        <md-list-item
+        <ListItemButton
           key={chapter.id || index}
-          type="button"
           onClick={() => onSeek(chapter.start)}
         >
-          <div
-            slot="headline"
-            style={{ fontVariantNumeric: 'tabular-nums', minWidth: '80px' }}
-          >
-            {formatTime(chapter.start)}
-          </div>
-          <div slot="supporting-text">{chapter.title}</div>
-        </md-list-item>
+          <ListItemText
+            primary={
+              <span
+                style={{
+                  fontVariantNumeric: 'tabular-nums',
+                  minWidth: '80px',
+                }}
+              >
+                {formatTime(chapter.start)}
+              </span>
+            }
+            secondary={chapter.title}
+          />
+        </ListItemButton>
       ))}
-    </md-list>
+    </List>
   )
 }
 

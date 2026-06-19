@@ -1,3 +1,4 @@
+import { MaterialIcon } from '../components/MaterialIcon'
 import { STATUS_FILTER_CONFIG } from '../labels'
 import styles from './WorkspaceStatCards.module.css'
 
@@ -28,7 +29,7 @@ export function WorkspaceStatCards({
             }`}
             onClick={() => onFilterChange(key)}
           >
-            <md-icon>{config.icon}</md-icon>
+            <MaterialIcon name={config.icon} fontSize="small" />
             <span>
               {config.label}（{counts[key] ?? 0}）
             </span>

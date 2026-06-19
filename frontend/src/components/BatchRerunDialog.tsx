@@ -1,4 +1,12 @@
 import { useState } from 'react'
+import {
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import { PHASE_LABELS } from '../labels'
 import styles from './BatchRerunDialog.module.css'
 
@@ -67,37 +75,49 @@ export function BatchRerunDialog({
 
   const showPhaseGrid = phases.length > 0
 
+  const phaseChip = (phase: string, label: string) => {
+    const selected = selectedPhase === phase
+    return (
+      <Chip
+        key={phase}
+        label={label}
+        onClick={() => setSelectedPhase(phase)}
+        variant={selected ? 'filled' : 'outlined'}
+        sx={
+          selected
+            ? {
+                backgroundColor: '#000000',
+                color: '#ffffff',
+                '&:hover': { backgroundColor: '#333333' },
+              }
+            : {}
+        }
+      />
+    )
+  }
+
   return (
-    <md-dialog
-      open
-      onClosed={onClose}
-      style={
-        {
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth={false}
+      PaperProps={{
+        sx: {
           minWidth: '520px',
           maxWidth: '760px',
           width: 'min(760px, 92vw)',
-          '--md-dialog-container-color': '#ffffff',
-        } as React.CSSProperties
-      }
+        },
+      }}
     >
-      <div slot="headline">选择重跑阶段</div>
-      <div slot="content">
+      <DialogTitle>选择重跑阶段</DialogTitle>
+      <DialogContent>
         <div className={styles.content}>
           {showPhaseGrid && (
             <div className={styles.phaseGrid}>
-              <md-filter-chip
-                label={PHASE_LABELS['__failed__']}
-                selected={selectedPhase === '__failed__' || undefined}
-                onClick={() => setSelectedPhase('__failed__')}
-              />
-              {phases.map((phase) => (
-                <md-filter-chip
-                  key={phase}
-                  label={PHASE_LABELS[phase] ?? phase}
-                  selected={selectedPhase === phase || undefined}
-                  onClick={() => setSelectedPhase(phase)}
-                />
-              ))}
+              {phaseChip('__failed__', PHASE_LABELS['__failed__'])}
+              {phases.map((phase) =>
+                phaseChip(phase, PHASE_LABELS[phase] ?? phase)
+              )}
             </div>
           )}
           <div className={styles.videoGrid}>
@@ -124,18 +144,19 @@ export function BatchRerunDialog({
             已选择 {items.length} 个{itemLabel}，可重跑 {runnableCount} 个
           </div>
         </div>
-      </div>
-      <div slot="actions">
-        <md-text-button type="button" onClick={onClose}>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" type="button" onClick={onClose}>
           取消
-        </md-text-button>
-        <md-filled-button
+        </Button>
+        <Button
+          variant="contained"
           onClick={handleConfirm}
-          disabled={runnableCount === 0 || loading || undefined}
+          disabled={runnableCount === 0 || loading}
         >
           重跑 {runnableCount} 个{itemLabel}
-        </md-filled-button>
-      </div>
-    </md-dialog>
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

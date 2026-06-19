@@ -192,7 +192,7 @@ describe('JobActionBar', () => {
 
   it('opens rerun dialog and exposes node keys for batch selection', async () => {
     const onRerun = vi.fn()
-    const { container } = render(
+    render(
       <JobActionBar
         jobs={[
           makeJob({
@@ -220,11 +220,9 @@ describe('JobActionBar', () => {
       screen.getByText('重跑').click()
     })
     expect(screen.getByText('选择重跑节点')).toBeInTheDocument()
-    const chips = container.querySelectorAll('md-filter-chip')
-    expect(chips.length).toBe(3)
-    expect(chips[0]?.getAttribute('label')).toBe('提取')
-    expect(chips[1]?.getAttribute('label')).toBe('生成')
-    expect(chips[2]?.getAttribute('label')).toBe('审核')
+    expect(screen.getByTestId('rerun-chip-extract')).toHaveTextContent('提取')
+    expect(screen.getByTestId('rerun-chip-generate')).toHaveTextContent('生成')
+    expect(screen.getByTestId('rerun-chip-review')).toHaveTextContent('审核')
   })
 
   it('disables actions when loading', () => {
@@ -246,7 +244,7 @@ describe('JobActionBar', () => {
 
   it('opens run-to dialog when the run-to button is clicked', async () => {
     const onRunTo = vi.fn()
-    const { container } = render(
+    render(
       <JobActionBar
         jobs={[
           makeJob({
@@ -270,9 +268,7 @@ describe('JobActionBar', () => {
     })
 
     expect(screen.getByText('选择运行到节点')).toBeInTheDocument()
-    expect(
-      container.querySelector('[data-testid="target-chip-extract"]')
-    ).toBeInTheDocument()
+    expect(screen.getByTestId('target-chip-extract')).toBeInTheDocument()
   })
 
   it('shows the continue button for a target-reached paused job', () => {

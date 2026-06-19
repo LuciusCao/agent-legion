@@ -312,16 +312,13 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
-    const search = document.querySelector('md-outlined-text-field') as
-      | (HTMLElement & { value: string })
-      | null
+    const search = screen.getByPlaceholderText(
+      '搜索 ID 或标题'
+    ) as HTMLInputElement
     expect(search).toBeInTheDocument()
 
     await act(async () => {
-      if (search) {
-        search.value = 'algebra'
-        search.dispatchEvent(new Event('input', { bubbles: true }))
-      }
+      fireEvent.change(search, { target: { value: 'algebra' } })
     })
 
     await act(async () => {

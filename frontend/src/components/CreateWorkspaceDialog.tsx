@@ -1,4 +1,12 @@
 import { useState } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  TextField,
+} from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 
@@ -19,8 +27,6 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
     onClose()
   }
 
-  if (!open) return null
-
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
     if (!name.trim()) return
@@ -37,39 +43,42 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
   }
 
   return (
-    <md-dialog open onClosed={handleClose}>
-      <div slot="headline">{WORKSPACE_LABELS.createWorkspace}</div>
-      <form
-        slot="content"
-        onSubmit={handleSubmit}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 16,
-          minWidth: 320,
-        }}
-      >
-        <md-outlined-text-field
-          label={WORKSPACE_LABELS.workspaceName}
-          value={name}
-          onInput={(e: Event) => setName((e.target as HTMLInputElement).value)}
-          required
-        />
-        {error && (
-          <div style={{ color: 'var(--md-sys-color-error)', fontSize: 12 }}>
-            {error}
-          </div>
-        )}
-      </form>
-      <div slot="actions">
-        <md-text-button onClick={handleClose}>取消</md-text-button>
-        <md-filled-button
+    <Dialog open={open} onClose={handleClose}>
+      <DialogTitle>{WORKSPACE_LABELS.createWorkspace}</DialogTitle>
+      <DialogContent>
+        <form
+          onSubmit={handleSubmit}
+          style={{
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 16,
+            minWidth: 320,
+          }}
+        >
+          <TextField
+            variant="outlined"
+            label={WORKSPACE_LABELS.workspaceName}
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+            required
+          />
+          {error && (
+            <div style={{ color: '#ba1a1a', fontSize: 12 }}>{error}</div>
+          )}
+        </form>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={handleClose} disabled={creating}>
+          取消
+        </Button>
+        <Button
+          variant="contained"
           onClick={handleSubmit}
-          disabled={creating || undefined}
+          disabled={creating || !name.trim()}
         >
           {creating ? '创建中…' : WORKSPACE_LABELS.create}
-        </md-filled-button>
-      </div>
-    </md-dialog>
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

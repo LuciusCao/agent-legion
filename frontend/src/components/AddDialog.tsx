@@ -1,7 +1,16 @@
-import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  MenuItem,
+  TextField,
+} from '@mui/material'
 import { useUiStore } from '../stores/uiStore'
 import { api, fetchWorkflowDefinition } from '../api'
-import { parseResourceInputs, getSelectedValue } from '../helpers'
+import { parseResourceInputs } from '../helpers'
 import type {
   AddResult,
   ContentType,
@@ -35,9 +44,6 @@ export function AddDialog({
   const [selectedModeKey, setSelectedModeKey] = useState('')
   const [loadingModes, setLoadingModes] = useState(false)
   const [inputValue, setInputValue] = useState('')
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
-  const dialogRef = useRef<HTMLElement>(null)
-  const selectRef = useRef<HTMLElement | null>(null)
 
   const hasInput = inputValue.trim().length > 0
 
@@ -204,30 +210,6 @@ export function AddDialog({
     onClose()
   }, [onClose])
 
-  useEffect(() => {
-    if (!open) return
-    const dialog = dialogRef.current
-    if (!dialog) return
-    dialog.addEventListener('close', handleClose)
-    dialog.addEventListener('closed', handleClose)
-    return () => {
-      dialog.removeEventListener('close', handleClose)
-      dialog.removeEventListener('closed', handleClose)
-    }
-  }, [open, handleClose])
-
-  useEffect(() => {
-    const select = selectRef.current
-    if (!select) return
-    const handler = (event: Event) => {
-      setSelectedModeKey(getSelectedValue(event))
-    }
-    select.addEventListener('change', handler)
-    return () => {
-      select.removeEventListener('change', handler)
-    }
-  }, [open])
-
   if (!open) return null
 
   const isVideo = context === 'video'
@@ -243,71 +225,65 @@ export function AddDialog({
     : modes.find((m) => m.key === selectedModeKey)?.label || 'ID'
 
   return (
-    <md-dialog
-      ref={dialogRef}
-      open
-      style={
-        {
-          minWidth: '520px',
-          '--md-dialog-container-color': '#ffffff',
-        } as React.CSSProperties
-      }
+    <Dialog
+      open={open}
+      onClose={handleClose}
+      maxWidth={false}
+      PaperProps={{ sx: { minWidth: '520px' } }}
     >
-      <div slot="headline">添加资源</div>
-      <div slot="content">
+      <DialogTitle>添加资源</DialogTitle>
+      <DialogContent>
         <div style={{ display: 'grid', gap: '16px', minWidth: '460px' }}>
           {isVideo && (
             <div style={{ display: 'flex', gap: '8px' }}>
-              <md-outlined-button
-                className={
-                  addContentType === 'knowledge'
-                    ? `${styles.typeBtn} ${styles.active}`
-                    : styles.typeBtn
+              <Button
+                variant={
+                  addContentType === 'knowledge' ? 'contained' : 'outlined'
                 }
+                className={styles.typeBtn}
                 onClick={() => setAddContentType('knowledge')}
               >
                 知识点
-              </md-outlined-button>
-              <md-outlined-button
-                className={
-                  addContentType === 'question'
-                    ? `${styles.typeBtn} ${styles.active}`
-                    : styles.typeBtn
+              </Button>
+              <Button
+                variant={
+                  addContentType === 'question' ? 'contained' : 'outlined'
                 }
+                className={styles.typeBtn}
                 onClick={() => setAddContentType('question')}
               >
                 题目
-              </md-outlined-button>
+              </Button>
             </div>
           )}
           {!isVideo && (
-            <md-outlined-select
-              ref={selectRef}
+            <TextField
+              select
               label="导入模式"
               value={selectedModeKey}
+              onChange={(event) => setSelectedModeKey(event.target.value)}
+              fullWidth
             >
               {modes.map((mode) => (
-                <md-select-option key={mode.key} value={mode.key}>
-                  <div slot="headline">{getEffectiveLabel(mode)}</div>
-                </md-select-option>
+                <MenuItem key={mode.key} value={mode.key}>
+                  {getEffectiveLabel(mode)}
+                </MenuItem>
               ))}
-            </md-outlined-select>
+            </TextField>
           )}
           {!isVideo && modes.length === 0 && !loadingModes && (
             <div className={styles.noModesHint}>
               当前工作空间未启用任何接入模式，请先在设置中配置并保存。
             </div>
           )}
-          <md-outlined-text-field
-            ref={textareaRef}
-            type="textarea"
+          <TextField
+            multiline
             rows={8}
             label={textareaLabel}
             placeholder={placeholder}
             value={inputValue}
-            onInput={(event: React.FormEvent<HTMLInputElement>) =>
-              setInputValue((event.target as HTMLInputElement).value)
-            }
+            onChange={(event) => setInputValue(event.target.value)}
+            fullWidth
           />
           {results.length > 0 && (
             <div className={styles.addResults}>
@@ -321,18 +297,19 @@ export function AddDialog({
             </div>
           )}
         </div>
-      </div>
-      <div slot="actions">
-        <md-text-button type="button" onClick={handleClose}>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={handleClose}>
           取消
-        </md-text-button>
-        <md-filled-button
+        </Button>
+        <Button
+          variant="contained"
           onClick={handleSubmit}
-          disabled={submitDisabled || undefined}
+          disabled={submitDisabled}
         >
           {isSubmitting ? '处理中...' : '加入队列'}
-        </md-filled-button>
-      </div>
-    </md-dialog>
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

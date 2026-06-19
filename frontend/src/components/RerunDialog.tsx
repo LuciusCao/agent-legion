@@ -1,4 +1,17 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  FormControl,
+  FormControlLabel,
+  List,
+  ListItemButton,
+  Radio,
+  RadioGroup,
+} from '@mui/material'
 import { useUiStore } from '../stores/uiStore'
 import { KNOWLEDGE_PHASES, QUESTION_PHASES, PHASE_LABELS } from '../labels'
 import type { VideoItem } from '../types'
@@ -31,62 +44,48 @@ export function RerunDialog({ video, onConfirm }: RerunDialogProps) {
   const [selectedPhase, setSelectedPhase] = useState(
     availablePhases[0] || 'download'
   )
-  const radioRefs = useRef<Map<string, HTMLElement>>(new Map())
 
   const handleConfirm = useCallback(() => {
     onConfirm(selectedPhase)
     closeRerunDialog()
   }, [selectedPhase, onConfirm, closeRerunDialog])
 
-  useEffect(() => {
-    if (!rerunDialogOpen) return
-    availablePhases.forEach((phase) => {
-      const el = radioRefs.current.get(phase)
-      if (el) {
-        ;(el as HTMLInputElement).checked = phase === selectedPhase
-      }
-    })
-  }, [rerunDialogOpen, selectedPhase, availablePhases])
-
-  if (!rerunDialogOpen) return null
-
   return (
-    <md-dialog
-      open
-      onClosed={closeRerunDialog}
-      style={
-        { '--md-dialog-container-color': '#ffffff' } as React.CSSProperties
-      }
-    >
-      <div slot="headline">选择重跑阶段</div>
-      <form slot="content" method="dialog">
-        <md-list>
-          {availablePhases.map((phase) => (
-            <md-list-item
-              key={phase}
-              type="button"
-              onClick={() => setSelectedPhase(phase)}
-            >
-              <md-radio
-                slot="start"
-                name="rerun-phase"
-                ref={(el: HTMLElement | null) => {
-                  if (el) {
-                    radioRefs.current.set(phase, el)
-                  } else {
-                    radioRefs.current.delete(phase)
-                  }
-                }}
-              />
-              <div slot="headline">{PHASE_LABELS[phase]}</div>
-            </md-list-item>
-          ))}
-        </md-list>
-      </form>
-      <div slot="actions">
-        <md-text-button onClick={closeRerunDialog}>取消</md-text-button>
-        <md-filled-button onClick={handleConfirm}>确认</md-filled-button>
-      </div>
-    </md-dialog>
+    <Dialog open={rerunDialogOpen} onClose={closeRerunDialog} maxWidth="xs">
+      <DialogTitle>选择重跑阶段</DialogTitle>
+      <DialogContent>
+        <FormControl fullWidth>
+          <RadioGroup
+            value={selectedPhase}
+            onChange={(e) => setSelectedPhase(e.target.value)}
+          >
+            <List disablePadding>
+              {availablePhases.map((phase) => (
+                <ListItemButton
+                  key={phase}
+                  onClick={() => setSelectedPhase(phase)}
+                  dense
+                >
+                  <FormControlLabel
+                    value={phase}
+                    control={<Radio />}
+                    label={PHASE_LABELS[phase]}
+                    onClick={(e) => e.stopPropagation()}
+                  />
+                </ListItemButton>
+              ))}
+            </List>
+          </RadioGroup>
+        </FormControl>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={closeRerunDialog} variant="text">
+          取消
+        </Button>
+        <Button onClick={handleConfirm} variant="contained">
+          确认
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

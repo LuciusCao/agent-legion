@@ -5,6 +5,7 @@ import { extractLatexParts, renderLatexInHtml } from '../lib/latex'
 import { buildHighlightedStemParts } from '../lib/questionHighlight'
 import { QuestionAnnotations } from './QuestionAnnotations'
 import { LaTeXText } from './LaTeXText'
+import { MaterialIcon } from './MaterialIcon'
 import styles from './QuestionContentPanel.module.css'
 import type { KeyInfoItem, PossibleErrorItem } from '../types'
 
@@ -299,7 +300,7 @@ export function QuestionContentPanel({
                     {info.type === 'hidden' && (
                       <div
                         className={styles.detailSection}
-                        style={{ color: 'var(--md-sys-color-tertiary)' }}
+                        style={{ color: '#5f6368' }}
                       >
                         👉 推导过程见题干右侧批注
                       </div>
@@ -353,9 +354,11 @@ export function QuestionContentPanel({
                   }`}
                 >
                   {isCorrect && (
-                    <md-icon className={styles.checkIcon} aria-hidden="true">
-                      check
-                    </md-icon>
+                    <MaterialIcon
+                      name="check"
+                      className={styles.checkIcon}
+                      aria-hidden="true"
+                    />
                   )}
                   <span className={styles.optionLabel}>{label}.</span>
                   <span className={styles.optionContent}>

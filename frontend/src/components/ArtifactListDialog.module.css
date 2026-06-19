@@ -1,7 +1,7 @@
 .empty {
   margin: 0;
   font-size: 14px;
-  color: var(--md-sys-color-on-surface-variant, #6b7280);
+  color: #43474e;
 }
 
 .list {
@@ -18,14 +18,14 @@
   text-align: left;
   padding: 10px 12px;
   border-radius: 8px;
-  border: 1px solid var(--md-sys-color-outline-variant, #e5e7eb);
-  background: var(--md-sys-color-surface-container-low, #f8f9fa);
-  color: var(--md-sys-color-on-surface, #111827);
+  border: 1px solid #e5e7eb;
+  background: #f8f9fa;
+  color: #1a1c1e;
   font-size: 13px;
   cursor: pointer;
   word-break: break-all;
 }
 
 .nameBtn:hover {
-  background: var(--md-sys-color-surface-container, #f3f4f6);
+  background: #f3f4f6;
 }

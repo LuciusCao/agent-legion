@@ -13,7 +13,7 @@
 }
 
 .rowLabel {
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   font-size: 12px;
   font-weight: 600;
   line-height: 1;
@@ -29,29 +29,23 @@
 
 .emptyHint {
   align-self: center;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   font-size: 12px;
 }
 
 .activeChapterChip {
-  --md-suggestion-chip-container-color: var(--md-sys-color-primary-container);
-  --md-suggestion-chip-label-text-color: var(
-    --md-sys-color-on-primary-container
-  );
-  --md-suggestion-chip-outline-color: var(--md-sys-color-primary);
+  background-color: #e0e0e0 !important;
+  color: #1a1c1e !important;
+  border-color: #000000 !important;
 }
 
 .interactionChip {
-  --md-suggestion-chip-container-color: var(--md-sys-color-secondary-container);
-  --md-suggestion-chip-label-text-color: var(
-    --md-sys-color-on-secondary-container
-  );
+  background-color: #f0f0f0 !important;
+  color: #1a1c1e !important;
 }
 
 .activeInteractionChip {
-  --md-suggestion-chip-container-color: var(--md-sys-color-secondary-container);
-  --md-suggestion-chip-label-text-color: var(
-    --md-sys-color-on-secondary-container
-  );
-  --md-suggestion-chip-outline-color: var(--md-sys-color-secondary);
+  background-color: #f0f0f0 !important;
+  color: #1a1c1e !important;
+  border-color: #5d5f61 !important;
 }

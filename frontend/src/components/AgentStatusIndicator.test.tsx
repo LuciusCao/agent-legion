@@ -72,11 +72,11 @@ describe('AgentStatusIndicator', () => {
 
   it('resumes scheduling when switch is toggled on', async () => {
     render(<AgentStatusIndicator workspaceId="ws1" />)
-    const switchEl = document.querySelector('md-switch')
-    expect(switchEl).toBeTruthy()
+    const switchEl = screen.getByRole('checkbox')
+    expect(switchEl).toBeInTheDocument()
 
     await act(async () => {
-      fireEvent.click(switchEl!)
+      fireEvent.click(switchEl)
     })
 
     expect(setWorkerPausedMock).toHaveBeenCalledWith(false, 'ws1')
@@ -86,11 +86,11 @@ describe('AgentStatusIndicator', () => {
   it('pauses scheduling when switch is toggled off', async () => {
     mockWorkerPaused = false
     render(<AgentStatusIndicator workspaceId="ws1" />)
-    const switchEl = document.querySelector('md-switch')
-    expect(switchEl).toBeTruthy()
+    const switchEl = screen.getByRole('checkbox')
+    expect(switchEl).toBeInTheDocument()
 
     await act(async () => {
-      fireEvent.click(switchEl!)
+      fireEvent.click(switchEl)
     })
 
     expect(setWorkerPausedMock).toHaveBeenCalledWith(true, 'ws1')

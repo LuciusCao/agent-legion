@@ -8,7 +8,7 @@
 .sectionLabel {
   font-size: 14px;
   font-weight: 500;
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
   margin-bottom: 8px;
 }
 
@@ -19,19 +19,19 @@
 }
 
 .empty {
-  color: var(--md-sys-color-on-surface-variant);
+  color: #6b7280;
   margin: 0;
 }
 
 .closureBox {
   padding: 12px;
   border-radius: 8px;
-  background: var(--md-sys-color-surface-variant);
+  background: #e5e7eb;
 }
 
 .closureTitle {
   font-size: 14px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   margin-bottom: 8px;
 }
 
@@ -45,19 +45,19 @@
   font-size: 13px;
   padding: 4px 10px;
   border-radius: 999px;
-  background: var(--md-sys-color-surface-container-highest);
-  color: var(--md-sys-color-on-surface);
+  background: #d1d5db;
+  color: #1a1c1e;
 }
 
 .excludedBox {
   padding: 12px;
   border-radius: 8px;
-  background: var(--md-sys-color-surface-variant);
+  background: #e5e7eb;
 }
 
 .excludedTitle {
   font-size: 14px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   margin-bottom: 8px;
 }
 
@@ -65,16 +65,16 @@
   margin: 0;
   padding-left: 18px;
   font-size: 14px;
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
 }
 
 .error {
   margin: 0;
   font-size: 14px;
-  color: var(--md-sys-color-error);
+  color: #b91c1c;
 }
 
 .summary {
   font-size: 14px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #6b7280;
 }

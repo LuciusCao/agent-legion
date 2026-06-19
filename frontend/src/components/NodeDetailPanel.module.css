@@ -1,12 +1,12 @@
 .panel {
-  background: var(--md-sys-color-surface-container-low, #f8f9fa);
-  border: 1px solid var(--md-sys-color-outline-variant, #e5e7eb);
+  background: #fafafa;
+  border: 1px solid #e0e0e0;
   border-radius: 12px;
   padding: 16px;
 }
 
 .empty {
-  color: var(--md-sys-color-on-surface-variant, #6b7280);
+  color: #43474e;
   font-size: 14px;
   text-align: center;
   padding: 24px 0;
@@ -23,7 +23,7 @@
 .title {
   font-size: 16px;
   font-weight: 600;
-  color: var(--md-sys-color-on-surface, #111827);
+  color: #1a1c1e;
 }
 
 .badge {
@@ -74,12 +74,12 @@
 }
 
 .row dt {
-  color: var(--md-sys-color-on-surface-variant, #6b7280);
+  color: #43474e;
 }
 
 .row dd {
   margin: 0;
-  color: var(--md-sys-color-on-surface, #111827);
+  color: #1a1c1e;
 }
 
 .actions {
@@ -91,19 +91,19 @@
   flex: 1;
   padding: 8px 12px;
   border-radius: 8px;
-  border: 1px solid var(--md-sys-color-outline, #d1d5db);
-  background: var(--md-sys-color-surface, #ffffff);
-  color: var(--md-sys-color-on-surface, #111827);
+  border: 1px solid #c3c6cf;
+  background: #ffffff;
+  color: #1a1c1e;
   font-size: 14px;
   cursor: pointer;
 }
 
 .btn:hover {
-  background: var(--md-sys-color-surface-container, #f3f4f6);
+  background: #1a1c1e;
 }
 
 .errorText {
-  color: var(--md-sys-color-error, #b91c1c);
+  color: #ba1a1a;
   white-space: pre-wrap;
   word-break: break-word;
 }

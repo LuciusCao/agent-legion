@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { useParams, useNavigate, Outlet, useLocation } from 'react-router-dom'
+import { IconButton } from '@mui/material'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
 import { useUiStore } from '../stores/uiStore'
@@ -7,6 +8,7 @@ import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
 import { AddDialog } from '../components/AddDialog'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
+import { MaterialIcon } from '../components/MaterialIcon'
 import { WORKSPACE_LABELS } from '../labels'
 
 export const VIDEO_HIVE_ID = 'video-hive'
@@ -108,14 +110,14 @@ export default function WorkspaceLayout() {
             showListActions ? (
               <>
                 <AgentStatusIndicator workspaceId={workspaceId} />
-                <md-icon-button
+                <IconButton
                   aria-label={selectMode ? '完成' : '多选'}
                   onClick={toggleSelectMode}
                   className={selectMode ? 'active-icon' : ''}
                 >
-                  <md-icon>{selectMode ? 'close' : 'checklist'}</md-icon>
-                </md-icon-button>
-                <md-icon-button
+                  <MaterialIcon name={selectMode ? 'close' : 'checklist'} />
+                </IconButton>
+                <IconButton
                   aria-label="添加"
                   onClick={() => {
                     if (isVideoHive) {
@@ -125,9 +127,9 @@ export default function WorkspaceLayout() {
                     }
                   }}
                 >
-                  <md-icon>add</md-icon>
-                </md-icon-button>
-                <md-icon-button
+                  <MaterialIcon name="add" />
+                </IconButton>
+                <IconButton
                   aria-label="包历史"
                   onClick={() => {
                     if (workspaceId) {
@@ -135,16 +137,16 @@ export default function WorkspaceLayout() {
                     }
                   }}
                 >
-                  <md-icon>inventory_2</md-icon>
-                </md-icon-button>
-                <md-icon-button
+                  <MaterialIcon name="inventory_2" />
+                </IconButton>
+                <IconButton
                   aria-label={WORKSPACE_LABELS.settings}
                   onClick={() =>
                     navigate(`/workspaces/${workspaceId}/settings`)
                   }
                 >
-                  <md-icon>settings</md-icon>
-                </md-icon-button>
+                  <MaterialIcon name="settings" />
+                </IconButton>
               </>
             ) : (
               detailPageActions

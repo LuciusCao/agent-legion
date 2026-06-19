@@ -1,4 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
+import { IconButton } from '@mui/material'
 import {
   DagGraph,
   type DagGraphNode,
@@ -6,6 +7,7 @@ import {
   type NodeRunSummary,
 } from './DagGraph'
 import { JobLogDialog } from './JobLogDialog'
+import { MaterialIcon } from './MaterialIcon'
 import styles from './DagFullscreenDialog.module.css'
 
 interface DagFullscreenDialogProps {
@@ -37,7 +39,7 @@ export function DagFullscreenDialog({
     setSelectedNode(null)
     setLogNodeKey(null)
     // Clear focus so that any focus captured inside the DAG (e.g. ReactFlow
-    // nodes or Material Web buttons) is released before the overlay is removed.
+    // nodes or MUI buttons) is released before the overlay is removed.
     // This prevents the app-bar buttons from becoming unresponsive after the
     // dialog is closed.
     if (document.activeElement instanceof HTMLElement) {
@@ -89,9 +91,9 @@ export function DagFullscreenDialog({
         <div className={styles.header}>
           <span className={styles.title}>DAG 视图</span>
           <div className={styles.actions}>
-            <md-icon-button aria-label="关闭" onClick={handleClose}>
-              <md-icon>close</md-icon>
-            </md-icon-button>
+            <IconButton aria-label="关闭" onClick={handleClose}>
+              <MaterialIcon name="close" />
+            </IconButton>
           </div>
         </div>
         <div className={styles.canvas}>

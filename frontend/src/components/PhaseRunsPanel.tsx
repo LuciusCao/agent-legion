@@ -1,4 +1,11 @@
 import type { CSSProperties } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import type {
   PhaseRun,
   TranscriptionRun,
@@ -9,6 +16,7 @@ import { STATUS_LABELS, STATUS_ICONS } from '../labels'
 import { usePhaseRunsTimeline } from '../hooks/usePhaseRunsTimeline'
 import { PhaseStepper } from './PhaseStepper'
 import { TranscriptionDetails } from './TranscriptionDetails'
+import { MaterialIcon, MaterialIconName } from './MaterialIcon'
 import styles from './PhaseRunsPanel.module.css'
 
 interface PhaseRunsPanelProps {
@@ -73,7 +81,6 @@ export function PhaseRunsPanel({
   )
 
   const dialogStyle = {
-    '--md-dialog-container-color': '#ffffff',
     maxWidth: '760px',
     width: '90vw',
   } as CSSProperties
@@ -83,13 +90,14 @@ export function PhaseRunsPanel({
       {video && (
         <div className={styles.panelStepper}>
           <PhaseStepper video={video} />
-          <md-text-button
+          <Button
+            variant="text"
             onClick={() =>
               setViewMode(viewMode === 'latest' ? 'history' : 'latest')
             }
           >
             {viewMode === 'latest' ? '历史' : '当前'}
-          </md-text-button>
+          </Button>
         </div>
       )}
 
@@ -98,7 +106,8 @@ export function PhaseRunsPanel({
       <div className={styles.phaseTimeline}>
         <div className={styles.phaseTimelineItems}>
           {items.map((item, idx) => {
-            const icon = STATUS_ICONS[item.run.status] || 'help'
+            const icon = (STATUS_ICONS[item.run.status] ||
+              'help') as MaterialIconName
             const statusText = STATUS_LABELS[item.run.status] || item.run.status
             const hasError = !!item.run.error_message
             const isTranscribe = item.run.phase_key === 'transcribe'
@@ -117,7 +126,7 @@ export function PhaseRunsPanel({
                       item.run.status === 'running' ? styles.spinning : ''
                     }`}
                   >
-                    <md-icon>{icon}</md-icon>
+                    <MaterialIcon name={icon} sx={{ fontSize: '14px' }} />
                   </div>
                   {idx < items.length - 1 && (
                     <div className={styles.timelineLine} />
@@ -146,20 +155,30 @@ export function PhaseRunsPanel({
 
                   {item.tool && (
                     <div className={styles.timelineMeta}>
-                      <md-icon className={styles.metaIcon}>
-                        build_circle
-                      </md-icon>
+                      <MaterialIcon
+                        name="build_circle"
+                        className={styles.metaIcon}
+                        sx={{ fontSize: '14px' }}
+                      />
                       <span className={styles.timelineTool}>{item.tool}</span>
                     </div>
                   )}
 
                   <div className={styles.timelineTimes}>
                     <span>
-                      <md-icon className={styles.metaIcon}>schedule</md-icon>
+                      <MaterialIcon
+                        name="schedule"
+                        className={styles.metaIcon}
+                        sx={{ fontSize: '14px' }}
+                      />
                       排队 {formatDuration(item.queueTime)}
                     </span>
                     <span>
-                      <md-icon className={styles.metaIcon}>timer</md-icon>
+                      <MaterialIcon
+                        name="timer"
+                        className={styles.metaIcon}
+                        sx={{ fontSize: '14px' }}
+                      />
                       处理 {formatDuration(item.processTime)}
                     </span>
                   </div>
@@ -170,7 +189,11 @@ export function PhaseRunsPanel({
                         className={styles.inlineAction}
                         onClick={() => void openSession(item.run, sessionId)}
                       >
-                        <md-icon className={styles.toggleIcon}>forum</md-icon>
+                        <MaterialIcon
+                          name="forum"
+                          className={styles.toggleIcon}
+                          sx={{ fontSize: '14px' }}
+                        />
                         查看会话
                       </button>
                     </div>
@@ -181,11 +204,17 @@ export function PhaseRunsPanel({
                       className={styles.timelineDetailToggle}
                       onClick={() => toggleDetail(item.run.id)}
                     >
-                      <md-icon className={styles.toggleIcon}>error</md-icon>
+                      <MaterialIcon
+                        name="error"
+                        className={styles.toggleIcon}
+                        sx={{ fontSize: '14px' }}
+                      />
                       错误详情
-                      <md-icon className={styles.toggleIcon}>
-                        {isDetailExpanded ? 'expand_less' : 'expand_more'}
-                      </md-icon>
+                      <MaterialIcon
+                        name={isDetailExpanded ? 'expand_less' : 'expand_more'}
+                        className={styles.toggleIcon}
+                        sx={{ fontSize: '14px' }}
+                      />
                     </button>
                   )}
 
@@ -194,9 +223,11 @@ export function PhaseRunsPanel({
                       className={styles.timelineDetailToggle}
                       onClick={() => setTranscriptionDialogOpen(true)}
                     >
-                      <md-icon className={styles.toggleIcon}>
-                        text_fields
-                      </md-icon>
+                      <MaterialIcon
+                        name="text_fields"
+                        className={styles.toggleIcon}
+                        sx={{ fontSize: '14px' }}
+                      />
                       转录详情
                     </button>
                   )}
@@ -213,50 +244,44 @@ export function PhaseRunsPanel({
         </div>
       </div>
 
-      {transcriptionDialogOpen && (
-        <md-dialog
-          open
-          onClosed={() => setTranscriptionDialogOpen(false)}
-          style={dialogStyle}
-        >
-          <div slot="headline">转录详情</div>
-          <div slot="content">
-            <TranscriptionDetails
-              primary={transPrimary}
-              fallback={transFallback}
-              totalCount={transcriptionRuns.length}
-            />
-          </div>
-          <div slot="actions">
-            <md-text-button onClick={() => setTranscriptionDialogOpen(false)}>
-              关闭
-            </md-text-button>
-          </div>
-        </md-dialog>
-      )}
+      <Dialog
+        open={transcriptionDialogOpen}
+        onClose={() => setTranscriptionDialogOpen(false)}
+        PaperProps={{ style: dialogStyle }}
+      >
+        <DialogTitle>转录详情</DialogTitle>
+        <DialogContent>
+          <TranscriptionDetails
+            primary={transPrimary}
+            fallback={transFallback}
+            totalCount={transcriptionRuns.length}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setTranscriptionDialogOpen(false)}>
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-      {sessionDialog && (
-        <md-dialog
-          open
-          onClosed={() => setSessionDialog(null)}
-          style={dialogStyle}
-        >
-          <div slot="headline">Agent 会话</div>
-          <div slot="content" className={styles.dialogContent}>
-            <div className={styles.sessionKey}>
-              会话 {sessionDialog.sessionId}
-            </div>
-            <pre className={styles.sessionPreview}>
-              {sessionLogs[sessionDialog.runId] || '加载中...'}
-            </pre>
+      <Dialog
+        open={!!sessionDialog}
+        onClose={() => setSessionDialog(null)}
+        PaperProps={{ style: dialogStyle }}
+      >
+        <DialogTitle>Agent 会话</DialogTitle>
+        <DialogContent className={styles.dialogContent}>
+          <div className={styles.sessionKey}>
+            会话 {sessionDialog?.sessionId}
           </div>
-          <div slot="actions">
-            <md-text-button onClick={() => setSessionDialog(null)}>
-              关闭
-            </md-text-button>
-          </div>
-        </md-dialog>
-      )}
+          <pre className={styles.sessionPreview}>
+            {sessionDialog ? sessionLogs[sessionDialog.runId] : '加载中...'}
+          </pre>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSessionDialog(null)}>关闭</Button>
+        </DialogActions>
+      </Dialog>
     </div>
   )
 }

@@ -1,3 +1,4 @@
+import { Button } from '@mui/material'
 import styles from './BatchToolbar.module.css'
 
 export type BatchFilter = {
@@ -32,47 +33,50 @@ export function BatchToolbar({
       <span>已选择 {selectedCount} 项</span>
       <div className={styles.batchActions}>
         {filters.map((filter) => (
-          <md-text-button key={filter.key} onClick={filter.onClick}>
+          <Button key={filter.key} variant="text" onClick={filter.onClick}>
             {filter.label}
-          </md-text-button>
+          </Button>
         ))}
         {actions.map((action) => {
-          const buttonStyle = action.danger
-            ? ({ color: 'var(--md-sys-color-error)' } as React.CSSProperties)
-            : undefined
+          const color = action.danger ? 'error' : undefined
           if (action.variant === 'text') {
             return (
-              <md-text-button
+              <Button
                 key={action.key}
+                variant="text"
+                color={color}
                 onClick={action.onClick}
-                style={buttonStyle}
               >
                 {action.label}
-              </md-text-button>
+              </Button>
             )
           }
           if (action.variant === 'filled') {
             return (
-              <md-filled-button
+              <Button
                 key={action.key}
+                variant="contained"
+                color={color}
                 onClick={action.onClick}
-                style={buttonStyle}
               >
                 {action.label}
-              </md-filled-button>
+              </Button>
             )
           }
           return (
-            <md-outlined-button
+            <Button
               key={action.key}
+              variant="outlined"
+              color={color}
               onClick={action.onClick}
-              style={buttonStyle}
             >
               {action.label}
-            </md-outlined-button>
+            </Button>
           )
         })}
-        <md-outlined-button onClick={onExitSelectMode}>退出</md-outlined-button>
+        <Button variant="outlined" onClick={onExitSelectMode}>
+          退出
+        </Button>
       </div>
     </div>
   )

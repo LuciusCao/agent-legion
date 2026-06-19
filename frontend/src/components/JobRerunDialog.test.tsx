@@ -69,7 +69,7 @@ describe('JobRerunDialog', () => {
   })
 
   it('renders nodes in workflow-definition order', () => {
-    const { container } = render(
+    render(
       <JobRerunDialog
         open
         jobs={[
@@ -86,15 +86,13 @@ describe('JobRerunDialog', () => {
     )
 
     expect(screen.getByText('选择重跑节点')).toBeInTheDocument()
-    const chips = container.querySelectorAll('md-filter-chip')
-    expect(chips.length).toBe(3)
-    expect(chips[0]?.getAttribute('label')).toBe('提取')
-    expect(chips[1]?.getAttribute('label')).toBe('生成')
-    expect(chips[2]?.getAttribute('label')).toBe('审核')
+    expect(screen.getByTestId('rerun-chip-extract')).toHaveTextContent('提取')
+    expect(screen.getByTestId('rerun-chip-generate')).toHaveTextContent('生成')
+    expect(screen.getByTestId('rerun-chip-review')).toHaveTextContent('审核')
   })
 
   it('shows common node intersection for batch selections across workflows', () => {
-    const { container } = render(
+    render(
       <JobRerunDialog
         open
         jobs={[
@@ -116,13 +114,13 @@ describe('JobRerunDialog', () => {
       />
     )
 
-    const chips = container.querySelectorAll('md-filter-chip')
-    expect(chips.length).toBe(1)
-    expect(chips[0]?.getAttribute('label')).toBe('提取')
+    expect(screen.getByTestId('rerun-chip-extract')).toHaveTextContent('提取')
+    expect(screen.queryByTestId('rerun-chip-generate')).not.toBeInTheDocument()
+    expect(screen.queryByTestId('rerun-chip-review')).not.toBeInTheDocument()
   })
 
   it('identifies jobs excluded by workflow mismatch for the selected node', () => {
-    const { container } = render(
+    render(
       <JobRerunDialog
         open
         jobs={[
@@ -146,10 +144,10 @@ describe('JobRerunDialog', () => {
       />
     )
 
-    const generateChip = container.querySelector('md-filter-chip[label="生成"]')
+    const generateChip = screen.getByTestId('rerun-chip-generate')
     expect(generateChip).toBeInTheDocument()
     act(() => {
-      ;(generateChip as HTMLElement).click()
+      generateChip.click()
     })
     expect(screen.getByText(/以下任务不包含所选节点/)).toBeInTheDocument()
     expect(screen.getByText('Q2')).toBeInTheDocument()
@@ -158,7 +156,7 @@ describe('JobRerunDialog', () => {
   it('calls onConfirm with the backend-authoritative node key', async () => {
     const onConfirm = vi.fn().mockResolvedValue(undefined)
     const onClose = vi.fn()
-    const { container } = render(
+    render(
       <JobRerunDialog
         open
         jobs={[
@@ -174,9 +172,9 @@ describe('JobRerunDialog', () => {
       />
     )
 
-    const reviewChip = container.querySelector('md-filter-chip[label="审核"]')
+    const reviewChip = screen.getByTestId('rerun-chip-review')
     act(() => {
-      ;(reviewChip as HTMLElement).click()
+      reviewChip.click()
     })
 
     await act(async () => {

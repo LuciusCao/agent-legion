@@ -1,4 +1,12 @@
 import { useMemo, useState } from 'react'
+import {
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import { ancestorClosure, validateRunTo } from '../lib/jobDag'
 import {
@@ -85,20 +93,19 @@ export function JobRunToDialog({
   }
 
   return (
-    <md-dialog
+    <Dialog
       open
-      onClosed={onClose}
-      style={
-        {
+      onClose={onClose}
+      PaperProps={{
+        sx: {
           minWidth: '520px',
           maxWidth: '760px',
           width: 'min(760px, 92vw)',
-          '--md-dialog-container-color': '#ffffff',
-        } as React.CSSProperties
-      }
+        },
+      }}
     >
-      <div slot="headline">选择运行到节点</div>
-      <div slot="content">
+      <DialogTitle>选择运行到节点</DialogTitle>
+      <DialogContent>
         <div className={styles.content}>
           {orderedNodes.length === 0 ? (
             <p className={styles.empty}>没有可运行到的公共节点</p>
@@ -108,11 +115,13 @@ export function JobRunToDialog({
                 <div className={styles.sectionLabel}>目标节点</div>
                 <div className={styles.nodeGrid}>
                   {orderedNodes.map((node) => (
-                    <md-filter-chip
+                    <Chip
                       key={node.key}
                       data-testid={`target-chip-${node.key}`}
                       label={node.label || node.key}
-                      selected={effectiveTargetKey === node.key || undefined}
+                      variant={
+                        effectiveTargetKey === node.key ? 'filled' : 'outlined'
+                      }
                       onClick={() => {
                         setTargetKey(node.key)
                         setStartKey(null)
@@ -126,20 +135,26 @@ export function JobRunToDialog({
                 <div>
                   <div className={styles.sectionLabel}>起始节点（可选）</div>
                   <div className={styles.nodeGrid}>
-                    <md-filter-chip
+                    <Chip
                       data-testid="start-chip-auto"
                       label="从首个依赖开始"
-                      selected={effectiveStartKey === null || undefined}
+                      variant={
+                        effectiveStartKey === null ? 'filled' : 'outlined'
+                      }
                       onClick={() => setStartKey(null)}
                     />
                     {orderedNodes
                       .filter((node) => node.key !== effectiveTargetKey)
                       .map((node) => (
-                        <md-filter-chip
+                        <Chip
                           key={node.key}
                           data-testid={`start-chip-${node.key}`}
                           label={node.label || node.key}
-                          selected={effectiveStartKey === node.key || undefined}
+                          variant={
+                            effectiveStartKey === node.key
+                              ? 'filled'
+                              : 'outlined'
+                          }
                           onClick={() => setStartKey(node.key)}
                         />
                       ))}
@@ -198,24 +213,24 @@ export function JobRunToDialog({
             </>
           )}
         </div>
-      </div>
-      <div slot="actions">
-        <md-text-button
+      </DialogContent>
+      <DialogActions>
+        <Button
+          variant="text"
           type="button"
           onClick={onClose}
-          disabled={loading || undefined}
+          disabled={loading}
         >
           取消
-        </md-text-button>
-        <md-filled-button
+        </Button>
+        <Button
+          variant="contained"
           onClick={handleConfirm}
-          disabled={
-            !effectiveTargetKey || !validation.valid || loading || undefined
-          }
+          disabled={!effectiveTargetKey || !validation.valid || loading}
         >
           确认运行到
-        </md-filled-button>
-      </div>
-    </md-dialog>
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

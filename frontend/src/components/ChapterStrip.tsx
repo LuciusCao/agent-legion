@@ -1,4 +1,5 @@
 import type { Chapter } from '../types'
+import { Chip } from '@mui/material'
 import styles from './ChapterStrip.module.css'
 
 interface ChapterStripProps {
@@ -26,11 +27,20 @@ export function ChapterStrip({
           currentTime >= chapter.start &&
           currentTime < (chapters[index + 1]?.start ?? Infinity)
         return (
-          <md-suggestion-chip
+          <Chip
             key={index}
-            class={isActive ? styles.active : ''}
             label={`${formatTime(chapter.start)} ${chapter.title}`}
             onClick={() => onSeek(chapter.start)}
+            variant={isActive ? 'filled' : 'outlined'}
+            sx={
+              isActive
+                ? {
+                    backgroundColor: '#000000',
+                    color: '#ffffff',
+                    '&:hover': { backgroundColor: '#333333' },
+                  }
+                : {}
+            }
           />
         )
       })}

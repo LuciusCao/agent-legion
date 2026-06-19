@@ -94,12 +94,8 @@ describe('ListPage', () => {
     })
     expect(screen.queryByText('题目视频B')).not.toBeInTheDocument()
 
-    const tabs = document.querySelector('md-tabs') as HTMLElement & {
-      activeTabIndex: number
-    }
     act(() => {
-      tabs.activeTabIndex = 1
-      tabs.dispatchEvent(new Event('change', { bubbles: true }))
+      screen.getByRole('tab', { name: '题目' }).click()
     })
 
     await waitFor(() => {
@@ -149,8 +145,10 @@ describe('ListPage', () => {
       expect(screen.getByText('知识视频A')).toBeInTheDocument()
     })
 
-    const search = document.querySelector('md-outlined-text-field')
-    expect(search).toHaveAttribute('value', 'K001')
+    const search = screen.getByPlaceholderText(
+      '搜索 ID、标题或内部记录'
+    ) as HTMLInputElement
+    expect(search).toHaveValue('K001')
     expect(screen.queryByText('知识视频B')).not.toBeInTheDocument()
   })
 })

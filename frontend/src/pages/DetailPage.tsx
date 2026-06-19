@@ -1,3 +1,11 @@
+import {
+  IconButton,
+  Button,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogActions,
+} from '@mui/material'
 import { VideoPlayer } from '../components/VideoPlayer'
 import { TimelineStrip } from '../components/TimelineStrip'
 import { PhaseRunsPanel } from '../components/PhaseRunsPanel'
@@ -8,6 +16,7 @@ import { RerunDialog } from '../components/RerunDialog'
 import { RunToDialog } from '../components/RunToDialog'
 import { InteractionReviewBadge } from '../components/InteractionReviewBadge'
 import { DeleteDialog } from '../components/DeleteDialog'
+import { MaterialIcon } from '../components/MaterialIcon'
 import { TYPE_LABELS, STATUS_LABELS } from '../labels'
 import { statusGroup } from '../helpers'
 import { useDetailPage } from '../hooks/useDetailPage'
@@ -19,9 +28,9 @@ export function DetailPage() {
     <section className="view detail-view">
       <section className="detail-upper">
         <header className="detail-topbar">
-          <md-icon-button onClick={() => window.history.back()}>
-            <md-icon>arrow_back</md-icon>
-          </md-icon-button>
+          <IconButton onClick={() => window.history.back()} aria-label="返回">
+            <MaterialIcon name="arrow_back" />
+          </IconButton>
           <div className="detail-title-block" data-tooltip={hook.detailTitle}>
             <h1>{hook.detailTitle}</h1>
             {hook.video && (
@@ -53,38 +62,36 @@ export function DetailPage() {
             )}
           </div>
           <div className="detail-actions">
-            <md-icon-button onClick={hook.openRerunDialog} title="重跑">
-              <md-icon>restart_alt</md-icon>
-            </md-icon-button>
-            <md-icon-button
+            <IconButton onClick={hook.openRerunDialog} title="重跑">
+              <MaterialIcon name="restart_alt" />
+            </IconButton>
+            <IconButton
               onClick={() => hook.setRunToDialogOpen(true)}
               title="运行到"
             >
-              <md-icon>play_circle</md-icon>
-            </md-icon-button>
-            <md-icon-button
-              disabled={
-                !hook.video || hook.video.status !== 'completed' || undefined
-              }
+              <MaterialIcon name="play_circle" />
+            </IconButton>
+            <IconButton
+              disabled={!hook.video || hook.video.status !== 'completed'}
               onClick={hook.handlePackage}
               title="打包"
             >
-              <md-icon>inventory_2</md-icon>
-            </md-icon-button>
-            <md-icon-button
-              style={{ color: 'var(--md-sys-color-error)' }}
+              <MaterialIcon name="inventory_2" />
+            </IconButton>
+            <IconButton
+              sx={{ color: '#d32f2f' }}
               onClick={hook.openDeleteDialog}
               title="删除"
             >
-              <md-icon>delete</md-icon>
-            </md-icon-button>
-            <md-icon-button
+              <MaterialIcon name="delete" />
+            </IconButton>
+            <IconButton
               id="more-menu-btn"
               onClick={() => hook.setMoreDialogOpen(true)}
               title="更多"
             >
-              <md-icon>more_vert</md-icon>
-            </md-icon-button>
+              <MaterialIcon name="more_vert" />
+            </IconButton>
           </div>
         </header>
 
@@ -136,137 +143,108 @@ export function DetailPage() {
       />
       <DeleteDialog onConfirm={hook.handleDeleteConfirm} />
 
-      {hook.moreDialogOpen && (
-        <md-dialog
-          open
-          onClosed={hook.closeMoreDialog}
-          style={
-            { '--md-dialog-container-color': '#ffffff' } as React.CSSProperties
-          }
+      <Dialog
+        open={hook.moreDialogOpen}
+        onClose={hook.closeMoreDialog}
+        PaperProps={{ sx: { minWidth: 200 } }}
+      >
+        <DialogTitle>更多信息</DialogTitle>
+        <DialogContent
+          sx={{ display: 'flex', flexDirection: 'column', gap: 1 }}
         >
-          <div slot="headline">更多信息</div>
-          <div
-            slot="content"
-            style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '8px',
-              minWidth: '200px',
+          <Button
+            variant="text"
+            sx={{ justifyContent: 'flex-start' }}
+            startIcon={<MaterialIcon name="subtitles" />}
+            onClick={() => hook.openMoreDialog('subtitles')}
+          >
+            字幕
+          </Button>
+          {hook.video?.content_type === 'knowledge' && (
+            <Button
+              variant="text"
+              sx={{ justifyContent: 'flex-start' }}
+              startIcon={<MaterialIcon name="account_tree" />}
+              onClick={() => hook.openMoreDialog('nodes')}
+            >
+              交互节点
+            </Button>
+          )}
+          <Button
+            variant="text"
+            sx={{ justifyContent: 'flex-start' }}
+            startIcon={<MaterialIcon name="data_object" />}
+            onClick={() => hook.openMoreDialog('metadata')}
+          >
+            元数据
+          </Button>
+        </DialogContent>
+        <DialogActions>
+          <Button variant="text" onClick={hook.closeMoreDialog}>
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      <Dialog
+        open={hook.moreDialogType === 'nodes'}
+        onClose={hook.closeMoreDialog}
+        PaperProps={{ sx: { maxWidth: 760, width: '90vw' } }}
+      >
+        <DialogTitle>交互节点</DialogTitle>
+        <DialogContent sx={{ maxHeight: '60vh', overflow: 'auto', py: 1 }}>
+          <NodePanel
+            onSeek={(time) => {
+              hook.handleSeek(time)
+              hook.closeMoreDialog()
             }}
-          >
-            <md-text-button
-              style={{ justifyContent: 'flex-start' }}
-              onClick={() => hook.openMoreDialog('subtitles')}
-            >
-              <md-icon slot="icon">subtitles</md-icon>
-              字幕
-            </md-text-button>
-            {hook.video?.content_type === 'knowledge' && (
-              <md-text-button
-                style={{ justifyContent: 'flex-start' }}
-                onClick={() => hook.openMoreDialog('nodes')}
-              >
-                <md-icon slot="icon">account_tree</md-icon>
-                交互节点
-              </md-text-button>
-            )}
-            <md-text-button
-              style={{ justifyContent: 'flex-start' }}
-              onClick={() => hook.openMoreDialog('metadata')}
-            >
-              <md-icon slot="icon">data_object</md-icon>
-              元数据
-            </md-text-button>
-          </div>
-          <div slot="actions">
-            <md-text-button onClick={hook.closeMoreDialog}>关闭</md-text-button>
-          </div>
-        </md-dialog>
-      )}
+            replayInteraction={hook.replayInteraction}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button variant="text" onClick={hook.closeMoreDialog}>
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-      {hook.moreDialogType === 'nodes' && (
-        <md-dialog
-          open
-          onClosed={hook.closeMoreDialog}
-          style={
-            {
-              '--md-dialog-container-color': '#ffffff',
-              maxWidth: '760px',
-              width: '90vw',
-            } as React.CSSProperties
-          }
-        >
-          <div slot="headline">交互节点</div>
-          <div
-            slot="content"
-            style={{ maxHeight: '60vh', overflow: 'auto', padding: '8px 0' }}
-          >
-            <NodePanel
-              onSeek={(time) => {
-                hook.handleSeek(time)
-                hook.closeMoreDialog()
-              }}
-              replayInteraction={hook.replayInteraction}
-            />
-          </div>
-          <div slot="actions">
-            <md-text-button onClick={hook.closeMoreDialog}>关闭</md-text-button>
-          </div>
-        </md-dialog>
-      )}
+      <Dialog
+        open={hook.moreDialogType === 'subtitles'}
+        onClose={hook.closeMoreDialog}
+        PaperProps={{ sx: { maxWidth: 720, width: '90vw' } }}
+      >
+        <DialogTitle>字幕</DialogTitle>
+        <DialogContent sx={{ maxHeight: '60vh', overflow: 'auto', py: 1 }}>
+          <SubtitlePanel
+            currentTime={hook.currentTime}
+            onSeek={(time) => {
+              hook.handleSeek(time)
+              hook.closeMoreDialog()
+            }}
+          />
+        </DialogContent>
+        <DialogActions>
+          <Button variant="text" onClick={hook.closeMoreDialog}>
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
 
-      {hook.moreDialogType === 'subtitles' && (
-        <md-dialog
-          open
-          onClosed={hook.closeMoreDialog}
-          style={
-            {
-              '--md-dialog-container-color': '#ffffff',
-              maxWidth: '720px',
-              width: '90vw',
-            } as React.CSSProperties
-          }
-        >
-          <div slot="headline">字幕</div>
-          <div
-            slot="content"
-            style={{ maxHeight: '60vh', overflow: 'auto', padding: '8px 0' }}
-          >
-            <SubtitlePanel
-              currentTime={hook.currentTime}
-              onSeek={(time) => {
-                hook.handleSeek(time)
-                hook.closeMoreDialog()
-              }}
-            />
-          </div>
-          <div slot="actions">
-            <md-text-button onClick={hook.closeMoreDialog}>关闭</md-text-button>
-          </div>
-        </md-dialog>
-      )}
-
-      {hook.moreDialogType === 'metadata' && (
-        <md-dialog
-          open
-          onClosed={hook.closeMoreDialog}
-          style={
-            {
-              '--md-dialog-container-color': '#ffffff',
-              maxWidth: '640px',
-              width: '90vw',
-            } as React.CSSProperties
-          }
-        >
-          <div slot="headline">元数据</div>
-          <div slot="content" style={{ maxHeight: '60vh', overflow: 'auto' }}>
-            <MetadataPanel />
-          </div>
-          <div slot="actions">
-            <md-text-button onClick={hook.closeMoreDialog}>关闭</md-text-button>
-          </div>
-        </md-dialog>
-      )}
+      <Dialog
+        open={hook.moreDialogType === 'metadata'}
+        onClose={hook.closeMoreDialog}
+        PaperProps={{ sx: { maxWidth: 640, width: '90vw' } }}
+      >
+        <DialogTitle>元数据</DialogTitle>
+        <DialogContent sx={{ maxHeight: '60vh', overflow: 'auto' }}>
+          <MetadataPanel />
+        </DialogContent>
+        <DialogActions>
+          <Button variant="text" onClick={hook.closeMoreDialog}>
+            关闭
+          </Button>
+        </DialogActions>
+      </Dialog>
     </section>
   )
 }

@@ -1,4 +1,5 @@
 import { useRef, useState } from 'react'
+import { Button } from '@mui/material'
 import type { InteractionNode } from '../types'
 import { LaTeXText } from './LaTeXText'
 import styles from './InteractionOverlay.module.css'
@@ -291,18 +292,23 @@ export function InteractionOverlay({
         {words.length > 0 && (
           <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             {words.map((word, index) => (
-              <md-outlined-button
+              <Button
                 key={`${word}-${index}`}
+                variant="outlined"
                 onClick={() => onWordClick(word)}
               >
                 {word}
-              </md-outlined-button>
+              </Button>
             ))}
           </div>
         )}
         <div>
-          <md-text-button onClick={onReset}>重置</md-text-button>
-          <md-filled-button onClick={onContinue}>确认</md-filled-button>
+          <Button variant="text" onClick={onReset}>
+            重置
+          </Button>
+          <Button variant="contained" onClick={onContinue}>
+            确认
+          </Button>
         </div>
       </div>
     </div>

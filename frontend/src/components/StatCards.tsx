@@ -1,5 +1,6 @@
 import { useVideoStore } from '../stores/videoStore'
 import { STATUS_FILTER_CONFIG } from '../labels'
+import { MaterialIcon, MaterialIconName } from './MaterialIcon'
 import styles from './StatCards.module.css'
 
 const STATUSES = ['queued', 'running', 'failed', 'completed']
@@ -26,7 +27,10 @@ export function StatCards() {
           }`}
           onClick={() => setStatusFilter(item.key)}
         >
-          <md-icon>{item.icon}</md-icon>
+          <MaterialIcon
+            name={item.icon as MaterialIconName}
+            sx={{ fontSize: '16px' }}
+          />
           <span>
             {item.label}（{counts[item.key] ?? 0}）
           </span>
@@ -43,7 +47,10 @@ export function StatCards() {
               setPackedFilter(packedFilter === 'packed' ? 'all' : 'packed')
             }
           >
-            <md-icon>{STATUS_FILTER_CONFIG.packed.icon}</md-icon>
+            <MaterialIcon
+              name={STATUS_FILTER_CONFIG.packed.icon as MaterialIconName}
+              sx={{ fontSize: '16px' }}
+            />
             <span>
               {STATUS_FILTER_CONFIG.packed.label}（{counts.packed ?? 0}）
             </span>
@@ -56,7 +63,10 @@ export function StatCards() {
               setPackedFilter(packedFilter === 'unpacked' ? 'all' : 'unpacked')
             }
           >
-            <md-icon>{STATUS_FILTER_CONFIG.unpacked.icon}</md-icon>
+            <MaterialIcon
+              name={STATUS_FILTER_CONFIG.unpacked.icon as MaterialIconName}
+              sx={{ fontSize: '16px' }}
+            />
             <span>
               {STATUS_FILTER_CONFIG.unpacked.label}（{counts.unpacked ?? 0}）
             </span>

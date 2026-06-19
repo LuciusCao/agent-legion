@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
+import { TextField } from '@mui/material'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
@@ -19,7 +20,7 @@ import styles from './WorkspaceMainPage.module.css'
 const sectionStyle = {
   padding: 16,
   borderRadius: 12,
-  background: 'var(--md-sys-color-surface)',
+  background: '#ffffff',
 } as React.CSSProperties
 
 export default function WorkspaceMainPage() {
@@ -219,16 +220,16 @@ export default function WorkspaceMainPage() {
               )
             }
           />
-          <md-outlined-text-field
+          <TextField
             type="search"
             placeholder="搜索 ID 或标题"
             value={searchInputValue}
-            onInput={(e: React.FormEvent<HTMLElement>) => {
-              const value = (e.target as HTMLInputElement).value
+            onChange={(e) => {
+              const value = e.target.value
               setSearchInputValue(value)
               debouncedSetSearchQuery(value)
             }}
-            style={{ width: 280, flexShrink: 0 }}
+            sx={{ width: 280, flexShrink: 0 }}
           />
         </div>
       </section>

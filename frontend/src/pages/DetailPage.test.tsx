@@ -191,16 +191,9 @@ describe('DetailPage', () => {
     expect(screen.getByText('章节')).toBeInTheDocument()
     expect(screen.getByText('互动')).toBeInTheDocument()
 
-    const chips = Array.from(document.querySelectorAll('md-suggestion-chip'))
-    expect(
-      chips.some((chip) => chip.getAttribute('label') === '0:12 第一章')
-    ).toBe(true)
-    expect(
-      chips.some((chip) => chip.getAttribute('label') === '0:05 例题试做')
-    ).toBe(true)
-    expect(
-      chips.some((chip) => chip.getAttribute('label')?.includes('节点内容'))
-    ).toBe(false)
+    expect(screen.getByText('0:12 第一章')).toBeInTheDocument()
+    expect(screen.getByText('0:05 例题试做')).toBeInTheDocument()
+    expect(screen.queryByText('节点内容')).not.toBeInTheDocument()
     expect(
       document.querySelector("[data-testid='timeline-track']")
     ).not.toBeInTheDocument()
