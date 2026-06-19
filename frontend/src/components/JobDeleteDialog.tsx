@@ -1,4 +1,11 @@
 import { useCallback, useState } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 
 interface JobDeleteDialogProps {
   open: boolean
@@ -24,39 +31,28 @@ export function JobDeleteDialog({
     }
   }, [onConfirm])
 
-  if (!open) return null
-
   return (
-    <md-dialog
-      open
-      onClosed={onClose}
-      style={
-        { '--md-dialog-container-color': '#ffffff' } as React.CSSProperties
-      }
-    >
-      <div slot="headline">确认删除</div>
-      <div slot="content">
+    <Dialog open={open} onClose={onClose}>
+      <DialogTitle>确认删除</DialogTitle>
+      <DialogContent>
         <p>
           确定删除任务 {title ? <strong>{title}</strong> : '此任务'}{' '}
           吗？删除后不可恢复。
         </p>
-      </div>
-      <div slot="actions">
-        <md-text-button onClick={onClose} disabled={isDeleting || undefined}>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={onClose} disabled={isDeleting}>
           取消
-        </md-text-button>
-        <md-filled-button
-          style={
-            {
-              '--md-sys-color-primary': 'var(--md-sys-color-error)',
-            } as React.CSSProperties
-          }
+        </Button>
+        <Button
+          variant="contained"
+          color="error"
           onClick={handleConfirm}
-          disabled={isDeleting || undefined}
+          disabled={isDeleting}
         >
           {isDeleting ? '删除中...' : '删除'}
-        </md-filled-button>
-      </div>
-    </md-dialog>
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

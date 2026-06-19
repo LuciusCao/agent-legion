@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Button } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
@@ -107,9 +108,13 @@ export function JobActionBar({
           {filters && filters.length > 0 && (
             <div className={styles.filters}>
               {filters.map((filter) => (
-                <md-text-button key={filter.key} onClick={filter.onClick}>
+                <Button
+                  key={filter.key}
+                  variant="text"
+                  onClick={filter.onClick}
+                >
                   {filter.label}
-                </md-text-button>
+                </Button>
               ))}
             </div>
           )}
@@ -117,43 +122,48 @@ export function JobActionBar({
       )}
 
       <div className={styles.actions}>
-        <md-outlined-button
+        <Button
+          variant="outlined"
           onClick={() => setRerunOpen(true)}
-          disabled={rerunDisabled || undefined}
+          disabled={rerunDisabled}
         >
           重跑
-        </md-outlined-button>
-        <md-outlined-button
+        </Button>
+        <Button
+          variant="outlined"
           onClick={() => setRunToOpen(true)}
-          disabled={runToDisabled || undefined}
+          disabled={runToDisabled}
         >
           运行到
-        </md-outlined-button>
+        </Button>
         {!isBatch && jobs.some((job) => canContinueJob(job)) && (
-          <md-outlined-button
+          <Button
+            variant="outlined"
             onClick={handleContinue}
-            disabled={continueDisabled || undefined}
+            disabled={continueDisabled}
           >
             继续完整流程
-          </md-outlined-button>
+          </Button>
         )}
-        <md-outlined-button
+        <Button
+          variant="outlined"
           onClick={onPackage}
-          disabled={packageDisabled || undefined}
+          disabled={packageDisabled}
         >
           打包
-        </md-outlined-button>
-        <md-outlined-button
+        </Button>
+        <Button
+          variant="outlined"
+          color="error"
           onClick={onDelete}
-          disabled={deleteDisabled || undefined}
-          style={{ color: 'var(--md-sys-color-error)' }}
+          disabled={deleteDisabled}
         >
           删除
-        </md-outlined-button>
+        </Button>
         {isBatch && onExitSelectMode && (
-          <md-outlined-button onClick={onExitSelectMode}>
+          <Button variant="outlined" onClick={onExitSelectMode}>
             退出
-          </md-outlined-button>
+          </Button>
         )}
       </div>
 

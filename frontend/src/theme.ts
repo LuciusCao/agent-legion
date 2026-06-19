@@ -2,7 +2,7 @@ import { createTheme, ThemeOptions } from '@mui/material/styles'
 
 /**
  * Neutral (black/white/gray) theme for MUI v6.
- * Mirrors the previous @material/web token palette so the UI stays visually consistent.
+ * Mirrors the previous Material Web token palette so the UI stays visually consistent.
  */
 const themeOptions: ThemeOptions = {
   palette: {
@@ -30,7 +30,8 @@ const themeOptions: ThemeOptions = {
     divider: '#c3c6cf',
   },
   typography: {
-    fontFamily: 'Roboto, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    fontFamily:
+      'Roboto, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
   },
   shape: {
     borderRadius: 12,

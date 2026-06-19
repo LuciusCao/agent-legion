@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import {
+  render,
+  screen,
+  waitFor,
+  fireEvent,
+  within,
+} from '@testing-library/react'
 import { QuestionContentPanel } from './QuestionContentPanel'
 
 const mockFetchJobArtifact = vi.fn()
@@ -134,7 +140,7 @@ describe('QuestionContentPanel', () => {
     await waitFor(() => expect(screen.getByText('选项')).toBeInTheDocument())
     const listItems = screen.getAllByRole('listitem')
     expect(listItems).toHaveLength(2)
-    expect(listItems[1].querySelector('md-icon')).toHaveTextContent('check')
+    expect(within(listItems[1]).getByTestId('CheckIcon')).toBeInTheDocument()
   })
 
   it('falls back to raw data for complex answer', async () => {
@@ -165,7 +171,7 @@ describe('QuestionContentPanel', () => {
     render(<QuestionContentPanel jobId="job1" />)
     await waitFor(() => expect(screen.getByText('选项')).toBeInTheDocument())
     const listItems = screen.getAllByRole('listitem')
-    expect(listItems[1].querySelector('md-icon')).toHaveTextContent('check')
+    expect(within(listItems[1]).getByTestId('CheckIcon')).toBeInTheDocument()
   })
 
   it('renders structured answer blanks with alternatives', async () => {

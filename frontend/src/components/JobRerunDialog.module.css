@@ -12,19 +12,19 @@
 }
 
 .empty {
-  color: var(--md-sys-color-on-surface-variant);
+  color: #6b7280;
   margin: 0;
 }
 
 .excludedBox {
   padding: 12px;
   border-radius: 8px;
-  background: var(--md-sys-color-surface-variant);
+  background: #e5e7eb;
 }
 
 .excludedTitle {
   font-size: 14px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   margin-bottom: 8px;
 }
 
@@ -32,10 +32,10 @@
   margin: 0;
   padding-left: 18px;
   font-size: 14px;
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
 }
 
 .summary {
   font-size: 14px;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #6b7280;
 }

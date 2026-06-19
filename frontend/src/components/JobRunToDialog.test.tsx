@@ -36,19 +36,15 @@ const workflow: WorkflowDefinitionRecord = {
   ],
 }
 
-function clickTargetChip(container: HTMLElement, key: string) {
-  const chip = container.querySelector(
-    `[data-testid="target-chip-${key}"]`
-  ) as HTMLElement | null
+function clickTargetChip(_container: HTMLElement, key: string) {
+  const chip = screen.getByTestId(`target-chip-${key}`)
   if (!chip) throw new Error(`Target chip not found: ${key}`)
   fireEvent.click(chip)
 }
 
-function clickStartChip(container: HTMLElement, key: string | null) {
+function clickStartChip(_container: HTMLElement, key: string | null) {
   const testId = key === null ? 'start-chip-auto' : `start-chip-${key}`
-  const chip = container.querySelector(
-    `[data-testid="${testId}"]`
-  ) as HTMLElement | null
+  const chip = screen.getByTestId(testId)
   if (!chip) throw new Error(`Start chip not found: ${testId}`)
   fireEvent.click(chip)
 }
@@ -142,12 +138,8 @@ describe('JobRunToDialog', () => {
     })
 
     expect(screen.getByText(/将运行以下节点/)).toBeInTheDocument()
-    expect(
-      container.querySelector('[data-testid="target-chip-extract"]')
-    ).toBeInTheDocument()
-    expect(
-      container.querySelector('[data-testid="target-chip-generate"]')
-    ).toBeInTheDocument()
+    expect(screen.getByTestId('target-chip-extract')).toBeInTheDocument()
+    expect(screen.getByTestId('target-chip-generate')).toBeInTheDocument()
   })
 
   it('rejects a start node outside the target closure before submission', async () => {

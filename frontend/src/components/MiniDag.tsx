@@ -1,3 +1,4 @@
+import { MaterialIcon } from './MaterialIcon'
 import styles from './MiniDag.module.css'
 
 export interface MiniDagNode {
@@ -27,14 +28,23 @@ export function MiniDag({ nodes }: MiniDagProps) {
             data-node={node.key}
             className={`${styles.node} ${styles[node.status]}`}
           >
-            <md-icon>{ICONS[node.status]}</md-icon>
+            <MaterialIcon name={ICONS[node.status]} />
             <span className={styles.label}>{node.label}</span>
             {typeof node.duration === 'number' && (
               <span className={styles.duration}>{node.duration}s</span>
             )}
           </div>
           {idx < nodes.length - 1 && (
-            <md-icon class={styles.arrow}>arrow_forward</md-icon>
+            <MaterialIcon
+              name="arrow_forward"
+              data-testid="mini-dag-arrow"
+              sx={{
+                fontSize: 16,
+                width: 16,
+                height: 16,
+                color: 'text.secondary',
+              }}
+            />
           )}
         </div>
       ))}

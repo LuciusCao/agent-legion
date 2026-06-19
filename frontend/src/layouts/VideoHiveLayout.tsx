@@ -1,7 +1,9 @@
 import { useNavigate, Outlet } from 'react-router-dom'
+import { IconButton } from '@mui/material'
 import { AppShell } from './AppShell'
 import { AppBar } from '../components/AppBar'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
+import { MaterialIcon } from '../components/MaterialIcon'
 
 export default function VideoHiveLayout() {
   const navigate = useNavigate()
@@ -16,12 +18,12 @@ export default function VideoHiveLayout() {
           rightActions={
             <>
               <AgentStatusIndicator workspaceId="video-hive" />
-              <md-icon-button
+              <IconButton
                 aria-label="设置"
                 onClick={() => navigate('/video-hive/settings')}
               >
-                <md-icon>settings</md-icon>
-              </md-icon-button>
+                <MaterialIcon name="settings" />
+              </IconButton>
             </>
           }
         />

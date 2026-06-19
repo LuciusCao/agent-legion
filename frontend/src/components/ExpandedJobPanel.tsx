@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom'
 import { MiniDag, type MiniDagNode } from './MiniDag'
 import { NodeRunsTable, type NodeRun } from './NodeRunsTable'
+import { MaterialIcon } from './MaterialIcon'
 import { JOB_STATUS_LABELS } from '../labels'
 import type { JobRecord } from '../types'
 import styles from './ExpandedJobPanel.module.css'
@@ -106,20 +107,21 @@ export function ExpandedJobPanel({
             onViewDetail()
           }}
         >
-          <md-icon class={styles.icon}>description</md-icon> 查看完整详情
+          <MaterialIcon className={styles.icon} name="description" />{' '}
+          查看完整详情
         </button>
         <button type="button" className={styles.actionBtn} onClick={onRerun}>
-          <md-icon class={styles.icon}>restart_alt</md-icon> 重跑
+          <MaterialIcon className={styles.icon} name="restart_alt" /> 重跑
         </button>
         <button type="button" className={styles.actionBtn} onClick={onRunTo}>
-          <md-icon class={styles.icon}>play_arrow</md-icon> 运行到...
+          <MaterialIcon className={styles.icon} name="play_arrow" /> 运行到...
         </button>
         <button
           type="button"
           className={`${styles.actionBtn} ${styles.danger}`}
           onClick={onDelete}
         >
-          <md-icon class={styles.icon}>delete</md-icon> 删除
+          <MaterialIcon className={styles.icon} name="delete" /> 删除
         </button>
       </div>
     </div>

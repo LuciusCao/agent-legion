@@ -1,5 +1,7 @@
 import { useState, useCallback } from 'react'
+import { IconButton } from '@mui/material'
 import { DagStepper } from './DagStepper'
+import { MaterialIcon } from './MaterialIcon'
 import { durationSeconds, filterRelevantRuns } from '../helpers'
 import type { JobNodeRecord, NodeRunRecord } from '../types'
 import { JOB_STATUS_LABELS } from '../labels'
@@ -103,9 +105,9 @@ export function JobProgressPanel({
         <div className={styles.stepperHeader}>
           <DagStepper nodes={nodes} />
           {onOpenDagDialog && (
-            <md-icon-button aria-label="查看 DAG" onClick={onOpenDagDialog}>
-              <md-icon>account_tree</md-icon>
-            </md-icon-button>
+            <IconButton aria-label="查看 DAG" onClick={onOpenDagDialog}>
+              <MaterialIcon name="account_tree" />
+            </IconButton>
           )}
         </div>
       </div>
@@ -131,7 +133,7 @@ export function JobProgressPanel({
                   <div
                     className={`${styles.timelineNode} ${NODE_STATUS_CLASS[node.status] || ''} ${node.status === 'running' ? styles.spinning : ''}`}
                   >
-                    <md-icon>{icon}</md-icon>
+                    <MaterialIcon name={icon} sx={{ fontSize: 14 }} />
                   </div>
                   {idx < nodes.length - 1 && (
                     <div className={styles.timelineLine} />
@@ -154,11 +156,19 @@ export function JobProgressPanel({
 
                   <div className={styles.timelineTimes}>
                     <span>
-                      <md-icon className={styles.metaIcon}>schedule</md-icon>
+                      <MaterialIcon
+                        name="schedule"
+                        className={styles.metaIcon}
+                        sx={{ fontSize: 14 }}
+                      />
                       {waitLabel}
                     </span>
                     <span>
-                      <md-icon className={styles.metaIcon}>timer</md-icon>
+                      <MaterialIcon
+                        name="timer"
+                        className={styles.metaIcon}
+                        sx={{ fontSize: 14 }}
+                      />
                       {formatDuration(dur)}
                     </span>
                   </div>
@@ -173,9 +183,11 @@ export function JobProgressPanel({
                         })
                       }
                     >
-                      <md-icon className={styles.toggleIcon}>
-                        description
-                      </md-icon>
+                      <MaterialIcon
+                        name="description"
+                        className={styles.toggleIcon}
+                        sx={{ fontSize: 14 }}
+                      />
                       查看日志
                     </button>
                   )}
@@ -185,11 +197,17 @@ export function JobProgressPanel({
                       className={styles.detailToggle}
                       onClick={() => toggleError(node.node_key)}
                     >
-                      <md-icon className={styles.toggleIcon}>error</md-icon>
+                      <MaterialIcon
+                        name="error"
+                        className={styles.toggleIcon}
+                        sx={{ fontSize: 14 }}
+                      />
                       错误详情
-                      <md-icon className={styles.toggleIcon}>
-                        {isExpanded ? 'expand_less' : 'expand_more'}
-                      </md-icon>
+                      <MaterialIcon
+                        name={isExpanded ? 'expand_less' : 'expand_more'}
+                        className={styles.toggleIcon}
+                        sx={{ fontSize: 14 }}
+                      />
                     </button>
                   )}
 

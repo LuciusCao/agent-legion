@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import { ArtifactListDialog } from './ArtifactListDialog'
 
 describe('ArtifactListDialog', () => {
@@ -65,24 +65,5 @@ describe('ArtifactListDialog', () => {
 
     fireEvent.click(screen.getByText('关闭'))
     expect(onClose).toHaveBeenCalledTimes(1)
-  })
-
-  it('calls onClose when the md-dialog open attribute is removed externally', async () => {
-    render(
-      <ArtifactListDialog
-        open={true}
-        artifacts={['metadata.json']}
-        onClose={onClose}
-        onSelect={onSelect}
-      />
-    )
-
-    const dialog = document.querySelector('md-dialog')
-    expect(dialog).toBeTruthy()
-    dialog!.removeAttribute('open')
-
-    await waitFor(() => {
-      expect(onClose).toHaveBeenCalledTimes(1)
-    })
   })
 })

@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, act } from '@testing-library/react'
 import { BatchRerunDialog } from './BatchRerunDialog'
+import { PHASE_LABELS } from '../labels'
 
 const phases = [
   'download',
@@ -33,7 +34,7 @@ describe('BatchRerunDialog', () => {
   })
 
   it('renders chips and video list', () => {
-    const { container } = render(
+    render(
       <BatchRerunDialog
         open
         items={items}
@@ -46,17 +47,17 @@ describe('BatchRerunDialog', () => {
 
     expect(screen.getByText('选择重跑阶段')).toBeInTheDocument()
     expect(
-      container.querySelector('md-filter-chip[label="下载"]')
+      screen.getByRole('button', { name: PHASE_LABELS.download })
     ).toBeInTheDocument()
     expect(
-      container.querySelector('md-filter-chip[label="转录"]')
+      screen.getByRole('button', { name: PHASE_LABELS.transcribe })
     ).toBeInTheDocument()
     expect(screen.getByText('K001')).toBeInTheDocument()
     expect(screen.getByText('K002')).toBeInTheDocument()
   })
 
   it('marks non-rerunnable videos when selecting a later phase', () => {
-    const { container } = render(
+    render(
       <BatchRerunDialog
         open
         items={items}
@@ -71,10 +72,12 @@ describe('BatchRerunDialog', () => {
     expect(screen.queryByText(/无法重跑/)).not.toBeInTheDocument()
 
     // Click "assemble" chip — v2 at subtitle_review cannot rerun from assemble
-    const assembleChip = container.querySelector('md-filter-chip[label="组装"]')
+    const assembleChip = screen.getByRole('button', {
+      name: PHASE_LABELS.assemble,
+    })
     expect(assembleChip).toBeInTheDocument()
     act(() => {
-      ;(assembleChip as HTMLElement).click()
+      assembleChip.click()
     })
 
     expect(screen.getByText(/当前处于 字幕审核/)).toBeInTheDocument()
@@ -95,7 +98,7 @@ describe('BatchRerunDialog', () => {
     )
 
     await act(async () => {
-      screen.getByText('重跑 2 个视频').click()
+      screen.getByRole('button', { name: /重跑 \d+ 个视频/ }).click()
     })
 
     expect(onConfirm).toHaveBeenCalledWith(['v1', 'v2'], 'download')
@@ -103,7 +106,7 @@ describe('BatchRerunDialog', () => {
   })
 
   it('renders failed-phase chip and filters runnable videos', () => {
-    const { container } = render(
+    render(
       <BatchRerunDialog
         open
         items={items}
@@ -115,23 +118,25 @@ describe('BatchRerunDialog', () => {
     )
 
     // Click "失败的阶段" chip
-    const failedChip = container.querySelector(
-      'md-filter-chip[label="失败的阶段"]'
-    )
+    const failedChip = screen.getByRole('button', {
+      name: PHASE_LABELS.__failed__,
+    })
     expect(failedChip).toBeInTheDocument()
     act(() => {
-      ;(failedChip as HTMLElement).click()
+      failedChip.click()
     })
 
     // v1 is completed, v2 is failed — only v2 should be runnable
     expect(screen.getByText('未失败，跳过')).toBeInTheDocument()
-    expect(screen.getByText('重跑 1 个视频')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /重跑 1 个视频/ })
+    ).toBeInTheDocument()
   })
 
   it('calls onConfirm with __failed__ phase when failed-phase chip selected', async () => {
     const onConfirm = vi.fn()
     const onClose = vi.fn()
-    const { container } = render(
+    render(
       <BatchRerunDialog
         open
         items={items}
@@ -142,15 +147,15 @@ describe('BatchRerunDialog', () => {
       />
     )
 
-    const failedChip = container.querySelector(
-      'md-filter-chip[label="失败的阶段"]'
-    )
+    const failedChip = screen.getByRole('button', {
+      name: PHASE_LABELS.__failed__,
+    })
     act(() => {
-      ;(failedChip as HTMLElement).click()
+      failedChip.click()
     })
 
     await act(async () => {
-      screen.getByText('重跑 1 个视频').click()
+      screen.getByRole('button', { name: /重跑 1 个视频/ }).click()
     })
 
     expect(onConfirm).toHaveBeenCalledWith(['v1', 'v2'], '__failed__')

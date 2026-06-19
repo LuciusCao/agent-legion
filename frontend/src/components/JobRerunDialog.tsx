@@ -1,4 +1,12 @@
 import { useMemo, useState } from 'react'
+import {
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import {
   computeOrderedNodes,
@@ -66,30 +74,32 @@ export function JobRerunDialog({
   }
 
   return (
-    <md-dialog
+    <Dialog
       open
-      onClosed={onClose}
-      style={
-        {
+      onClose={onClose}
+      PaperProps={{
+        sx: {
           minWidth: '520px',
           maxWidth: '760px',
           width: 'min(760px, 92vw)',
-          '--md-dialog-container-color': '#ffffff',
-        } as React.CSSProperties
-      }
+        },
+      }}
     >
-      <div slot="headline">选择重跑节点</div>
-      <div slot="content">
+      <DialogTitle>选择重跑节点</DialogTitle>
+      <DialogContent>
         <div className={styles.content}>
           {orderedNodes.length === 0 ? (
             <p className={styles.empty}>没有可重跑的公共节点</p>
           ) : (
             <div className={styles.nodeGrid}>
               {orderedNodes.map((node) => (
-                <md-filter-chip
+                <Chip
                   key={node.key}
+                  data-testid={`rerun-chip-${node.key}`}
                   label={node.label || node.key}
-                  selected={effectiveNodeKey === node.key || undefined}
+                  variant={
+                    effectiveNodeKey === node.key ? 'filled' : 'outlined'
+                  }
                   onClick={() => setSelectedNodeKey(node.key)}
                 />
               ))}
@@ -116,22 +126,24 @@ export function JobRerunDialog({
               : ''}
           </div>
         </div>
-      </div>
-      <div slot="actions">
-        <md-text-button
+      </DialogContent>
+      <DialogActions>
+        <Button
+          variant="text"
           type="button"
           onClick={onClose}
-          disabled={loading || undefined}
+          disabled={loading}
         >
           取消
-        </md-text-button>
-        <md-filled-button
+        </Button>
+        <Button
+          variant="contained"
           onClick={handleConfirm}
-          disabled={!effectiveNodeKey || loading || undefined}
+          disabled={!effectiveNodeKey || loading}
         >
           确认重跑
-        </md-filled-button>
-      </div>
-    </md-dialog>
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

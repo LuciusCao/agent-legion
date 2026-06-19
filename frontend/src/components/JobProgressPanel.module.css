@@ -3,8 +3,8 @@
   flex-direction: column;
   gap: 12px;
   padding: 16px;
-  background: var(--md-sys-color-surface, #ffffff);
-  border: 1px solid var(--md-sys-color-outline-variant, #e5e7eb);
+  background: #ffffff;
+  border: 1px solid #e5e7eb;
   border-radius: 12px;
   height: 100%;
   overflow-y: auto;
@@ -13,7 +13,7 @@
 
 .stepperWrap {
   padding-bottom: 8px;
-  border-bottom: 1px solid var(--md-sys-color-outline-variant, #e5e7eb);
+  border-bottom: 1px solid #e5e7eb;
 }
 
 .stepperHeader {
@@ -52,12 +52,12 @@
   align-items: center;
   justify-content: center;
   flex-shrink: 0;
-  background: var(--md-sys-color-surface);
-  border: 2px solid var(--md-sys-color-outline-variant);
-  color: var(--md-sys-color-on-surface-variant);
+  background: #ffffff;
+  border: 2px solid #e5e7eb;
+  color: #6b7280;
 }
 
-.timelineNode md-icon {
+.timelineNode > svg {
   font-size: 14px;
   width: 14px;
   height: 14px;
@@ -88,9 +88,9 @@
 }
 
 .statusPending {
-  background: var(--md-sys-color-surface);
-  border-color: var(--md-sys-color-outline-variant);
-  color: var(--md-sys-color-on-surface-variant);
+  background: #ffffff;
+  border-color: #e5e7eb;
+  color: #6b7280;
 }
 
 .spinning {
@@ -110,7 +110,7 @@
   width: 2px;
   flex: 1;
   min-height: 16px;
-  background: var(--md-sys-color-outline-variant, #e5e7eb);
+  background: #e5e7eb;
 }
 
 .timelineContent {
@@ -122,7 +122,7 @@
 }
 
 .nodeNameRunning {
-  color: var(--md-sys-color-primary);
+  color: #000000;
   font-weight: 600;
 }
 
@@ -137,7 +137,7 @@
 .nodeName {
   font-weight: 500;
   font-size: 14px;
-  color: var(--md-sys-color-on-surface, #111827);
+  color: #111827;
 }
 
 .statusBadge {
@@ -170,8 +170,8 @@
 }
 
 .badgePending {
-  background: var(--md-sys-color-surface-variant);
-  color: var(--md-sys-color-on-surface-variant);
+  background: #e5e7eb;
+  color: #43474e;
 }
 
 .timelineTimes {
@@ -179,7 +179,7 @@
   align-items: center;
   gap: 12px;
   font-size: 12px;
-  color: var(--md-sys-color-on-surface-variant, #6b7280);
+  color: #6b7280;
   flex-wrap: wrap;
 }
 
@@ -202,7 +202,7 @@
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: var(--md-sys-color-error, #dc2626);
+  color: #dc2626;
   background: none;
   border: none;
   cursor: pointer;
@@ -231,7 +231,7 @@
   align-items: center;
   gap: 4px;
   font-size: 12px;
-  color: var(--md-sys-color-primary, #2563eb);
+  color: #2563eb;
   background: none;
   border: none;
   cursor: pointer;
@@ -241,7 +241,7 @@
 .emptyState {
   margin: 0;
   font-size: 13px;
-  color: var(--md-sys-color-on-surface-variant, #6b7280);
+  color: #6b7280;
 }
 
 .dialogContent {

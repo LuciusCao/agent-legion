@@ -1,3 +1,4 @@
+import { Button, Chip } from '@mui/material'
 import { useArtifactStore } from '../stores/artifactStore'
 import { useInteractionStore } from '../stores/interactionStore'
 import { INTERACTION_TYPE_LABELS } from '../labels'
@@ -87,7 +88,7 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
               <span
                 style={{
                   fontVariantNumeric: 'tabular-nums',
-                  color: 'var(--md-sys-color-primary)',
+                  color: '#1a73e8',
                 }}
               >
                 {formatTime(triggerTime)}
@@ -95,7 +96,7 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
               <span>
                 <LaTeXText>{node.instruction || '交互节点'}</LaTeXText>
               </span>
-              <md-assist-chip label={typeLabel} />
+              <Chip label={typeLabel} size="small" />
             </div>
             {node.options && node.options.length > 0 && (
               <div
@@ -108,12 +109,14 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
                 onClick={(e) => e.stopPropagation()}
               >
                 {node.options.map((opt, j) => (
-                  <md-outlined-button
+                  <Button
                     key={opt.id ?? j}
-                    disabled={answered || undefined}
+                    variant="outlined"
+                    disabled={answered}
+                    size="small"
                   >
                     <LaTeXText>{opt.text}</LaTeXText>
-                  </md-outlined-button>
+                  </Button>
                 ))}
               </div>
             )}
@@ -141,7 +144,7 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
                       margin: 0,
                       paddingLeft: '16px',
                       fontSize: '0.75rem',
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#5f6368',
                     }}
                   >
                     {issues.map((issue, idx) => (

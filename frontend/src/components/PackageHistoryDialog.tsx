@@ -1,7 +1,17 @@
 import { useEffect, useState } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  IconButton,
+  TextField,
+} from '@mui/material'
 import { deletePackage, updatePackage, api } from '../api'
 import { triggerDownload } from '../lib/download'
 import { usePackageStore } from '../stores/packageStore'
+import { MaterialIcon } from './MaterialIcon'
 import styles from './PackageHistoryDialog.module.css'
 
 interface PackageItem {
@@ -84,8 +94,6 @@ export function PackageHistoryDialog({
     }
   }, [open, isWorkspace, workspaceId, fetchPackagesList])
 
-  if (!open) return null
-
   const handleDownload = (pkg: PackageItem) => {
     const filename = pkg.path.split('/').pop() || ''
     if (!filename) return
@@ -138,9 +146,9 @@ export function PackageHistoryDialog({
   }
 
   return (
-    <md-dialog open>
-      <div slot="headline">包历史</div>
-      <div slot="content" className={styles.dialogContent}>
+    <Dialog open={open} onClose={onClose} maxWidth="sm" fullWidth>
+      <DialogTitle>包历史</DialogTitle>
+      <DialogContent className={styles.dialogContent}>
         {isWorkspace && !workspaceId && (
           <div className={styles.empty}>未提供工作区 ID</div>
         )}
@@ -154,16 +162,17 @@ export function PackageHistoryDialog({
               <div key={pkg.id} className={styles.item}>
                 <div className={styles.itemInfo}>
                   {editingId === pkg.id && !isWorkspace ? (
-                    <md-outlined-text-field
+                    <TextField
                       value={editValue}
-                      onInput={(e: Event) =>
-                        setEditValue((e.target as HTMLInputElement).value)
-                      }
-                      onKeyDown={(e: KeyboardEvent) => {
+                      onChange={(e) => setEditValue(e.target.value)}
+                      onKeyDown={(e) => {
                         if (e.key === 'Enter') handleRename(pkg.id)
                         if (e.key === 'Escape') setEditingId(null)
                       }}
-                      style={{ width: '100%' }}
+                      fullWidth
+                      variant="outlined"
+                      size="small"
+                      autoFocus
                     />
                   ) : (
                     <>
@@ -176,15 +185,14 @@ export function PackageHistoryDialog({
                         title={isWorkspace ? '' : '点击重命名'}
                       >
                         {pkg.locked ? (
-                          <md-icon
-                            style={{
+                          <MaterialIcon
+                            name="lock"
+                            sx={{
                               fontSize: '14px',
                               verticalAlign: 'middle',
                               marginRight: '4px',
                             }}
-                          >
-                            lock
-                          </md-icon>
+                          />
                         ) : null}
                         {pkg.name || '未命名'}
                       </span>
@@ -197,51 +205,54 @@ export function PackageHistoryDialog({
                 </div>
                 <div className={styles.itemActions}>
                   {editingId === pkg.id && !isWorkspace ? (
-                    <md-icon-button
+                    <IconButton
                       onClick={() => handleRename(pkg.id)}
                       title="确认"
+                      size="small"
                     >
-                      <md-icon>check</md-icon>
-                    </md-icon-button>
+                      <MaterialIcon name="check" />
+                    </IconButton>
                   ) : (
                     <>
                       {!isWorkspace && (
                         <>
-                          <md-icon-button
+                          <IconButton
                             onClick={() => handleToggleLock(pkg)}
                             title={pkg.locked ? '解锁' : '锁定'}
+                            size="small"
                           >
-                            <md-icon>
-                              {pkg.locked ? 'lock' : 'lock_open'}
-                            </md-icon>
-                          </md-icon-button>
-                          <md-icon-button
+                            <MaterialIcon
+                              name={pkg.locked ? 'lock' : 'lock_open'}
+                            />
+                          </IconButton>
+                          <IconButton
                             onClick={() => handleDownload(pkg)}
                             title="下载"
+                            size="small"
                           >
-                            <md-icon>download</md-icon>
-                          </md-icon-button>
-                          <md-icon-button
-                            disabled={pkg.locked || undefined}
+                            <MaterialIcon name="download" />
+                          </IconButton>
+                          <IconButton
+                            disabled={!!pkg.locked}
                             onClick={() => handleDelete(pkg.id)}
                             title={pkg.locked ? '已锁定，无法删除' : '删除'}
-                            style={{
-                              color: pkg.locked
-                                ? 'var(--md-sys-color-outline)'
-                                : 'var(--md-sys-color-error)',
+                            size="small"
+                            sx={{
+                              color: pkg.locked ? '#9ca3af' : '#ba1a1a',
                             }}
                           >
-                            <md-icon>delete</md-icon>
-                          </md-icon-button>
+                            <MaterialIcon name="delete" />
+                          </IconButton>
                         </>
                       )}
                       {isWorkspace && (
-                        <md-icon-button
+                        <IconButton
                           onClick={() => handleDownload(pkg)}
                           title="下载"
+                          size="small"
                         >
-                          <md-icon>download</md-icon>
-                        </md-icon-button>
+                          <MaterialIcon name="download" />
+                        </IconButton>
                       )}
                     </>
                   )}
@@ -250,10 +261,12 @@ export function PackageHistoryDialog({
             ))}
           </div>
         )}
-      </div>
-      <div slot="actions">
-        <md-text-button onClick={onClose}>关闭</md-text-button>
-      </div>
-    </md-dialog>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} variant="text">
+          关闭
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

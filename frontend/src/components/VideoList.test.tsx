@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { VideoList } from './VideoList'
 import { useVideoStore } from '../stores/videoStore'
@@ -70,26 +70,25 @@ describe('VideoList', () => {
   })
 
   it('does not render checkboxes when not in select mode', () => {
-    const { container } = render(
+    render(
       <MemoryRouter>
         <VideoList />
       </MemoryRouter>
     )
-    expect(container.querySelectorAll('md-checkbox').length).toBe(0)
+    expect(screen.queryAllByRole('checkbox').length).toBe(0)
   })
 
   it('renders unchecked checkboxes in select mode when nothing is selected', () => {
     useVideoStore.setState({ selectMode: true })
-    const { container } = render(
+    render(
       <MemoryRouter>
         <VideoList />
       </MemoryRouter>
     )
-    const checkboxes = container.querySelectorAll('md-checkbox')
+    const checkboxes = screen.getAllByRole('checkbox')
     expect(checkboxes.length).toBe(2)
     checkboxes.forEach((cb) => {
-      // checked="false" would still be interpreted as checked by Material Web
-      expect(cb.hasAttribute('checked')).toBe(false)
+      expect((cb as HTMLInputElement).checked).toBe(false)
     })
   })
 
@@ -98,13 +97,13 @@ describe('VideoList', () => {
       selectMode: true,
       selectedIds: new Set(['v1']),
     })
-    const { container } = render(
+    render(
       <MemoryRouter>
         <VideoList />
       </MemoryRouter>
     )
-    const checkboxes = Array.from(container.querySelectorAll('md-checkbox'))
-    expect(checkboxes[0].hasAttribute('checked')).toBe(true)
-    expect(checkboxes[1].hasAttribute('checked')).toBe(false)
+    const checkboxes = screen.getAllByRole('checkbox')
+    expect((checkboxes[0] as HTMLInputElement).checked).toBe(true)
+    expect((checkboxes[1] as HTMLInputElement).checked).toBe(false)
   })
 })

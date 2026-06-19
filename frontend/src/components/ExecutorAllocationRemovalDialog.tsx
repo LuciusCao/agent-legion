@@ -1,8 +1,11 @@
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
-
-const dialogStyle = {
-  '--md-dialog-container-color': '#ffffff',
-} as React.CSSProperties
 
 export function ExecutorAllocationRemovalDialog() {
   const {
@@ -23,11 +26,11 @@ export function ExecutorAllocationRemovalDialog() {
   )
 
   return (
-    <md-dialog open onClosed={cancelExecutorRemoval} style={dialogStyle}>
-      <div slot="headline">
+    <Dialog open onClose={cancelExecutorRemoval}>
+      <DialogTitle>
         移除 {executor?.id ?? pendingAllocationRemoval} 执行器
-      </div>
-      <div slot="content">
+      </DialogTitle>
+      <DialogContent>
         <p>移除执行器会同时清除以下节点绑定</p>
         <ul>
           {affectedBindings.map((binding) => (
@@ -36,13 +39,15 @@ export function ExecutorAllocationRemovalDialog() {
             </li>
           ))}
         </ul>
-      </div>
-      <div slot="actions">
-        <md-text-button onClick={cancelExecutorRemoval}>取消</md-text-button>
-        <md-filled-button onClick={confirmExecutorRemoval}>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={cancelExecutorRemoval}>
+          取消
+        </Button>
+        <Button variant="contained" onClick={confirmExecutorRemoval}>
           确认
-        </md-filled-button>
-      </div>
-    </md-dialog>
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

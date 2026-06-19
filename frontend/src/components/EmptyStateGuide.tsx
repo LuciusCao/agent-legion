@@ -1,3 +1,4 @@
+import { MaterialIcon } from './MaterialIcon'
 import styles from './EmptyStateGuide.module.css'
 
 export interface EmptyStateGuideProps {
@@ -15,7 +16,7 @@ export function EmptyStateGuide({ steps }: EmptyStateGuideProps) {
   return (
     <div className={styles.container}>
       <div className={styles.header}>
-        <md-icon class={styles.rocket}>rocket_launch</md-icon>
+        <MaterialIcon className={styles.rocket} name="rocket_launch" />
         <h2 className={styles.title}>开始使用 Workspace</h2>
         <p className={styles.subtitle}>按以下步骤配置并启动你的第一个任务</p>
       </div>
@@ -30,7 +31,7 @@ export function EmptyStateGuide({ steps }: EmptyStateGuideProps) {
             }`}
           >
             <div className={styles.stepIcon}>
-              <md-icon>{step.icon}</md-icon>
+              <MaterialIcon name={step.icon} />
             </div>
             <div className={styles.stepBody}>
               <h3 className={styles.stepTitle}>{step.title}</h3>

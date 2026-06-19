@@ -1,4 +1,5 @@
 import React, { useMemo } from 'react'
+import { List, ListItemButton, ListItemText } from '@mui/material'
 import { useArtifactStore } from '../stores/artifactStore'
 import { LaTeXText } from './LaTeXText'
 
@@ -19,26 +20,30 @@ export const SubtitlePanel = React.memo(function SubtitlePanel({
   }, [subtitles, currentTime])
 
   return (
-    <md-list className="tab-panel">
+    <List className="tab-panel" disablePadding>
       {subtitles.map((sub, i) => (
-        <md-list-item
+        <ListItemButton
           key={i}
-          type="button"
-          className={i === activeIndex ? 'active' : ''}
+          selected={i === activeIndex}
           onClick={() => onSeek(sub.start)}
+          dense
         >
-          <div
-            slot="headline"
-            style={{ fontVariantNumeric: 'tabular-nums', minWidth: '100px' }}
-          >
-            {formatTime(sub.start)} → {formatTime(sub.end)}
-          </div>
-          <div slot="supporting-text">
-            <LaTeXText>{sub.text}</LaTeXText>
-          </div>
-        </md-list-item>
+          <ListItemText
+            primary={
+              <span
+                style={{
+                  fontVariantNumeric: 'tabular-nums',
+                  minWidth: '100px',
+                }}
+              >
+                {formatTime(sub.start)} → {formatTime(sub.end)}
+              </span>
+            }
+            secondary={<LaTeXText>{sub.text}</LaTeXText>}
+          />
+        </ListItemButton>
       ))}
-    </md-list>
+    </List>
   )
 })
 

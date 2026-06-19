@@ -1,8 +1,10 @@
 import { useState } from 'react'
+import { IconButton } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
 import { JobDeleteDialog } from './JobDeleteDialog'
+import { MaterialIcon } from './MaterialIcon'
 import { canRerunJob, canPackageJob, canContinueJob } from './JobActionBar'
 import styles from './JobDetailActions.module.css'
 
@@ -72,57 +74,57 @@ export function JobDetailActions({
   return (
     <>
       <div className={styles.actions} data-testid="job-detail-actions">
-        <md-icon-button
+        <IconButton
           aria-label="重跑"
           title="重跑"
-          disabled={rerunDisabled || undefined}
+          disabled={rerunDisabled}
           onClick={() => setRerunOpen(true)}
         >
-          <md-icon>restart_alt</md-icon>
-        </md-icon-button>
-        <md-icon-button
+          <MaterialIcon name="restart_alt" />
+        </IconButton>
+        <IconButton
           aria-label="运行到"
           title="运行到"
-          disabled={runToDisabled || undefined}
+          disabled={runToDisabled}
           onClick={() => setRunToOpen(true)}
         >
-          <md-icon>play_circle</md-icon>
-        </md-icon-button>
+          <MaterialIcon name="play_circle" />
+        </IconButton>
         {showContinue && onContinue && (
-          <md-icon-button
+          <IconButton
             aria-label="继续完整流程"
             title="继续完整流程"
-            disabled={continueDisabled || undefined}
+            disabled={continueDisabled}
             onClick={handleContinue}
           >
-            <md-icon>skip_next</md-icon>
-          </md-icon-button>
+            <MaterialIcon name="skip_next" />
+          </IconButton>
         )}
-        <md-icon-button
+        <IconButton
           aria-label="打包"
           title="打包"
-          disabled={packageDisabled || undefined}
+          disabled={packageDisabled}
           onClick={onPackage}
         >
-          <md-icon>inventory_2</md-icon>
-        </md-icon-button>
-        <md-icon-button
+          <MaterialIcon name="inventory_2" />
+        </IconButton>
+        <IconButton
           aria-label="删除"
           title="删除"
-          disabled={deleteDisabled || undefined}
+          color="error"
+          disabled={deleteDisabled}
           onClick={() => setDeleteOpen(true)}
-          style={{ color: 'var(--md-sys-color-error)' }}
         >
-          <md-icon>delete</md-icon>
-        </md-icon-button>
-        <md-icon-button
+          <MaterialIcon name="delete" />
+        </IconButton>
+        <IconButton
           aria-label="产物文件"
           title="产物文件"
-          disabled={loading || undefined}
+          disabled={loading}
           onClick={onOpenArtifacts}
         >
-          <md-icon>folder_open</md-icon>
-        </md-icon-button>
+          <MaterialIcon name="folder_open" />
+        </IconButton>
       </div>
 
       <JobRerunDialog

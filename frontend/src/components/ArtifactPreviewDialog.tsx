@@ -1,4 +1,10 @@
-import type { CSSProperties } from 'react'
+import {
+  Button,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import styles from './ArtifactPreviewDialog.module.css'
 
 export interface ArtifactPreviewDialogProps {
@@ -27,21 +33,22 @@ export function ArtifactPreviewDialog({
 }: ArtifactPreviewDialogProps) {
   if (!open) return null
 
-  const dialogStyle = {
-    '--md-dialog-container-color': '#ffffff',
-    maxWidth: '900px',
-    width: '95vw',
-  } as CSSProperties
-
   return (
-    <md-dialog open onClosed={onClose} style={dialogStyle}>
-      <div slot="headline">{name}</div>
-      <div slot="content" className={styles.content}>
+    <Dialog
+      open={open}
+      onClose={onClose}
+      maxWidth={false}
+      PaperProps={{ sx: { maxWidth: '900px', width: '95vw' } }}
+    >
+      <DialogTitle>{name}</DialogTitle>
+      <DialogContent className={styles.content}>
         <pre className={styles.pre}>{formatContent(name, content)}</pre>
-      </div>
-      <div slot="actions">
-        <md-text-button onClick={onClose}>关闭</md-text-button>
-      </div>
-    </md-dialog>
+      </DialogContent>
+      <DialogActions>
+        <Button variant="text" onClick={onClose}>
+          关闭
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }

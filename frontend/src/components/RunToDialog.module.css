@@ -11,7 +11,7 @@
 }
 
 .sectionLabel {
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   font-size: 13px;
   font-weight: 500;
   line-height: 18px;
@@ -24,7 +24,7 @@
   align-items: center;
 }
 
-.chipGrid md-filter-chip {
+.chipGrid :global(.MuiChip-root) {
   width: 100%;
 }
 
@@ -34,7 +34,7 @@
   gap: 8px;
 }
 
-.modeGrid md-filter-chip {
+.modeGrid :global(.MuiChip-root) {
   width: 100%;
 }
 
@@ -54,16 +54,16 @@
   min-height: 52px;
   padding: 8px 10px;
   border-radius: 8px;
-  background: var(--md-sys-color-surface-container-low);
+  background: #fafafa;
 }
 
 .videoTileDisabled {
-  background: var(--md-sys-color-error-container);
+  background: #fee2e2;
 }
 
 .videoName {
   overflow: hidden;
-  color: var(--md-sys-color-on-surface);
+  color: #1a1c1e;
   font-size: 14px;
   font-weight: 500;
   line-height: 20px;
@@ -73,7 +73,7 @@
 
 .videoHint {
   overflow: hidden;
-  color: var(--md-sys-color-error);
+  color: #ba1a1a;
   font-size: 12px;
   line-height: 16px;
   text-overflow: ellipsis;
@@ -81,7 +81,7 @@
 }
 
 .summary {
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
   font-size: 14px;
   line-height: 20px;
 }

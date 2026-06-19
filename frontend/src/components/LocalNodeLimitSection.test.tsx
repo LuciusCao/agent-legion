@@ -125,9 +125,7 @@ describe('LocalNodeLimitSection', () => {
   it('sets the input max to the bound executor workspace allocation', () => {
     render(<LocalNodeLimitSection />)
 
-    const input = document.querySelector(
-      'md-outlined-text-field[label="获取题目 并发上限"]'
-    ) as HTMLElement
+    const input = screen.getByLabelText('获取题目 并发上限') as HTMLInputElement
     expect(input).toBeTruthy()
     expect(input).toHaveAttribute('max', '4')
   })
@@ -135,11 +133,8 @@ describe('LocalNodeLimitSection', () => {
   it('updates the node limit through the store', async () => {
     render(<LocalNodeLimitSection />)
 
-    const input = document.querySelector(
-      'md-outlined-text-field[label="获取题目 并发上限"]'
-    ) as HTMLInputElement
-    input.value = '3'
-    fireEvent.input(input)
+    const input = screen.getByLabelText('获取题目 并发上限') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '3' } })
 
     await waitFor(() => {
       expect(
@@ -157,11 +152,8 @@ describe('LocalNodeLimitSection', () => {
   it('removes the row from the request when the limit is cleared', async () => {
     render(<LocalNodeLimitSection />)
 
-    const input = document.querySelector(
-      'md-outlined-text-field[label="获取题目 并发上限"]'
-    ) as HTMLInputElement
-    input.value = ''
-    fireEvent.input(input)
+    const input = screen.getByLabelText('获取题目 并发上限') as HTMLInputElement
+    fireEvent.change(input, { target: { value: '' } })
 
     await waitFor(() => {
       expect(
@@ -194,11 +186,10 @@ describe('LocalNodeLimitSection', () => {
 
     render(<LocalNodeLimitSection />)
 
-    const input = document.querySelector(
-      'md-outlined-text-field[label="清洗与解析 并发上限"]'
+    const input = screen.getByLabelText(
+      '清洗与解析 并发上限'
     ) as HTMLInputElement
-    input.value = '2'
-    fireEvent.input(input)
+    fireEvent.change(input, { target: { value: '2' } })
 
     await waitFor(() => {
       expect(

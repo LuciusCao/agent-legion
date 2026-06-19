@@ -16,31 +16,31 @@ describe('RerunDialog', () => {
   })
 
   it('renders when open', () => {
-    const { container } = renderOpen(makeVideo())
+    renderOpen(makeVideo())
     expect(screen.getByText('选择重跑阶段')).toBeInTheDocument()
-    expect(container.querySelectorAll('md-list-item').length).toBeGreaterThan(0)
+    expect(screen.getAllByRole('radio').length).toBeGreaterThan(0)
   })
 
   it('displays all knowledge phases for a completed knowledge video', () => {
-    const { container } = renderOpen(
+    renderOpen(
       makeVideo({
         content_type: 'knowledge',
         status: 'completed',
         current_phase: 'package',
       })
     )
-    expect(container.querySelectorAll('md-list-item')).toHaveLength(7)
+    expect(screen.getAllByRole('radio')).toHaveLength(7)
   })
 
   it('displays question phases for a completed question video', () => {
-    const { container } = renderOpen(
+    renderOpen(
       makeVideo({
         content_type: 'question',
         status: 'completed',
         current_phase: 'package',
       })
     )
-    expect(container.querySelectorAll('md-list-item')).toHaveLength(5)
+    expect(screen.getAllByRole('radio')).toHaveLength(5)
   })
 
   it('calls onConfirm with the selected phase and closes the dialog', () => {

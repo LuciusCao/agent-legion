@@ -11,22 +11,22 @@
   gap: 4px;
   padding: 4px 12px;
   border-radius: 16px;
-  border: 1px solid var(--md-sys-color-outline-variant);
-  background: var(--md-sys-color-surface);
+  border: 1px solid #e0e0e0;
+  background: #ffffff;
   cursor: pointer;
   font-size: 14px;
   user-select: none;
-  color: var(--md-sys-color-on-surface-variant);
+  color: #43474e;
 }
 
 .stat-pill:hover {
-  background: var(--md-sys-color-surface-container-high);
+  background: #f5f5f5;
 }
 
 .stat-pill.active {
-  background: var(--md-sys-color-primary-container);
-  border-color: var(--md-sys-color-primary);
-  color: var(--md-sys-color-on-primary-container);
+  background: #e0e0e0;
+  border-color: #000000;
+  color: #1a1c1e;
   font-weight: 600;
 }
 
@@ -34,11 +34,11 @@
   display: inline-block;
   width: 1px;
   height: 24px;
-  background: var(--md-sys-color-outline-variant);
+  background: #e0e0e0;
   margin: 0 4px;
 }
 
-.stat-pill md-icon {
+.stat-pill :global(.MuiSvgIcon-root) {
   font-size: 16px;
   width: 16px;
   height: 16px;

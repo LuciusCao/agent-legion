@@ -39,7 +39,7 @@ describe('RunToDialog', () => {
     expect(screen.getByText('运行到阶段')).toBeInTheDocument()
 
     await act(async () => {
-      screen.getByText('运行到章节生成').click()
+      screen.getByRole('button', { name: '运行到章节生成' }).click()
     })
 
     expect(onConfirm).toHaveBeenCalledWith({
@@ -50,7 +50,7 @@ describe('RunToDialog', () => {
 
   it('supports rerun mode with start and target phases', async () => {
     const onConfirm = vi.fn()
-    const { container } = render(
+    render(
       <RunToDialog
         open
         videos={[video()]}
@@ -59,25 +59,21 @@ describe('RunToDialog', () => {
       />
     )
 
-    const rerunChip = container.querySelector(
-      'md-filter-chip[label="重跑并运行到"]'
-    )
+    const rerunChip = screen.getByRole('button', { name: '重跑并运行到' })
     expect(rerunChip).toBeInTheDocument()
 
     act(() => {
-      ;(rerunChip as HTMLElement).click()
+      rerunChip.click()
     })
 
-    const transcribeChip = container.querySelector(
-      'md-filter-chip[label="转录"]'
-    )
-    expect(transcribeChip).toBeInTheDocument()
+    const transcribeChips = screen.getAllByRole('button', { name: '转录' })
+    expect(transcribeChips.length).toBeGreaterThan(0)
     act(() => {
-      ;(transcribeChip as HTMLElement).click()
+      transcribeChips[0].click()
     })
 
     await act(async () => {
-      screen.getByText('从转录重跑到章节生成').click()
+      screen.getByRole('button', { name: '从转录重跑到章节生成' }).click()
     })
 
     expect(onConfirm).toHaveBeenCalledWith({
@@ -97,6 +93,8 @@ describe('RunToDialog', () => {
     )
 
     expect(screen.getByText('正在处理中')).toBeInTheDocument()
-    expect(screen.getByText('运行到章节生成')).toBeDisabled()
+    expect(
+      screen.getByRole('button', { name: '运行到章节生成' })
+    ).toBeDisabled()
   })
 })

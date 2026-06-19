@@ -23,7 +23,7 @@ describe('MiniDag', () => {
     expect(screen.getByText('转录')).toBeInTheDocument()
     expect(screen.getByText('审核')).toBeInTheDocument()
     expect(screen.getByText('打包')).toBeInTheDocument()
-    expect(screen.getAllByText('arrow_forward')).toHaveLength(3)
+    expect(screen.getAllByTestId('mini-dag-arrow')).toHaveLength(3)
   })
 
   it('renders durations when provided', () => {

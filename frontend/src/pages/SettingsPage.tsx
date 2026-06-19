@@ -1,11 +1,19 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import {
+  IconButton,
+  TextField,
+  Button,
+  Checkbox,
+  MenuItem,
+} from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { ExecutorAllocationSection } from '../components/ExecutorAllocationSection'
 import { ExecutorBindingSection } from '../components/ExecutorBindingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
+import { MaterialIcon } from '../components/MaterialIcon'
 import { fetchWorkflows } from '../api'
 import styles from './SettingsPage.module.css'
 
@@ -177,13 +185,13 @@ export function SettingsPage() {
 
   const rightActions = (
     <div className={styles.saveButtonWrap}>
-      <md-icon-button
+      <IconButton
         onClick={() => void saveAll()}
-        disabled={!isDirty || isSaving || undefined}
+        disabled={!isDirty || isSaving}
         aria-label="保存"
       >
-        <md-icon>save</md-icon>
-      </md-icon-button>
+        <MaterialIcon name="save" />
+      </IconButton>
       {isDirty && <span className={styles.saveBadge} aria-hidden="true" />}
     </div>
   )
@@ -224,27 +232,25 @@ export function SettingsPage() {
             <h2 className={styles.sectionTitle}>基本信息</h2>
             <hr className={styles.sectionDivider} />
             <div className={styles.field}>
-              <md-outlined-text-field
+              <TextField
                 label="Workspace 名称"
+                variant="outlined"
                 value={workspaceName}
-                onInput={(event: Event) =>
-                  setWorkspaceName((event.target as HTMLInputElement).value)
-                }
-                style={{ width: '100%' }}
+                onChange={(event) => setWorkspaceName(event.target.value)}
+                fullWidth
               />
             </div>
             <div className={styles.field}>
-              <md-outlined-text-field
+              <TextField
                 label="描述"
-                type="textarea"
+                variant="outlined"
+                multiline
                 rows={2}
                 value={workspaceDescription}
-                onInput={(event: Event) =>
-                  setWorkspaceDescription(
-                    (event.target as HTMLInputElement).value
-                  )
+                onChange={(event) =>
+                  setWorkspaceDescription(event.target.value)
                 }
-                style={{ width: '100%' }}
+                fullWidth
               />
             </div>
           </section>
@@ -253,35 +259,32 @@ export function SettingsPage() {
             <h2 className={styles.sectionTitle}>接入与资源</h2>
             <hr className={styles.sectionDivider} />
             <div className={styles.field}>
-              <md-outlined-select
+              <TextField
+                select
                 label="默认实体类型"
+                variant="outlined"
                 value={settings.entityType}
-                onChange={(e: React.FormEvent<HTMLSelectElement>) =>
+                onChange={(e) =>
                   setSettings({
-                    entityType: (e.target as HTMLSelectElement).value as
+                    entityType: e.target.value as
                       | 'question'
                       | 'knowledge'
                       | 'video',
                   })
                 }
+                fullWidth
               >
-                <md-select-option value="question">
-                  <div slot="headline">question</div>
-                </md-select-option>
-                <md-select-option value="knowledge">
-                  <div slot="headline">knowledge</div>
-                </md-select-option>
-                <md-select-option value="video">
-                  <div slot="headline">video</div>
-                </md-select-option>
-              </md-outlined-select>
+                <MenuItem value="question">question</MenuItem>
+                <MenuItem value="knowledge">knowledge</MenuItem>
+                <MenuItem value="video">video</MenuItem>
+              </TextField>
             </div>
 
             <div className={styles.field}>
               <span
                 style={{
                   fontSize: 12,
-                  color: 'var(--md-sys-color-on-surface-variant)',
+                  color: '#616161',
                 }}
               >
                 接入模式
@@ -305,9 +308,9 @@ export function SettingsPage() {
                         gap: 8,
                       }}
                     >
-                      <md-checkbox
-                        checked={isChecked || undefined}
-                        onClick={() => toggleIntakeMode(mode.key)}
+                      <Checkbox
+                        checked={isChecked}
+                        onChange={() => toggleIntakeMode(mode.key)}
                       />
                       <span style={{ fontSize: 14 }}>{mode.label}</span>
                     </div>
@@ -331,7 +334,7 @@ export function SettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     资源接口参数
@@ -347,8 +350,7 @@ export function SettingsPage() {
                         <div
                           key={provider.key}
                           style={{
-                            border:
-                              '1px solid var(--md-sys-color-outline-variant)',
+                            border: '1px solid #e0e0e0',
                             borderRadius: 12,
                             padding: 16,
                           }}
@@ -365,7 +367,7 @@ export function SettingsPage() {
                           <div
                             style={{
                               fontSize: 12,
-                              color: 'var(--md-sys-color-on-surface-variant)',
+                              color: '#616161',
                               marginBottom: 12,
                             }}
                           >
@@ -373,17 +375,16 @@ export function SettingsPage() {
                           </div>
                           <div style={{ display: 'grid', gap: 8 }}>
                             {provider.paramKeys.map((paramKey) => (
-                              <md-outlined-text-field
+                              <TextField
                                 key={paramKey}
                                 label={paramKey}
+                                variant="outlined"
                                 placeholder={
                                   provider.defaultParams[paramKey] || ''
                                 }
                                 value={binding.config[paramKey] || ''}
-                                onInput={(event: Event) => {
-                                  const value = (
-                                    event.target as HTMLInputElement
-                                  ).value
+                                onChange={(event) => {
+                                  const value = event.target.value
                                   const nextConfig = { ...binding.config }
                                   if (value) {
                                     nextConfig[paramKey] = value
@@ -400,7 +401,7 @@ export function SettingsPage() {
                                     },
                                   })
                                 }}
-                                style={{ width: '100%' }}
+                                fullWidth
                               />
                             ))}
                           </div>
@@ -419,12 +420,13 @@ export function SettingsPage() {
                 marginTop: 16,
               }}
             >
-              <md-outlined-button
+              <Button
+                variant="outlined"
                 onClick={testConnection}
-                disabled={isTesting || isSaving || undefined}
+                disabled={isTesting || isSaving}
               >
                 {isTesting ? '测试中...' : '测试连接'}
-              </md-outlined-button>
+              </Button>
               <div aria-live="polite" aria-atomic="true">
                 <ConnectionStatusPill
                   state={testStatus.state}
@@ -436,7 +438,7 @@ export function SettingsPage() {
               <div
                 className="error-text"
                 role="alert"
-                style={{ color: 'var(--md-sys-color-error)', marginTop: 12 }}
+                style={{ color: '#d32f2f', marginTop: 12 }}
               >
                 {saveError}
               </div>
@@ -447,24 +449,25 @@ export function SettingsPage() {
             <h2 className={styles.sectionTitle}>工作流</h2>
             <hr className={styles.sectionDivider} />
             <div className={styles.field}>
-              <md-outlined-select
+              <TextField
+                select
                 label="工作流"
+                variant="outlined"
                 value={settings.workflowKey || ''}
-                onChange={(e: React.FormEvent<HTMLSelectElement>) =>
+                onChange={(e) =>
                   setSettings({
-                    workflowKey: (e.target as HTMLSelectElement).value,
+                    workflowKey: e.target.value,
                   })
                 }
+                fullWidth
               >
-                <md-select-option value="">
-                  <div slot="headline">请选择</div>
-                </md-select-option>
+                <MenuItem value="">请选择</MenuItem>
                 {workflowOptions.map((p) => (
-                  <md-select-option key={p.key} value={p.key}>
-                    <div slot="headline">{p.label}</div>
-                  </md-select-option>
+                  <MenuItem key={p.key} value={p.key}>
+                    {p.label}
+                  </MenuItem>
                 ))}
-              </md-outlined-select>
+              </TextField>
             </div>
           </section>
 

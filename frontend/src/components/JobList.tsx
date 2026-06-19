@@ -1,5 +1,6 @@
 import { useJobStore } from '../stores/jobStore'
 import { JobListItem } from './JobListItem'
+import { MaterialIcon } from './MaterialIcon'
 import styles from './JobList.module.css'
 
 export interface JobListProps {
@@ -15,11 +16,10 @@ export function JobList({ workspaceId }: JobListProps) {
   if (jobs.length === 0) {
     return (
       <div className={styles.empty}>
-        <md-icon
-          style={{ fontSize: '48px', color: 'var(--md-sys-color-outline)' }}
-        >
-          inbox
-        </md-icon>
+        <MaterialIcon
+          name="inbox"
+          sx={{ fontSize: 48, color: 'text.secondary' }}
+        />
         <p className="title-medium">暂无任务</p>
       </div>
     )

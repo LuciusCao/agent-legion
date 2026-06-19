@@ -554,10 +554,10 @@ describe('JobDetailPage', () => {
 
     expect(screen.getByLabelText('重跑')).toBeInTheDocument()
     expect(screen.getByLabelText('打包')).toBeInTheDocument()
-    // The old body action bar used md-outlined-button with text labels;
-    // app bar actions are now md-icon-button with aria-label.
+    // The old body action bar used text buttons with labels;
+    // app bar actions are now icon buttons with aria-label.
     expect(
-      screen.queryByText('重跑', { selector: 'md-outlined-button' })
+      screen.queryByText('重跑', { selector: 'button' })
     ).not.toBeInTheDocument()
   })
 
@@ -590,7 +590,7 @@ describe('JobDetailPage', () => {
 
     // Artifact list dialog should open
     expect(
-      screen.getByText('产物文件', { selector: '[slot="headline"]' })
+      screen.getByRole('heading', { name: '产物文件' })
     ).toBeInTheDocument()
     expect(screen.getByText('question.json')).toBeInTheDocument()
   })

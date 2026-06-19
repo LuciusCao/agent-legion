@@ -1,4 +1,5 @@
 import React, { useCallback } from 'react'
+import { Chip } from '@mui/material'
 import type { Chapter, InteractionNode } from '../types'
 import { INTERACTION_TYPE_LABELS } from '../labels'
 import { parseTimeSeconds } from '../helpers'
@@ -51,11 +52,13 @@ export const TimelineStrip = React.memo(function TimelineStrip({
               currentTime >= chapter.start &&
               currentTime < (chapters[index + 1]?.start ?? Infinity)
             return (
-              <md-suggestion-chip
+              <Chip
                 key={chapter.id ?? index}
-                class={isActive ? styles.activeChapterChip : ''}
+                className={isActive ? styles.activeChapterChip : ''}
                 label={`${formatTime(chapter.start)} ${chapter.title}`}
                 onClick={() => onSeek(chapter.start)}
+                size="small"
+                variant="outlined"
               />
             )
           })}
@@ -72,9 +75,9 @@ export const TimelineStrip = React.memo(function TimelineStrip({
             const time = parseTimeSeconds(node.trigger_time ?? 0)
             const isActive = currentTime >= time && currentTime < time + 1.5
             return (
-              <md-suggestion-chip
+              <Chip
                 key={node.id ?? index}
-                class={
+                className={
                   isActive
                     ? styles.activeInteractionChip
                     : styles.interactionChip
@@ -82,6 +85,8 @@ export const TimelineStrip = React.memo(function TimelineStrip({
                 label={`${formatTime(time)} ${getInteractionLabel(node)}`}
                 onClick={() => seekInteraction(time, index)}
                 title={`${formatTime(time)} ${node.instruction || '交互节点'}`}
+                size="small"
+                variant="outlined"
               />
             )
           })}

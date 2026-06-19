@@ -57,7 +57,7 @@ describe('JobLogDialog', () => {
       truncated: false,
     })
 
-    const { container } = render(
+    render(
       <JobLogDialog
         jobId="j1"
         runId={1}
@@ -68,10 +68,10 @@ describe('JobLogDialog', () => {
     )
 
     await waitFor(() => {
-      const pre = container.querySelector('pre')
+      const pre = document.querySelector('pre')
       expect(pre).toHaveTextContent('line1')
     })
-    expect(container.querySelector('pre')).toHaveTextContent('line2')
+    expect(document.querySelector('pre')).toHaveTextContent('line2')
   })
 
   it('renders empty state when log is empty', async () => {
@@ -276,7 +276,7 @@ describe('JobLogDialog', () => {
       truncated: false,
     })
 
-    const { container } = render(
+    render(
       <JobLogDialog
         jobId="j1"
         runId={1}
@@ -289,7 +289,7 @@ describe('JobLogDialog', () => {
     await waitFor(() => {
       expect(screen.getByText('ok')).toBeInTheDocument()
     })
-    expect(container.textContent).not.toContain('/logs/jobs/')
-    expect(container.textContent).not.toContain('.log')
+    expect(document.body.textContent).not.toContain('/logs/jobs/')
+    expect(document.body.textContent).not.toContain('.log')
   })
 })

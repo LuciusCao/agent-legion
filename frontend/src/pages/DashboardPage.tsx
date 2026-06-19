@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
+import { Button } from '@mui/material'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useVideoStore } from '../stores/videoStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
@@ -77,9 +78,9 @@ export function DashboardPage() {
         }}
       >
         <h1 style={{ margin: 0, fontSize: 28 }}>Agent Legion</h1>
-        <md-filled-button onClick={() => setDialogOpen(true)}>
+        <Button variant="contained" onClick={() => setDialogOpen(true)}>
           新建 Workspace
-        </md-filled-button>
+        </Button>
       </div>
 
       <div

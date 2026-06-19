@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
+import { Switch } from '@mui/material'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { useUiStore } from '../stores/uiStore'
+import { MaterialIcon } from '../components/MaterialIcon'
 import { api } from '../api'
 import type { GlobalServiceStatus } from '../types'
 
@@ -79,7 +81,7 @@ export function VideoHiveSettingsPage() {
               fontSize: 16,
             }}
           >
-            <md-icon>cloud</md-icon>
+            <MaterialIcon name="cloud" />
             <span>全局服务状态</span>
           </div>
           <div style={{ padding: '0 16px 16px' }}>
@@ -89,7 +91,7 @@ export function VideoHiveSettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     CMS Base URL
@@ -102,7 +104,7 @@ export function VideoHiveSettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     Token 状态
@@ -115,7 +117,7 @@ export function VideoHiveSettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     环境
@@ -142,7 +144,7 @@ export function VideoHiveSettingsPage() {
               fontSize: 16,
             }}
           >
-            <md-icon>toggle_on</md-icon>
+            <MaterialIcon name="toggle_on" />
             <span>Worker 控制</span>
           </div>
           <div style={{ padding: '0 16px 16px' }}>
@@ -156,10 +158,7 @@ export function VideoHiveSettingsPage() {
               }}
             >
               <span>自动调度</span>
-              <md-switch
-                selected={!workerPaused || undefined}
-                onClick={togglePause}
-              />
+              <Switch checked={!workerPaused} onChange={togglePause} />
             </label>
           </div>
         </div>
@@ -175,7 +174,7 @@ export function VideoHiveSettingsPage() {
               fontSize: 16,
             }}
           >
-            <md-icon>stream</md-icon>
+            <MaterialIcon name="stream" />
             <span>工作流信息</span>
           </div>
           <div style={{ padding: '0 16px 16px' }}>
@@ -185,7 +184,7 @@ export function VideoHiveSettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     ASR Provider
@@ -198,7 +197,7 @@ export function VideoHiveSettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     Whisper 配置
@@ -211,7 +210,7 @@ export function VideoHiveSettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     SenseVoice 配置
@@ -224,7 +223,7 @@ export function VideoHiveSettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     VAD
@@ -237,7 +236,7 @@ export function VideoHiveSettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     OpenClaw Runners
@@ -250,7 +249,7 @@ export function VideoHiveSettingsPage() {
                   <span
                     style={{
                       fontSize: 12,
-                      color: 'var(--md-sys-color-on-surface-variant)',
+                      color: '#616161',
                     }}
                   >
                     超时时间

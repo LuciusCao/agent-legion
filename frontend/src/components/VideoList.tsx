@@ -1,11 +1,13 @@
 import { useRef, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useVirtualizer } from '@tanstack/react-virtual'
+import { Checkbox, ListItemButton, ListItemText } from '@mui/material'
 import { useVideoStore } from '../stores/videoStore'
 import { PHASE_LABELS, STATUS_LABELS, TYPE_LABELS } from '../labels'
 import { statusGroup, formatInteractionStats } from '../helpers'
 import { PhaseStepper } from './PhaseStepper'
 import { InteractionReviewBadge } from './InteractionReviewBadge'
+import { MaterialIcon } from './MaterialIcon'
 import { useAppShellScroll } from '../layouts/AppShell'
 import styles from './VideoList.module.css'
 
@@ -45,18 +47,14 @@ export function VideoList() {
     return (
       <div className={styles.videoList}>
         <div className="empty-state">
-          <md-icon
-            style={{ fontSize: '48px', color: 'var(--md-sys-color-outline)' }}
-          >
-            inbox
-          </md-icon>
+          <MaterialIcon
+            name="inbox"
+            sx={{ fontSize: '48px', color: '#9ca3af' }}
+          />
           <p className="title-medium">
             暂无{selectedType === 'knowledge' ? '知识点' : '题目'}视频
           </p>
-          <p
-            className="body-medium"
-            style={{ color: 'var(--md-sys-color-outline)' }}
-          >
+          <p className="body-medium" style={{ color: '#9ca3af' }}>
             点击右上角 + 添加视频
           </p>
         </div>
@@ -84,9 +82,8 @@ export function VideoList() {
                   transform: `translateY(${virtualItem.start}px)`,
                 }}
               >
-                <md-list-item
-                  type="button"
-                  className={isSelected ? 'active' : ''}
+                <ListItemButton
+                  selected={isSelected}
                   onClick={() => {
                     if (selectMode) {
                       toggleVideoSelection(video.id)
@@ -96,30 +93,34 @@ export function VideoList() {
                   }}
                 >
                   {selectMode && (
-                    <md-checkbox
-                      slot="start"
-                      checked={isSelected || undefined}
-                      onClick={(e: React.MouseEvent) => {
+                    <Checkbox
+                      checked={isSelected}
+                      onClick={(e) => {
                         e.stopPropagation()
                         toggleVideoSelection(video.id)
                       }}
                     />
                   )}
-                  <div slot="headline">
-                    <strong>{video.title || '未命名'}</strong>
-                  </div>
-                  <div slot="supporting-text">
-                    <small>
-                      {TYPE_LABELS[video.content_type]} ·{' '}
-                      {video.external_id || '未填 ID'}
-                    </small>
-                    {video.error_message && (
-                      <small className="error-text" title={video.error_message}>
-                        {video.error_message}
-                      </small>
-                    )}
-                  </div>
-                  <div slot="end" className={styles.statusEnd}>
+                  <ListItemText
+                    primary={<strong>{video.title || '未命名'}</strong>}
+                    secondary={
+                      <>
+                        <small>
+                          {TYPE_LABELS[video.content_type]} ·{' '}
+                          {video.external_id || '未填 ID'}
+                        </small>
+                        {video.error_message && (
+                          <small
+                            className="error-text"
+                            title={video.error_message}
+                          >
+                            {video.error_message}
+                          </small>
+                        )}
+                      </>
+                    }
+                  />
+                  <div className={styles.statusEnd}>
                     {video.content_type === 'knowledge' &&
                       video.interaction_stats && (
                         <span
@@ -150,7 +151,7 @@ export function VideoList() {
                       <span className="packed-badge">已打包</span>
                     )}
                   </div>
-                </md-list-item>
+                </ListItemButton>
               </div>
             )
           })}

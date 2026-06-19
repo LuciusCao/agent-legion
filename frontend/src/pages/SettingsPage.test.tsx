@@ -9,6 +9,7 @@ import type { WorkspaceSettings } from '../types'
 import { useUiStore } from '../stores/uiStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { api, fetchWorkflows } from '../api'
+import { expectConsoleWarning } from '../test-setup'
 
 vi.mock('../api', () => ({
   api: vi.fn(),
@@ -214,20 +215,14 @@ describe('SettingsPage', () => {
     })
     renderPage()
     await waitFor(() => {
-      expect(
-        document.querySelector('md-outlined-text-field[label="Workspace 名称"]')
-      ).toBeTruthy()
+      expect(screen.getByLabelText('Workspace 名称')).toBeInTheDocument()
     })
-    const nameField = document.querySelector(
-      'md-outlined-text-field[label="Workspace 名称"]'
+    const nameField = screen.getByLabelText(
+      'Workspace 名称'
     ) as HTMLInputElement
-    const descField = document.querySelector(
-      'md-outlined-text-field[label="描述"]'
-    ) as HTMLInputElement
-    nameField.value = '新名称'
-    descField.value = '新描述'
-    fireEvent.input(nameField)
-    fireEvent.input(descField)
+    const descField = screen.getByLabelText('描述') as HTMLInputElement
+    fireEvent.change(nameField, { target: { value: '新名称' } })
+    fireEvent.change(descField, { target: { value: '新描述' } })
     const saveBtn = screen.getByLabelText('保存')
     fireEvent.click(saveBtn)
     await waitFor(() => {
@@ -235,11 +230,12 @@ describe('SettingsPage', () => {
     })
   })
 
-  it('navigates back to workspace main page', () => {
+  it('navigates back to workspace main page', async () => {
     renderPage()
-    const back = document.querySelector('md-icon-button')
+    await act(async () => {})
+    const back = screen.getByTestId('app-bar-back')
     expect(back).toBeTruthy()
-    fireEvent.click(back!)
+    fireEvent.click(back)
     expect(screen.getByText('Workspace main')).toBeInTheDocument()
   })
 
@@ -371,12 +367,8 @@ describe('SettingsPage', () => {
     await waitFor(() => {
       expect(screen.getByText('cms.question.detail')).toBeInTheDocument()
     })
-    expect(
-      document.querySelector('md-outlined-text-field[label="bank_version"]')
-    ).toBeTruthy()
-    expect(
-      document.querySelector('md-outlined-text-field[label="country_id"]')
-    ).toBeTruthy()
+    expect(screen.getByLabelText('bank_version')).toBeInTheDocument()
+    expect(screen.getByLabelText('country_id')).toBeInTheDocument()
   })
 
   it('renders checked checkbox for enabled intake modes', async () => {
@@ -409,9 +401,11 @@ describe('SettingsPage', () => {
     })
     const { container } = renderPage()
     await act(async () => {})
-    const checkboxes = Array.from(container.querySelectorAll('md-checkbox'))
-    expect(checkboxes[0].hasAttribute('checked')).toBe(false)
-    expect(checkboxes[1].hasAttribute('checked')).toBe(true)
+    const checkboxes = Array.from(
+      container.querySelectorAll('input[type="checkbox"]')
+    ) as HTMLInputElement[]
+    expect(checkboxes[0].checked).toBe(false)
+    expect(checkboxes[1].checked).toBe(true)
   })
 
   it('renders unchecked checkbox for disabled intake modes', async () => {
@@ -438,9 +432,11 @@ describe('SettingsPage', () => {
     })
     const { container } = renderPage()
     await act(async () => {})
-    const checkbox = container.querySelector('md-checkbox')
+    const checkbox = container.querySelector(
+      'input[type="checkbox"]'
+    ) as HTMLInputElement
     expect(checkbox).toBeTruthy()
-    expect(checkbox!.hasAttribute('checked')).toBe(false)
+    expect(checkbox.checked).toBe(false)
   })
 
   it('renders executor binding section between allocation and local limit sections', async () => {
@@ -557,6 +553,11 @@ describe('SettingsPage', () => {
       saveAll: originalActions.saveAll,
     })
 
+    mockFetchWorkflows.mockResolvedValueOnce({
+      workflows: [{ key: 'reading_analysis', label: '阅读分析' }],
+    })
+    expectConsoleWarning(/out-of-range value/)
+
     mockApi.mockResolvedValueOnce({
       workspace: { name: 'Flow Workspace', description: '' },
       settings,
@@ -587,17 +588,20 @@ describe('SettingsPage', () => {
     })
 
     renderPage()
+    await act(async () => {})
 
     await waitFor(() => {
       expect(
-        document.querySelector('md-switch[aria-label="分配 local-default"]')
-      ).toBeTruthy()
+        screen.getByRole('checkbox', { name: '分配 local-default' })
+      ).toBeInTheDocument()
     })
 
-    const switchEl = document.querySelector(
-      'md-switch[aria-label="分配 local-default"]'
-    ) as HTMLElement
-    fireEvent.click(switchEl)
+    const switchEl = screen.getByRole('checkbox', {
+      name: '分配 local-default',
+    })
+    await act(async () => {
+      fireEvent.click(switchEl)
+    })
 
     await waitFor(() => {
       expect(
@@ -605,15 +609,15 @@ describe('SettingsPage', () => {
       ).toHaveLength(1)
     })
 
-    const select = document.querySelector(
-      'md-outlined-select[aria-label="绑定 fetch_questions"]'
-    ) as HTMLElement
+    const select = screen.getByRole('combobox', {
+      name: '绑定 fetch_questions',
+    })
     await act(async () => {
-      select.dispatchEvent(
-        new CustomEvent('change', {
-          detail: { value: 'local-default' },
-          bubbles: true,
-        })
+      fireEvent.mouseDown(select)
+    })
+    await act(async () => {
+      fireEvent.click(
+        screen.getByRole('option', { name: 'local-default (local)' })
       )
     })
 
@@ -623,11 +627,12 @@ describe('SettingsPage', () => {
       ).toHaveLength(1)
     })
 
-    const limitInput = document.querySelector(
-      'md-outlined-text-field[label="获取题目 并发上限"]'
+    const limitInput = screen.getByLabelText(
+      '获取题目 并发上限'
     ) as HTMLInputElement
-    limitInput.value = '2'
-    fireEvent.input(limitInput)
+    await act(async () => {
+      fireEvent.change(limitInput, { target: { value: '2' } })
+    })
 
     await waitFor(() => {
       expect(
@@ -642,7 +647,9 @@ describe('SettingsPage', () => {
     })
 
     const saveBtn = screen.getByLabelText('保存')
-    fireEvent.click(saveBtn)
+    await act(async () => {
+      fireEvent.click(saveBtn)
+    })
 
     await waitFor(() => {
       expect(mockApi).toHaveBeenCalledTimes(1)
@@ -743,11 +750,14 @@ describe('SettingsPage', () => {
     })
 
     renderPage()
+    await act(async () => {})
 
-    const switchEl = document.querySelector(
-      'md-switch[aria-label="分配 local-default"]'
-    ) as HTMLElement
-    fireEvent.click(switchEl)
+    const switchEl = screen.getByRole('checkbox', {
+      name: '分配 local-default',
+    })
+    await act(async () => {
+      fireEvent.click(switchEl)
+    })
 
     await waitFor(() => {
       expect(
@@ -758,7 +768,9 @@ describe('SettingsPage', () => {
       ).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByText('取消'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('取消'))
+    })
     await waitFor(() => {
       expect(
         useSettingStore.getState().executorConfiguration.allocations
@@ -769,12 +781,16 @@ describe('SettingsPage', () => {
       expect(useSettingStore.getState().pendingAllocationRemoval).toBeNull()
     })
 
-    fireEvent.click(switchEl)
+    await act(async () => {
+      fireEvent.click(switchEl)
+    })
     await waitFor(() => {
       expect(screen.getByText('确认')).toBeInTheDocument()
     })
 
-    fireEvent.click(screen.getByText('确认'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('确认'))
+    })
     await waitFor(() => {
       expect(
         useSettingStore.getState().executorConfiguration.allocations

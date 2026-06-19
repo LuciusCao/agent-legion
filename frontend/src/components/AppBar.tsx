@@ -1,3 +1,5 @@
+import { IconButton } from '@mui/material'
+import { MaterialIcon } from './MaterialIcon'
 import { useNavigate } from 'react-router-dom'
 import styles from './AppBar.module.css'
 
@@ -19,21 +21,21 @@ export function AppBar({
   const navigate = useNavigate()
 
   const leftButton = backTo ? (
-    <md-icon-button
+    <IconButton
       onClick={() => navigate(backTo)}
       aria-label="返回"
       data-testid="app-bar-back"
     >
-      <md-icon>arrow_back</md-icon>
-    </md-icon-button>
+      <MaterialIcon name="arrow_back" />
+    </IconButton>
   ) : home ? (
-    <md-icon-button
+    <IconButton
       onClick={() => navigate('/')}
       aria-label="主页"
       data-testid="app-bar-home"
     >
-      <md-icon>home</md-icon>
-    </md-icon-button>
+      <MaterialIcon name="home" />
+    </IconButton>
   ) : null
 
   return (

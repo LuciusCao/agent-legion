@@ -1,4 +1,12 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react'
+import { useEffect, useMemo, useState } from 'react'
+import {
+  Button,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import { PHASE_LABELS } from '../labels'
 import { canContinueTo, canRerunTo, getSharedPhases } from '../helpers'
 import type { RunToMode, VideoItem } from '../types'
@@ -58,8 +66,6 @@ export function RunToDialog({
     })
   }, [defaultTargetPhase, phases, startPhase, targetPhase])
 
-  if (!open) return null
-
   const isRerun = mode === 'rerun'
   const selectedStartPhase = startPhase ?? phases[0]
   const selectedTargetPhase = targetPhase ?? defaultTargetPhase
@@ -86,29 +92,29 @@ export function RunToDialog({
   }
 
   return (
-    <md-dialog
-      open
-      onClosed={onClose}
-      style={
-        {
+    <Dialog
+      open={open}
+      onClose={onClose}
+      PaperProps={{
+        sx: {
           minWidth: '520px',
           maxWidth: '760px',
           width: 'min(760px, 92vw)',
-          '--md-dialog-container-color': '#ffffff',
-        } as CSSProperties
-      }
+        },
+      }}
     >
-      <div slot="headline">运行到阶段</div>
-      <div slot="content">
+      <DialogTitle>运行到阶段</DialogTitle>
+      <DialogContent>
         <div className={styles.content}>
           <div className={styles.section}>
             <div className={styles.modeGrid}>
               {(Object.keys(MODE_LABELS) as RunToMode[]).map((modeKey) => (
-                <md-filter-chip
+                <Chip
                   key={modeKey}
                   label={MODE_LABELS[modeKey]}
-                  selected={mode === modeKey || undefined}
+                  color={mode === modeKey ? 'primary' : 'default'}
                   onClick={() => setMode(modeKey)}
+                  sx={{ width: '100%', justifyContent: 'center' }}
                 />
               ))}
             </div>
@@ -119,11 +125,12 @@ export function RunToDialog({
               <span className={styles.sectionLabel}>起始阶段</span>
               <div className={styles.chipGrid}>
                 {phases.map((phase) => (
-                  <md-filter-chip
+                  <Chip
                     key={phase}
                     label={PHASE_LABELS[phase] ?? phase}
-                    selected={selectedStartPhase === phase || undefined}
+                    color={selectedStartPhase === phase ? 'primary' : 'default'}
                     onClick={() => setStartPhase(phase)}
+                    sx={{ width: '100%', justifyContent: 'center' }}
                   />
                 ))}
               </div>
@@ -134,11 +141,12 @@ export function RunToDialog({
             <span className={styles.sectionLabel}>目标阶段</span>
             <div className={styles.chipGrid}>
               {phases.map((phase) => (
-                <md-filter-chip
+                <Chip
                   key={phase}
                   label={PHASE_LABELS[phase] ?? phase}
-                  selected={selectedTargetPhase === phase || undefined}
+                  color={selectedTargetPhase === phase ? 'primary' : 'default'}
                   onClick={() => setTargetPhase(phase)}
+                  sx={{ width: '100%', justifyContent: 'center' }}
                 />
               ))}
             </div>
@@ -169,18 +177,19 @@ export function RunToDialog({
             已选择 {videos.length} 个视频，可运行 {runnableCount} 个
           </div>
         </div>
-      </div>
-      <div slot="actions">
-        <md-text-button type="button" onClick={onClose}>
+      </DialogContent>
+      <DialogActions>
+        <Button onClick={onClose} variant="text">
           取消
-        </md-text-button>
-        <md-filled-button
+        </Button>
+        <Button
           onClick={handleConfirm}
-          disabled={runnableCount === 0 || undefined}
+          variant="contained"
+          disabled={runnableCount === 0}
         >
           {confirmLabel}
-        </md-filled-button>
-      </div>
-    </md-dialog>
+        </Button>
+      </DialogActions>
+    </Dialog>
   )
 }
