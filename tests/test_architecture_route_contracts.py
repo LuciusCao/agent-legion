@@ -47,6 +47,15 @@ def write_custom_route(root: Path, imports: str, annotation: str) -> None:
     budget_path.write_text(json.dumps({"files": {}}), encoding="utf-8")
 
 
+def write_route_source(root: Path, source: str) -> None:
+    path = root / "server/app/routes/example.py"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(source, encoding="utf-8")
+    budget_path = root / "config/architecture/architecture-budgets.json"
+    budget_path.parent.mkdir(parents=True, exist_ok=True)
+    budget_path.write_text(json.dumps({"files": {}}), encoding="utf-8")
+
+
 @pytest.mark.parametrize(
     "annotation",
     [
@@ -162,3 +171,110 @@ def test_runtime_protocol_response_resolves_postponed_annotation():
     )
 
     assert route_contracts.has_protocol_response_endpoint(namespace["endpoint"])
+
+
+def test_helper_local_import_does_not_authorize_module_route(tmp_path):
+    write_route_source(
+        tmp_path,
+        "from fastapi import APIRouter\n"
+        "router = APIRouter()\n"
+        "def helper():\n"
+        "    from fastapi.responses import FileResponse\n"
+        "@router.get('/example')\n"
+        "def example() -> FileResponse:\n"
+        "    raise NotImplementedError\n",
+    )
+
+    assert any("requires named response_model" in error for error in check_repository(tmp_path))
+
+
+def test_helper_local_import_does_not_authorize_factory_route(tmp_path):
+    write_route_source(
+        tmp_path,
+        "from fastapi import APIRouter\n"
+        "router = APIRouter()\n"
+        "def helper():\n"
+        "    from fastapi.responses import FileResponse\n"
+        "def create_router():\n"
+        "    @router.get('/example')\n"
+        "    def example() -> FileResponse:\n"
+        "        raise NotImplementedError\n",
+    )
+
+    assert any("requires named response_model" in error for error in check_repository(tmp_path))
+
+
+def test_pre_definition_rebinding_revokes_protocol_import(tmp_path):
+    write_route_source(
+        tmp_path,
+        "from fastapi import APIRouter\n"
+        "from fastapi.responses import FileResponse\n"
+        "FileResponse = dict\n"
+        "router = APIRouter()\n"
+        "@router.get('/example')\n"
+        "def example() -> FileResponse:\n"
+        "    raise NotImplementedError\n",
+    )
+
+    assert any("requires named response_model" in error for error in check_repository(tmp_path))
+
+
+def test_module_import_authorizes_nested_route(tmp_path):
+    write_route_source(
+        tmp_path,
+        "from fastapi import APIRouter\n"
+        "from fastapi.responses import FileResponse as DownloadResponse\n"
+        "router = APIRouter()\n"
+        "def create_router():\n"
+        "    @router.get('/example')\n"
+        "    def example() -> DownloadResponse:\n"
+        "        raise NotImplementedError\n",
+    )
+
+    assert not any("requires named response_model" in error for error in check_repository(tmp_path))
+
+
+def test_enclosing_factory_import_authorizes_nested_route(tmp_path):
+    write_route_source(
+        tmp_path,
+        "from fastapi import APIRouter\n"
+        "router = APIRouter()\n"
+        "def create_router():\n"
+        "    from fastapi.responses import FileResponse\n"
+        "    @router.get('/example')\n"
+        "    def example() -> FileResponse:\n"
+        "        raise NotImplementedError\n",
+    )
+
+    assert not any("requires named response_model" in error for error in check_repository(tmp_path))
+
+
+def test_normal_annotation_ignores_post_definition_rebinding(tmp_path):
+    write_route_source(
+        tmp_path,
+        "from fastapi import APIRouter\n"
+        "from fastapi.responses import FileResponse\n"
+        "router = APIRouter()\n"
+        "@router.get('/example')\n"
+        "def example() -> FileResponse:\n"
+        "    raise NotImplementedError\n"
+        "FileResponse = dict\n",
+    )
+
+    assert not any("requires named response_model" in error for error in check_repository(tmp_path))
+
+
+def test_postponed_annotation_honors_post_definition_rebinding(tmp_path):
+    write_route_source(
+        tmp_path,
+        "from __future__ import annotations\n"
+        "from fastapi import APIRouter\n"
+        "from fastapi.responses import FileResponse\n"
+        "router = APIRouter()\n"
+        "@router.get('/example')\n"
+        "def example() -> FileResponse:\n"
+        "    raise NotImplementedError\n"
+        "FileResponse = dict\n",
+    )
+
+    assert any("requires named response_model" in error for error in check_repository(tmp_path))

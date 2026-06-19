@@ -40,36 +40,121 @@ def _annotation_members(annotation: ast.expr) -> list[str] | None:
     return [name] if name else None
 
 
-def _protocol_imports(tree: ast.AST) -> tuple[dict[str, str], dict[str, str]]:
-    classes: dict[str, str] = {}
-    modules: dict[str, str] = {}
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            module = node.module or ""
-            if module in _PROTOCOL_RESPONSE_MODULES:
-                for alias in node.names:
-                    if alias.name in _PROTOCOL_RESPONSE_NAMES:
-                        classes[alias.asname or alias.name] = alias.name
-            elif module in {"fastapi", "starlette"}:
-                for alias in node.names:
-                    if alias.name == "responses":
-                        modules[alias.asname or alias.name] = f"{module}.responses"
-        elif isinstance(node, ast.Import):
-            for alias in node.names:
-                if alias.name in _PROTOCOL_RESPONSE_MODULES:
-                    local_name = alias.asname or alias.name.split(".")[0]
-                    modules[local_name] = alias.name if alias.asname else local_name
-    return classes, modules
+class _LocalBindingVisitor(ast.NodeVisitor):
+    def __init__(self) -> None:
+        self.names: set[str] = set()
+
+    def visit_Name(self, node: ast.Name) -> None:
+        if isinstance(node.ctx, ast.Store):
+            self.names.add(node.id)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        self.names.update(alias.asname or alias.name.split(".")[0] for alias in node.names)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        self.names.update(alias.asname or alias.name for alias in node.names)
+
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
+        self.names.add(node.name)
+
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
+        self.names.add(node.name)
+
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
+        self.names.add(node.name)
+
+    def visit_Lambda(self, node: ast.Lambda) -> None:
+        pass
 
 
-def _is_resolved_protocol_name(name: str, classes: dict[str, str], modules: dict[str, str]) -> bool:
-    if name in classes:
-        return True
+def _function_local_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> set[str]:
+    visitor = _LocalBindingVisitor()
+    for argument in [
+        *function.args.posonlyargs,
+        *function.args.args,
+        *function.args.kwonlyargs,
+    ]:
+        visitor.names.add(argument.arg)
+    if function.args.vararg:
+        visitor.names.add(function.args.vararg.arg)
+    if function.args.kwarg:
+        visitor.names.add(function.args.kwarg.arg)
+    for statement in function.body:
+        visitor.visit(statement)
+    return visitor.names
+
+
+def _apply_binding(statement: ast.stmt, bindings: dict[str, str | None]) -> None:
+    if isinstance(statement, ast.ImportFrom):
+        module = statement.module or ""
+        for alias in statement.names:
+            local_name = alias.asname or alias.name
+            bindings[local_name] = None
+            if module in _PROTOCOL_RESPONSE_MODULES and alias.name in _PROTOCOL_RESPONSE_NAMES:
+                bindings[local_name] = alias.name
+            elif module in {"fastapi", "starlette"} and alias.name == "responses":
+                bindings[local_name] = f"{module}.responses"
+        return
+    if isinstance(statement, ast.Import):
+        for alias in statement.names:
+            local_name = alias.asname or alias.name.split(".")[0]
+            bindings[local_name] = None
+            if alias.name in _PROTOCOL_RESPONSE_MODULES:
+                bindings[local_name] = alias.name if alias.asname else local_name
+        return
+    if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+        bindings[statement.name] = None
+        return
+    visitor = _LocalBindingVisitor()
+    visitor.visit(statement)
+    for name in visitor.names:
+        bindings[name] = None
+
+
+def _scope_path(
+    scope: ast.Module | ast.FunctionDef | ast.AsyncFunctionDef,
+    target: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> list[tuple[ast.Module | ast.FunctionDef | ast.AsyncFunctionDef, int]]:
+    for index, statement in enumerate(scope.body):
+        if statement is target:
+            return [(scope, index)]
+        if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)) and any(
+            node is target for node in ast.walk(statement)
+        ):
+            nested = _scope_path(statement, target)
+            if nested:
+                return [(scope, index), *nested]
+    return []
+
+
+def _protocol_bindings(
+    tree: ast.Module, function: ast.FunctionDef | ast.AsyncFunctionDef
+) -> dict[str, str | None]:
+    bindings: dict[str, str | None] = {}
+    postponed = any(
+        isinstance(statement, ast.ImportFrom)
+        and statement.module == "__future__"
+        and any(alias.name == "annotations" for alias in statement.names)
+        for statement in tree.body
+    )
+    for scope, boundary in _scope_path(tree, function):
+        if isinstance(scope, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for name in _function_local_names(scope):
+                bindings[name] = None
+        limit = len(scope.body) if postponed and isinstance(scope, ast.Module) else boundary
+        for statement in scope.body[:limit]:
+            _apply_binding(statement, bindings)
+    return bindings
+
+
+def _is_resolved_protocol_name(name: str, bindings: dict[str, str | None]) -> bool:
+    if "." not in name:
+        return bindings.get(name) in _PROTOCOL_RESPONSE_NAMES
     prefix, _, response_name = name.rpartition(".")
     if response_name not in _PROTOCOL_RESPONSE_NAMES:
         return False
     root, _, remainder = prefix.partition(".")
-    module = modules.get(root)
+    module = bindings.get(root)
     return bool(module and (not remainder or f"{module}.{remainder}" in _PROTOCOL_RESPONSE_MODULES))
 
 
@@ -81,8 +166,10 @@ def has_protocol_response_annotation(
     members = _annotation_members(function.returns)
     if not members:
         return False
-    classes, modules = _protocol_imports(tree)
-    return all(_is_resolved_protocol_name(member, classes, modules) for member in members)
+    if not isinstance(tree, ast.Module):
+        return False
+    bindings = _protocol_bindings(tree, function)
+    return all(_is_resolved_protocol_name(member, bindings) for member in members)
 
 
 def has_protocol_response_type(annotation: object) -> bool:

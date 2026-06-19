@@ -235,6 +235,98 @@ describe('AddDialog', () => {
     })
   })
 
+  it('attaches the select change listener when the dialog opens after mount', async () => {
+    mockFetchWorkflowDefinition.mockResolvedValue({
+      workflow: {
+        key: 'question_comprehension_info',
+        label: '题目审题信息生成 DAG',
+        intake: {
+          modes: [
+            {
+              key: 'batch_by_knowledge',
+              label: '按知识点批量',
+              input_field: 'knowledge_codes',
+              resource: '',
+            },
+            {
+              key: 'batch_by_ids',
+              label: '按题目ID批量',
+              input_field: 'question_ids',
+              resource: '',
+            },
+          ],
+        },
+        nodes: [],
+      },
+    })
+    mockApi
+      .mockResolvedValueOnce({
+        workspace: {
+          id: 'ws1',
+          name: '题目审题信息',
+          default_workflow_key: 'question_comprehension_info',
+          default_entity: 'question',
+          intake_config: {
+            enabled_modes: ['batch_by_knowledge', 'batch_by_ids'],
+            label_overrides: {},
+          },
+        },
+      })
+      .mockResolvedValueOnce({ batch: {}, created_count: 1, jobs: [] })
+
+    const { rerender } = render(
+      <AddDialog
+        open={false}
+        onClose={vi.fn()}
+        context="workspace"
+        workspaceId="ws1"
+      />
+    )
+
+    rerender(
+      <AddDialog
+        open={true}
+        onClose={vi.fn()}
+        context="workspace"
+        workspaceId="ws1"
+      />
+    )
+
+    await waitFor(() => {
+      expect(document.querySelector('md-select-option')).toBeInTheDocument()
+    })
+
+    const select = document.querySelector('md-outlined-select') as HTMLElement
+    await act(async () => {
+      select.dispatchEvent(
+        new CustomEvent('change', {
+          detail: { value: 'batch_by_ids' },
+          bubbles: true,
+        })
+      )
+    })
+
+    enterResourceIds('5cf31cfe5805488fe22aea87b3853267')
+    fireEvent.click(screen.getByText('加入队列'))
+
+    await waitFor(() => {
+      expect(mockApi).toHaveBeenLastCalledWith(
+        '/api/workspaces/ws1/job-batches',
+        expect.objectContaining({
+          method: 'POST',
+        })
+      )
+    })
+    const body = JSON.parse(
+      mockApi.mock.calls[mockApi.mock.calls.length - 1][1]?.body as string
+    )
+    expect(body).toMatchObject({
+      source_kind: 'batch_by_ids',
+      question_ids: ['5cf31cfe5805488fe22aea87b3853267'],
+      knowledge_codes: [],
+    })
+  })
+
   it('disables submit and shows hint when workspace enabled_modes is empty', async () => {
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: {
