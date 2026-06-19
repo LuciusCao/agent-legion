@@ -3,8 +3,8 @@ import subprocess
 from pathlib import Path
 
 VALIDATOR = (
-    Path(__file__).resolve().parents[1]
-    / "server/app/workflows/skills/question_comprehension_info/assess_comprehension_difficulty/scripts/validate_output.py"
+    Path.home()
+    / ".agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty/scripts/validate_output.py"
 )
 
 
