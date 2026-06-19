@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
+from server.app.skills.config import SkillsLock
 from server.app.skills.manager import SkillManager
 
 
@@ -14,11 +15,18 @@ def refresh_lock(config_path: Path, lock_path: Path, base_dir: Path) -> None:
         base_dir=base_dir,
     )
     config = manager._load_config()
+    refreshed = {}
     for skill_key in config.skills:
         workflow, capability = manager._parse_skill_key(skill_key)
         cache_dir = manager._resolve_cache_dir(workflow, capability)
         with manager._cache_lock_for(cache_dir):
-            manager._ensure_cached(config.skills[skill_key].repo, skill_key, cache_dir)
+            refreshed[skill_key] = manager._refresh_source(
+                skill_key,
+                config.skills[skill_key],
+                cache_dir,
+            )
+    with manager._lockfile_lock:
+        manager._write_lock_unlocked(SkillsLock(skills=refreshed))
 
 
 def main() -> None:

@@ -45,5 +45,9 @@ def resolve_skill_dir(
 ) -> Path:
     """Resolve a Pi skill to a validated, execution-private directory."""
     skill_dir = skill_manager.get_skill_dir(skill, execution_id)
-    resolve_workflow_skill(skill_manager.base_dir, skill)
-    return skill_dir
+    try:
+        resolve_workflow_skill(skill_manager.base_dir, skill)
+        return skill_dir
+    except Exception:
+        skill_manager.cleanup_execution(execution_id)
+        raise

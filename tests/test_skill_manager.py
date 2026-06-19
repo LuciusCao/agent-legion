@@ -137,6 +137,29 @@ def _push_new_commit(repo_uri: str, tmp_path: Path, content: str) -> None:
     subprocess.run(["git", "-C", str(work), "push", "origin", "HEAD"], check=True)
 
 
+def _make_in_place_repo(repo: Path) -> str:
+    repo.mkdir(parents=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    (repo / "SKILL.md").write_text("# local skill\n")
+    (repo / "references").mkdir()
+    (repo / "references" / "output-contract.md").write_text("contract\n")
+    (repo / "scripts").mkdir()
+    (repo / "scripts" / "validate_output.py").write_text("print('ok')\n")
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(
+        ["git", "-C", str(repo), "commit", "-m", "init", "--no-gpg-sign"],
+        check=True,
+        env=_git_env(),
+    )
+    subprocess.run(["git", "-C", str(repo), "tag", "v1.0.0"], check=True)
+    return subprocess.run(
+        ["git", "-C", str(repo), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
 def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
@@ -157,6 +180,36 @@ def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
     assert skill_dir == tmp_path / "runs" / execution_id / "reading_analysis" / "extract_keywords"
     assert (skill_dir / "SKILL.md").is_file()
     assert not (skill_dir / ".git").exists()
+
+
+def test_tilde_local_source_can_be_managed_in_place(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    fake_home = tmp_path / "home"
+    base_dir = fake_home / ".agents" / "skills" / "agent-legion"
+    repo = base_dir / "reading_analysis" / "extract_keywords"
+    commit = _make_in_place_repo(repo)
+    monkeypatch.setenv("HOME", str(fake_home))
+
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        "skills:\n"
+        "  reading_analysis/extract_keywords:\n"
+        "    repo: ~/.agents/skills/agent-legion/reading_analysis/extract_keywords\n"
+        "    ref: v1.0.0\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=base_dir,
+        runs_dir=tmp_path / "runs",
+    )
+
+    skill_dir = manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+
+    assert (skill_dir / "SKILL.md").read_text() == "# local skill\n"
+    assert manager._load_lock().skills["reading_analysis/extract_keywords"].commit == commit
+    assert (repo / ".git").is_dir()
 
 
 def test_lock_commit_used_even_when_ref_drifts(tmp_path: Path) -> None:
@@ -182,6 +235,55 @@ def test_lock_commit_used_even_when_ref_drifts(tmp_path: Path) -> None:
     second_dir = manager.get_skill_dir("reading_analysis/extract_keywords", second_execution)
 
     assert (second_dir / "SKILL.md").read_text() == locked_content
+
+
+def test_lock_source_drift_is_rejected(tmp_path: Path) -> None:
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+    manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: HEAD\n"
+    )
+
+    with pytest.raises(SkillConfigError, match="refresh"):
+        manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+
+
+def test_refresh_lock_replaces_existing_pin(tmp_path: Path) -> None:
+    from server.app.skills.lock import refresh_lock
+
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+    )
+    lock_path = tmp_path / "skills.lock"
+    base_dir = tmp_path / "skills"
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=lock_path,
+        base_dir=base_dir,
+        runs_dir=tmp_path / "runs",
+    )
+    manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    first_commit = manager._load_lock().skills["reading_analysis/extract_keywords"].commit
+
+    _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
+    refresh_lock(config_path, lock_path, base_dir)
+
+    refreshed = manager._load_lock().skills["reading_analysis/extract_keywords"]
+    assert refreshed.commit != first_commit
+    assert refreshed.repo == repo_uri
+    assert refreshed.ref == "main"
 
 
 def test_undeclared_skill_key_raises_config_error(tmp_path: Path) -> None:

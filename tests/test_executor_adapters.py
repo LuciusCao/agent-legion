@@ -282,6 +282,51 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
     assert "fake_pi" in result.command[0]
     assert ctx.log_path.is_file()
     assert "event" in ctx.log_path.read_text(encoding="utf-8")
+    assert not (skill_manager.runs_dir / ctx.execution_id).exists()
+
+
+def test_pi_executor_cleans_snapshot_when_runner_raises(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    skill_manager = _make_skill_manager(
+        tmp_path,
+        "reading_analysis/extract_keywords",
+        validate_script="#!/usr/bin/env python3\n",
+    )
+    executor = PiExecutor(
+        "pi-default",
+        PiConfig(binary="pi"),
+        skill_manager,
+        {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
+    )
+    monkeypatch.setattr(
+        executor._runner,
+        "run",
+        lambda **_kwargs: (_ for _ in ()).throw(RuntimeError("runner failed")),
+    )
+    job_dir = tmp_path / "job"
+    ctx = ExecutionContext(
+        execution_id="exec-error",
+        lease_id="lease-1",
+        node_run_id=8,
+        executor_id="pi-default",
+        workspace_id="ws-a",
+        job_id="job-1",
+        workflow_key="reading_analysis",
+        node_key="extract_keywords",
+        capability="extract_keywords",
+        workspace={"id": "ws-a"},
+        job={"id": "job-1", "storage_dir": str(job_dir)},
+        job_dir=job_dir,
+        log_path=tmp_path / "run-error.log",
+        inputs=(),
+        expected_outputs=(),
+    )
+
+    with pytest.raises(RuntimeError, match="runner failed"):
+        executor.execute(ctx)
+
+    assert not (skill_manager.runs_dir / ctx.execution_id).exists()
 
 
 def test_pi_executor_fails_when_output_missing(tmp_path: Path) -> None:

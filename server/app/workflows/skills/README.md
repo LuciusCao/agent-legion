@@ -1,7 +1,7 @@
 # Workflow Skills
 
 The repository-owned Pi skills that used to live under this directory have been
-migrated to standalone external git repositories.
+migrated to standalone git repositories outside this source tree.
 
 ## New Location
 
@@ -32,9 +32,9 @@ remote after the initial commit.
 
 ## Why External Repos?
 
-Keeping each skill in its own repository lets the Pi executor clone skills on
-demand, version them independently, and share them across workspaces without
-bundling them into the Video Hive application repository.
+Keeping each skill in its own repository lets the Pi executor use local paths or
+clone remote URLs, version skills independently, and share them across workspaces
+without bundling them into the Video Hive application repository.
 
 ## Legacy Resolver
 
