@@ -105,3 +105,27 @@ def test_destructive_git_ops_only_after_path_validation(tmp_path: Path) -> None:
 
     after = set(manager.base_dir.rglob("*"))
     assert after == before
+
+
+@pytest.mark.full_gate
+def test_symlink_run_dir_escape_rejected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An intermediate symlink in runs_dir must not redirect rmtree outside."""
+    manager = _make_manager(tmp_path)
+    execution_id = str(uuid.uuid4())
+    cache_dir = manager.base_dir / "reading_analysis" / "extract_keywords"
+    cache_dir.mkdir(parents=True)
+    (cache_dir / "SKILL.md").write_text("# cached\n", encoding="utf-8")
+    monkeypatch.setattr(manager, "_ensure_cached", lambda *_args, **_kwargs: None)
+
+    outside = tmp_path / "outside_runs"
+    capability = outside / "reading_analysis" / "extract_keywords"
+    capability.mkdir(parents=True)
+    sentinel = capability / "sentinel.txt"
+    sentinel.write_text("outside", encoding="utf-8")
+    manager.runs_dir.mkdir(parents=True)
+    (manager.runs_dir / execution_id).symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(SkillPathError):
+        manager.get_skill_dir("reading_analysis/extract_keywords", execution_id)
+
+    assert sentinel.read_text(encoding="utf-8") == "outside"

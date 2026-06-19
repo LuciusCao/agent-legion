@@ -1,45 +1,42 @@
 # Repository-owned Pi skills registry.
 #
-# This file declares the external repository location for each capability.
-# The URLs below are placeholders; replace them with the canonical remote
-# URLs for your organization before running production workloads. Once the
-# remotes are available, run `server.app.skills.lock` to regenerate
-# `config/skills.lock` with resolved commit hashes.
+# Sources may be local paths or remote Git URLs. The default installation keeps
+# each skill under ~/.agents/skills/agent-legion as an independent local repo.
 
 skills:
   # question_comprehension_info
   question_comprehension_info/assess_comprehension_difficulty:
-    repo: https://github.com/agent-legion/skill-question-comprehension-info-assess-comprehension-difficulty.git
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
     ref: v1.0.0
   question_comprehension_info/generate_key_info:
-    repo: https://github.com/agent-legion/skill-question-comprehension-info-generate-key-info.git
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
     ref: v1.0.0
   question_comprehension_info/generate_possible_errors:
-    repo: https://github.com/agent-legion/skill-question-comprehension-info-generate-possible-errors.git
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
     ref: v1.0.0
   question_comprehension_info/review_key_info:
-    repo: https://github.com/agent-legion/skill-question-comprehension-info-review-key-info.git
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/review_key_info
     ref: v1.0.0
   question_comprehension_info/review_possible_errors:
-    repo: https://github.com/agent-legion/skill-question-comprehension-info-review-possible-errors.git
+    repo: ~/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
     ref: v1.0.0
 
   # reading_analysis
   reading_analysis/assess_difficulty:
-    repo: https://github.com/agent-legion/skill-reading-analysis-assess-difficulty.git
+    repo: ~/.agents/skills/agent-legion/reading_analysis/assess_difficulty
     ref: v1.0.0
   reading_analysis/extract_keywords:
-    repo: https://github.com/agent-legion/skill-reading-analysis-extract-keywords.git
+    repo: ~/.agents/skills/agent-legion/reading_analysis/extract_keywords
     ref: v1.0.0
   reading_analysis/generate_distractors:
-    repo: https://github.com/agent-legion/skill-reading-analysis-generate-distractors.git
+    repo: ~/.agents/skills/agent-legion/reading_analysis/generate_distractors
     ref: v1.0.0
   reading_analysis/review_difficulty:
-    repo: https://github.com/agent-legion/skill-reading-analysis-review-difficulty.git
+    repo: ~/.agents/skills/agent-legion/reading_analysis/review_difficulty
     ref: v1.0.0
   reading_analysis/review_distractors:
-    repo: https://github.com/agent-legion/skill-reading-analysis-review-distractors.git
+    repo: ~/.agents/skills/agent-legion/reading_analysis/review_distractors
     ref: v1.0.0
   reading_analysis/review_keywords:
-    repo: https://github.com/agent-legion/skill-reading-analysis-review-keywords.git
+    repo: ~/.agents/skills/agent-legion/reading_analysis/review_keywords
     ref: v1.0.0

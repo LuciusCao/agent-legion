@@ -44,17 +44,23 @@ class SkillManager:
         self._validate_execution_id(execution_id)
         workflow, capability = self._parse_skill_key(skill_key)
         cache_dir = self._resolve_cache_dir(workflow, capability)
+        run_dir = self._resolve_run_dir(execution_id, workflow, capability)
         source = self._source_for(skill_key)
 
         cache_lock = self._cache_lock_for(cache_dir)
         with cache_lock:
-            self._ensure_cached(source.repo, skill_key, cache_dir)
+            self._ensure_cached(source, skill_key, cache_dir)
 
-            run_dir = self.runs_dir / execution_id / workflow / capability
             if run_dir.exists():
                 shutil.rmtree(run_dir)
             shutil.copytree(cache_dir, run_dir, ignore=shutil.ignore_patterns(".git"))
         return run_dir
+
+    def cleanup_execution(self, execution_id: str) -> None:
+        self._validate_execution_id(execution_id)
+        execution_dir = self._resolve_execution_dir(execution_id)
+        if execution_dir.exists():
+            shutil.rmtree(execution_dir)
 
     def _validate_execution_id(self, execution_id: str) -> None:
         if not execution_id:
@@ -88,6 +94,25 @@ class SkillManager:
             raise SkillPathError(f"skill cache dir escapes base dir: {candidate}") from exc
         return candidate
 
+    def _resolve_run_dir(self, execution_id: str, workflow: str, capability: str) -> Path:
+        execution_dir = self._resolve_execution_dir(execution_id)
+        root = self.runs_dir.resolve()
+        candidate = (execution_dir / workflow / capability).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError as exc:
+            raise SkillPathError(f"skill run dir escapes runs dir: {candidate}") from exc
+        return candidate
+
+    def _resolve_execution_dir(self, execution_id: str) -> Path:
+        root = self.runs_dir.resolve()
+        candidate = (root / execution_id).resolve()
+        try:
+            candidate.relative_to(root)
+        except ValueError as exc:
+            raise SkillPathError(f"skill execution dir escapes runs dir: {candidate}") from exc
+        return candidate
+
     def _source_for(self, skill_key: str) -> SkillSourceConfig:
         config = self._load_config()
         source = config.skills.get(skill_key)
@@ -101,45 +126,93 @@ class SkillManager:
         data = yaml.safe_load(self.config_path.read_text(encoding="utf-8")) or {}
         return SkillsConfig.model_validate(data)
 
-    def _ensure_cached(self, repo: str, skill_key: str, cache_dir: Path) -> None:
+    def _ensure_cached(
+        self,
+        source: SkillSourceConfig,
+        skill_key: str,
+        cache_dir: Path,
+    ) -> None:
+        repo = self._normalize_repo(source.repo)
+        in_place = self._is_in_place_source(repo, cache_dir)
         if not cache_dir.exists():
+            if in_place:
+                raise SkillRepoError(f"local skill repo not found: {cache_dir}")
             cache_dir.parent.mkdir(parents=True, exist_ok=True)
             self._run_git(["clone", repo, str(cache_dir)])
         elif not (cache_dir / ".git").is_dir():
             raise SkillRepoError(f"cache dir exists but is not a git repo: {cache_dir}")
-
-        source = self._source_for(skill_key)
 
         with self._lockfile_lock:
             lock = self._load_lock()
             locked = lock.skills.get(skill_key)
 
         if locked is not None and locked.commit:
+            if locked.repo != source.repo or locked.ref != source.ref:
+                raise SkillConfigError(
+                    f"skill {skill_key!r} config differs from skills.lock; refresh the lock"
+                )
             commit = locked.commit
             if not self._has_commit(cache_dir, commit):
+                if in_place:
+                    raise SkillRepoError(
+                        f"locked commit {commit!r} is missing from local skill repo {cache_dir}"
+                    )
                 self._run_git(["-C", str(cache_dir), "fetch", "origin", commit])
                 fetched_commit = self._rev_parse(cache_dir, "FETCH_HEAD")
-                with self._lockfile_lock:
-                    lock = self._load_lock()
-                    current = lock.skills.get(skill_key)
-                    if current is not None and current.commit == commit:
-                        current.commit = fetched_commit
-                        lock.skills[skill_key] = current
-                        self._write_lock_unlocked(lock)
                 commit = fetched_commit
         else:
-            ref = source.ref
-            self._run_git(["-C", str(cache_dir), "fetch", "origin", ref])
-            commit = self._rev_parse(cache_dir, "FETCH_HEAD")
+            commit = self._resolve_source_ref(cache_dir, source.ref, in_place=in_place)
             with self._lockfile_lock:
                 lock = self._load_lock()
                 current = lock.skills.get(skill_key)
                 if current is None:
-                    lock.skills[skill_key] = LockedSkillSource(repo=repo, ref=ref, commit=commit)
+                    lock.skills[skill_key] = LockedSkillSource(
+                        repo=source.repo,
+                        ref=source.ref,
+                        commit=commit,
+                    )
                     self._write_lock_unlocked(lock)
 
         self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
         self._run_git(["-C", str(cache_dir), "clean", "-fd"])
+
+    def _refresh_source(
+        self,
+        skill_key: str,
+        source: SkillSourceConfig,
+        cache_dir: Path,
+    ) -> LockedSkillSource:
+        repo = self._normalize_repo(source.repo)
+        in_place = self._is_in_place_source(repo, cache_dir)
+        if not cache_dir.exists():
+            if in_place:
+                raise SkillRepoError(f"local skill repo not found: {cache_dir}")
+            cache_dir.parent.mkdir(parents=True, exist_ok=True)
+            self._run_git(["clone", repo, str(cache_dir)])
+        elif not (cache_dir / ".git").is_dir():
+            raise SkillRepoError(f"cache dir exists but is not a git repo: {cache_dir}")
+
+        commit = self._resolve_source_ref(cache_dir, source.ref, in_place=in_place)
+        self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
+        self._run_git(["-C", str(cache_dir), "clean", "-fd"])
+        logger.info("Refreshed Pi skill %s to %s", skill_key, commit)
+        return LockedSkillSource(repo=source.repo, ref=source.ref, commit=commit)
+
+    def _resolve_source_ref(self, cache_dir: Path, ref: str, *, in_place: bool) -> str:
+        if in_place:
+            return self._rev_parse(cache_dir, ref)
+        self._run_git(["-C", str(cache_dir), "fetch", "origin", ref])
+        return self._rev_parse(cache_dir, "FETCH_HEAD")
+
+    def _normalize_repo(self, repo: str) -> str:
+        if repo.startswith("~/") or Path(repo).is_absolute():
+            return str(Path(repo).expanduser().resolve())
+        return repo
+
+    def _is_in_place_source(self, repo: str, cache_dir: Path) -> bool:
+        if not Path(repo).is_absolute():
+            return False
+        return Path(repo).resolve() == cache_dir.resolve()
 
     def _has_commit(self, cache_dir: Path, commit: str) -> bool:
         result = self._run_git(["-C", str(cache_dir), "cat-file", "-t", commit], check=False)

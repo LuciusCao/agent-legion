@@ -67,38 +67,43 @@ class PiExecutor:
                 log_path=str(context.log_path),
             )
 
-        context.job_dir.mkdir(parents=True, exist_ok=True)
-        context.log_path.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            context.job_dir.mkdir(parents=True, exist_ok=True)
+            context.log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        raw_token = (
-            context.runtime.get("cancellation") if isinstance(context.runtime, Mapping) else None
-        )
-        token = raw_token if isinstance(raw_token, CancellationToken) else None
-        result = self._runner.run(
-            job=dict(context.job),
-            node_key=context.node_key,
-            skill_dir=skill_dir,
-            inputs=list(context.inputs),
-            outputs=list(context.expected_outputs),
-            tools=list(capability_config.tools),
-            persist_run=False,
-            job_dir=context.job_dir,
-            execution_id=context.execution_id,
-            cancellation_token=token,
-            tracker=self._tracker,
-        )
+            raw_token = (
+                context.runtime.get("cancellation")
+                if isinstance(context.runtime, Mapping)
+                else None
+            )
+            token = raw_token if isinstance(raw_token, CancellationToken) else None
+            result = self._runner.run(
+                job=dict(context.job),
+                node_key=context.node_key,
+                skill_dir=skill_dir,
+                inputs=list(context.inputs),
+                outputs=list(context.expected_outputs),
+                tools=list(capability_config.tools),
+                persist_run=False,
+                job_dir=context.job_dir,
+                execution_id=context.execution_id,
+                cancellation_token=token,
+                tracker=self._tracker,
+            )
 
-        copy_pi_logs(result.run_dir, context.log_path)
-        return ExecutionResult(
-            status=result.status,
-            exit_code=result.exit_code,
-            error_message=result.error_message,
-            command=tuple(result.command),
-            log_path=str(context.log_path),
-            produced_artifacts=tuple(
-                name for name in context.expected_outputs if (context.job_dir / name).is_file()
-            ),
-        )
+            copy_pi_logs(result.run_dir, context.log_path)
+            return ExecutionResult(
+                status=result.status,
+                exit_code=result.exit_code,
+                error_message=result.error_message,
+                command=tuple(result.command),
+                log_path=str(context.log_path),
+                produced_artifacts=tuple(
+                    name for name in context.expected_outputs if (context.job_dir / name).is_file()
+                ),
+            )
+        finally:
+            self.skill_manager.cleanup_execution(context.execution_id)
 
     def cancel(self, execution_id: str) -> None:
         self._cancelled.add(execution_id)
