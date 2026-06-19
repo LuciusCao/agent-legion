@@ -27,6 +27,7 @@ from server.app.pipeline.runners import RunnerPool
 from server.app.routes import create_router
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
+from server.app.skills.manager import SkillManager
 from server.app.worker_control import WorkerControl, WorkspaceWorkerControl
 from server.app.worker_thread import WorkerThread
 from server.app.workflow_worker_thread import WorkflowWorkerThread
@@ -69,10 +70,15 @@ def build_executor_registry(
     all workspaces. Runtime dependencies (Pi binary, OpenClaw template, local
     handlers) are injected here so adapters remain environment-agnostic.
     """
+    skill_manager = SkillManager(
+        config_path=settings.root_dir / "config" / "skills.yaml",
+        lock_path=settings.root_dir / "config" / "skills.lock",
+        base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
+    )
     runtime = RuntimeDependencies(
         local_handlers=_build_local_handlers(settings),
         pi_runtime=settings.executor_runtime.workflows.pi,
-        pi_skill_root=settings.root_dir / "server" / "app" / "workflows" / "skills",
+        skill_manager=skill_manager,
         openclaw_runtime=settings.executor_runtime.openclaw,
         settings_config=settings.config,
         job_db=job_db,
