@@ -233,13 +233,10 @@ export function QuestionContentPanel({
                     }`}
                     onClick={() => {
                       setSelectedIds((prev) => {
-                        const next = new Set(prev)
-                        if (next.has(info.key_info_id)) {
-                          next.delete(info.key_info_id)
-                        } else {
-                          next.add(info.key_info_id)
+                        if (prev.has(info.key_info_id)) {
+                          return new Set()
                         }
-                        return next
+                        return new Set([info.key_info_id])
                       })
                     }}
                   >
