@@ -1,7 +1,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo } from 'react'
 import { useUiStore } from '../stores/uiStore'
 import { api, fetchWorkflowDefinition } from '../api'
-import { parseResourceInputs } from '../helpers'
+import { parseResourceInputs, getSelectedValue } from '../helpers'
 import type {
   AddResult,
   ContentType,
@@ -37,6 +37,7 @@ export function AddDialog({
   const [inputValue, setInputValue] = useState('')
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dialogRef = useRef<HTMLElement>(null)
+  const selectRef = useRef<HTMLElement | null>(null)
 
   const hasInput = inputValue.trim().length > 0
 
@@ -215,6 +216,18 @@ export function AddDialog({
     }
   }, [open, handleClose])
 
+  useEffect(() => {
+    const select = selectRef.current
+    if (!select) return
+    const handler = (event: Event) => {
+      setSelectedModeKey(getSelectedValue(event))
+    }
+    select.addEventListener('change', handler)
+    return () => {
+      select.removeEventListener('change', handler)
+    }
+  }, [])
+
   if (!open) return null
 
   const isVideo = context === 'video'
@@ -269,11 +282,9 @@ export function AddDialog({
           )}
           {!isVideo && (
             <md-outlined-select
+              ref={selectRef}
               label="导入模式"
               value={selectedModeKey}
-              onChange={(e: React.FormEvent<HTMLSelectElement>) =>
-                setSelectedModeKey((e.target as HTMLSelectElement).value)
-              }
             >
               {modes.map((mode) => (
                 <md-select-option key={mode.key} value={mode.key}>
