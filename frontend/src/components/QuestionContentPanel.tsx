@@ -91,6 +91,7 @@ export function QuestionContentPanel({
   const { question, loading, error } = useJobQuestion(jobId, refreshKey)
   const { info: comprehensionInfo } = useJobComprehensionInfo(jobId, refreshKey)
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [selectedErrorId, setSelectedErrorId] = useState<string | null>(null)
   const stemWrapperRef = useRef<HTMLDivElement>(null)
 
   const keyInfoList = useMemo(
@@ -114,14 +115,31 @@ export function QuestionContentPanel({
       .filter((k): k is KeyInfoItem => Boolean(k))
   }, [selectedIds, keyInfoList])
 
+  const selectedError = useMemo(
+    () => possibleErrorList.find((e) => e.error_id === selectedErrorId) ?? null,
+    [selectedErrorId, possibleErrorList]
+  )
+
+  const errorKeyInfos = useMemo(() => {
+    if (!selectedError) return []
+    return selectedError.related_key_info_ids
+      .map((id) => keyInfoList.find((k) => k.key_info_id === id))
+      .filter((k): k is KeyInfoItem => Boolean(k))
+  }, [selectedError, keyInfoList])
+
+  const highlightedKeyInfos = useMemo(
+    () => [...selectedKeyInfos, ...errorKeyInfos],
+    [selectedKeyInfos, errorKeyInfos]
+  )
+
   const highlightedStemParts = useMemo(() => {
-    if (!stem || selectedKeyInfos.length === 0) return null
-    return buildHighlightedStemParts(stem, selectedKeyInfos)
-  }, [stem, selectedKeyInfos])
+    if (!stem || highlightedKeyInfos.length === 0) return null
+    return buildHighlightedStemParts(stem, highlightedKeyInfos)
+  }, [stem, highlightedKeyInfos])
 
   const hiddenKeyInfos = useMemo(
-    () => selectedKeyInfos.filter((k) => k.type === 'hidden'),
-    [selectedKeyInfos]
+    () => highlightedKeyInfos.filter((k) => k.type === 'hidden'),
+    [highlightedKeyInfos]
   )
 
   function escapeHtml(s: string): string {
@@ -300,7 +318,7 @@ export function QuestionContentPanel({
                     </div>
                     {errors.length > 0 && (
                       <div className={styles.detailSection}>
-                        <strong>常见审题错误</strong>
+                        <strong>关联常见错误</strong>
                         <ul>
                           {errors.map((err) => (
                             <li key={err.error_id}>
@@ -389,6 +407,86 @@ export function QuestionContentPanel({
             </div>
           ) : (
             <p className={styles.empty}>无答案</p>
+          )}
+        </section>
+      )}
+
+      {comprehensionCompleted && possibleErrorList.length > 0 && (
+        <section className={styles.card}>
+          <div className={styles.comprehensionChips}>
+            <div className={styles.chipsHeader}>
+              <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
+                常见审题错误
+                <span className={styles.chipsCount}>
+                  {possibleErrorList.length} 个易错点
+                </span>
+              </h2>
+            </div>
+            <div className={styles.chipRow}>
+              {possibleErrorList.map((err, idx) => {
+                const isSelected = selectedErrorId === err.error_id
+                const labelSource = err.error_description || `易错点 ${idx + 1}`
+                const label =
+                  labelSource.length > 12
+                    ? labelSource.slice(0, 12) + '…'
+                    : labelSource
+                return (
+                  <button
+                    key={err.error_id}
+                    className={`${styles.chip} ${
+                      isSelected ? styles.chipSelected : ''
+                    }`}
+                    onClick={() => {
+                      setSelectedErrorId((prev) =>
+                        prev === err.error_id ? null : err.error_id
+                      )
+                    }}
+                  >
+                    <span className={styles.chipIndex}>{idx + 1}</span>
+                    <LaTeXText>{label}</LaTeXText>
+                  </button>
+                )
+              })}
+            </div>
+          </div>
+
+          {selectedError && (
+            <div className={styles.detailPanel}>
+              <div className={styles.detailCard}>
+                <div className={styles.detailCardHeader}>
+                  <span className={styles.errorAnswerBadge}>
+                    错误答案：{selectedError.error_answer}
+                  </span>
+                  <span className={styles.detailId}>
+                    {selectedError.error_id}
+                  </span>
+                </div>
+                <div className={styles.detailText}>
+                  <LaTeXText>{selectedError.error_description}</LaTeXText>
+                </div>
+                <div className={styles.detailSection}>
+                  <strong>关联关键信息</strong>
+                  <div className={styles.relatedKeyInfoList}>
+                    {errorKeyInfos.length > 0 ? (
+                      errorKeyInfos.map((k) => (
+                        <span
+                          key={k.key_info_id}
+                          className={styles.relatedKeyInfoTag}
+                        >
+                          <LaTeXText>
+                            {k.content.text ||
+                              k.content.derived_text ||
+                              k.key_info_id}
+                          </LaTeXText>
+                        </span>
+                      ))
+                    ) : (
+                      <span className={styles.relatedKeyInfoTag}>无</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
           )}
         </section>
       )}
