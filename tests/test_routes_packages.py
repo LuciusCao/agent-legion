@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from server.app.storage_paths import resolve_job_dir
+
 
 @pytest.fixture
 def workspace_client(client):
@@ -28,7 +30,7 @@ def _create_completed_job(client: TestClient, workspace_id: str, question_id: st
     # Write a minimal artifact so workspace packaging has something to archive.
     job_db = client.app.state.job_db
     record = job_db.get_job(job_id)
-    storage_dir = Path(str(record["storage_dir"]))
+    storage_dir = resolve_job_dir(record, client.app.state.settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "question_context.json").write_text('{"question_id":"' + question_id + '"}')
 

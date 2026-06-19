@@ -8,7 +8,7 @@ from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_job_dir
+from server.app.storage_paths import resolve_data_path, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
 
 
@@ -30,6 +30,24 @@ class JobQueryService:
         if job is None:
             raise NotFoundError("Job not found")
         return job
+
+    def _with_resolved_paths(
+        self,
+        record: dict[str, Any],
+        path_fields: set[str],
+    ) -> dict[str, Any]:
+        """Return a shallow copy of ``record`` with selected paths resolved absolute.
+
+        Empty optional path fields are left unchanged.
+        """
+        copied = dict(record)
+        for field in path_fields:
+            value = copied.get(field, "")
+            if value:
+                copied[field] = str(
+                    resolve_data_path(value, self.settings.data_dir, allow_missing=True)
+                )
+        return copied
 
     def _definition(self, workflow_key: str) -> WorkflowDefinition:
         return self.workflows.definition(workflow_key)
@@ -107,6 +125,7 @@ class JobQueryService:
                 error_summary = active_summary["error_message"][:240]
 
         control = self.job_db.get_job_execution_control(job["id"])
+        job = self._with_resolved_paths(job, {"storage_dir"})
         return {
             **job,
             "node_summaries": summaries,
@@ -173,7 +192,10 @@ class JobQueryService:
         return {
             "job": self._job_summary(job, nodes, definition),
             "nodes": nodes_with_definition,
-            "runs": self.job_db.list_node_runs(job_id),
+            "runs": [
+                self._with_resolved_paths(run, {"log_path", "run_dir", "session_dir"})
+                for run in self.job_db.list_node_runs(job_id)
+            ],
             "artifacts": self._artifact_names(job),
         }
 
@@ -185,13 +207,16 @@ class JobQueryService:
         job_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        return self.job_db.list_workspace_node_runs(
+        runs = self.job_db.list_workspace_node_runs(
             workspace_id,
             status=status,
             node_key=node_key,
             job_id=job_id,
             limit=limit,
         )
+        return [
+            self._with_resolved_paths(run, {"log_path", "run_dir", "session_dir"}) for run in runs
+        ]
 
     def workspace_dag(self, workspace_id: str) -> dict[str, Any]:
         workspace = self.job_db.get_workspace(workspace_id)
