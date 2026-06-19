@@ -379,6 +379,70 @@ describe('SettingsPage', () => {
     ).toBeTruthy()
   })
 
+  it('renders checked checkbox for enabled intake modes', async () => {
+    useSettingStore.setState({
+      workflowDefinition: {
+        key: 'question_comprehension_info',
+        label: '题目审题信息生成',
+        intake: {
+          modes: [
+            {
+              key: 'batch_by_knowledge',
+              label: '按知识点批量',
+              input_field: 'knowledge_codes',
+              resource: '',
+            },
+            {
+              key: 'batch_by_ids',
+              label: '按题目ID批量',
+              input_field: 'question_ids',
+              resource: '',
+            },
+          ],
+        },
+        nodes: [],
+      },
+      settings: {
+        ...defaultState.settings,
+        intakeModes: ['batch_by_ids'],
+      },
+    })
+    const { container } = renderPage()
+    await act(async () => {})
+    const checkboxes = Array.from(container.querySelectorAll('md-checkbox'))
+    expect(checkboxes[0].hasAttribute('checked')).toBe(false)
+    expect(checkboxes[1].hasAttribute('checked')).toBe(true)
+  })
+
+  it('renders unchecked checkbox for disabled intake modes', async () => {
+    useSettingStore.setState({
+      workflowDefinition: {
+        key: 'question_comprehension_info',
+        label: '题目审题信息生成',
+        intake: {
+          modes: [
+            {
+              key: 'batch_by_ids',
+              label: '按题目ID批量',
+              input_field: 'question_ids',
+              resource: '',
+            },
+          ],
+        },
+        nodes: [],
+      },
+      settings: {
+        ...defaultState.settings,
+        intakeModes: [],
+      },
+    })
+    const { container } = renderPage()
+    await act(async () => {})
+    const checkbox = container.querySelector('md-checkbox')
+    expect(checkbox).toBeTruthy()
+    expect(checkbox!.hasAttribute('checked')).toBe(false)
+  })
+
   it('renders executor binding section between allocation and local limit sections', async () => {
     useSettingStore.setState({
       workflowDefinition: {

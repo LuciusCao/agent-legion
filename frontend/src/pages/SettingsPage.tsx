@@ -294,22 +294,25 @@ export function SettingsPage() {
                   marginTop: 8,
                 }}
               >
-                {(workflowDefinition?.intake?.modes || []).map((mode) => (
-                  <div
-                    key={mode.key}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                    }}
-                  >
-                    <md-checkbox
-                      checked={settings.intakeModes.includes(mode.key)}
-                      onClick={() => toggleIntakeMode(mode.key)}
-                    />
-                    <span style={{ fontSize: 14 }}>{mode.label}</span>
-                  </div>
-                ))}
+                {(workflowDefinition?.intake?.modes || []).map((mode) => {
+                  const isChecked = settings.intakeModes.includes(mode.key)
+                  return (
+                    <div
+                      key={mode.key}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                      }}
+                    >
+                      <md-checkbox
+                        checked={isChecked || undefined}
+                        onClick={() => toggleIntakeMode(mode.key)}
+                      />
+                      <span style={{ fontSize: 14 }}>{mode.label}</span>
+                    </div>
+                  )
+                })}
               </div>
             </div>
 
