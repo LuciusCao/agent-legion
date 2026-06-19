@@ -1,45 +1,47 @@
-# Repository-owned Pi skills registry.
-#
-# This file declares the external repository location for each capability.
-# The URLs below are placeholders; replace them with the canonical remote
-# URLs for your organization before running production workloads. Once the
-# remotes are available, run `server.app.skills.lock` to regenerate
-# `config/skills.lock` with resolved commit hashes.
-
+version: '1'
+resolved_at: '2026-06-19T07:54:03Z'
 skills:
-  # question_comprehension_info
   question_comprehension_info/assess_comprehension_difficulty:
     repo: https://github.com/agent-legion/skill-question-comprehension-info-assess-comprehension-difficulty.git
     ref: v1.0.0
+    commit: a38f8e35d5bdc48fedff12f20d21e6278aca0f4a
   question_comprehension_info/generate_key_info:
     repo: https://github.com/agent-legion/skill-question-comprehension-info-generate-key-info.git
     ref: v1.0.0
+    commit: 80273fa4b4b5bf975632aad94a44cc006ac3dbb0
   question_comprehension_info/generate_possible_errors:
     repo: https://github.com/agent-legion/skill-question-comprehension-info-generate-possible-errors.git
     ref: v1.0.0
+    commit: 1a51ad2bee39ab71b28120969d4c6b666a56be93
   question_comprehension_info/review_key_info:
     repo: https://github.com/agent-legion/skill-question-comprehension-info-review-key-info.git
     ref: v1.0.0
+    commit: 4d258495e342f554dda8148451a872c0fd0c6391
   question_comprehension_info/review_possible_errors:
     repo: https://github.com/agent-legion/skill-question-comprehension-info-review-possible-errors.git
     ref: v1.0.0
-
-  # reading_analysis
+    commit: f1102572eecc3352a9d4d72f35d8cf99689b81fc
   reading_analysis/assess_difficulty:
     repo: https://github.com/agent-legion/skill-reading-analysis-assess-difficulty.git
     ref: v1.0.0
+    commit: 42de381bdb5a1c3022f3ee09f03e4e092f800595
   reading_analysis/extract_keywords:
     repo: https://github.com/agent-legion/skill-reading-analysis-extract-keywords.git
     ref: v1.0.0
+    commit: c4429ba009eb42cdfaa5302f299b8d90c834d394
   reading_analysis/generate_distractors:
     repo: https://github.com/agent-legion/skill-reading-analysis-generate-distractors.git
     ref: v1.0.0
+    commit: dde243c58336083f5cb6df1fc533c7e62fc2982e
   reading_analysis/review_difficulty:
     repo: https://github.com/agent-legion/skill-reading-analysis-review-difficulty.git
     ref: v1.0.0
+    commit: 96f52647f0a84e3012775bb84d6b7f55db5c0402
   reading_analysis/review_distractors:
     repo: https://github.com/agent-legion/skill-reading-analysis-review-distractors.git
     ref: v1.0.0
+    commit: cb65e678a829e5f753c45b9d13d35b72bc57e8a4
   reading_analysis/review_keywords:
     repo: https://github.com/agent-legion/skill-reading-analysis-review-keywords.git
     ref: v1.0.0
+    commit: 7586e222f9e28de8a8195078af1afc198b46ab22
