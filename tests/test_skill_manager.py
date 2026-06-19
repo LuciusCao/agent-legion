@@ -386,3 +386,72 @@ def test_invalid_execution_id_rejected(execution_id: str, tmp_path: Path) -> Non
     )
     with pytest.raises(SkillPathError):
         manager.get_skill_dir("reading_analysis/extract_keywords", execution_id)
+
+
+def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None:
+    dir_a = tmp_path / "a"
+    dir_a.mkdir()
+    dir_b = tmp_path / "b"
+    dir_b.mkdir()
+    repo_a = _make_bare_repo(dir_a)
+    repo_b = _make_bare_repo(dir_b)
+    _push_new_commit(repo_a, dir_a, "# skill a\n")
+    _push_new_commit(repo_b, dir_b, "# skill b\n")
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n"
+        f"  reading_analysis/extract_keywords:\n"
+        f"    repo: {repo_a}\n"
+        f"    ref: main\n"
+        f"  summarization/summarize:\n"
+        f"    repo: {repo_b}\n"
+        f"    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+
+    def fetch(key: str) -> Path:
+        return manager.get_skill_dir(key, str(uuid.uuid4()))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
+        futures = [
+            executor.submit(fetch, key)
+            for key in ("reading_analysis/extract_keywords", "summarization/summarize")
+        ]
+        dirs = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+    lock = manager._load_lock()
+    assert "reading_analysis/extract_keywords" in lock.skills
+    assert "summarization/summarize" in lock.skills
+    assert lock.skills["reading_analysis/extract_keywords"].commit
+    assert lock.skills["summarization/summarize"].commit
+    assert (
+        lock.skills["reading_analysis/extract_keywords"].commit
+        != lock.skills["summarization/summarize"].commit
+    )
+    assert len({str(d) for d in dirs}) == 2
+    for skill_dir in dirs:
+        assert (skill_dir / "SKILL.md").is_file()
+        assert not (skill_dir / ".git").exists()
+
+
+def test_invalid_repo_uri_raises_skill_repo_error(tmp_path: Path) -> None:
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        "skills:\n"
+        "  reading_analysis/extract_keywords:\n"
+        "    repo: file:///nonexistent/repo.git\n"
+        "    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+    with pytest.raises(SkillRepoError):
+        manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
