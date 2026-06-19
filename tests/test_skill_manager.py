@@ -120,11 +120,32 @@ def _make_bare_repo(tmp_path: Path) -> str:
     return f"file://{repo.resolve()}"
 
 
+def _push_new_commit(repo_uri: str, tmp_path: Path, content: str) -> None:
+    import subprocess
+
+    work = tmp_path / "work" / "clone"
+    (work / "SKILL.md").write_text(content)
+    subprocess.run(["git", "-C", str(work), "add", "."], check=True)
+    env = {**dict(__import__("os").environ)}
+    env.update(
+        GIT_AUTHOR_NAME="t",
+        GIT_AUTHOR_EMAIL="t@t",
+        GIT_COMMITTER_NAME="t",
+        GIT_COMMITTER_EMAIL="t@t",
+    )
+    subprocess.run(
+        ["git", "-C", str(work), "commit", "-m", "update", "--no-gpg-sign"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(work), "push", "origin", "HEAD"], check=True)
+
+
 def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: HEAD\n"
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
     )
     manager = SkillManager(
         config_path=config_path,
@@ -139,3 +160,83 @@ def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
     assert skill_dir.is_dir()
     assert (skill_dir / "SKILL.md").is_file()
     assert "runs" in str(skill_dir)
+
+
+def test_lock_commit_used_even_when_ref_drifts(tmp_path: Path) -> None:
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+
+    first_execution = str(uuid.uuid4())
+    first_dir = manager.get_skill_dir("reading_analysis/extract_keywords", first_execution)
+    locked_content = (first_dir / "SKILL.md").read_text()
+
+    _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
+
+    second_execution = str(uuid.uuid4())
+    second_dir = manager.get_skill_dir("reading_analysis/extract_keywords", second_execution)
+
+    assert (second_dir / "SKILL.md").read_text() == locked_content
+
+
+def test_isolated_copies_do_not_interfere(tmp_path: Path) -> None:
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+
+    first_dir = manager.get_skill_dir(
+        "reading_analysis/extract_keywords", str(uuid.uuid4())
+    )
+    second_dir = manager.get_skill_dir(
+        "reading_analysis/extract_keywords", str(uuid.uuid4())
+    )
+
+    original = (first_dir / "SKILL.md").read_text()
+    (first_dir / "SKILL.md").write_text("# modified\n")
+
+    assert (second_dir / "SKILL.md").read_text() == original
+
+
+@pytest.mark.parametrize(
+    "skill_key",
+    [
+        "../escape",
+        "foo/../bar",
+        "/absolute/key",
+        "",
+        "no-slash",
+        "foo//bar",
+        "foo/bar/baz",
+        "foo/",
+        "/foo",
+    ],
+)
+def test_malicious_or_absolute_or_empty_skill_key_rejected(
+    skill_key: str, tmp_path: Path
+) -> None:
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text("skills: {}\n")
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+    with pytest.raises((SkillPathError, SkillConfigError)):
+        manager.get_skill_dir(skill_key, str(uuid.uuid4()))
