@@ -16,6 +16,9 @@ from server.app.db.migrations.v007_rename_pipeline_to_workflow import (
 from server.app.db.migrations.v008_job_node_created_at import (
     MIGRATION as V008_JOB_NODE_CREATED_AT,
 )
+from server.app.db.migrations.v009_relative_path_storage import (
+    MIGRATION as V009_RELATIVE_PATH_STORAGE,
+)
 
 MIGRATIONS: tuple[Migration, ...] = (
     V001_EXECUTOR_CORE,
@@ -25,4 +28,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     V006_JOB_EXECUTION_CONTROL,
     V007_RENAME_PIPELINE_TO_WORKFLOW,
     V008_JOB_NODE_CREATED_AT,
+    V009_RELATIVE_PATH_STORAGE,
 )

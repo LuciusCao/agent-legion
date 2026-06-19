@@ -5,9 +5,12 @@ from pathlib import Path
 import pytest
 
 from server.app.db.connection import connect_sqlite
+from server.app.db.migrations import MIGRATIONS
 from server.app.db.migrations.runner import Migration, run_migrations
 from server.app.db.schema import init_db
 
+EXPECTED_VERSIONS = [m.version for m in MIGRATIONS]
+EXPECTED_VERSIONS_WITH_V005 = sorted(EXPECTED_VERSIONS + [5])
 EXPECTED_TABLES = {
     "schema_migrations",
     "workspace_executor_allocations",
@@ -32,7 +35,7 @@ def test_empty_database_migrates_to_latest_version(tmp_path: Path) -> None:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
 
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7, 8]
+        assert [row["version"] for row in versions] == EXPECTED_VERSIONS
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
     assert list(tmp_path.glob("empty-before-v007-*.sqlite")) == []
@@ -173,7 +176,7 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
         ).fetchone()
 
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7, 8]
+        assert [row["version"] for row in versions] == EXPECTED_VERSIONS
         assert legacy_row is not None
         assert legacy_row["agent_id"] == "agent_a"
         assert conn.execute("pragma foreign_key_check").fetchall() == []
@@ -419,7 +422,7 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
         }
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
         assert tables >= EXPECTED_TABLES
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7, 8]
+        assert [row["version"] for row in versions] == EXPECTED_VERSIONS
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
         # V006 check constraint accepts until_node and rejects the old targeted value.
@@ -448,7 +451,7 @@ def test_v006_is_compatible_with_later_v005_finalizer(tmp_path: Path) -> None:
 
     with closing(connect_sqlite(path)) as conn, conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7, 8]
+        assert [row["version"] for row in versions] == EXPECTED_VERSIONS
 
     # Simulate the destructive V005 finalizer recording its version manually.
     with closing(connect_sqlite(path)) as conn, conn:
@@ -461,7 +464,7 @@ def test_v006_is_compatible_with_later_v005_finalizer(tmp_path: Path) -> None:
 
     with closing(connect_sqlite(path)) as conn, conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 5, 6, 7, 8]
+        assert [row["version"] for row in versions] == EXPECTED_VERSIONS_WITH_V005
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 
