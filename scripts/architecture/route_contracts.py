@@ -45,7 +45,7 @@ class _LocalBindingVisitor(ast.NodeVisitor):
         self.names: set[str] = set()
 
     def visit_Name(self, node: ast.Name) -> None:
-        if isinstance(node.ctx, ast.Store):
+        if isinstance(node.ctx, (ast.Store, ast.Del)):
             self.names.add(node.id)
 
     def visit_Import(self, node: ast.Import) -> None:
@@ -84,6 +84,22 @@ def _function_local_names(function: ast.FunctionDef | ast.AsyncFunctionDef) -> s
     return visitor.names
 
 
+def _attribute_root(target: ast.expr) -> str | None:
+    while isinstance(target, (ast.Attribute, ast.Subscript)):
+        target = target.value
+    return target.id if isinstance(target, ast.Name) else None
+
+
+def _mutation_targets(statement: ast.stmt) -> list[ast.expr]:
+    if isinstance(statement, ast.Assign):
+        return statement.targets
+    if isinstance(statement, (ast.AnnAssign, ast.AugAssign)):
+        return [statement.target]
+    if isinstance(statement, ast.Delete):
+        return statement.targets
+    return []
+
+
 def _apply_binding(statement: ast.stmt, bindings: dict[str, str | None]) -> None:
     if isinstance(statement, ast.ImportFrom):
         module = statement.module or ""
@@ -105,6 +121,10 @@ def _apply_binding(statement: ast.stmt, bindings: dict[str, str | None]) -> None
     if isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
         bindings[statement.name] = None
         return
+    for target in _mutation_targets(statement):
+        root = _attribute_root(target)
+        if root and bindings.get(root) in _PROTOCOL_RESPONSE_MODULES:
+            bindings[root] = None
     visitor = _LocalBindingVisitor()
     visitor.visit(statement)
     for name in visitor.names:

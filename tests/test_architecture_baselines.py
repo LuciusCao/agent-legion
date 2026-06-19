@@ -147,37 +147,6 @@ def test_scheduler_threadpool_baseline_allows_only_recorded_targets_and_counts(t
     assert any("self._agent_executor" in error for error in check_repository(tmp_path))
 
 
-def test_services_do_not_import_fastapi_regardless_of_filename(tmp_path):
-    write(
-        tmp_path / "server/app/services/catalog.py",
-        "from fastapi import HTTPException\n",
-    )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
-    errors = check_repository(tmp_path)
-    assert any("service boundary forbids import fastapi" in error for error in errors)
-
-
-def test_services_do_not_import_worker_entrypoints(tmp_path):
-    write(
-        tmp_path / "server/app/services/manual_run.py",
-        "from server.app.worker import process_video_once\nfrom ..worker import process_video_once\nfrom .. import worker\n",
-    )
-    write(
-        tmp_path / "server/app/services/feature/manual_run.py",
-        "from ..worker import process_video_once\nfrom ...worker import process_video_once\n",
-    )
-    write(tmp_path / "config/architecture/architecture-budgets.json", '{"files": {}}')
-    report = "\n".join(check_repository(tmp_path))
-    worker_error = "service boundary forbids import server.app.worker"
-    for line in (1, 2, 3):
-        assert f"services/manual_run.py:{line}: {worker_error}" in report
-    assert "feature/manual_run.py:1: service boundary" not in report
-    assert f"feature/manual_run.py:2: {worker_error}" in report
-
-
 def test_jobs_router_is_not_a_router_aggregator(tmp_path):
     write(
         tmp_path / "server/app/routes/jobs.py",

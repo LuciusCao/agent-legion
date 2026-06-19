@@ -175,3 +175,32 @@ def test_protocol_operation_ids_distinguish_duplicate_endpoint_names():
 
     assert protocol_route.unique_id in operation_ids
     assert json_route.unique_id not in operation_ids
+
+
+def test_legacy_exemption_matches_endpoint_source_file_and_name():
+    app = FastAPI()
+
+    def endpoint_from(relative_path: str):
+        namespace: dict[str, object] = {}
+        filename = export_openapi.PROJECT_ROOT / relative_path
+        exec(
+            compile("def shared() -> dict[str, str]:\n    return {}\n", str(filename), "exec"),
+            namespace,
+        )
+        return namespace["shared"]
+
+    legacy = endpoint_from("server/app/routes/legacy.py")
+    unrelated = endpoint_from("server/app/routes/unrelated.py")
+    app.get("/legacy")(legacy)
+    app.get("/unrelated")(unrelated)
+    legacy_route = next(route for route in app.routes if getattr(route, "path", "") == "/legacy")
+    unrelated_route = next(
+        route for route in app.routes if getattr(route, "path", "") == "/unrelated"
+    )
+
+    operation_ids = export_openapi.response_contract_exempt_operation_ids(
+        app, {"server/app/routes/legacy.py:shared"}
+    )
+
+    assert legacy_route.unique_id in operation_ids
+    assert unrelated_route.unique_id not in operation_ids
