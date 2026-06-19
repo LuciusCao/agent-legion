@@ -226,7 +226,7 @@ export function AddDialog({
     return () => {
       select.removeEventListener('change', handler)
     }
-  }, [])
+  }, [open])
 
   if (!open) return null
 
