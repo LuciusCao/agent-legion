@@ -51,6 +51,15 @@ const themeOptions: ThemeOptions = {
         },
       },
     },
+    MuiDialogContent: {
+      styleOverrides: {
+        root: {
+          '&&': {
+            paddingTop: '16px',
+          },
+        },
+      },
+    },
   },
 }
 
