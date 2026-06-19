@@ -1,10 +1,11 @@
-import os
 from pathlib import Path
 
 import pytest
 
 from server.app.storage_paths import (
     ManagedPathError,
+    make_data_relative,
+    resolve_data_path,
     resolve_job_dir,
     resolve_managed_path,
     resolve_video_dir,
@@ -14,6 +15,13 @@ from server.app.storage_paths import (
 @pytest.fixture
 def managed_root(tmp_path: Path) -> Path:
     root = tmp_path / "managed"
+    root.mkdir()
+    return root
+
+
+@pytest.fixture
+def data_dir(tmp_path: Path) -> Path:
+    root = tmp_path / "data"
     root.mkdir()
     return root
 
@@ -137,10 +145,12 @@ class TestResolveManagedPath:
 
         assert "managed" in str(exc_info.value).lower()
 
-    def test_expanduser_outside_rejected(self, managed_root: Path) -> None:
+    def test_expanduser_outside_rejected(
+        self, managed_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
         home = managed_root.parent / "home"
         home.mkdir()
-        os.environ["HOME"] = str(home)
+        monkeypatch.setenv("HOME", str(home))
 
         with pytest.raises(ManagedPathError) as exc_info:
             resolve_managed_path(
@@ -194,14 +204,133 @@ class TestResolveManagedPath:
             )
 
 
+class TestMakeDataRelative:
+    def test_canonical_jobs_path(self, data_dir: Path) -> None:
+        path = data_dir / "jobs" / "ws" / "job" / "runs" / "node" / "token" / "session"
+        path.mkdir(parents=True)
+
+        relative = make_data_relative(path, data_dir)
+
+        assert relative == "jobs/ws/job/runs/node/token/session"
+
+    def test_all_canonical_prefixes(self, data_dir: Path) -> None:
+        for prefix in ("videos", "jobs", "logs", "packages"):
+            path = data_dir / prefix / "item"
+            path.mkdir(parents=True)
+
+            relative = make_data_relative(path, data_dir)
+
+            assert relative == f"{prefix}/item"
+
+    def test_rejects_data_dir_itself(self, data_dir: Path) -> None:
+        with pytest.raises(ManagedPathError):
+            make_data_relative(data_dir, data_dir)
+
+    def test_rejects_outside_path(self, data_dir: Path) -> None:
+        outside = data_dir.parent / "outside"
+        outside.mkdir()
+
+        with pytest.raises(ManagedPathError):
+            make_data_relative(outside, data_dir)
+
+    def test_rejects_escape_via_dotdot(self, data_dir: Path) -> None:
+        with pytest.raises(ManagedPathError):
+            make_data_relative(data_dir.parent, data_dir)
+
+
+class TestResolveDataPath:
+    def test_canonical_jobs_path(self, data_dir: Path) -> None:
+        relative = "jobs/ws/job/runs/node/token/session"
+        (data_dir / relative).mkdir(parents=True)
+
+        result = resolve_data_path(relative, data_dir, allow_missing=True)
+
+        assert result == (data_dir / relative).resolve()
+
+    def test_all_canonical_prefixes(self, data_dir: Path) -> None:
+        for prefix in ("videos", "jobs", "logs", "packages"):
+            relative = f"{prefix}/item"
+            (data_dir / relative).mkdir(parents=True)
+
+            result = resolve_data_path(relative, data_dir, allow_missing=True)
+
+            assert result == (data_dir / relative).resolve()
+
+    def test_rejects_empty_string(self, data_dir: Path) -> None:
+        with pytest.raises(ManagedPathError):
+            resolve_data_path("", data_dir, allow_missing=True)
+
+    def test_rejects_dotdot_escape(self, data_dir: Path) -> None:
+        with pytest.raises(ManagedPathError):
+            resolve_data_path("../outside", data_dir, allow_missing=True)
+
+    def test_rejects_data_dir_itself(self, data_dir: Path) -> None:
+        with pytest.raises(ManagedPathError):
+            resolve_data_path(".", data_dir, allow_missing=True)
+
+    def test_rejects_absolute_data_dir_itself(self, data_dir: Path) -> None:
+        with pytest.raises(ManagedPathError):
+            resolve_data_path(str(data_dir), data_dir, allow_missing=True)
+
+    def test_rejects_unrelated_absolute(self, data_dir: Path) -> None:
+        with pytest.raises(ManagedPathError):
+            resolve_data_path("/unrelated/session", data_dir, allow_missing=True)
+
+    def test_rejects_outside_absolute_without_managed_suffix(self, data_dir: Path) -> None:
+        outside = data_dir.parent / "outside"
+        outside.mkdir()
+
+        with pytest.raises(ManagedPathError):
+            resolve_data_path(str(outside / "session"), data_dir, allow_missing=True)
+
+    def test_accepts_absolute_inside_current_data_dir_with_warning(self, data_dir: Path) -> None:
+        path = data_dir / "videos" / "v1"
+        path.mkdir(parents=True)
+
+        with pytest.warns(DeprecationWarning):
+            result = resolve_data_path(str(path), data_dir, allow_missing=True)
+
+        assert result == path.resolve()
+
+    def test_rebases_legacy_absolute_with_data_dir_suffix(self, data_dir: Path) -> None:
+        relative = "jobs/ws/job/runs/node/token/session"
+        old_path = f"/old/checkout/{data_dir.name}/{relative}"
+        (data_dir / relative).mkdir(parents=True)
+
+        with pytest.warns(DeprecationWarning):
+            result = resolve_data_path(old_path, data_dir, allow_missing=True)
+
+        assert result == (data_dir / relative).resolve()
+
+    def test_rejects_symlink_parent_that_escapes_root(self, data_dir: Path) -> None:
+        outside = data_dir.parent / "outside"
+        outside.mkdir()
+        link = data_dir / "link"
+        link.symlink_to(outside)
+
+        with pytest.raises(ManagedPathError):
+            resolve_data_path("link/file.txt", data_dir, allow_missing=True)
+
+
 class TestResolveVideoDir:
     def test_uses_storage_dir_when_set(self, managed_root: Path) -> None:
         video = {"id": "v1", "storage_dir": str(managed_root / "v1")}
+
+        with pytest.warns(DeprecationWarning):
+            result = resolve_video_dir(video, managed_root)
+
+        assert result == (managed_root / "v1").resolve()
+
+    def test_uses_relative_storage_dir_when_set(self, managed_root: Path) -> None:
+        # managed_root acts as videos_dir in this fixture, so its name is the
+        # canonical managed-category prefix relative to data_dir.
+        video = {"id": "v1", "storage_dir": f"{managed_root.name}/v1"}
 
         result = resolve_video_dir(video, managed_root)
 
         assert result == (managed_root / "v1").resolve()
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_rejects_escape(self, managed_root: Path) -> None:
         outside = managed_root.parent / "outside"
         outside.mkdir()
@@ -213,15 +342,33 @@ class TestResolveVideoDir:
         assert "video" in str(exc_info.value)
         assert "v2" in str(exc_info.value)
 
+    def test_rejects_other_managed_category(self, managed_root: Path) -> None:
+        # A path valid inside data_dir but outside the narrower videos_dir.
+        video = {"id": "v1", "storage_dir": "jobs/j1"}
+
+        with pytest.raises(ManagedPathError) as exc_info:
+            resolve_video_dir(video, managed_root)
+
+        assert "video" in str(exc_info.value)
+
 
 class TestResolveJobDir:
     def test_uses_storage_dir_when_set(self, managed_root: Path) -> None:
         job = {"id": "j1", "storage_dir": str(managed_root / "ws" / "j1")}
 
+        with pytest.warns(DeprecationWarning):
+            result = resolve_job_dir(job, managed_root)
+
+        assert result == (managed_root / "ws" / "j1").resolve()
+
+    def test_uses_relative_storage_dir_when_set(self, managed_root: Path) -> None:
+        job = {"id": "j1", "storage_dir": f"{managed_root.name}/ws/j1"}
+
         result = resolve_job_dir(job, managed_root)
 
         assert result == (managed_root / "ws" / "j1").resolve()
 
+    @pytest.mark.filterwarnings("ignore::DeprecationWarning")
     def test_rejects_escape(self, managed_root: Path) -> None:
         outside = managed_root.parent / "outside"
         outside.mkdir()
@@ -232,3 +379,11 @@ class TestResolveJobDir:
 
         assert "job" in str(exc_info.value)
         assert "j2" in str(exc_info.value)
+
+    def test_rejects_other_managed_category(self, managed_root: Path) -> None:
+        job = {"id": "j1", "storage_dir": "videos/v1"}
+
+        with pytest.raises(ManagedPathError) as exc_info:
+            resolve_job_dir(job, managed_root)
+
+        assert "job" in str(exc_info.value)
