@@ -1,58 +1,20 @@
 import logging
 from typing import Any
 
-from server.app.cms.client import get_token
-from server.app.cms.question import list_questions_by_knowledge
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
-from server.app.services.job_errors import (
-    InvalidOperationError,
-    NotFoundError,
-    UnsupportedOperationError,
+from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_intake_resolution import (
+    RESOLVER_MAP,
+    normalize_values,
+    resolve_cms_question_candidates,
+    resolve_direct_candidates,
+    singular_field_name,
 )
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
-from server.app.workflows.resources import resolve_cms_resource
 
 logger = logging.getLogger(__name__)
-
-RESOLVER_MAP: dict[tuple[str, str], str] = {
-    ("question", "direct_ids"): "direct.question_ids",
-    ("question", "by_knowledge"): "cms.questions_by_knowledge",
-    ("question", "batch_by_ids"): "direct.question_ids",
-    ("question", "batch_by_knowledge"): "cms.questions_by_knowledge",
-    ("video", "direct_ids"): "direct.video_ids",
-    ("video", "by_knowledge"): "cms.videos_by_knowledge",
-}
-
-
-def _candidate(
-    entity_type: str,
-    entity_id: str,
-    title: str,
-    source_kind: str,
-    source_value: str,
-    stem: str = "",
-) -> dict[str, Any]:
-    return {
-        "entity_type": entity_type,
-        "entity_id": entity_id,
-        "title": title,
-        "stem": stem,
-        "source": {"kind": source_kind, "value": source_value},
-    }
-
-
-def _normalize_values(values: list[str]) -> list[str]:
-    return list(dict.fromkeys(value.strip() for value in values if value.strip()))
-
-
-def _singular_field_name(value: str) -> str:
-    if value.endswith("ies"):
-        return f"{value[:-3]}y"
-    if value.endswith("s"):
-        return value[:-1]
-    return value
 
 
 class JobIntakeService:
@@ -124,10 +86,10 @@ class JobIntakeService:
         raw_values = payload.get(mode.input_field)
         if not isinstance(raw_values, list):
             raise InvalidOperationError(f"Unsupported input field: {mode.input_field}")
-        input_values = _normalize_values(raw_values)
+        input_values = normalize_values(raw_values)
         if not input_values:
             raise InvalidOperationError(
-                f"At least one {_singular_field_name(mode.input_field)} is required"
+                f"At least one {singular_field_name(mode.input_field)} is required"
             )
 
         workspace_entity = str(workspace.get("default_entity") or "question")
@@ -138,64 +100,18 @@ class JobIntakeService:
 
         candidates: list[dict[str, Any]] = []
         if resolver.startswith("direct."):
-            candidates = [
-                _candidate(
-                    entity,
-                    value,
-                    f"{entity.title()} {value}",
-                    payload["source_kind"],
-                    value,
-                )
-                for value in input_values
-            ]
+            candidates = resolve_direct_candidates(entity, input_values, payload["source_kind"])
         elif resolver.startswith("cms."):
-            if entity != "question":
-                raise UnsupportedOperationError(f"{entity} resolver not yet implemented")
-            list_resource = resolve_cms_resource(
-                self.settings.config,
+            candidates = resolve_cms_question_candidates(
+                entity,
+                input_values,
+                payload["source_kind"],
+                resolver,
+                mode,
+                self.settings,
                 workspace,
-                None,
-                mode.resource,
-            )
-            api_url = list_resource.get("api_url") or list_resource.get("question_list_url")
-            logger.info(
-                "CMS lookup for workspace=%s mode=%s: api_url=%s resource=%s",
                 workspace_id,
-                mode.key,
-                api_url,
-                mode.resource,
             )
-            token = get_token(str(list_resource.get("env", "")), list_resource)
-            seen_question_ids: set[str] = set()
-            for knowledge_code in input_values:
-                summaries = list_questions_by_knowledge(
-                    knowledge_code,
-                    api_url,
-                    token,
-                )
-                logger.info(
-                    "CMS returned %d questions for knowledge_code=%s",
-                    len(summaries),
-                    knowledge_code,
-                )
-                for summary in summaries:
-                    if summary.question_id in seen_question_ids:
-                        continue
-                    seen_question_ids.add(summary.question_id)
-                    stem = ""
-                    body = summary.payload.get("body")
-                    if isinstance(body, dict):
-                        stem = str(body.get("content") or "").strip()
-                    candidates.append(
-                        _candidate(
-                            entity,
-                            summary.question_id,
-                            summary.title or f"Question {summary.question_id}",
-                            "knowledge_code",
-                            knowledge_code,
-                            stem=stem,
-                        )
-                    )
         else:
             raise InvalidOperationError(f"Unsupported resolver: {resolver}")
 

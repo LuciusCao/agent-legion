@@ -3,7 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
-from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse
+from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ..agents import AgentStatusManager
@@ -91,6 +91,32 @@ class BatchRunToResponse(BaseModel):
     results: list[RunToResult]
 
 
+_VIDEO_FILE_RESPONSES: dict[int | str, dict[str, Any]] = {
+    200: {"content": {"video/mp4": {}}},
+    302: {
+        "description": "Temporary Redirect",
+        "headers": {
+            "Location": {
+                "description": "Redirect target",
+                "schema": {"type": "string"},
+            }
+        },
+    },
+    404: {
+        "content": {
+            "text/plain": {},
+            "application/json": {
+                "schema": {
+                    "type": "object",
+                    "properties": {"detail": {"type": "string"}},
+                    "required": ["detail"],
+                }
+            },
+        }
+    },
+}
+
+
 def create_videos_router(
     db: Database,
     settings: Settings,
@@ -99,12 +125,20 @@ def create_videos_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/videos", tags=["videos"])
 
-    @router.get("/events")
-    async def videos_events(request: Request):
+    @router.get(
+        "/events",
+        response_class=StreamingResponse,
+        responses={200: {"content": {"text/event-stream": {}}}},
+    )
+    async def videos_events(request: Request) -> StreamingResponse:
         return await video_event_manager.connect(request)
 
-    @router.get("/{video_id}/events")
-    async def video_detail_events(request: Request, video_id: str):
+    @router.get(
+        "/{video_id}/events",
+        response_class=StreamingResponse,
+        responses={200: {"content": {"text/event-stream": {}}}},
+    )
+    async def video_detail_events(request: Request, video_id: str) -> StreamingResponse:
         return await video_event_manager.connect_video(request, video_id)
 
     @router.post("")
@@ -226,9 +260,19 @@ def create_videos_router(
             raise HTTPException(status_code=404, detail="OpenClaw session not found")
         return {"session_id": session_id, "log": render_openclaw_session(path)}
 
-    @router.get("/{video_id}/video")
-    @router.head("/{video_id}/video")
-    def video_file(video_id: str):
+    @router.get(
+        "/{video_id}/video",
+        response_class=FileResponse,
+        response_model=None,
+        responses=_VIDEO_FILE_RESPONSES,
+    )
+    @router.head(
+        "/{video_id}/video",
+        response_class=FileResponse,
+        response_model=None,
+        responses=_VIDEO_FILE_RESPONSES,
+    )
+    def video_file(video_id: str) -> FileResponse | RedirectResponse | PlainTextResponse:
         video = db.get_video(video_id)
         if not video:
             raise HTTPException(status_code=404, detail="Video not found")

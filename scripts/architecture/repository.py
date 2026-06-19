@@ -38,6 +38,7 @@ from scripts.architecture.phase6 import (
     check_schema_mutation_locations,
     check_workspace_video_hive_imports,
 )
+from scripts.architecture.route_contracts import has_protocol_response_annotation
 from scripts.architecture.workflow import check_workflow_definitions
 
 
@@ -220,7 +221,11 @@ def check_repository(root: Path) -> list[str]:
 
             for function, decorator in route_operations(tree):
                 key = f"{relative_path}:{function.name}"
-                if key not in response_model_exemptions and not has_named_response_model(decorator):
+                if (
+                    key not in response_model_exemptions
+                    and not has_named_response_model(decorator)
+                    and not has_protocol_response_annotation(function, tree)
+                ):
                     errors.append(
                         f"{relative_path}:{decorator.lineno}: route {function.name} "
                         "requires named response_model"

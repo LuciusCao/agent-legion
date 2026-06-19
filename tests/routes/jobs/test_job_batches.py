@@ -69,10 +69,12 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
         ]
 
     monkeypatch.setattr(
-        "server.app.services.job_intake.list_questions_by_knowledge",
+        "server.app.services.job_intake_resolution.list_questions_by_knowledge",
         fake_list_questions_by_knowledge,
     )
-    monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -104,6 +106,71 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
     assert [job["title"] for job in body["jobs"]] == ["题目一", "题目二"]
 
 
+def test_create_workspace_job_batch_from_question_ids_uses_cms_title(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.cms.question import CmsQuestionDetail
+    from server.app.main import create_app
+
+    calls = []
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        calls.append({"question_id": question_id, "api_url": api_url, "token": token})
+        return CmsQuestionDetail(
+            question_id=question_id,
+            title=f"知识点名称-{question_id}",
+            normalized={"stem": f"stem-{question_id}"},
+            payload={"uuid": question_id},
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    app.state.settings.config["cms"] = {
+        "env": "prod",
+        "question_detail_url": "https://cms.example/question/detail",
+    }
+    with TestClient(app) as c:
+        workspace = c.post(
+            "/api/workspaces",
+            json={
+                "name": "Question Id Batch",
+                "default_workflow_key": "question_comprehension_info",
+                "intake_config": {"enabled_modes": ["batch_by_ids"]},
+            },
+        ).json()["workspace"]
+        response = c.post(
+            f"/api/workspaces/{workspace['id']}/job-batches",
+            json={
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q001", "Q002"],
+                "knowledge_codes": [],
+            },
+        )
+
+    assert response.status_code == 200
+    body = response.json()
+    payload = json.loads(body["batch"]["source_payload_json"])
+    assert payload["question_ids"] == ["Q001", "Q002"]
+    assert payload["knowledge_codes"] == []
+    assert body["created_count"] == 2
+    assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
+    assert [job["title"] for job in body["jobs"]] == ["知识点名称-Q001", "知识点名称-Q002"]
+    assert [c["title"] for c in payload["task_candidates"]] == [
+        "知识点名称-Q001",
+        "知识点名称-Q002",
+    ]
+    assert all(c["source"]["kind"] == "batch_by_ids" for c in payload["task_candidates"])
+
+
 def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
@@ -117,10 +184,12 @@ def test_create_workspace_job_batch_from_resource_binding(tmp_path, monkeypatch)
         return [CmsQuestionSummary("Q101", "资源绑定题目", {"uuid": "Q101"})]
 
     monkeypatch.setattr(
-        "server.app.services.job_intake.list_questions_by_knowledge",
+        "server.app.services.job_intake_resolution.list_questions_by_knowledge",
         fake_list_questions_by_knowledge,
     )
-    monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
@@ -262,10 +331,12 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
         ]
 
     monkeypatch.setattr(
-        "server.app.services.job_intake.list_questions_by_knowledge",
+        "server.app.services.job_intake_resolution.list_questions_by_knowledge",
         fake_list_questions_by_knowledge,
     )
-    monkeypatch.setattr("server.app.services.job_intake.get_token", lambda env, config: "token")
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True

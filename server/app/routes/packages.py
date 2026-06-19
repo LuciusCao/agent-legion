@@ -156,8 +156,12 @@ def create_packages_router(
             result["locked"] = body.locked
         return result
 
-    @router.get("/packages/{filename:path}")
-    def download_package(filename: str):
+    @router.get(
+        "/packages/{filename:path}",
+        response_class=FileResponse,
+        responses={200: {"content": {"application/zip": {}}}},
+    )
+    def download_package(filename: str) -> FileResponse:
         try:
             validate_package_filename(filename)
         except ValueError:
@@ -211,8 +215,12 @@ def create_packages_router(
             download_url=package_result["download_url"],
         )
 
-    @router.get("/workspaces/{workspace_id}/packages/{filename:path}")
-    def download_workspace_package(workspace_id: str, filename: str):
+    @router.get(
+        "/workspaces/{workspace_id}/packages/{filename:path}",
+        response_class=FileResponse,
+        responses={200: {"content": {"application/zip": {}}}},
+    )
+    def download_workspace_package(workspace_id: str, filename: str) -> FileResponse:
         try:
             validate_package_filename(filename)
         except ValueError:
