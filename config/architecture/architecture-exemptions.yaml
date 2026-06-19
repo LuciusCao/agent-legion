@@ -168,13 +168,13 @@ exemptions:
     path: server/app/routes/questions.py:server.app.cms.client
     reason: Question detail route uses CMS token client directly while the CMS resource resolver is being moved out of routes.
     owner: workspace-executor
-    remove_when: issues/open/027-P1-split-routes-jobs-refactor.md
+    remove_when: issues/open/040-P2-question-route-cms-boundary.md
 
   - check: architecture.route_import_boundary
     path: server/app/routes/questions.py:server.app.cms.question
     reason: Question detail route uses CMS question fetcher directly while the CMS resource resolver is being moved out of routes.
     owner: workspace-executor
-    remove_when: issues/open/027-P1-split-routes-jobs-refactor.md
+    remove_when: issues/open/040-P2-question-route-cms-boundary.md
 
   # Scheduler threadpool exemption ------------------------------------------------------------
   - check: architecture.scheduler_threadpool

@@ -97,6 +97,49 @@ def test_type_checking_import_is_not_runtime_dependency(
     assert _check_import_cycles(tmp_path) == []
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from typing import TYPE_CHECKING as TC\nTC, other = (True, 1)\nif TC:\n    import server.app.a\n",
+        "from typing import TYPE_CHECKING as TC\nfor TC in [True]:\n    if TC:\n        import server.app.a\n",
+        "if object():\n    TC = True\nelse:\n    from typing import TYPE_CHECKING as TC\nif TC:\n    import server.app.a\n",
+        "from typing import TYPE_CHECKING as TC\n(TC := True)\nif TC:\n    import server.app.a\n",
+        "from contextlib import nullcontext\nfrom typing import TYPE_CHECKING as TC\nwith nullcontext(True) as TC:\n    if TC:\n        import server.app.a\n",
+        "try:\n    TC = True\nexcept Exception:\n    from typing import TYPE_CHECKING as TC\nif TC:\n    import server.app.a\n",
+        "match 1:\n    case 1:\n        TC = True\n    case _:\n        from typing import TYPE_CHECKING as TC\nif TC:\n    import server.app.a\n",
+        "from typing import TYPE_CHECKING as TC\nfor _ in range(2):\n    if TC:\n        import server.app.a\n    TC = True\n",
+        "from typing import TYPE_CHECKING as TC\ntry:\n    TC = True\n    raise RuntimeError\nexcept RuntimeError:\n    if TC:\n        import server.app.a\n",
+        "from typing import TYPE_CHECKING as TC\nclass Runtime:\n    global TC\n    TC = True\nif TC:\n    import server.app.a\n",
+        "from typing import TYPE_CHECKING as TC\ndef eager(value=(TC := True)):\n    pass\nif TC:\n    import server.app.a\n",
+        "from typing import TYPE_CHECKING as TC\neager = lambda value=(TC := True): value\nif TC:\n    import server.app.a\n",
+        "from typing import TYPE_CHECKING as TC\n@((TC := (lambda value: value)))\nclass Runtime:\n    pass\nif TC:\n    import server.app.a\n",
+        "from contextlib import suppress\nfrom typing import TYPE_CHECKING as TC\nwith suppress(Exception):\n    TC = True\n    raise Exception\n    from typing import TYPE_CHECKING as TC\nif TC:\n    import server.app.a\n",
+    ],
+)
+def test_rebound_type_checking_alias_is_runtime_dependency(tmp_path: Path, source: str) -> None:
+    _write(tmp_path, "server/app/a.py", "import server.app.b\n")
+    _write(tmp_path, "server/app/b.py", source)
+
+    assert _check_import_cycles(tmp_path) == ["import cycle: server.app.a -> server.app.b"]
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "from typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import server.app.a\nTYPE_CHECKING = True\n",
+        "from typing import TYPE_CHECKING\nclass Runtime:\n    TYPE_CHECKING = True\nif TYPE_CHECKING:\n    import server.app.a\n",
+        "from typing import TYPE_CHECKING\nTYPE_CHECKING = True\nfrom typing import TYPE_CHECKING\nif TYPE_CHECKING:\n    import server.app.a\n",
+    ],
+)
+def test_type_checking_guard_respects_scope_and_statement_order(
+    tmp_path: Path, source: str
+) -> None:
+    _write(tmp_path, "server/app/a.py", "import server.app.b\n")
+    _write(tmp_path, "server/app/b.py", source)
+
+    assert _check_import_cycles(tmp_path) == []
+
+
 def test_class_body_import_is_eager(tmp_path: Path) -> None:
     _write(tmp_path, "server/app/a.py", "import server.app.b\n")
     _write(
