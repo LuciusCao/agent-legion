@@ -1,0 +1,44 @@
+# Repository-owned Pi skills registry.
+#
+# This file declares the external repository location for each capability.
+# The URLs below are placeholders; skills currently live in
+# server/app/workflows/skills/ and will be moved to external repositories in
+# Task 9.
+
+skills:
+  # question_comprehension_info
+  question_comprehension_info/assess_comprehension_difficulty:
+    repo: https://github.com/agent-legion/skill-question-comprehension-info-assess-comprehension-difficulty.git
+    ref: v1.0.0
+  question_comprehension_info/generate_key_info:
+    repo: https://github.com/agent-legion/skill-question-comprehension-info-generate-key-info.git
+    ref: v1.0.0
+  question_comprehension_info/generate_possible_errors:
+    repo: https://github.com/agent-legion/skill-question-comprehension-info-generate-possible-errors.git
+    ref: v1.0.0
+  question_comprehension_info/review_key_info:
+    repo: https://github.com/agent-legion/skill-question-comprehension-info-review-key-info.git
+    ref: v1.0.0
+  question_comprehension_info/review_possible_errors:
+    repo: https://github.com/agent-legion/skill-question-comprehension-info-review-possible-errors.git
+    ref: v1.0.0
+
+  # reading_analysis
+  reading_analysis/assess_difficulty:
+    repo: https://github.com/agent-legion/skill-reading-analysis-assess-difficulty.git
+    ref: v1.0.0
+  reading_analysis/extract_keywords:
+    repo: https://github.com/agent-legion/skill-reading-analysis-extract-keywords.git
+    ref: v1.0.0
+  reading_analysis/generate_distractors:
+    repo: https://github.com/agent-legion/skill-reading-analysis-generate-distractors.git
+    ref: v1.0.0
+  reading_analysis/review_difficulty:
+    repo: https://github.com/agent-legion/skill-reading-analysis-review-difficulty.git
+    ref: v1.0.0
+  reading_analysis/review_distractors:
+    repo: https://github.com/agent-legion/skill-reading-analysis-review-distractors.git
+    ref: v1.0.0
+  reading_analysis/review_keywords:
+    repo: https://github.com/agent-legion/skill-reading-analysis-review-keywords.git
+    ref: v1.0.0
