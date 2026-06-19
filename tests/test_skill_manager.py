@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import concurrent.futures
 import os
 import subprocess
 import uuid
@@ -262,3 +263,126 @@ def test_lock_refresh_command_writes_lock(tmp_path: Path) -> None:
     content = lock_path.read_text()
     assert "reading_analysis/extract_keywords" in content
     assert "commit:" in content
+
+
+def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+
+    first_dir = manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    assert (first_dir / "SKILL.md").is_file()
+
+    cache_dir = tmp_path / "skills" / "reading_analysis" / "extract_keywords"
+    (cache_dir / "garbage.txt").write_text("trash")
+
+    second_dir = manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    assert second_dir.is_dir()
+    assert not (second_dir / "garbage.txt").exists()
+    assert (second_dir / "SKILL.md").is_file()
+
+
+def test_concurrent_get_skill_dir_serializes_git_operations(tmp_path: Path) -> None:
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+
+    def fetch_copy(_index: int) -> Path:
+        return manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+        futures = [executor.submit(fetch_copy, i) for i in range(5)]
+        dirs = [f.result() for f in concurrent.futures.as_completed(futures)]
+
+    assert len({str(d) for d in dirs}) == 5
+    for skill_dir in dirs:
+        assert skill_dir.is_dir()
+        assert (skill_dir / "SKILL.md").is_file()
+        assert not (skill_dir / ".git").exists()
+
+
+def test_broken_cache_directory_raises_skill_repo_error(tmp_path: Path) -> None:
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+
+    cache_dir = tmp_path / "skills" / "reading_analysis" / "extract_keywords"
+    cache_dir.mkdir(parents=True)
+
+    with pytest.raises(SkillRepoError):
+        manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+
+
+def test_lockfile_content_stays_stable_across_calls(tmp_path: Path) -> None:
+    repo_uri = _make_bare_repo(tmp_path)
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text(
+        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+    )
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+
+    manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    first_lock = manager._load_lock()
+    first_commit = first_lock.skills["reading_analysis/extract_keywords"].commit
+
+    manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    second_lock = manager._load_lock()
+
+    assert second_lock.skills["reading_analysis/extract_keywords"].commit == first_commit
+    assert second_lock.resolved_at == first_lock.resolved_at
+
+
+@pytest.mark.parametrize(
+    "execution_id",
+    [
+        "",
+        "..",
+        "/absolute/id",
+        "foo/bar",
+        "foo\\bar",
+        "foo..bar",
+        "foo bar",
+        "foo?bar",
+        "foo:bar",
+    ],
+)
+def test_invalid_execution_id_rejected(execution_id: str, tmp_path: Path) -> None:
+    config_path = tmp_path / "skills.yaml"
+    config_path.write_text("skills: {}\n")
+    manager = SkillManager(
+        config_path=config_path,
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+        runs_dir=tmp_path / "runs",
+    )
+    with pytest.raises(SkillPathError):
+        manager.get_skill_dir("reading_analysis/extract_keywords", execution_id)
