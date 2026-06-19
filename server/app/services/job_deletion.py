@@ -15,7 +15,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_job_dir
+from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +102,10 @@ class JobDeletionService:
             for log_path in glob.glob(str(self.settings.logs_dir / "jobs" / f"{job_id}-*.log"))
         ]
 
-        storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
+        try:
+            storage_dir = resolve_job_dir(job, self.settings.jobs_dir)
+        except ManagedPathError as exc:
+            return self._result(job_id, "failed", "delete_failed", str(exc))
 
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
         staged_storage: Path | None = None
