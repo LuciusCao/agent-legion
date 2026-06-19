@@ -54,27 +54,37 @@ def copy_tree(src: Path, dst: Path) -> None:
         "*.pyc",
         "*.pyo",
     )
-    shutil.copytree(src, dst, ignore=ignore, dirs_exist_ok=True)
+    shutil.copytree(src, dst, ignore=ignore)
 
 
-def rewrite_shared_path(target_capability: Path) -> int:
-    """Update validate_output.py references to the relocated _shared directory.
+def rewrite_shared_path(target_capability: Path) -> tuple[int, list[Path]]:
+    """Update Python references to the relocated _shared directory.
 
-    Replaces ``parents[2]`` with ``parents[1]`` in any ``Path(__file__).resolve()``
-    expression so that the copied ``_shared`` package at the repo root is found.
-    Returns the number of files modified.
+    Replaces ``parents[2]`` with ``parents[1]`` in any
+    ``Path(__file__).resolve().parents[2]`` expression so that the copied
+    ``_shared`` package at the repo root is found.
+
+    Returns a tuple of (modified_count, skipped_paths). A path is recorded as
+    skipped when it contains ``parents[2]`` but does not match the expected
+    replacement pattern.
     """
     modified = 0
-    for script_path in target_capability.rglob("scripts/validate_output.py"):
+    skipped: list[Path] = []
+    for script_path in target_capability.rglob("*.py"):
         original = script_path.read_text(encoding="utf-8")
-        if OLD_SHARED_PARENT not in original:
-            continue
-        updated = original.replace(OLD_SHARED_PARENT, NEW_SHARED_PARENT)
-        if updated != original:
-            script_path.write_text(updated, encoding="utf-8")
-            modified += 1
-            logger.info("Rewrote shared path in %s", script_path)
-    return modified
+        if OLD_SHARED_PARENT in original:
+            updated = original.replace(OLD_SHARED_PARENT, NEW_SHARED_PARENT)
+            if updated != original:
+                script_path.write_text(updated, encoding="utf-8")
+                modified += 1
+                logger.info("Rewrote shared path in %s", script_path)
+        elif "parents[2]" in original:
+            skipped.append(script_path)
+            logger.warning(
+                "Skipped shared path rewrite in %s (contains parents[2] but not expected pattern)",
+                script_path,
+            )
+    return modified, skipped
 
 
 def init_git_repo(target_dir: Path) -> None:
@@ -123,7 +133,12 @@ def migrate_capability(
     if shared_dir.is_dir():
         copy_tree(shared_dir, target_dir / "_shared")
 
-    rewrite_shared_path(target_dir)
+    modified, skipped = rewrite_shared_path(target_dir)
+    if modified:
+        logger.info("Rewrote shared path in %d file(s)", modified)
+    if skipped:
+        logger.warning("Skipped shared path rewrite in %d file(s)", len(skipped))
+
     init_git_repo(target_dir)
 
     if push and remote_template:
@@ -137,14 +152,21 @@ def migrate_capability(
     return target_dir
 
 
-def verify_migration(targets: list[Path]) -> bool:
-    """Verify each target is a git repo with the expected files."""
+def verify_migration(targets: list[tuple[Path, Path]]) -> bool:
+    """Verify each target is a git repo with the expected files.
+
+    Each item in ``targets`` is a ``(target_dir, workflow_dir)`` tuple. The
+    presence of ``_shared`` in the target is only enforced when the source
+    workflow directory also contains ``_shared``.
+    """
     ok = True
-    for target in targets:
+    for target, workflow_dir in targets:
         git_dir = target / ".git"
         skill_md = target / "SKILL.md"
         shared_dir = target / "_shared"
         validate_script = target / "scripts" / "validate_output.py"
+        source_shared_dir = workflow_dir / "_shared"
+        expects_shared = source_shared_dir.is_dir()
 
         if not git_dir.is_dir():
             logger.error("Missing .git in %s", target)
@@ -152,8 +174,8 @@ def verify_migration(targets: list[Path]) -> bool:
         if not skill_md.is_file():
             logger.error("Missing SKILL.md in %s", target)
             ok = False
-        if not shared_dir.is_dir():
-            logger.error("Missing _shared in %s", target)
+        if expects_shared and not shared_dir.is_dir():
+            logger.error("Missing _shared in %s (expected because source has _shared)", target)
             ok = False
         if not validate_script.is_file():
             logger.error("Missing scripts/validate_output.py in %s", target)
@@ -248,32 +270,41 @@ def main(argv: list[str] | None = None) -> int:
     if args.push and not args.remote_template:
         parser.error("--push requires --remote-template")
 
-    targets: list[Path] = []
-    for workflow_dir, capability_dir, capability_name in capabilities:
-        target = migrate_capability(
-            workflow_dir,
-            capability_dir,
-            capability_name,
-            args.target_root,
-            args.push,
-            args.remote_template,
-        )
-        targets.append(target)
+    try:
+        targets: list[tuple[Path, Path]] = []
+        for workflow_dir, capability_dir, capability_name in capabilities:
+            target = migrate_capability(
+                workflow_dir,
+                capability_dir,
+                capability_name,
+                args.target_root,
+                args.push,
+                args.remote_template,
+            )
+            targets.append((target, workflow_dir))
 
-    logger.info("Verifying %d migrated repo(s)...", len(targets))
-    if not verify_migration(targets):
-        logger.error("Migration verification failed; source directories left intact.")
+        logger.info("Verifying %d migrated repo(s)...", len(targets))
+        if not verify_migration(targets):
+            logger.error("Migration verification failed; source directories left intact.")
+            return 1
+
+        logger.info("Migration verified successfully.")
+
+        if args.delete_source:
+            for _workflow_dir, capability_dir, _capability_name in capabilities:
+                logger.info("Removing source %s", capability_dir)
+                shutil.rmtree(capability_dir)
+            logger.info("Source directories removed.")
+
+        return 0
+    except subprocess.CalledProcessError as exc:
+        logger.error("Command failed: %s", exc)
+        if exc.stderr:
+            logger.error("%s", exc.stderr)
         return 1
-
-    logger.info("Migration verified successfully.")
-
-    if args.delete_source:
-        for _workflow_dir, capability_dir, _capability_name in capabilities:
-            logger.info("Removing source %s", capability_dir)
-            shutil.rmtree(capability_dir)
-        logger.info("Source directories removed.")
-
-    return 0
+    except (OSError, shutil.Error) as exc:
+        logger.error("Filesystem error: %s", exc)
+        return 1
 
 
 if __name__ == "__main__":
