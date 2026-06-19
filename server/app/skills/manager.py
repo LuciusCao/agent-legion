@@ -3,6 +3,7 @@ from __future__ import annotations
 import datetime
 import logging
 import os
+import re
 import shutil
 import subprocess
 import uuid
@@ -15,6 +16,8 @@ from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock
 from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
 
 logger = logging.getLogger(__name__)
+
+_EXECUTION_ID_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class SkillManager:
@@ -34,10 +37,13 @@ class SkillManager:
         )
         self.git_command = git_command or ["git"]
         self._cache_locks: dict[str, FileLock] = {}
-        self._lockfile_lock_path = self.lock_path.with_suffix(".lock")
+        self._lockfile_lock_path = self.lock_path.with_suffix(
+            self.lock_path.suffix + ".lock"
+        )
         self._lockfile_lock = FileLock(str(self._lockfile_lock_path))
 
     def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
+        self._validate_execution_id(execution_id)
         workflow, capability = self._parse_skill_key(skill_key)
         cache_dir = self._resolve_cache_dir(workflow, capability)
         source = self._source_for(skill_key)
@@ -51,6 +57,20 @@ class SkillManager:
             shutil.rmtree(run_dir)
         shutil.copytree(cache_dir, run_dir, ignore=shutil.ignore_patterns(".git"))
         return run_dir
+
+    def _validate_execution_id(self, execution_id: str) -> None:
+        if not execution_id:
+            raise SkillPathError("execution_id must not be empty")
+        if os.path.isabs(execution_id):
+            raise SkillPathError(f"execution_id must not be an absolute path: {execution_id!r}")
+        if "/" in execution_id or "\\" in execution_id:
+            raise SkillPathError(f"execution_id must not contain path separators: {execution_id!r}")
+        if ".." in execution_id:
+            raise SkillPathError(f"execution_id must not contain '..': {execution_id!r}")
+        if not _EXECUTION_ID_RE.match(execution_id):
+            raise SkillPathError(
+                f"execution_id contains unsafe characters: {execution_id!r}"
+            )
 
     def _parse_skill_key(self, skill_key: str) -> tuple[str, str]:
         if not skill_key:
@@ -98,12 +118,15 @@ class SkillManager:
             commit = locked.commit
             if not self._has_commit(cache_dir, commit):
                 self._run_git(["-C", str(cache_dir), "fetch", "origin", commit])
+                commit = self._rev_parse(cache_dir, "FETCH_HEAD")
+                locked.commit = commit
+                lock.skills[skill_key] = locked
+                self._atomic_write_lock(lock)
         else:
-            self._run_git(["-C", str(cache_dir), "fetch", "origin"])
+            ref = self._source_for(skill_key).ref
+            self._run_git(["-C", str(cache_dir), "fetch", "origin", ref])
             commit = self._rev_parse(cache_dir, "FETCH_HEAD")
-            locked = LockedSkillSource(
-                repo=repo, ref=self._source_for(skill_key).ref, commit=commit
-            )
+            locked = LockedSkillSource(repo=repo, ref=ref, commit=commit)
             lock.skills[skill_key] = locked
             self._atomic_write_lock(lock)
 
@@ -111,28 +134,24 @@ class SkillManager:
         self._run_git(["-C", str(cache_dir), "clean", "-fd"])
 
     def _has_commit(self, cache_dir: Path, commit: str) -> bool:
-        result = subprocess.run(
-            self.git_command + ["-C", str(cache_dir), "cat-file", "-t", commit],
-            capture_output=True,
-            text=True,
+        result = self._run_git(
+            ["-C", str(cache_dir), "cat-file", "-t", commit], check=False
         )
         return result.returncode == 0 and "commit" in result.stdout
 
     def _rev_parse(self, cache_dir: Path, rev: str) -> str:
-        result = subprocess.run(
-            self.git_command + ["-C", str(cache_dir), "rev-parse", rev],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
+        result = self._run_git(["-C", str(cache_dir), "rev-parse", rev])
         return result.stdout.strip()
 
-    def _run_git(self, args: list[str]) -> None:
+    def _run_git(
+        self, args: list[str], check: bool = True
+    ) -> subprocess.CompletedProcess[str]:
         cmd = self.git_command + args
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
         result = subprocess.run(cmd, capture_output=True, text=True, env=env)
-        if result.returncode != 0:
+        if check and result.returncode != 0:
             raise SkillRepoError(f"git command failed: {' '.join(cmd)}\n{result.stderr}")
+        return result
 
     def _load_lock(self) -> SkillsLock:
         if not self.lock_path.is_file():
