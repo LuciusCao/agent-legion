@@ -16,6 +16,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_deletion import JobDeleteResult, JobDeletionService
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_job_dir
 
 
 @pytest.mark.full_gate
@@ -59,7 +60,7 @@ def test_delete_rollback_survives_concurrent_recreation(
     )
     job_db.update_job_status(job["id"], "completed")
 
-    storage_dir = Path(str(job["storage_dir"]))
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     original_artifact = storage_dir / "artifact.bin"
     original_artifact.write_bytes(b"original-bytes")

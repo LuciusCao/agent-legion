@@ -13,6 +13,7 @@ from server.app.services.job_intake_resolution import (
 )
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +167,13 @@ class JobIntakeService:
                     stem=str(candidate.get("stem", "")),
                 )
             )
+
+        resolved_jobs: list[dict[str, Any]] = []
+        for job in jobs:
+            projected = dict(job)
+            projected["storage_dir"] = str(resolve_job_dir(projected, self.settings.jobs_dir))
+            resolved_jobs.append(projected)
+        jobs = resolved_jobs
 
         batch["created_count"] = len(jobs)
         if self.job_event_manager is not None:

@@ -5,6 +5,7 @@ import yaml
 
 from server.app.executors.config import load_executor_definitions
 from server.app.jobs.queries import JobQueries
+from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.question_comprehension_info import (
     assemble_comprehension_info,
     clean_and_parse,
@@ -22,7 +23,7 @@ def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "assemble_comprehension_info"],
     )
-    artifact_dir = Path(job["storage_dir"])
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions.json").write_text(
         json.dumps(
             {
@@ -64,7 +65,7 @@ def test_clean_and_parse_marks_missing_fingerprint_without_hashing(tmp_path):
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "assemble_comprehension_info"],
     )
-    artifact_dir = Path(job["storage_dir"])
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions.json").write_text(
         json.dumps(
             {
@@ -107,7 +108,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
         title="Question Q100",
         node_keys=["assemble_comprehension_info"],
     )
-    artifact_dir = Path(job["storage_dir"])
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions_parsed.json").write_text(
         json.dumps(
             {

@@ -6,6 +6,7 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.services.job_packages import JobPackageResult, JobPackageService
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_job_dir
 
 
 def _create_settings(tmp_path: Path) -> Settings:
@@ -49,8 +50,8 @@ def _create_job(
     return job
 
 
-def _write_artifact(job: dict[str, Any]) -> None:
-    storage_dir = Path(str(job["storage_dir"]))
+def _write_artifact(job: dict[str, Any], settings: Settings) -> None:
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "question_context.json").write_text(
         '{"question_id":"' + job["source_id"] + '"}', encoding="utf-8"
@@ -65,13 +66,13 @@ def test_package_returns_ordered_results_with_reason_codes(
 
     workspace_id = "pkg-ws"
     completed_a = _create_job(job_db, workspace_id, "Q100", status="completed")
-    _write_artifact(completed_a)
+    _write_artifact(completed_a, settings)
     completed_b = _create_job(job_db, workspace_id, "Q101", status="completed")
-    _write_artifact(completed_b)
+    _write_artifact(completed_b, settings)
     incomplete = _create_job(job_db, workspace_id, "Q102", status="queued")
-    _write_artifact(incomplete)
+    _write_artifact(incomplete, settings)
     other_workspace_job = _create_job(job_db, "other-ws", "Q103", status="completed")
-    _write_artifact(other_workspace_job)
+    _write_artifact(other_workspace_job, settings)
 
     job_ids = [
         completed_a["id"],
@@ -118,7 +119,7 @@ def test_package_requires_at_least_one_eligible_job(job_db: JobQueries, tmp_path
 
     workspace_id = "empty-pkg-ws"
     incomplete = _create_job(job_db, workspace_id, "Q200", status="queued")
-    _write_artifact(incomplete)
+    _write_artifact(incomplete, settings)
 
     response: JobPackageResult = service.package(workspace_id, [incomplete["id"]])
 
