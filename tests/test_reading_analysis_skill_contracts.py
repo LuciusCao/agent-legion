@@ -2,12 +2,16 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 from pathlib import Path
 
 import pytest
 
-from server.app.workflows.skills.reading_analysis._shared.review import validate_review_result
-from server.app.workflows.skills.reading_analysis._shared.validation import (
+_SHARED_ROOT = Path.home() / ".agents/skills/agent-legion/reading_analysis/extract_keywords/_shared"
+sys.path.insert(0, str(_SHARED_ROOT))
+
+from review import validate_review_result  # noqa: E402
+from validation import (  # noqa: E402
     ContractError,
     load_json_object,
     load_single_question,

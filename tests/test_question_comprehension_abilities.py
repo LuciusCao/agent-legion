@@ -2,8 +2,8 @@ import json
 from pathlib import Path
 
 TAXONOMY = (
-    Path(__file__).resolve().parents[1]
-    / "server/app/workflows/skills/question_comprehension_info/_shared/references/question_comprehension_abilities.json"
+    Path.home()
+    / ".agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty/_shared/references/question_comprehension_abilities.json"
 )
 
 

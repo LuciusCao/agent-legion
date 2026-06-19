@@ -1,5 +1,6 @@
 import hashlib
 import importlib
+import importlib.util
 import json
 import shutil
 import subprocess
@@ -10,9 +11,9 @@ import pytest
 
 from server.app.workflows.definition import load_workflow_definition
 from server.app.workflows.skills import resolve_workflow_skill
-from server.app.workflows.skills.reading_analysis._shared.validation import ContractError
 
 FIXTURE_ROOT = Path("tests/fixtures/reading_analysis/eval")
+SKILL_ROOT = Path.home() / ".agents/skills/agent-legion"
 SKILL_NAMES = [
     "reading_analysis/extract_keywords",
     "reading_analysis/review_keywords",
@@ -25,12 +26,25 @@ SKILL_NAMES = [
 
 def _run_validator(skill_name: str, job_dir: Path) -> list[str]:
     """Call a skill's in-process validate() and return a flat list of error messages."""
-    mod = importlib.import_module(
-        f"server.app.workflows.skills.reading_analysis.{skill_name.split('/')[-1]}.scripts.validate_output"
+    capability = skill_name.split("/")[-1]
+    shared_root = SKILL_ROOT / "reading_analysis" / capability / "_shared"
+    script_path = SKILL_ROOT / "reading_analysis" / capability / "scripts" / "validate_output.py"
+
+    spec = importlib.util.spec_from_file_location(
+        f"external_skill.reading_analysis.{capability}.validate_output",
+        script_path,
     )
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+
+    # Make the copied _shared helpers importable for the validator module.
+    if str(shared_root) not in sys.path:
+        sys.path.insert(0, str(shared_root))
+
+    spec.loader.exec_module(mod)
     try:
         result = mod.validate(job_dir)
-    except (ContractError, mod.ContractError) as exc:
+    except mod.ContractError as exc:
         return [str(exc)]
     if isinstance(result, list):
         return result
@@ -318,12 +332,11 @@ def _agent_skill_path(capability: str) -> str:
 
 def test_all_agent_nodes_have_complete_repository_skills():
     definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
-    root = Path("server/app/workflows/skills")
 
     for node in definition.nodes.values():
         if node.capability in LOCAL_CAPABILITIES:
             continue
-        skill = resolve_workflow_skill(root, _agent_skill_path(node.capability))
+        skill = resolve_workflow_skill(SKILL_ROOT, _agent_skill_path(node.capability))
         assert (skill / "SKILL.md").is_file()
         assert (skill / "references" / "output-contract.md").is_file()
         assert (skill / "scripts" / "validate_output.py").is_file()
@@ -462,8 +475,7 @@ def test_validator_rejects_invalid_report_in_process(skill_name, tmp_path):
 @pytest.mark.parametrize("skill_name", SKILL_NAMES)
 def test_validator_cli_smoke_accepts_valid_output(skill_name, tmp_path):
     """Keep one subprocess smoke per skill to verify the CLI entry point."""
-    root = Path("server/app/workflows/skills")
-    skill = resolve_workflow_skill(root, skill_name)
+    skill = resolve_workflow_skill(SKILL_ROOT, skill_name)
     validator = skill / "scripts" / "validate_output.py"
     job_dir = tmp_path / "job"
     job_dir.mkdir()
@@ -480,9 +492,7 @@ def test_validator_cli_smoke_accepts_valid_output(skill_name, tmp_path):
 
 
 def test_validator_usage_requires_directory_argument():
-    validator = Path(
-        "server/app/workflows/skills/reading_analysis/extract_keywords/scripts/validate_output.py"
-    )
+    validator = SKILL_ROOT / "reading_analysis/extract_keywords/scripts/validate_output.py"
     result = subprocess.run(
         [sys.executable, str(validator)],
         capture_output=True,
@@ -494,12 +504,11 @@ def test_validator_usage_requires_directory_argument():
 
 def test_all_skill_validators_are_executable():
     definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
-    root = Path("server/app/workflows/skills")
 
     for node in definition.nodes.values():
         if node.capability in LOCAL_CAPABILITIES:
             continue
-        skill = resolve_workflow_skill(root, _agent_skill_path(node.capability))
+        skill = resolve_workflow_skill(SKILL_ROOT, _agent_skill_path(node.capability))
         validator = skill / "scripts" / "validate_output.py"
         assert validator.stat().st_mode & 0o111, f"{validator} is not executable"
 
