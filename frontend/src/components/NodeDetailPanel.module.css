@@ -99,7 +99,8 @@
 }
 
 .btn:hover {
-  background: #1a1c1e;
+  background: #000000;
+  color: #ffffff;
 }
 
 .errorText {
