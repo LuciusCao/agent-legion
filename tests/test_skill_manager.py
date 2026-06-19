@@ -69,12 +69,6 @@ def test_locked_skill_source_round_trip() -> None:
     }
 
 
-@pytest.mark.parametrize("exc_cls", [SkillConfigError, SkillRepoError, SkillPathError])
-def test_skill_exceptions_can_be_raised_and_caught(exc_cls: type[Exception]) -> None:
-    with pytest.raises(exc_cls):
-        raise exc_cls("test error")
-
-
 def test_skill_config_error_is_value_error() -> None:
     with pytest.raises(ValueError):
         raise SkillConfigError("bad config")
