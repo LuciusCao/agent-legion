@@ -16,7 +16,7 @@ from server.app.services.job_deletion import (
     JobDeletionService,
 )
 from server.app.settings import Settings
-from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.storage_paths import resolve_job_dir
 
 
 def _create_settings(tmp_path: Path) -> Settings:
@@ -292,9 +292,10 @@ def test_delete_raises_for_escaping_storage_dir(job_db: JobQueries, tmp_path: Pa
             ("../escape", job["id"]),
         )
 
-    with pytest.raises(ManagedPathError):
-        service.delete(job["workspace_id"], job["id"])
+    result = service.delete(job["workspace_id"], job["id"])
 
+    assert result["status"] == "failed"
+    assert result["reason_code"] == "delete_failed"
     assert legitimate_storage.exists()
     assert (legitimate_storage / "artifact.json").exists()
     assert not (settings.jobs_dir / ".trash").exists()
