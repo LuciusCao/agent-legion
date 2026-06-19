@@ -139,7 +139,7 @@ def _claim_request(
     global_capacity: int = 2,
     local_node_limit: int | None = 1,
     ttl: int = 60,
-    log_path: str = "/tmp/run.log",
+    log_path: str = "logs/run.log",
     workflow_key: str = "reading_analysis",
     execution_mode: str = "full",
     target_node_key: str | None = None,
@@ -487,12 +487,13 @@ def test_finish_is_idempotent_and_updates_job_aggregate_status(
     )
     assert claim is not None
 
+    data_dir = queries.path.parent
     result = ExecutionResult(
         status="completed",
         exit_code=0,
         command=("python", "run.py"),
-        log_path="/tmp/updated.log",
-        session_reference="/sessions/abc",
+        log_path="logs/updated.log",
+        session_reference=str(data_dir / "sessions" / "abc"),
     )
     assert repo_a.finish(claim.lease_id, result) is True
     assert repo_a.finish(claim.lease_id, result) is False
@@ -506,8 +507,8 @@ def test_finish_is_idempotent_and_updates_job_aggregate_status(
     assert lease["status"] == "released"
     assert run["status"] == "completed"
     assert run["exit_code"] == 0
-    assert run["log_path"] == "/tmp/updated.log"
-    assert run["session_dir"] == "/sessions/abc"
+    assert run["log_path"] == "logs/updated.log"
+    assert run["session_dir"] == "sessions/abc"
     assert job["status"] == "completed"
 
 
@@ -523,7 +524,7 @@ def test_fail_without_lease_creates_failed_run_and_updates_job_status(
         workflow_key="reading_analysis",
         node_key="review_keywords",
         capability="review_keywords",
-        log_path="/tmp/error.log",
+        log_path="logs/error.log",
     )
     run_id = repo_a.fail_without_lease(request, "missing binding")
     assert run_id is not None
@@ -553,7 +554,7 @@ def test_fail_without_lease_is_idempotent_for_the_same_node(
         workflow_key="reading_analysis",
         node_key="review_keywords",
         capability="review_keywords",
-        log_path="/tmp/error.log",
+        log_path="logs/error.log",
     )
 
     first_run_id = repo_a.fail_without_lease(request, "missing binding")
@@ -863,14 +864,14 @@ def test_claim_lease_transitions_queued_job_back_to_running(
         workflow_key="reading_analysis",
         node_key="node_b",
         capability="review_keywords",
-        log_path="/tmp/node_b.log",
+        log_path="logs/node_b.log",
         lease_ttl_seconds=60,
         global_capacity=10,
         local_node_limit=1,
     )
 
     with queries.connect() as conn:
-        claimed = claim_lease(conn, request)
+        claimed = claim_lease(conn, request, queries.path.parent)
         conn.commit()
 
     assert claimed is not None
@@ -901,6 +902,7 @@ def test_recover_orphaned_running_jobs_returns_them_to_queued(
 
     assert recovered == [job_id]
     job = queries.get_job(job_id)
+    assert job is not None
     assert job["status"] == "queued"
     node = queries.get_job_node(job_id, "node_a")
     assert node is not None
@@ -991,6 +993,7 @@ def test_recover_skips_jobs_with_active_lease(
 
     assert recovered == []
     job = queries.get_job(job_id)
+    assert job is not None
     assert job["status"] == "running"
 
 
@@ -1032,3 +1035,169 @@ def test_recover_orphaned_running_jobs_marks_running_node_runs_failed(
     assert run["status"] == "failed"
     assert run["error_message"] == "orphaned recovery"
     assert run["finished_at"] is not None
+
+
+def test_claim_lease_persists_relative_log_path(queries: JobQueries) -> None:
+    data_dir = queries.path.parent
+    log_path = data_dir / "logs" / "jobs" / "run.log"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-rel-log", "local-default", workspace_limit=2
+    )
+    request = _claim_request(
+        workspace_id,
+        job_id,
+        executor_id="local-default",
+        global_capacity=2,
+        log_path=str(log_path),
+    )
+
+    with queries.connect() as conn:
+        claimed = claim_lease(conn, request, data_dir)
+        conn.commit()
+
+    assert claimed is not None
+    with queries.connect() as conn:
+        run = conn.execute(
+            "select * from node_runs where job_id=? and node_key=?",
+            (job_id, "review_keywords"),
+        ).fetchone()
+    assert run is not None
+    assert run["log_path"] == "logs/jobs/run.log"
+
+
+def test_finish_lease_persists_relative_log_path(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-rel-finish", "local-default", workspace_limit=2
+    )
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="local-default", global_capacity=2)
+    )
+    assert claim is not None
+
+    data_dir = queries.path.parent
+    absolute_log = data_dir / "logs" / "updated.log"
+    result = ExecutionResult(
+        status="completed",
+        exit_code=0,
+        log_path=str(absolute_log),
+    )
+    assert repo_a.finish(claim.lease_id, result) is True
+
+    with queries.connect() as conn:
+        run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
+    assert run is not None
+    assert run["log_path"] == "logs/updated.log"
+
+
+def test_fail_without_lease_persists_relative_log_path(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-rel-fail", "local-default", workspace_limit=2
+    )
+    data_dir = queries.path.parent
+    absolute_log = data_dir / "logs" / "error.log"
+    request = ConfigurationFailureRequest(
+        workspace_id=workspace_id,
+        job_id=job_id,
+        workflow_key="reading_analysis",
+        node_key="review_keywords",
+        capability="review_keywords",
+        log_path=str(absolute_log),
+    )
+    run_id = repo_a.fail_without_lease(request, "missing binding")
+    assert run_id is not None
+
+    with queries.connect() as conn:
+        run = conn.execute("select * from node_runs where id=?", (run_id,)).fetchone()
+    assert run is not None
+    assert run["log_path"] == "logs/error.log"
+
+
+def test_try_claim_returns_absolute_log_path_and_persists_relative(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-repo-claim-abs", "local-default", workspace_limit=2
+    )
+    data_dir = queries.path.parent
+    absolute_log = data_dir / "logs" / "jobs" / "run.log"
+    absolute_log.parent.mkdir(parents=True, exist_ok=True)
+    request = _claim_request(
+        workspace_id,
+        job_id,
+        executor_id="local-default",
+        global_capacity=2,
+        log_path=str(absolute_log),
+    )
+
+    claim = repo_a.try_claim(request)
+
+    assert claim is not None
+    assert claim.log_path == str(absolute_log)
+    with queries.connect() as conn:
+        run = conn.execute(
+            "select * from node_runs where job_id=? and node_key=?",
+            (job_id, "review_keywords"),
+        ).fetchone()
+    assert run is not None
+    assert run["log_path"] == "logs/jobs/run.log"
+
+
+def test_finish_lease_canonicalizes_fallback_legacy_absolute_log_path(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-finish-fallback", "local-default", workspace_limit=2
+    )
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="local-default", global_capacity=2)
+    )
+    assert claim is not None
+
+    data_dir = queries.path.parent
+    legacy_absolute_log = data_dir / "logs" / "legacy.log"
+    legacy_absolute_log.parent.mkdir(parents=True, exist_ok=True)
+    with queries.connect() as conn:
+        conn.execute(
+            "update node_runs set log_path=? where id=?",
+            (str(legacy_absolute_log), claim.node_run_id),
+        )
+        conn.execute("commit")
+
+    result = ExecutionResult(status="completed", exit_code=0, log_path="")
+    assert repo_a.finish(claim.lease_id, result) is True
+
+    with queries.connect() as conn:
+        run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
+    assert run is not None
+    assert run["log_path"] == "logs/legacy.log"
+
+
+def test_finish_lease_persists_relative_session_dir(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-rel-session", "local-default", workspace_limit=2
+    )
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="local-default", global_capacity=2)
+    )
+    assert claim is not None
+
+    data_dir = queries.path.parent
+    absolute_session = data_dir / "sessions" / "abc"
+    result = ExecutionResult(
+        status="completed",
+        exit_code=0,
+        session_reference=str(absolute_session),
+    )
+    assert repo_a.finish(claim.lease_id, result) is True
+
+    with queries.connect() as conn:
+        run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
+    assert run is not None
+    assert run["session_dir"] == "sessions/abc"

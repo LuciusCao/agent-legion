@@ -9,6 +9,7 @@ from server.app.pipeline.common import make_record_id
 from server.app.records import VideoRecord
 from server.app.security import validate_download_url
 from server.app.settings import Settings
+from server.app.storage_paths import make_data_relative
 
 CONTENT_TYPES = {"knowledge", "question"}
 REJECTED_INTAKE_STATUSES = {"invalid", "not_found", "fetch_failed"}
@@ -150,7 +151,7 @@ def add_video_items(
         video_dir.mkdir(parents=True, exist_ok=True)
         db.update_video(
             video["id"],
-            storage_dir=str(video_dir),
+            storage_dir=make_data_relative(video_dir, settings.data_dir),
             status="queued" if url else "missing_url",
             current_phase="download" if url else "waiting_for_url",
         )

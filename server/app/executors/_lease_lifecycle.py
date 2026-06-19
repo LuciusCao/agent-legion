@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import sqlite3
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
@@ -10,6 +11,7 @@ from server.app.executors._lease_control import (
 )
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
+from server.app.storage_paths import make_data_relative
 
 
 def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -> bool:
@@ -32,7 +34,17 @@ def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -
     return True
 
 
-def finish_lease(conn: sqlite3.Connection, lease_id: str, result: ExecutionResult) -> bool:
+def finish_lease(
+    conn: sqlite3.Connection,
+    lease_id: str,
+    result: ExecutionResult,
+    data_dir: Path | None = None,
+) -> bool:
+    """Finish a lease and persist the node run result.
+
+    When ``data_dir`` is provided, the persisted ``log_path`` is canonicalized
+    relative to it.
+    """
     now = datetime.now(UTC)
     now_str = _sqlite_timestamp(now)
     lease = conn.execute(
@@ -59,6 +71,11 @@ def finish_lease(conn: sqlite3.Connection, lease_id: str, result: ExecutionResul
         "select log_path from node_runs where id=?", (lease["node_run_id"],)
     ).fetchone()
     effective_log_path = result.log_path or (node_run["log_path"] if node_run is not None else "")
+    if data_dir is not None and effective_log_path and Path(effective_log_path).is_absolute():
+        effective_log_path = make_data_relative(Path(effective_log_path), data_dir)
+    session_dir = result.session_reference
+    if data_dir is not None and session_dir and Path(session_dir).is_absolute():
+        session_dir = make_data_relative(Path(session_dir), data_dir)
     conn.execute(
         """
         update node_runs
@@ -72,7 +89,7 @@ def finish_lease(conn: sqlite3.Connection, lease_id: str, result: ExecutionResul
             result.error_message,
             json.dumps(list(result.command)),
             effective_log_path,
-            result.session_reference,
+            session_dir,
             now_str,
             lease["node_run_id"],
         ),
@@ -100,7 +117,13 @@ def fail_without_lease(
     conn: sqlite3.Connection,
     request: ConfigurationFailureRequest,
     error_message: str,
+    data_dir: Path | None = None,
 ) -> int | None:
+    """Record a failed node run without claiming a lease.
+
+    When ``data_dir`` is provided, the persisted ``log_path`` is canonicalized
+    relative to it.
+    """
     now = datetime.now(UTC)
     now_str = _sqlite_timestamp(now)
     cursor = conn.execute(
@@ -114,6 +137,9 @@ def fail_without_lease(
     if cursor.rowcount == 0:
         return None
 
+    log_path = request.log_path
+    if data_dir is not None and log_path and Path(log_path).is_absolute():
+        log_path = make_data_relative(Path(log_path), data_dir)
     cursor = conn.execute(
         """
         insert into node_runs(
@@ -126,7 +152,7 @@ def fail_without_lease(
             request.job_id,
             request.node_key,
             json.dumps([]),
-            request.log_path,
+            log_path,
             now_str,
             now_str,
             error_message,

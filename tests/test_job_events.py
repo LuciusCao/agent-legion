@@ -263,7 +263,9 @@ def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
     monkeypatch.setattr(
         executors.leases,
         "finish_lease",
-        lambda _conn, _lease_id, _result: (_ for _ in ()).throw(RuntimeError("simulated failure")),
+        lambda _conn, _lease_id, _result, _data_dir=None: (_ for _ in ()).throw(
+            RuntimeError("simulated failure")
+        ),
     )
 
     queue = _ws1_queue(manager)

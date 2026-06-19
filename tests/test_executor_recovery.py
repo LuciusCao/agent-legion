@@ -107,7 +107,7 @@ def _claim(workspace_id: str, job_id: str, repo: ExecutorLeaseRepository) -> Non
         capability="fetch",
         local_node_limit=1,
         lease_ttl_seconds=60,
-        log_path="/tmp/recovery.log",
+        log_path=str(repo.data_dir / "logs" / "recovery.log"),
     )
     claim = repo.try_claim(request)
     assert claim is not None
@@ -296,7 +296,7 @@ def test_recovery_frees_global_and_workspace_capacity(
             capability="fetch",
             local_node_limit=1,
             lease_ttl_seconds=60,
-            log_path="/tmp/recovery-b.log",
+            log_path=str(fresh_repo.data_dir / "logs" / "recovery-b.log"),
         )
     )
     assert claim_b is not None

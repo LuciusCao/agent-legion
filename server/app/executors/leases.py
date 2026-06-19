@@ -36,10 +36,12 @@ class ExecutorLeaseRepository:
         path: Path,
         job_db: JobQueries | None = None,
         job_event_manager: JobEventManager | None = None,
+        data_dir: Path | None = None,
     ):
         self.path = path
         self.job_db = job_db
         self.job_event_manager = job_event_manager
+        self.data_dir = data_dir or path.parent
         init_db(path)
 
     def _broadcast_job_update(self, job_id: str) -> None:
@@ -63,7 +65,7 @@ class ExecutorLeaseRepository:
         claimed: ClaimedExecution | None = None
         try:
             conn.execute("begin immediate")
-            result = claim_lease(conn, request)
+            result = claim_lease(conn, request, self.data_dir)
             if result is None:
                 conn.execute("rollback")
             else:
@@ -103,7 +105,7 @@ class ExecutorLeaseRepository:
                 "select job_id from executor_leases where id=?", (lease_id,)
             ).fetchone()
             job_id = str(lease["job_id"]) if lease else None
-            result_flag = finish_lease(conn, lease_id, result)
+            result_flag = finish_lease(conn, lease_id, result, self.data_dir)
             conn.execute("commit")
             if job_id is not None and result_flag:
                 self._broadcast_job_update(job_id)
@@ -123,7 +125,7 @@ class ExecutorLeaseRepository:
         run_id: int | None = None
         try:
             conn.execute("begin immediate")
-            run_id = fail_without_lease(conn, request, error_message)
+            run_id = fail_without_lease(conn, request, error_message, self.data_dir)
             conn.execute("commit")
             self._broadcast_job_update(job_id)
             return run_id

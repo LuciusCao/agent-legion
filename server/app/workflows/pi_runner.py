@@ -16,7 +16,7 @@ from server.app.executors.cancellation import CancellationToken, SubprocessTrack
 from server.app.executors.models import ExecutionStatus
 from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.jobs import JobQueries
-from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
 
 logger = logging.getLogger(__name__)
 
@@ -179,13 +179,14 @@ class PiRunner:
 
         try:
             if job_db is not None and persist_run:
+                data_dir = job_db.jobs_dir.parent
                 run_record = job_db.start_node_run(
                     job["id"],
                     node_key,
                     command,
-                    str(events_file),
-                    run_dir=str(run_dir),
-                    session_dir=str(session_dir),
+                    make_data_relative(events_file, data_dir),
+                    run_dir=make_data_relative(run_dir, data_dir),
+                    session_dir=make_data_relative(session_dir, data_dir),
                 )
                 if run_record is None:
                     return PiRunResult(

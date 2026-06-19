@@ -27,6 +27,12 @@ def test_job_intake_creates_direct_id_jobs(job_db, settings):
 
     assert result["created_count"] == 2
     assert [job["source_id"] for job in result["jobs"]] == ["Q1", "Q2"]
+    assert [job["storage_dir"] for job in result["jobs"]] == [
+        "jobs/default/default_question_content_Q1",
+        "jobs/default/default_question_content_Q2",
+    ]
+    for job in result["jobs"]:
+        assert (settings.data_dir / "jobs" / "default" / job["id"]).is_dir()
 
 
 def test_job_intake_rejects_missing_workspace(intake_service):
