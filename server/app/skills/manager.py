@@ -108,24 +108,35 @@ class SkillManager:
         elif not (cache_dir / ".git").is_dir():
             raise SkillRepoError(f"cache dir exists but is not a git repo: {cache_dir}")
 
+        source = self._source_for(skill_key)
+
         with self._lockfile_lock:
             lock = self._load_lock()
             locked = lock.skills.get(skill_key)
-            if locked is not None and locked.commit:
-                commit = locked.commit
-                if not self._has_commit(cache_dir, commit):
-                    self._run_git(["-C", str(cache_dir), "fetch", "origin", commit])
-                    commit = self._rev_parse(cache_dir, "FETCH_HEAD")
-                    locked.commit = commit
-                    lock.skills[skill_key] = locked
-                    self._atomic_write_lock(lock)
-            else:
-                ref = self._source_for(skill_key).ref
-                self._run_git(["-C", str(cache_dir), "fetch", "origin", ref])
-                commit = self._rev_parse(cache_dir, "FETCH_HEAD")
-                locked = LockedSkillSource(repo=repo, ref=ref, commit=commit)
-                lock.skills[skill_key] = locked
-                self._atomic_write_lock(lock)
+
+        if locked is not None and locked.commit:
+            commit = locked.commit
+            if not self._has_commit(cache_dir, commit):
+                self._run_git(["-C", str(cache_dir), "fetch", "origin", commit])
+                fetched_commit = self._rev_parse(cache_dir, "FETCH_HEAD")
+                with self._lockfile_lock:
+                    lock = self._load_lock()
+                    current = lock.skills.get(skill_key)
+                    if current is not None and current.commit == commit:
+                        current.commit = fetched_commit
+                        lock.skills[skill_key] = current
+                        self._write_lock_unlocked(lock)
+                commit = fetched_commit
+        else:
+            ref = source.ref
+            self._run_git(["-C", str(cache_dir), "fetch", "origin", ref])
+            commit = self._rev_parse(cache_dir, "FETCH_HEAD")
+            with self._lockfile_lock:
+                lock = self._load_lock()
+                current = lock.skills.get(skill_key)
+                if current is None:
+                    lock.skills[skill_key] = LockedSkillSource(repo=repo, ref=ref, commit=commit)
+                    self._write_lock_unlocked(lock)
 
         self._run_git(["-C", str(cache_dir), "checkout", commit, "-f"])
         self._run_git(["-C", str(cache_dir), "clean", "-fd"])
@@ -154,19 +165,22 @@ class SkillManager:
         data = yaml.safe_load(self.lock_path.read_text(encoding="utf-8")) or {}
         return SkillsLock.model_validate(data)
 
-    def _atomic_write_lock(self, lock: SkillsLock) -> None:
+    def _write_lock_unlocked(self, lock: SkillsLock) -> None:
+        """Write ``lock`` to disk atomically.
+
+        The caller must already hold ``self._lockfile_lock``.
+        """
         lock.resolved_at = (
             datetime.datetime.now(datetime.UTC)
             .replace(microsecond=0)
             .isoformat()
             .replace("+00:00", "Z")
         )
-        with self._lockfile_lock:
-            payload = yaml.safe_dump(lock.model_dump(), sort_keys=False)
-            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
-            tmp_path = self.lock_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
-            tmp_path.write_text(payload, encoding="utf-8")
-            tmp_path.replace(self.lock_path)
+        payload = yaml.safe_dump(lock.model_dump(), sort_keys=False)
+        self.lock_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = self.lock_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
+        tmp_path.write_text(payload, encoding="utf-8")
+        tmp_path.replace(self.lock_path)
 
     def _cache_lock_for(self, cache_dir: Path) -> FileLock:
         key = str(cache_dir.resolve())
