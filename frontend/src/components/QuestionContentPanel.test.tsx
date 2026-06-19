@@ -258,6 +258,115 @@ describe('QuestionContentPanel', () => {
     expect(screen.queryByText('审题信息')).not.toBeInTheDocument()
   })
 
+  it('renders possible-error chips after data loads', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
+    )
+
+    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
+    expect(screen.getByText('常见审题错误')).toBeInTheDocument()
+    expect(screen.getByText('1 个易错点')).toBeInTheDocument()
+    const chips = screen.getAllByRole('button')
+    const possibleErrorChip = chips.find((c) =>
+      c.textContent?.includes('区间写反')
+    )
+    expect(possibleErrorChip).toBeDefined()
+  })
+
+  it('does not render possible-error block before comprehension node completes', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
+    )
+
+    render(<QuestionContentPanel jobId="job1" comprehensionCompleted={false} />)
+    await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
+    expect(screen.queryByText('常见审题错误')).not.toBeInTheDocument()
+  })
+
+  it('toggles possible-error chip selection and expands detail card', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
+    )
+
+    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    await waitFor(() =>
+      expect(screen.getByText('常见审题错误')).toBeInTheDocument()
+    )
+    const chips = screen.getAllByRole('button')
+    const possibleErrorChip = chips.find((c) =>
+      c.textContent?.includes('区间写反')
+    )!
+    fireEvent.click(possibleErrorChip)
+    await waitFor(() =>
+      expect(screen.getByText(/错误答案/)).toBeInTheDocument()
+    )
+    expect(screen.getByText(/错误答案：C/)).toBeInTheDocument()
+    expect(screen.getAllByText('区间写反').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getAllByText('判别式大于零').length).toBeGreaterThanOrEqual(2)
+
+    fireEvent.click(possibleErrorChip)
+    await waitFor(() =>
+      expect(screen.queryByText(/错误答案/)).not.toBeInTheDocument()
+    )
+  })
+
+  it('merges key-info highlights from comprehension and possible-error selections', async () => {
+    const originalPositions =
+      mockComprehensionInfo.comprehension_data.key_info_list.map(
+        (k) => k.content.position
+      )
+    mockComprehensionInfo.comprehension_data.key_info_list[0].content.position =
+      {
+        start: 0,
+        end: 15,
+      }
+    mockComprehensionInfo.comprehension_data.key_info_list[1].content.position =
+      {
+        start: 17,
+        end: 20,
+      }
+
+    try {
+      mockFetchJobArtifact.mockResolvedValue(
+        makeQuestionsJson({
+          stem: '方程 x^2+mx+1=0 有两个不等实根',
+        })
+      )
+
+      render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+      await waitFor(() =>
+        expect(screen.getByText('审题信息')).toBeInTheDocument()
+      )
+      const chips = screen.getAllByRole('button')
+      const keyInfoChip = chips.find((c) => c.textContent?.includes('方程'))!
+      fireEvent.click(keyInfoChip)
+      await waitFor(() =>
+        expect(document.querySelectorAll('.highlight').length).toBeGreaterThan(
+          0
+        )
+      )
+      const baselineHighlightCount =
+        document.querySelectorAll('.highlight').length
+
+      const possibleErrorChip = chips.find((c) =>
+        c.textContent?.includes('区间写反')
+      )!
+      fireEvent.click(possibleErrorChip)
+      await waitFor(() =>
+        expect(document.querySelectorAll('.highlight').length).toBeGreaterThan(
+          baselineHighlightCount
+        )
+      )
+    } finally {
+      mockComprehensionInfo.comprehension_data.key_info_list.forEach(
+        (k, idx) => {
+          k.content.position = originalPositions[idx]
+        }
+      )
+    }
+  })
+
   it('toggles chip selection and expands detail card', async () => {
     mockFetchJobArtifact.mockResolvedValue(
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
