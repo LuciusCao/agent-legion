@@ -12,7 +12,7 @@ from pathlib import Path
 import yaml
 from filelock import FileLock
 
-from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock
+from server.app.skills.config import LockedSkillSource, SkillsConfig, SkillsLock, SkillSourceConfig
 from server.app.skills.errors import SkillConfigError, SkillPathError, SkillRepoError
 
 logger = logging.getLogger(__name__)
@@ -88,7 +88,7 @@ class SkillManager:
             raise SkillPathError(f"skill cache dir escapes base dir: {candidate}") from exc
         return candidate
 
-    def _source_for(self, skill_key: str):
+    def _source_for(self, skill_key: str) -> SkillSourceConfig:
         config = self._load_config()
         source = config.skills.get(skill_key)
         if source is None:
@@ -140,7 +140,9 @@ class SkillManager:
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
         cmd = self.git_command + args
         env = {k: v for k, v in os.environ.items() if not k.startswith("GIT_")}
-        result = subprocess.run(cmd, capture_output=True, text=True, env=env)
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, env=env, encoding="utf-8", errors="replace"
+        )
         if check and result.returncode != 0:
             raise SkillRepoError(f"git command failed: {' '.join(cmd)}\n{result.stderr}")
         return result
@@ -160,6 +162,7 @@ class SkillManager:
         )
         with self._lockfile_lock:
             payload = yaml.safe_dump(lock.model_dump(), sort_keys=False)
+            self.lock_path.parent.mkdir(parents=True, exist_ok=True)
             tmp_path = self.lock_path.with_suffix(f".tmp.{uuid.uuid4().hex}")
             tmp_path.write_text(payload, encoding="utf-8")
             tmp_path.replace(self.lock_path)
