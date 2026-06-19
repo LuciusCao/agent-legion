@@ -19,6 +19,20 @@ function makeKeyInfo(start: number, end: number): KeyInfoItem {
   }
 }
 
+function makeKeyInfoWithText(
+  text: string,
+  start: number,
+  end: number
+): KeyInfoItem {
+  return {
+    key_info_id: `ki_${text}`,
+    type: 'given',
+    content: { text, position: { start, end } },
+    question: { text: '', options: [] },
+    question_comprehension_abilities: [],
+  }
+}
+
 describe('extractPlainText', () => {
   it('strips html tags', () => {
     expect(extractPlainText('<p>hello <strong>world</strong></p>')).toBe(
@@ -99,6 +113,42 @@ describe('buildHighlightedStemHtml', () => {
     const html = buildHighlightedStemHtml(stem, [makeKeyInfo(0, 1)])
     expect(html).toBe(
       '<span class="highlight" data-ids="ki_0_1">a</span> &lt; b &amp; c'
+    )
+  })
+
+  it('falls back to content.text when position is mismatched', () => {
+    const stem = '修路队要修一条公路，每月可修276千米，修了17月后还剩69千米。'
+    const html = buildHighlightedStemHtml(stem, [
+      makeKeyInfoWithText('每月可修276千米', 13, 22),
+    ])
+    expect(html).toContain(
+      '<span class="highlight-corrected" data-ids="ki_每月可修276千米">每月可修276千米</span>'
+    )
+  })
+
+  it('picks the nearest occurrence for ambiguous target text', () => {
+    const stem = 'abc abc abc'
+    const html = buildHighlightedStemHtml(stem, [
+      makeKeyInfoWithText('abc', 9, 11),
+    ])
+    expect(html).toBe(
+      'abc abc <span class="highlight-corrected" data-ids="ki_abc">abc</span>'
+    )
+  })
+
+  it('keeps original position when target text is not found', () => {
+    const stem = 'abcdef'
+    const html = buildHighlightedStemHtml(stem, [makeKeyInfo(1, 3)])
+    expect(html).toBe('a<span class="highlight" data-ids="ki_1_3">bc</span>def')
+  })
+
+  it('uses normal highlight class when position matches content.text', () => {
+    const stem = '修路队要修一条公路，每月可修276千米，修了17月后还剩69千米。'
+    const html = buildHighlightedStemHtml(stem, [
+      makeKeyInfoWithText('每月可修276千米', 10, 19),
+    ])
+    expect(html).toContain(
+      '<span class="highlight" data-ids="ki_每月可修276千米">每月可修276千米</span>'
     )
   })
 })

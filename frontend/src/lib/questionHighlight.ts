@@ -77,6 +77,7 @@ export interface StemPart {
   type: 'plain' | 'highlight'
   text: string
   ids?: string[]
+  corrected?: boolean
 }
 
 function escapeHtml(s: string): string {
@@ -92,39 +93,97 @@ function escapeHtml(s: string): string {
   )
 }
 
+function getItemTargetText(item: KeyInfoItem): string | undefined {
+  return item.content.text || item.content.derived_text
+}
+
+function findNearestOccurrence(
+  plain: string,
+  target: string,
+  nearStart: number
+): number {
+  let idx = plain.indexOf(target)
+  if (idx === -1) return -1
+  let best = idx
+  let bestDist = Math.abs(idx - nearStart)
+  while (true) {
+    idx = plain.indexOf(target, idx + 1)
+    if (idx === -1) break
+    const dist = Math.abs(idx - nearStart)
+    if (dist < bestDist) {
+      bestDist = dist
+      best = idx
+    }
+  }
+  return best
+}
+
+function resolveHighlightBounds(
+  plain: string,
+  item: KeyInfoItem
+): { start: number; end: number; id: string; corrected: boolean } | null {
+  const pos = item.content.position
+  if (
+    !pos ||
+    typeof pos.start !== 'number' ||
+    typeof pos.end !== 'number' ||
+    pos.start < 0 ||
+    pos.end > plain.length ||
+    pos.end <= pos.start
+  ) {
+    return null
+  }
+
+  let start = pos.start
+  let end = pos.end
+  let corrected = false
+  const target = getItemTargetText(item)
+  if (target) {
+    const actual = plain.slice(start, end)
+    if (actual !== target) {
+      const found = findNearestOccurrence(plain, target, start)
+      if (found !== -1) {
+        start = found
+        end = found + target.length
+        corrected = true
+      }
+    }
+  }
+
+  const bounds = adjustHighlightBoundaries(plain, start, end)
+  return { ...bounds, id: item.key_info_id, corrected }
+}
+
 function computeMergedRanges(
   plain: string,
   items: KeyInfoItem[]
-): { start: number; end: number; ids: string[] }[] | null {
+): { start: number; end: number; ids: string[]; corrected: boolean }[] | null {
   const ranges = items
-    .map((item) => {
-      const pos = item.content.position
-      if (
-        !pos ||
-        typeof pos.start !== 'number' ||
-        typeof pos.end !== 'number' ||
-        pos.start < 0 ||
-        pos.end > plain.length ||
-        pos.end <= pos.start
-      ) {
-        return null
-      }
-      const bounds = adjustHighlightBoundaries(plain, pos.start, pos.end)
-      return { ...bounds, id: item.key_info_id }
-    })
-    .filter((r): r is { start: number; end: number; id: string } => r !== null)
+    .map((item) => resolveHighlightBounds(plain, item))
+    .filter(
+      (
+        r
+      ): r is { start: number; end: number; id: string; corrected: boolean } =>
+        r !== null
+    )
     .sort((a, b) => a.start - b.start)
 
   if (ranges.length === 0) return null
 
-  const merged: { start: number; end: number; ids: string[] }[] = []
-  for (const { start, end, id } of ranges) {
+  const merged: {
+    start: number
+    end: number
+    ids: string[]
+    corrected: boolean
+  }[] = []
+  for (const { start, end, id, corrected } of ranges) {
     const last = merged[merged.length - 1]
     if (last && start <= last.end) {
       last.end = Math.max(last.end, end)
+      last.corrected = last.corrected || corrected
       last.ids.push(id)
     } else {
-      merged.push({ start, end, ids: [id] })
+      merged.push({ start, end, ids: [id], corrected })
     }
   }
   return merged
@@ -144,11 +203,16 @@ export function buildHighlightedStemParts(
 
   const parts: StemPart[] = []
   let cursor = 0
-  for (const { start, end, ids } of merged) {
+  for (const { start, end, ids, corrected } of merged) {
     if (start > cursor) {
       parts.push({ type: 'plain', text: plain.slice(cursor, start) })
     }
-    parts.push({ type: 'highlight', text: plain.slice(start, end), ids })
+    parts.push({
+      type: 'highlight',
+      text: plain.slice(start, end),
+      ids,
+      corrected,
+    })
     cursor = end
   }
   if (cursor < plain.length) {
@@ -173,7 +237,8 @@ export function buildHighlightedStemHtml(
         const dataAttr = part.ids?.length
           ? ` data-ids="${escapeHtml(part.ids.join(','))}"`
           : ''
-        return `<span class="highlight"${dataAttr}>${text}</span>`
+        const className = part.corrected ? 'highlight-corrected' : 'highlight'
+        return `<span class="${className}"${dataAttr}>${text}</span>`
       }
       return text
     })

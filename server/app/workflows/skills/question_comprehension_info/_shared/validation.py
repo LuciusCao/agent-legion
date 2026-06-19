@@ -1,12 +1,118 @@
 from __future__ import annotations
 
 import json
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
 
 class ContractError(ValueError):
     """Raised when a skill output violates its deterministic contract."""
+
+
+class _HTMLTextExtractor(HTMLParser):
+    """Strip HTML tags and return the visible text."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._parts: list[str] = []
+        self._skip = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag in {"script", "style"}:
+            self._skip += 1
+        elif tag == "br":
+            self._parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag in {"script", "style"}:
+            self._skip -= 1
+
+    def handle_data(self, data: str) -> None:
+        if self._skip <= 0:
+            self._parts.append(data)
+
+    def text(self) -> str:
+        return "".join(self._parts)
+
+
+def plain_text_from_html(html: object) -> str:
+    """Return the plain text of an HTML fragment."""
+    if not isinstance(html, str):
+        return ""
+    parser = _HTMLTextExtractor()
+    parser.feed(html)
+    return parser.text()
+
+
+def _find_text_in_plain(plain: str, target: str, start_hint: int) -> tuple[int, int] | None:
+    """Find the occurrence of *target* closest to *start_hint*."""
+    first = plain.find(target)
+    if first == -1:
+        return None
+
+    best = first
+    pos = first
+    while pos != -1:
+        if abs(pos - start_hint) < abs(best - start_hint):
+            best = pos
+        pos = plain.find(target, pos + 1)
+
+    return best, best + len(target)
+
+
+def normalize_key_info_positions(raw: dict[str, Any], question: dict[str, Any]) -> list[str]:
+    """Convert HTML-based positions in a key_info payload to plain-text positions.
+
+    Mutates *raw* in place and returns a list of warning messages.
+    """
+    warnings: list[str] = []
+    key_info_list = raw.get("key_info_list")
+    if not isinstance(key_info_list, list):
+        return ["key_info_list must be an array"]
+
+    plain_stem = plain_text_from_html(question.get("stem", ""))
+
+    for i, item in enumerate(key_info_list):
+        if not isinstance(item, dict):
+            warnings.append(f"key_info item at index {i} is not an object; skipped")
+            continue
+        if item.get("type") != "given":
+            continue
+
+        content = item.get("content")
+        if not isinstance(content, dict):
+            continue
+
+        text = content.get("text")
+        position = content.get("position")
+        if not isinstance(text, str) or not isinstance(position, dict):
+            continue
+
+        start = position.get("start")
+        end = position.get("end")
+        if not isinstance(start, int) or not isinstance(end, int):
+            continue
+
+        if plain_stem[start:end] == text:
+            continue
+
+        found = _find_text_in_plain(plain_stem, text, start)
+        if found is None:
+            warnings.append(
+                f"{item.get('key_info_id', f'item {i}')}: text {text!r} not found in plain stem"
+            )
+            continue
+
+        new_start, new_end = found
+        position["start"] = new_start
+        position["end"] = new_end
+        warnings.append(
+            f"{item.get('key_info_id', f'item {i}')}: position corrected "
+            f"from [{start}:{end}] to [{new_start}:{new_end}]"
+        )
+
+    return warnings
 
 
 def load_json_object(path: Path) -> dict[str, Any]:
@@ -68,7 +174,7 @@ def _validate_non_empty_string(value: object, field_name: str) -> None:
         raise ContractError(f"{field_name} must be a non-empty string, got {value!r}")
 
 
-def _validate_position(position: object) -> None:
+def _validate_position(position: object, max_length: int | None = None) -> tuple[int, int]:
     if not isinstance(position, dict):
         raise ContractError(f"content.position must be an object, got {type(position).__name__}")
     start = position.get("start")
@@ -77,6 +183,11 @@ def _validate_position(position: object) -> None:
         raise ContractError(f"content.position.start must be a non-negative int, got {start!r}")
     if not isinstance(end, int) or end <= start:
         raise ContractError(f"content.position.end must be an int greater than start, got {end!r}")
+    if max_length is not None and end > max_length:
+        raise ContractError(
+            f"content.position.end ({end}) exceeds plain stem length ({max_length})"
+        )
+    return start, end
 
 
 def _validate_option(option: object, index: int) -> bool:
@@ -90,7 +201,9 @@ def _validate_option(option: object, index: int) -> bool:
     return is_correct
 
 
-def validate_key_info_item(item: object, valid_ability_ids: set[str], index: int) -> None:
+def validate_key_info_item(
+    item: object, valid_ability_ids: set[str], index: int, plain_stem: str
+) -> None:
     if not isinstance(item, dict):
         raise ContractError(f"key_info item at index {index} must be an object")
 
@@ -106,12 +219,19 @@ def validate_key_info_item(item: object, valid_ability_ids: set[str], index: int
     if not isinstance(content, dict):
         raise ContractError(f"content must be an object, got {type(content).__name__}")
 
+    start, end = _validate_position(content.get("position"), max_length=len(plain_stem))
+
     if item_type == "given":
         _validate_non_empty_string(content.get("text"), "content.text")
-        _validate_position(content.get("position"))
+        text = content["text"]
+        slice_text = plain_stem[start:end]
+        if slice_text != text:
+            raise ContractError(
+                f"content.text at index {index} does not match stem slice "
+                f"[{start}:{end}]: expected {text!r}, got {slice_text!r}"
+            )
     else:
         _validate_non_empty_string(content.get("derived_text"), "content.derived_text")
-        _validate_position(content.get("position"))
         _validate_non_empty_string(content.get("derivation"), "content.derivation")
 
     question = item.get("question")
@@ -147,9 +267,11 @@ def validate_key_info_payload(
     if not isinstance(key_info_list, list) or len(key_info_list) == 0:
         raise ContractError("key_info_list must be a non-empty array")
 
+    plain_stem = plain_text_from_html(question.get("stem", ""))
+
     seen_ids: set[str] = set()
     for i, item in enumerate(key_info_list):
-        validate_key_info_item(item, valid_ability_ids, i)
+        validate_key_info_item(item, valid_ability_ids, i, plain_stem)
         item_id = item["key_info_id"]
         if item_id in seen_ids:
             raise ContractError(f"duplicate key_info_id: {item_id!r}")

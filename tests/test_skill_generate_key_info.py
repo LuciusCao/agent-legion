@@ -35,7 +35,7 @@ def test_generate_key_info_validator_accepts_valid_artifact(tmp_path):
                         "type": "given",
                         "content": {
                             "text": "14场",
-                            "position": {"start": 6, "end": 9},
+                            "position": {"start": 5, "end": 8},
                         },
                         "question": {
                             "text": "小明一共参加了多少场比赛？",
@@ -51,7 +51,7 @@ def test_generate_key_info_validator_accepts_valid_artifact(tmp_path):
                         "type": "hidden",
                         "content": {
                             "derived_text": "平局场数",
-                            "position": {"start": 24, "end": 27},
+                            "position": {"start": 21, "end": 26},
                             "derivation": "其余为平局",
                         },
                         "question": {
