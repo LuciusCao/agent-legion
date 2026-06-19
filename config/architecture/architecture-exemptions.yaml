@@ -31,40 +31,10 @@ exemptions:
     remove_when: issues/open/036-P3-type-sync-automation.md
 
   - check: architecture.route_response_model
-    path: server/app/routes/packages.py:download_package
-    reason: Package download endpoint returns a FileResponse; no named Pydantic model is used for binary streams.
-    owner: video-hive
-    remove_when: issues/open/036-P3-type-sync-automation.md
-
-  - check: architecture.route_response_model
     path: server/app/routes/packages.py:list_workspace_packages
     reason: Workspace package list endpoint returns a dynamic JSON envelope pending typed response models.
     owner: workspace-executor
     remove_when: issues/open/036-P3-type-sync-automation.md
-
-  - check: architecture.route_response_model
-    path: server/app/routes/packages.py:download_workspace_package
-    reason: Workspace package download endpoint returns a FileResponse; no named Pydantic model is used for binary streams.
-    owner: workspace-executor
-    remove_when: issues/open/036-P3-type-sync-automation.md
-
-  - check: architecture.route_response_model
-    path: server/app/routes/videos.py:videos_events
-    reason: SSE endpoint returns an asynchronous event-stream response that cannot be represented by a named Pydantic model.
-    owner: video-hive
-    remove_when: issues/open/022-P2-frontend-websocket-and-misc.md
-
-  - check: architecture.route_response_model
-    path: server/app/routes/videos.py:video_detail_events
-    reason: SSE endpoint returns an asynchronous event-stream response that cannot be represented by a named Pydantic model.
-    owner: video-hive
-    remove_when: issues/open/022-P2-frontend-websocket-and-misc.md
-
-  - check: architecture.route_response_model
-    path: server/app/routes/workspaces.py:workspace_events
-    reason: Workspace SSE endpoint returns an asynchronous event-stream response that cannot be represented by a named Pydantic model.
-    owner: workspace-executor
-    remove_when: issues/open/022-P2-frontend-websocket-and-misc.md
 
   - check: architecture.route_response_model
     path: server/app/routes/videos.py:add_videos
@@ -105,12 +75,6 @@ exemptions:
   - check: architecture.route_response_model
     path: server/app/routes/videos.py:phase_run_session
     reason: Phase-run session endpoint returns a dynamic JSON envelope pending typed response models.
-    owner: video-hive
-    remove_when: issues/open/036-P3-type-sync-automation.md
-
-  - check: architecture.route_response_model
-    path: server/app/routes/videos.py:video_file
-    reason: Video file endpoint returns a FileResponse or RedirectResponse; no named Pydantic model is used for binary streams and redirects.
     owner: video-hive
     remove_when: issues/open/036-P3-type-sync-automation.md
 

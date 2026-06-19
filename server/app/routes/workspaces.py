@@ -1,4 +1,5 @@
 from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import StreamingResponse
 
 from server.app.events import JobEventManager
 from server.app.routes.job_contracts import (
@@ -73,8 +74,12 @@ def create_workspaces_router(
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
-    @router.get("/workspaces/{workspace_id}/events")
-    async def workspace_events(request: Request, workspace_id: str):
+    @router.get(
+        "/workspaces/{workspace_id}/events",
+        response_class=StreamingResponse,
+        responses={200: {"content": {"text/event-stream": {}}}},
+    )
+    async def workspace_events(request: Request, workspace_id: str) -> StreamingResponse:
         require_workflows_enabled(settings)
         if job_event_manager is None:
             raise HTTPException(status_code=503, detail="Event manager not available")

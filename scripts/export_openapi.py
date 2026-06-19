@@ -7,19 +7,20 @@ from typing import Any
 
 import yaml
 
+from scripts.architecture.route_contracts import has_protocol_response_endpoint
 from server.app.main import create_app
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
-def validate_response_contracts(schema: dict[str, Any], exempt_operation_names: set[str]) -> None:
+def validate_response_contracts(schema: dict[str, Any], exempt_operation_ids: set[str]) -> None:
     errors = []
     for path, path_item in schema.get("paths", {}).items():
         for method, operation in path_item.items():
             if method not in {"get", "post", "put", "patch", "delete"}:
                 continue
             operation_id = operation.get("operationId", f"{method} {path}")
-            if any(operation_id.startswith(f"{name}_") for name in exempt_operation_names):
+            if operation_id in exempt_operation_ids:
                 continue
             for status, response in operation.get("responses", {}).items():
                 if not str(status).startswith("2"):
@@ -50,6 +51,20 @@ def validate_unique_api_routes(app: Any) -> None:
         )
 
 
+def response_contract_exempt_operation_ids(app: Any, exempt_endpoint_names: set[str]) -> set[str]:
+    operation_ids: set[str] = set()
+    for route in app.routes:
+        endpoint = getattr(route, "endpoint", None)
+        if getattr(route, "name", "") not in exempt_endpoint_names and not (
+            callable(endpoint) and has_protocol_response_endpoint(endpoint)
+        ):
+            continue
+        operation_id = getattr(route, "unique_id", "")
+        if operation_id:
+            operation_ids.add(operation_id)
+    return operation_ids
+
+
 def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
     data_dir.mkdir(parents=True, exist_ok=True)
     app = create_app(data_dir=data_dir, start_worker=False)
@@ -67,12 +82,13 @@ def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
             encoding="utf-8"
         )
     ) or {"exemptions": []}
-    exempt_operation_names = {
+    exempt_endpoint_names = {
         ex["path"].rsplit(":", 1)[-1]
         for ex in exemptions.get("exemptions", [])
         if ex.get("check") == "architecture.route_response_model"
     }
-    validate_response_contracts(schema, exempt_operation_names)
+    exempt_operation_ids = response_contract_exempt_operation_ids(app, exempt_endpoint_names)
+    validate_response_contracts(schema, exempt_operation_ids)
     return schema
 
 

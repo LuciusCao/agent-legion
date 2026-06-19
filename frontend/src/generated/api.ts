@@ -2407,7 +2407,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': unknown
+          'application/zip': unknown
         }
       }
       /** @description Validation Error */
@@ -2702,7 +2702,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': unknown
+          'text/event-stream': unknown
         }
       }
     }
@@ -2823,7 +2823,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': unknown
+          'text/event-stream': unknown
         }
       }
       /** @description Validation Error */
@@ -2993,7 +2993,28 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': unknown
+          'video/mp4': unknown
+        }
+      }
+      /** @description Temporary Redirect */
+      302: {
+        headers: {
+          /** @description Redirect target */
+          Location?: string
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': {
+            detail: string
+          }
+          'text/plain': unknown
         }
       }
       /** @description Validation Error */
@@ -3024,7 +3045,28 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': unknown
+          'video/mp4': unknown
+        }
+      }
+      /** @description Temporary Redirect */
+      302: {
+        headers: {
+          /** @description Redirect target */
+          Location?: string
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Not Found */
+      404: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': {
+            detail: string
+          }
+          'text/plain': unknown
         }
       }
       /** @description Validation Error */
@@ -3437,7 +3479,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': unknown
+          'text/event-stream': unknown
         }
       }
       /** @description Validation Error */
@@ -3742,7 +3784,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': unknown
+          'application/zip': unknown
         }
       }
       /** @description Validation Error */

@@ -58,7 +58,8 @@
     "scripts/architecture/main.py": 15,
     "scripts/architecture/phase4.py": 151,
     "scripts/architecture/workflow.py": 49,
-    "scripts/architecture/repository.py": 280,
+    "scripts/architecture/repository.py": 285,
+    "scripts/architecture/route_contracts.py": 103,
     "scripts/architecture/phase5.py": 77,
     "scripts/architecture/phase6.py": 350,
     "tests/test_architecture_baselines.py": 250,
@@ -67,6 +68,7 @@
     "tests/test_architecture_executor_governance.py": 110,
     "tests/test_architecture_phase4.py": 103,
     "tests/test_check_architecture.py": 520,
+    "tests/test_architecture_route_contracts.py": 164,
     "tests/test_executor_phase5_inventory.py": 81,
     "tests/test_executor_recovery.py": 366
   },
