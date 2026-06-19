@@ -2,13 +2,13 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from pathlib import Path
 
 from server.app.executors._log_utils import copy_pi_logs
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.runtime_config import PiRuntimeConfig
+from server.app.skills.manager import SkillManager
 from server.app.workflows.pi_runner import PiConfig, PiRunner
 from server.app.workflows.skills import resolve_workflow_skill
 
@@ -24,14 +24,14 @@ class PiExecutor:
         self,
         id: str,
         config: PiRuntimeConfig,
-        skill_root: Path,
+        skill_manager: SkillManager,
         capabilities: dict[str, PiCapabilityConfig],
     ) -> None:
         self.id = id
         self.config = PiConfig.from_runtime(config)
-        self.skill_root = skill_root
+        self.skill_manager = skill_manager
         self.capabilities = capabilities
-        self._runner = PiRunner(self.config, skill_root)
+        self._runner = PiRunner(self.config, skill_manager.base_dir)
         self._cancelled: set[str] = set()
         self._tracker = SubprocessTracker(grace_seconds=self.config.cancellation_grace_seconds)
 
@@ -58,7 +58,11 @@ class PiExecutor:
             )
 
         try:
-            skill_dir = resolve_workflow_skill(self.skill_root, capability_config.skill)
+            skill_dir = self.skill_manager.get_skill_dir(
+                capability_config.skill,
+                context.execution_id,
+            )
+            resolve_workflow_skill(self.skill_manager.base_dir, capability_config.skill)
         except Exception as exc:
             logger.exception(
                 "Failed to resolve Pi skill %s for execution %s",

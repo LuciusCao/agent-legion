@@ -18,6 +18,7 @@ from server.app.executors.openclaw import build_openclaw_executor
 from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
+from server.app.skills.manager import SkillManager
 
 logger = logging.getLogger(__name__)
 
@@ -44,7 +45,13 @@ class RuntimeDependencies:
 
     local_handlers: Mapping[str, LocalHandler] = field(default_factory=dict)
     pi_runtime: PiRuntimeConfig = field(default_factory=PiRuntimeConfig)
-    pi_skill_root: Path = field(default_factory=lambda: Path("."))
+    skill_manager: SkillManager = field(
+        default_factory=lambda: SkillManager(
+            config_path=Path("config") / "skills.yaml",
+            lock_path=Path("config") / "skills.lock",
+            base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
+        )
+    )
     openclaw_runtime: OpenClawRuntimeConfig = field(
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
     )
@@ -96,7 +103,7 @@ class ExecutorRegistry:
                 executor = PiExecutor(
                     id=executor_id,
                     config=runtime.pi_runtime,
-                    skill_root=runtime.pi_skill_root,
+                    skill_manager=runtime.skill_manager,
                     capabilities=config.capabilities,
                 )
             elif isinstance(config, OpenClawExecutorConfig):
