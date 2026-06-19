@@ -279,6 +279,7 @@ def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
     worker._poll()
 
     node = job_db.get_job_node(job["id"], "fetch")
+    assert node is not None
     assert node["status"] == "failed"
     assert "No Executor binding" in node["error_message"]
 
@@ -316,6 +317,7 @@ def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
     worker._poll()
 
     node = job_db.get_job_node(job["id"], "fetch")
+    assert node is not None
     assert node["status"] == "failed"
     assert "does not support capability" in node["error_message"]
 
@@ -480,8 +482,9 @@ def test_make_workflow_worker_runs_reading_analysis_local_node(tmp_path: Path, m
         future.result(timeout=5)
 
     node = queries.get_job_node(job["id"], "fetch_questions")
+    assert node is not None
     assert node["status"] == "completed"
-    assert (Path(job["storage_dir"]) / "questions.json").exists()
+    assert (tmp_path / job["storage_dir"] / "questions.json").exists()
 
     worker.stop()
 
@@ -664,3 +667,45 @@ def test_poll_does_not_update_agent_status_for_local_executor(tmp_path: Path) ->
 
     agent_manager.set_busy.assert_not_called()
     agent_manager.set_idle.assert_not_called()
+
+
+def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Path) -> None:
+    db_path = tmp_path / "video_hive.sqlite"
+    job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
+    ws = job_db.create_workspace("Test WS")
+    executor = RecordingExecutor("local-default")
+    definition = _make_definition([_local_node("fetch")])
+
+    job = job_db.create_job(
+        workflow_key="test",
+        source_type="question",
+        source_id="Q1",
+        batch_id="",
+        title="Q1",
+        node_keys=["fetch"],
+        workspace_id=ws["id"],
+    )
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            (ws["id"], "test", "fetch", "local-default"),
+        )
+        conn.execute(
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            (ws["id"], "local-default", 2),
+        )
+
+    worker = _make_worker(tmp_path, db_path, executor, [definition])
+    processed = worker._poll()
+
+    assert processed is True
+    executor.block_event.set()
+    worker.stop()
+
+    runs = job_db.list_node_runs(job["id"])
+    assert len(runs) == 1
+    assert runs[0]["log_path"].startswith("logs/")
+    assert not Path(runs[0]["log_path"]).is_absolute()
+
+    assert len(executor.contexts) == 1
+    assert executor.contexts[0].log_path.is_absolute()

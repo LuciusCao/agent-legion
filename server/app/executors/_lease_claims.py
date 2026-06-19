@@ -4,6 +4,7 @@ import json
 import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from server.app.executors._lease_control import (
     _execution_control_rejects_claim,
@@ -11,14 +12,22 @@ from server.app.executors._lease_control import (
 )
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
+from server.app.storage_paths import make_data_relative
 
 
-def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> ClaimedExecution | None:
+def claim_lease(
+    conn: sqlite3.Connection,
+    request: LeaseClaimRequest,
+    data_dir: Path | None = None,
+) -> ClaimedExecution | None:
     """Attempt to claim a node run under capacity limits.
 
     Must run inside an active transaction. Returns None when capacity is
     exhausted or the node is not claimable; the caller is responsible for
     rolling back. Raises ValueError for configuration mismatches.
+
+    When ``data_dir`` is provided, the persisted ``log_path`` is canonicalized
+    relative to it.
     """
     lease_id = str(uuid.uuid4())
     execution_id = str(uuid.uuid4())
@@ -132,6 +141,9 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
     if cursor.rowcount == 0:
         return None
 
+    log_path = request.log_path
+    if data_dir is not None and log_path and Path(log_path).is_absolute():
+        log_path = make_data_relative(Path(log_path), data_dir)
     cursor = conn.execute(
         """
         insert into node_runs(
@@ -139,7 +151,13 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
         )
         values (?, ?, 'running', ?, ?, '', '', ?)
         """,
-        (request.job_id, request.node_key, json.dumps([]), request.log_path, now_str),
+        (
+            request.job_id,
+            request.node_key,
+            json.dumps([]),
+            log_path,
+            now_str,
+        ),
     )
     if cursor.lastrowid is None:
         raise sqlite3.OperationalError("node_runs insert did not produce a row id")

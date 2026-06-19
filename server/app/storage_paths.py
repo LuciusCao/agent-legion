@@ -94,8 +94,11 @@ def make_data_relative(path: Path, data_dir: Path) -> str:
     slash. Examples: ``videos/knowledge_x41020501``,
     ``jobs/question_comprehension/...``, ``logs/...-download.log``,
     ``packages/...``.
+
+    Missing leaf paths are accepted so that not-yet-created log files and run
+    directories can be canonicalized before persistence.
     """
-    resolved_path = path.resolve(strict=True)
+    resolved_path = resolve_with_existing_parent(path, allow_missing=True)
     resolved_data_dir = data_dir.resolve(strict=True)
     if resolved_path == resolved_data_dir or not resolved_path.is_relative_to(resolved_data_dir):
         raise ManagedPathError("Path is not inside data directory")
