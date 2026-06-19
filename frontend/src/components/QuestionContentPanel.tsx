@@ -2,7 +2,7 @@ import { useMemo, useRef, useState } from 'react'
 import { useJobQuestion } from '../hooks/useJobQuestion'
 import { useJobComprehensionInfo } from '../hooks/useJobComprehensionInfo'
 import { extractLatexParts, renderLatexInHtml } from '../lib/latex'
-import { buildHighlightedStemHtml } from '../lib/questionHighlight'
+import { buildHighlightedStemParts } from '../lib/questionHighlight'
 import { QuestionAnnotations } from './QuestionAnnotations'
 import { LaTeXText } from './LaTeXText'
 import styles from './QuestionContentPanel.module.css'
@@ -114,17 +114,28 @@ export function QuestionContentPanel({
       .filter((k): k is KeyInfoItem => Boolean(k))
   }, [selectedIds, keyInfoList])
 
-  const highlightedStemHtml = useMemo(() => {
+  const highlightedStemParts = useMemo(() => {
     if (!stem || selectedKeyInfos.length === 0) return null
-    const highlighted = buildHighlightedStemHtml(stem, selectedKeyInfos)
-    if (!highlighted) return null
-    return renderLatexInHtml(highlighted)
+    return buildHighlightedStemParts(stem, selectedKeyInfos)
   }, [stem, selectedKeyInfos])
 
   const hiddenKeyInfos = useMemo(
     () => selectedKeyInfos.filter((k) => k.type === 'hidden'),
     [selectedKeyInfos]
   )
+
+  function escapeHtml(s: string): string {
+    return s.replace(
+      /[&<>"]/g,
+      (c) =>
+        ({
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+        })[c] as string
+    )
+  }
 
   const analysis = question?.analysis
   const analysisHtml = useMemo(() => {
@@ -160,12 +171,27 @@ export function QuestionContentPanel({
         <div ref={stemWrapperRef} className={styles.stemWrapper}>
           <div className={styles.stemMain}>
             {question.stem ? (
-              <div
-                className={styles.richText}
-                dangerouslySetInnerHTML={{
-                  __html: highlightedStemHtml ?? stemHtml,
-                }}
-              />
+              highlightedStemParts ? (
+                <div className={styles.richText}>
+                  {highlightedStemParts.map((part, idx) => (
+                    <span
+                      key={idx}
+                      className={
+                        part.type === 'highlight' ? 'highlight' : undefined
+                      }
+                      data-ids={part.ids?.join(',')}
+                      dangerouslySetInnerHTML={{
+                        __html: renderLatexInHtml(escapeHtml(part.text)),
+                      }}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div
+                  className={styles.richText}
+                  dangerouslySetInnerHTML={{ __html: stemHtml }}
+                />
+              )
             ) : (
               <p className={styles.empty}>无题干</p>
             )}

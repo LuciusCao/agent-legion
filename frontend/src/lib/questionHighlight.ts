@@ -73,15 +73,29 @@ export function adjustHighlightBoundaries(
   return { start: Math.min(newStart, start), end: Math.max(newEnd, end) }
 }
 
-export function buildHighlightedStemHtml(
-  stem: string,
-  items: KeyInfoItem[]
-): string | null {
-  const plain = extractPlainText(stem)
-  if (!plain || items.length === 0) {
-    return null
-  }
+export interface StemPart {
+  type: 'plain' | 'highlight'
+  text: string
+  ids?: string[]
+}
 
+function escapeHtml(s: string): string {
+  return s.replace(
+    /[&<>"]/g,
+    (c) =>
+      ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+      })[c] as string
+  )
+}
+
+function computeMergedRanges(
+  plain: string,
+  items: KeyInfoItem[]
+): { start: number; end: number; ids: string[] }[] | null {
   const ranges = items
     .map((item) => {
       const pos = item.content.position
@@ -113,34 +127,55 @@ export function buildHighlightedStemHtml(
       merged.push({ start, end, ids: [id] })
     }
   }
+  return merged
+}
 
-  function escapeHtml(s: string): string {
-    return s.replace(
-      /[&<>"]/g,
-      (c) =>
-        ({
-          '&': '&amp;',
-          '<': '&lt;',
-          '>': '&gt;',
-          '"': '&quot;',
-        })[c] as string
-    )
+export function buildHighlightedStemParts(
+  stem: string,
+  items: KeyInfoItem[]
+): StemPart[] {
+  const plain = extractPlainText(stem)
+  if (!plain || items.length === 0) {
+    return [{ type: 'plain', text: plain || stem }]
   }
 
-  let html = ''
+  const merged = computeMergedRanges(plain, items)
+  if (!merged) return [{ type: 'plain', text: plain }]
+
+  const parts: StemPart[] = []
   let cursor = 0
   for (const { start, end, ids } of merged) {
     if (start > cursor) {
-      html += escapeHtml(plain.slice(cursor, start))
+      parts.push({ type: 'plain', text: plain.slice(cursor, start) })
     }
-    const dataAttr = ids.length
-      ? ` data-ids="${escapeHtml(ids.join(','))}"`
-      : ''
-    html += `<span class="highlight"${dataAttr}>${escapeHtml(plain.slice(start, end))}</span>`
+    parts.push({ type: 'highlight', text: plain.slice(start, end), ids })
     cursor = end
   }
   if (cursor < plain.length) {
-    html += escapeHtml(plain.slice(cursor))
+    parts.push({ type: 'plain', text: plain.slice(cursor) })
   }
-  return html
+  return parts
+}
+
+export function buildHighlightedStemHtml(
+  stem: string,
+  items: KeyInfoItem[]
+): string | null {
+  const parts = buildHighlightedStemParts(stem, items)
+  if (parts.length === 1 && parts[0].type === 'plain') {
+    return null
+  }
+
+  return parts
+    .map((part) => {
+      const text = escapeHtml(part.text)
+      if (part.type === 'highlight') {
+        const dataAttr = part.ids?.length
+          ? ` data-ids="${escapeHtml(part.ids.join(','))}"`
+          : ''
+        return `<span class="highlight"${dataAttr}>${text}</span>`
+      }
+      return text
+    })
+    .join('')
 }
