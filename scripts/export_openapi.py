@@ -1,4 +1,5 @@
 import argparse
+import inspect
 import json
 from copy import deepcopy
 from pathlib import Path
@@ -51,11 +52,20 @@ def validate_unique_api_routes(app: Any) -> None:
         )
 
 
-def response_contract_exempt_operation_ids(app: Any, exempt_endpoint_names: set[str]) -> set[str]:
+def _endpoint_exemption_key(endpoint: Any) -> str | None:
+    try:
+        source_path = Path(inspect.getfile(endpoint)).resolve()
+        relative_path = source_path.relative_to(PROJECT_ROOT)
+    except (TypeError, ValueError):
+        return None
+    return f"{relative_path.as_posix()}:{getattr(endpoint, '__name__', '')}"
+
+
+def response_contract_exempt_operation_ids(app: Any, exempt_route_handlers: set[str]) -> set[str]:
     operation_ids: set[str] = set()
     for route in app.routes:
         endpoint = getattr(route, "endpoint", None)
-        if getattr(route, "name", "") not in exempt_endpoint_names and not (
+        if _endpoint_exemption_key(endpoint) not in exempt_route_handlers and not (
             callable(endpoint) and has_protocol_response_endpoint(endpoint)
         ):
             continue
@@ -71,7 +81,7 @@ def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
     workflows = app.state.settings.config.setdefault("workflows", {})
     workflows["enabled"] = True
     validate_unique_api_routes(app)
-    schema = deepcopy(app.openapi())
+    schema: dict[str, Any] = deepcopy(app.openapi())
     schema["paths"] = {
         path: definition
         for path, definition in schema.get("paths", {}).items()
@@ -82,12 +92,12 @@ def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
             encoding="utf-8"
         )
     ) or {"exemptions": []}
-    exempt_endpoint_names = {
-        ex["path"].rsplit(":", 1)[-1]
+    exempt_route_handlers = {
+        ex["path"]
         for ex in exemptions.get("exemptions", [])
         if ex.get("check") == "architecture.route_response_model"
     }
-    exempt_operation_ids = response_contract_exempt_operation_ids(app, exempt_endpoint_names)
+    exempt_operation_ids = response_contract_exempt_operation_ids(app, exempt_route_handlers)
     validate_response_contracts(schema, exempt_operation_ids)
     return schema
 

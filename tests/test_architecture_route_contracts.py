@@ -278,3 +278,27 @@ def test_postponed_annotation_honors_post_definition_rebinding(tmp_path):
     )
 
     assert any("requires named response_model" in error for error in check_repository(tmp_path))
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "responses.FileResponse = dict",
+        "responses.FileResponse: object = dict",
+        "responses.FileResponse += dict",
+        "del responses.FileResponse",
+    ],
+)
+def test_module_alias_attribute_mutation_revokes_protocol_origin(tmp_path, mutation):
+    write_route_source(
+        tmp_path,
+        "from fastapi import APIRouter\n"
+        "import fastapi.responses as responses\n"
+        f"{mutation}\n"
+        "router = APIRouter()\n"
+        "@router.get('/example')\n"
+        "def example() -> responses.FileResponse:\n"
+        "    raise NotImplementedError\n",
+    )
+
+    assert any("requires named response_model" in error for error in check_repository(tmp_path))

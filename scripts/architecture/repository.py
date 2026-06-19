@@ -1,7 +1,6 @@
 import ast
 import json
 from collections import Counter, defaultdict
-from importlib.util import resolve_name
 from pathlib import Path
 
 from scripts.architecture.helpers import (
@@ -14,12 +13,12 @@ from scripts.architecture.helpers import (
     has_named_response_model,
     imported_modules,
     is_scheduler_path,
-    is_service_path,
     reads_futures_length,
     reads_raw_executors_config,
     route_operations,
     threadpool_dict_by_workspace,
 )
+from scripts.architecture.import_cycles import check_import_cycles
 from scripts.architecture.phase4 import (
     check_executor_contract_models,
     check_frontend_executor_types,
@@ -39,6 +38,7 @@ from scripts.architecture.phase6 import (
     check_workspace_video_hive_imports,
 )
 from scripts.architecture.route_contracts import has_protocol_response_annotation
+from scripts.architecture.service_boundaries import check_service_import_boundaries
 from scripts.architecture.workflow import check_workflow_definitions
 
 
@@ -168,38 +168,7 @@ def check_repository(root: Path) -> list[str]:
                         "ExecutorConfig instead of raw settings.config['executors']"
                     )
 
-            if is_service_path(relative_path):
-                package = ".".join(Path(relative_path).parent.parts)
-                for node in ast.walk(tree):
-                    if (
-                        not isinstance(node, ast.ImportFrom)
-                        or not node.level
-                        or node.level > package.count(".") + 1
-                    ):
-                        continue
-                    resolved = resolve_name("." * node.level + (node.module or ""), package)
-                    imports_worker = resolved == "server.app.worker" or resolved.startswith(
-                        "server.app.worker."
-                    )
-                    imports_worker = imports_worker or (
-                        node.module is None
-                        and resolved == "server.app"
-                        and any(alias.name == "worker" for alias in node.names)
-                    )
-                    if imports_worker:
-                        errors.append(
-                            f"{relative_path}:{node.lineno}: service boundary forbids import server.app.worker"
-                        )
-                for module, lineno in modules.items():
-                    if (
-                        module == "fastapi"
-                        or module.startswith("fastapi.")
-                        or module == "server.app.worker"
-                        or module.startswith("server.app.worker.")
-                    ):
-                        errors.append(
-                            f"{relative_path}:{lineno}: service boundary forbids import {module}"
-                        )
+            errors.extend(check_service_import_boundaries(relative_path, tree))
             if relative_path == "server/app/routes/jobs.py":
                 for call in (node for node in ast.walk(tree) if isinstance(node, ast.Call)):
                     name = ast.unparse(call.func)
@@ -249,6 +218,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_frontend_handwritten_job_transports(root))
     errors.extend(check_job_deletion_service_is_singular(root))
     errors.extend(check_schema_mutation_locations(root))
+    errors.extend(check_import_cycles(root))
 
     file_budgets = config.get("files", {})
     for relative_path, budget in file_budgets.items():

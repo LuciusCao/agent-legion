@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
-from server.app.routes import job_contracts, workflow_contracts
+import server.app.routes.job_contracts as job_contracts
+import server.app.routes.workflow_contracts as workflow_contracts
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workflow_catalog import WorkflowCatalogService

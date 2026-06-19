@@ -4,7 +4,7 @@ import sqlite3
 from contextlib import AbstractContextManager
 from typing import Any, Protocol
 
-from server.app.jobs import atomic_mutations
+from server.app.jobs.atomic_mutations import resume_job as resume_job_mutation
 
 
 class _JobQueries(Protocol):
@@ -115,7 +115,7 @@ class JobExecutionControlMixin:
 
     def resume_job(self: _JobQueries, job_id: str) -> None:
         with self.connect() as conn:
-            atomic_mutations.resume_job(conn, job_id)
+            resume_job_mutation(conn, job_id)
 
     def get_job_execution_control(self: _JobQueries, job_id: str) -> dict[str, Any] | None:
         row = self.get_job(job_id)
