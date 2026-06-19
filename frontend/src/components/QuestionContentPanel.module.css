@@ -50,10 +50,14 @@
 }
 
 .richText :global(.highlight) {
-  background: var(--md-sys-color-primary-container);
-  color: var(--md-sys-color-on-primary-container);
-  border-radius: 4px;
-  padding: 1px 2px;
+  background: linear-gradient(
+    180deg,
+    transparent 60%,
+    rgba(255, 235, 59, 0.85) 60%
+  );
+  color: var(--md-sys-color-on-surface);
+  border-radius: 2px;
+  padding: 0 2px;
 }
 
 .optionList {
