@@ -28,3 +28,11 @@
   min-width: 0;
   overflow-wrap: anywhere;
 }
+
+.no-modes-hint {
+  color: var(--md-sys-color-error);
+  font-size: 14px;
+  padding: 8px;
+  border: 1px solid var(--md-sys-color-error);
+  border-radius: 8px;
+}

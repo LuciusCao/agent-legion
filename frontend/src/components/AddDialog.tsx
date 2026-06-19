@@ -25,7 +25,7 @@ export function AddDialog({
   context = 'video',
   workspaceId,
 }: AddDialogProps) {
-  const { addContentType, setAddContentType } = useUiStore()
+  const { addContentType, setAddContentType, showToast } = useUiStore()
   const [results, setResults] = useState<AddResult[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [workspace, setWorkspace] = useState<WorkspaceRecord | null>(null)
@@ -39,19 +39,23 @@ export function AddDialog({
   const dialogRef = useRef<HTMLElement>(null)
 
   const hasInput = inputValue.trim().length > 0
-  const submitDisabled = !hasInput || isSubmitting || loadingModes
 
   const modes = useMemo<WorkflowIntakeModeRecord[]>(() => {
     if (!workflow?.intake?.modes) return []
-    const enabledModes = workspace?.intake_config?.enabled_modes || []
-    if (enabledModes.length === 0) return workflow.intake.modes
-    const filtered = workflow.intake.modes.filter((mode) =>
-      enabledModes.includes(mode.key)
+    const rawEnabledModes = workspace?.intake_config?.enabled_modes
+    if (rawEnabledModes === undefined) return workflow.intake.modes
+    if (!Array.isArray(rawEnabledModes) || rawEnabledModes.length === 0)
+      return []
+    return workflow.intake.modes.filter((mode) =>
+      rawEnabledModes.includes(mode.key)
     )
-    // If enabled_modes doesn't match any workflow modes (e.g. after workflow
-    // switch), fall back to all workflow modes rather than showing nothing.
-    return filtered.length > 0 ? filtered : workflow.intake.modes
   }, [workflow, workspace])
+
+  const submitDisabled =
+    !hasInput ||
+    isSubmitting ||
+    loadingModes ||
+    (context === 'workspace' && modes.length === 0)
 
   const getEffectiveLabel = useCallback(
     (mode: WorkflowIntakeModeRecord): string => {
@@ -83,11 +87,20 @@ export function AddDialog({
         const { ws, result } = data
         setWorkflow(result.workflow)
         const availableModes = result.workflow.intake?.modes || []
-        const enabledModes = ws.intake_config?.enabled_modes || []
-        const filtered =
-          enabledModes.length === 0
-            ? availableModes
-            : availableModes.filter((mode) => enabledModes.includes(mode.key))
+        const rawEnabledModes = ws.intake_config?.enabled_modes
+        let filtered: WorkflowIntakeModeRecord[]
+        if (rawEnabledModes === undefined) {
+          filtered = availableModes
+        } else if (
+          !Array.isArray(rawEnabledModes) ||
+          rawEnabledModes.length === 0
+        ) {
+          filtered = []
+        } else {
+          filtered = availableModes.filter((mode) =>
+            rawEnabledModes.includes(mode.key)
+          )
+        }
         setSelectedModeKey(filtered[0]?.key || '')
       })
       .finally(() => {
@@ -100,6 +113,10 @@ export function AddDialog({
 
   const handleSubmit = useCallback(async () => {
     const input = inputValue.trim()
+    const reportError = (err: unknown, action: string) => {
+      const message = err instanceof Error ? err.message : action
+      showToast(`${action}失败: ${message}`, 'error')
+    }
     if (context === 'video') {
       const items = parseResourceInputs(input)
       if (items.length === 0) return
@@ -120,6 +137,8 @@ export function AddDialog({
         })
         setResults(response.results)
         setInputValue('')
+      } catch (err) {
+        reportError(err, '添加资源')
       } finally {
         setIsSubmitting(false)
       }
@@ -158,6 +177,8 @@ export function AddDialog({
         }))
         setResults(mappedResults)
         setInputValue('')
+      } catch (err) {
+        reportError(err, '创建任务')
       } finally {
         setIsSubmitting(false)
       }
@@ -170,6 +191,7 @@ export function AddDialog({
     workspace,
     modes,
     inputValue,
+    showToast,
   ])
 
   const handleClose = useCallback(() => {
@@ -259,6 +281,11 @@ export function AddDialog({
                 </md-select-option>
               ))}
             </md-outlined-select>
+          )}
+          {!isVideo && modes.length === 0 && !loadingModes && (
+            <div className={styles.noModesHint}>
+              当前工作空间未启用任何接入模式，请先在设置中配置并保存。
+            </div>
           )}
           <md-outlined-text-field
             ref={textareaRef}

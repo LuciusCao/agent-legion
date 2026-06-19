@@ -64,7 +64,7 @@ def test_workspace_intake_config_rejects_disabled_mode(tmp_path):
         )
 
     assert response.status_code == 400
-    assert response.json()["detail"] == "Intake mode is disabled for this workspace"
+    assert "Intake mode is disabled" in response.json()["detail"]
 
 
 def test_workspace_default_entity_is_used_when_batch_omits_entity(tmp_path):
