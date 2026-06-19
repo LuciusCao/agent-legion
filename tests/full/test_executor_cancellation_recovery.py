@@ -13,6 +13,7 @@ from server.app.executors.config import (
 from server.app.executors.local import LocalExecutor
 from server.app.executors.pi import PiExecutor
 from server.app.jobs import JobQueries
+from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.pi_runner import PiConfig
 from tests.helpers.executor_worker import (
     allocate,
@@ -224,5 +225,5 @@ def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
         future.result(timeout=10)
     node2 = job_db.get_job_node(job2["id"], "cooperative")
     assert node2["status"] == "completed"
-    assert (Path(job2["storage_dir"]) / "output.json").is_file()
+    assert (resolve_job_dir(job2, tmp_path / "jobs") / "output.json").is_file()
     worker2.stop()

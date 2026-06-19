@@ -23,6 +23,7 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.main import create_app
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.storage_paths import resolve_job_dir
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.definition import load_workflow_definition
 
@@ -321,7 +322,7 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
         # 8. delete removes database rows, storage, and logs.
         job = app.state.job_db.get_job(job_id)
-        storage_dir = Path(str(job["storage_dir"]))
+        storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         log_dir = app.state.settings.logs_dir / "jobs"
         log_files = list(log_dir.glob(f"{job_id}-*.log"))
         assert storage_dir.exists()

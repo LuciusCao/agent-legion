@@ -583,7 +583,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
             capability="root",
             local_node_limit=1,
             lease_ttl_seconds=60,
-            log_path="/tmp/run.log",
+            log_path="logs/run.log",
             execution_mode="until_node",
             target_node_key="root",
             allowed_node_keys=("root",),
@@ -679,7 +679,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
         capability="fetch",
         local_node_limit=None,
         lease_ttl_seconds=60,
-        log_path="/tmp/run.log",
+        log_path="logs/run.log",
     )
 
     claim1 = worker.leases.try_claim(base_request)
@@ -696,7 +696,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
             capability="fetch",
             local_node_limit=None,
             lease_ttl_seconds=60,
-            log_path="/tmp/run2.log",
+            log_path="logs/run2.log",
         )
     )
     assert claim2 is None

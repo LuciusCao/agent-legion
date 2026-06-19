@@ -177,7 +177,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
                 capability=capability,
                 local_node_limit=local_limit,
                 lease_ttl_seconds=60,
-                log_path="/tmp/run.log",
+                log_path=str(settings.logs_dir / "run.log"),
             )
         )
         assert claim is not None, f"claim failed for {executor_id}"
@@ -292,7 +292,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
                 capability="fetch_questions",
                 local_node_limit=None,
                 lease_ttl_seconds=60,
-                log_path="/tmp/run.log",
+                log_path=str(settings.logs_dir / "run.log"),
             )
         )
         assert claim is not None

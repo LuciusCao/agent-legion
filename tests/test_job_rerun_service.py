@@ -1,6 +1,5 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
 import pytest
@@ -11,6 +10,7 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService, StagedOutputs
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.storage_paths import resolve_job_dir
 
 
 @pytest.fixture
@@ -78,7 +78,9 @@ def _create_lease(
     *,
     expires_offset_seconds: float,
 ) -> dict[str, Any]:
-    run = job_db.start_node_run(job["id"], node_key, ["cmd"], "/dev/null")
+    run = job_db.start_node_run(
+        job["id"], node_key, ["cmd"], f"logs/jobs/{job['id']}-{node_key}.log"
+    )
     assert run is not None
     now = datetime.now(UTC)
     expires = now + timedelta(seconds=expires_offset_seconds)
@@ -244,8 +246,8 @@ def test_rerun_wrong_workspace(rerun_service, job):
     assert result["reason_code"] == "wrong_workspace"
 
 
-def test_rerun_stages_and_removes_artifacts(rerun_service, job):
-    storage = Path(job["storage_dir"])
+def test_rerun_stages_and_removes_artifacts(rerun_service, job, settings):
+    storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "understanding.json").write_text("understanding")
     (storage / "misconceptions.json").write_text("misconceptions")
@@ -259,8 +261,8 @@ def test_rerun_stages_and_removes_artifacts(rerun_service, job):
     assert (storage / "fetch.log").exists()
 
 
-def test_rerun_rolls_back_artifacts_when_db_fails(rerun_service, job, monkeypatch):
-    storage = Path(job["storage_dir"])
+def test_rerun_rolls_back_artifacts_when_db_fails(rerun_service, job, settings, monkeypatch):
+    storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "understanding.json").write_text("understanding")
 
@@ -280,9 +282,9 @@ def test_rerun_rolls_back_artifacts_when_db_fails(rerun_service, job, monkeypatc
 
 
 def test_rerun_reports_success_when_post_commit_cleanup_fails(
-    rerun_service, job, monkeypatch, caplog
+    rerun_service, job, settings, monkeypatch, caplog
 ):
-    storage = Path(job["storage_dir"])
+    storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "understanding.json").write_text("understanding")
 
