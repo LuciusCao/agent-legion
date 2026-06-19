@@ -111,6 +111,7 @@ export default function WorkspaceLayout() {
               <>
                 <AgentStatusIndicator workspaceId={workspaceId} />
                 <IconButton
+                  size="small"
                   aria-label={selectMode ? '完成' : '多选'}
                   onClick={toggleSelectMode}
                   className={selectMode ? 'active-icon' : ''}
@@ -118,6 +119,7 @@ export default function WorkspaceLayout() {
                   <MaterialIcon name={selectMode ? 'close' : 'checklist'} />
                 </IconButton>
                 <IconButton
+                  size="small"
                   aria-label="添加"
                   onClick={() => {
                     if (isVideoHive) {
@@ -130,6 +132,7 @@ export default function WorkspaceLayout() {
                   <MaterialIcon name="add" />
                 </IconButton>
                 <IconButton
+                  size="small"
                   aria-label="包历史"
                   onClick={() => {
                     if (workspaceId) {
@@ -140,6 +143,7 @@ export default function WorkspaceLayout() {
                   <MaterialIcon name="inventory_2" />
                 </IconButton>
                 <IconButton
+                  size="small"
                   aria-label={WORKSPACE_LABELS.settings}
                   onClick={() =>
                     navigate(`/workspaces/${workspaceId}/settings`)
