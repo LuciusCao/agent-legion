@@ -27,6 +27,25 @@ function makeComprehensionJson(info: Record<string, unknown>) {
   return { content: JSON.stringify(info) }
 }
 
+function makeKeyInfoReviewedJson() {
+  return {
+    content: JSON.stringify({
+      question_id: mockComprehensionInfo.question_id,
+      key_info_list: mockComprehensionInfo.comprehension_data.key_info_list,
+    }),
+  }
+}
+
+function makePossibleErrorsReviewedJson() {
+  return {
+    content: JSON.stringify({
+      question_id: mockComprehensionInfo.question_id,
+      possible_error_list:
+        mockComprehensionInfo.comprehension_data.possible_error_list,
+    }),
+  }
+}
+
 const mockComprehensionInfo = {
   question_id: 'Q1',
   fingerprint: 'fp1',
@@ -82,6 +101,12 @@ vi.mock('../api', async (importOriginal) => {
           return Promise.reject(new Error('not found'))
         }
         return Promise.resolve(makeComprehensionJson(mockComprehensionInfo))
+      }
+      if (artifactName === 'key_info_reviewed.json') {
+        return Promise.resolve(makeKeyInfoReviewedJson())
+      }
+      if (artifactName === 'possible_errors_reviewed.json') {
+        return Promise.resolve(makePossibleErrorsReviewedJson())
       }
       return mockFetchJobArtifact(...args)
     },
@@ -395,14 +420,15 @@ describe('QuestionContentPanel', () => {
     )
   })
 
-  it('does not render chips when comprehension_info.json is missing', async () => {
+  it('renders chips from intermediate artifacts when comprehension_info.json is missing', async () => {
     comprehensionArtifactEnabled = false
     mockFetchJobArtifact.mockResolvedValue(
-      makeQuestionsJson({ stem: '<p>Simple</p>' })
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
-    expect(screen.queryByText('审题信息')).not.toBeInTheDocument()
+    expect(screen.getByText('审题信息')).toBeInTheDocument()
+    expect(screen.getByText('常见审题错误')).toBeInTheDocument()
   })
 })

@@ -81,16 +81,21 @@ function extractAnswerItems(answer: unknown): string[] | null {
 export interface QuestionContentPanelProps {
   jobId: string
   refreshKey?: string
+  comprehensionRefreshKey?: string
   comprehensionCompleted?: boolean
 }
 
 export function QuestionContentPanel({
   jobId,
   refreshKey,
+  comprehensionRefreshKey,
   comprehensionCompleted = false,
 }: QuestionContentPanelProps) {
   const { question, loading, error } = useJobQuestion(jobId, refreshKey)
-  const { info: comprehensionInfo } = useJobComprehensionInfo(jobId, refreshKey)
+  const { info: comprehensionInfo } = useJobComprehensionInfo(
+    jobId,
+    comprehensionRefreshKey ?? refreshKey
+  )
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectedErrorId, setSelectedErrorId] = useState<string | null>(null)
   const stemWrapperRef = useRef<HTMLDivElement>(null)
@@ -196,7 +201,11 @@ export function QuestionContentPanel({
                     <span
                       key={idx}
                       className={
-                        part.type === 'highlight' ? 'highlight' : undefined
+                        part.type === 'highlight'
+                          ? part.corrected
+                            ? 'highlight-corrected'
+                            : 'highlight'
+                          : undefined
                       }
                       data-ids={part.ids?.join(',')}
                       dangerouslySetInnerHTML={{

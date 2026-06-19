@@ -192,6 +192,29 @@ export default function JobDetailPage() {
     )
   }, [detail])
 
+  const comprehensionRefreshKey = useMemo(() => {
+    const assembleNode = detail?.nodes.find(
+      (node) => node.node_key === 'assemble_comprehension_info'
+    )
+    const reviewKeyInfoNode = detail?.nodes.find(
+      (node) => node.node_key === 'review_key_info'
+    )
+    const reviewPossibleErrorsNode = detail?.nodes.find(
+      (node) => node.node_key === 'review_possible_errors'
+    )
+    return [
+      assembleNode?.status,
+      assembleNode?.started_at,
+      assembleNode?.finished_at,
+      reviewKeyInfoNode?.status,
+      reviewKeyInfoNode?.started_at,
+      reviewKeyInfoNode?.finished_at,
+      reviewPossibleErrorsNode?.status,
+      reviewPossibleErrorsNode?.started_at,
+      reviewPossibleErrorsNode?.finished_at,
+    ].join(':')
+  }, [detail])
+
   const [actionLoading, setActionLoading] = useState(false)
 
   const handleRerun = useCallback(
@@ -320,14 +343,22 @@ export default function JobDetailPage() {
   }
 
   const comprehensionCompleted = useMemo(() => {
-    return (
-      detail?.nodes.some(
-        (n) =>
-          n.node_key === 'assemble_comprehension_info' &&
-          n.status === 'completed'
-      ) ?? false
+    if (!detail) return false
+    const assembleCompleted = detail.nodes.some(
+      (n) =>
+        n.node_key === 'assemble_comprehension_info' && n.status === 'completed'
     )
-  }, [detail?.nodes])
+    const reviewKeyInfoCompleted = detail.nodes.some(
+      (n) => n.node_key === 'review_key_info' && n.status === 'completed'
+    )
+    const reviewPossibleErrorsCompleted = detail.nodes.some(
+      (n) => n.node_key === 'review_possible_errors' && n.status === 'completed'
+    )
+    return (
+      assembleCompleted ||
+      (reviewKeyInfoCompleted && reviewPossibleErrorsCompleted)
+    )
+  }, [detail])
 
   if (!jobId) {
     return <p className="error-text">缺少任务 ID</p>
@@ -348,6 +379,7 @@ export default function JobDetailPage() {
               key={jobId}
               jobId={jobId}
               refreshKey={questionArtifactRefreshKey}
+              comprehensionRefreshKey={comprehensionRefreshKey}
               comprehensionCompleted={comprehensionCompleted}
             />
           )}
