@@ -238,7 +238,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.getByText('审题信息')).toBeInTheDocument()
     expect(screen.getByText('2 个信息点')).toBeInTheDocument()
@@ -248,12 +248,22 @@ describe('QuestionContentPanel', () => {
     expect(chips[1]).toHaveTextContent('2')
   })
 
+  it('does not render chips before comprehension node completes', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
+    )
+
+    render(<QuestionContentPanel jobId="job1" comprehensionCompleted={false} />)
+    await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
+    expect(screen.queryByText('审题信息')).not.toBeInTheDocument()
+  })
+
   it('toggles chip selection and expands detail card', async () => {
     mockFetchJobArtifact.mockResolvedValue(
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" />)
+    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
     )

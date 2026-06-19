@@ -319,6 +319,16 @@ export default function JobDetailPage() {
     }
   }
 
+  const comprehensionCompleted = useMemo(() => {
+    return (
+      detail?.nodes.some(
+        (n) =>
+          n.node_key === 'assemble_comprehension_info' &&
+          n.status === 'completed'
+      ) ?? false
+    )
+  }, [detail?.nodes])
+
   if (!jobId) {
     return <p className="error-text">缺少任务 ID</p>
   }
@@ -338,6 +348,7 @@ export default function JobDetailPage() {
               key={jobId}
               jobId={jobId}
               refreshKey={questionArtifactRefreshKey}
+              comprehensionCompleted={comprehensionCompleted}
             />
           )}
         </div>
