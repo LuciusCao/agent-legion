@@ -209,10 +209,10 @@ export function QuestionContentPanel({
             <div className={styles.chipsHeader}>
               <h2 className={styles.sectionTitle} style={{ margin: 0 }}>
                 审题信息
+                <span className={styles.chipsCount}>
+                  {keyInfoList.length} 个信息点
+                </span>
               </h2>
-              <span className={styles.chipsCount}>
-                {keyInfoList.length} 个信息点
-              </span>
             </div>
             <div className={styles.chipRow}>
               {keyInfoList.map((info, idx) => {
