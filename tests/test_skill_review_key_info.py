@@ -33,7 +33,7 @@ def _write_valid_inputs(job_dir: Path):
                     {
                         "key_info_id": "ki_001",
                         "type": "given",
-                        "content": {"text": "14场", "position": {"start": 6, "end": 9}},
+                        "content": {"text": "14场", "position": {"start": 5, "end": 8}},
                         "question": {
                             "text": "小明一共参加了多少场比赛？",
                             "options": [
@@ -61,7 +61,7 @@ def test_review_key_info_validator_accepts_valid_artifact(tmp_path):
                     {
                         "key_info_id": "ki_001",
                         "type": "given",
-                        "content": {"text": "14场", "position": {"start": 6, "end": 9}},
+                        "content": {"text": "14场", "position": {"start": 5, "end": 8}},
                         "question": {
                             "text": "小明一共参加了多少场比赛？",
                             "options": [
@@ -111,7 +111,7 @@ def test_review_key_info_validator_rejects_count_mismatch(tmp_path):
                     {
                         "key_info_id": "ki_001",
                         "type": "given",
-                        "content": {"text": "14场", "position": {"start": 6, "end": 9}},
+                        "content": {"text": "14场", "position": {"start": 5, "end": 8}},
                         "question": {
                             "text": "小明一共参加了多少场比赛？",
                             "options": [

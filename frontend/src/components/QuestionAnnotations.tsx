@@ -117,7 +117,7 @@ export function QuestionAnnotations({
     }
 
     const layerRect = layer.getBoundingClientRect()
-    const spans = Array.from(wrapper.querySelectorAll('.highlight'))
+    const spans = Array.from(wrapper.querySelectorAll('[data-ids]'))
     const next: Measurement[] = []
 
     for (const item of hiddenItems) {

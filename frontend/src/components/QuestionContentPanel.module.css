@@ -60,6 +60,17 @@
   padding: 0 2px;
 }
 
+.richText :global(.highlight-corrected) {
+  background: linear-gradient(
+    180deg,
+    transparent 60%,
+    rgba(239, 68, 68, 0.45) 60%
+  );
+  color: #1a1c1e;
+  border-radius: 2px;
+  padding: 0 2px;
+}
+
 .optionList {
   list-style: none;
   padding: 0;
