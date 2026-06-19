@@ -4,7 +4,6 @@ import logging
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -24,7 +23,7 @@ from ..services.package_deletion import (
 )
 from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
-from ..storage_paths import ManagedPathError
+from ..storage_paths import ManagedPathError, make_data_relative, resolve_data_path
 from .job_operation_contracts import (
     WorkspacePackageRequest,
     WorkspacePackageResponse,
@@ -95,8 +94,9 @@ def create_packages_router(
                     if request is not None and request.name
                     else f"批次 ({video_count}个视频)"
                 )
+                relative_path = make_data_relative(package_path, settings.data_dir)
                 db.insert_package(
-                    str(package_path), name=name, video_count=video_count, size_bytes=size_bytes
+                    relative_path, name=name, video_count=video_count, size_bytes=size_bytes
                 )
                 download_url = f"/api/packages/{package_path.name}"
                 video_event_manager.broadcast_package_ready(download_url)
@@ -111,23 +111,47 @@ def create_packages_router(
     @router.get("/packages")
     def list_packages() -> dict[str, Any]:
         packages = db.list_packages(limit=10)
+        resolved_packages_dir = settings.packages_dir.resolve(strict=True)
+        result: list[dict[str, Any]] = []
         for pkg in packages:
-            if not pkg.get("name") or pkg.get("video_count", 0) == 0:
+            stored_path = pkg.get("path") or ""
+            pkg_out = dict(pkg)
+            if stored_path:
                 try:
-                    with zipfile.ZipFile(pkg["path"]) as zf:
-                        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
-                        video_count = len(manifest.get("videos", []))
-                        name = pkg.get("name") or f"批次 ({video_count}个视频)"
-                        size_bytes = pkg.get("size_bytes") or Path(pkg["path"]).stat().st_size
-                        db.update_package_stats(
-                            pkg["id"], name=name, video_count=video_count, size_bytes=size_bytes
+                    resolved_path = resolve_data_path(
+                        stored_path, settings.data_dir, allow_missing=True
+                    )
+                    if resolved_path == resolved_packages_dir or not resolved_path.is_relative_to(
+                        resolved_packages_dir
+                    ):
+                        raise ManagedPathError(
+                            "Path escapes package root",
+                            record_id=str(pkg.get("id", "")),
+                            root_kind="package",
                         )
-                        pkg["name"] = name
-                        pkg["video_count"] = video_count
-                        pkg["size_bytes"] = size_bytes
-                except Exception:
-                    pass
-        return {"packages": packages}
+                except ManagedPathError:
+                    continue
+                if not pkg.get("name") or pkg.get("video_count", 0) == 0:
+                    try:
+                        with zipfile.ZipFile(resolved_path) as zf:
+                            manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+                            video_count = len(manifest.get("videos", []))
+                            name = pkg.get("name") or f"批次 ({video_count}个视频)"
+                            size_bytes = pkg.get("size_bytes") or resolved_path.stat().st_size
+                            db.update_package_stats(
+                                pkg["id"],
+                                name=name,
+                                video_count=video_count,
+                                size_bytes=size_bytes,
+                            )
+                            pkg_out["name"] = name
+                            pkg_out["video_count"] = video_count
+                            pkg_out["size_bytes"] = size_bytes
+                    except Exception:
+                        pass
+                pkg_out["path"] = str(resolved_path)
+            result.append(pkg_out)
+        return {"packages": result}
 
     @router.delete("/packages/{package_id:int}")
     def delete_package(package_id: int) -> dict[str, bool]:

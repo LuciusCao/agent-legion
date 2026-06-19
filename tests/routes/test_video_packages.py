@@ -316,7 +316,7 @@ def test_delete_package(tmp_path, client, monkeypatch):
 
     client.post("/api/package", json={"video_ids": [video_id]})
     pkg = client.app.state.db.list_packages(limit=1)[0]
-    package_path = Path(pkg["path"])
+    package_path = client.app.state.settings.data_dir / pkg["path"]
     assert package_path.exists()
 
     response = client.delete(f"/api/packages/{pkg['id']}")

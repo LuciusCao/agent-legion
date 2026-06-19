@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from server.app.db import Database
-from server.app.storage_paths import resolve_managed_path
+from server.app.storage_paths import ManagedPathError, resolve_data_path
 
 
 class PackageNotFoundError(LookupError):
@@ -27,13 +27,28 @@ class PackageDeletionService:
         if package["locked"]:
             raise PackageLockedError(f"Package {package_id} is locked")
 
-        package_path = resolve_managed_path(
-            self.packages_dir,
-            package["path"],
-            allow_missing=True,
-            record_id=str(package_id),
-            root_kind="package",
-        )
+        data_dir = self.packages_dir.parent
+        try:
+            package_path = resolve_data_path(
+                package["path"],
+                data_dir,
+                allow_missing=True,
+            )
+        except ManagedPathError as exc:
+            raise ManagedPathError(
+                str(exc),
+                record_id=str(package_id),
+                root_kind="package",
+            ) from exc
+        resolved_packages_dir = self.packages_dir.resolve(strict=True)
+        if package_path == resolved_packages_dir or not package_path.is_relative_to(
+            resolved_packages_dir
+        ):
+            raise ManagedPathError(
+                "Path escapes package root",
+                record_id=str(package_id),
+                root_kind="package",
+            )
         if package_path.exists():
             package_path.unlink()
         self.db.delete_package(package_id)
