@@ -1,11 +1,11 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
+from server.app.jobs.queries.base import JobQueriesBase
 from server.app.storage_paths import make_data_relative
 
 
@@ -14,7 +14,7 @@ def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:
     return f"{workspace_id}_{workflow_key}_{safe_source_id}"
 
 
-class JobNodeQueriesMixin:
+class JobNodeQueriesMixin(JobQueriesBase):
     jobs_dir: Path
 
     def create_job(

@@ -1,13 +1,11 @@
 from __future__ import annotations
 
-import json
-import sqlite3
 from typing import Any
 
-from server.app.db.queries.video import _iso
+from server.app.db.queries.video import VideoQueriesMixin, _iso
 
 
-class TranscriptionQueriesMixin:
+class TranscriptionQueriesMixin(VideoQueriesMixin):
     def record_transcription_run(
         self,
         video_id: str,

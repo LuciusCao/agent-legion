@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any, cast
 
 from server.app.db.notifications import NotificationHub
+from server.app.db.queries.base import VideoQueriesBase
 from server.app.pipeline.common import make_record_id, resolve_video_dir
 from server.app.pipeline.openclaw import extract_openclaw_arg
 from server.app.records import PhaseRunRecord, VideoRecord
@@ -69,7 +70,7 @@ def _build_update_assignments(ordered_keys: list[str]) -> str:
     return ", ".join(f"{key}=?" for key in ordered_keys)
 
 
-class VideoQueriesMixin:
+class VideoQueriesMixin(VideoQueriesBase):
     _hub: NotificationHub | None
     _videos_dir: Path | None
 

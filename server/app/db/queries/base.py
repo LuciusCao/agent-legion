@@ -3,11 +3,12 @@ from __future__ import annotations
 import sqlite3
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import cast
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.notifications import NotificationHub
 from server.app.db.schema import init_db
+from server.app.records import VideoRecord
 
 
 class VideoQueriesBase:
@@ -40,5 +41,5 @@ class VideoQueriesBase:
         finally:
             conn.close()
 
-    def _row(self, row: sqlite3.Row | None) -> dict[str, Any] | None:
-        return dict(row) if row else None
+    def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
+        return cast(VideoRecord, dict(row)) if row else None
