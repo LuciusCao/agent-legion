@@ -1,6 +1,17 @@
 from server.app.storage_paths import make_data_relative
 
 
+def test_video_detail_projects_phase_log_path_absolute(client, db, settings):
+    db.create_video("https://example.com/k1.mp4", "k1")
+    log_path = settings.logs_dir / "k1-download.log"
+    db.start_phase("k1", "download", ["cmd"], make_data_relative(log_path, settings.data_dir))
+
+    response = client.get("/api/videos/k1")
+
+    assert response.status_code == 200
+    assert response.json()["phase_runs"][0]["log_path"] == str(log_path)
+
+
 def test_logs_empty(client):
     client.post(
         "/api/videos",

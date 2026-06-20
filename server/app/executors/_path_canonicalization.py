@@ -2,11 +2,19 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from server.app.storage_paths import make_data_relative
+from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_data_path
 
 
-def canonicalize_if_absolute(path: str, data_dir: Path | None) -> str:
-    """Return a data-relative path if ``data_dir`` is set and ``path`` is absolute."""
-    if data_dir is not None and path and Path(path).is_absolute():
-        return make_data_relative(Path(path), data_dir)
-    return path
+def canonicalize_data_path(path: str, data_dir: Path | None, expected_category: str) -> str:
+    """Return a validated canonical path for a database path column."""
+    if not path or data_dir is None:
+        return path
+    resolved = resolve_data_path(path, data_dir, allow_missing=True)
+    relative = make_data_relative(resolved, data_dir)
+    category = Path(relative).parts[0]
+    if category != expected_category:
+        raise ManagedPathError(
+            f"Stored path starts with '{category}', expected '{expected_category}'",
+            root_kind=expected_category,
+        )
+    return relative
