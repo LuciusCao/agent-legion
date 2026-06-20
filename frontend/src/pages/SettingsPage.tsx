@@ -15,6 +15,7 @@ import { ExecutorBindingSection } from '../components/ExecutorBindingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { ConnectionTestStatus } from '../components/settings/ConnectionTestStatus'
+import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { fetchWorkflows } from '../api'
 import styles from './SettingsPage.module.css'
 
@@ -204,32 +205,12 @@ export function SettingsPage() {
         </nav>
 
         <div className={styles.contentArea}>
-          <section id="basic-info" className={styles.section}>
-            <h2 className={styles.sectionTitle}>基本信息</h2>
-            <hr className={styles.sectionDivider} />
-            <div className={styles.field}>
-              <TextField
-                label="Workspace 名称"
-                variant="outlined"
-                value={workspaceName}
-                onChange={(event) => setWorkspaceName(event.target.value)}
-                fullWidth
-              />
-            </div>
-            <div className={styles.field}>
-              <TextField
-                label="描述"
-                variant="outlined"
-                multiline
-                rows={2}
-                value={workspaceDescription}
-                onChange={(event) =>
-                  setWorkspaceDescription(event.target.value)
-                }
-                fullWidth
-              />
-            </div>
-          </section>
+          <BasicInfoSection
+            workspaceName={workspaceName}
+            workspaceDescription={workspaceDescription}
+            onNameChange={setWorkspaceName}
+            onDescriptionChange={setWorkspaceDescription}
+          />
 
           <section id="intake-config" className={styles.section}>
             <h2 className={styles.sectionTitle}>接入与资源</h2>
