@@ -16,6 +16,7 @@ import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { ConnectionTestStatus } from '../components/settings/ConnectionTestStatus'
 import { BasicInfoSection } from '../components/settings/BasicInfoSection'
+import { WorkflowSection } from '../components/settings/WorkflowSection'
 import { fetchWorkflows } from '../api'
 import styles from './SettingsPage.module.css'
 
@@ -402,31 +403,11 @@ export function SettingsPage() {
             )}
           </section>
 
-          <section id="workflow" className={styles.section}>
-            <h2 className={styles.sectionTitle}>工作流</h2>
-            <hr className={styles.sectionDivider} />
-            <div className={styles.field}>
-              <TextField
-                select
-                label="工作流"
-                variant="outlined"
-                value={settings.workflowKey || ''}
-                onChange={(e) =>
-                  setSettings({
-                    workflowKey: e.target.value,
-                  })
-                }
-                fullWidth
-              >
-                <MenuItem value="">请选择</MenuItem>
-                {workflowOptions.map((p) => (
-                  <MenuItem key={p.key} value={p.key}>
-                    {p.label}
-                  </MenuItem>
-                ))}
-              </TextField>
-            </div>
-          </section>
+          <WorkflowSection
+            workflowKey={settings.workflowKey}
+            options={workflowOptions}
+            onChange={(key) => setSettings({ workflowKey: key })}
+          />
 
           <section id="executor-allocation" className={styles.section}>
             <h2 className={styles.sectionTitle}>执行器分配</h2>
