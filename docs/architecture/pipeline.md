@@ -46,7 +46,7 @@ server/app/workflows/
 
 - ASR 使用 `auto` 模式：先尝试 whisper.cpp，失败则回退 SenseVoice。
 - 每个阶段失败都会将视频标记为 `failed`，支持从任意阶段重跑。
-- Agent 阶段通过 OpenClaw 调用外部命令，模板化配置在 `config/workflow.yaml` 中。
+- Agent 阶段通过 OpenClaw 调用外部命令，模板化配置在 `config/video_hive.yaml` 中。
 
 ## API Surface / Interface
 

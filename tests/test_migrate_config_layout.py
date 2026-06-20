@@ -222,6 +222,50 @@ class TestApplyLayout:
         with pytest.raises(ConfigurationLoadError, match="rollback"):
             migration_module.apply_layout(config_dir)
 
+    def test_apply_recovers_when_workflow_yaml_still_has_legacy_content(
+        self, migration_module: Any, tmp_path: Path
+    ) -> None:
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        backup = config_dir / "workflow.yaml.bak-20240102030405"
+        backup.write_text("data_dir: data\ncms: {token: ''}\nexecutors: {}\n", encoding="utf-8")
+        (config_dir / "app.yaml").write_text("data_dir: data\n", encoding="utf-8")
+        (config_dir / "video_hive.yaml").write_text("cms: {token: ''}\n", encoding="utf-8")
+        # workflow.yaml still contains the full legacy mapping, not just the slice.
+        (config_dir / "workflow.yaml").write_text(
+            "data_dir: data\ncms: {token: ''}\nexecutors: {}\n", encoding="utf-8"
+        )
+
+        migration_module.apply_layout(config_dir)
+
+        workflow_yaml = migration_module.load_yaml_mapping(config_dir / "workflow.yaml")
+        assert set(workflow_yaml) == {"executors"}
+
+    def test_apply_recovers_from_inconsistent_split_layout(
+        self, migration_module: Any, tmp_path: Path
+    ) -> None:
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        backup = config_dir / "workflow.yaml.bak-20240102030405"
+        backup.write_text("data_dir: data\ncms: {token: ''}\nexecutors: {}\n", encoding="utf-8")
+        # app.yaml and video_hive.yaml are valid split slices, but workflow.yaml contains
+        # unowned legacy keys, making the detected layout an invalid split.
+        (config_dir / "app.yaml").write_text("data_dir: data\n", encoding="utf-8")
+        (config_dir / "video_hive.yaml").write_text("cms: {token: ''}\n", encoding="utf-8")
+        (config_dir / "workflow.yaml").write_text(
+            "data_dir: data\ncms: {token: ''}\nexecutors: {}\n", encoding="utf-8"
+        )
+
+        migration_module.apply_layout(config_dir)
+
+        for name, expected_keys in {
+            "app.yaml": {"data_dir"},
+            "video_hive.yaml": {"cms"},
+            "workflow.yaml": {"executors"},
+        }.items():
+            mapping = migration_module.load_yaml_mapping(config_dir / name)
+            assert set(mapping) == expected_keys
+
     def test_apply_leaves_destinations_unchanged_on_validation_failure(
         self,
         migration_module: Any,
@@ -260,3 +304,18 @@ class TestApplyLayout:
         migration_module.apply_layout(legacy_config_dir, before_replace=before_replace)
 
         assert calls == ["app.yaml", "video_hive.yaml", "workflow.yaml"]
+
+    def test_apply_warns_about_comment_and_formatting_loss(
+        self, migration_module: Any, legacy_config_dir: Path
+    ) -> None:
+        report = migration_module.apply_layout(legacy_config_dir)
+        rendered = report.render()
+        assert "WARNING:" in rendered
+        assert "comments" in rendered.lower()
+        assert "formatting" in rendered.lower()
+
+    def test_apply_no_op_split_does_not_warn(
+        self, migration_module: Any, split_config_dir: Path
+    ) -> None:
+        report = migration_module.apply_layout(split_config_dir)
+        assert "WARNING" not in report.render()
