@@ -1,42 +1,34 @@
-# Repository-owned Pi skills registry.
-#
-# Sources may be local paths or remote Git URLs. The default installation keeps
-# each skill under ~/.agents/skills/agent-legion as an independent local repo.
-
 skills:
-  # question_comprehension_info
   question_comprehension_info/assess_comprehension_difficulty:
-    repo: ~/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
+    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
     ref: v1.0.1
   question_comprehension_info/generate_key_info:
-    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
+    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
     ref: v1.0.2
   question_comprehension_info/generate_possible_errors:
-    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
+    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
     ref: v1.0.1
   question_comprehension_info/review_key_info:
-    repo: ~/.agents/skills/agent-legion/question_comprehension_info/review_key_info
+    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_key_info
     ref: v1.0.2
   question_comprehension_info/review_possible_errors:
-    repo: ~/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
+    repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
     ref: v1.0.1
-
-  # reading_analysis
   reading_analysis/assess_difficulty:
-    repo: ~/.agents/skills/agent-legion/reading_analysis/assess_difficulty
+    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/assess_difficulty
     ref: v1.0.0
   reading_analysis/extract_keywords:
-    repo: ~/.agents/skills/agent-legion/reading_analysis/extract_keywords
+    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/extract_keywords
     ref: v1.0.0
   reading_analysis/generate_distractors:
-    repo: ~/.agents/skills/agent-legion/reading_analysis/generate_distractors
+    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/generate_distractors
     ref: v1.0.0
   reading_analysis/review_difficulty:
-    repo: ~/.agents/skills/agent-legion/reading_analysis/review_difficulty
+    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/review_difficulty
     ref: v1.0.0
   reading_analysis/review_distractors:
-    repo: ~/.agents/skills/agent-legion/reading_analysis/review_distractors
+    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/review_distractors
     ref: v1.0.0
   reading_analysis/review_keywords:
-    repo: ~/.agents/skills/agent-legion/reading_analysis/review_keywords
+    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/review_keywords
     ref: v1.0.0
