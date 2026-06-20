@@ -4,11 +4,7 @@ import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact } from '../api'
 import { useUiStore } from '../stores/uiStore'
-import {
-  toDagEdges,
-  toDagNodes,
-  toWorkflowDefinition,
-} from './jobDetail/jobNodeHelpers'
+import { deriveJobDetailPresentation } from './jobDetail/jobNodeHelpers'
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
@@ -53,68 +49,14 @@ export default function JobDetailPage() {
     }
   }, [jobId])
 
-  const dagNodes = useMemo(
-    () => (detail ? toDagNodes(detail.nodes) : []),
-    [detail]
-  )
-  const dagEdges = useMemo(
-    () => (detail ? toDagEdges(detail.nodes) : []),
-    [detail]
-  )
-  const workflowDefinition = useMemo(
-    () => toWorkflowDefinition(detail),
-    [detail]
-  )
-  const questionArtifactRefreshKey = useMemo(() => {
-    const producer = detail?.nodes.find((node) =>
-      node.outputs?.includes('questions.json')
-    )
-    if (!producer) return ''
-    return [producer.status, producer.started_at, producer.finished_at].join(
-      ':'
-    )
-  }, [detail])
-
-  const comprehensionRefreshKey = useMemo(() => {
-    const assembleNode = detail?.nodes.find(
-      (node) => node.node_key === 'assemble_comprehension_info'
-    )
-    const reviewKeyInfoNode = detail?.nodes.find(
-      (node) => node.node_key === 'review_key_info'
-    )
-    const reviewPossibleErrorsNode = detail?.nodes.find(
-      (node) => node.node_key === 'review_possible_errors'
-    )
-    return [
-      assembleNode?.status,
-      assembleNode?.started_at,
-      assembleNode?.finished_at,
-      reviewKeyInfoNode?.status,
-      reviewKeyInfoNode?.started_at,
-      reviewKeyInfoNode?.finished_at,
-      reviewPossibleErrorsNode?.status,
-      reviewPossibleErrorsNode?.started_at,
-      reviewPossibleErrorsNode?.finished_at,
-    ].join(':')
-  }, [detail])
-
-  const comprehensionCompleted = useMemo(() => {
-    if (!detail) return false
-    const assembleCompleted = detail.nodes.some(
-      (n) =>
-        n.node_key === 'assemble_comprehension_info' && n.status === 'completed'
-    )
-    const reviewKeyInfoCompleted = detail.nodes.some(
-      (n) => n.node_key === 'review_key_info' && n.status === 'completed'
-    )
-    const reviewPossibleErrorsCompleted = detail.nodes.some(
-      (n) => n.node_key === 'review_possible_errors' && n.status === 'completed'
-    )
-    return (
-      assembleCompleted ||
-      (reviewKeyInfoCompleted && reviewPossibleErrorsCompleted)
-    )
-  }, [detail])
+  const {
+    dagNodes,
+    dagEdges,
+    workflowDefinition,
+    questionArtifactRefreshKey,
+    comprehensionRefreshKey,
+    comprehensionCompleted,
+  } = useMemo(() => deriveJobDetailPresentation(detail), [detail])
 
   const openArtifact = useCallback(
     async (name: string) => {

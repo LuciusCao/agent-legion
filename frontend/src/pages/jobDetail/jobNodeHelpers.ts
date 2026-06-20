@@ -76,4 +76,59 @@ export function toWorkflowDefinition(
   }
 }
 
+export function deriveJobDetailPresentation(detail: JobDetailResponse | null) {
+  const nodes = detail ? toDagNodes(detail.nodes) : []
+  const edges = detail ? toDagEdges(detail.nodes) : []
+  const workflowDefinition = toWorkflowDefinition(detail)
+  const producer = detail?.nodes.find((node) =>
+    node.outputs?.includes('questions.json')
+  )
+  const questionArtifactRefreshKey = producer
+    ? [producer.status, producer.started_at, producer.finished_at].join(':')
+    : ''
+  const assembleNode = detail?.nodes.find(
+    (node) => node.node_key === 'assemble_comprehension_info'
+  )
+  const reviewKeyInfoNode = detail?.nodes.find(
+    (node) => node.node_key === 'review_key_info'
+  )
+  const reviewPossibleErrorsNode = detail?.nodes.find(
+    (node) => node.node_key === 'review_possible_errors'
+  )
+  const comprehensionRefreshKey = [
+    assembleNode?.status,
+    assembleNode?.started_at,
+    assembleNode?.finished_at,
+    reviewKeyInfoNode?.status,
+    reviewKeyInfoNode?.started_at,
+    reviewKeyInfoNode?.finished_at,
+    reviewPossibleErrorsNode?.status,
+    reviewPossibleErrorsNode?.started_at,
+    reviewPossibleErrorsNode?.finished_at,
+  ].join(':')
+  const comprehensionCompleted = detail
+    ? detail.nodes.some(
+        (n) =>
+          n.node_key === 'assemble_comprehension_info' &&
+          n.status === 'completed'
+      ) ||
+      (detail.nodes.some(
+        (n) => n.node_key === 'review_key_info' && n.status === 'completed'
+      ) &&
+        detail.nodes.some(
+          (n) =>
+            n.node_key === 'review_possible_errors' &&
+            n.status === 'completed'
+        ))
+    : false
+  return {
+    dagNodes: nodes,
+    dagEdges: edges,
+    workflowDefinition,
+    questionArtifactRefreshKey,
+    comprehensionRefreshKey,
+    comprehensionCompleted,
+  }
+}
+
 export { POLLING_STATUSES }
