@@ -6,12 +6,14 @@ import pytest
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.migrations import (
+    MIGRATIONS,
     Migration,
     MigrationError,
     MigrationHistoryError,
     MigrationRegistryError,
     run_migrations,
 )
+from server.app.db.schema import init_db
 
 
 def test_migrations_run_in_ascending_version_order(tmp_path: Path) -> None:
@@ -315,3 +317,56 @@ def test_phase_hook_interruption_rolls_back_and_restores_foreign_keys(
     assert "ok_table" in tables
     assert "partial_table" not in tables
     assert versions == [1]
+
+
+def test_v009_relative_path_storage_is_registered() -> None:
+    """Migration version 9 is registered with the expected name."""
+    by_version = {migration.version: migration for migration in MIGRATIONS}
+    assert 9 in by_version
+    assert by_version[9].name == "relative_path_storage"
+
+
+def test_v009_relative_path_storage_is_recorded_on_fresh_database(tmp_path: Path) -> None:
+    """A fresh database records the relative path storage rollout migration."""
+    path = tmp_path / "fresh.sqlite"
+    init_db(path)
+    conn = connect_sqlite(path)
+
+    row = conn.execute("select version, name from schema_migrations where version = 9").fetchone()
+    conn.close()
+
+    assert row is not None
+    assert row["version"] == 9
+    assert row["name"] == "relative_path_storage"
+
+
+def test_v009_relative_path_storage_is_recorded_on_legacy_database(tmp_path: Path) -> None:
+    """A legacy database already at V8 records V9 after running migrations."""
+    path = tmp_path / "legacy.sqlite"
+    conn = connect_sqlite(path)
+    with conn:
+        conn.executescript(
+            """
+            create table schema_migrations (
+              version integer primary key,
+              name text not null,
+              applied_at text not null default current_timestamp
+            );
+            insert into schema_migrations(version, name) values (1, 'executor_core');
+            insert into schema_migrations(version, name) values (2, 'executor_bootstrap_state');
+            insert into schema_migrations(version, name) values (3, 'legacy_columns');
+            insert into schema_migrations(version, name) values (4, 'workspace_dag_foreign_keys');
+            insert into schema_migrations(version, name) values (6, 'job_execution_control');
+            insert into schema_migrations(version, name) values (7, 'rename_pipeline_to_workflow');
+            insert into schema_migrations(version, name) values (8, 'job_node_created_at');
+            """
+        )
+
+    run_migrations(conn, MIGRATIONS)
+
+    row = conn.execute("select version, name from schema_migrations where version = 9").fetchone()
+    conn.close()
+
+    assert row is not None
+    assert row["version"] == 9
+    assert row["name"] == "relative_path_storage"

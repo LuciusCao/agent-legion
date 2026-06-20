@@ -205,7 +205,7 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
         title="Q1",
         node_keys=["extract_keywords"],
     )
-    job_dir = Path(job["storage_dir"])
+    job_dir = tmp_path / job["storage_dir"]
     job_dir.mkdir(parents=True, exist_ok=True)
 
     result = runner.run(
@@ -223,8 +223,8 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
     assert len(runs) == 1
     assert runs[0]["status"] == "completed"
     assert runs[0]["exit_code"] == 0
-    assert runs[0]["run_dir"] == str(result.run_dir)
-    assert runs[0]["session_dir"] == str(result.session_dir)
+    assert (tmp_path / runs[0]["run_dir"]).resolve() == result.run_dir.resolve()
+    assert (tmp_path / runs[0]["session_dir"]).resolve() == result.session_dir.resolve()
     assert json.loads(runs[0]["command_json"])[0] == str(fake_pi)
 
     node = job_db.get_job_node(job["id"], "extract_keywords")
@@ -378,3 +378,62 @@ def test_run_fails_when_validator_rejects_output(tmp_path, monkeypatch):
 
     assert result.status == "failed"
     assert "validation failed" in result.error_message
+
+
+def test_run_persists_relative_paths_while_result_stays_absolute(tmp_path, monkeypatch):
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        '#!/bin/bash\necho \'{"event":"done"}\'\necho \'{"questions": []}\' > keywords_raw.json\n'
+    )
+    fake_pi.chmod(0o755)
+
+    runner = PiRunner.from_config(
+        {"binary": str(fake_pi), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text(
+        "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
+        "job_dir = Path(sys.argv[1])\n"
+        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+    )
+    validator.chmod(0o755)
+
+    db_path = tmp_path / "jobs.sqlite"
+    job_db = JobQueries(db_path, tmp_path / "jobs")
+    job = job_db.create_job(
+        workflow_key="reading_analysis",
+        source_type="question",
+        source_id="Q1",
+        batch_id="b1",
+        title="Q1",
+        node_keys=["extract_keywords"],
+    )
+    job_dir = tmp_path / job["storage_dir"]
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    result = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=job_db,
+        job_dir=job_dir,
+    )
+
+    assert result.status == "completed"
+    assert result.run_dir.is_absolute()
+    assert result.session_dir.is_absolute()
+
+    runs = job_db.list_node_runs(job["id"])
+    assert len(runs) == 1
+    assert runs[0]["log_path"].startswith("jobs/")
+    assert runs[0]["run_dir"].startswith("jobs/")
+    assert runs[0]["session_dir"].startswith("jobs/")
+    assert not Path(runs[0]["log_path"]).is_absolute()
+    assert not Path(runs[0]["run_dir"]).is_absolute()
+    assert not Path(runs[0]["session_dir"]).is_absolute()

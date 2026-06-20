@@ -3,6 +3,7 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_node_executor_resolver import resolve_node_executors
+from server.app.services.job_path_projection import resolve_record_paths
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
@@ -10,6 +11,8 @@ from server.app.services.workspace_executor_configuration import (
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
+
+_RUN_PATH_FIELDS = {"log_path", "run_dir", "session_dir"}
 
 
 class JobQueryService:
@@ -30,9 +33,6 @@ class JobQueryService:
         if job is None:
             raise NotFoundError("Job not found")
         return job
-
-    def _definition(self, workflow_key: str) -> WorkflowDefinition:
-        return self.workflows.definition(workflow_key)
 
     def _job_nodes_with_definition(
         self,
@@ -107,6 +107,7 @@ class JobQueryService:
                 error_summary = active_summary["error_message"][:240]
 
         control = self.job_db.get_job_execution_control(job["id"])
+        job = resolve_record_paths(job, self.settings.data_dir, {"storage_dir"})
         return {
             **job,
             "node_summaries": summaries,
@@ -146,7 +147,7 @@ class JobQueryService:
         for job in jobs:
             key = str(job["workflow_key"])
             if key not in definitions:
-                definitions[key] = self._definition(key)
+                definitions[key] = self.workflows.definition(key)
 
         return [
             self._job_summary(
@@ -157,7 +158,7 @@ class JobQueryService:
 
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
-        definition = self._definition(str(job["workflow_key"]))
+        definition = self.workflows.definition(str(job["workflow_key"]))
         nodes = self.job_db.list_job_nodes(job_id)
         nodes_with_definition = self._job_nodes_with_definition(job, nodes, definition)
         executor_map = resolve_node_executors(
@@ -173,7 +174,10 @@ class JobQueryService:
         return {
             "job": self._job_summary(job, nodes, definition),
             "nodes": nodes_with_definition,
-            "runs": self.job_db.list_node_runs(job_id),
+            "runs": [
+                resolve_record_paths(run, self.settings.data_dir, _RUN_PATH_FIELDS)
+                for run in self.job_db.list_node_runs(job_id)
+            ],
             "artifacts": self._artifact_names(job),
         }
 
@@ -185,20 +189,21 @@ class JobQueryService:
         job_id: str | None = None,
         limit: int = 100,
     ) -> list[dict[str, Any]]:
-        return self.job_db.list_workspace_node_runs(
+        runs = self.job_db.list_workspace_node_runs(
             workspace_id,
             status=status,
             node_key=node_key,
             job_id=job_id,
             limit=limit,
         )
+        return [resolve_record_paths(run, self.settings.data_dir, _RUN_PATH_FIELDS) for run in runs]
 
     def workspace_dag(self, workspace_id: str) -> dict[str, Any]:
         workspace = self.job_db.get_workspace(workspace_id)
         if workspace is None:
             raise NotFoundError("Workspace not found")
         workflow_key = str(workspace.get("default_workflow_key") or "question_content")
-        definition = self._definition(workflow_key)
+        definition = self.workflows.definition(workflow_key)
         counts = self.job_db.count_workspace_job_nodes_by_status(workspace_id, workflow_key)
         statuses = ["pending", "running", "completed", "failed", "stale"]
         return {

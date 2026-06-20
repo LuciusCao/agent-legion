@@ -1,4 +1,4 @@
-from pathlib import Path
+from server.app.storage_paths import resolve_job_dir
 
 
 def test_rerun_node_marks_downstream_stale(tmp_path):
@@ -164,7 +164,12 @@ def test_rerun_node_rejects_running_job(tmp_path):
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{job_id}-fetch_question_context.log"
         log_path.write_text("running")
-        app.state.job_db.start_node_run(job_id, "fetch_question_context", ["cmd"], str(log_path))
+        app.state.job_db.start_node_run(
+            job_id,
+            "fetch_question_context",
+            ["cmd"],
+            f"logs/jobs/{job_id}-fetch_question_context.log",
+        )
         resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_question_context/rerun")
     assert resp.status_code == 400
     assert "running" in resp.json()["detail"].lower()
@@ -400,7 +405,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
         )
         job_id = "test_question_content_Q705"
         job_db = app.state.job_db
-        run = job_db.start_node_run(job_id, "question_understanding", ["cmd"], "/dev/null")
+        run = job_db.start_node_run(job_id, "question_understanding", ["cmd"], "logs/jobs/run.log")
         now = datetime.now(UTC)
         with job_db.connect() as conn:
             conn.execute(
@@ -454,7 +459,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
         )
         job_id = "test_question_content_Q706"
         job_db = app.state.job_db
-        run = job_db.start_node_run(job_id, "question_understanding", ["cmd"], "/dev/null")
+        run = job_db.start_node_run(job_id, "question_understanding", ["cmd"], "logs/jobs/run.log")
         job_db.finish_node_run(run["id"], "failed", 1, "expired")
         now = datetime.now(UTC)
         with job_db.connect() as conn:
@@ -508,7 +513,7 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
             },
         )
         job_id = "test_question_content_Q707"
-        storage = Path(app.state.job_db.get_job(job_id)["storage_dir"])
+        storage = resolve_job_dir(app.state.job_db.get_job(job_id), app.state.settings.jobs_dir)
         storage.mkdir(parents=True, exist_ok=True)
         (storage / "understanding.json").write_text("understanding")
 

@@ -21,6 +21,7 @@ from server.app.pipeline.transcribe import (
 from server.app.pipeline.validators import phase_outputs_sufficient, validate_phase_outputs
 from server.app.services.interaction_cache import InteractionCacheService
 from server.app.settings import Settings
+from server.app.storage_paths import make_data_relative
 
 
 def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
@@ -181,7 +182,7 @@ def process_video_once(
     video_dir = resolve_video_dir(video, settings.videos_dir)
     video_dir.mkdir(parents=True, exist_ok=True)
     log_path = settings.logs_dir / f"{video_id}-{phase}.log"
-    run = db.start_phase(video_id, phase, [], str(log_path))
+    run = db.start_phase(video_id, phase, [], make_data_relative(log_path, settings.data_dir))
     if run is None:
         return False
 

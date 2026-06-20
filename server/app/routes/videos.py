@@ -1,5 +1,4 @@
 import re
-from pathlib import Path
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request
@@ -24,6 +23,7 @@ from ..services.video_actions import (
 )
 from ..services.video_read import VideoReadService
 from ..settings import Settings
+from ..storage_paths import ManagedPathError, resolve_data_path
 
 
 class VideoInput(BaseModel):
@@ -239,10 +239,18 @@ def create_videos_router(
         runs = db.list_phase_runs(video_id)
         if not runs:
             return {"log": ""}
-        log_path = Path(runs[-1]["log_path"])
-        if not log_path.exists():
+        log_path = runs[-1].get("log_path") or ""
+        if not log_path:
             return {"log": ""}
-        with log_path.open("rb") as f:
+        try:
+            resolved_log_path = resolve_data_path(log_path, settings.data_dir, allow_missing=True)
+        except ManagedPathError:
+            return {"log": ""}
+        if not resolved_log_path.is_relative_to(settings.logs_dir.resolve()):
+            return {"log": ""}
+        if not resolved_log_path.exists():
+            return {"log": ""}
+        with resolved_log_path.open("rb") as f:
             f.seek(0, 2)
             size = f.tell()
             f.seek(max(0, size - 12000), 0)

@@ -292,3 +292,28 @@ def test_runtime_cancellation_result_finishes_lease(job_dir: Path) -> None:
     assert len(leases.finished) == 1
     assert leases.finished[0][0] == claim.lease_id
     assert leases.finished[0][1] == result
+
+
+def test_runtime_result_log_path_remains_absolute(job_dir: Path) -> None:
+    context_log_path = job_dir / "run.log"
+    executor = FakeExecutor(
+        "fake",
+        result=ExecutionResult(status="completed", exit_code=0, log_path=str(context_log_path)),
+    )
+    leases = FakeLeaseRepository()
+    registry = FakeRegistry(executor)
+    runtime = ExecutionRuntime(
+        leases=leases,
+        registry=registry,
+        heartbeat_interval_seconds=0.01,
+        lease_ttl_seconds=30,
+    )
+    claim = _make_claim()
+    context = _make_context(claim, job_dir)
+
+    result = runtime.run(claim, context)
+
+    assert result.log_path == str(context_log_path)
+    assert Path(result.log_path).is_absolute()
+    assert len(leases.finished) == 1
+    assert leases.finished[0][1].log_path == str(context_log_path)

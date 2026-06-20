@@ -1,9 +1,9 @@
 import json
-from pathlib import Path
 
 import pytest
 
 from server.app.jobs import JobQueries
+from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.executor import LOCAL_HANDLERS
 from server.app.workflows.reading_analysis import (
     clean_and_parse,
@@ -39,7 +39,7 @@ def test_fetch_questions_with_cms_writes_single_question(tmp_path, monkeypatch):
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
     )
-    artifact_dir = Path(job["storage_dir"])
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
 
     fetch_questions(
         job,
@@ -76,7 +76,7 @@ def test_fetch_questions_without_cms_writes_base_payload(tmp_path):
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
     )
-    artifact_dir = Path(job["storage_dir"])
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
 
     fetch_questions(
         job,
@@ -103,7 +103,7 @@ def test_clean_and_parse_produces_normalized_question(tmp_path):
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
     )
-    artifact_dir = Path(job["storage_dir"])
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions.json").write_text(
         json.dumps(
             {
@@ -152,7 +152,7 @@ def test_clean_and_parse_fails_when_question_id_missing(tmp_path):
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
     )
-    artifact_dir = Path(job["storage_dir"])
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions.json").write_text(
         json.dumps({"questions": [{"title": "no id"}]}),
         encoding="utf-8",
@@ -173,7 +173,7 @@ def test_mark_question_joins_reviewed_artifacts(tmp_path):
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
     )
-    artifact_dir = Path(job["storage_dir"])
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "keywords_reviewed.json").write_text(
         json.dumps({"question_id": "Q100", "keywords": ["加法"]}),
         encoding="utf-8",
@@ -213,7 +213,7 @@ def test_mark_question_fails_when_question_id_mismatch(tmp_path):
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
     )
-    artifact_dir = Path(job["storage_dir"])
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "keywords_reviewed.json").write_text(
         json.dumps({"question_id": "Q100", "keywords": ["加法"]}),
         encoding="utf-8",

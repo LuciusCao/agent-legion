@@ -13,6 +13,8 @@ from server.app.db.migrations.v004_workspace_dag_foreign_keys import (
 )
 from server.app.db.schema import init_db
 
+EXPECTED_VERSIONS = [m.version for m in MIGRATIONS]
+
 
 def _create_pre_v004_database(path: Path) -> None:
     conn = connect_sqlite(path)
@@ -419,7 +421,7 @@ def test_v004_is_idempotent(tmp_path: Path) -> None:
 
     with closing(connect_sqlite(path)) as conn, conn:
         versions = conn.execute("select version from schema_migrations order by version").fetchall()
-        assert [row["version"] for row in versions] == [1, 2, 3, 4, 6, 7, 8]
+        assert [row["version"] for row in versions] == EXPECTED_VERSIONS
         assert _foreign_key_relationships(conn) == {
             ("job_batches", "workspace_id", "workspaces"),
             ("jobs", "workspace_id", "workspaces"),
@@ -503,7 +505,7 @@ def test_v004_interruption_after_copy_recovers_on_reopen(tmp_path: Path) -> None
                 "select version from schema_migrations order by version"
             ).fetchall()
         ]
-        assert versions == [1, 2, 3, 4, 6, 7, 8]
+        assert versions == EXPECTED_VERSIONS
         assert _foreign_key_relationships(conn) == {
             ("job_batches", "workspace_id", "workspaces"),
             ("jobs", "workspace_id", "workspaces"),

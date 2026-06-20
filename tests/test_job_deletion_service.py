@@ -16,6 +16,7 @@ from server.app.services.job_deletion import (
     JobDeletionService,
 )
 from server.app.settings import Settings
+from server.app.storage_paths import resolve_job_dir
 
 
 def _create_settings(tmp_path: Path) -> Settings:
@@ -119,7 +120,7 @@ def test_delete_rejects_active_lease_despite_stale_ui(job_db: JobQueries, tmp_pa
     assert result["reason_code"] == "active_lease"
     # Database row and storage directory must remain intact.
     assert job_db.get_job(job["id"]) is not None
-    assert Path(str(job["storage_dir"])).exists()
+    assert resolve_job_dir(job, settings.jobs_dir).exists()
 
 
 def test_delete_atomic_guard_catches_lease_created_after_precheck(
@@ -129,7 +130,7 @@ def test_delete_atomic_guard_catches_lease_created_after_precheck(
     lease_repo = ExecutorLeaseRepository(job_db.path)
     service = JobDeletionService(job_db, lease_repo, settings)
     job = _create_job(job_db, "ws-race", "Q001", status="queued")
-    storage_dir = Path(str(job["storage_dir"]))
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
     (storage_dir / "artifact.json").write_text("{}", encoding="utf-8")
 
     original = job_db.lease_guarded_mutation
@@ -161,7 +162,7 @@ def test_delete_succeeds_for_inactive_job(job_db: JobQueries, tmp_path: Path) ->
     service = JobDeletionService(job_db, lease_repo, settings)
 
     job = _create_job(job_db, "ws2", "Q002", status="completed")
-    storage_dir = Path(str(job["storage_dir"]))
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "artifact.json").write_text("{}", encoding="utf-8")
 
@@ -234,7 +235,7 @@ def test_delete_rollback_preserves_recreated_destination(
     lease_repo = ExecutorLeaseRepository(job_db.path)
     service = JobDeletionService(job_db, lease_repo, settings)
     job = _create_job(job_db, "ws-rollback", "Q007", status="completed")
-    storage_dir = Path(str(job["storage_dir"]))
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
     (storage_dir / "original.json").write_text("original", encoding="utf-8")
 
@@ -273,3 +274,28 @@ def test_delete_rollback_preserves_recreated_destination(
     assert (original_storage / "sentinel.json").read_text(encoding="utf-8") == "recreated"
     assert staged_storage.exists()
     assert (staged_storage / "original.json").read_text(encoding="utf-8") == "original"
+
+
+def test_delete_raises_for_escaping_storage_dir(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+
+    job = _create_job(job_db, "ws-escape", "Q008", status="completed")
+    legitimate_storage = resolve_job_dir(job, settings.jobs_dir)
+    legitimate_storage.mkdir(parents=True, exist_ok=True)
+    (legitimate_storage / "artifact.json").write_text("{}", encoding="utf-8")
+
+    with job_db.connect() as conn:
+        conn.execute(
+            "update jobs set storage_dir = ? where id = ?",
+            ("../escape", job["id"]),
+        )
+
+    result = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "failed"
+    assert result["reason_code"] == "delete_failed"
+    assert legitimate_storage.exists()
+    assert (legitimate_storage / "artifact.json").exists()
+    assert not (settings.jobs_dir / ".trash").exists()
