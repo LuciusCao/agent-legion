@@ -9,12 +9,15 @@ invariants:
         gate: quick
 
   - id: BOUNDARY-LAYER-001
-    statement: Architecture contract checks enforce layer boundaries between routes, services, and pipeline phases.
+    statement: Architecture contract checks enforce layer boundaries between routes, services, and pipeline phases, and configuration file ownership is enforced by the split-layout architecture check.
     owner: architecture
     risk: high
     evidence:
       - kind: contract
         target: scripts/check_architecture.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_configuration.py
         gate: quick
 
   - id: SECURITY-PATH-001
@@ -153,7 +156,7 @@ invariants:
         gate: full
 
   - id: CONFIG-STARTUP-001
-    statement: "Secrets use environment overrides and enabled runtime dependencies fail validation at startup."
+    statement: "Secrets use environment overrides, enabled runtime dependencies fail validation at startup, and the split configuration layout is detected, validated for owned keys, and composed before settings are built."
     owner: config
     risk: high
     evidence:
@@ -163,6 +166,12 @@ invariants:
       - kind: integration
         target: tests/test_startup_validation.py
         gate: quick
+      - kind: integration
+        target: tests/test_configuration_loader.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_split_config_startup.py
+        gate: full
 
   - id: EXEC-EVENT-001
     statement: |

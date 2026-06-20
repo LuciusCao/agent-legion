@@ -41,6 +41,7 @@ from scripts.architecture.phase6 import (
 from scripts.architecture.route_contracts import has_protocol_response_annotation
 from scripts.architecture.service_boundaries import check_service_import_boundaries
 from scripts.architecture.workflow import check_workflow_definitions
+from scripts.architecture.configuration import check_configuration_ownership
 
 
 def check_repository(root: Path) -> list[str]:
@@ -170,6 +171,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_job_deletion_service_is_singular(root))
     errors.extend(check_schema_mutation_locations(root))
     errors.extend(check_import_cycles(root))
+    errors.extend(check_configuration_ownership(root))
 
     file_budgets = config.get("files", {})
     for relative_path, budget in file_budgets.items():
