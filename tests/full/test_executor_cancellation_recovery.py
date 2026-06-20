@@ -7,12 +7,11 @@ from typing import Any
 
 import pytest
 
-from server.app.executors.config import (
-    PiCapabilityConfig,
-)
+from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.local import LocalExecutor
 from server.app.executors.pi import PiExecutor
 from server.app.jobs import JobQueries
+from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.pi_runner import PiConfig
 from tests.helpers.executor_worker import (
@@ -26,6 +25,20 @@ from tests.helpers.executor_worker import (
 )
 
 GRACE = 0.5
+
+
+class _StubSkillManager(SkillManager):
+    """SkillManager stub that returns an existing on-disk skill directory."""
+
+    def __init__(self, base_dir: Path) -> None:
+        super().__init__(
+            config_path=base_dir / "skills.yaml",
+            lock_path=base_dir / "skills.lock",
+            base_dir=base_dir,
+        )
+
+    def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
+        return self.base_dir / skill_key
 
 
 # Repository-owned style handlers, referenced by fully-qualified module path so
@@ -67,7 +80,7 @@ def _pi_executor(fake_pi: Path, skill_root: Path) -> PiExecutor:
     return PiExecutor(
         "pi-default",
         PiConfig(binary=str(fake_pi), cancellation_grace_seconds=GRACE),
-        skill_root,
+        _StubSkillManager(skill_root),
         {"blocked_pi": PiCapabilityConfig(skill="reading_analysis/blocked_pi")},
     )
 

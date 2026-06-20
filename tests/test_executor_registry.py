@@ -28,6 +28,7 @@ from server.app.executors.runtime_config import (
     OpenClawSkillSafetyRuntimeConfig,
     PiRuntimeConfig,
 )
+from server.app.skills.manager import SkillManager
 
 
 def _write_handler_artifact(artifact_dir: Path, name: str) -> None:
@@ -104,14 +105,19 @@ def definitions() -> dict[str, ExecutorConfig]:
 
 
 @pytest.fixture
-def runtime_dependencies() -> RuntimeDependencies:
+def runtime_dependencies(tmp_path: Path) -> RuntimeDependencies:
+    skill_manager = SkillManager(
+        config_path=tmp_path / "skills.yaml",
+        lock_path=tmp_path / "skills.lock",
+        base_dir=tmp_path / "skills",
+    )
     return RuntimeDependencies(
         local_handlers={
             "reading_analysis.fetch_questions": _fetch_questions_handler,
             "reading_analysis.clean_and_parse": _clean_and_parse_handler,
         },
         pi_runtime=_sample_pi_runtime(),
-        pi_skill_root=Path("."),
+        skill_manager=skill_manager,
         openclaw_runtime=OpenClawRuntimeConfig(
             command_template=(
                 "openclaw",
@@ -211,7 +217,7 @@ def test_registry_skips_unavailable_local_handlers(
     runtime = RuntimeDependencies(
         local_handlers={"reading_analysis.available": _available_handler},
         pi_runtime=runtime_dependencies.pi_runtime,
-        pi_skill_root=runtime_dependencies.pi_skill_root,
+        skill_manager=runtime_dependencies.skill_manager,
         openclaw_runtime=runtime_dependencies.openclaw_runtime,
     )
 
@@ -243,7 +249,7 @@ def test_registry_builds_local_executor_with_settings_and_job_db(
     runtime = RuntimeDependencies(
         local_handlers=runtime_dependencies.local_handlers,
         pi_runtime=runtime_dependencies.pi_runtime,
-        pi_skill_root=runtime_dependencies.pi_skill_root,
+        skill_manager=runtime_dependencies.skill_manager,
         openclaw_runtime=runtime_dependencies.openclaw_runtime,
         settings_config=settings_config,
         job_db=job_db,
