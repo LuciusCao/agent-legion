@@ -21,7 +21,7 @@ def test_add_video_list_artifacts_and_rerun(tmp_path, client):
     assert created_video["id"] == "knowledge_K001"
     assert created_video["content_type"] == "knowledge"
     assert created_video["knowledge_code"] == "K001"
-    assert created_video["storage_dir"] == "videos/knowledge_K001"
+    assert created_video["storage_dir"] == str(tmp_path / "videos" / "knowledge_K001")
     assert (tmp_path / "videos" / "knowledge_K001").is_dir()
 
     video_dir = tmp_path / "videos" / "knowledge_K001"
@@ -67,7 +67,7 @@ def test_add_question_without_url_waits_for_url(tmp_path, monkeypatch, client):
     assert video["status"] == "missing_url"
     assert video["current_phase"] == "waiting_for_url"
     assert video["question_id"] == "Q001"
-    assert video["storage_dir"] == "videos/question_Q001"
+    assert video["storage_dir"] == str(tmp_path / "videos" / "question_Q001")
     assert (tmp_path / "videos" / "question_Q001").is_dir()
 
 
@@ -100,7 +100,7 @@ def test_add_knowledge_without_url_fetches_source_v2_from_cms(tmp_path, monkeypa
     assert video["source_url"] == "https://example.com/k001.mp4"
     assert video["status"] == "queued"
     assert video["current_phase"] == "download"
-    assert video["storage_dir"] == "videos/knowledge_K001"
+    assert video["storage_dir"] == str(tmp_path / "videos" / "knowledge_K001")
     assert (tmp_path / "videos" / "knowledge_K001").is_dir()
 
 
