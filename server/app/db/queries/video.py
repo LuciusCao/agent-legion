@@ -1,13 +1,12 @@
+from __future__ import annotations
+
 import json
 import sqlite3
-from contextlib import contextmanager
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
-from server.app.db.connection import connect_sqlite
 from server.app.db.notifications import NotificationHub
-from server.app.db.schema import init_db
+from server.app.db.queries.base import VideoQueriesBase
 from server.app.pipeline.common import make_record_id, resolve_video_dir
 from server.app.pipeline.openclaw import extract_openclaw_arg
 from server.app.records import PhaseRunRecord, VideoRecord
@@ -21,6 +20,8 @@ def _iso(dt_str: str | None) -> str | None:
     """Convert SQLite timestamp (UTC) to ISO 8601 format with timezone."""
     if not dt_str:
         return None
+    from datetime import UTC, datetime
+
     dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
     return dt.isoformat()
 
@@ -69,35 +70,9 @@ def _build_update_assignments(ordered_keys: list[str]) -> str:
     return ", ".join(f"{key}=?" for key in ordered_keys)
 
 
-class VideoQueries:
-    def __init__(
-        self, path: Path, hub: NotificationHub | None = None, videos_dir: Path | None = None
-    ):
-        self.path = path
-        self._hub = hub
-        self._videos_dir = videos_dir
-        init_db(path)
-
-    @contextmanager
-    def connect(self):
-        conn = connect_sqlite(self.path)
-        try:
-            with conn:
-                yield conn
-        finally:
-            conn.close()
-
-    @contextmanager
-    def _connect_read(self):
-        """Read-only connection context that does not implicitly commit."""
-        conn = connect_sqlite(self.path)
-        try:
-            yield conn
-        finally:
-            conn.close()
-
-    def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
-        return cast(VideoRecord, dict(row)) if row else None
+class VideoQueriesMixin(VideoQueriesBase):
+    _hub: NotificationHub | None
+    _videos_dir: Path | None
 
     def _list_phase_runs_with_conn(
         self, conn: sqlite3.Connection, video_id: str
@@ -344,27 +319,6 @@ class VideoQueries:
         if notify:
             self.batch_notify(video_ids)
 
-    def start_phase(
-        self, video_id: str, phase_key: str, command: list[str], log_path: str = ""
-    ) -> PhaseRunRecord | None:
-        with self.connect() as conn:
-            updated = conn.execute(
-                "update videos set current_phase=?, status='running', updated_at=current_timestamp where id=? and status in ('queued', 'missing_url')",
-                (phase_key, video_id),
-            ).rowcount
-            if updated == 0:
-                return None
-            cur = conn.execute(
-                """
-                insert into phase_runs(video_id, phase_key, status, command_json, log_path)
-                values (?, ?, 'running', ?, ?)
-                """,
-                (video_id, phase_key, json.dumps(command), log_path),
-            )
-            row = conn.execute("select * from phase_runs where id=?", (cur.lastrowid,)).fetchone()
-        self._notify(video_id)
-        return _phase_run_with_agent_session(dict(row))
-
     def recover_running_videos(self) -> int:
         video_ids = []
         with self.connect() as conn:
@@ -392,124 +346,6 @@ class VideoQueries:
             self._notify(vid)
         return len(video_ids)
 
-    def finish_phase(
-        self, run_id: int, status: str, exit_code: int | None, error_message: str
-    ) -> None:
-        video_id = None
-        with self.connect() as conn:
-            run = conn.execute("select * from phase_runs where id=?", (run_id,)).fetchone()
-            conn.execute(
-                """
-                update phase_runs
-                set status=?, exit_code=?, error_message=?, finished_at=current_timestamp
-                where id=?
-                """,
-                (status, exit_code, error_message, run_id),
-            )
-            if run:
-                video_id = run["video_id"]
-                conn.execute(
-                    """
-                    update videos
-                    set status=?, error_message=?, updated_at=current_timestamp
-                    where id=?
-                    """,
-                    (status, error_message, video_id),
-                )
-        if video_id:
-            self._notify(video_id)
-
-    def update_phase_command(self, run_id: int, command: list[str]) -> None:
-        video_id = None
-        with self.connect() as conn:
-            run = conn.execute("select video_id from phase_runs where id=?", (run_id,)).fetchone()
-            conn.execute(
-                "update phase_runs set command_json=? where id=?",
-                (json.dumps(command), run_id),
-            )
-            if run:
-                video_id = run["video_id"]
-        if video_id:
-            self._notify(video_id)
-
-    def get_phase_run(self, video_id: str, run_id: int) -> PhaseRunRecord | None:
-        with self._connect_read() as conn:
-            row = conn.execute(
-                "select * from phase_runs where video_id=? and id=?",
-                (video_id, run_id),
-            ).fetchone()
-            if not row:
-                return None
-            phase_run = _phase_run_with_agent_session(dict(row))
-            phase_run["started_at"] = _iso(phase_run["started_at"]) or ""
-            phase_run["finished_at"] = _iso(phase_run["finished_at"])
-            return phase_run
-
-    def record_transcription_run(
-        self,
-        video_id: str,
-        provider: str,
-        status: str,
-        srt_entry_count: int,
-        validation_summary: str,
-        fallback_reason: str,
-    ) -> None:
-        with self.connect() as conn:
-            conn.execute(
-                """
-                insert into transcription_runs(
-                  video_id,
-                  provider,
-                  status,
-                  finished_at,
-                  srt_entry_count,
-                  validation_summary,
-                  fallback_reason
-                )
-                values (?, ?, ?, current_timestamp, ?, ?, ?)
-                """,
-                (
-                    video_id,
-                    provider,
-                    status,
-                    srt_entry_count,
-                    validation_summary,
-                    fallback_reason,
-                ),
-            )
-        self._notify(video_id)
-
-    def list_phase_runs(self, video_id: str) -> list[PhaseRunRecord]:
-        with self._connect_read() as conn:
-            rows = [
-                dict(row)
-                for row in conn.execute(
-                    "select * from phase_runs where video_id=? order by id", (video_id,)
-                )
-            ]
-            for row in rows:
-                row["started_at"] = _iso(row["started_at"]) or ""
-                row["finished_at"] = _iso(row["finished_at"])
-                _phase_run_with_agent_session(row)
-            return cast(list[PhaseRunRecord], rows)
-
-    def list_transcription_runs(self, video_id: str) -> list[dict[str, Any]]:
-        with self._connect_read() as conn:
-            rows = [
-                dict(row)
-                for row in conn.execute(
-                    "select * from transcription_runs where video_id=? order by id", (video_id,)
-                )
-            ]
-            for row in rows:
-                row["started_at"] = _iso(row["started_at"]) or ""
-                row["finished_at"] = _iso(row["finished_at"])
-            return rows
-
-    def clear_transcription_runs(self, video_id: str) -> None:
-        with self.connect() as conn:
-            conn.execute("delete from transcription_runs where video_id=?", (video_id,))
-
     def delete_video(self, video_id: str) -> None:
         with self.connect() as conn:
             conn.execute("delete from phase_runs where video_id=?", (video_id,))
@@ -529,69 +365,6 @@ class VideoQueries:
                     f"select * from videos where id in ({placeholders})", video_ids
                 )
             ]
-
-    def insert_package(
-        self,
-        path: str,
-        name: str = "",
-        video_count: int = 0,
-        size_bytes: int = 0,
-        locked: int = 0,
-    ) -> None:
-        from datetime import UTC, datetime
-
-        with self.connect() as conn:
-            conn.execute(
-                "insert into packages(path, name, video_count, size_bytes, locked, created_at) values (?, ?, ?, ?, ?, ?)",
-                (path, name, video_count, size_bytes, locked, datetime.now(UTC).isoformat()),
-            )
-
-    def list_packages(self, limit: int = 5) -> list[dict[str, Any]]:
-        with self._connect_read() as conn:
-            return [
-                cast(dict[str, Any], dict(row))
-                for row in conn.execute(
-                    "select * from packages order by created_at desc limit ?",
-                    (limit,),
-                )
-            ]
-
-    def delete_package(self, package_id: int) -> None:
-        with self.connect() as conn:
-            conn.execute("delete from packages where id = ?", (package_id,))
-
-    def update_package_name(self, package_id: int, name: str) -> None:
-        with self.connect() as conn:
-            conn.execute("update packages set name = ? where id = ?", (name, package_id))
-
-    def update_package_stats(
-        self,
-        package_id: int,
-        *,
-        name: str | None = None,
-        video_count: int | None = None,
-        size_bytes: int | None = None,
-        locked: int | None = None,
-    ) -> None:
-        fields: list[str] = []
-        values: list[Any] = []
-        if name is not None:
-            fields.append("name = ?")
-            values.append(name)
-        if video_count is not None:
-            fields.append("video_count = ?")
-            values.append(video_count)
-        if size_bytes is not None:
-            fields.append("size_bytes = ?")
-            values.append(size_bytes)
-        if locked is not None:
-            fields.append("locked = ?")
-            values.append(locked)
-        if not fields:
-            return
-        sql = f"update packages set {', '.join(fields)} where id = ?"
-        with self.connect() as conn:
-            conn.execute(sql, values + [package_id])
 
     def batch_delete_videos(self, video_ids: list[str]) -> None:
         if not video_ids:
