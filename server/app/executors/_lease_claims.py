@@ -11,7 +11,7 @@ from server.app.executors._lease_control import (
     _read_job_execution_control,
 )
 from server.app.executors._lease_transactions import _sqlite_timestamp
-from server.app.executors._path_canonicalization import canonicalize_if_absolute
+from server.app.executors._path_canonicalization import canonicalize_data_path
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
 
 
@@ -136,7 +136,7 @@ def claim_lease(
     if cursor.rowcount == 0:
         return None
 
-    log_path = canonicalize_if_absolute(request.log_path, data_dir)
+    log_path = canonicalize_data_path(request.log_path, data_dir, "logs")
     cursor = conn.execute(
         """
         insert into node_runs(

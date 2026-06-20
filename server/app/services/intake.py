@@ -5,9 +5,10 @@ from server.app.cms.client import get_token
 from server.app.cms.knowledge import lookup_knowledge_video
 from server.app.cms.question import lookup_question_video
 from server.app.db import Database
-from server.app.pipeline.common import make_record_id, resolve_video_dir
+from server.app.pipeline.common import make_record_id
 from server.app.records import VideoRecord
 from server.app.security import validate_download_url
+from server.app.services.video_read import project_video_storage_dir
 from server.app.settings import Settings
 from server.app.storage_paths import make_data_relative
 
@@ -88,13 +89,14 @@ def add_video_items(
         if external_id:
             existing = existing_by_identity.get((content_type, external_id))
             if existing:
+                projected = project_video_storage_dir(existing, settings)
                 results.append(
                     {
                         "external_id": external_id,
                         "content_type": content_type,
                         "status": "duplicate",
                         "message": "资源已在队列中",
-                        "video": existing,
+                        "video": projected,
                     }
                 )
                 continue
@@ -102,13 +104,14 @@ def add_video_items(
             video_id = make_record_id(item.url.strip(), content_type, external_id)
             existing = existing_by_id.get(video_id)
             if existing:
+                projected = project_video_storage_dir(existing, settings)
                 results.append(
                     {
                         "external_id": external_id,
                         "content_type": content_type,
                         "status": "duplicate",
                         "message": "资源已在队列中",
-                        "video": existing,
+                        "video": projected,
                     }
                 )
                 continue
@@ -157,10 +160,7 @@ def add_video_items(
         )
         saved = db.get_video(video["id"])
         if saved is not None:
-            saved_dir = resolve_video_dir(saved, settings.videos_dir)
-            projected: dict[str, Any] = dict(saved)
-            projected["storage_dir"] = str(saved_dir)
-            saved = cast(VideoRecord, projected)
+            saved = cast(VideoRecord, project_video_storage_dir(saved, settings))
         videos.append(saved)
         results.append(
             {

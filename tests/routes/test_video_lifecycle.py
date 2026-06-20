@@ -292,3 +292,4 @@ def test_run_to_success(client, monkeypatch):
     response = client.post(f"/api/videos/{video_id}/run-to", json={"target_phase": "download"})
     assert response.status_code == 200
     assert response.json()["result"]["status"] == "accepted"
+    assert response.json()["video"]["storage_dir"] == created.json()["videos"][0]["storage_dir"]

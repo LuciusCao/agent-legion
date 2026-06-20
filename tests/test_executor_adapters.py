@@ -237,6 +237,8 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
     assert result.exit_code == 0
     assert result.produced_artifacts == ("keywords_raw.json",)
     assert "fake_pi" in result.command[0]
+    assert Path(result.run_dir).is_relative_to(job_dir / "runs" / "extract_keywords")
+    assert Path(result.session_dir) == Path(result.run_dir) / "session"
     assert ctx.log_path.is_file()
     assert "event" in ctx.log_path.read_text(encoding="utf-8")
 

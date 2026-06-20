@@ -33,6 +33,8 @@ class ExecutionResult:
     error_message: str = ""
     command: tuple[str, ...] = ()
     log_path: str = ""
+    run_dir: str = ""
+    session_dir: str = ""
     session_reference: str = ""
     produced_artifacts: tuple[str, ...] = ()
 
