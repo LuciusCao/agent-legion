@@ -8,7 +8,7 @@ Video Hive 设计为**本地运行**的工具，不依赖云服务。开发者�
 
 ```
 config/
-└── pipeline.yaml           # ASR 配置、OpenClaw 命令模板、流水线开关
+└── workflow.yaml           # ASR 配置、OpenClaw 命令模板、流水线开关
 
 data/                       # 运行时数据（gitignored）
 ├── video_hive.sqlite       # SQLite 数据库
@@ -50,7 +50,7 @@ scripts/
 - `cms`
 - `data_dir`
 - `openclaw` — OpenClaw 命令模板与工作目录
-- `pipelines` — Agent Legion DAG 流水线开关
+- `workflows` — Agent Legion DAG 流水线开关
 - `resource_providers`
 - `server`
 - `worker`
