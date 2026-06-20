@@ -1,14 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
-import { fetchJobArtifact, fetchJobDetail, deleteJob } from '../api'
-import { rerunJob, runToJob, packageJobs } from '../jobApi'
+import { fetchJobArtifact } from '../api'
 import { useUiStore } from '../stores/uiStore'
-import { useJobStore } from '../stores/jobStore'
-import type { JobDetailResponse } from '../types'
 import {
-  POLLING_STATUSES,
   toDagEdges,
   toDagNodes,
   toWorkflowDefinition,
@@ -18,16 +14,24 @@ import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
 import { JobDetailActions } from '../components/JobDetailActions'
+import { useJobDetail } from './jobDetail/useJobDetail'
 
 export default function JobDetailPage() {
   const { workspaceId, jobId } = useParams<{
     workspaceId: string
     jobId: string
   }>()
-  const navigate = useNavigate()
-  const { setPageTitle, setDetailPageActions } = useUiStore()
-  const [detail, setDetail] = useState<JobDetailResponse | null>(null)
-  const [error, setError] = useState('')
+  const { setDetailPageActions } = useUiStore()
+  const {
+    detail,
+    error,
+    actionLoading,
+    handleRerun,
+    handleRunTo,
+    handleContinue,
+    handlePackage,
+    handleDelete,
+  } = useJobDetail(workspaceId, jobId)
   const [artifactListOpen, setArtifactListOpen] = useState(false)
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewArtifact, setPreviewArtifact] = useState<{
@@ -37,64 +41,17 @@ export default function JobDetailPage() {
   const [dagDialogOpen, setDagDialogOpen] = useState(false)
   const artifactRequestId = useRef(0)
 
-  const refreshDetail =
-    useCallback(async (): Promise<JobDetailResponse | null> => {
-      if (!jobId) return null
-      try {
-        const data = await fetchJobDetail(jobId)
-        setDetail(data)
-        setError('')
-        return data
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-        return null
-      }
-    }, [jobId])
-
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    setDetail(null)
-    setError('')
     setArtifactListOpen(false)
     setPreviewOpen(false)
     setPreviewArtifact(null)
-    if (!jobId) return
-    let stale = false
-    refreshDetail().then((data) => {
-      if (stale || !data) return
-      setPageTitle(data.job.title || data.job.source_id || '任务详情')
-    })
     return () => {
-      stale = true
-      setPageTitle(null)
       setArtifactListOpen(false)
       setPreviewOpen(false)
       setPreviewArtifact(null)
     }
-  }, [jobId, setPageTitle, refreshDetail])
-
-  // Poll every 5s for queued and running jobs only
-  const detailRef = useRef(detail)
-  useEffect(() => {
-    detailRef.current = detail
-  }, [detail])
-  useEffect(() => {
-    if (!jobId) return
-    let stale = false
-    const timer = setInterval(() => {
-      const status = detailRef.current?.job.status
-      if (status && POLLING_STATUSES.has(status)) {
-        refreshDetail().then((data) => {
-          if (stale || !data) return
-          setDetail(data)
-        })
-      }
-    }, 5000)
-    return () => {
-      stale = true
-      clearInterval(timer)
-    }
-  }, [jobId, refreshDetail])
+  }, [jobId])
 
   const dagNodes = useMemo(
     () => (detail ? toDagNodes(detail.nodes) : []),
@@ -141,80 +98,45 @@ export default function JobDetailPage() {
     ].join(':')
   }, [detail])
 
-  const [actionLoading, setActionLoading] = useState(false)
+  const comprehensionCompleted = useMemo(() => {
+    if (!detail) return false
+    const assembleCompleted = detail.nodes.some(
+      (n) =>
+        n.node_key === 'assemble_comprehension_info' && n.status === 'completed'
+    )
+    const reviewKeyInfoCompleted = detail.nodes.some(
+      (n) => n.node_key === 'review_key_info' && n.status === 'completed'
+    )
+    const reviewPossibleErrorsCompleted = detail.nodes.some(
+      (n) => n.node_key === 'review_possible_errors' && n.status === 'completed'
+    )
+    return (
+      assembleCompleted ||
+      (reviewKeyInfoCompleted && reviewPossibleErrorsCompleted)
+    )
+  }, [detail])
 
-  const handleRerun = useCallback(
-    async (nodeKey: string) => {
+  const openArtifact = useCallback(
+    async (name: string) => {
       if (!jobId) return
-      setActionLoading(true)
+      const requestId = ++artifactRequestId.current
+      setArtifactListOpen(false)
+      setPreviewArtifact({ name, content: '' })
+      setPreviewOpen(true)
       try {
-        await rerunJob(jobId, nodeKey)
-        await refreshDetail()
+        const artifact = await fetchJobArtifact(jobId, name)
+        if (requestId !== artifactRequestId.current) return
+        setPreviewArtifact({ name, content: artifact.content })
       } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setActionLoading(false)
+        if (requestId !== artifactRequestId.current) return
+        setPreviewArtifact({
+          name,
+          content: err instanceof Error ? err.message : String(err),
+        })
       }
     },
-    [jobId, refreshDetail]
+    [jobId]
   )
-
-  const handleRunTo = useCallback(
-    async (targetKey: string, startKey?: string) => {
-      if (!jobId) return
-      setActionLoading(true)
-      try {
-        await runToJob(jobId, targetKey, startKey)
-        await refreshDetail()
-      } catch (err) {
-        setError(err instanceof Error ? err.message : String(err))
-      } finally {
-        setActionLoading(false)
-      }
-    },
-    [jobId, refreshDetail]
-  )
-
-  const handleContinue = useCallback(async () => {
-    if (!jobId) return
-    setActionLoading(true)
-    try {
-      await useJobStore.getState().continueJob(jobId)
-      await refreshDetail()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setActionLoading(false)
-    }
-  }, [jobId, refreshDetail])
-
-  const handlePackage = useCallback(async () => {
-    if (!workspaceId || !jobId) return
-    setActionLoading(true)
-    try {
-      const result = await packageJobs(workspaceId, [jobId])
-      if (result.download_url) {
-        window.open(result.download_url, '_blank')
-      }
-      await refreshDetail()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setActionLoading(false)
-    }
-  }, [workspaceId, jobId, refreshDetail])
-
-  const handleDelete = useCallback(async () => {
-    if (!jobId || !workspaceId) return
-    setActionLoading(true)
-    try {
-      await deleteJob(jobId)
-      navigate(`/workspaces/${encodeURIComponent(workspaceId)}`)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      setActionLoading(false)
-    }
-  }, [jobId, workspaceId, navigate])
 
   useEffect(() => {
     if (!detail) {
@@ -248,43 +170,6 @@ export default function JobDetailPage() {
     handlePackage,
     handleDelete,
   ])
-
-  async function openArtifact(name: string) {
-    if (!jobId) return
-    const requestId = ++artifactRequestId.current
-    setArtifactListOpen(false)
-    setPreviewArtifact({ name, content: '' })
-    setPreviewOpen(true)
-    try {
-      const artifact = await fetchJobArtifact(jobId, name)
-      if (requestId !== artifactRequestId.current) return
-      setPreviewArtifact({ name, content: artifact.content })
-    } catch (err) {
-      if (requestId !== artifactRequestId.current) return
-      setPreviewArtifact({
-        name,
-        content: err instanceof Error ? err.message : String(err),
-      })
-    }
-  }
-
-  const comprehensionCompleted = useMemo(() => {
-    if (!detail) return false
-    const assembleCompleted = detail.nodes.some(
-      (n) =>
-        n.node_key === 'assemble_comprehension_info' && n.status === 'completed'
-    )
-    const reviewKeyInfoCompleted = detail.nodes.some(
-      (n) => n.node_key === 'review_key_info' && n.status === 'completed'
-    )
-    const reviewPossibleErrorsCompleted = detail.nodes.some(
-      (n) => n.node_key === 'review_possible_errors' && n.status === 'completed'
-    )
-    return (
-      assembleCompleted ||
-      (reviewKeyInfoCompleted && reviewPossibleErrorsCompleted)
-    )
-  }, [detail])
 
   if (!jobId) {
     return <p className="error-text">缺少任务 ID</p>
