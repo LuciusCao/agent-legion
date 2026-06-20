@@ -12,6 +12,7 @@ from server.app.jobs.executor_configuration import (
     get_workspace_executor_configuration,
     replace_workspace_executor_configuration,
 )
+from server.app.jobs.queries.base import JobQueriesBase
 
 
 def _safe_identifier(value: str, fallback: str) -> str:
@@ -41,7 +42,7 @@ def _workspace_record(row: sqlite3.Row) -> dict[str, Any]:
     return record
 
 
-class WorkspaceQueriesMixin:
+class WorkspaceQueriesMixin(JobQueriesBase):
     jobs_dir: Path
 
     def create_workspace(

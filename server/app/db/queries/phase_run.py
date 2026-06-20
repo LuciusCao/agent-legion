@@ -1,14 +1,13 @@
 from __future__ import annotations
 
 import json
-import sqlite3
-from typing import Any, cast
+from typing import cast
 
-from server.app.db.queries.video import _iso, _phase_run_with_agent_session
+from server.app.db.queries.video import VideoQueriesMixin, _iso, _phase_run_with_agent_session
 from server.app.records import PhaseRunRecord
 
 
-class PhaseRunQueriesMixin:
+class PhaseRunQueriesMixin(VideoQueriesMixin):
     def start_phase(
         self, video_id: str, phase_key: str, command: list[str], log_path: str = ""
     ) -> PhaseRunRecord | None:

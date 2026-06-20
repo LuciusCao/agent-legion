@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-import sqlite3
-from typing import Any
+from server.app.jobs.queries.base import JobQueriesBase
 
 
-class JobStatusQueriesMixin:
+class JobStatusQueriesMixin(JobQueriesBase):
     def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
         with self._connect_read() as conn:
             rows = conn.execute(
