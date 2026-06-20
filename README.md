@@ -29,7 +29,13 @@ UV_CACHE_DIR=.uv-cache uv sync
 
 ## Configuration
 
-Edit `config/workflow.yaml`.
+Configuration is split by domain into three files under `config/`:
+
+- `config/app.yaml`: application paths, HTTP settings, and worker concurrency.
+- `config/video_hive.yaml`: ASR, CMS, resource providers, cleanup, and OpenClaw settings.
+- `config/workflow.yaml`: workspace executors and workflow runtime settings.
+
+Edit `config/video_hive.yaml` for:
 
 - `asr.provider`: `auto`, `whisper`, or `sensevoice`.
 - `asr.whisper.binary`: local `whisper-cli`.

@@ -98,6 +98,66 @@ def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypa
     assert token_gen["url"] == "http://basecms/token"
 
 
+def _write_split_config(root: Path) -> None:
+    config_dir = root / "config"
+    config_dir.mkdir()
+    (config_dir / "app.yaml").write_text(
+        "data_dir: data\nserver: {}\nworker: {}\n", encoding="utf-8"
+    )
+    (config_dir / "video_hive.yaml").write_text(
+        "cms:\n"
+        "  token: yaml-token\n"
+        "  token_gen:\n"
+        "    secret: yaml-secret\n"
+        "asr:\n"
+        "  provider: whisper\n"
+        "  whisper:\n"
+        "    binary: yaml-binary\n"
+        "    model: yaml-model\n"
+        "  sensevoice:\n"
+        "    model_dir: yaml-dir\n"
+        "openclaw:\n"
+        "  cwd: yaml-cwd\n"
+        "  command_template:\n"
+        "    - openclaw\n"
+        "    - agent\n",
+        encoding="utf-8",
+    )
+    (config_dir / "workflow.yaml").write_text(
+        "workflows:\n  enabled: false\n  pi:\n    binary: yaml-pi\nexecutors: {}\n",
+        encoding="utf-8",
+    )
+
+
+def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):
+    config_dir = tmp_path / "config"
+    config_dir.mkdir()
+    (config_dir / "app.yaml").write_text(
+        "data_dir: runtime\nworker: {phase_concurrency: {download: 3}}\n", encoding="utf-8"
+    )
+    (config_dir / "video_hive.yaml").write_text(
+        "cms: {base_url: 'https://cms.example/v2'}\n"
+        "openclaw: {cwd: '.', command_template: [openclaw, agent]}\n",
+        encoding="utf-8",
+    )
+    (config_dir / "workflow.yaml").write_text(
+        "workflows: {enabled: false}\nexecutors: {}\n", encoding="utf-8"
+    )
+    monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+    settings = load_settings()
+    assert settings.data_dir == tmp_path / "runtime"
+    assert settings.config["worker"]["phase_concurrency"]["download"] == 3
+    assert settings.config["cms"]["question_url"].startswith("https://cms.example/v2")
+
+
+def test_explicit_path_does_not_inspect_partial_neighbor_layout(tmp_path):
+    (tmp_path / "app.yaml").write_text("data_dir: ignored\n", encoding="utf-8")
+    explicit = tmp_path / "custom.yaml"
+    explicit.write_text("data_dir: selected\n", encoding="utf-8")
+    settings = load_settings(data_dir=tmp_path / "data", config_path=explicit)
+    assert settings.config == {"data_dir": "selected"}
+
+
 def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(
@@ -214,74 +274,125 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
 
 
 @pytest.mark.parametrize(
-    ("env_var", "config_path", "env_value", "expected"),
+    ("layout", "env_var", "config_path", "env_value", "expected"),
     [
         (
+            "legacy",
             "BASECMS_BASE_URL",
             ["cms", "base_url"],
             "http://cms.internal.example.com/v2",
             "http://cms.internal.example.com/v2",
         ),
-        ("VIDEO_HIVE_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
+        ("legacy", "VIDEO_HIVE_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
         (
+            "legacy",
             "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
             ["cms", "token_gen", "secret"],
             "env-secret",
             "env-secret",
         ),
         (
+            "legacy",
             "VIDEO_HIVE_ASR_WHISPER_BINARY",
             ["asr", "whisper", "binary"],
             "/tmp/whisper-cli",
             "/tmp/whisper-cli",
         ),
         (
+            "legacy",
             "VIDEO_HIVE_ASR_WHISPER_MODEL",
             ["asr", "whisper", "model"],
             "/tmp/model.bin",
             "/tmp/model.bin",
         ),
         (
+            "legacy",
             "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR",
             ["asr", "sensevoice", "model_dir"],
             "/tmp/sensevoice",
             "/tmp/sensevoice",
         ),
-        ("VIDEO_HIVE_PI_BINARY", ["workflows", "pi", "binary"], "/tmp/pi", "/tmp/pi"),
-        ("VIDEO_HIVE_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
+        ("legacy", "VIDEO_HIVE_PI_BINARY", ["workflows", "pi", "binary"], "/tmp/pi", "/tmp/pi"),
+        ("legacy", "VIDEO_HIVE_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
+        (
+            "split",
+            "BASECMS_BASE_URL",
+            ["cms", "base_url"],
+            "http://cms.internal.example.com/v2",
+            "http://cms.internal.example.com/v2",
+        ),
+        ("split", "VIDEO_HIVE_CMS_TOKEN", ["cms", "token"], "env-token", "env-token"),
+        (
+            "split",
+            "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET",
+            ["cms", "token_gen", "secret"],
+            "env-secret",
+            "env-secret",
+        ),
+        (
+            "split",
+            "VIDEO_HIVE_ASR_WHISPER_BINARY",
+            ["asr", "whisper", "binary"],
+            "/tmp/whisper-cli",
+            "/tmp/whisper-cli",
+        ),
+        (
+            "split",
+            "VIDEO_HIVE_ASR_WHISPER_MODEL",
+            ["asr", "whisper", "model"],
+            "/tmp/model.bin",
+            "/tmp/model.bin",
+        ),
+        (
+            "split",
+            "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR",
+            ["asr", "sensevoice", "model_dir"],
+            "/tmp/sensevoice",
+            "/tmp/sensevoice",
+        ),
+        ("split", "VIDEO_HIVE_PI_BINARY", ["workflows", "pi", "binary"], "/tmp/pi", "/tmp/pi"),
+        ("split", "VIDEO_HIVE_OPENCLAW_CWD", ["openclaw", "cwd"], "/tmp/cwd", "/tmp/cwd"),
     ],
 )
 def test_env_override_precedes_yaml(
-    tmp_path, monkeypatch, env_var, config_path, env_value, expected
+    tmp_path, monkeypatch, layout, env_var, config_path, env_value, expected
 ):
     monkeypatch.setenv(env_var, env_value)
-    config_path_file = tmp_path / "workflow.yaml"
-    config_path_file.write_text(
-        "data_dir: data\n"
-        "cms:\n"
-        "  token: yaml-token\n"
-        "  token_gen:\n"
-        "    secret: yaml-secret\n"
-        "asr:\n"
-        "  provider: whisper\n"
-        "  whisper:\n"
-        "    binary: yaml-binary\n"
-        "    model: yaml-model\n"
-        "  sensevoice:\n"
-        "    model_dir: yaml-dir\n"
-        "workflows:\n"
-        "  enabled: false\n"
-        "  pi:\n"
-        "    binary: yaml-pi\n"
-        "openclaw:\n"
-        "  cwd: yaml-cwd\n"
-        "  command_template:\n"
-        "    - openclaw\n"
-        "    - agent\n",
-        encoding="utf-8",
-    )
+    if layout == "legacy":
+        config_path_file = tmp_path / "workflow.yaml"
+        config_path_file.write_text(
+            "data_dir: data\n"
+            "cms:\n"
+            "  token: yaml-token\n"
+            "  token_gen:\n"
+            "    secret: yaml-secret\n"
+            "asr:\n"
+            "  provider: whisper\n"
+            "  whisper:\n"
+            "    binary: yaml-binary\n"
+            "    model: yaml-model\n"
+            "  sensevoice:\n"
+            "    model_dir: yaml-dir\n"
+            "workflows:\n"
+            "  enabled: false\n"
+            "  pi:\n"
+            "    binary: yaml-pi\n"
+            "openclaw:\n"
+            "  cwd: yaml-cwd\n"
+            "  command_template:\n"
+            "    - openclaw\n"
+            "    - agent\n",
+            encoding="utf-8",
+        )
+    else:
+        _write_split_config(tmp_path)
+        config_path_file = tmp_path / "config" / "workflow.yaml"
 
-    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path_file)
+    if layout == "split":
+        monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+        settings = load_settings()
+    else:
+        settings = load_settings(data_dir=tmp_path / "data", config_path=config_path_file)
 
     node = settings.config
     for key in config_path[:-1]:
