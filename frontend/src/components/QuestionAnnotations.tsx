@@ -111,8 +111,12 @@ export function QuestionAnnotations({
       return cleanup
     }
 
-    // Already measured for the current measureKey.
-    if (measurements.length === hiddenItems.length) {
+    // Already measured for the current hidden items.
+    const hiddenIds = new Set(hiddenItems.map((i) => i.key_info_id))
+    if (
+      measurements.length === hiddenItems.length &&
+      measurements.every((m) => hiddenIds.has(m.id))
+    ) {
       return cleanup
     }
 
@@ -172,7 +176,7 @@ export function QuestionAnnotations({
     return cleanup
   }, [
     hiddenItems,
-    measurements.length,
+    measurements,
     recalcTick,
     mathJaxTick,
     measureRetryTick,
@@ -191,11 +195,16 @@ export function QuestionAnnotations({
     }
 
     const sorted = measurements
-      .map((m) => ({
-        ...m,
-        center: m.targetTop + m.targetHeight / 2,
-        item: itemMap.get(m.id)!,
-      }))
+      .map((m) => {
+        const item = itemMap.get(m.id)
+        if (!item) return null
+        return {
+          ...m,
+          center: m.targetTop + m.targetHeight / 2,
+          item,
+        }
+      })
+      .filter((m): m is NonNullable<typeof m> => m !== null)
       .sort((a, b) => a.center - b.center)
 
     const layouts: FinalLayout[] = []
