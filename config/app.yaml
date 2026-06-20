@@ -1,0 +1,11 @@
+data_dir: data
+server:
+  host: 127.0.0.1
+  port: 8000
+worker:
+  phase_concurrency:
+    download: 10
+    transcribe: 1
+    assemble: 10
+    package: 10
+    waiting_for_url: 10
