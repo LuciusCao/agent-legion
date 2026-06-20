@@ -615,7 +615,7 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ## Security Considerations
 
 - The backend downloads arbitrary URLs via `requests`; only run with trusted input.
-- OpenClaw commands are executed via `subprocess.run` with user-defined templates in `config/workflow.yaml`. Ensure the configuration file is not writable by untrusted users.
+- OpenClaw commands are executed via `subprocess.run` with user-defined templates in `config/video_hive.yaml`. Ensure the configuration file is not writable by untrusted users.
 - The SQLite database and video storage are local; there is no authentication layer. Do not expose the dev server to untrusted networks.
 - `data/` is gitignored; never commit runtime data or secrets.
 
