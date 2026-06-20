@@ -1,13 +1,30 @@
+import { useEffect, useState } from 'react'
 import { MenuItem, TextField } from '@mui/material'
+import { fetchWorkflows } from '../../api'
 import styles from '../../pages/SettingsPage.module.css'
 
 interface Props {
   workflowKey: string
-  options: Array<{ key: string; label: string }>
   onChange: (key: string) => void
 }
 
-export function WorkflowSection({ workflowKey, options, onChange }: Props) {
+export function WorkflowSection({ workflowKey, onChange }: Props) {
+  const [options, setOptions] = useState<Array<{ key: string; label: string }>>(
+    []
+  )
+
+  useEffect(() => {
+    fetchWorkflows()
+      .then((data) => {
+        setOptions(
+          data.workflows.map((p) => ({ key: p.key, label: p.label }))
+        )
+      })
+      .catch(() => {
+        setOptions([])
+      })
+  }, [])
+
   return (
     <section id="workflow" className={styles.section}>
       <h2 className={styles.sectionTitle}>工作流</h2>

@@ -11,7 +11,6 @@ import { MaterialIcon } from '../components/MaterialIcon'
 import { BasicInfoSection } from '../components/settings/BasicInfoSection'
 import { WorkflowSection } from '../components/settings/WorkflowSection'
 import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
-import { fetchWorkflows } from '../api'
 import styles from './SettingsPage.module.css'
 
 export function SettingsPage() {
@@ -81,34 +80,13 @@ export function SettingsPage() {
   )
 
   const [activeSection, setActiveSection] = useState('basic-info')
-  const [workflowOptions, setWorkflowOptions] = useState<
-    Array<{ key: string; label: string }>
-  >([])
 
   useEffect(() => {
     if (!workspaceId) return
     setWorkspaceId(workspaceId)
     resetTestStatus()
     void fetchSettings(workspaceId)
-  }, [
-    workspaceId,
-    setWorkspaceId,
-    resetTestStatus,
-    fetchSettings,
-    fetchWorkflowDefinition,
-  ])
-
-  useEffect(() => {
-    fetchWorkflows()
-      .then((data) => {
-        setWorkflowOptions(
-          data.workflows.map((p) => ({ key: p.key, label: p.label }))
-        )
-      })
-      .catch(() => {
-        setWorkflowOptions([])
-      })
-  }, [])
+  }, [workspaceId, setWorkspaceId, resetTestStatus, fetchSettings])
 
   useEffect(() => {
     if (!workspaceId) return
@@ -128,54 +106,6 @@ export function SettingsPage() {
       el.scrollIntoView({ behavior: 'smooth' })
     }
   }, [])
-
-  const toggleIntakeMode = (key: string) => {
-    const isEnabled = settings.intakeModes.includes(key)
-    const nextModes = isEnabled
-      ? settings.intakeModes.filter((k) => k !== key)
-      : [...settings.intakeModes, key]
-
-    const mode = workflowDefinition?.intake?.modes.find((m) => m.key === key)
-    if (mode?.resource) {
-      const binding = settings.resources[mode.resource] || {
-        enabled: true,
-        config: {},
-      }
-      const nextResources = {
-        ...settings.resources,
-        [mode.resource]: { ...binding, enabled: !isEnabled },
-      }
-      setSettings({ intakeModes: nextModes, resources: nextResources })
-    } else {
-      setSettings({ intakeModes: nextModes })
-    }
-  }
-
-  const handleResourceConfigChange = (
-    providerKey: string,
-    paramKey: string,
-    value: string
-  ) => {
-    const binding = settings.resources[providerKey] || {
-      enabled: true,
-      config: {},
-    }
-    const nextConfig = { ...binding.config }
-    if (value) {
-      nextConfig[paramKey] = value
-    } else {
-      delete nextConfig[paramKey]
-    }
-    setSettings({
-      resources: {
-        ...settings.resources,
-        [providerKey]: {
-          ...binding,
-          config: nextConfig,
-        },
-      },
-    })
-  }
 
   if (!workspaceId) return null
 
@@ -234,24 +164,19 @@ export function SettingsPage() {
           />
 
           <IntakeConfigSection
-            entityType={settings.entityType}
-            onEntityTypeChange={(entityType) => setSettings({ entityType })}
-            intakeModes={settings.intakeModes}
+            settings={settings}
             workflowDefinition={workflowDefinition}
-            settingsResources={settings.resources}
             resourceProviders={resourceProviders}
             testStatus={testStatus}
             saveError={saveError}
             isTesting={isTesting}
             isSaving={isSaving}
-            onToggleIntakeMode={toggleIntakeMode}
-            onResourceConfigChange={handleResourceConfigChange}
+            setSettings={setSettings}
             onTestConnection={testConnection}
           />
 
           <WorkflowSection
             workflowKey={settings.workflowKey}
-            options={workflowOptions}
             onChange={(key) => setSettings({ workflowKey: key })}
           />
 
