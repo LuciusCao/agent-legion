@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -8,8 +10,6 @@ from fastapi.testclient import TestClient
 from server.app.cms.question import CmsQuestionDetail
 from server.app.jobs import JobQueries
 from server.app.workflows.definition import (
-    WorkflowDefinition,
-    WorkflowIntake,
     WorkflowNode,
     load_workflow_definition,
 )
@@ -18,7 +18,7 @@ from server.app.workflows.executor import (
     execute_node_once,
     process_ready_workflow_node,
 )
-from server.app.workflows.pi_runner import PiRunner
+from tests.workers.helpers import _make_test_definition
 
 
 def test_execute_fetch_question_context_writes_artifact(tmp_path):
@@ -254,150 +254,6 @@ def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
         )
 
 
-def _make_fake_skill(skill_dir: Path) -> None:
-    (skill_dir / "scripts").mkdir(parents=True)
-    (skill_dir / "references").mkdir(parents=True)
-    (skill_dir / "SKILL.md").write_text("# skill", encoding="utf-8")
-    (skill_dir / "references" / "output-contract.md").write_text("# contract", encoding="utf-8")
-    validator = skill_dir / "scripts" / "validate_output.py"
-    validator.write_text(
-        "#!/usr/bin/env python3\n"
-        "import sys\n"
-        "from pathlib import Path\n"
-        "job_dir = Path(sys.argv[1])\n"
-        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
-        "(job_dir / 'keywords_report.json').write_text('{\"summary\": {}}')\n"
-    )
-    validator.chmod(0o755)
-
-
-def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
-    fake_pi = tmp_path / "fake_pi"
-    fake_pi.write_text(
-        "#!/bin/bash\n"
-        'echo \'{"event":"done"}\'\n'
-        "echo '{\"questions\": []}' > keywords_raw.json\n"
-        "echo '{\"summary\": {}}' > keywords_report.json\n"
-    )
-    fake_pi.chmod(0o755)
-
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
-    _make_fake_skill(skill_dir)
-
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
-    job = queries.create_job(
-        workflow_key="reading_analysis",
-        source_type="question",
-        source_id="Q100",
-        batch_id="",
-        title="Question Q100",
-        node_keys=list(definition.nodes),
-    )
-    job_dir = tmp_path / job["storage_dir"]
-    (job_dir / "questions_parsed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q100"}]}), encoding="utf-8"
-    )
-
-    pi_runner = PiRunner.from_config(
-        {"binary": str(fake_pi), "timeout_seconds": 10},
-        skill_root=tmp_path / "skills",
-    )
-
-    completed = execute_node_once(
-        job_db=queries,
-        definition=definition,
-        job=job,
-        node_key="extract_keywords",
-        logs_dir=tmp_path / "logs",
-        pi_runner=pi_runner,
-        skill_root=tmp_path / "skills",
-        jobs_dir=tmp_path / "jobs",
-    )
-
-    assert completed is True
-    assert (job_dir / "keywords_raw.json").is_file()
-    assert (job_dir / "keywords_report.json").is_file()
-    node = queries.get_job_node(job["id"], "extract_keywords")
-    assert node["status"] == "completed"
-
-
-def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
-    fake_pi = tmp_path / "fake_pi"
-    fake_pi.write_text(
-        "#!/bin/bash\n"
-        'echo \'{"event":"done"}\'\n'
-        "echo '{\"questions\": []}' > keywords_raw.json\n"
-        "echo '{\"summary\": {}}' > keywords_report.json\n"
-    )
-    fake_pi.chmod(0o755)
-
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
-    _make_fake_skill(skill_dir)
-
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
-    job = queries.create_job(
-        workflow_key="reading_analysis",
-        source_type="question",
-        source_id="Q100",
-        batch_id="",
-        title="Question Q100",
-        node_keys=list(definition.nodes),
-    )
-    job_dir = tmp_path / job["storage_dir"]
-    (job_dir / "questions_parsed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q100"}]}), encoding="utf-8"
-    )
-
-    pi_runner = PiRunner.from_config(
-        {"binary": str(fake_pi), "timeout_seconds": 10},
-        skill_root=tmp_path / "skills",
-    )
-
-    completed = execute_node_once(
-        job_db=queries,
-        definition=definition,
-        job=job,
-        node_key="extract_keywords",
-        logs_dir=tmp_path / "logs",
-        pi_runner=pi_runner,
-        skill_root=tmp_path / "skills",
-        jobs_dir=tmp_path / "jobs",
-    )
-
-    assert completed is True
-    node = queries.get_job_node(job["id"], "extract_keywords")
-    assert node["status"] == "completed"
-
-
-def test_execute_node_once_raises_when_pi_runner_missing_for_agent_node(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
-    job = queries.create_job(
-        workflow_key="reading_analysis",
-        source_type="question",
-        source_id="Q100",
-        batch_id="",
-        title="Question Q100",
-        node_keys=list(definition.nodes),
-    )
-    job_dir = tmp_path / job["storage_dir"]
-    (job_dir / "questions_parsed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q100"}]}), encoding="utf-8"
-    )
-
-    with pytest.raises(ValueError, match="Pi runner is not configured"):
-        execute_node_once(
-            job_db=queries,
-            definition=definition,
-            job=job,
-            node_key="extract_keywords",
-            logs_dir=tmp_path / "logs",
-            jobs_dir=tmp_path / "jobs",
-        )
-
-
 def test_workflow_worker_does_not_start_when_app_worker_disabled(tmp_path, monkeypatch):
     from server.app import main as app_main
 
@@ -421,15 +277,6 @@ def test_workflow_worker_does_not_start_when_app_worker_disabled(tmp_path, monke
         pass
 
     assert started == []
-
-
-def _make_test_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
-    return WorkflowDefinition(
-        key="test",
-        label="Test",
-        intake=WorkflowIntake(),
-        nodes={n.key: n for n in nodes},
-    )
 
 
 def test_execute_node_wrapped_falls_back_to_direct_update_when_no_run_exists():
@@ -526,81 +373,3 @@ def test_process_ready_workflow_node_refreshes_job_status_when_no_local_nodes_re
     assert result is False
     mock_find.assert_called_once()
     mock_refresh.assert_called_once_with(job_db, "job_1")
-
-
-def test_execute_local_node_run_persists_relative_log_path(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
-    job = queries.create_job(
-        workflow_key="question_content",
-        source_type="question_id",
-        source_id="Q200",
-        batch_id="",
-        title="Question Q200",
-        node_keys=list(definition.nodes),
-    )
-
-    execute_node_once(
-        job_db=queries,
-        definition=definition,
-        job=job,
-        node_key="fetch_question_context",
-        logs_dir=tmp_path / "logs",
-        jobs_dir=tmp_path / "jobs",
-    )
-
-    runs = queries.list_node_runs(job["id"])
-    assert len(runs) == 1
-    assert runs[0]["log_path"].startswith("logs/")
-    assert not Path(runs[0]["log_path"]).is_absolute()
-
-
-def test_execute_pi_node_run_persists_relative_paths(tmp_path, monkeypatch):
-    fake_pi = tmp_path / "fake_pi"
-    fake_pi.write_text(
-        "#!/bin/bash\n"
-        'echo \'{"event":"done"}\'\n'
-        "echo '{\"questions\": []}' > keywords_raw.json\n"
-        "echo '{\"summary\": {}}' > keywords_report.json\n"
-    )
-    fake_pi.chmod(0o755)
-
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
-    _make_fake_skill(skill_dir)
-
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
-    job = queries.create_job(
-        workflow_key="reading_analysis",
-        source_type="question",
-        source_id="Q100",
-        batch_id="",
-        title="Question Q100",
-        node_keys=list(definition.nodes),
-    )
-    job_dir = tmp_path / job["storage_dir"]
-    (job_dir / "questions_parsed.json").write_text(
-        json.dumps({"questions": [{"question_id": "Q100"}]}), encoding="utf-8"
-    )
-
-    pi_runner = PiRunner.from_config(
-        {"binary": str(fake_pi), "timeout_seconds": 10},
-        skill_root=tmp_path / "skills",
-    )
-
-    execute_node_once(
-        job_db=queries,
-        definition=definition,
-        job=job,
-        node_key="extract_keywords",
-        logs_dir=tmp_path / "logs",
-        pi_runner=pi_runner,
-        skill_root=tmp_path / "skills",
-        jobs_dir=tmp_path / "jobs",
-    )
-
-    runs = queries.list_node_runs(job["id"])
-    assert len(runs) == 1
-    assert runs[0]["log_path"].startswith("jobs/")
-    assert runs[0]["run_dir"].startswith("jobs/")
-    assert runs[0]["session_dir"].startswith("jobs/")
