@@ -42,6 +42,8 @@ Edit `config/workflow.yaml`.
 In `auto` ASR mode, Video Hive tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
 
 > See [AGENTS.md](AGENTS.md) for full configuration reference.
+>
+> You must also configure `config/skills.yaml` (and commit the generated `config/skills.lock`) for Agent Legion / Pi workflows to resolve skills. See the Pi section below.
 
 ## Video Types
 
@@ -179,7 +181,7 @@ pi
 
 ### Configuration
 
-Pi settings live in `config/workflow.yaml` under `workflows.pi`:
+Pi CLI settings live in `config/workflow.yaml` under `workflows.pi`:
 
 ```yaml
 workflows:
@@ -199,9 +201,28 @@ workflows:
 - `timeout_seconds`: per-node timeout. Pi is terminated if it exceeds this.
 - `environment`: merged into Pi's subprocess environment.
 
-### Repository Skills
+### External Skills
 
-Each agent node in `reading_analysis` maps to one repository-owned skill under `server/app/workflows/skills/reading_analysis/{node_key}/`. Every skill contains:
+Each agent node in `reading_analysis` (and other workflows) maps to a skill in a **standalone git repository** managed by `SkillManager`. Local copies typically live under:
+
+```text
+~/.agents/skills/agent-legion/<workflow>/<capability>/
+```
+
+For example:
+
+```text
+~/.agents/skills/agent-legion/reading_analysis/extract_keywords/
+~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info/
+```
+
+Skill sources are declared in `config/skills.yaml` and pinned by `config/skills.lock`. To migrate or re-migrate skills from the current source tree, run:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/migrate-skills-to-external-repos.py
+```
+
+Every skill repo must contain:
 
 - `SKILL.md` — execution workflow and I/O contract
 - `references/output-contract.md` — field-level artifact specification

@@ -24,12 +24,12 @@ server/app/pipeline/
 Agent Legion 流水线（与视频流水线独立）：
 
 ```
-server/app/pipelines/
+server/app/workflows/
 ├── definition.py           # DAG 定义加载
 ├── scheduler.py            # 下游节点解析
 ├── executor.py             # 单节点执行
 ├── pi_runner.py            # Pi Agent 调用
-└── skills.py               # Skill 注册
+└── skills.py               # Skill 路径解析 / 契约检查
 ```
 
 ## Data Flow
@@ -46,7 +46,7 @@ server/app/pipelines/
 
 - ASR 使用 `auto` 模式：先尝试 whisper.cpp，失败则回退 SenseVoice。
 - 每个阶段失败都会将视频标记为 `failed`，支持从任意阶段重跑。
-- Agent 阶段通过 OpenClaw 调用外部命令，模板化配置在 `config/pipeline.yaml` 中。
+- Agent 阶段通过 OpenClaw 调用外部命令，模板化配置在 `config/workflow.yaml` 中。
 
 ## API Surface / Interface
 
