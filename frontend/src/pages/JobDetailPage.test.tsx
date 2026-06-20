@@ -259,6 +259,33 @@ describe('JobDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
+  it.each([['running'], ['queued']] as const)(
+    'polls %s jobs every five seconds',
+    async (detailStatus) => {
+      const fetchMock = createFetchMock({ detailStatus })
+      vi.stubGlobal('fetch', fetchMock)
+
+      const { unmount } = renderPage()
+      await waitFor(() => {
+        expect(screen.getByText('提取')).toBeInTheDocument()
+      })
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+
+      await act(async () => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+
+      unmount()
+
+      await act(async () => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    }
+  )
+
   it('reloads questions.json when its producer node completes', async () => {
     let detailRequests = 0
     let artifactRequests = 0
