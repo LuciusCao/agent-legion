@@ -7,6 +7,7 @@ from __future__ import annotations
 import argparse
 import sqlite3
 import sys
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -185,6 +186,7 @@ def run_migration(
     old_data_dir: Path,
     *,
     dry_run: bool = False,
+    on_backup: Callable[[Path], None] | None = None,
 ) -> dict[tuple[str, str], int]:
     """Validate and migrate all affected columns.
 
@@ -194,16 +196,23 @@ def run_migration(
     transaction, and reports counts.
     """
     conn = connect_sqlite(db_path)
-    backup_path: Path | None = None
+    conn.isolation_level = None
     try:
         if not dry_run:
             conn.execute("pragma wal_checkpoint(TRUNCATE)")
-            backup_path = _timestamped_backup_path(db_path)
-            backup_sqlite_connection(conn, backup_path)
-
         conn.execute("BEGIN IMMEDIATE")
-        counts: dict[tuple[str, str], int] = {}
         try:
+            if not dry_run:
+                backup_path = _timestamped_backup_path(db_path)
+                backup_source = connect_sqlite(db_path)
+                try:
+                    backup_sqlite_connection(backup_source, backup_path)
+                finally:
+                    backup_source.close()
+                if on_backup is not None:
+                    on_backup(backup_path)
+
+            counts: dict[tuple[str, str], int] = {}
             for spec in AFFECTED_COLUMNS:
                 counts[(spec.table, spec.path_column)] = _migrate_column(conn, old_data_dir, spec)
         except Exception:
@@ -248,7 +257,12 @@ def main(argv: list[str] | None = None) -> int:
     db_path = settings.data_dir / "video_hive.sqlite"
 
     try:
-        counts = run_migration(db_path, old_data_dir, dry_run=args.dry_run)
+        counts = run_migration(
+            db_path,
+            old_data_dir,
+            dry_run=args.dry_run,
+            on_backup=lambda path: print(f"Backup: {path}"),
+        )
     except PathMigrationError as exc:
         print(
             f"{exc.table}.{exc.column} row {exc.row_id}: {exc}",

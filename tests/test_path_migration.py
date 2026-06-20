@@ -235,6 +235,53 @@ class TestMigratePathsToRelative:
         assert len(backups) == 1
         assert backups[0].is_file()
 
+    def test_real_run_reports_backup_path(
+        self,
+        migration_module: Any,
+        db_path: Path,
+        old_data_dir: Path,
+    ) -> None:
+        reported: list[Path] = []
+
+        migration_module.run_migration(db_path, old_data_dir, on_backup=reported.append)
+
+        assert reported == _list_backups(db_path)
+
+    def test_backup_is_created_while_competing_writers_are_locked(
+        self,
+        migration_module: Any,
+        db_path: Path,
+        old_data_dir: Path,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        conn = sqlite3.connect(db_path)
+        try:
+            conn.execute("create table concurrent_writes(value text)")
+            conn.commit()
+        finally:
+            conn.close()
+
+        outcomes: list[str] = []
+        original_backup = migration_module.backup_sqlite_connection
+
+        def observe_lock(source: sqlite3.Connection, backup_path: Path) -> None:
+            competing = sqlite3.connect(db_path, timeout=0.01)
+            try:
+                competing.execute("insert into concurrent_writes values ('late')")
+                competing.commit()
+                outcomes.append("wrote")
+            except sqlite3.OperationalError:
+                outcomes.append("locked")
+            finally:
+                competing.close()
+            original_backup(source, backup_path)
+
+        monkeypatch.setattr(migration_module, "backup_sqlite_connection", observe_lock)
+
+        migration_module.run_migration(db_path, old_data_dir)
+
+        assert outcomes == ["locked"]
+
     def test_second_run_changes_zero_rows(
         self,
         migration_module: Any,

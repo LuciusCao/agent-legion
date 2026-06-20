@@ -21,7 +21,7 @@ from ..services.video_actions import (
     delete_video_record,
     rerun_video_record,
 )
-from ..services.video_read import VideoReadService
+from ..services.video_read import VideoReadService, project_phase_run_paths
 from ..settings import Settings
 from ..storage_paths import ManagedPathError, resolve_data_path
 
@@ -161,7 +161,7 @@ def create_videos_router(
             raise HTTPException(status_code=404, detail="Video not found")
         return {
             "video": {**video, "packed": bool(video.get("packed", 0))},
-            "phase_runs": db.list_phase_runs(video_id),
+            "phase_runs": project_phase_run_paths(db.list_phase_runs(video_id), settings),
             "transcription_runs": db.list_transcription_runs(video_id),
         }
 
@@ -206,7 +206,7 @@ def create_videos_router(
             raise HTTPException(status_code=409, detail=result["message"])
         if result["status"] == "invalid_phase":
             raise HTTPException(status_code=400, detail=result["message"])
-        return {"result": result, "video": db.get_video(video_id)}
+        return {"result": result, "video": read_service.get_video_detail(video_id)}
 
     @router.post("/{video_id}/rerun")
     def rerun_video(video_id: str, request: RerunRequest) -> dict[str, Any]:
@@ -217,7 +217,7 @@ def create_videos_router(
             raise HTTPException(status_code=409, detail=result["message"])
         if result["status"] == "invalid_phase":
             raise HTTPException(status_code=400, detail=result["message"])
-        return {"video": db.get_video(video_id)}
+        return {"video": read_service.get_video_detail(video_id)}
 
     @router.delete("/{video_id}")
     def delete_video(video_id: str) -> dict[str, Any]:

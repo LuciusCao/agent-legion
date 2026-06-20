@@ -15,6 +15,7 @@ from server.app.executors.models import (
     LeaseClaimRequest,
 )
 from server.app.jobs.queries import JobQueries
+from server.app.storage_paths import ManagedPathError
 
 
 @pytest.fixture
@@ -488,12 +489,15 @@ def test_finish_is_idempotent_and_updates_job_aggregate_status(
     assert claim is not None
 
     data_dir = queries.path.parent
+    run_dir = data_dir / "jobs" / workspace_id / job_id / "runs" / "review_keywords" / "abc"
+    session_dir = run_dir / "session"
     result = ExecutionResult(
         status="completed",
         exit_code=0,
         command=("python", "run.py"),
         log_path="logs/updated.log",
-        session_reference=str(data_dir / "sessions" / "abc"),
+        run_dir=str(run_dir),
+        session_dir=str(session_dir),
     )
     assert repo_a.finish(claim.lease_id, result) is True
     assert repo_a.finish(claim.lease_id, result) is False
@@ -508,7 +512,8 @@ def test_finish_is_idempotent_and_updates_job_aggregate_status(
     assert run["status"] == "completed"
     assert run["exit_code"] == 0
     assert run["log_path"] == "logs/updated.log"
-    assert run["session_dir"] == "sessions/abc"
+    assert run["run_dir"] == run_dir.relative_to(data_dir).as_posix()
+    assert run["session_dir"] == session_dir.relative_to(data_dir).as_posix()
     assert job["status"] == "completed"
 
 
@@ -1189,15 +1194,38 @@ def test_finish_lease_persists_relative_session_dir(
     assert claim is not None
 
     data_dir = queries.path.parent
-    absolute_session = data_dir / "sessions" / "abc"
+    absolute_session = (
+        data_dir / "jobs" / workspace_id / job_id / "runs" / "node" / "abc" / "session"
+    )
     result = ExecutionResult(
         status="completed",
         exit_code=0,
-        session_reference=str(absolute_session),
+        session_dir=str(absolute_session),
     )
     assert repo_a.finish(claim.lease_id, result) is True
 
     with queries.connect() as conn:
         run = conn.execute("select * from node_runs where id=?", (claim.node_run_id,)).fetchone()
     assert run is not None
-    assert run["session_dir"] == "sessions/abc"
+    assert run["session_dir"] == absolute_session.relative_to(data_dir).as_posix()
+
+
+def test_finish_lease_rejects_session_dir_outside_jobs(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(
+        queries, "ws-invalid-session", "local-default", workspace_limit=2
+    )
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="local-default", global_capacity=2)
+    )
+    assert claim is not None
+
+    result = ExecutionResult(
+        status="completed",
+        exit_code=0,
+        session_dir="sessions/abc",
+    )
+
+    with pytest.raises(ManagedPathError, match="expected 'jobs'"):
+        repo_a.finish(claim.lease_id, result)
