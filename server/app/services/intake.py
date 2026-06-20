@@ -1,11 +1,11 @@
 from collections.abc import Sequence
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from server.app.cms.client import get_token
 from server.app.cms.knowledge import lookup_knowledge_video
 from server.app.cms.question import lookup_question_video
 from server.app.db import Database
-from server.app.pipeline.common import make_record_id
+from server.app.pipeline.common import make_record_id, resolve_video_dir
 from server.app.records import VideoRecord
 from server.app.security import validate_download_url
 from server.app.settings import Settings
@@ -156,6 +156,11 @@ def add_video_items(
             current_phase="download" if url else "waiting_for_url",
         )
         saved = db.get_video(video["id"])
+        if saved is not None:
+            saved_dir = resolve_video_dir(saved, settings.videos_dir)
+            projected: dict[str, Any] = dict(saved)
+            projected["storage_dir"] = str(saved_dir)
+            saved = cast(VideoRecord, projected)
         videos.append(saved)
         results.append(
             {

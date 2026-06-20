@@ -35,6 +35,7 @@ class VideoReadService:
     def _enrich(self, video: dict[str, Any]) -> None:
         """Populate derived response fields in place."""
         _enrich_video(video)
+        video_dir = resolve_video_dir(video, self.settings.videos_dir)
+        video["storage_dir"] = str(video_dir)
         if video.get("content_type") == "knowledge" and "interaction_stats" not in video:
-            video_dir = resolve_video_dir(video, self.settings.videos_dir)
             _backfill_interaction_stats(video, video_dir)
