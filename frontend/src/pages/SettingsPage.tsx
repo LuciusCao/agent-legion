@@ -14,33 +14,9 @@ import { ExecutorAllocationSection } from '../components/ExecutorAllocationSecti
 import { ExecutorBindingSection } from '../components/ExecutorBindingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
+import { ConnectionTestStatus } from '../components/settings/ConnectionTestStatus'
 import { fetchWorkflows } from '../api'
 import styles from './SettingsPage.module.css'
-
-type ConnectionState = 'idle' | 'testing' | 'success' | 'failed'
-
-function ConnectionStatusPill({
-  state,
-  message,
-}: {
-  state: ConnectionState
-  message?: string
-}) {
-  if (state === 'idle') return null
-  const labels: Record<ConnectionState, string> = {
-    idle: '',
-    testing: '测试中...',
-    success: '连接成功',
-    failed: '连接失败',
-  }
-  const className = `status-badge ${state === 'testing' ? 'running' : state}`
-  return (
-    <span className={className}>
-      {labels[state]}
-      {message ? ` · ${message}` : ''}
-    </span>
-  )
-}
 
 export function SettingsPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
@@ -428,7 +404,7 @@ export function SettingsPage() {
                 {isTesting ? '测试中...' : '测试连接'}
               </Button>
               <div aria-live="polite" aria-atomic="true">
-                <ConnectionStatusPill
+                <ConnectionTestStatus
                   state={testStatus.state}
                   message={testStatus.message}
                 />
