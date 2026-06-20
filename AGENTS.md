@@ -22,7 +22,9 @@ video-hive/
 ├── pyproject.toml              # Python project metadata, dependencies, tool config
 ├── uv.lock                     # Locked Python dependency tree
 ├── config/
-│   └── workflow.yaml           # Runtime configuration (ASR providers, openclaw, workflows)
+│   ├── app.yaml                # Application paths, HTTP settings, worker concurrency
+│   ├── video_hive.yaml         # ASR, CMS, resource providers, cleanup, openclaw
+│   └── workflow.yaml           # Workspace executors and workflow runtime settings
 ├── server/
 │   ├── app/
 │   │   ├── main.py             # FastAPI app factory + lifespan worker threads
@@ -530,7 +532,13 @@ Previous runs are preserved. Rerunning a node deletes that node's and all downst
 
 ## Configuration
 
-Edit `config/workflow.yaml`:
+Configuration is split by domain into three files under `config/`:
+
+- `config/app.yaml`: application paths, HTTP settings, and worker concurrency.
+- `config/video_hive.yaml`: ASR, CMS, resource providers, cleanup, and OpenClaw settings.
+- `config/workflow.yaml`: workspace executors and workflow runtime settings.
+
+Edit `config/video_hive.yaml` for:
 
 - `asr.provider`: `auto`, `whisper`, or `sensevoice`.
 - `asr.whisper.binary`: path to local `whisper-cli`.
