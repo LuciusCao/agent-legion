@@ -16,3 +16,4 @@ frontend/dist/
 .coverage.*
 coverage/
 .DS_Store
+config/workflow.yaml.bak-*
