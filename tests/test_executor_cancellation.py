@@ -23,6 +23,7 @@ from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.pipeline.openclaw import OpenClawRunner
+from server.app.skills.manager import SkillManager
 from server.app.workflows.pi_runner import PiConfig
 
 
@@ -204,6 +205,20 @@ def _pi_skill(skill_dir: Path) -> None:
     )
 
 
+class _StubSkillManager(SkillManager):
+    """SkillManager stub that returns an existing on-disk skill directory."""
+
+    def __init__(self, base_dir: Path) -> None:
+        super().__init__(
+            config_path=base_dir / "skills.yaml",
+            lock_path=base_dir / "skills.lock",
+            base_dir=base_dir,
+        )
+
+    def get_skill_dir(self, skill_key: str, execution_id: str) -> Path:
+        return self.base_dir / skill_key
+
+
 class TestPiExecutorCancellation:
     @pytest.mark.slow
     @pytest.mark.skipif(not hasattr(os, "killpg"), reason="process groups require POSIX")
@@ -218,7 +233,7 @@ class TestPiExecutorCancellation:
         executor = PiExecutor(
             "pi-default",
             PiConfig(binary=str(fake_pi), cancellation_grace_seconds=0.3),
-            tmp_path / "skills",
+            _StubSkillManager(tmp_path / "skills"),
             {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
         )
         job_dir = tmp_path / "job"

@@ -182,3 +182,16 @@ exemptions:
     reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor per executor definition to submit adapter executions; each pool is bounded by the executor's global capacity and keyed by executor_id, not workspace.
     owner: workspace-executor
     remove_when: issues/open/032-P2-event-driven-worker.md
+
+  # Pre-existing file budget overruns ---------------------------------------------------------
+  - check: architecture.file_budget
+    path: scripts/architecture/import_cycles.py
+    reason: Pre-existing line-count overrun before Pi skill governance work; module split tracked in issue.
+    owner: architecture
+    remove_when: issues/open/037-import-cycle-budget-overrun.md
+
+  - check: architecture.file_budget
+    path: tests/test_architecture_import_cycles.py
+    reason: Pre-existing line-count overrun before Pi skill governance work; test split tracked in issue.
+    owner: architecture
+    remove_when: issues/open/037-import-cycle-budget-overrun.md
