@@ -2,43 +2,83 @@ import { Button, Checkbox, MenuItem, TextField } from '@mui/material'
 import styles from '../../pages/SettingsPage.module.css'
 import { ConnectionTestStatus } from './ConnectionTestStatus'
 import type {
-  ResourceBinding,
   ResourceProviderDefinition,
   WorkflowDefinitionRecord,
+  WorkspaceSettings,
 } from '../../types'
 import type { TestStatus } from '../../stores/settingStore'
 
 interface Props {
-  entityType: 'question' | 'knowledge' | 'video'
-  onEntityTypeChange: (type: 'question' | 'knowledge' | 'video') => void
-  intakeModes: string[]
+  settings: WorkspaceSettings
   workflowDefinition: WorkflowDefinitionRecord | null
-  settingsResources: Record<string, ResourceBinding>
   resourceProviders: ResourceProviderDefinition[]
   testStatus: TestStatus
   saveError: string | null
   isTesting: boolean
   isSaving: boolean
-  onToggleIntakeMode: (key: string) => void
-  onResourceConfigChange: (providerKey: string, paramKey: string, value: string) => void
+  setSettings: (s: Partial<WorkspaceSettings>) => void
   onTestConnection: () => void
 }
 
 export function IntakeConfigSection({
-  entityType,
-  onEntityTypeChange,
-  intakeModes,
+  settings,
   workflowDefinition,
-  settingsResources,
   resourceProviders,
   testStatus,
   saveError,
   isTesting,
   isSaving,
-  onToggleIntakeMode,
-  onResourceConfigChange,
+  setSettings,
   onTestConnection,
 }: Props) {
+  const toggleIntakeMode = (key: string) => {
+    const isEnabled = settings.intakeModes.includes(key)
+    const nextModes = isEnabled
+      ? settings.intakeModes.filter((k) => k !== key)
+      : [...settings.intakeModes, key]
+
+    const mode = workflowDefinition?.intake?.modes.find((m) => m.key === key)
+    if (mode?.resource) {
+      const binding = settings.resources[mode.resource] || {
+        enabled: true,
+        config: {},
+      }
+      const nextResources = {
+        ...settings.resources,
+        [mode.resource]: { ...binding, enabled: !isEnabled },
+      }
+      setSettings({ intakeModes: nextModes, resources: nextResources })
+    } else {
+      setSettings({ intakeModes: nextModes })
+    }
+  }
+
+  const handleResourceConfigChange = (
+    providerKey: string,
+    paramKey: string,
+    value: string
+  ) => {
+    const binding = settings.resources[providerKey] || {
+      enabled: true,
+      config: {},
+    }
+    const nextConfig = { ...binding.config }
+    if (value) {
+      nextConfig[paramKey] = value
+    } else {
+      delete nextConfig[paramKey]
+    }
+    setSettings({
+      resources: {
+        ...settings.resources,
+        [providerKey]: {
+          ...binding,
+          config: nextConfig,
+        },
+      },
+    })
+  }
+
   return (
     <section id="intake-config" className={styles.section}>
       <h2 className={styles.sectionTitle}>接入与资源</h2>
@@ -48,9 +88,11 @@ export function IntakeConfigSection({
           select
           label="默认实体类型"
           variant="outlined"
-          value={entityType}
+          value={settings.entityType}
           onChange={(e) =>
-            onEntityTypeChange(e.target.value as 'question' | 'knowledge' | 'video')
+            setSettings({
+              entityType: e.target.value as 'question' | 'knowledge' | 'video',
+            })
           }
           fullWidth
         >
@@ -78,7 +120,7 @@ export function IntakeConfigSection({
           }}
         >
           {(workflowDefinition?.intake?.modes || []).map((mode) => {
-            const isChecked = intakeModes.includes(mode.key)
+            const isChecked = settings.intakeModes.includes(mode.key)
             return (
               <div
                 key={mode.key}
@@ -90,7 +132,7 @@ export function IntakeConfigSection({
               >
                 <Checkbox
                   checked={isChecked}
-                  onChange={() => onToggleIntakeMode(mode.key)}
+                  onChange={() => toggleIntakeMode(mode.key)}
                 />
                 <span style={{ fontSize: 14 }}>{mode.label}</span>
               </div>
@@ -102,7 +144,7 @@ export function IntakeConfigSection({
       {(() => {
         const activeKeys = new Set<string>()
         for (const mode of workflowDefinition?.intake?.modes || []) {
-          if (intakeModes.includes(mode.key) && mode.resource) {
+          if (settings.intakeModes.includes(mode.key) && mode.resource) {
             activeKeys.add(mode.resource)
           }
         }
@@ -120,7 +162,7 @@ export function IntakeConfigSection({
             {resourceProviders
               .filter((p) => activeKeys.has(p.key))
               .map((provider) => {
-                const binding = settingsResources[provider.key] || {
+                const binding = settings.resources[provider.key] || {
                   enabled: true,
                   config: {},
                 }
@@ -160,7 +202,7 @@ export function IntakeConfigSection({
                           placeholder={provider.defaultParams[paramKey] || ''}
                           value={binding.config[paramKey] || ''}
                           onChange={(event) =>
-                            onResourceConfigChange(
+                            handleResourceConfigChange(
                               provider.key,
                               paramKey,
                               event.target.value
