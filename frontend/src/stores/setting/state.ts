@@ -94,9 +94,7 @@ export function normalizeExecutorConfiguration(
   }
 }
 
-export function computeDirty(
-  state: Omit<SettingState, 'isDirty'>
-): boolean {
+export function computeDirty(state: Omit<SettingState, 'isDirty'>): boolean {
   if (state.originalSettings === null) return false
   if (state.workspaceName !== state.originalWorkspaceName) return true
   if (state.workspaceDescription !== state.originalWorkspaceDescription)

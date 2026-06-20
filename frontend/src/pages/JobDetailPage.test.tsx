@@ -259,29 +259,32 @@ describe('JobDetailPage', () => {
     expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
-  it('polls queued and running jobs every five seconds', async () => {
-    const fetchMock = createFetchMock({ detailStatus: 'running' })
-    vi.stubGlobal('fetch', fetchMock)
+  it.each([['running'], ['queued']] as const)(
+    'polls %s jobs every five seconds',
+    async (detailStatus) => {
+      const fetchMock = createFetchMock({ detailStatus })
+      vi.stubGlobal('fetch', fetchMock)
 
-    const { unmount } = renderPage()
-    await waitFor(() => {
-      expect(screen.getByText('提取')).toBeInTheDocument()
-    })
+      const { unmount } = renderPage()
+      await waitFor(() => {
+        expect(screen.getByText('提取')).toBeInTheDocument()
+      })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledTimes(1)
 
-    await act(async () => {
-      vi.advanceTimersByTime(5000)
-    })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+      await act(async () => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
 
-    unmount()
+      unmount()
 
-    await act(async () => {
-      vi.advanceTimersByTime(5000)
-    })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
+      await act(async () => {
+        vi.advanceTimersByTime(5000)
+      })
+      expect(fetchMock).toHaveBeenCalledTimes(2)
+    }
+  )
 
   it('reloads questions.json when its producer node completes', async () => {
     let detailRequests = 0

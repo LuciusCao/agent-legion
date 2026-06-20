@@ -16,9 +16,7 @@ export function WorkflowSection({ workflowKey, onChange }: Props) {
   useEffect(() => {
     fetchWorkflows()
       .then((data) => {
-        setOptions(
-          data.workflows.map((p) => ({ key: p.key, label: p.label }))
-        )
+        setOptions(data.workflows.map((p) => ({ key: p.key, label: p.label })))
       })
       .catch(() => {
         setOptions([])

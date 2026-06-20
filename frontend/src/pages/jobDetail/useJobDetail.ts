@@ -7,7 +7,10 @@ import { useJobStore } from '../../stores/jobStore'
 import type { JobDetailResponse } from '../../types'
 import { POLLING_STATUSES } from './jobNodeHelpers'
 
-export function useJobDetail(workspaceId: string | undefined, jobId: string | undefined) {
+export function useJobDetail(
+  workspaceId: string | undefined,
+  jobId: string | undefined
+) {
   const navigate = useNavigate()
   const { setPageTitle } = useUiStore()
   const [detail, setDetail] = useState<JobDetailResponse | null>(null)
@@ -19,33 +22,38 @@ export function useJobDetail(workspaceId: string | undefined, jobId: string | un
     detailRef.current = detail
   }, [detail])
 
-  const refreshDetail = useCallback(async (): Promise<JobDetailResponse | null> => {
-    if (!jobId) return null
-    try {
-      const data = await fetchJobDetail(jobId)
-      setDetail(data)
-      setError('')
-      return data
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-      return null
-    }
-  }, [jobId])
+  const refreshDetail = useCallback(
+    async (options?: {
+      signal?: AbortSignal
+    }): Promise<JobDetailResponse | null> => {
+      if (!jobId) return null
+      try {
+        const data = await fetchJobDetail(jobId)
+        if (options?.signal?.aborted) return null
+        setDetail(data)
+        setError('')
+        return data
+      } catch (err) {
+        if (options?.signal?.aborted) return null
+        setError(err instanceof Error ? err.message : String(err))
+        return null
+      }
+    },
+    [jobId]
+  )
 
   // Preserve the page's existing polling behavior for active jobs.
   useEffect(() => {
     if (!jobId) return
-    let stale = false
+    const controller = new AbortController()
     const timer = window.setInterval(() => {
       const status = detailRef.current?.job.status
       if (status && POLLING_STATUSES.has(status)) {
-        void refreshDetail().then((data) => {
-          if (!stale && data) detailRef.current = data
-        })
+        void refreshDetail({ signal: controller.signal })
       }
     }, 5000)
     return () => {
-      stale = true
+      controller.abort()
       window.clearInterval(timer)
     }
   }, [jobId, refreshDetail])
@@ -55,13 +63,13 @@ export function useJobDetail(workspaceId: string | undefined, jobId: string | un
     setDetail(null)
     setError('')
     if (!jobId) return
-    let stale = false
-    refreshDetail().then((data) => {
-      if (stale || !data) return
+    const controller = new AbortController()
+    refreshDetail({ signal: controller.signal }).then((data) => {
+      if (controller.signal.aborted || !data) return
       setPageTitle(data.job.title || data.job.source_id || '任务详情')
     })
     return () => {
-      stale = true
+      controller.abort()
       setPageTitle(null)
     }
   }, [jobId, setPageTitle, refreshDetail])

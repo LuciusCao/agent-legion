@@ -94,11 +94,7 @@ export function executorActions(set: SettingStoreSet) {
       })
     },
 
-    setNodeLimit(
-      workflowKey: string,
-      nodeKey: string,
-      limit: number | null
-    ) {
+    setNodeLimit(workflowKey: string, nodeKey: string, limit: number | null) {
       set((state) => {
         const node_limits = state.executorConfiguration.node_limits.filter(
           (l) => !(l.workflow_key === workflowKey && l.node_key === nodeKey)

@@ -5,7 +5,10 @@ export interface ConnectionTestStatusProps {
   message?: string
 }
 
-export function ConnectionTestStatus({ state, message }: ConnectionTestStatusProps) {
+export function ConnectionTestStatus({
+  state,
+  message,
+}: ConnectionTestStatusProps) {
   if (state === 'idle') return null
   const labels: Record<ConnectionState, string> = {
     idle: '',
