@@ -7,8 +7,6 @@ import re
 import sys
 from pathlib import Path
 
-import yaml
-
 AUTO_START = "<!-- AUTO-GENERATED: scripts/generate_architecture.py -->"
 AUTO_END = "<!-- END AUTO-GENERATED -->"
 TODO_PLACEHOLDER_PATTERN = re.compile(r"<!--\s*TODO:\s*.*?(?:AST|自动生成).*?-->", re.IGNORECASE)
@@ -273,22 +271,35 @@ def extract_pipeline_phases(root: Path) -> str:
 
 
 def extract_config(root: Path) -> str:
-    """Extract top-level config keys from config/workflow.yaml."""
-    config_file = root / "config" / "workflow.yaml"
-    if not config_file.exists():
-        return "_No workflow.yaml found._\n"
+    """Extract top-level config keys from the composed domain configuration."""
+    project_root = root.resolve()
+    if str(project_root) not in sys.path:
+        sys.path.insert(0, str(project_root))
 
     try:
-        data = yaml.safe_load(config_file.read_text(encoding="utf-8"))
+        from server.app.configuration.loader import load_application_config
     except Exception:
-        return "_Could not parse workflow.yaml._\n"
+        return "_Could not load configuration loader._\n"
 
+    try:
+        loaded = load_application_config(project_root)
+    except Exception:
+        return "_Could not parse configuration._\n"
+
+    data = loaded.config
     if not isinstance(data, dict):
         return "_Invalid config format._\n"
 
     descriptions = {
+        "data_dir": "数据目录",
+        "server": "HTTP 服务监听地址与端口",
+        "worker": "后台 worker 并发配置",
         "asr": "ASR 提供商配置（whisper / SenseVoice）",
+        "cms": "CMS 集成配置",
+        "resource_providers": "资源提供方路径映射",
+        "cleanup_video_after_assemble": "打包后是否清理视频",
         "openclaw": "OpenClaw 命令模板与工作目录",
+        "executors": "Workspace 执行器定义",
         "workflows": "Agent Legion DAG 工作流开关",
     }
 

@@ -5,8 +5,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode
 
-import yaml
-
+from server.app.configuration import load_application_config
 from server.app.executors.config import (
     ExecutorConfig,
     load_executor_definitions,
@@ -17,6 +16,8 @@ from server.app.executors.runtime_config import (
     WorkflowsRuntimeConfig,
     validate_runtime,
 )
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 
 @dataclass
@@ -93,12 +94,13 @@ def _apply_env_overrides(config: dict[str, Any]) -> None:
 
 def _apply_basecms_env_overrides(config: dict[str, Any]) -> None:
     """Apply BASECMS_* overrides that predate the VIDEO_HIVE_* overrides."""
+    base_url = os.environ.get("BASECMS_BASE_URL")
+    if not base_url:
+        return
     cms = config.setdefault("cms", {})
     if not isinstance(cms, dict):
         return
-    base_url = os.environ.get("BASECMS_BASE_URL")
-    if base_url:
-        cms["base_url"] = base_url
+    cms["base_url"] = base_url
 
 
 def _normalize_cms_config(config: dict[str, Any]) -> None:
@@ -130,14 +132,10 @@ def _normalize_cms_config(config: dict[str, Any]) -> None:
 
 
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
-    root_dir = Path(__file__).resolve().parents[2]
+    root_dir = PROJECT_ROOT
     load_env_file(root_dir / ".env")
-    config_file = config_path or root_dir / "config" / "workflow.yaml"
-    config: dict[str, Any] = {}
-    if config_file.exists():
-        loaded = yaml.safe_load(config_file.read_text(encoding="utf-8"))
-        if isinstance(loaded, dict):
-            config = loaded
+    loaded = load_application_config(root_dir, config_path=config_path)
+    config = loaded.config
     _apply_env_overrides(config)
     _apply_basecms_env_overrides(config)
     _normalize_cms_config(config)

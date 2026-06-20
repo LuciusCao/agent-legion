@@ -3,6 +3,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from scripts.architecture.configuration import check_configuration_ownership
 from scripts.architecture.exemptions import categorize_exemptions, load_exemptions
 from scripts.architecture.helpers import (
     ROUTE_FORBIDDEN,
@@ -170,6 +171,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_job_deletion_service_is_singular(root))
     errors.extend(check_schema_mutation_locations(root))
     errors.extend(check_import_cycles(root))
+    errors.extend(check_configuration_ownership(root))
 
     file_budgets = config.get("files", {})
     for relative_path, budget in file_budgets.items():
