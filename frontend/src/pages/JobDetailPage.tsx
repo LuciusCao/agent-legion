@@ -1,97 +1,23 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import type { DagEdge, DagGraphNode } from '../components/DagGraph'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact, fetchJobDetail, deleteJob } from '../api'
 import { rerunJob, runToJob, packageJobs } from '../jobApi'
 import { useUiStore } from '../stores/uiStore'
 import { useJobStore } from '../stores/jobStore'
-import type {
-  JobDetailResponse,
-  JobNodeRecord,
-  WorkflowDefinitionRecord,
-} from '../types'
+import type { JobDetailResponse } from '../types'
+import {
+  POLLING_STATUSES,
+  toDagEdges,
+  toDagNodes,
+  toWorkflowDefinition,
+} from './jobDetail/jobNodeHelpers'
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
 import { JobDetailActions } from '../components/JobDetailActions'
-
-const VALID_STATUSES = new Set<DagGraphNode['status']>([
-  'pending',
-  'running',
-  'completed',
-  'failed',
-  'stale',
-])
-
-const POLLING_STATUSES = new Set(['queued', 'running'])
-
-function normalizeStatus(status: string): DagGraphNode['status'] {
-  if (VALID_STATUSES.has(status as DagGraphNode['status'])) {
-    return status as DagGraphNode['status']
-  }
-  return 'pending'
-}
-
-function computeNodeDuration(
-  startedAt?: string | null,
-  finishedAt?: string | null
-): number | undefined {
-  const start = startedAt ? new Date(startedAt).getTime() : NaN
-  if (Number.isNaN(start)) return undefined
-  if (finishedAt) {
-    const end = new Date(finishedAt).getTime()
-    if (Number.isNaN(end)) return undefined
-    return (end - start) / 1000
-  }
-  return (Date.now() - start) / 1000
-}
-
-function toDagNodes(nodes: JobNodeRecord[]): DagGraphNode[] {
-  return nodes.map((n) => ({
-    key: n.node_key,
-    label: n.label || n.node_key,
-    status: normalizeStatus(n.status),
-    created_at: n.created_at,
-    inputs: n.inputs,
-    outputs: n.outputs,
-    duration: computeNodeDuration(n.started_at, n.finished_at),
-    executorKind: (n.executor_kind as DagGraphNode['executorKind']) ?? null,
-  }))
-}
-
-function toDagEdges(nodes: JobNodeRecord[]): DagEdge[] {
-  const edges: DagEdge[] = []
-  nodes.forEach((node) => {
-    if (node.after && Array.isArray(node.after)) {
-      node.after.forEach((fromKey) => {
-        edges.push({ from: fromKey, to: node.node_key })
-      })
-    }
-  })
-  return edges
-}
-
-function toWorkflowDefinition(
-  detail: JobDetailResponse | null
-): WorkflowDefinitionRecord | null {
-  if (!detail) return null
-  return {
-    key: detail.job.workflow_key,
-    label: detail.job.workflow_key,
-    intake: { modes: [] },
-    nodes: detail.nodes.map((n) => ({
-      key: n.node_key,
-      label: n.label,
-      after: n.after,
-      capability: n.capability,
-      inputs: n.inputs,
-      outputs: n.outputs,
-    })),
-  }
-}
 
 export default function JobDetailPage() {
   const { workspaceId, jobId } = useParams<{
