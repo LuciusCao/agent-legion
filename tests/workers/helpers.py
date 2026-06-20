@@ -196,3 +196,29 @@ def _make_pi_worker(
     )
     worker._definitions = definitions
     return worker
+
+
+def _make_test_definition(nodes: list[WorkflowNode]) -> WorkflowDefinition:
+    return WorkflowDefinition(
+        key="test",
+        label="Test",
+        intake=WorkflowIntake(),
+        nodes={n.key: n for n in nodes},
+    )
+
+
+def _make_fake_skill(skill_dir: Path) -> None:
+    (skill_dir / "scripts").mkdir(parents=True)
+    (skill_dir / "references").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("# skill", encoding="utf-8")
+    (skill_dir / "references" / "output-contract.md").write_text("# contract", encoding="utf-8")
+    validator = skill_dir / "scripts" / "validate_output.py"
+    validator.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "job_dir = Path(sys.argv[1])\n"
+        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+        "(job_dir / 'keywords_report.json').write_text('{\"summary\": {}}')\n"
+    )
+    validator.chmod(0o755)
