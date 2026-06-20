@@ -10,7 +10,7 @@ from server.app.executors._lease_control import (
     _sync_job_status,
 )
 from server.app.executors._lease_transactions import _sqlite_timestamp
-from server.app.executors._path_canonicalization import canonicalize_if_absolute
+from server.app.executors._path_canonicalization import canonicalize_data_path
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 
 
@@ -49,15 +49,16 @@ def finish_lease(
     node_run = conn.execute(
         "select log_path from node_runs where id=?", (lease["node_run_id"],)
     ).fetchone()
-    effective_log_path = canonicalize_if_absolute(
-        result.log_path or (node_run["log_path"] if node_run is not None else ""), data_dir
-    )
-    session_dir = canonicalize_if_absolute(result.session_reference, data_dir)
+    stored_log_path = result.log_path or (node_run["log_path"] if node_run is not None else "")
+    effective_log_path = canonicalize_data_path(stored_log_path, data_dir, "logs")
+    run_dir = canonicalize_data_path(result.run_dir, data_dir, "jobs")
+    session_path = result.session_dir or result.session_reference
+    session_dir = canonicalize_data_path(session_path, data_dir, "jobs")
     conn.execute(
         """
         update node_runs
         set status=?, exit_code=?, error_message=?,
-            command_json=?, log_path=?, session_dir=?, finished_at=?
+            command_json=?, log_path=?, run_dir=?, session_dir=?, finished_at=?
         where id=?
         """,
         (
@@ -66,6 +67,7 @@ def finish_lease(
             result.error_message,
             json.dumps(list(result.command)),
             effective_log_path,
+            run_dir,
             session_dir,
             now_str,
             lease["node_run_id"],
@@ -110,7 +112,7 @@ def fail_without_lease(
     if cursor.rowcount == 0:
         return None
 
-    log_path = canonicalize_if_absolute(request.log_path, data_dir)
+    log_path = canonicalize_data_path(request.log_path, data_dir, "logs")
     cursor = conn.execute(
         """
         insert into node_runs(

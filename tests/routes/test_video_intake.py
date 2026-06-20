@@ -39,6 +39,7 @@ def test_add_video_list_artifacts_and_rerun(tmp_path, client):
 
     rerun = client.post("/api/videos/knowledge_K001/rerun", json={"phase": "download"})
     assert rerun.status_code == 200
+    assert rerun.json()["video"]["storage_dir"] == str(video_dir)
     assert not (video_dir / "subtitles.srt").exists()
 
 
@@ -217,6 +218,10 @@ def test_add_duplicate_identity_reports_duplicate(client):
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["results"][0]["status"] == "duplicate"
+    assert (
+        second.json()["results"][0]["video"]["storage_dir"]
+        == first.json()["videos"][0]["storage_dir"]
+    )
     assert len(client.get("/api/videos").json()["videos"]) == 1
 
 
@@ -247,6 +252,10 @@ def test_add_duplicate_direct_url_without_external_id_reports_duplicate(client):
     assert first.status_code == 200
     assert second.status_code == 200
     assert second.json()["results"][0]["status"] == "duplicate"
+    assert (
+        second.json()["results"][0]["video"]["storage_dir"]
+        == first.json()["videos"][0]["storage_dir"]
+    )
     videos = client.get("/api/videos").json()["videos"]
     assert len(videos) == 1
     assert videos[0]["title"] == "First Title"
