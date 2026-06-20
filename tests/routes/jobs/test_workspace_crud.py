@@ -21,6 +21,8 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     with TestClient(app) as c:
         workspace_response = c.post("/api/workspaces", json={"name": "Math Sprint"})
         workspace_id = workspace_response.json()["workspace"]["id"]
+        other_response = c.post("/api/workspaces", json={"name": "Other"})
+        other_id = other_response.json()["workspace"]["id"]
         created = c.post(
             f"/api/workspaces/{workspace_id}/job-batches",
             json={
@@ -31,7 +33,7 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
             },
         )
         workspace_jobs = c.get(f"/api/workspaces/{workspace_id}/jobs?workflow_key=question_content")
-        default_jobs = c.get("/api/jobs?workflow_key=question_content")
+        other_jobs = c.get(f"/api/workspaces/{other_id}/jobs?workflow_key=question_content")
 
     assert workspace_response.status_code == 200
     assert workspace_id == "math_sprint"
@@ -41,7 +43,7 @@ def test_create_workspace_and_scoped_jobs_when_enabled(tmp_path):
     assert body["jobs"][0]["id"] == f"{workspace_id}_question_content_Q001"
     assert body["jobs"][0]["source_type"] == "question"
     assert [job["id"] for job in workspace_jobs.json()["jobs"]] == [body["jobs"][0]["id"]]
-    assert default_jobs.json()["jobs"] == []
+    assert other_jobs.json()["jobs"] == []
 
 
 def test_delete_workspace_hidden_when_workflows_disabled(tmp_path):
@@ -56,7 +58,7 @@ def test_delete_workspace_hidden_when_workflows_disabled(tmp_path):
     assert response.status_code == 404
 
 
-def test_delete_workspace_rejects_default(tmp_path):
+def test_delete_workspace_named_default_is_allowed(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -64,9 +66,11 @@ def test_delete_workspace_rejects_default(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        response = c.delete("/api/workspaces/default")
-    assert response.status_code == 400
-    assert "default" in response.json()["detail"].lower()
+        ws = c.post("/api/workspaces", json={"name": "default"}).json()
+        ws_id = ws["workspace"]["id"]
+        response = c.delete(f"/api/workspaces/{ws_id}")
+    assert response.status_code == 200
+    assert response.json()["deleted"] == ws_id
 
 
 def test_delete_workspace_rejects_when_jobs_running(tmp_path):

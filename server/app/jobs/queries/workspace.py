@@ -223,8 +223,6 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         return _workspace_record(row)
 
     def delete_workspace(self, workspace_id: str) -> None:
-        if workspace_id == "default":
-            raise ValueError("Cannot delete the default workspace")
         with self.connect() as conn:
             running = conn.execute(
                 "select 1 from jobs where workspace_id = ? and status = ?",

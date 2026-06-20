@@ -23,6 +23,7 @@ from tests.workers.helpers import _make_test_definition
 
 def test_execute_fetch_question_context_writes_artifact(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     job = queries.create_job(
         workflow_key="question_content",
@@ -31,6 +32,7 @@ def test_execute_fetch_question_context_writes_artifact(tmp_path):
         batch_id="",
         title="Question Q100",
         node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
     )
 
     completed = execute_node_once(
@@ -208,6 +210,7 @@ def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, 
 
 def test_process_ready_workflow_node_runs_root(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     job = queries.create_job(
         workflow_key="question_content",
@@ -216,6 +219,7 @@ def test_process_ready_workflow_node_runs_root(tmp_path):
         batch_id="",
         title="Question Q101",
         node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
     )
 
     processed = process_ready_workflow_node(
@@ -231,6 +235,7 @@ def test_process_ready_workflow_node_runs_root(tmp_path):
 
 def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     job = queries.create_job(
         workflow_key="question_content",
@@ -239,6 +244,7 @@ def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
         batch_id="",
         title="Question Q102",
         node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
     )
 
     from server.app.workflows.executor import execute_local_node_once

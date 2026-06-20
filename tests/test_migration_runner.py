@@ -370,3 +370,102 @@ def test_v009_relative_path_storage_is_recorded_on_legacy_database(tmp_path: Pat
     assert row is not None
     assert row["version"] == 9
     assert row["name"] == "relative_path_storage"
+
+
+def test_v011_skips_rebuild_when_schema_is_incomplete(tmp_path: Path) -> None:
+    """V011 does not partially rebuild tables when a dependent table is incomplete."""
+    path = tmp_path / "v011_partial.sqlite"
+    conn = connect_sqlite(path)
+    with conn:
+        conn.executescript(
+            """
+            create table schema_migrations (
+              version integer primary key,
+              name text not null,
+              applied_at text not null default current_timestamp
+            );
+            insert into schema_migrations(version, name) values (1, 'executor_core');
+            insert into schema_migrations(version, name) values (2, 'executor_bootstrap_state');
+            insert into schema_migrations(version, name) values (3, 'legacy_columns');
+            insert into schema_migrations(version, name) values (4, 'workspace_dag_foreign_keys');
+            insert into schema_migrations(version, name) values (6, 'job_execution_control');
+            insert into schema_migrations(version, name) values (7, 'rename_pipeline_to_workflow');
+            insert into schema_migrations(version, name) values (8, 'job_node_created_at');
+
+            create table workspaces (
+              id text primary key,
+              name text not null,
+              description text not null default '',
+              default_workflow_key text not null default 'question_content',
+              cms_config_json text not null default '{}',
+              resource_config_json text not null default '{}',
+              created_at text not null default current_timestamp,
+              updated_at text not null default current_timestamp,
+              default_entity text not null default 'question',
+              intake_config_json text not null default '{}'
+            );
+            insert into workspaces(id, name) values ('math', 'Math');
+
+            create table job_batches (
+              id text primary key,
+              workspace_id text not null default 'default',
+              workflow_key text not null,
+              source_kind text not null,
+              source_payload_json text not null default '{}',
+              status text not null default 'created',
+              created_count integer not null default 0,
+              error_message text not null default '',
+              created_at text not null default current_timestamp,
+              foreign key(workspace_id) references workspaces(id) on delete cascade
+            );
+
+            create table jobs (
+              id text primary key,
+              workspace_id text not null default 'default',
+              workflow_key text not null,
+              source_type text not null,
+              source_id text not null,
+              batch_id text not null default '',
+              title text not null default '',
+              status text not null default 'queued',
+              storage_dir text not null default '',
+              error_message text not null default '',
+              stem text not null default '',
+              created_at text not null default current_timestamp,
+              updated_at text not null default current_timestamp,
+              execution_mode text not null default 'full',
+              target_node_key text,
+              execution_paused integer not null default 0,
+              pause_reason text not null default '',
+              foreign key(workspace_id) references workspaces(id) on delete cascade
+            );
+
+            create table job_nodes (
+              id integer primary key autoincrement,
+              job_id text not null,
+              node_key text not null,
+              status text not null default 'pending'
+            );
+
+            insert into job_batches(id, workspace_id, workflow_key, source_kind)
+            values ('b1', 'math', 'question_content', 'direct_ids');
+            insert into jobs(id, workspace_id, workflow_key, source_type, source_id, batch_id)
+            values ('j1', 'math', 'question_content', 'question', 'Q1', 'b1');
+            insert into job_nodes(job_id, node_key) values ('j1', 'fetch_question_context');
+            """
+        )
+
+    run_migrations(conn, MIGRATIONS)
+
+    # job_nodes was incomplete (missing stale_reason, error_message, started_at,
+    # finished_at, created_at), so V011 should skip the whole rebuild group.
+    # The job_node row must survive and there must be no dangling old tables.
+    assert conn.execute("select count(*) from job_nodes").fetchone()[0] == 1
+    assert conn.execute("select job_id from job_nodes").fetchone()[0] == "j1"
+    assert (
+        conn.execute("select 1 from sqlite_master where name like '%__v004_old%'").fetchone()
+        is None
+    )
+    fk_violations = conn.execute("pragma foreign_key_check").fetchall()
+    assert fk_violations == []
+    conn.close()

@@ -35,14 +35,12 @@ EXPECTED_OPERATIONS = {
         "/api/workspaces/{workspace_id}/settings/test-connection",
     ): "WorkspaceSettingsTestResponse",
     ("post", "/api/workspaces/{workspace_id}/job-batches"): "JobBatchResponse",
-    ("post", "/api/job-batches"): "JobBatchResponse",
     ("get", "/api/workspaces/{workspace_id}/jobs"): "JobsResponse",
     ("post", "/api/workspaces/{workspace_id}/jobs/batch-rerun"): "BatchJobMutationResponse",
     ("delete", "/api/workspaces/{workspace_id}/jobs/batch"): "BatchJobMutationResponse",
     ("post", "/api/workspaces/{workspace_id}/jobs/batch-run-to"): "BatchJobMutationResponse",
     ("get", "/api/workspaces/{workspace_id}/runs"): "WorkspaceRunsResponse",
     ("get", "/api/workspaces/{workspace_id}/dag"): "WorkspaceDagResponse",
-    ("get", "/api/jobs"): "JobsResponse",
     ("get", "/api/jobs/{job_id}"): "JobDetailResponse",
     ("delete", "/api/jobs/{job_id}"): "DeleteJobResponse",
     ("post", "/api/jobs/{job_id}/nodes/{node_key}/rerun"): "JobMutationResultResponse",
@@ -116,8 +114,11 @@ def test_workspace_job_error_contract(client, method, path, expected_status, exp
 
 
 def _create_test_job(client):
+    ws_response = client.post("/api/workspaces", json={"name": "test_ws"})
+    assert ws_response.status_code == 200
+    workspace_id = ws_response.json()["workspace"]["id"]
     response = client.post(
-        "/api/job-batches",
+        f"/api/workspaces/{workspace_id}/job-batches",
         json={
             "workflow_key": "question_content",
             "source_kind": "direct_ids",
@@ -126,7 +127,7 @@ def _create_test_job(client):
         },
     )
     assert response.status_code == 200
-    return response.json()["jobs"][0]["id"]
+    return workspace_id, response.json()["jobs"][0]["id"]
 
 
 def _assert_job_summary(summary: JobSummaryResponse) -> None:
@@ -145,8 +146,8 @@ def _assert_job_summary(summary: JobSummaryResponse) -> None:
 
 
 def test_get_jobs_returns_typed_job_summaries(client):
-    job_id = _create_test_job(client)
-    response = client.get("/api/jobs")
+    workspace_id, job_id = _create_test_job(client)
+    response = client.get(f"/api/workspaces/{workspace_id}/jobs")
     assert response.status_code == 200
     body = JobsResponse.model_validate(response.json())
     summary = next(job for job in body.jobs if job.id == job_id)
@@ -154,8 +155,8 @@ def test_get_jobs_returns_typed_job_summaries(client):
 
 
 def test_get_workspace_jobs_returns_typed_job_summaries(client):
-    job_id = _create_test_job(client)
-    response = client.get("/api/workspaces/default/jobs")
+    workspace_id, job_id = _create_test_job(client)
+    response = client.get(f"/api/workspaces/{workspace_id}/jobs")
     assert response.status_code == 200
     body = JobsResponse.model_validate(response.json())
     summary = next(job for job in body.jobs if job.id == job_id)
@@ -163,7 +164,7 @@ def test_get_workspace_jobs_returns_typed_job_summaries(client):
 
 
 def test_get_job_detail_returns_typed_job_summary(client):
-    job_id = _create_test_job(client)
+    workspace_id, job_id = _create_test_job(client)
     response = client.get(f"/api/jobs/{job_id}")
     assert response.status_code == 200
     body = JobDetailResponse.model_validate(response.json())
@@ -175,19 +176,19 @@ def test_get_job_detail_returns_typed_job_summary(client):
 
 
 def test_get_jobs_returns_absolute_storage_dir(client):
-    job_id = _create_test_job(client)
-    response = client.get("/api/jobs")
+    workspace_id, job_id = _create_test_job(client)
+    response = client.get(f"/api/workspaces/{workspace_id}/jobs")
     assert response.status_code == 200
     body = response.json()
     summary = next(job for job in body["jobs"] if job["id"] == job_id)
     assert Path(summary["storage_dir"]).is_absolute()
-    assert summary["storage_dir"].endswith(f"default/{job_id}")
+    assert summary["storage_dir"].endswith(f"{workspace_id}/{job_id}")
 
 
 def test_get_job_detail_returns_absolute_storage_dir(client):
-    job_id = _create_test_job(client)
+    workspace_id, job_id = _create_test_job(client)
     response = client.get(f"/api/jobs/{job_id}")
     assert response.status_code == 200
     body = response.json()
     assert Path(body["job"]["storage_dir"]).is_absolute()
-    assert body["job"]["storage_dir"].endswith(f"default/{job_id}")
+    assert body["job"]["storage_dir"].endswith(f"{workspace_id}/{job_id}")

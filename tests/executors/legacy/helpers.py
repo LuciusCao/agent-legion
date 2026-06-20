@@ -182,4 +182,5 @@ def _seed_default_workspace_assignment(tmp_path: Path) -> None:
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir=jobs_dir)
     ensure_legacy_workspace_tables(queries)
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     _insert_legacy_agent_assignment(queries, "default", "pi", 3)

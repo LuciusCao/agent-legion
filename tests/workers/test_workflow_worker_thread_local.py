@@ -358,6 +358,16 @@ def test_make_workflow_worker_runs_reading_analysis_local_node(tmp_path: Path, m
     )
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
+    workspace = queries.create_workspace("test_ws")
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",
+            (workspace["id"], "local-default", 2),
+        )
+        conn.execute(
+            "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
+            (workspace["id"], "reading_analysis", "fetch_questions", "local-default"),
+        )
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -365,6 +375,7 @@ def test_make_workflow_worker_runs_reading_analysis_local_node(tmp_path: Path, m
         batch_id="",
         title="Question Q100",
         node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
     )
 
     processed = worker._poll()

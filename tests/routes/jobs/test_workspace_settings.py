@@ -1,3 +1,7 @@
+def _create_workspace(client, name="default"):
+    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+
+
 def test_create_workspace_stores_cms_config_override(client_factory):
     with client_factory(workflows_enabled=True) as c:
         response = c.post(
@@ -84,7 +88,8 @@ def test_update_workspace_resource_config(client_factory):
 
 def test_workspace_settings_without_cms_fields(client_factory):
     with client_factory(workflows_enabled=True) as c:
-        response = c.get("/api/workspaces/default/settings")
+        ws_id = _create_workspace(c)
+        response = c.get(f"/api/workspaces/{ws_id}/settings")
 
     assert response.status_code == 200
     settings = response.json()["settings"]
@@ -95,8 +100,9 @@ def test_workspace_settings_without_cms_fields(client_factory):
 
 def test_workspace_settings_returns_resource_config(client_factory):
     with client_factory(workflows_enabled=True) as c:
+        ws_id = _create_workspace(c)
         c.patch(
-            "/api/workspaces/default",
+            f"/api/workspaces/{ws_id}",
             json={
                 "resource_config": {
                     "resources": {
@@ -108,7 +114,7 @@ def test_workspace_settings_returns_resource_config(client_factory):
                 }
             },
         )
-        response = c.get("/api/workspaces/default/settings")
+        response = c.get(f"/api/workspaces/{ws_id}/settings")
 
     assert response.status_code == 200
     settings = response.json()["settings"]
@@ -118,11 +124,12 @@ def test_workspace_settings_returns_resource_config(client_factory):
 
 def test_patch_settings_connection_saves_resource_config(client_factory):
     with client_factory(workflows_enabled=True) as c:
+        ws_id = _create_workspace(c)
         response = c.patch(
-            "/api/workspaces/default/settings/connection",
+            f"/api/workspaces/{ws_id}/settings/connection",
             json={"resources": {"question_detail": {"enabled": False, "config": {}}}},
         )
-        fetched = c.get("/api/workspaces/default/settings")
+        fetched = c.get(f"/api/workspaces/{ws_id}/settings")
 
     assert response.status_code == 200
     assert fetched.json()["settings"]["resources"]["question_detail"]["enabled"] is False
@@ -136,7 +143,8 @@ def test_test_connection_uses_global_cms_url(client_factory):
         }
 
     with client_factory(workflows_enabled=True, configure=configure) as c:
-        response = c.post("/api/workspaces/default/settings/test-connection")
+        ws_id = _create_workspace(c)
+        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
 
     assert response.status_code == 200
     assert response.json()["ok"] is True
@@ -147,7 +155,8 @@ def test_test_connection_fails_when_global_url_missing(client_factory):
         app.state.settings.config["cms"] = {}
 
     with client_factory(workflows_enabled=True, configure=configure) as c:
-        response = c.post("/api/workspaces/default/settings/test-connection")
+        ws_id = _create_workspace(c)
+        response = c.post(f"/api/workspaces/{ws_id}/settings/test-connection")
 
     assert response.status_code == 400
     assert "Global CMS URL" in response.json()["detail"]

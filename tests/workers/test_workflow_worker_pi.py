@@ -30,6 +30,7 @@ def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
     _make_fake_skill(skill_dir)
 
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
     job = queries.create_job(
         workflow_key="reading_analysis",
@@ -38,6 +39,7 @@ def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
         batch_id="",
         title="Question Q100",
         node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
     )
     job_dir = tmp_path / job["storage_dir"]
     (job_dir / "questions_parsed.json").write_text(
@@ -81,6 +83,7 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
     _make_fake_skill(skill_dir)
 
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
     job = queries.create_job(
         workflow_key="reading_analysis",
@@ -89,6 +92,7 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
         batch_id="",
         title="Question Q100",
         node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
     )
     job_dir = tmp_path / job["storage_dir"]
     (job_dir / "questions_parsed.json").write_text(
@@ -118,6 +122,7 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
 
 def test_execute_node_once_raises_when_pi_runner_missing_for_agent_node(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
     job = queries.create_job(
         workflow_key="reading_analysis",
@@ -126,6 +131,7 @@ def test_execute_node_once_raises_when_pi_runner_missing_for_agent_node(tmp_path
         batch_id="",
         title="Question Q100",
         node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
     )
     job_dir = tmp_path / job["storage_dir"]
     (job_dir / "questions_parsed.json").write_text(

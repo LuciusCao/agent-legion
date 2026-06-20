@@ -15,6 +15,7 @@ from server.app.workflows.question_comprehension_info import (
 def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     job = queries.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
@@ -22,6 +23,7 @@ def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
         batch_id="batch1",
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "assemble_comprehension_info"],
+        workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions.json").write_text(
@@ -57,6 +59,7 @@ def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
 def test_clean_and_parse_marks_missing_fingerprint_without_hashing(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     job = queries.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
@@ -64,6 +67,7 @@ def test_clean_and_parse_marks_missing_fingerprint_without_hashing(tmp_path):
         batch_id="batch1",
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "assemble_comprehension_info"],
+        workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions.json").write_text(
@@ -100,6 +104,7 @@ def test_clean_and_parse_marks_missing_fingerprint_without_hashing(tmp_path):
 def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     job = queries.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
@@ -107,6 +112,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
         batch_id="batch1",
         title="Question Q100",
         node_keys=["assemble_comprehension_info"],
+        workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions_parsed.json").write_text(

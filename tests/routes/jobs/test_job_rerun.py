@@ -1,6 +1,10 @@
 from server.app.storage_paths import resolve_job_dir
 
 
+def _create_workspace(client, name="default"):
+    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+
+
 def test_rerun_node_marks_downstream_stale(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -9,8 +13,9 @@ def test_rerun_node_marks_downstream_stale(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -48,8 +53,9 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -60,7 +66,7 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
         job_id = created["jobs"][0]["id"]
         app.state.job_db.update_job_status(job_id, "failed", "boom")
         response = c.post(
-            "/api/workspaces/default/jobs/batch-rerun",
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun",
             json={"job_ids": [job_id], "node_key": "fetch_question_context"},
         )
         detail = c.get(f"/api/jobs/{job_id}").json()
@@ -249,8 +255,9 @@ def test_rerun_node_preserves_ancestors(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -306,10 +313,27 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
     assert results[0]["reason_code"] == "node_not_found"
 
 
-def test_batch_rerun_mixed_workflows(tmp_path):
+def test_batch_rerun_mixed_workflows(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
+    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        return CmsQuestionDetail(
+            question_id=question_id,
+            title=f"Reading {question_id}",
+            normalized={},
+            payload={"uuid": question_id},
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True

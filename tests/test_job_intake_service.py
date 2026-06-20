@@ -7,11 +7,12 @@ from server.app.services.workflow_catalog import WorkflowCatalogService
 
 @pytest.fixture
 def intake_service(job_db, settings):
+    job_db.create_workspace("default")
     return JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
 
 def test_job_intake_creates_direct_id_jobs(job_db, settings):
-    job_db.get_workspace("default")
+    job_db.create_workspace("default")
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
     result = service.create_batch(

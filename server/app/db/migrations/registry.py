@@ -19,6 +19,12 @@ from server.app.db.migrations.v008_job_node_created_at import (
 from server.app.db.migrations.v009_relative_path_storage import (
     MIGRATION as V009_RELATIVE_PATH_STORAGE,
 )
+from server.app.db.migrations.v010_remove_default_workspace import (
+    MIGRATION as V010_REMOVE_DEFAULT_WORKSPACE,
+)
+from server.app.db.migrations.v011_remove_workspace_id_defaults import (
+    MIGRATION as V011_REMOVE_WORKSPACE_ID_DEFAULTS,
+)
 
 MIGRATIONS: tuple[Migration, ...] = (
     V001_EXECUTOR_CORE,
@@ -29,4 +35,6 @@ MIGRATIONS: tuple[Migration, ...] = (
     V007_RENAME_PIPELINE_TO_WORKFLOW,
     V008_JOB_NODE_CREATED_AT,
     V009_RELATIVE_PATH_STORAGE,
+    V010_REMOVE_DEFAULT_WORKSPACE,
+    V011_REMOVE_WORKSPACE_ID_DEFAULTS,
 )
