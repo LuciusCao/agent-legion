@@ -122,11 +122,19 @@ def _sections_from_backup(backup_path: Path) -> dict[str, dict[str, Any]]:
     return _owned_sections(source)
 
 
-def _slice_for_file(path: Path) -> dict[str, Any]:
-    """Return only the keys owned by this file from its current content."""
-    mapping = load_yaml_mapping(path)
-    owned = CONFIG_FILE_KEYS[path.name]
-    return {key: mapping[key] for key in mapping if key in owned}
+def _file_matches_recovery_state(
+    path: Path, expected_section: dict[str, Any], full_backup: dict[str, Any] | None
+) -> bool:
+    """Return True when an existing file is in a state migration could have produced.
+
+    A generated domain file must equal the expected backup section exactly. The legacy
+    workflow.yaml source file may still contain the full backup content and is also
+    accepted so an interrupted replacement of workflow.yaml can resume.
+    """
+    actual = load_yaml_mapping(path)
+    return actual == expected_section or (
+        full_backup is not None and path.name == "workflow.yaml" and actual == full_backup
+    )
 
 
 def _find_matching_backup(
@@ -141,7 +149,11 @@ def _find_matching_backup(
     matches: list[tuple[Path, dict[str, dict[str, Any]]]] = []
     for backup in backups:
         sections = _sections_from_backup(backup)
-        if all(_slice_for_file(config_dir / name) == sections[name] for name in existing_names):
+        full_backup = load_yaml_mapping(backup)
+        if all(
+            _file_matches_recovery_state(config_dir / name, sections[name], full_backup)
+            for name in existing_names
+        ):
             matches.append((backup, sections))
 
     if len(matches) != 1:
@@ -218,6 +230,11 @@ def apply_layout(
     )
 
 
+_COMMENT_LOSS_WARNING = (
+    "generated YAML files do not preserve comments or formatting from the source configuration"
+)
+
+
 def _write_split_files(
     config_dir: Path,
     sections: dict[str, dict[str, Any]],
@@ -236,6 +253,7 @@ def _write_split_files(
         merge_config_sections(loaded_sections)
         if backup_callback is not None:
             backup_callback()
+        print(f"WARNING: {_COMMENT_LOSS_WARNING}", file=sys.stderr)
         _replace_in_order(staged_by_name, targets, before_replace)
     finally:
         for staged in staged_by_name.values():
@@ -244,9 +262,7 @@ def _write_split_files(
     return MigrationReport(
         "split",
         {name: tuple(sorted(sections[name])) for name in SPLIT_FILE_NAMES},
-        warnings=(
-            "generated YAML files do not preserve comments or formatting from the source configuration",
-        ),
+        warnings=(_COMMENT_LOSS_WARNING,),
     )
 
 

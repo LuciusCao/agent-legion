@@ -222,6 +222,23 @@ class TestApplyLayout:
         with pytest.raises(ConfigurationLoadError, match="rollback"):
             migration_module.apply_layout(config_dir)
 
+    def test_apply_refuses_recovery_when_file_contains_unowned_key(
+        self, migration_module: Any, tmp_path: Path
+    ) -> None:
+        config_dir = tmp_path / "config"
+        config_dir.mkdir()
+        backup = config_dir / "workflow.yaml.bak-20240102030405"
+        backup.write_text("data_dir: data\ncms: {token: ''}\nexecutors: {}\n", encoding="utf-8")
+        # app.yaml contains a key that does not belong to app.yaml. Recovery must not
+        # silently drop it by slicing; it should require a rollback instead.
+        (config_dir / "app.yaml").write_text("new_setting: keep-me\n", encoding="utf-8")
+
+        with pytest.raises(ConfigurationLoadError, match="rollback"):
+            migration_module.apply_layout(config_dir)
+
+        # The user's extra key must survive the failed recovery attempt.
+        assert (config_dir / "app.yaml").read_text(encoding="utf-8") == "new_setting: keep-me\n"
+
     def test_apply_recovers_when_workflow_yaml_still_has_legacy_content(
         self, migration_module: Any, tmp_path: Path
     ) -> None:
@@ -306,13 +323,35 @@ class TestApplyLayout:
         assert calls == ["app.yaml", "video_hive.yaml", "workflow.yaml"]
 
     def test_apply_warns_about_comment_and_formatting_loss(
-        self, migration_module: Any, legacy_config_dir: Path
+        self, migration_module: Any, legacy_config_dir: Path, capsys: Any
     ) -> None:
         report = migration_module.apply_layout(legacy_config_dir)
         rendered = report.render()
         assert "WARNING:" in rendered
         assert "comments" in rendered.lower()
         assert "formatting" in rendered.lower()
+
+        captured = capsys.readouterr()
+        assert "WARNING:" in captured.err
+        assert "comments" in captured.err.lower()
+        assert "formatting" in captured.err.lower()
+
+    def test_apply_warning_printed_before_replacement(
+        self, migration_module: Any, legacy_config_dir: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import io
+
+        captured = io.StringIO()
+        monkeypatch.setattr("sys.stderr", captured)
+        warning_seen_before_replace = False
+
+        def before_replace(path: Path) -> None:
+            nonlocal warning_seen_before_replace
+            if not warning_seen_before_replace:
+                warning_seen_before_replace = "WARNING:" in captured.getvalue()
+
+        migration_module.apply_layout(legacy_config_dir, before_replace=before_replace)
+        assert warning_seen_before_replace
 
     def test_apply_no_op_split_does_not_warn(
         self, migration_module: Any, split_config_dir: Path

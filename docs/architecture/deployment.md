@@ -8,7 +8,9 @@ Video Hive 设计为**本地运行**的工具，不依赖云服务。开发者�
 
 ```
 config/
-└── workflow.yaml           # ASR 配置、OpenClaw 命令模板、流水线开关
+├── app.yaml                # 应用路径、HTTP 设置、worker 并发
+├── video_hive.yaml         # ASR、CMS、资源提供方、OpenClaw 配置
+└── workflow.yaml           # Workspace 执行器与工作流运行时开关
 
 data/                       # 运行时数据（gitignored）
 ├── video_hive.sqlite       # SQLite 数据库
