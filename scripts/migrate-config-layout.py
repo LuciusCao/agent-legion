@@ -37,12 +37,15 @@ from server.app.configuration.loader import (
 class MigrationReport:
     status: str
     keys_by_file: dict[str, tuple[str, ...]]
+    warnings: tuple[str, ...] = ()
 
     def render(self) -> str:
         lines = [f"status: {self.status}"]
         for name in sorted(self.keys_by_file):
             keys = ", ".join(sorted(self.keys_by_file[name]))
             lines.append(f"{name}: {keys}")
+        for warning in self.warnings:
+            lines.append(f"WARNING: {warning}")
         return "\n".join(lines)
 
 
@@ -119,6 +122,13 @@ def _sections_from_backup(backup_path: Path) -> dict[str, dict[str, Any]]:
     return _owned_sections(source)
 
 
+def _slice_for_file(path: Path) -> dict[str, Any]:
+    """Return only the keys owned by this file from its current content."""
+    mapping = load_yaml_mapping(path)
+    owned = CONFIG_FILE_KEYS[path.name]
+    return {key: mapping[key] for key in mapping if key in owned}
+
+
 def _find_matching_backup(
     config_dir: Path, existing_names: set[str]
 ) -> tuple[Path, dict[str, dict[str, Any]]]:
@@ -131,7 +141,7 @@ def _find_matching_backup(
     matches: list[tuple[Path, dict[str, dict[str, Any]]]] = []
     for backup in backups:
         sections = _sections_from_backup(backup)
-        if all(load_yaml_mapping(config_dir / name) == sections[name] for name in existing_names):
+        if all(_slice_for_file(config_dir / name) == sections[name] for name in existing_names):
             matches.append((backup, sections))
 
     if len(matches) != 1:
@@ -155,48 +165,57 @@ def apply_layout(
     try:
         selection = detect_layout(config_dir)
     except ConfigurationLoadError:
-        # Attempt recovery from a partial layout using a unique matching backup.
-        existing_names = {
-            path.name for path in (config_dir / name for name in SPLIT_FILE_NAMES) if path.exists()
-        }
-        if not existing_names:
+        selection = None
+
+    existing_names = {
+        path.name for path in (config_dir / name for name in SPLIT_FILE_NAMES) if path.exists()
+    }
+
+    if selection is not None and selection.layout is ConfigLayout.SPLIT:
+        # A clean split layout is a no-op. If ownership validation fails, treat it
+        # as an interrupted migration and try to recover from a matching backup.
+        try:
+            keys_by_file: dict[str, tuple[str, ...]] = {}
+            for path in selection.paths:
+                mapping = load_yaml_mapping(path)
+                validate_owned_keys(path, mapping)
+                keys_by_file[path.name] = tuple(sorted(mapping))
+            return MigrationReport("split", keys_by_file)
+        except ConfigurationLoadError:
+            pass
+
+    if selection is not None and selection.layout is ConfigLayout.LEGACY:
+        # Legacy single-file layout: back up, stage, validate, and replace.
+        source_path = selection.paths[0]
+        source = load_yaml_mapping(source_path)
+        sections = _owned_sections(source)
+        backup_path = source_path.with_name(f"{source_path.name}.bak-{now():%Y%m%d%H%M%S}")
+
+        def _create_backup() -> None:
+            shutil.copy2(source_path, backup_path)
+
+        try:
+            return _write_split_files(
+                config_dir,
+                sections,
+                source_mode=source_path.stat().st_mode,
+                before_replace=before_replace,
+                backup_callback=_create_backup,
+            )
+        except Exception:
+            # Do not delete backups; the operator may need them for recovery.
             raise
-        backup, sections = _find_matching_backup(config_dir, existing_names)
-        return _write_split_files(
-            config_dir,
-            sections,
-            source_mode=backup.stat().st_mode,
-            before_replace=before_replace,
-        )
 
-    if selection.layout is ConfigLayout.SPLIT:
-        keys_by_file: dict[str, tuple[str, ...]] = {}
-        for path in selection.paths:
-            mapping = load_yaml_mapping(path)
-            validate_owned_keys(path, mapping)
-            keys_by_file[path.name] = tuple(sorted(mapping))
-        return MigrationReport("split", keys_by_file)
-
-    # Legacy single-file layout: back up, stage, validate, and replace.
-    source_path = selection.paths[0]
-    source = load_yaml_mapping(source_path)
-    sections = _owned_sections(source)
-    backup_path = source_path.with_name(f"{source_path.name}.bak-{now():%Y%m%d%H%M%S}")
-
-    def _create_backup() -> None:
-        shutil.copy2(source_path, backup_path)
-
-    try:
-        return _write_split_files(
-            config_dir,
-            sections,
-            source_mode=source_path.stat().st_mode,
-            before_replace=before_replace,
-            backup_callback=_create_backup,
-        )
-    except Exception:
-        # Do not delete backups; the operator may need them for recovery.
-        raise
+    # Partial or inconsistent split layout: recover from a unique matching backup.
+    if not existing_names:
+        raise ConfigurationLoadError("no configuration files found")
+    backup, sections = _find_matching_backup(config_dir, existing_names)
+    return _write_split_files(
+        config_dir,
+        sections,
+        source_mode=backup.stat().st_mode,
+        before_replace=before_replace,
+    )
 
 
 def _write_split_files(
@@ -225,6 +244,9 @@ def _write_split_files(
     return MigrationReport(
         "split",
         {name: tuple(sorted(sections[name])) for name in SPLIT_FILE_NAMES},
+        warnings=(
+            "generated YAML files do not preserve comments or formatting from the source configuration",
+        ),
     )
 
 

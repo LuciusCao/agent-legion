@@ -118,6 +118,17 @@ def test_load_yaml_mapping_reports_invalid_yaml(tmp_path: Path):
     assert "line" in message.lower()
 
 
+def test_load_yaml_mapping_does_not_leak_secret_in_error(tmp_path: Path):
+    path = tmp_path / "secret.yaml"
+    _write(path, "token: TOP_SECRET: broken\n")
+    with pytest.raises(ConfigurationLoadError) as exc_info:
+        load_yaml_mapping(path)
+    message = str(exc_info.value)
+    assert "invalid YAML" in message
+    assert "TOP_SECRET" not in message
+    assert "TOP_SECRET" not in str(exc_info.value.__cause__)
+
+
 def test_validate_owned_keys_rejects_unowned_keys(tmp_path: Path):
     path = tmp_path / "app.yaml"
     _write(path, "{}")

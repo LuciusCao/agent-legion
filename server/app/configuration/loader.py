@@ -67,6 +67,16 @@ def detect_layout(config_dir: Path) -> LayoutSelection:
 _legacy_warning_emitted = False
 
 
+def _format_yaml_error(path: Path, exc: yaml.YAMLError) -> str:
+    mark = getattr(exc, "problem_mark", None)
+    if mark is not None:
+        return (
+            f"invalid YAML in {path}: {exc.__class__.__name__} "
+            f"at line {mark.line + 1}, column {mark.column + 1}"
+        )
+    return f"invalid YAML in {path}: {exc.__class__.__name__}"
+
+
 def load_yaml_mapping(path: Path, *, allow_missing: bool = False) -> dict[str, Any]:
     if not path.exists():
         if allow_missing:
@@ -75,7 +85,9 @@ def load_yaml_mapping(path: Path, *, allow_missing: bool = False) -> dict[str, A
     try:
         loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     except yaml.YAMLError as exc:
-        raise ConfigurationLoadError(f"invalid YAML in {path}: {exc}") from exc
+        # Do not chain the original YAMLError because its message contains the raw
+        # source line and may leak secret configuration values.
+        raise ConfigurationLoadError(_format_yaml_error(path, exc)) from None
     if not isinstance(loaded, dict):
         raise ConfigurationLoadError(f"configuration root must be a mapping: {path}")
     return loaded
