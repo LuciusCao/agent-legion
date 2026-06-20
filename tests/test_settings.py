@@ -124,11 +124,7 @@ def _write_split_config(root: Path) -> None:
         encoding="utf-8",
     )
     (config_dir / "workflow.yaml").write_text(
-        "workflows:\n"
-        "  enabled: false\n"
-        "  pi:\n"
-        "    binary: yaml-pi\n"
-        "executors: {}\n",
+        "workflows:\n  enabled: false\n  pi:\n    binary: yaml-pi\nexecutors: {}\n",
         encoding="utf-8",
     )
 

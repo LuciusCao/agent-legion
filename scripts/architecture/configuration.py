@@ -17,9 +17,7 @@ def check_configuration_ownership(root: Path) -> list[str]:
         return [str(exc)]
     if selection.layout is ConfigLayout.LEGACY:
         return []
-    owner_by_key = {
-        key: name for name, keys in CONFIG_FILE_KEYS.items() for key in keys
-    }
+    owner_by_key = {key: name for name, keys in CONFIG_FILE_KEYS.items() for key in keys}
     errors: list[str] = []
     for path in selection.paths:
         try:
