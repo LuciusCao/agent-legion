@@ -32,7 +32,8 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
             `/api/workspaces/${encodeURIComponent(workspaceId)}`
           ),
           api<
-            Partial<WorkspaceSettings> | { settings: Partial<WorkspaceSettings> }
+            | Partial<WorkspaceSettings>
+            | { settings: Partial<WorkspaceSettings> }
           >(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
           getExecutorCatalog(),
           getWorkspaceExecutorConfiguration(workspaceId),
@@ -44,7 +45,7 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
           'settings' in settingsResult
             ? (settingsResult.settings as Partial<WorkspaceSettings>)
             : (settingsResult as Partial<WorkspaceSettings>)
-        const nextSettings = { ...defaultSettings, ...get().settings, ...data }
+        const nextSettings = { ...defaultSettings, ...data }
         const nextCatalog = catalogResult?.executors ?? []
         const nextExecutorConfiguration = normalizeExecutorConfiguration(
           executorConfigurationResult

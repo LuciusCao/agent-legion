@@ -81,7 +81,10 @@ export function countMutationResults(
   )
 }
 
-export function makeMutationToast(action: string, counts: MutationCounts): string {
+export function makeMutationToast(
+  action: string,
+  counts: MutationCounts
+): string {
   if (counts.skipped === 0 && counts.failed === 0) {
     return `${action}完成：成功 ${counts.succeeded} 项`
   }

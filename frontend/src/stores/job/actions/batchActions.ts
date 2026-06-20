@@ -5,6 +5,7 @@ import {
   batchRunToJobs,
   continueJob as apiContinueJob,
 } from '../../../jobApi'
+import type { JobMutationResult } from '../../../jobTypes'
 import { useUiStore } from '../../uiStore'
 import {
   countMutationResults,
@@ -45,7 +46,8 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
         await get().fetchJobs(workspaceId)
         return data
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Batch rerun failed'
+        const message =
+          err instanceof Error ? err.message : 'Batch rerun failed'
         set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
@@ -88,7 +90,8 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
           )
         return data
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Batch delete failed'
+        const message =
+          err instanceof Error ? err.message : 'Batch delete failed'
         set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
@@ -176,7 +179,8 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
         await get().fetchJobs(workspaceId)
         return data
       } catch (err) {
-        const message = err instanceof Error ? err.message : 'Batch run-to failed'
+        const message =
+          err instanceof Error ? err.message : 'Batch run-to failed'
         set({ error: message })
         useUiStore.getState().showToast(message, 'error')
         throw err
@@ -185,14 +189,16 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       }
     },
 
-    async continueJob(jobId: string) {
+    async continueJob(jobId: string): Promise<JobMutationResult> {
       set({ continueLoading: true })
       try {
         const data = await apiContinueJob(jobId)
         useUiStore
           .getState()
           .showToast(
-            data.status === 'succeeded' ? '继续完整流程成功' : '继续完整流程失败',
+            data.status === 'succeeded'
+              ? '继续完整流程成功'
+              : '继续完整流程失败',
             data.status === 'succeeded' ? 'success' : 'error'
           )
         return data

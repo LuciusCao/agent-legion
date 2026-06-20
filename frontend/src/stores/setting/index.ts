@@ -73,6 +73,6 @@ export const useSettingStore = create<SettingState>((set, get) => ({
 
   ...loadActions(set, get),
   ...saveActions(set, get),
-  ...executorActions(set, get),
+  ...executorActions(set),
   ...testActions(set, get),
 }))

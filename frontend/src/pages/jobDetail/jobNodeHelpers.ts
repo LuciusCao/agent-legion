@@ -1,5 +1,9 @@
 import type { DagEdge, DagGraphNode } from '../../components/DagGraph'
-import type { JobDetailResponse, JobNodeRecord, WorkflowDefinitionRecord } from '../../types'
+import type {
+  JobDetailResponse,
+  JobNodeRecord,
+  WorkflowDefinitionRecord,
+} from '../../types'
 
 const VALID_STATUSES = new Set<DagGraphNode['status']>([
   'pending',
@@ -117,8 +121,7 @@ export function deriveJobDetailPresentation(detail: JobDetailResponse | null) {
       ) &&
         detail.nodes.some(
           (n) =>
-            n.node_key === 'review_possible_errors' &&
-            n.status === 'completed'
+            n.node_key === 'review_possible_errors' && n.status === 'completed'
         ))
     : false
   return {
