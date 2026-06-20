@@ -1,6 +1,10 @@
 import json
 
 
+def _create_workspace(client, name="default"):
+    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+
+
 def test_create_question_jobs_when_enabled(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -9,8 +13,9 @@ def test_create_question_jobs_when_enabled(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         response = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -22,7 +27,7 @@ def test_create_question_jobs_when_enabled(tmp_path):
     assert response.status_code == 200
     body = response.json()
     assert body["created_count"] == 2
-    assert body["jobs"][0]["workspace_id"] == "default"
+    assert body["jobs"][0]["workspace_id"] == ws_id
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["source_id"] for job in body["jobs"]] == ["Q001", "Q002"]
 
@@ -35,8 +40,9 @@ def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         response = c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -83,8 +89,9 @@ def test_create_workspace_job_batch_from_knowledge_codes(tmp_path, monkeypatch):
         "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
     }
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         response = c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "by_knowledge",
@@ -250,8 +257,9 @@ def test_create_workspace_job_batch_rejects_empty_question_ids(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         response = c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -298,9 +306,28 @@ def test_job_batch_rejects_disabled_resource_provider(tmp_path):
     assert "disabled" in response.json()["detail"].lower()
 
 
-def test_reading_analysis_batch_by_ids_creates_one_job_per_question(client):
+def test_reading_analysis_batch_by_ids_creates_one_job_per_question(client, monkeypatch):
+    from server.app.cms.question import CmsQuestionDetail
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        return CmsQuestionDetail(
+            question_id=question_id,
+            title=f"Reading {question_id}",
+            normalized={},
+            payload={"uuid": question_id},
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
+
+    ws_id = _create_workspace(client)
     response = client.post(
-        "/api/workspaces/default/job-batches",
+        f"/api/workspaces/{ws_id}/job-batches",
         json={
             "workflow_key": "reading_analysis",
             "source_kind": "batch_by_ids",
@@ -345,8 +372,9 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
         "question_list_url": "https://cms.example/question/list?bank_version=v5&page_size=50",
     }
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         response = c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "reading_analysis",
                 "source_kind": "batch_by_knowledge",

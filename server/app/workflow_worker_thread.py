@@ -133,7 +133,9 @@ class WorkflowWorkerThread:
             for job in self.job_db.list_jobs(workspace_id=None, workflow_key=definition.key):
                 if job.get("status") in ("completed", "failed"):
                     continue
-                workspace_id = str(job.get("workspace_id") or "default")
+                if not (workspace_id := job.get("workspace_id")):
+                    continue
+                workspace_id = str(workspace_id)
                 if workspace_id not in jobs_by_workspace:
                     workspace_ids.append(workspace_id)
                     jobs_by_workspace[workspace_id] = []

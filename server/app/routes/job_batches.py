@@ -21,8 +21,4 @@ def create_job_batches_router(service: JobIntakeService, settings: Settings) -> 
     def create_workspace_job_batch(workspace_id: str, payload: JobBatchRequest) -> JobBatchResponse:
         return create(workspace_id, payload)
 
-    @router.post("/job-batches", response_model=JobBatchResponse)
-    def create_job_batch(payload: JobBatchRequest) -> JobBatchResponse:
-        return create("default", payload)
-
     return router

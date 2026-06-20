@@ -1,3 +1,7 @@
+def _create_workspace(client, name="default"):
+    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+
+
 def test_run_to_target_sets_execution_control(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -6,8 +10,9 @@ def test_run_to_target_sets_execution_control(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -39,8 +44,9 @@ def test_run_to_rejects_unknown_target(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -63,8 +69,9 @@ def test_run_to_rejects_start_outside_target_closure(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -90,8 +97,9 @@ def test_continue_job_resumes_after_target_reached(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",

@@ -25,7 +25,7 @@ class JobNodeQueriesMixin(JobQueriesBase):
         batch_id: str,
         title: str,
         node_keys: list[str],
-        workspace_id: str = "default",
+        workspace_id: str,
         stem: str = "",
     ) -> dict[str, Any]:
         job_id = _job_id(workspace_id, workflow_key, source_id)
@@ -81,7 +81,7 @@ class JobNodeQueriesMixin(JobQueriesBase):
         self,
         workflow_key: str | None = None,
         status: str | None = None,
-        workspace_id: str | None = "default",
+        workspace_id: str | None = None,
         source_id: str | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []

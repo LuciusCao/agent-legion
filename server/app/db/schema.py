@@ -83,7 +83,7 @@ def init_db(path: Path) -> None:
                 );
                 create table if not exists job_batches (
                   id text primary key,
-                  workspace_id text not null default 'default',
+                  workspace_id text not null,
                   workflow_key text not null,
                   source_kind text not null,
                   source_payload_json text not null default '{}',
@@ -95,7 +95,7 @@ def init_db(path: Path) -> None:
                 );
                 create table if not exists jobs (
                   id text primary key,
-                  workspace_id text not null default 'default',
+                  workspace_id text not null,
                   workflow_key text not null,
                   source_type text not null,
                   source_id text not null,
@@ -146,20 +146,6 @@ def init_db(path: Path) -> None:
         run_migrations(conn, MIGRATIONS)
 
         with conn:
-            conn.execute(
-                """
-                insert into workspaces(id, name, default_workflow_key)
-                values ('default', '默认工作空间', 'reading_analysis')
-                on conflict(id) do nothing
-                """
-            )
-            conn.execute(
-                """
-                update workspaces
-                set default_workflow_key = 'reading_analysis'
-                where id = 'default' and default_workflow_key = 'question_content'
-                """
-            )
             conn.execute(
                 """
                 insert or ignore into workspaces(id, name, default_workflow_key, default_entity)

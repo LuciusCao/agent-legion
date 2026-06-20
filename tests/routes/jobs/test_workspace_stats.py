@@ -1,10 +1,32 @@
+def _create_workspace(client, name="default"):
+    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+
+
 def test_workspace_stats_hidden_when_workflows_disabled(client_factory):
     with client_factory(workflows_enabled=False) as c:
         response = c.get("/api/workspaces/default/stats")
     assert response.status_code == 404
 
 
-def test_workspace_stats_returns_counts_and_executor_status(client_factory):
+def test_workspace_stats_returns_counts_and_executor_status(client_factory, monkeypatch):
+    from server.app.cms.question import CmsQuestionDetail
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        return CmsQuestionDetail(
+            question_id=question_id,
+            title=f"Question {question_id}",
+            normalized={},
+            payload={"uuid": question_id},
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
+
     with client_factory(workflows_enabled=True) as c:
         ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
         ws_id = ws["workspace"]["id"]
@@ -32,8 +54,26 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory):
 
 
 def test_workspace_stats_executor_status_reflects_allocations_and_leases(
-    client_factory,
+    client_factory, monkeypatch
 ):
+    from server.app.cms.question import CmsQuestionDetail
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        return CmsQuestionDetail(
+            question_id=question_id,
+            title=f"Reading {question_id}",
+            normalized={},
+            payload={"uuid": question_id},
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
+
     with client_factory(workflows_enabled=True) as c:
         job_db = c.app.state.job_db
         ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
@@ -76,8 +116,9 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(
 
 def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
     with client_factory(workflows_enabled=True) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -89,7 +130,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
         job_db = c.app.state.job_db
         run = job_db.start_node_run(job_id, "question_understanding", ["echo", "hi"], "/dev/null")
         job_db.finish_node_run(run["id"], "completed", 0, "")
-        stats = c.get("/api/workspaces/default/stats")
+        stats = c.get(f"/api/workspaces/{ws_id}/stats")
 
     assert stats.status_code == 200
     body = stats.json()

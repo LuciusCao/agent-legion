@@ -13,7 +13,7 @@ class BatchQueriesMixin(JobQueriesBase):
         workflow_key: str,
         source_kind: str,
         source_payload: dict[str, Any],
-        workspace_id: str = "default",
+        workspace_id: str,
     ) -> dict[str, Any]:
         payload_json = json.dumps(source_payload, ensure_ascii=False, sort_keys=True)
         payload_digest = hashlib.sha256(payload_json.encode("utf-8")).hexdigest()[:16]

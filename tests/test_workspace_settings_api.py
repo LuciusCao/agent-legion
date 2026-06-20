@@ -9,8 +9,11 @@ def test_workspace_settings_round_trip(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws = c.post("/api/workspaces", json={"name": "test_ws"})
+        assert ws.status_code == 200
+        workspace_id = ws.json()["workspace"]["id"]
         connection = c.patch(
-            "/api/workspaces/default/settings/connection",
+            f"/api/workspaces/{workspace_id}/settings/connection",
             json={
                 "resources": {"question_detail": {"enabled": True, "config": {}}},
                 "cmsUrl": "https://cms.example",
@@ -18,7 +21,7 @@ def test_workspace_settings_round_trip(tmp_path):
             },
         )
         intake = c.patch(
-            "/api/workspaces/default/settings/intake",
+            f"/api/workspaces/{workspace_id}/settings/intake",
             json={
                 "entityType": "video",
                 "intakeModes": ["direct_ids"],
@@ -26,11 +29,11 @@ def test_workspace_settings_round_trip(tmp_path):
             },
         )
         workflow = c.patch(
-            "/api/workspaces/default/settings/workflow",
+            f"/api/workspaces/{workspace_id}/settings/workflow",
             json={"workflowKey": "question_content"},
         )
-        fetched = c.get("/api/workspaces/default/settings")
-        test_connection = c.post("/api/workspaces/default/settings/test-connection")
+        fetched = c.get(f"/api/workspaces/{workspace_id}/settings")
+        test_connection = c.post(f"/api/workspaces/{workspace_id}/settings/test-connection")
 
     assert connection.status_code == 200
     assert intake.status_code == 200
@@ -44,7 +47,7 @@ def test_workspace_settings_round_trip(tmp_path):
     assert settings["intakeModes"] == ["direct_ids"]
     assert settings["labelOverrides"] == {"direct_ids": "输入 ID"}
     assert settings["workflowKey"] == "question_content"
-    workspace = app.state.job_db.get_workspace("default")
+    workspace = app.state.job_db.get_workspace(workspace_id)
     assert "pipeline_config" not in workspace
 
 
@@ -52,8 +55,11 @@ def test_workspace_settings_workflow_rejects_legacy_concurrency_fields(tmp_path)
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws = c.post("/api/workspaces", json={"name": "test_ws"})
+        assert ws.status_code == 200
+        workspace_id = ws.json()["workspace"]["id"]
         response = c.patch(
-            "/api/workspaces/default/settings/workflow",
+            f"/api/workspaces/{workspace_id}/settings/workflow",
             json={
                 "workflowKey": "question_content",
                 "localConcurrency": 5,
@@ -69,7 +75,7 @@ def test_workspace_settings_workflow_rejects_legacy_concurrency_fields(tmp_path)
         e["loc"][-1] for e in detail if e.get("type") == "extra_forbidden" and e.get("loc")
     }
     assert extra_fields == legacy_fields
-    workspace = app.state.job_db.get_workspace("default")
+    workspace = app.state.job_db.get_workspace(workspace_id)
     assert "pipeline_config" not in workspace
 
 

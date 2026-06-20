@@ -81,19 +81,6 @@ def create_jobs_router(
             results=[JobMutationResultResponse.model_validate(result) for result in results]
         )
 
-    @router.get("/jobs", response_model=JobsResponse)
-    def list_jobs(workflow_key: str | None = None, status: str | None = None) -> JobsResponse:
-        require_workflows_enabled(settings)
-        try:
-            return JobsResponse(
-                jobs=cast(
-                    list[JobSummaryResponse],
-                    job_queries.list_jobs("default", workflow_key=workflow_key, status=status),
-                )
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
-
     @router.get("/jobs/{job_id}", response_model=JobDetailResponse)
     def get_job(job_id: str) -> JobDetailResponse:
         require_workflows_enabled(settings)

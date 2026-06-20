@@ -31,6 +31,7 @@ def test_fetch_questions_with_cms_writes_single_question(tmp_path, monkeypatch):
 
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -38,6 +39,7 @@ def test_fetch_questions_with_cms_writes_single_question(tmp_path, monkeypatch):
         batch_id="batch1",
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
+        workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
 
@@ -68,6 +70,7 @@ def test_fetch_questions_with_cms_writes_single_question(tmp_path, monkeypatch):
 def test_fetch_questions_without_cms_writes_base_payload(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -75,6 +78,7 @@ def test_fetch_questions_without_cms_writes_base_payload(tmp_path):
         batch_id="batch1",
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
+        workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
 
@@ -95,6 +99,7 @@ def test_fetch_questions_without_cms_writes_base_payload(tmp_path):
 def test_clean_and_parse_produces_normalized_question(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -102,6 +107,7 @@ def test_clean_and_parse_produces_normalized_question(tmp_path):
         batch_id="batch1",
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
+        workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions.json").write_text(
@@ -144,6 +150,7 @@ def test_clean_and_parse_produces_normalized_question(tmp_path):
 def test_clean_and_parse_fails_when_question_id_missing(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -151,6 +158,7 @@ def test_clean_and_parse_fails_when_question_id_missing(tmp_path):
         batch_id="batch1",
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
+        workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions.json").write_text(
@@ -165,6 +173,7 @@ def test_clean_and_parse_fails_when_question_id_missing(tmp_path):
 def test_mark_question_joins_reviewed_artifacts(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -172,6 +181,7 @@ def test_mark_question_joins_reviewed_artifacts(tmp_path):
         batch_id="batch1",
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
+        workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "keywords_reviewed.json").write_text(
@@ -205,6 +215,7 @@ def test_mark_question_joins_reviewed_artifacts(tmp_path):
 def test_mark_question_fails_when_question_id_mismatch(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     job = queries.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -212,6 +223,7 @@ def test_mark_question_fails_when_question_id_mismatch(tmp_path):
         batch_id="batch1",
         title="Question Q100",
         node_keys=["fetch_questions", "clean_and_parse", "mark_question"],
+        workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "keywords_reviewed.json").write_text(

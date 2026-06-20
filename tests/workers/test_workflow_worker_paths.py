@@ -16,6 +16,7 @@ from tests.workers.helpers import _make_fake_skill
 
 def test_execute_local_node_run_persists_relative_log_path(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
     job = queries.create_job(
         workflow_key="question_content",
@@ -24,6 +25,7 @@ def test_execute_local_node_run_persists_relative_log_path(tmp_path):
         batch_id="",
         title="Question Q200",
         node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
     )
 
     execute_node_once(
@@ -55,6 +57,7 @@ def test_execute_pi_node_run_persists_relative_paths(tmp_path, monkeypatch):
     _make_fake_skill(skill_dir)
 
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
     definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
     job = queries.create_job(
         workflow_key="reading_analysis",
@@ -63,6 +66,7 @@ def test_execute_pi_node_run_persists_relative_paths(tmp_path, monkeypatch):
         batch_id="",
         title="Question Q100",
         node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
     )
     job_dir = tmp_path / job["storage_dir"]
     (job_dir / "questions_parsed.json").write_text(

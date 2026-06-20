@@ -9,7 +9,7 @@ from server.app.db.migrations.report import MigrationIssue, MigrationReport, rai
 _JOB_BATCHES_TABLE_SQL = """
 create table job_batches__v004 (
   id text primary key,
-  workspace_id text not null default 'default',
+  workspace_id text not null,
   workflow_key text not null,
   source_kind text not null,
   source_payload_json text not null default '{}',
@@ -24,7 +24,7 @@ create table job_batches__v004 (
 _JOBS_TABLE_SQL = """
 create table jobs__v004 (
   id text primary key,
-  workspace_id text not null default 'default',
+  workspace_id text not null,
   workflow_key text not null,
   source_type text not null,
   source_id text not null,

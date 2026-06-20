@@ -197,6 +197,7 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
 
     db_path = tmp_path / "jobs.sqlite"
     job_db = JobQueries(db_path, tmp_path / "jobs")
+    workspace = job_db.create_workspace("test_ws")
     job = job_db.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -204,6 +205,7 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
         batch_id="b1",
         title="Q1",
         node_keys=["extract_keywords"],
+        workspace_id=workspace["id"],
     )
     job_dir = tmp_path / job["storage_dir"]
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -404,6 +406,7 @@ def test_run_persists_relative_paths_while_result_stays_absolute(tmp_path, monke
 
     db_path = tmp_path / "jobs.sqlite"
     job_db = JobQueries(db_path, tmp_path / "jobs")
+    workspace = job_db.create_workspace("test_ws")
     job = job_db.create_job(
         workflow_key="reading_analysis",
         source_type="question",
@@ -411,6 +414,7 @@ def test_run_persists_relative_paths_while_result_stays_absolute(tmp_path, monke
         batch_id="b1",
         title="Q1",
         node_keys=["extract_keywords"],
+        workspace_id=workspace["id"],
     )
     job_dir = tmp_path / job["storage_dir"]
     job_dir.mkdir(parents=True, exist_ok=True)

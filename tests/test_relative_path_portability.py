@@ -89,6 +89,12 @@ def _seed_old_root(old_root: Path) -> None:
         conn.execute("PRAGMA foreign_keys=ON")
         conn.execute(
             """
+            insert into workspaces(id, name, default_workflow_key, default_entity)
+            values ('default', 'Default', 'reading_analysis', 'question')
+            """
+        )
+        conn.execute(
+            """
             insert into videos(
                 id, source_url, title, content_type, external_id,
                 knowledge_code, storage_dir, current_phase, status

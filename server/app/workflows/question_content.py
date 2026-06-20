@@ -27,8 +27,9 @@ def _effective_cms_config(job: dict[str, Any], context: dict[str, Any]) -> dict[
     job_db = context.get("job_db")
     workspace = None
     batch_payload = None
-    if job_db is not None:
-        workspace = job_db.get_workspace(str(job.get("workspace_id", "default")))
+    workspace_id = job.get("workspace_id")
+    if job_db is not None and workspace_id:
+        workspace = job_db.get_workspace(str(workspace_id))
         batch = job_db.get_batch(str(job.get("batch_id", "")))
         if batch:
             batch_payload = _decode_json_object(batch.get("source_payload_json"))

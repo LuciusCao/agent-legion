@@ -46,9 +46,10 @@ def test_v007_creates_pre_migration_backup_for_pipeline_columns(tmp_path: Path) 
     init_db(path)
 
     with closing(connect_sqlite(path)) as conn, conn:
+        conn.execute("insert into workspaces(id, name) values ('ws1', 'Test Workspace')")
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values ('job1', 'default', 'reading_analysis', 'question', 'Q1')"
+            "values ('job1', 'ws1', 'reading_analysis', 'question', 'Q1')"
         )
         conn.execute("delete from schema_migrations where version=7")
         for table, new_name, old_name in (

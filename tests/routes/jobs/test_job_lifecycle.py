@@ -4,6 +4,10 @@ from pathlib import Path
 from server.app.storage_paths import resolve_job_dir
 
 
+def _create_workspace(client, name="default"):
+    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+
+
 def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -12,8 +16,9 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -36,16 +41,34 @@ def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     assert traversal.status_code == 400
 
 
-def test_job_detail_includes_pi_run_trace(tmp_path):
+def test_job_detail_includes_pi_run_trace(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
+    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        return CmsQuestionDetail(
+            question_id=question_id,
+            title=f"Reading {question_id}",
+            normalized={},
+            payload={"uuid": question_id},
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "reading_analysis",
                 "source_kind": "batch_by_ids",
@@ -83,8 +106,9 @@ def test_job_detail_includes_node_dependencies(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -110,8 +134,9 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
     app.state.settings.executor_runtime.workflows.enabled = True
     job_db = app.state.job_db
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -121,7 +146,7 @@ def test_job_detail_includes_executor_binding_and_kind(tmp_path):
         ).json()
         job_id = created["jobs"][0]["id"]
         job_db.replace_workspace_executor_configuration(
-            "default",
+            ws_id,
             allocations=[
                 {"executor_id": "local-default", "concurrency_limit": 1},
                 {"executor_id": "pi-default", "concurrency_limit": 1},
@@ -170,8 +195,9 @@ def test_delete_job_rejects_running_job(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -179,7 +205,7 @@ def test_delete_job_rejects_running_job(tmp_path):
                 "knowledge_codes": [],
             },
         )
-        job_id = "default_question_content_Q601"
+        job_id = f"{ws_id}_question_content_Q601"
         job = app.state.job_db.get_job(job_id)
         storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
@@ -211,8 +237,9 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -220,7 +247,7 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
                 "knowledge_codes": [],
             },
         )
-        job_id = "default_question_content_Q602"
+        job_id = f"{ws_id}_question_content_Q602"
         job = app.state.job_db.get_job(job_id)
         storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
@@ -243,8 +270,9 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         batch = c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -261,12 +289,12 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
         )
         app.state.job_db.finish_node_run(run["id"], "completed", 0, "")
 
-        response = c.get("/api/workspaces/default/runs")
+        response = c.get(f"/api/workspaces/{ws_id}/runs")
 
     assert response.status_code == 200
     body = response.json()
     assert len(body["runs"]) == 1
-    assert body["runs"][0]["workspace_id"] == "default"
+    assert body["runs"][0]["workspace_id"] == ws_id
     assert body["runs"][0]["job_id"] == job_id
     assert body["runs"][0]["job_title"] == "Question Q001"
     assert body["runs"][0]["source_id"] == "Q001"
@@ -283,8 +311,9 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         batch = c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -300,7 +329,7 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
         run2 = app.state.job_db.start_node_run(job_id, "assemble_package", ["local"], "logs/b.log")
         app.state.job_db.finish_node_run(run2["id"], "failed", 1, "boom")
 
-        response = c.get("/api/workspaces/default/runs?status=failed&node_key=assemble_package")
+        response = c.get(f"/api/workspaces/{ws_id}/runs?status=failed&node_key=assemble_package")
 
     assert response.status_code == 200
     runs = response.json()["runs"]
@@ -310,16 +339,37 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
     assert runs[0]["error_message"] == "boom"
 
 
-def test_get_workspace_dag_returns_node_status_counts(tmp_path):
+def test_get_workspace_dag_returns_node_status_counts(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
+    from server.app.cms.question import CmsQuestionDetail
     from server.app.main import create_app
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        return CmsQuestionDetail(
+            question_id=question_id,
+            title=f"Reading {question_id}",
+            normalized={},
+            payload={"uuid": question_id},
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = c.post(
+            "/api/workspaces",
+            json={"name": "Reading DAG", "default_workflow_key": "reading_analysis"},
+        ).json()["workspace"]["id"]
         c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "reading_analysis",
                 "source_kind": "batch_by_ids",
@@ -327,7 +377,7 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path):
                 "knowledge_codes": [],
             },
         )
-        response = c.get("/api/workspaces/default/dag")
+        response = c.get(f"/api/workspaces/{ws_id}/dag")
 
     assert response.status_code == 200
     body = response.json()

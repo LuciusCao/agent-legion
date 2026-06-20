@@ -37,7 +37,7 @@ def test_job_routes_are_hidden_when_workflows_disabled(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = False
     with TestClient(app) as c:
-        response = c.get("/api/jobs")
+        response = c.get("/api/workspaces/ws1/jobs")
         workspaces = c.get("/api/workspaces")
 
     assert response.status_code == 404

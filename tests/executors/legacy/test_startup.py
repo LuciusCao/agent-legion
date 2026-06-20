@@ -73,6 +73,7 @@ def test_app_startup_aborts_when_finalization_blocked(tmp_path: Path) -> None:
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir=jobs_dir)
     ensure_legacy_workspace_tables(queries)
+    queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     _insert_legacy_agent_assignment(queries, "default", "unknown-agent", 2)
 
     with pytest.raises(RuntimeError, match="finalize-workspace-executor-migration.py --check"):

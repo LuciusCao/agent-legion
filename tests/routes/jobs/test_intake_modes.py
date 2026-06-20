@@ -1,6 +1,10 @@
 import json
 
 
+def _create_workspace(client, name="default"):
+    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+
+
 def test_workspace_batch_delete_removes_jobs(tmp_path):
     from fastapi.testclient import TestClient
 
@@ -9,8 +13,9 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -21,7 +26,7 @@ def test_workspace_batch_delete_removes_jobs(tmp_path):
         job_id = created["jobs"][0]["id"]
         response = c.request(
             "DELETE",
-            "/api/workspaces/default/jobs/batch",
+            f"/api/workspaces/{ws_id}/jobs/batch",
             json={"job_ids": [job_id]},
         )
         detail = c.get(f"/api/jobs/{job_id}")
@@ -114,8 +119,9 @@ def test_batch_with_entity_question(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         response = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "entity": "question",
@@ -143,8 +149,9 @@ def test_batch_unsupported_entity_mode(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         response = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "entity": "knowledge",
@@ -166,8 +173,9 @@ def test_batch_video_resolver_not_implemented(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         response = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "entity": "video",
@@ -189,8 +197,9 @@ def test_batch_with_entity_video_direct_ids(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         response = c.post(
-            "/api/workspaces/default/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "entity": "video",
@@ -312,8 +321,9 @@ def test_batch_run_to_returns_results_in_order(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
+        ws_id = _create_workspace(c)
         created = c.post(
-            "/api/job-batches",
+            f"/api/workspaces/{ws_id}/job-batches",
             json={
                 "workflow_key": "question_content",
                 "source_kind": "direct_ids",
@@ -323,7 +333,7 @@ def test_batch_run_to_returns_results_in_order(tmp_path):
         ).json()
         job_id = created["jobs"][0]["id"]
         response = c.post(
-            "/api/workspaces/default/jobs/batch-run-to",
+            f"/api/workspaces/{ws_id}/jobs/batch-run-to",
             json={"job_ids": [job_id, "missing-job"], "target_node_key": "question_understanding"},
         )
 
