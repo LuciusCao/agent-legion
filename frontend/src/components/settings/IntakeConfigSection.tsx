@@ -1,6 +1,7 @@
 import { Button, Checkbox, MenuItem, TextField } from '@mui/material'
 import styles from '../../pages/SettingsPage.module.css'
 import { ConnectionTestStatus } from './ConnectionTestStatus'
+import { ResourceProviderCard } from './ResourceProviderCard'
 import type {
   ResourceProviderDefinition,
   WorkflowDefinitionRecord,
@@ -161,60 +162,21 @@ export function IntakeConfigSection({
             </span>
             {resourceProviders
               .filter((p) => activeKeys.has(p.key))
-              .map((provider) => {
-                const binding = settings.resources[provider.key] || {
-                  enabled: true,
-                  config: {},
-                }
-                return (
-                  <div
-                    key={provider.key}
-                    style={{
-                      border: '1px solid #e0e0e0',
-                      borderRadius: 12,
-                      padding: 16,
-                    }}
-                  >
-                    <div
-                      style={{
-                        fontWeight: 500,
-                        fontSize: 14,
-                        marginBottom: 4,
-                      }}
-                    >
-                      {provider.provider}
-                    </div>
-                    <div
-                      style={{
-                        fontSize: 12,
-                        color: '#616161',
-                        marginBottom: 12,
-                      }}
-                    >
-                      Path: {provider.path}
-                    </div>
-                    <div style={{ display: 'grid', gap: 8 }}>
-                      {provider.paramKeys.map((paramKey) => (
-                        <TextField
-                          key={paramKey}
-                          label={paramKey}
-                          variant="outlined"
-                          placeholder={provider.defaultParams[paramKey] || ''}
-                          value={binding.config[paramKey] || ''}
-                          onChange={(event) =>
-                            handleResourceConfigChange(
-                              provider.key,
-                              paramKey,
-                              event.target.value
-                            )
-                          }
-                          fullWidth
-                        />
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
+              .map((provider) => (
+                <ResourceProviderCard
+                  key={provider.key}
+                  provider={provider}
+                  binding={
+                    settings.resources[provider.key] || {
+                      enabled: true,
+                      config: {},
+                    }
+                  }
+                  onChange={(paramKey, value) =>
+                    handleResourceConfigChange(provider.key, paramKey, value)
+                  }
+                />
+              ))}
           </div>
         )
       })()}

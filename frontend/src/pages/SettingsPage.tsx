@@ -185,13 +185,11 @@ export function SettingsPage() {
             <hr className={styles.sectionDivider} />
             <ExecutorAllocationSection />
           </section>
-
           <section id="executor-binding" className={styles.section}>
             <h2 className={styles.sectionTitle}>节点绑定</h2>
             <hr className={styles.sectionDivider} />
             <ExecutorBindingSection />
           </section>
-
           {hasLocalNodes && (
             <section id="local-node-concurrency" className={styles.section}>
               <h2 className={styles.sectionTitle}>本地节点并发</h2>
