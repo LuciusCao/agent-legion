@@ -342,7 +342,7 @@ describe('QuestionContentPanel', () => {
     )
   })
 
-  it('merges key-info highlights from comprehension and possible-error selections', async () => {
+  it('switches highlight from key-info selection to possible-error selection', async () => {
     const originalPositions =
       mockComprehensionInfo.comprehension_data.key_info_list.map(
         (k) => k.content.position
@@ -377,8 +377,6 @@ describe('QuestionContentPanel', () => {
           0
         )
       )
-      const baselineHighlightCount =
-        document.querySelectorAll('.highlight').length
 
       const possibleErrorChip = chips.find((c) =>
         c.textContent?.includes('区间写反')
@@ -386,9 +384,11 @@ describe('QuestionContentPanel', () => {
       fireEvent.click(possibleErrorChip)
       await waitFor(() =>
         expect(document.querySelectorAll('.highlight').length).toBeGreaterThan(
-          baselineHighlightCount
+          0
         )
       )
+      // Key-info detail is no longer shown because selections are mutually exclusive.
+      expect(screen.queryByText('题干信息')).not.toBeInTheDocument()
     } finally {
       mockComprehensionInfo.comprehension_data.key_info_list.forEach(
         (k, idx) => {

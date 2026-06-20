@@ -266,6 +266,7 @@ export function QuestionContentPanel({
                         }
                         return new Set([info.key_info_id])
                       })
+                      setSelectedErrorId(null)
                     }}
                   >
                     <span className={styles.chipIndex}>{idx + 1}</span>
@@ -452,6 +453,7 @@ export function QuestionContentPanel({
                       setSelectedErrorId((prev) =>
                         prev === err.error_id ? null : err.error_id
                       )
+                      setSelectedIds(new Set())
                     }}
                   >
                     <span className={styles.chipIndex}>{idx + 1}</span>
