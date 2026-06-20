@@ -18,6 +18,7 @@ from server.app.jobs.executor_configuration import (
     get_workspace_executor_configuration,
     replace_workspace_executor_configuration,
 )
+from server.app.storage_paths import make_data_relative
 
 
 def _safe_identifier(value: str, fallback: str) -> str:
@@ -295,6 +296,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
         job_id = _job_id(workspace_id, workflow_key, source_id)
         storage_dir = self.jobs_dir / workspace_id / job_id
         storage_dir.mkdir(parents=True, exist_ok=True)
+        data_dir = self.jobs_dir.parent
 
         with self.connect() as conn:
             existing = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
@@ -325,7 +327,7 @@ class JobQueries(AtomicJobMutationsMixin, JobExecutionControlMixin):
                     source_id,
                     batch_id,
                     title,
-                    str(storage_dir),
+                    make_data_relative(storage_dir, data_dir),
                     stem,
                 ),
             )

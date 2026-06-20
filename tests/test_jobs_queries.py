@@ -61,6 +61,12 @@ def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
         workspace_id=workspace["id"],
     )
 
+    assert (
+        job["storage_dir"]
+        == "jobs/created_at_workspace/created_at_workspace_question_content_Q-CREATED"
+    )
+    assert (tmp_path / "jobs" / "created_at_workspace" / job["id"]).is_dir()
+
     node = db.get_job_node(job["id"], "fetch_question_context")
     assert node is not None
     assert _looks_like_timestamp(node["created_at"])

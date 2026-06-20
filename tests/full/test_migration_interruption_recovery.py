@@ -31,6 +31,8 @@ from tests.test_workspace_dag_fk_migration import _create_pre_v004_database
 
 pytestmark = pytest.mark.full_gate
 
+EXPECTED_VERSIONS = [m.version for m in MIGRATIONS]
+
 
 def _foreign_key_relationships(conn: sqlite3.Connection) -> set[tuple[str, str, str]]:
     relationships: set[tuple[str, str, str]] = set()
@@ -96,7 +98,7 @@ def test_v004_interruption_at_phase_boundary_recovers(tmp_path: Path, interrupt_
                 "select version from schema_migrations order by version"
             ).fetchall()
         ]
-        assert versions == [1, 2, 3, 4, 6, 7, 8]
+        assert versions == EXPECTED_VERSIONS
         assert _foreign_key_relationships(conn) == _expected_fk_relationships()
         assert conn.execute("pragma integrity_check").fetchone()[0] == "ok"
         assert conn.execute("pragma foreign_key_check").fetchall() == []

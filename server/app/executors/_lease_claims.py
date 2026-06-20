@@ -4,16 +4,20 @@ import json
 import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 
 from server.app.executors._lease_control import (
     _execution_control_rejects_claim,
     _read_job_execution_control,
 )
 from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._path_canonicalization import canonicalize_if_absolute
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
 
 
-def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> ClaimedExecution | None:
+def claim_lease(
+    conn: sqlite3.Connection, request: LeaseClaimRequest, data_dir: Path | None = None
+) -> ClaimedExecution | None:
     """Attempt to claim a node run under capacity limits.
 
     Must run inside an active transaction. Returns None when capacity is
@@ -132,6 +136,7 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
     if cursor.rowcount == 0:
         return None
 
+    log_path = canonicalize_if_absolute(request.log_path, data_dir)
     cursor = conn.execute(
         """
         insert into node_runs(
@@ -139,12 +144,11 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
         )
         values (?, ?, 'running', ?, ?, '', '', ?)
         """,
-        (request.job_id, request.node_key, json.dumps([]), request.log_path, now_str),
+        (request.job_id, request.node_key, json.dumps([]), log_path, now_str),
     )
     if cursor.lastrowid is None:
         raise sqlite3.OperationalError("node_runs insert did not produce a row id")
     node_run_id = cursor.lastrowid
-
     expires_at = now + timedelta(seconds=request.lease_ttl_seconds)
     conn.execute(
         """
@@ -170,11 +174,7 @@ def claim_lease(conn: sqlite3.Connection, request: LeaseClaimRequest) -> Claimed
     )
 
     conn.execute(
-        """
-        update jobs
-        set status='running', updated_at=?
-        where id=? and status != 'running'
-        """,
+        "update jobs set status='running', updated_at=? where id=? and status != 'running'",
         (now_str, request.job_id),
     )
 

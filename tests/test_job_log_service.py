@@ -9,6 +9,7 @@ from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_logs import JobLogService
 from server.app.settings import Settings
+from server.app.storage_paths import make_data_relative
 
 
 def _create_job_with_run(
@@ -91,7 +92,9 @@ def test_job_log_service_returns_tail(log_service):
     log_file = logs_root / "run.log"
     log_file.write_text("line1\nline2\nline3\n", encoding="utf-8")
 
-    job, run = _create_job_with_run(job_db, settings, str(log_file))
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
     result = service.read(job["id"], run["id"])
 
     assert result["run_id"] == run["id"]
@@ -109,7 +112,9 @@ def test_job_log_service_truncates_long_file(log_service):
     repeats = (14 * 1024 // len(chunk)) + 10
     log_file.write_text(chunk * repeats, encoding="utf-8")
 
-    job, run = _create_job_with_run(job_db, settings, str(log_file))
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
     result = service.read(job["id"], run["id"])
 
     assert result["truncated"] is True
@@ -122,7 +127,9 @@ def test_job_log_service_returns_empty_for_missing_file(log_service):
     logs_root.mkdir(parents=True, exist_ok=True)
     log_file = logs_root / "missing.log"
 
-    job, run = _create_job_with_run(job_db, settings, str(log_file))
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
     result = service.read(job["id"], run["id"])
 
     assert result["run_id"] == run["id"]
@@ -151,7 +158,7 @@ def test_job_log_service_rejects_run_from_other_job(log_service):
         other_job["id"],
         "fetch_question_context",
         ["echo", "hi"],
-        str(log_file),
+        make_data_relative(log_file, settings.data_dir),
     )
 
     with pytest.raises(NotFoundError, match="Run not found"):
@@ -178,6 +185,20 @@ def test_job_log_service_rejects_absolute_path(log_service):
         service.read(job["id"], run["id"])
 
 
+def test_job_log_service_rejects_wrong_category_inside_data_dir(log_service):
+    service, settings, job_db = log_service
+    videos_dir = settings.videos_dir / "v1"
+    videos_dir.mkdir(parents=True, exist_ok=True)
+    log_file = videos_dir / "phase.log"
+    log_file.write_text("secret", encoding="utf-8")
+
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
+    with pytest.raises(InvalidOperationError, match="Invalid log path"):
+        service.read(job["id"], run["id"])
+
+
 def test_job_log_service_rejects_symlink_escape(log_service, tmp_path):
     service, settings, job_db = log_service
     outside = tmp_path / "outside.log"
@@ -186,7 +207,7 @@ def test_job_log_service_rejects_symlink_escape(log_service, tmp_path):
     linked.parent.mkdir(parents=True, exist_ok=True)
     linked.symlink_to(outside)
 
-    job, run = _create_job_with_run(job_db, settings, str(linked))
+    job, run = _create_job_with_run(job_db, settings, make_data_relative(linked, settings.data_dir))
     with pytest.raises(InvalidOperationError, match="Invalid log path"):
         service.read(job["id"], run["id"])
 
@@ -201,7 +222,9 @@ def test_job_log_service_redacts_home_path(log_service, tmp_path, monkeypatch):
     log_file = logs_root / "run.log"
     log_file.write_text(f"loaded from {fake_home / '.config' / 'secret.ini'}", encoding="utf-8")
 
-    job, run = _create_job_with_run(job_db, settings, str(log_file))
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
     result = service.read(job["id"], run["id"])
 
     assert str(fake_home) not in result["log"]
@@ -218,7 +241,9 @@ def test_job_log_service_redacts_root_dir(log_service, tmp_path):
         encoding="utf-8",
     )
 
-    job, run = _create_job_with_run(job_db, settings, str(log_file))
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
     result = service.read(job["id"], run["id"])
 
     assert str(settings.root_dir) not in result["log"]
@@ -235,7 +260,9 @@ def test_job_log_service_redacts_config_secrets(log_service_with_secret_config):
         encoding="utf-8",
     )
 
-    job, run = _create_job_with_run(job_db, settings, str(log_file))
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
     result = service.read(job["id"], run["id"])
 
     assert "cms-token-123" not in result["log"]
@@ -253,7 +280,9 @@ def test_job_log_service_preserves_empty_config_values(log_service):
     log_file = logs_root / "run.log"
     log_file.write_text("nothing to hide", encoding="utf-8")
 
-    job, run = _create_job_with_run(job_db, settings, str(log_file))
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
     result = service.read(job["id"], run["id"])
 
     assert result["log"] == "nothing to hide"
@@ -272,7 +301,9 @@ def test_job_log_service_redacts_nested_secret_values(log_service):
     log_file = logs_root / "run.log"
     log_file.write_text("hidden-token hidden-key visible-value", encoding="utf-8")
 
-    job, run = _create_job_with_run(job_db, settings, str(log_file))
+    job, run = _create_job_with_run(
+        job_db, settings, make_data_relative(log_file, settings.data_dir)
+    )
     result = service.read(job["id"], run["id"])
 
     assert "hidden-token" not in result["log"]

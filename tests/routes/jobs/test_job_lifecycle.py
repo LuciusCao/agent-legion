@@ -1,6 +1,8 @@
 import json
 from pathlib import Path
 
+from server.app.storage_paths import resolve_job_dir
+
 
 def test_get_job_detail_and_artifact_when_enabled(tmp_path):
     from fastapi.testclient import TestClient
@@ -56,7 +58,7 @@ def test_job_detail_includes_pi_run_trace(tmp_path):
             job_id,
             "extract_keywords",
             ["pi", "--mode", "json"],
-            "events.jsonl",
+            "logs/jobs/extract_keywords-events.jsonl",
             run_dir=str(tmp_path / "run-1"),
             session_dir=str(tmp_path / "run-1" / "session"),
         )
@@ -161,8 +163,6 @@ def test_delete_job_returns_404_for_unknown_job(tmp_path):
 
 
 def test_delete_job_rejects_running_job(tmp_path):
-    from pathlib import Path
-
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -181,7 +181,7 @@ def test_delete_job_rejects_running_job(tmp_path):
         )
         job_id = "default_question_content_Q601"
         job = app.state.job_db.get_job(job_id)
-        storage_dir = Path(str(job["storage_dir"]))
+        storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
         (storage_dir / "artifact.json").write_text("{}")
         log_dir = app.state.settings.logs_dir / "jobs"
@@ -189,7 +189,12 @@ def test_delete_job_rejects_running_job(tmp_path):
         log_path = log_dir / f"{job_id}-fetch_question_context.log"
         log_path.write_text("running")
         # Start a node run so _job_has_running_nodes returns True
-        app.state.job_db.start_node_run(job_id, "fetch_question_context", ["cmd"], str(log_path))
+        app.state.job_db.start_node_run(
+            job_id,
+            "fetch_question_context",
+            ["cmd"],
+            f"logs/jobs/{job_id}-fetch_question_context.log",
+        )
         resp = c.delete(f"/api/jobs/{job_id}")
     assert resp.status_code == 400
     assert "running" in resp.json()["detail"].lower()
@@ -199,8 +204,6 @@ def test_delete_job_rejects_running_job(tmp_path):
 
 
 def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
-    from pathlib import Path
-
     from fastapi.testclient import TestClient
 
     from server.app.main import create_app
@@ -219,7 +222,7 @@ def test_delete_job_cascades_and_returns_deleted_id(tmp_path):
         )
         job_id = "default_question_content_Q602"
         job = app.state.job_db.get_job(job_id)
-        storage_dir = Path(str(job["storage_dir"]))
+        storage_dir = resolve_job_dir(job, app.state.settings.jobs_dir)
         storage_dir.mkdir(parents=True, exist_ok=True)
         (storage_dir / "artifact.json").write_text("{}")
         log_dir = app.state.settings.logs_dir / "jobs"
@@ -254,7 +257,7 @@ def test_list_workspace_runs_returns_joined_job_metadata(tmp_path):
             job_id,
             "fetch_question_context",
             ["local", "fetch_question_context"],
-            "data/logs/jobs/run.log",
+            "logs/jobs/run.log",
         )
         app.state.job_db.finish_node_run(run["id"], "completed", 0, "")
 
@@ -290,9 +293,11 @@ def test_list_workspace_runs_filters_by_status_and_node(tmp_path):
             },
         ).json()
         job_id = batch["jobs"][0]["id"]
-        run1 = app.state.job_db.start_node_run(job_id, "fetch_question_context", ["local"], "a.log")
+        run1 = app.state.job_db.start_node_run(
+            job_id, "fetch_question_context", ["local"], "logs/a.log"
+        )
         app.state.job_db.finish_node_run(run1["id"], "completed", 0, "")
-        run2 = app.state.job_db.start_node_run(job_id, "assemble_package", ["local"], "b.log")
+        run2 = app.state.job_db.start_node_run(job_id, "assemble_package", ["local"], "logs/b.log")
         app.state.job_db.finish_node_run(run2["id"], "failed", 1, "boom")
 
         response = c.get("/api/workspaces/default/runs?status=failed&node_key=assemble_package")
@@ -372,7 +377,10 @@ def test_get_job_run_log_returns_redacted_tail(tmp_path):
         log_path = log_dir / f"{job_id}-fetch_question_context.log"
         log_path.write_text("start\nleaked-token\nend\n", encoding="utf-8")
         run = app.state.job_db.start_node_run(
-            job_id, "fetch_question_context", ["cmd"], str(log_path)
+            job_id,
+            "fetch_question_context",
+            ["cmd"],
+            f"logs/jobs/{job_id}-fetch_question_context.log",
         )
 
         resp = c.get(f"/api/jobs/{job_id}/runs/{run['id']}/log")

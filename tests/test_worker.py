@@ -551,3 +551,69 @@ def test_process_next_does_not_limit_polling_query(db, settings):
         call_kwargs = mock_list.call_args.kwargs
         assert "limit" not in call_kwargs
         assert call_kwargs.get("status_filter") == ["queued", "missing_url", "running"]
+
+
+def test_phase_run_log_path_is_persisted_relative(db, settings):
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "a.mp4").write_bytes(b"fake")
+    db.update_video("a", storage_dir=str(video_dir), current_phase="transcribe", status="queued")
+
+    process_video_once(db, settings, video["id"], providers=[TestProvider()])
+
+    runs = db.list_phase_runs("a")
+    assert runs
+    assert runs[-1]["log_path"].startswith("logs/")
+    assert not Path(runs[-1]["log_path"]).is_absolute()
+
+
+class _RecordingChapterRunner:
+    def __init__(self):
+        self.calls = 0
+        self.log_path: Path | None = None
+
+    def run(self, phase, video_id: str, video_dir: Path, prompt_dir: Path, log_path: Path):
+        self.calls += 1
+        self.log_path = log_path
+        phase_key = getattr(phase, "key", str(phase))
+        (video_dir / "chapters_raw.json").write_text(
+            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
+            encoding="utf-8",
+        )
+        (video_dir / "chapters.json").write_text(
+            json.dumps([{"id": "C1", "start_time": 0, "end_time": 2, "title": "开始"}]),
+            encoding="utf-8",
+        )
+        return type(
+            "Result",
+            (),
+            {
+                "status": "completed",
+                "error_message": "",
+                "command": ["openclaw", phase_key, video_id],
+            },
+        )()
+
+
+def test_agent_phase_runner_receives_absolute_log_path(db, settings):
+    video = db.create_video("https://example.com/a.mp4", "A")
+    video_dir = settings.videos_dir / "a"
+    video_dir.mkdir(parents=True)
+    (video_dir / "subtitles_reviewed.srt").write_text(
+        "1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8"
+    )
+    db.update_video(
+        video["id"],
+        storage_dir=str(video_dir),
+        current_phase="chapter_generate",
+        status="queued",
+    )
+    runner = _RecordingChapterRunner()
+
+    process_video_once(db, settings, video["id"], openclaw_runner=runner)
+
+    assert runner.calls == 1
+    assert runner.log_path is not None
+    assert runner.log_path.is_absolute()
+    assert runner.log_path == settings.logs_dir / f"{video['id']}-chapter_generate.log"

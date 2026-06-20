@@ -75,3 +75,17 @@ def test_delete_rejects_symlink_to_outside_without_changes(db, tmp_path):
     assert outside_path.read_bytes() == b"outside archive"
     assert package_path.is_symlink()
     assert [package["id"] for package in db.list_packages(limit=1000)] == [package_id]
+
+
+def test_delete_removes_existing_file_with_relative_path(db, tmp_path):
+    packages_dir = tmp_path / "packages"
+    packages_dir.mkdir(exist_ok=True)
+    package_path = packages_dir / "batch.zip"
+    package_path.write_bytes(b"archive")
+    db.insert_package("packages/batch.zip")
+    package_id = int(db.list_packages(limit=1)[0]["id"])
+
+    PackageDeletionService(db, packages_dir).delete(package_id)
+
+    assert not package_path.exists()
+    assert db.list_packages(limit=1000) == []

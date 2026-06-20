@@ -7,6 +7,7 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.settings import Settings
+from server.app.storage_paths import ManagedPathError, resolve_data_path
 
 TAIL_READ_LIMIT = 12 * 1024
 RETURN_LIMIT = 8 * 1024
@@ -27,10 +28,10 @@ class JobLogService:
         if not log_path:
             return {"run_id": run_id, "log": "", "truncated": False}
 
-        path = Path(log_path).expanduser().resolve()
         try:
+            path = resolve_data_path(log_path, self.settings.data_dir, allow_missing=True)
             path.relative_to(self.logs_root)
-        except ValueError as exc:
+        except (ValueError, ManagedPathError) as exc:
             raise InvalidOperationError("Invalid log path") from exc
 
         if not path.exists() or not path.is_file():

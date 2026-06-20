@@ -10,6 +10,7 @@ from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_execution import JobExecutionService
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.registry import load_registered_workflow
 
 
@@ -62,7 +63,9 @@ def _create_active_lease(
     node_key: str,
     expires_offset_seconds: float = 300,
 ) -> None:
-    run = job_db.start_node_run(job["id"], node_key, ["cmd"], "/dev/null")
+    run = job_db.start_node_run(
+        job["id"], node_key, ["cmd"], f"logs/jobs/{job['id']}-{node_key}.log"
+    )
     assert run is not None
     now = datetime.now(UTC)
     expires = now + timedelta(seconds=expires_offset_seconds)
@@ -144,10 +147,10 @@ def test_run_to_without_start_unpauses_target_reached_job(
 
 
 def test_run_to_with_start_unpauses_target_reached_job(
-    execution_service: JobExecutionService, job_db: JobQueries, workspace
+    execution_service: JobExecutionService, job_db: JobQueries, workspace, settings
 ):
     job = _create_job(job_db, workspace["id"])
-    storage = Path(job["storage_dir"])
+    storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "understanding.json").write_text("understanding")
     job_db.update_job_node(job["id"], "fetch_question_context", status="completed")
@@ -197,10 +200,10 @@ def test_run_to_without_start_preserves_completed_ancestors(
 
 
 def test_run_to_with_start_reruns_within_target_closure(
-    execution_service: JobExecutionService, job_db: JobQueries, workspace
+    execution_service: JobExecutionService, job_db: JobQueries, workspace, settings
 ):
     job = _create_job(job_db, workspace["id"])
-    storage = Path(job["storage_dir"])
+    storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
     (storage / "question_context.json").write_text("context")
     (storage / "understanding.json").write_text("understanding")

@@ -1,11 +1,9 @@
-from __future__ import annotations
-
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.pi_runner import PiRunner
 from server.app.workflows.question_comprehension_info import (
@@ -73,7 +71,9 @@ def execute_local_node_once(
 
     log_path = logs_dir / "jobs" / f"{job['id']}-{node_key}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    run = job_db.start_node_run(job["id"], node_key, ["local", node_key], str(log_path))
+    run = job_db.start_node_run(
+        job["id"], node_key, ["local", node_key], make_data_relative(log_path, logs_dir.parent)
+    )
     if run is None:
         return False
 
@@ -105,8 +105,7 @@ def execute_node_once(
     skill_root: Path | None = None,
     jobs_dir: Path | None = None,
 ) -> bool:
-    has_local_handler = LOCAL_HANDLERS.get(definition.key, {}).get(node_key) is not None
-    if has_local_handler:
+    if LOCAL_HANDLERS.get(definition.key, {}).get(node_key) is not None:
         return execute_local_node_once(
             job_db,
             definition,

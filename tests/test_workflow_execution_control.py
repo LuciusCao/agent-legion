@@ -121,7 +121,7 @@ def _claim_request(
     global_capacity: int = 2,
     local_node_limit: int | None = 1,
     ttl: int = 60,
-    log_path: str = "/tmp/run.log",
+    log_path: str = "logs/run.log",
     workflow_key: str = "branched",
     capability: str = "root",
 ) -> LeaseClaimRequest:

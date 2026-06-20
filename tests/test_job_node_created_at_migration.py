@@ -2,7 +2,10 @@ from contextlib import closing
 from pathlib import Path
 
 from server.app.db.connection import connect_sqlite
+from server.app.db.migrations import MIGRATIONS
 from server.app.db.schema import init_db
+
+EXPECTED_VERSIONS = [m.version for m in MIGRATIONS]
 
 
 def test_v008_adds_created_at_to_existing_job_nodes(tmp_path: Path) -> None:
@@ -84,7 +87,7 @@ def test_v008_adds_created_at_to_existing_job_nodes(tmp_path: Path) -> None:
                 "select version from schema_migrations order by version"
             ).fetchall()
         ]
-        assert versions == [1, 2, 3, 4, 6, 7, 8]
+        assert versions == EXPECTED_VERSIONS
 
         completed = conn.execute(
             "select created_at from job_nodes where node_key='completed_node'"
@@ -111,6 +114,6 @@ def test_v008_is_idempotent(tmp_path: Path) -> None:
                 "select version from schema_migrations order by version"
             ).fetchall()
         ]
-        assert versions == [1, 2, 3, 4, 6, 7, 8]
+        assert versions == EXPECTED_VERSIONS
         cols = {row["name"] for row in conn.execute("pragma table_info(job_nodes)").fetchall()}
         assert "created_at" in cols
