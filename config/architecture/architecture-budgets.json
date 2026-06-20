@@ -59,6 +59,7 @@
     "scripts/architecture/phase4.py": 151,
     "scripts/architecture/workflow.py": 49,
     "scripts/architecture/repository.py": 255,
+    "scripts/architecture/configuration.py": 80,
     "scripts/architecture/import_cycles.py": 63,
     "scripts/architecture/import_dependencies.py": 290,
     "scripts/architecture/import_guards.py": 137,
@@ -77,6 +78,7 @@
     "tests/test_architecture_route_contracts.py": 304,
     "tests/test_architecture_route_mutations.py": 133,
     "tests/test_architecture_service_boundaries.py": 75,
+    "tests/test_architecture_configuration.py": 120,
     "tests/test_executor_phase5_inventory.py": 81,
     "tests/test_executor_recovery.py": 366
   },
