@@ -17,7 +17,6 @@ from server.app.executors.runtime_config import (
     validate_runtime,
 )
 
-
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
 

@@ -3,6 +3,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
+from scripts.architecture.configuration import check_configuration_ownership
 from scripts.architecture.exemptions import categorize_exemptions, load_exemptions
 from scripts.architecture.helpers import (
     ROUTE_FORBIDDEN,
@@ -41,7 +42,6 @@ from scripts.architecture.phase6 import (
 from scripts.architecture.route_contracts import has_protocol_response_annotation
 from scripts.architecture.service_boundaries import check_service_import_boundaries
 from scripts.architecture.workflow import check_workflow_definitions
-from scripts.architecture.configuration import check_configuration_ownership
 
 
 def check_repository(root: Path) -> list[str]:
