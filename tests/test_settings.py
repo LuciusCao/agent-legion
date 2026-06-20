@@ -155,7 +155,10 @@ def test_explicit_path_does_not_inspect_partial_neighbor_layout(tmp_path):
     explicit = tmp_path / "custom.yaml"
     explicit.write_text("data_dir: selected\n", encoding="utf-8")
     settings = load_settings(data_dir=tmp_path / "data", config_path=explicit)
-    assert settings.config == {"data_dir": "selected"}
+    assert settings.config["data_dir"] == "selected"
+    # The neighbor app.yaml must not influence the explicit configuration.
+    assert settings.config.get("server") is None
+    assert settings.config.get("worker") is None
 
 
 def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
