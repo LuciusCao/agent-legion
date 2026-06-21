@@ -99,64 +99,75 @@ def _git_env() -> dict[str, str]:
         GIT_COMMITTER_NAME="t",
         GIT_COMMITTER_EMAIL="t@t",
     )
+    # When invoked from a git hook (e.g. pre-commit), these variables point at
+    # the parent repository. They must not leak into the temporary test repos,
+    # otherwise commands like `git -C <tmp> push origin HEAD` would operate on
+    # the parent repo and push to its remote instead of the local bare repo.
+    env.pop("GIT_DIR", None)
+    env.pop("GIT_WORK_TREE", None)
+    env.pop("GIT_INDEX_FILE", None)
     return env
 
 
 def _make_bare_repo(tmp_path: Path) -> str:
+    env = _git_env()
     repo = tmp_path / "remote.git"
     repo.mkdir()
-    subprocess.run(["git", "init", "--bare", str(repo)], check=True)
+    subprocess.run(["git", "init", "--bare", str(repo)], check=True, env=env)
     work = tmp_path / "work"
     work.mkdir()
-    subprocess.run(["git", "clone", str(repo), str(work / "clone")], check=True)
+    subprocess.run(["git", "clone", str(repo), str(work / "clone")], check=True, env=env)
     clone = work / "clone"
     (clone / "SKILL.md").write_text("# skill\n")
     (clone / "references").mkdir()
     (clone / "references" / "output-contract.md").write_text("contract\n")
     (clone / "scripts").mkdir()
     (clone / "scripts" / "validate_output.py").write_text("print('ok')\n")
-    subprocess.run(["git", "-C", str(clone), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(clone), "add", "."], check=True, env=env)
     subprocess.run(
         ["git", "-C", str(clone), "commit", "-m", "init", "--no-gpg-sign"],
         check=True,
-        env=_git_env(),
+        env=env,
     )
-    subprocess.run(["git", "-C", str(clone), "push", "origin", "HEAD"], check=True)
+    subprocess.run(["git", "-C", str(clone), "push", "origin", "HEAD"], check=True, env=env)
     return f"file://{repo.resolve()}"
 
 
 def _push_new_commit(repo_uri: str, tmp_path: Path, content: str) -> None:
+    env = _git_env()
     work = tmp_path / "work" / "clone"
     (work / "SKILL.md").write_text(content)
-    subprocess.run(["git", "-C", str(work), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(work), "add", "."], check=True, env=env)
     subprocess.run(
         ["git", "-C", str(work), "commit", "-m", "update", "--no-gpg-sign"],
         check=True,
-        env=_git_env(),
+        env=env,
     )
-    subprocess.run(["git", "-C", str(work), "push", "origin", "HEAD"], check=True)
+    subprocess.run(["git", "-C", str(work), "push", "origin", "HEAD"], check=True, env=env)
 
 
 def _make_in_place_repo(repo: Path) -> str:
+    env = _git_env()
     repo.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", str(repo)], check=True)
+    subprocess.run(["git", "init", "-q", str(repo)], check=True, env=env)
     (repo / "SKILL.md").write_text("# local skill\n")
     (repo / "references").mkdir()
     (repo / "references" / "output-contract.md").write_text("contract\n")
     (repo / "scripts").mkdir()
     (repo / "scripts" / "validate_output.py").write_text("print('ok')\n")
-    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True, env=env)
     subprocess.run(
         ["git", "-C", str(repo), "commit", "-m", "init", "--no-gpg-sign"],
         check=True,
-        env=_git_env(),
+        env=env,
     )
-    subprocess.run(["git", "-C", str(repo), "tag", "v1.0.0"], check=True)
+    subprocess.run(["git", "-C", str(repo), "tag", "v1.0.0"], check=True, env=env)
     return subprocess.run(
         ["git", "-C", str(repo), "rev-parse", "HEAD"],
         check=True,
         capture_output=True,
         text=True,
+        env=env,
     ).stdout.strip()
 
 
