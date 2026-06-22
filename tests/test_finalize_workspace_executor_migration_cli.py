@@ -34,7 +34,7 @@ def _legacy_database(data_dir: Path, *, agent_id: str = "pi") -> Path:
     ensure_legacy_workspace_tables(queries)
     workspace = queries.create_workspace(
         name="Legacy Workspace",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )
     workspace_id = str(workspace["id"])
     with queries.connect() as conn:

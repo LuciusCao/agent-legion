@@ -342,13 +342,13 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     assert job_after["pause_reason"] == "target_reached"
 
 
-def test_make_workflow_worker_runs_reading_analysis_local_node(tmp_path: Path, monkeypatch) -> None:
+def test_make_workflow_worker_runs_question_comprehension_info_local_node(tmp_path: Path, monkeypatch) -> None:
     monkeypatch.setattr(
-        "server.app.workflows.reading_analysis.get_token",
+        "server.app.workflows.question_comprehension_info.get_token",
         lambda env, config: "test-token",
     )
     monkeypatch.setattr(
-        "server.app.workflows.reading_analysis.fetch_question_detail",
+        "server.app.workflows.question_comprehension_info.fetch_question_detail",
         lambda question_id, api_url, token: SimpleNamespace(
             question_id=question_id,
             title="Question Q100",
@@ -366,10 +366,10 @@ def test_make_workflow_worker_runs_reading_analysis_local_node(tmp_path: Path, m
         )
         conn.execute(
             "insert into workspace_node_bindings (workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-            (workspace["id"], "reading_analysis", "fetch_questions", "local-default"),
+            (workspace["id"], "question_comprehension_info", "fetch_questions", "local-default"),
         )
     job = queries.create_job(
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q100",
         batch_id="",

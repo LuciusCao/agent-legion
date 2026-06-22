@@ -55,7 +55,7 @@ def make_workflow_worker(
     tmp_path: Path,
     queries: JobQueries,
     *,
-    workflow_key: str = "reading_analysis",
+    workflow_key: str = "question_comprehension_info",
     pi_binary: str | None = "echo",
     pi_timeout: int = 1,
 ) -> tuple[WorkflowWorkerThread, WorkflowDefinition]:

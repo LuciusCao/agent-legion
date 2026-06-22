@@ -19,8 +19,8 @@ def test_pi_executor_supports_capability(tmp_path: Path) -> None:
     executor = PiExecutor(
         "pi-default",
         PiRuntimeConfig(binary="pi"),
-        _make_skill_manager(tmp_path, "reading_analysis/review_keywords"),
-        {"review_keywords": PiCapabilityConfig(skill="reading_analysis/review_keywords")},
+        _make_skill_manager(tmp_path, "question_comprehension_info/review_key_info"),
+        {"review_keywords": PiCapabilityConfig(skill="question_comprehension_info/review_key_info")},
     )
     assert executor.supports("review_keywords")
     assert not executor.supports("other")
@@ -35,7 +35,7 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
 
     skill_manager = _make_skill_manager(
         tmp_path,
-        "reading_analysis/extract_keywords",
+        "question_comprehension_info/generate_key_info",
         validate_script=(
             "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
             "job_dir = Path(sys.argv[1])\n"
@@ -47,7 +47,7 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
         "pi-default",
         PiRuntimeConfig(binary=str(fake_pi)),
         skill_manager,
-        {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
+        {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
     )
 
     job_dir = tmp_path / "job"
@@ -59,7 +59,7 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
         executor_id="pi-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         node_key="extract_keywords",
         capability="extract_keywords",
         workspace={"id": "ws-a"},
@@ -87,14 +87,14 @@ def test_pi_executor_cleans_snapshot_when_runner_raises(
 ) -> None:
     skill_manager = _make_skill_manager(
         tmp_path,
-        "reading_analysis/extract_keywords",
+        "question_comprehension_info/generate_key_info",
         validate_script="#!/usr/bin/env python3\n",
     )
     executor = PiExecutor(
         "pi-default",
         PiRuntimeConfig(binary="pi"),
         skill_manager,
-        {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
+        {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
     )
     monkeypatch.setattr(
         executor._runner,
@@ -109,7 +109,7 @@ def test_pi_executor_cleans_snapshot_when_runner_raises(
         executor_id="pi-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         node_key="extract_keywords",
         capability="extract_keywords",
         workspace={"id": "ws-a"},
@@ -133,7 +133,7 @@ def test_pi_executor_fails_when_output_missing(tmp_path: Path) -> None:
 
     skill_manager = _make_skill_manager(
         tmp_path,
-        "reading_analysis/extract_keywords",
+        "question_comprehension_info/generate_key_info",
         validate_script="#!/usr/bin/env python3\nimport sys\n",
     )
 
@@ -141,7 +141,7 @@ def test_pi_executor_fails_when_output_missing(tmp_path: Path) -> None:
         "pi-default",
         PiRuntimeConfig(binary=str(fake_pi)),
         skill_manager,
-        {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
+        {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
     )
 
     job_dir = tmp_path / "job"
@@ -153,7 +153,7 @@ def test_pi_executor_fails_when_output_missing(tmp_path: Path) -> None:
         executor_id="pi-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         node_key="extract_keywords",
         capability="extract_keywords",
         workspace={"id": "ws-a"},
@@ -173,8 +173,8 @@ def test_pi_executor_cancel_records_intent(tmp_path: Path) -> None:
     executor = PiExecutor(
         "pi-default",
         PiRuntimeConfig(binary="pi"),
-        _make_skill_manager(tmp_path, "reading_analysis/extract_keywords"),
-        {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
+        _make_skill_manager(tmp_path, "question_comprehension_info/generate_key_info"),
+        {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
     )
     executor.cancel("exec-1")
 
@@ -187,7 +187,7 @@ def test_pi_executor_cancel_records_intent(tmp_path: Path) -> None:
         executor_id="pi-default",
         workspace_id="ws-a",
         job_id="job-1",
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         node_key="extract_keywords",
         capability="extract_keywords",
         workspace={"id": "ws-a"},

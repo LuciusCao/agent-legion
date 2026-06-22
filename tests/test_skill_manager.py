@@ -15,24 +15,24 @@ from server.app.skills.manager import SkillManager
 
 def test_skills_config_parses_minimal() -> None:
     data = {
-        "skills": {"reading_analysis": {"repo": "https://example.com/skills.git", "ref": "main"}}
+        "skills": {"question_comprehension_info": {"repo": "https://example.com/skills.git", "ref": "main"}}
     }
     config = SkillsConfig.model_validate(data)
-    assert config.skills["reading_analysis"].repo == "https://example.com/skills.git"
-    assert config.skills["reading_analysis"].ref == "main"
+    assert config.skills["question_comprehension_info"].repo == "https://example.com/skills.git"
+    assert config.skills["question_comprehension_info"].ref == "main"
 
 
 def test_skills_config_parses_workflow_capability_key() -> None:
     data = {
         "skills": {
-            "reading_analysis/extract_keywords": {
+            "question_comprehension_info/generate_key_info": {
                 "repo": "https://example.com/skills.git",
                 "ref": "v1.2.3",
             }
         }
     }
     config = SkillsConfig.model_validate(data)
-    key = "reading_analysis/extract_keywords"
+    key = "question_comprehension_info/generate_key_info"
     assert key in config.skills
     assert config.skills[key].repo == "https://example.com/skills.git"
     assert config.skills[key].ref == "v1.2.3"
@@ -44,7 +44,7 @@ def test_skills_lock_parses_and_serializes() -> None:
         "version": "1",
         "resolved_at": "2026-06-19T06:59:19Z",
         "skills": {
-            "reading_analysis": {
+            "question_comprehension_info": {
                 "repo": "https://example.com/skills.git",
                 "ref": "main",
                 "commit": "abc123def456",
@@ -54,9 +54,9 @@ def test_skills_lock_parses_and_serializes() -> None:
     lock = SkillsLock.model_validate(data)
     assert lock.version == "1"
     assert lock.resolved_at == "2026-06-19T06:59:19Z"
-    assert lock.skills["reading_analysis"].repo == "https://example.com/skills.git"
-    assert lock.skills["reading_analysis"].ref == "main"
-    assert lock.skills["reading_analysis"].commit == "abc123def456"
+    assert lock.skills["question_comprehension_info"].repo == "https://example.com/skills.git"
+    assert lock.skills["question_comprehension_info"].ref == "main"
+    assert lock.skills["question_comprehension_info"].commit == "abc123def456"
     assert lock.model_dump() == data
 
 
@@ -175,7 +175,7 @@ def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
     )
     manager = SkillManager(
         config_path=config_path,
@@ -185,10 +185,10 @@ def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
     )
 
     execution_id = str(uuid.uuid4())
-    skill_dir = manager.get_skill_dir("reading_analysis/extract_keywords", execution_id)
+    skill_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", execution_id)
 
     assert skill_dir.is_dir()
-    assert skill_dir == tmp_path / "runs" / execution_id / "reading_analysis" / "extract_keywords"
+    assert skill_dir == tmp_path / "runs" / execution_id / "question_comprehension_info" / "extract_keywords"
     assert (skill_dir / "SKILL.md").is_file()
     assert not (skill_dir / ".git").exists()
 
@@ -198,15 +198,15 @@ def test_tilde_local_source_can_be_managed_in_place(
 ) -> None:
     fake_home = tmp_path / "home"
     base_dir = fake_home / ".agents" / "skills" / "agent-legion"
-    repo = base_dir / "reading_analysis" / "extract_keywords"
+    repo = base_dir / "question_comprehension_info" / "extract_keywords"
     commit = _make_in_place_repo(repo)
     monkeypatch.setenv("HOME", str(fake_home))
 
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
         "skills:\n"
-        "  reading_analysis/extract_keywords:\n"
-        "    repo: ~/.agents/skills/agent-legion/reading_analysis/extract_keywords\n"
+        "  question_comprehension_info/generate_key_info:\n"
+        "    repo: ~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info\n"
         "    ref: v1.0.0\n"
     )
     manager = SkillManager(
@@ -216,10 +216,10 @@ def test_tilde_local_source_can_be_managed_in_place(
         runs_dir=tmp_path / "runs",
     )
 
-    skill_dir = manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    skill_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
 
     assert (skill_dir / "SKILL.md").read_text() == "# local skill\n"
-    assert manager._load_lock().skills["reading_analysis/extract_keywords"].commit == commit
+    assert manager._load_lock().skills["question_comprehension_info/generate_key_info"].commit == commit
     assert (repo / ".git").is_dir()
 
 
@@ -227,7 +227,7 @@ def test_lock_commit_used_even_when_ref_drifts(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
     )
     manager = SkillManager(
         config_path=config_path,
@@ -237,13 +237,13 @@ def test_lock_commit_used_even_when_ref_drifts(tmp_path: Path) -> None:
     )
 
     first_execution = str(uuid.uuid4())
-    first_dir = manager.get_skill_dir("reading_analysis/extract_keywords", first_execution)
+    first_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", first_execution)
     locked_content = (first_dir / "SKILL.md").read_text()
 
     _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
 
     second_execution = str(uuid.uuid4())
-    second_dir = manager.get_skill_dir("reading_analysis/extract_keywords", second_execution)
+    second_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", second_execution)
 
     assert (second_dir / "SKILL.md").read_text() == locked_content
 
@@ -252,7 +252,7 @@ def test_lock_source_drift_is_rejected(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
     )
     manager = SkillManager(
         config_path=config_path,
@@ -260,13 +260,13 @@ def test_lock_source_drift_is_rejected(tmp_path: Path) -> None:
         base_dir=tmp_path / "skills",
         runs_dir=tmp_path / "runs",
     )
-    manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: HEAD\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: HEAD\n"
     )
 
     with pytest.raises(SkillConfigError, match="refresh"):
-        manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+        manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
 
 
 def test_refresh_lock_replaces_existing_pin(tmp_path: Path) -> None:
@@ -275,7 +275,7 @@ def test_refresh_lock_replaces_existing_pin(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
     )
     lock_path = tmp_path / "skills.lock"
     base_dir = tmp_path / "skills"
@@ -285,13 +285,13 @@ def test_refresh_lock_replaces_existing_pin(tmp_path: Path) -> None:
         base_dir=base_dir,
         runs_dir=tmp_path / "runs",
     )
-    manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
-    first_commit = manager._load_lock().skills["reading_analysis/extract_keywords"].commit
+    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    first_commit = manager._load_lock().skills["question_comprehension_info/generate_key_info"].commit
 
     _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
     refresh_lock(config_path, lock_path, base_dir)
 
-    refreshed = manager._load_lock().skills["reading_analysis/extract_keywords"]
+    refreshed = manager._load_lock().skills["question_comprehension_info/generate_key_info"]
     assert refreshed.commit != first_commit
     assert refreshed.repo == repo_uri
     assert refreshed.ref == "main"
@@ -314,7 +314,7 @@ def test_isolated_copies_do_not_interfere(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
     )
     manager = SkillManager(
         config_path=config_path,
@@ -323,8 +323,8 @@ def test_isolated_copies_do_not_interfere(tmp_path: Path) -> None:
         runs_dir=tmp_path / "runs",
     )
 
-    first_dir = manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
-    second_dir = manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    first_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    second_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
 
     original = (first_dir / "SKILL.md").read_text()
     (first_dir / "SKILL.md").write_text("# modified\n")
@@ -365,7 +365,7 @@ def test_lock_refresh_command_writes_lock(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: HEAD\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: HEAD\n"
     )
     lock_path = tmp_path / "skills.lock"
     base_dir = tmp_path / "skills"
@@ -374,7 +374,7 @@ def test_lock_refresh_command_writes_lock(tmp_path: Path) -> None:
 
     assert lock_path.is_file()
     content = lock_path.read_text()
-    assert "reading_analysis/extract_keywords" in content
+    assert "question_comprehension_info/generate_key_info" in content
     assert "commit:" in content
 
 
@@ -382,7 +382,7 @@ def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
     )
     manager = SkillManager(
         config_path=config_path,
@@ -391,13 +391,13 @@ def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
         runs_dir=tmp_path / "runs",
     )
 
-    first_dir = manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    first_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
     assert (first_dir / "SKILL.md").is_file()
 
-    cache_dir = tmp_path / "skills" / "reading_analysis" / "extract_keywords"
+    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "extract_keywords"
     (cache_dir / "garbage.txt").write_text("trash")
 
-    second_dir = manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    second_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
     assert second_dir.is_dir()
     assert not (second_dir / "garbage.txt").exists()
     assert (second_dir / "SKILL.md").is_file()
@@ -407,7 +407,7 @@ def test_concurrent_get_skill_dir_serializes_git_operations(tmp_path: Path) -> N
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
     )
     manager = SkillManager(
         config_path=config_path,
@@ -417,7 +417,7 @@ def test_concurrent_get_skill_dir_serializes_git_operations(tmp_path: Path) -> N
     )
 
     def fetch_copy(_index: int) -> Path:
-        return manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+        return manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(fetch_copy, i) for i in range(5)]
@@ -434,7 +434,7 @@ def test_broken_cache_directory_raises_skill_repo_error(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
     )
     manager = SkillManager(
         config_path=config_path,
@@ -443,18 +443,18 @@ def test_broken_cache_directory_raises_skill_repo_error(tmp_path: Path) -> None:
         runs_dir=tmp_path / "runs",
     )
 
-    cache_dir = tmp_path / "skills" / "reading_analysis" / "extract_keywords"
+    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "extract_keywords"
     cache_dir.mkdir(parents=True)
 
     with pytest.raises(SkillRepoError):
-        manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+        manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
 
 
 def test_lockfile_content_stays_stable_across_calls(tmp_path: Path) -> None:
     repo_uri = _make_bare_repo(tmp_path)
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
-        f"skills:\n  reading_analysis/extract_keywords:\n    repo: {repo_uri}\n    ref: main\n"
+        f"skills:\n  question_comprehension_info/generate_key_info:\n    repo: {repo_uri}\n    ref: main\n"
     )
     manager = SkillManager(
         config_path=config_path,
@@ -463,14 +463,14 @@ def test_lockfile_content_stays_stable_across_calls(tmp_path: Path) -> None:
         runs_dir=tmp_path / "runs",
     )
 
-    manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
     first_lock = manager._load_lock()
-    first_commit = first_lock.skills["reading_analysis/extract_keywords"].commit
+    first_commit = first_lock.skills["question_comprehension_info/generate_key_info"].commit
 
-    manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+    manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
     second_lock = manager._load_lock()
 
-    assert second_lock.skills["reading_analysis/extract_keywords"].commit == first_commit
+    assert second_lock.skills["question_comprehension_info/generate_key_info"].commit == first_commit
     assert second_lock.resolved_at == first_lock.resolved_at
 
 
@@ -498,7 +498,7 @@ def test_invalid_execution_id_rejected(execution_id: str, tmp_path: Path) -> Non
         runs_dir=tmp_path / "runs",
     )
     with pytest.raises(SkillPathError):
-        manager.get_skill_dir("reading_analysis/extract_keywords", execution_id)
+        manager.get_skill_dir("question_comprehension_info/generate_key_info", execution_id)
 
 
 def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None:
@@ -513,7 +513,7 @@ def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
         f"skills:\n"
-        f"  reading_analysis/extract_keywords:\n"
+        f"  question_comprehension_info/generate_key_info:\n"
         f"    repo: {repo_a}\n"
         f"    ref: main\n"
         f"  summarization/summarize:\n"
@@ -533,17 +533,17 @@ def test_concurrent_two_skills_lock_retains_both_commits(tmp_path: Path) -> None
     with concurrent.futures.ThreadPoolExecutor(max_workers=2) as executor:
         futures = [
             executor.submit(fetch, key)
-            for key in ("reading_analysis/extract_keywords", "summarization/summarize")
+            for key in ("question_comprehension_info/generate_key_info", "summarization/summarize")
         ]
         dirs = [f.result() for f in concurrent.futures.as_completed(futures)]
 
     lock = manager._load_lock()
-    assert "reading_analysis/extract_keywords" in lock.skills
+    assert "question_comprehension_info/generate_key_info" in lock.skills
     assert "summarization/summarize" in lock.skills
-    assert lock.skills["reading_analysis/extract_keywords"].commit
+    assert lock.skills["question_comprehension_info/generate_key_info"].commit
     assert lock.skills["summarization/summarize"].commit
     assert (
-        lock.skills["reading_analysis/extract_keywords"].commit
+        lock.skills["question_comprehension_info/generate_key_info"].commit
         != lock.skills["summarization/summarize"].commit
     )
     assert len({str(d) for d in dirs}) == 2
@@ -556,7 +556,7 @@ def test_invalid_repo_uri_raises_skill_repo_error(tmp_path: Path) -> None:
     config_path = tmp_path / "skills.yaml"
     config_path.write_text(
         "skills:\n"
-        "  reading_analysis/extract_keywords:\n"
+        "  question_comprehension_info/generate_key_info:\n"
         "    repo: file:///nonexistent/repo.git\n"
         "    ref: main\n"
     )
@@ -567,4 +567,4 @@ def test_invalid_repo_uri_raises_skill_repo_error(tmp_path: Path) -> None:
         runs_dir=tmp_path / "runs",
     )
     with pytest.raises(SkillRepoError):
-        manager.get_skill_dir("reading_analysis/extract_keywords", str(uuid.uuid4()))
+        manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))

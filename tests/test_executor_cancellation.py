@@ -227,14 +227,14 @@ class TestPiExecutorCancellation:
         fake_pi.write_text("#!/bin/bash\ntrap '' TERM\nsleep 1000\n")
         fake_pi.chmod(0o755)
 
-        skill_dir = tmp_path / "skills" / "reading_analysis" / "extract_keywords"
+        skill_dir = tmp_path / "skills" / "question_comprehension_info" / "extract_keywords"
         _pi_skill(skill_dir)
 
         executor = PiExecutor(
             "pi-default",
             PiConfig(binary=str(fake_pi), cancellation_grace_seconds=0.3),
             _StubSkillManager(tmp_path / "skills"),
-            {"extract_keywords": PiCapabilityConfig(skill="reading_analysis/extract_keywords")},
+            {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
         )
         job_dir = tmp_path / "job"
         job_dir.mkdir()
@@ -246,7 +246,7 @@ class TestPiExecutorCancellation:
             executor_id="pi-default",
             workspace_id="ws-a",
             job_id="job-1",
-            workflow_key="reading_analysis",
+            workflow_key="question_comprehension_info",
             node_key="extract_keywords",
             capability="extract_keywords",
             workspace={},
@@ -304,7 +304,7 @@ class TestOpenClawExecutorCancellation:
             executor_id="oc-default",
             workspace_id="ws-a",
             job_id="job-1",
-            workflow_key="reading_analysis",
+            workflow_key="question_comprehension_info",
             node_key="interaction_generate",
             capability="interaction_generate",
             workspace={},

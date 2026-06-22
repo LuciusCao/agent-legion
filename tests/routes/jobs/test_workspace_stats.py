@@ -83,7 +83,7 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(
             allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
             bindings=[
                 {
-                    "workflow_key": "reading_analysis",
+                    "workflow_key": "question_comprehension_info",
                     "node_key": "review_keywords",
                     "executor_id": "local-default",
                 }
@@ -93,7 +93,7 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q301"],
                 "knowledge_codes": [],

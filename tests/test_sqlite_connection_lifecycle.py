@@ -46,33 +46,33 @@ def test_executor_lease_repository_closes_connections(tmp_path: Path) -> None:
     init_db(path)
 
     queries = JobQueries(path, jobs_dir)
-    queries.create_workspace("lifecycle", default_workflow_key="reading_analysis")
+    queries.create_workspace("lifecycle", default_workflow_key="question_comprehension_info")
     queries.update_workspace_configuration(
         "lifecycle",
         name="lifecycle",
         description="",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
         default_entity="question",
         resource_config={},
         intake_config={},
         executor_allocations=[{"executor_id": "local", "concurrency_limit": 1}],
         node_bindings=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "extract_keywords",
                 "executor_id": "local",
             }
         ],
         node_limits=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "extract_keywords",
                 "concurrency_limit": 1,
             }
         ],
     )
     queries.create_job(
-        "reading_analysis",
+        "question_comprehension_info",
         "question_id",
         "q1",
         "",
@@ -86,8 +86,8 @@ def test_executor_lease_repository_closes_connections(tmp_path: Path) -> None:
         executor_id="local",
         global_capacity=1,
         workspace_id="lifecycle",
-        job_id="lifecycle_reading_analysis_q1",
-        workflow_key="reading_analysis",
+        job_id="lifecycle_question_comprehension_info_q1",
+        workflow_key="question_comprehension_info",
         node_key="extract_keywords",
         capability="extract_keywords",
         local_node_limit=1,

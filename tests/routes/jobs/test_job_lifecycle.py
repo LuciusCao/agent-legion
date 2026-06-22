@@ -70,7 +70,7 @@ def test_job_detail_includes_pi_run_trace(tmp_path, monkeypatch):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q100"],
                 "knowledge_codes": [],
@@ -366,12 +366,12 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path, monkeypatch):
     with TestClient(app) as c:
         ws_id = c.post(
             "/api/workspaces",
-            json={"name": "Reading DAG", "default_workflow_key": "reading_analysis"},
+            json={"name": "Reading DAG", "default_workflow_key": "question_comprehension_info"},
         ).json()["workspace"]["id"]
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q001", "Q002"],
                 "knowledge_codes": [],
@@ -381,7 +381,7 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     body = response.json()
-    assert body["workflow"]["key"] == "reading_analysis"
+    assert body["workflow"]["key"] == "question_comprehension_info"
     assert all("label" in node for node in body["nodes"])
     first = body["nodes"][0]
     assert first["key"] == "fetch_questions"

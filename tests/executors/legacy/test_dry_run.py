@@ -21,7 +21,7 @@ from tests.executors.legacy.helpers import (
 def test_dry_run_returns_report_without_writing(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Dry Run",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 3)
 
@@ -38,7 +38,7 @@ def test_dry_run_returns_report_without_writing(queries: JobQueries) -> None:
 def test_dry_run_raises_blocked_error_and_leaves_legacy_data(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Blocked Dry Run",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "bad-agent", 2)
 
@@ -55,7 +55,7 @@ def test_dry_run_raises_blocked_error_and_leaves_legacy_data(queries: JobQueries
 def test_v005_rolls_back_when_drop_column_is_not_supported(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Unsupported SQLite",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )["id"]
     with queries.connect() as conn:
         conn.execute(

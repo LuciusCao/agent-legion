@@ -20,7 +20,7 @@ from tests.executors.legacy.helpers import (
 def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> None:
     workspace = queries.create_workspace(
         name="Local Workspace",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )
     workspace_id = str(workspace["id"])
     _set_workflow_config(queries, workspace_id, {"local": 4})
@@ -43,13 +43,13 @@ def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> Non
     assert bindings == [
         {
             "workspace_id": workspace_id,
-            "workflow_key": "reading_analysis",
+            "workflow_key": "question_comprehension_info",
             "node_key": "local_a",
             "executor_id": "local-default",
         },
         {
             "workspace_id": workspace_id,
-            "workflow_key": "reading_analysis",
+            "workflow_key": "question_comprehension_info",
             "node_key": "local_b",
             "executor_id": "local-default",
         },
@@ -59,13 +59,13 @@ def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> Non
     assert limits == [
         {
             "workspace_id": workspace_id,
-            "workflow_key": "reading_analysis",
+            "workflow_key": "question_comprehension_info",
             "node_key": "local_a",
             "concurrency_limit": 1,
         },
         {
             "workspace_id": workspace_id,
-            "workflow_key": "reading_analysis",
+            "workflow_key": "question_comprehension_info",
             "node_key": "local_b",
             "concurrency_limit": 1,
         },
@@ -75,7 +75,7 @@ def test_finalizer_materializes_local_only_workspace(queries: JobQueries) -> Non
 def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None:
     workspace = queries.create_workspace(
         name="Pi Workspace",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )
     workspace_id = str(workspace["id"])
     _set_workflow_config(queries, workspace_id, {"nodes": {"local_a": 1}})
@@ -113,7 +113,7 @@ def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None
 def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Authoritative",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 99)
 
@@ -145,7 +145,7 @@ def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) ->
 def test_finalizer_blocks_on_unknown_agent(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Unknown Agent",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "unknown", 2)
 
@@ -160,7 +160,7 @@ def test_finalizer_blocks_on_unknown_agent(queries: JobQueries) -> None:
 def test_finalizer_blocks_on_invalid_legacy_limit(queries: JobQueries) -> None:
     workspace = queries.create_workspace(
         name="Bad Limit",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )
     _set_workflow_config(queries, str(workspace["id"]), {"local": 0})
 
@@ -177,7 +177,7 @@ def test_finalizer_blocks_on_invalid_pipeline_config_json(
 ) -> None:
     workspace_id = queries.create_workspace(
         name=f"Invalid JSON {raw_value}",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )["id"]
     with queries.connect() as conn:
         conn.execute(
@@ -215,7 +215,7 @@ def test_finalizer_blocks_on_missing_workflow_definition(queries: JobQueries) ->
 def test_finalizer_is_idempotent_after_v005(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Idempotent",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )["id"]
     _insert_legacy_agent_assignment(queries, workspace_id, "pi", 3)
 
@@ -261,7 +261,7 @@ def test_finalizer_does_not_bind_unallocated_agent_nodes(queries: JobQueries) ->
 def test_finalizer_applies_v005_and_removes_pipeline_config_json(queries: JobQueries) -> None:
     workspace = queries.create_workspace(
         name="V005",
-        default_workflow_key="reading_analysis",
+        default_workflow_key="question_comprehension_info",
     )
     _set_workflow_config(queries, str(workspace["id"]), {"local": 7})
 

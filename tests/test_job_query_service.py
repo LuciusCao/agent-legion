@@ -215,7 +215,7 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
                 "executor_id": "local-default",
             },
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_package",
                 "executor_id": "pi-default",
             },

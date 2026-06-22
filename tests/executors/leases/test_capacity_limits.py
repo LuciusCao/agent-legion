@@ -73,11 +73,11 @@ def test_local_node_limit_blocks_same_node_but_allows_other_local_node(
     with queries.connect() as conn:
         conn.execute(
             "insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id) values (?, ?, ?, ?)",
-            (workspace_id, "reading_analysis", other_node_key, executor_id),
+            (workspace_id, "question_comprehension_info", other_node_key, executor_id),
         )
         conn.execute(
             "insert into workspace_node_limits(workspace_id, workflow_key, node_key, concurrency_limit) values (?, ?, ?, ?)",
-            (workspace_id, "reading_analysis", other_node_key, 1),
+            (workspace_id, "question_comprehension_info", other_node_key, 1),
         )
         conn.execute(
             "insert or ignore into job_nodes(job_id, node_key, status) values (?, ?, 'pending')",

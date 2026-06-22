@@ -49,7 +49,7 @@ def test_v007_creates_pre_migration_backup_for_pipeline_columns(tmp_path: Path) 
         conn.execute("insert into workspaces(id, name) values ('ws1', 'Test Workspace')")
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values ('job1', 'ws1', 'reading_analysis', 'question', 'Q1')"
+            "values ('job1', 'ws1', 'question_comprehension_info', 'question', 'Q1')"
         )
         conn.execute("delete from schema_migrations where version=7")
         for table, new_name, old_name in (
@@ -73,7 +73,7 @@ def test_v007_creates_pre_migration_backup_for_pipeline_columns(tmp_path: Path) 
         assert "pipeline_key" in backup_columns
         assert "workflow_key" not in backup_columns
         assert backup.execute("select pipeline_key from jobs where id='job1'").fetchone()[0] == (
-            "reading_analysis"
+            "question_comprehension_info"
         )
 
     with closing(connect_sqlite(path)) as conn, conn:
@@ -259,14 +259,14 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
               id, workspace_id, workflow_key, source_kind, source_payload_json,
               status, created_count, error_message, created_at
             ) values (
-              'batch1', 'ws1', 'reading_analysis', 'question', '{}',
+              'batch1', 'ws1', 'question_comprehension_info', 'question', '{}',
               'created', 5, '', '2024-01-01 09:00:00'
             );
             insert into jobs(
               id, workspace_id, workflow_key, source_type, source_id, batch_id,
               title, status, storage_dir, error_message, created_at, updated_at, stem
             ) values (
-              'job1', 'ws1', 'reading_analysis', 'question', 'q1', 'batch1',
+              'job1', 'ws1', 'question_comprehension_info', 'question', 'q1', 'batch1',
               'Test Job', 'running', '/tmp/job1', '',
               '2024-01-01 10:00:00', '2024-01-01 12:00:00', 'job-stem-value'
             );
@@ -295,7 +295,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
         batch = conn.execute("select * from job_batches where id = 'batch1'").fetchone()
         assert batch is not None
         assert batch["workspace_id"] == "ws1"
-        assert batch["workflow_key"] == "reading_analysis"
+        assert batch["workflow_key"] == "question_comprehension_info"
         assert batch["source_kind"] == "question"
         assert batch["created_count"] == 5
         assert batch["created_at"] == "2024-01-01 09:00:00"
@@ -303,7 +303,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
         job = conn.execute("select * from jobs where id = 'job1'").fetchone()
         assert job is not None
         assert job["workspace_id"] == "ws1"
-        assert job["workflow_key"] == "reading_analysis"
+        assert job["workflow_key"] == "question_comprehension_info"
         assert job["source_type"] == "question"
         assert job["source_id"] == "q1"
         assert job["batch_id"] == "batch1"
@@ -432,7 +432,7 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, execution_mode) "
-            "values ('job_ok', 'constraint_ws', 'reading_analysis', 'question_id', 'Q1', 'until_node')"
+            "values ('job_ok', 'constraint_ws', 'question_comprehension_info', 'question_id', 'Q1', 'until_node')"
         )
         assert (
             conn.execute("select execution_mode from jobs where id='job_ok'").fetchone()[0]
@@ -441,7 +441,7 @@ def test_executor_migration_is_idempotent(tmp_path: Path) -> None:
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, execution_mode) "
-                "values ('job_bad', 'constraint_ws', 'reading_analysis', 'question_id', 'Q2', 'targeted')"
+                "values ('job_bad', 'constraint_ws', 'question_comprehension_info', 'question_id', 'Q2', 'targeted')"
             )
 
 

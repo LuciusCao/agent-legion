@@ -11,7 +11,7 @@ def test_loads_discriminated_executor_definitions() -> None:
                 "kind": "local",
                 "global_capacity": 4,
                 "capabilities": {
-                    "fetch_questions": {"handler": "reading_analysis.fetch_questions"}
+                    "fetch_questions": {"handler": "question_comprehension_info.fetch_questions"}
                 },
             },
             "pi-default": {
@@ -19,7 +19,7 @@ def test_loads_discriminated_executor_definitions() -> None:
                 "global_capacity": 8,
                 "capabilities": {
                     "review_keywords": {
-                        "skill": "reading_analysis/review_keywords",
+                        "skill": "question_comprehension_info/review_key_info",
                         "tools": ["read", "write", "bash"],
                     }
                 },
@@ -58,7 +58,7 @@ def test_rejects_empty_capability_name() -> None:
                 "local-default": {
                     "kind": "local",
                     "global_capacity": 4,
-                    "capabilities": {"": {"handler": "reading_analysis.fetch_questions"}},
+                    "capabilities": {"": {"handler": "question_comprehension_info.fetch_questions"}},
                 }
             }
         )

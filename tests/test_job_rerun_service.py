@@ -374,7 +374,7 @@ def test_batch_rerun_mixed_workflows(rerun_service, job_db):
         "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     r_batch = job_db.create_batch(
-        "reading_analysis", "batch_by_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info", "batch_by_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
     )
     q_job = job_db.create_job(
         workflow_key="question_content",
@@ -386,7 +386,7 @@ def test_batch_rerun_mixed_workflows(rerun_service, job_db):
         workspace_id=workspace["id"],
     )
     r_job = job_db.create_job(
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=r_batch["id"],

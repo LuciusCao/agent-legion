@@ -76,12 +76,12 @@ def _local_executor() -> LocalExecutor:
 
 
 def _pi_executor(fake_pi: Path, skill_root: Path) -> PiExecutor:
-    make_pi_skill(skill_root, "reading_analysis/blocked_pi")
+    make_pi_skill(skill_root, "question_comprehension_info/blocked_pi")
     return PiExecutor(
         "pi-default",
         PiConfig(binary=str(fake_pi), cancellation_grace_seconds=GRACE),
         _StubSkillManager(skill_root),
-        {"blocked_pi": PiCapabilityConfig(skill="reading_analysis/blocked_pi")},
+        {"blocked_pi": PiCapabilityConfig(skill="question_comprehension_info/blocked_pi")},
     )
 
 
@@ -104,7 +104,7 @@ def _make_registry(local_executor: LocalExecutor, pi_executor: PiExecutor) -> An
             "pi-default": {
                 "kind": "pi",
                 "global_capacity": 1,
-                "capabilities": {"blocked_pi": {"skill": "reading_analysis/blocked_pi"}},
+                "capabilities": {"blocked_pi": {"skill": "question_comprehension_info/blocked_pi"}},
             },
         },
     )

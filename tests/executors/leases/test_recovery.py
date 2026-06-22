@@ -128,7 +128,7 @@ def test_claim_lease_transitions_queued_job_back_to_running(
         1,
         node_key="node_b",
         local_limit=1,
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
     )
     with queries.connect() as conn:
         conn.execute(
@@ -145,7 +145,7 @@ def test_claim_lease_transitions_queued_job_back_to_running(
         executor_id="exec-requeue",
         workspace_id=workspace_id,
         job_id=job_id,
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         node_key="node_b",
         capability="review_keywords",
         log_path="logs/node_b.log",
@@ -263,7 +263,7 @@ def test_recover_skips_jobs_with_active_lease(
                 "exec-active",
                 workspace_id,
                 job_id,
-                "reading_analysis",
+                "question_comprehension_info",
                 "node_a",
                 node_run_id,
                 _sqlite_timestamp(datetime.now(UTC)),
