@@ -27,16 +27,24 @@
   overflow: hidden;
 }
 
+.nonShrinkingEntry {
+  flex-shrink: 0;
+}
+
 .entryHeader {
   display: flex;
   align-items: center;
+  width: 100%;
   gap: 8px;
   padding: 8px 12px;
   background: var(--log-header-bg);
+  border: 0;
   border-bottom: 1px solid var(--log-border);
   font-size: 13px;
   font-weight: 500;
   color: var(--log-text-primary);
+  text-align: left;
+  cursor: pointer;
 }
 
 .entryIcon {
@@ -50,6 +58,12 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.expandIcon {
+  flex: 0 0 auto;
+  font-size: 18px;
+  color: var(--log-text-secondary);
 }
 
 .entryDetail {

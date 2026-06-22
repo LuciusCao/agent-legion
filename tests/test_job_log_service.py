@@ -413,6 +413,51 @@ def test_job_log_service_renders_pi_structured_events(log_service):
     assert result["raw_url"] == f"/api/jobs/{job['id']}/runs/{run['id']}/log?raw=1"
 
 
+def test_job_log_service_includes_sanitized_command_and_prompt_in_agent_start(log_service):
+    service, settings, job_db = log_service
+    job, run, run_dir = _create_pi_job(job_db, settings)
+    (run_dir / "prompt.md").write_text(
+        f"Read {settings.root_dir}/input.json with token123",
+        encoding="utf-8",
+    )
+    _write_events(run_dir / "events.jsonl", [{"type": "agent_start"}])
+
+    result = service.read(job["id"], run["id"])
+
+    start = result["structured"][0]
+    assert start["title"] == "Agent 开始运行"
+    assert "启动命令\npi --mode json" in start["detail"]
+    assert "提示词\nRead <local-path>/input.json with <redacted>" in start["detail"]
+    assert str(settings.root_dir) not in start["detail"]
+    assert "token123" not in start["detail"]
+
+
+def test_job_log_service_does_not_truncate_structured_entry_details(log_service):
+    service, settings, job_db = log_service
+    job, run, run_dir = _create_pi_job(job_db, settings)
+    long_detail = "x" * 1200
+    _write_events(
+        run_dir / "events.jsonl",
+        [
+            {"type": "turn_start"},
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "thinking", "thinking": long_detail}],
+                    "stopReason": "stop",
+                },
+            },
+        ],
+    )
+
+    result = service.read(job["id"], run["id"])
+
+    assert result["structured"][0]["detail"] == long_detail
+    assert result["structured"][0]["truncated"] is False
+    assert "已截断" not in result["log"]
+
+
 def test_job_log_service_renders_pi_error_stop_reason(log_service):
     service, settings, job_db = log_service
     job, run, run_dir = _create_pi_job(job_db, settings)

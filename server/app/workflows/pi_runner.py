@@ -114,7 +114,7 @@ class PiRunner:
             cmd.extend(["--model", self.config.model])
         if self.config.thinking:
             cmd.extend(["--thinking", self.config.thinking])
-        cmd.extend([str(prompt_file), "Execute the attached node instructions."])
+        cmd.extend([f"@{prompt_file}", "Execute the attached node instructions."])
         return cmd
 
     def run(

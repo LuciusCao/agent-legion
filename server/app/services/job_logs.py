@@ -42,7 +42,12 @@ class JobLogService:
                 run.get("job_id") or "",
                 self.settings,
             )
-        rendered = render_log(path, run_dir, sanitize=self._sanitize)
+        rendered = render_log(
+            path,
+            run_dir,
+            sanitize=self._sanitize,
+            command_json=run.get("command_json") or "[]",
+        )
         return {
             "run_id": run_id,
             "log": rendered["log"],
