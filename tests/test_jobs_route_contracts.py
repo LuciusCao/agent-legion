@@ -113,6 +113,17 @@ def test_workspace_job_error_contract(client, method, path, expected_status, exp
     assert response.json() == {"detail": expected_detail}
 
 
+def test_catch_all_router_does_not_shadow_job_log_endpoint(client):
+    """Regression: the `/jobs/{job_id}/{invalid_path:path}` catch-all must be
+    registered after `/jobs/{job_id}/runs/{run_id}/log`, otherwise valid log
+    requests are misrouted and return 'Invalid job path' instead of 'Run not found'.
+    """
+    workspace_id, job_id = _create_test_job(client)
+    response = client.get(f"/api/jobs/{job_id}/runs/999/log")
+    assert response.status_code == 404
+    assert response.json() == {"detail": "Run not found"}
+
+
 def _create_test_job(client):
     ws_response = client.post("/api/workspaces", json={"name": "test_ws"})
     assert ws_response.status_code == 200

@@ -11,6 +11,7 @@ from .artifacts import create_artifacts_router
 from .common import create_common_router
 from .job_artifacts import create_job_artifacts_router
 from .job_batches import create_job_batches_router
+from .job_invalid_paths import create_job_invalid_paths_router
 from .jobs import create_jobs_router
 from .packages import create_packages_router
 from .questions import create_questions_router
@@ -114,6 +115,10 @@ def create_router(
         create_jobs_router(job_queries, job_rerun, job_deletion, job_execution, settings)
     )
     router.include_router(create_job_artifacts_router(job_artifacts, settings, job_logs))
+    # The invalid-paths router is a catch-all for `/jobs/{job_id}/...`. It MUST be
+    # registered after all other `/jobs/{job_id}/...` routers, otherwise it will
+    # shadow legitimate job endpoints.
+    router.include_router(create_job_invalid_paths_router(job_artifacts, settings))
     router.include_router(create_workspace_runs_router(job_queries, settings))
     router.include_router(create_video_hive_router(settings))
     router.include_router(create_questions_router(job_db, settings))

@@ -1,63 +1,50 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_errors import NotFoundError
+from server.app.services.job_log_raw import (
+    read_raw_log,
+    resolve_job_log_path,
+    resolve_run_dir,
+)
+from server.app.services.job_log_renderer import render_log
 from server.app.settings import Settings
-from server.app.storage_paths import ManagedPathError, resolve_data_path
-
-TAIL_READ_LIMIT = 12 * 1024
-RETURN_LIMIT = 8 * 1024
 
 
 class JobLogService:
     def __init__(self, settings: Settings, job_db: JobQueries) -> None:
         self.settings = settings
         self.job_db = job_db
-        self.logs_root = (settings.logs_dir / "jobs").resolve()
 
     def read(self, job_id: str, run_id: int) -> dict[str, Any]:
         run = self.job_db.get_node_run(job_id, run_id)
         if run is None:
             raise NotFoundError("Run not found")
 
-        log_path = run.get("log_path") or ""
-        if not log_path:
-            return {"run_id": run_id, "log": "", "truncated": False}
+        log_path_str = run.get("log_path") or ""
+        empty = {"run_id": run_id, "log": "", "truncated": False, "structured": [], "raw_url": ""}
+        if not log_path_str:
+            return empty
 
-        try:
-            path = resolve_data_path(log_path, self.settings.data_dir, allow_missing=True)
-            path.relative_to(self.logs_root)
-        except (ValueError, ManagedPathError) as exc:
-            raise InvalidOperationError("Invalid log path") from exc
-
+        path = resolve_job_log_path(log_path_str, self.settings)
         if not path.exists() or not path.is_file():
-            return {"run_id": run_id, "log": "", "truncated": False}
+            return empty
 
-        size = path.stat().st_size
-        if size == 0:
-            return {"run_id": run_id, "log": "", "truncated": False}
+        run_dir = resolve_run_dir(run.get("run_dir") or "", self.settings)
+        rendered = render_log(path, run_dir, sanitize=self._sanitize)
+        return {
+            "run_id": run_id,
+            "log": rendered["log"],
+            "truncated": rendered["truncated"],
+            "structured": rendered["structured"],
+            "raw_url": f"/api/jobs/{job_id}/runs/{run_id}/log?raw=1",
+        }
 
-        truncated = False
-        with open(path, "rb") as f:
-            if size > TAIL_READ_LIMIT:
-                f.seek(-TAIL_READ_LIMIT, os.SEEK_END)
-                raw = f.read(TAIL_READ_LIMIT)
-                truncated = True
-            else:
-                raw = f.read()
-
-        text = raw.decode("utf-8", errors="replace")
-        sanitized = self._sanitize(text)
-        encoded = sanitized.encode("utf-8")
-        if len(encoded) > RETURN_LIMIT:
-            sanitized = encoded[:RETURN_LIMIT].decode("utf-8", errors="ignore")
-            truncated = True
-
-        return {"run_id": run_id, "log": sanitized, "truncated": truncated}
+    def read_raw(self, job_id: str, run_id: int) -> str:
+        return self._sanitize(read_raw_log(job_id, run_id, self.job_db, self.settings))
 
     def _sanitize(self, text: str) -> str:
         paths = [

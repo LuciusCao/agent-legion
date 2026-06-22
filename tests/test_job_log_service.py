@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -7,6 +8,12 @@ import pytest
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_log_raw import (
+    MAX_RAW_LOG_BYTES,
+    PayloadTooLargeError,
+    resolve_job_log_path,
+    resolve_run_dir,
+)
 from server.app.services.job_logs import JobLogService
 from server.app.settings import Settings
 from server.app.storage_paths import make_data_relative
@@ -309,3 +316,192 @@ def test_job_log_service_redacts_nested_secret_values(log_service):
     assert "hidden-token" not in result["log"]
     assert "hidden-key" not in result["log"]
     assert "visible-value" in result["log"]
+
+
+def _write_events(path: Path, events: list[dict[str, Any]]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        "\n".join(json.dumps(event, ensure_ascii=False) for event in events),
+        encoding="utf-8",
+    )
+
+
+def _create_pi_job(
+    job_db: JobQueries,
+    settings: Settings,
+) -> tuple[dict[str, Any], dict[str, Any], Path]:
+    workspace = job_db.create_workspace("Pi WS")
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q100",
+        batch_id="batch-pi",
+        title="Question Q100",
+        node_keys=["generate_key_info"],
+        workspace_id=workspace["id"],
+    )
+    run_dir = settings.jobs_dir / job["id"] / "runs" / "generate_key_info" / "r1"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    log_file = run_dir / "events.jsonl"
+    run = job_db.start_node_run(
+        job["id"],
+        "generate_key_info",
+        ["pi", "--mode", "json"],
+        make_data_relative(log_file, settings.data_dir),
+        run_dir=str(run_dir),
+    )
+    assert run is not None
+    return job, run, run_dir
+
+
+def test_job_log_service_renders_pi_structured_events(log_service):
+    service, settings, job_db = log_service
+    job, run, run_dir = _create_pi_job(job_db, settings)
+    log_file = run_dir / "events.jsonl"
+
+    _write_events(
+        log_file,
+        [
+            {
+                "type": "turn_end",
+                "message": {
+                    "content": [
+                        {"type": "thinking", "thinking": "Need to fetch context."},
+                        {
+                            "type": "toolCall",
+                            "name": "fetch_context",
+                            "arguments": {"question_id": "Q100"},
+                        },
+                        {"type": "text", "text": "Working on it."},
+                    ]
+                },
+                "toolResults": [
+                    {
+                        "toolName": "fetch_context",
+                        "content": [{"type": "text", "text": "context body"}],
+                    }
+                ],
+            }
+        ],
+    )
+
+    result = service.read(job["id"], run["id"])
+
+    assert result["run_id"] == run["id"]
+    assert result["truncated"] is False
+    assert len(result["structured"]) == 4
+    types = [entry["type"] for entry in result["structured"]]
+    assert types == ["thinking", "tool_call", "tool_result", "message"]
+    assert "Turn 1 · 思考" in result["log"]
+    assert "fetch_context" in result["log"]
+    assert result["raw_url"] == f"/api/jobs/{job['id']}/runs/{run['id']}/log?raw=1"
+
+
+def test_job_log_service_renders_pi_error_stop_reason(log_service):
+    service, settings, job_db = log_service
+    job, run, run_dir = _create_pi_job(job_db, settings)
+    log_file = run_dir / "events.jsonl"
+
+    _write_events(
+        log_file,
+        [
+            {
+                "type": "turn_end",
+                "message": {
+                    "stopReason": "error",
+                    "errorMessage": "model refused",
+                    "content": [],
+                },
+            }
+        ],
+    )
+
+    result = service.read(job["id"], run["id"])
+
+    assert any(entry["type"] == "error" for entry in result["structured"])
+    assert "model refused" in result["log"]
+
+
+def test_job_log_service_renders_pi_stderr(log_service):
+    service, settings, job_db = log_service
+    job, run, run_dir = _create_pi_job(job_db, settings)
+    log_file = run_dir / "events.jsonl"
+    stderr_file = run_dir / "stderr.log"
+    stderr_file.write_text("warning line\n", encoding="utf-8")
+
+    _write_events(
+        log_file,
+        [{"type": "turn_end", "message": {"content": []}}],
+    )
+
+    result = service.read(job["id"], run["id"])
+
+    assert any(entry["type"] == "stderr" for entry in result["structured"])
+    assert "warning line" in result["log"]
+
+
+def test_resolve_job_log_path_accepts_logs_dir(log_service):
+    _, settings, _ = log_service
+    log_path = str(make_data_relative(settings.logs_dir / "jobs" / "test.log", settings.data_dir))
+    resolved = resolve_job_log_path(log_path, settings)
+    assert resolved == settings.logs_dir / "jobs" / "test.log"
+
+
+def test_resolve_job_log_path_accepts_jobs_dir(log_service):
+    _, settings, _ = log_service
+    log_path = str(
+        make_data_relative(
+            settings.jobs_dir / "job-1" / "runs" / "node" / "events.jsonl", settings.data_dir
+        )
+    )
+    resolved = resolve_job_log_path(log_path, settings)
+    assert resolved == settings.jobs_dir / "job-1" / "runs" / "node" / "events.jsonl"
+
+
+def test_resolve_job_log_path_rejects_empty_path(log_service):
+    _, settings, _ = log_service
+    with pytest.raises(InvalidOperationError, match="Empty log path"):
+        resolve_job_log_path("", settings)
+
+
+def test_resolve_job_log_path_rejects_outside_roots(log_service):
+    _, settings, _ = log_service
+    with pytest.raises(InvalidOperationError, match="Invalid log path"):
+        resolve_job_log_path("/etc/passwd", settings)
+
+
+def test_resolve_job_log_path_rejects_symlink_escape(log_service):
+    _, settings, _ = log_service
+    with pytest.raises(InvalidOperationError, match="Invalid log path"):
+        resolve_job_log_path("videos/../../etc/passwd", settings)
+
+
+def test_resolve_run_dir_returns_none_for_invalid_path(log_service):
+    _, settings, _ = log_service
+    assert resolve_run_dir("/not/inside/data", settings) is None
+
+
+def test_resolve_run_dir_returns_existing_directory(log_service):
+    _, settings, _ = log_service
+    run_dir = settings.jobs_dir / "job-1" / "runs" / "node"
+    run_dir.mkdir(parents=True, exist_ok=True)
+    run_dir_str = str(make_data_relative(run_dir, settings.data_dir))
+    assert resolve_run_dir(run_dir_str, settings) == run_dir
+
+
+def test_read_raw_log_rejects_oversized_file(log_service):
+    service, settings, job_db = log_service
+    job, run = _create_job_with_run(job_db, settings)
+    log_file = settings.logs_dir / "jobs" / "test.log"
+    log_file.parent.mkdir(parents=True, exist_ok=True)
+    log_file.write_bytes(b"x" * (MAX_RAW_LOG_BYTES + 1))
+
+    # Point the existing run record at the oversized log file.
+    with job_db.connect() as conn:
+        conn.execute(
+            "update node_runs set log_path=? where id=?",
+            (str(make_data_relative(log_file, settings.data_dir)), run["id"]),
+        )
+
+    with pytest.raises(PayloadTooLargeError):
+        service.read_raw(job["id"], run["id"])

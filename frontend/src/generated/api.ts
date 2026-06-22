@@ -1230,8 +1230,12 @@ export interface components {
     JobLogResponse: {
       /** Log */
       log: string
+      /** Raw Url */
+      raw_url?: string | null
       /** Run Id */
       run_id: number
+      /** Structured */
+      structured?: components['schemas']['LogEventResponse'][] | null
       /** Truncated */
       truncated: boolean
     }
@@ -1353,6 +1357,17 @@ export interface components {
     JobsResponse: {
       /** Jobs */
       jobs: components['schemas']['JobSummaryResponse'][]
+    }
+    /** LogEventResponse */
+    LogEventResponse: {
+      /** Detail */
+      detail: string
+      /** Title */
+      title: string
+      /** Truncated */
+      truncated: boolean
+      /** Type */
+      type: string
     }
     /** NodeBindingRequest */
     NodeBindingRequest: {
@@ -2174,7 +2189,9 @@ export interface operations {
   }
   get_job_run_log_api_jobs__job_id__runs__run_id__log_get: {
     parameters: {
-      query?: never
+      query?: {
+        raw?: boolean
+      }
       header?: never
       path: {
         job_id: string

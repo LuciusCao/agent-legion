@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any, cast
 
@@ -8,6 +9,8 @@ from server.app.cms.client import get_token
 from server.app.cms.question import fetch_question_detail
 from server.app.executors.cancellation import check_cancellation
 from server.app.workflows.question_content import _effective_cms_config
+
+logger = logging.getLogger(__name__)
 
 
 def _first_string(*values: Any) -> str | None:
@@ -42,10 +45,16 @@ def fetch_questions(
 ) -> None:
     context = context or {}
     check_cancellation(context)
+    logger.info(
+        "fetch_questions: source_id=%s title=%s",
+        job["source_id"],
+        job.get("title", ""),
+    )
 
     cms_config = _effective_cms_config(job, context)
     api_url = cms_config.get("api_url") or cms_config.get("question_detail_url")
     if api_url:
+        logger.info("  fetching from CMS: %s", api_url)
         token = get_token(str(cms_config.get("env", "")), cms_config)
         detail = fetch_question_detail(str(job["source_id"]), str(api_url), token)
         check_cancellation(context)
@@ -56,6 +65,7 @@ def fetch_questions(
             "cms_payload": detail.payload,
         }
     else:
+        logger.info("  no CMS configured, using base payload")
         payload = {
             "question_id": job["source_id"],
             "title": job["title"],
@@ -64,10 +74,12 @@ def fetch_questions(
         }
 
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    (artifact_dir / "questions.json").write_text(
+    out_path = artifact_dir / "questions.json"
+    out_path.write_text(
         json.dumps({"questions": [payload]}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    logger.info("  wrote %s", out_path.name)
 
 
 def clean_and_parse(
@@ -81,11 +93,13 @@ def clean_and_parse(
         raise ValueError("questions.json not found")
 
     check_cancellation(context)
+    logger.info("clean_and_parse: source_id=%s", job["source_id"])
     data = json.loads(questions_path.read_text(encoding="utf-8"))
     questions = data.get("questions", [])
     if not isinstance(questions, list) or not questions:
         raise ValueError("questions.json contains no questions")
 
+    logger.info("  parsing %d question(s)", len(questions))
     parsed_questions: list[dict[str, Any]] = []
     for q in questions:
         check_cancellation(context)
@@ -110,12 +124,19 @@ def clean_and_parse(
                 "fingerprint_missing": fingerprint is None,
             }
         )
+        logger.info(
+            "    parsed question_id=%s fingerprint=%s",
+            qid,
+            "present" if fingerprint else "missing",
+        )
 
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    (artifact_dir / "questions_parsed.json").write_text(
+    out_path = artifact_dir / "questions_parsed.json"
+    out_path.write_text(
         json.dumps({"questions": parsed_questions}, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    logger.info("  wrote %s", out_path.name)
 
 
 def _load_json_object(path: Path) -> dict[str, Any]:
@@ -152,11 +173,13 @@ def assemble_comprehension_info(
 ) -> None:
     context = context or {}
     source_id = str(job["source_id"])
+    logger.info("assemble_comprehension_info: source_id=%s", source_id)
     question = _single_parsed_question(artifact_dir, source_id)
     key_info = _load_json_object(artifact_dir / "key_info_reviewed.json")
     possible_errors = _load_json_object(artifact_dir / "possible_errors_reviewed.json")
     difficulty = _load_json_object(artifact_dir / "comprehension_difficulty.json")
 
+    logger.info("  validating input artifacts")
     for name, content in (
         ("key_info_reviewed.json", key_info),
         ("possible_errors_reviewed.json", possible_errors),
@@ -203,3 +226,4 @@ def assemble_comprehension_info(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    logger.info("  wrote comprehension_info.json and manifest.json")
