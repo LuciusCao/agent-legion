@@ -8,9 +8,8 @@ from server.app.db.connection import connect_sqlite
 from server.app.db.schema import init_db
 from server.app.events import JobEventManager
 from server.app.executors._lease_claims import claim_lease
-from server.app.executors._lease_control import _sync_job_status
+from server.app.executors._lease_control import _sync_job_status, active_lease_counts
 from server.app.executors._lease_lifecycle import (
-    active_lease_counts,
     expire_stale_leases,
     fail_without_lease,
     finish_lease,

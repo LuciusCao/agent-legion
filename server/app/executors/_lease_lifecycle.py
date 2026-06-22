@@ -10,7 +10,10 @@ from server.app.executors._lease_control import (
     _sync_job_status,
 )
 from server.app.executors._lease_transactions import _sqlite_timestamp
-from server.app.executors._path_canonicalization import canonicalize_data_path
+from server.app.executors._path_canonicalization import (
+    canonicalize_data_path,
+    canonicalize_finish_paths,
+)
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 
 
@@ -37,7 +40,6 @@ def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -
 def finish_lease(
     conn: sqlite3.Connection, lease_id: str, result: ExecutionResult, data_dir: Path | None = None
 ) -> bool:
-    """Finish a lease and persist the node run result."""
     now = datetime.now(UTC)
     now_str = _sqlite_timestamp(now)
     lease = conn.execute("select * from executor_leases where id=?", (lease_id,)).fetchone()
@@ -49,11 +51,13 @@ def finish_lease(
     node_run = conn.execute(
         "select log_path from node_runs where id=?", (lease["node_run_id"],)
     ).fetchone()
-    stored_log_path = result.log_path or (node_run["log_path"] if node_run is not None else "")
-    effective_log_path = canonicalize_data_path(stored_log_path, data_dir, "logs")
-    run_dir = canonicalize_data_path(result.run_dir, data_dir, "jobs")
-    session_path = result.session_dir or result.session_reference
-    session_dir = canonicalize_data_path(session_path, data_dir, "jobs")
+    effective_log_path, run_dir, session_dir = canonicalize_finish_paths(
+        result,
+        data_dir,
+        node_run["log_path"] if node_run is not None else "",
+        lease["node_key"],
+        lease["job_id"],
+    )
     conn.execute(
         """
         update node_runs
@@ -73,17 +77,20 @@ def finish_lease(
             lease["node_run_id"],
         ),
     )
-
-    node_status = "completed" if result.status == "completed" else "failed"
     conn.execute(
         """
         update job_nodes
         set status=?, error_message=?, finished_at=?
         where job_id=? and node_key=?
         """,
-        (node_status, result.error_message, now_str, lease["job_id"], lease["node_key"]),
+        (
+            "completed" if result.status == "completed" else "failed",
+            result.error_message,
+            now_str,
+            lease["job_id"],
+            lease["node_key"],
+        ),
     )
-
     _sync_job_status(conn, lease["job_id"])
 
     if result.status == "completed":
@@ -180,38 +187,3 @@ def expire_stale_leases(conn: sqlite3.Connection, now: datetime) -> list[str]:
             (now_str, row["job_id"]),
         )
     return expired
-
-
-def active_lease_counts(conn: sqlite3.Connection, executor_id: str) -> dict[str, int]:
-    now_str = _sqlite_timestamp(datetime.now(UTC))
-    counts: dict[str, int] = {"global": 0}
-
-    allocated = conn.execute(
-        "select workspace_id from workspace_executor_allocations where executor_id=?",
-        (executor_id,),
-    ).fetchall()
-    for row in allocated:
-        counts[row["workspace_id"]] = 0
-
-    global_row = conn.execute(
-        """
-        select count(*) as cnt
-        from executor_leases
-        where executor_id=? and status='active' and expires_at>?
-        """,
-        (executor_id, now_str),
-    ).fetchone()
-    counts["global"] = global_row["cnt"]
-
-    rows = conn.execute(
-        """
-        select workspace_id, count(*) as cnt
-        from executor_leases
-        where executor_id=? and status='active' and expires_at>?
-        group by workspace_id
-        """,
-        (executor_id, now_str),
-    ).fetchall()
-    for row in rows:
-        counts[row["workspace_id"]] = row["cnt"]
-    return counts
