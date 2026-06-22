@@ -15,7 +15,9 @@ from server.app.skills.manager import SkillManager
 
 def test_skills_config_parses_minimal() -> None:
     data = {
-        "skills": {"question_comprehension_info": {"repo": "https://example.com/skills.git", "ref": "main"}}
+        "skills": {
+            "question_comprehension_info": {"repo": "https://example.com/skills.git", "ref": "main"}
+        }
     }
     config = SkillsConfig.model_validate(data)
     assert config.skills["question_comprehension_info"].repo == "https://example.com/skills.git"
@@ -188,7 +190,10 @@ def test_get_skill_dir_clones_and_returns_isolated_copy(tmp_path: Path) -> None:
     skill_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", execution_id)
 
     assert skill_dir.is_dir()
-    assert skill_dir == tmp_path / "runs" / execution_id / "question_comprehension_info" / "extract_keywords"
+    assert (
+        skill_dir
+        == tmp_path / "runs" / execution_id / "question_comprehension_info" / "generate_key_info"
+    )
     assert (skill_dir / "SKILL.md").is_file()
     assert not (skill_dir / ".git").exists()
 
@@ -198,7 +203,7 @@ def test_tilde_local_source_can_be_managed_in_place(
 ) -> None:
     fake_home = tmp_path / "home"
     base_dir = fake_home / ".agents" / "skills" / "agent-legion"
-    repo = base_dir / "question_comprehension_info" / "extract_keywords"
+    repo = base_dir / "question_comprehension_info" / "generate_key_info"
     commit = _make_in_place_repo(repo)
     monkeypatch.setenv("HOME", str(fake_home))
 
@@ -216,10 +221,15 @@ def test_tilde_local_source_can_be_managed_in_place(
         runs_dir=tmp_path / "runs",
     )
 
-    skill_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    skill_dir = manager.get_skill_dir(
+        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
+    )
 
     assert (skill_dir / "SKILL.md").read_text() == "# local skill\n"
-    assert manager._load_lock().skills["question_comprehension_info/generate_key_info"].commit == commit
+    assert (
+        manager._load_lock().skills["question_comprehension_info/generate_key_info"].commit
+        == commit
+    )
     assert (repo / ".git").is_dir()
 
 
@@ -237,13 +247,17 @@ def test_lock_commit_used_even_when_ref_drifts(tmp_path: Path) -> None:
     )
 
     first_execution = str(uuid.uuid4())
-    first_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", first_execution)
+    first_dir = manager.get_skill_dir(
+        "question_comprehension_info/generate_key_info", first_execution
+    )
     locked_content = (first_dir / "SKILL.md").read_text()
 
     _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
 
     second_execution = str(uuid.uuid4())
-    second_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", second_execution)
+    second_dir = manager.get_skill_dir(
+        "question_comprehension_info/generate_key_info", second_execution
+    )
 
     assert (second_dir / "SKILL.md").read_text() == locked_content
 
@@ -286,7 +300,9 @@ def test_refresh_lock_replaces_existing_pin(tmp_path: Path) -> None:
         runs_dir=tmp_path / "runs",
     )
     manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
-    first_commit = manager._load_lock().skills["question_comprehension_info/generate_key_info"].commit
+    first_commit = (
+        manager._load_lock().skills["question_comprehension_info/generate_key_info"].commit
+    )
 
     _push_new_commit(repo_uri, tmp_path, "# updated skill\n")
     refresh_lock(config_path, lock_path, base_dir)
@@ -323,8 +339,12 @@ def test_isolated_copies_do_not_interfere(tmp_path: Path) -> None:
         runs_dir=tmp_path / "runs",
     )
 
-    first_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
-    second_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    first_dir = manager.get_skill_dir(
+        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
+    )
+    second_dir = manager.get_skill_dir(
+        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
+    )
 
     original = (first_dir / "SKILL.md").read_text()
     (first_dir / "SKILL.md").write_text("# modified\n")
@@ -391,13 +411,17 @@ def test_corrupted_cache_is_repaired_to_clean_copy(tmp_path: Path) -> None:
         runs_dir=tmp_path / "runs",
     )
 
-    first_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    first_dir = manager.get_skill_dir(
+        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
+    )
     assert (first_dir / "SKILL.md").is_file()
 
-    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "extract_keywords"
+    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
     (cache_dir / "garbage.txt").write_text("trash")
 
-    second_dir = manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+    second_dir = manager.get_skill_dir(
+        "question_comprehension_info/generate_key_info", str(uuid.uuid4())
+    )
     assert second_dir.is_dir()
     assert not (second_dir / "garbage.txt").exists()
     assert (second_dir / "SKILL.md").is_file()
@@ -417,7 +441,9 @@ def test_concurrent_get_skill_dir_serializes_git_operations(tmp_path: Path) -> N
     )
 
     def fetch_copy(_index: int) -> Path:
-        return manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
+        return manager.get_skill_dir(
+            "question_comprehension_info/generate_key_info", str(uuid.uuid4())
+        )
 
     with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
         futures = [executor.submit(fetch_copy, i) for i in range(5)]
@@ -443,7 +469,7 @@ def test_broken_cache_directory_raises_skill_repo_error(tmp_path: Path) -> None:
         runs_dir=tmp_path / "runs",
     )
 
-    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "extract_keywords"
+    cache_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
     cache_dir.mkdir(parents=True)
 
     with pytest.raises(SkillRepoError):
@@ -470,7 +496,9 @@ def test_lockfile_content_stays_stable_across_calls(tmp_path: Path) -> None:
     manager.get_skill_dir("question_comprehension_info/generate_key_info", str(uuid.uuid4()))
     second_lock = manager._load_lock()
 
-    assert second_lock.skills["question_comprehension_info/generate_key_info"].commit == first_commit
+    assert (
+        second_lock.skills["question_comprehension_info/generate_key_info"].commit == first_commit
+    )
     assert second_lock.resolved_at == first_lock.resolved_at
 
 

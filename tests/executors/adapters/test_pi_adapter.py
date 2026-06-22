@@ -20,7 +20,11 @@ def test_pi_executor_supports_capability(tmp_path: Path) -> None:
         "pi-default",
         PiRuntimeConfig(binary="pi"),
         _make_skill_manager(tmp_path, "question_comprehension_info/review_key_info"),
-        {"review_keywords": PiCapabilityConfig(skill="question_comprehension_info/review_key_info")},
+        {
+            "review_keywords": PiCapabilityConfig(
+                skill="question_comprehension_info/review_key_info"
+            )
+        },
     )
     assert executor.supports("review_keywords")
     assert not executor.supports("other")
@@ -47,7 +51,11 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
         "pi-default",
         PiRuntimeConfig(binary=str(fake_pi)),
         skill_manager,
-        {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
+        {
+            "extract_keywords": PiCapabilityConfig(
+                skill="question_comprehension_info/generate_key_info"
+            )
+        },
     )
 
     job_dir = tmp_path / "job"
@@ -94,7 +102,11 @@ def test_pi_executor_cleans_snapshot_when_runner_raises(
         "pi-default",
         PiRuntimeConfig(binary="pi"),
         skill_manager,
-        {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
+        {
+            "extract_keywords": PiCapabilityConfig(
+                skill="question_comprehension_info/generate_key_info"
+            )
+        },
     )
     monkeypatch.setattr(
         executor._runner,
@@ -141,7 +153,11 @@ def test_pi_executor_fails_when_output_missing(tmp_path: Path) -> None:
         "pi-default",
         PiRuntimeConfig(binary=str(fake_pi)),
         skill_manager,
-        {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
+        {
+            "extract_keywords": PiCapabilityConfig(
+                skill="question_comprehension_info/generate_key_info"
+            )
+        },
     )
 
     job_dir = tmp_path / "job"
@@ -174,7 +190,11 @@ def test_pi_executor_cancel_records_intent(tmp_path: Path) -> None:
         "pi-default",
         PiRuntimeConfig(binary="pi"),
         _make_skill_manager(tmp_path, "question_comprehension_info/generate_key_info"),
-        {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
+        {
+            "extract_keywords": PiCapabilityConfig(
+                skill="question_comprehension_info/generate_key_info"
+            )
+        },
     )
     executor.cancel("exec-1")
 

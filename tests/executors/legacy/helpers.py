@@ -47,7 +47,6 @@ def _sample_workflows() -> list[WorkflowDefinition]:
     return [
         _sample_workflow(),
         _legacy_unconfigured_agent_workflow(),
-        _question_comprehension_info_workflow(),
     ]
 
 
@@ -121,21 +120,6 @@ def _legacy_unconfigured_agent_workflow() -> WorkflowDefinition:
                 key="understand",
                 label="Understand",
                 capability="understand",
-            ),
-        },
-    )
-
-
-def _question_comprehension_info_workflow() -> WorkflowDefinition:
-    return WorkflowDefinition(
-        key="question_comprehension_info",
-        label="Question Comprehension Info",
-        intake=WorkflowIntake(),
-        nodes={
-            "local_a": WorkflowNode(
-                key="local_a",
-                label="Local A",
-                capability="local_a",
             ),
         },
     )

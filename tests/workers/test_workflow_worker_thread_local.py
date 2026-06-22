@@ -342,7 +342,9 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
     assert job_after["pause_reason"] == "target_reached"
 
 
-def test_make_workflow_worker_runs_question_comprehension_info_local_node(tmp_path: Path, monkeypatch) -> None:
+def test_make_workflow_worker_runs_question_comprehension_info_local_node(
+    tmp_path: Path, monkeypatch
+) -> None:
     monkeypatch.setattr(
         "server.app.workflows.question_comprehension_info.get_token",
         lambda env, config: "test-token",

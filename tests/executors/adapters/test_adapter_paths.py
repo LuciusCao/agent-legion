@@ -48,7 +48,11 @@ def test_pi_executor_result_log_path_is_absolute(tmp_path: Path) -> None:
         "pi-default",
         PiRuntimeConfig(binary=str(fake_pi)),
         skill_manager,
-        {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
+        {
+            "extract_keywords": PiCapabilityConfig(
+                skill="question_comprehension_info/generate_key_info"
+            )
+        },
     )
 
     job_dir = tmp_path / "job"

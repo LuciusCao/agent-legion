@@ -55,7 +55,9 @@ def context() -> ValidationContext:
             kind="pi",
             global_capacity=2,
             capabilities={
-                "review_keywords": PiCapabilityConfig(skill="question_comprehension_info/review_key_info"),
+                "review_keywords": PiCapabilityConfig(
+                    skill="question_comprehension_info/review_key_info"
+                ),
             },
         ),
     }
@@ -135,7 +137,8 @@ def test_duplicate_node_bindings_are_rejected(context: ValidationContext) -> Non
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Duplicate Node binding question_comprehension_info\\.fetch_questions"
+        InvalidOperationError,
+        match="Duplicate Node binding question_comprehension_info\\.fetch_questions",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
@@ -172,7 +175,8 @@ def test_binding_node_must_exist_in_workflow(context: ValidationContext) -> None
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Unknown Workflow Node question_comprehension_info\\.unknown_node"
+        InvalidOperationError,
+        match="Unknown Workflow Node question_comprehension_info\\.unknown_node",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
@@ -221,7 +225,8 @@ def test_duplicate_node_limits_are_rejected(context: ValidationContext) -> None:
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Duplicate Node limit question_comprehension_info\\.fetch_questions"
+        InvalidOperationError,
+        match="Duplicate Node limit question_comprehension_info\\.fetch_questions",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,

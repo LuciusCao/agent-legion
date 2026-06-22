@@ -227,14 +227,18 @@ class TestPiExecutorCancellation:
         fake_pi.write_text("#!/bin/bash\ntrap '' TERM\nsleep 1000\n")
         fake_pi.chmod(0o755)
 
-        skill_dir = tmp_path / "skills" / "question_comprehension_info" / "extract_keywords"
+        skill_dir = tmp_path / "skills" / "question_comprehension_info" / "generate_key_info"
         _pi_skill(skill_dir)
 
         executor = PiExecutor(
             "pi-default",
             PiConfig(binary=str(fake_pi), cancellation_grace_seconds=0.3),
             _StubSkillManager(tmp_path / "skills"),
-            {"extract_keywords": PiCapabilityConfig(skill="question_comprehension_info/generate_key_info")},
+            {
+                "generate_key_info": PiCapabilityConfig(
+                    skill="question_comprehension_info/generate_key_info"
+                )
+            },
         )
         job_dir = tmp_path / "job"
         job_dir.mkdir()
@@ -247,8 +251,8 @@ class TestPiExecutorCancellation:
             workspace_id="ws-a",
             job_id="job-1",
             workflow_key="question_comprehension_info",
-            node_key="extract_keywords",
-            capability="extract_keywords",
+            node_key="generate_key_info",
+            capability="generate_key_info",
             workspace={},
             job={"id": "job-1", "storage_dir": str(job_dir)},
             job_dir=job_dir,
