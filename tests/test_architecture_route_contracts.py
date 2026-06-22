@@ -1,4 +1,3 @@
-import json
 from pathlib import Path
 
 import pytest
@@ -7,6 +6,7 @@ from fastapi.responses import FileResponse
 from scripts.architecture import route_contracts
 from scripts.check_architecture import check_repository
 from server.app.main import create_app
+from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 
 def write_route(root: Path, annotation: str | None, *, response_model_none: bool = False) -> None:
@@ -26,9 +26,7 @@ def write_route(root: Path, annotation: str | None, *, response_model_none: bool
         "    raise NotImplementedError\n",
         encoding="utf-8",
     )
-    budget_path = root / "config/architecture/architecture-budgets.json"
-    budget_path.parent.mkdir(parents=True, exist_ok=True)
-    budget_path.write_text(json.dumps({"files": {}}), encoding="utf-8")
+    write_neutral_budget_governance(root)
 
 
 def write_custom_route(root: Path, imports: str, annotation: str) -> None:
@@ -42,18 +40,14 @@ def write_custom_route(root: Path, imports: str, annotation: str) -> None:
         "    raise NotImplementedError\n",
         encoding="utf-8",
     )
-    budget_path = root / "config/architecture/architecture-budgets.json"
-    budget_path.parent.mkdir(parents=True, exist_ok=True)
-    budget_path.write_text(json.dumps({"files": {}}), encoding="utf-8")
+    write_neutral_budget_governance(root)
 
 
 def write_route_source(root: Path, source: str) -> None:
     path = root / "server/app/routes/example.py"
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(source, encoding="utf-8")
-    budget_path = root / "config/architecture/architecture-budgets.json"
-    budget_path.parent.mkdir(parents=True, exist_ok=True)
-    budget_path.write_text(json.dumps({"files": {}}), encoding="utf-8")
+    write_neutral_budget_governance(root)
 
 
 @pytest.mark.parametrize(

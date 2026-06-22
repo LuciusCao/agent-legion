@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from scripts.check_architecture import check_repository
+from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 
 def write(path: Path, content: str) -> None:
@@ -25,10 +26,7 @@ def test_rejects_none_response_model(tmp_path):
         "def example() -> dict[str, str]:\n"
         "    return {}\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
     errors = check_repository(tmp_path)
     assert any("named response_model" in error for error in errors)
 
@@ -42,10 +40,7 @@ def test_rejects_builtin_generic_response_model(tmp_path):
         "def example() -> dict[str, str]:\n"
         "    return {}\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
     errors = check_repository(tmp_path)
     assert any("named response_model" in error for error in errors)
 
@@ -60,10 +55,7 @@ def test_accepts_imported_named_response_model(tmp_path):
         "def example() -> dict[str, str]:\n"
         "    return {}\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
     errors = check_repository(tmp_path)
     assert errors == []
 
@@ -71,7 +63,7 @@ def test_accepts_imported_named_response_model(tmp_path):
 def test_route_import_baseline_allows_only_recorded_modules(tmp_path):
     path = tmp_path / "server/app/routes/example.py"
     write(path, "from server.app.cms.client import CmsClient\n")
-    write(tmp_path / "config/architecture/architecture-budgets.json", '{"files": {}}')
+    write_neutral_budget_governance(tmp_path)
     write_exemptions(
         tmp_path,
         [
@@ -96,7 +88,7 @@ def test_route_import_baseline_allows_only_recorded_modules(tmp_path):
 def test_scheduler_import_baseline_allows_only_recorded_modules(tmp_path):
     path = tmp_path / "server/app/workflows/scheduler.py"
     write(path, "from server.app.workflows.pi_runner import PiRunner\n")
-    write(tmp_path / "config/architecture/architecture-budgets.json", '{"files": {}}')
+    write_neutral_budget_governance(tmp_path)
     write_exemptions(
         tmp_path,
         [
@@ -123,7 +115,7 @@ def test_scheduler_threadpool_baseline_allows_only_recorded_targets_and_counts(t
         "    def build(self):\n"
         "        self._local_executor = ThreadPoolExecutor(max_workers=1)\n",
     )
-    write(tmp_path / "config/architecture/architecture-budgets.json", '{"files": {}}')
+    write_neutral_budget_governance(tmp_path)
     write_exemptions(
         tmp_path,
         [
@@ -152,10 +144,7 @@ def test_jobs_router_is_not_a_router_aggregator(tmp_path):
         tmp_path / "server/app/routes/jobs.py",
         "from fastapi import APIRouter\nrouter = APIRouter()\nrouter.include_router(other)\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -170,7 +159,7 @@ def test_scheduler_executor_id_indexed_pool_is_allowed(tmp_path):
         "    def build(self, executor_id):\n"
         "        self._pools[executor_id] = ThreadPoolExecutor(max_workers=1)\n",
     )
-    write(tmp_path / "config/architecture/architecture-budgets.json", '{"files": {}}')
+    write_neutral_budget_governance(tmp_path)
     write_exemptions(
         tmp_path,
         [
@@ -196,10 +185,7 @@ def test_workflow_yaml_capability_node_is_allowed(tmp_path):
         tmp_path / "config/workflows/example.yaml",
         "key: example\nlabel: Example\nnodes:\n  review:\n    capability: review\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     assert check_repository(tmp_path) == []
 
@@ -211,9 +197,6 @@ def test_executor_module_config_subscript_not_named_executors_is_allowed(tmp_pat
         "    def __init__(self, settings):\n"
         "        self.value = settings.config['other']\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     assert check_repository(tmp_path) == []

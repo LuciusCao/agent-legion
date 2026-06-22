@@ -1,0 +1,19 @@
+version: 1
+production:
+  roots:
+    - path: server/app
+      extensions: [.py]
+    - path: scripts
+      extensions: [.py]
+    - path: frontend/src
+      extensions: [.ts, .tsx]
+  exclude:
+    - frontend/src/generated/**
+    - frontend/src/**/*.test.ts
+    - frontend/src/**/*.test.tsx
+  buffer_lines: 5
+tests:
+  roots:
+    - path: tests
+      patterns: ['**/*.py']
+  max_lines: 1000

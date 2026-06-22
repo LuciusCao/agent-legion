@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from scripts.check_architecture import check_repository
+from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 
 def _write(root: Path, relative: str, source: str) -> None:
@@ -196,7 +197,7 @@ def test_current_repository_has_no_import_cycles() -> None:
 def test_repository_reports_each_import_cycle_once(tmp_path: Path) -> None:
     _write(tmp_path, "server/app/a.py", "from server.app import b\n")
     _write(tmp_path, "server/app/b.py", "from . import a\n")
-    _write(tmp_path, "config/architecture/architecture-budgets.json", '{"files": {}}')
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 

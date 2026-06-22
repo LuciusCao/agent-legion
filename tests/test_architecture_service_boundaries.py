@@ -3,6 +3,7 @@ import importlib
 from pathlib import Path
 
 from scripts.check_architecture import check_repository
+from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 
 def write(path: Path, content: str) -> None:
@@ -11,7 +12,7 @@ def write(path: Path, content: str) -> None:
 
 
 def write_budgets(root: Path) -> None:
-    write(root / "config/architecture/architecture-budgets.json", '{"files": {}}')
+    write_neutral_budget_governance(root)
 
 
 def test_services_do_not_import_fastapi_regardless_of_filename(tmp_path):
