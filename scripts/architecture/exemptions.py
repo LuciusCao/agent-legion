@@ -16,7 +16,18 @@ def load_exemptions(root: Path) -> tuple:
     return _load(path)
 
 
-def categorize_exemptions(exemptions: tuple):
+def categorize_exemptions(
+    exemptions: tuple,
+) -> tuple[
+    set[str],
+    set[str],
+    set[str],
+    dict[str, set[str]],
+    set[str],
+    dict[str, set[str]],
+    dict[str, set[str]],
+    dict[str, int],
+]:
     """Group exemptions by check name for efficient lookup."""
     response_model_exemptions: set[str] = set()
     annotation_exemptions: set[str] = set()
@@ -25,7 +36,7 @@ def categorize_exemptions(exemptions: tuple):
     scheduler_import_exempt_files: set[str] = set()
     scheduler_import_exempt_modules: dict[str, set[str]] = defaultdict(set)
     scheduler_threadpool_exempt_targets: dict[str, set[str]] = defaultdict(set)
-    file_budget_exemptions: set[str] = set()
+    file_budget_exemptions: dict[str, int] = {}
     for ex in exemptions:
         if ex.check == "architecture.route_response_model":
             response_model_exemptions.add(ex.path)
@@ -47,8 +58,8 @@ def categorize_exemptions(exemptions: tuple):
             file_part, _, target = ex.path.partition(":")
             if target:
                 scheduler_threadpool_exempt_targets[file_part].add(target)
-        elif ex.check == "architecture.file_budget":
-            file_budget_exemptions.add(ex.path)
+        elif ex.check == "architecture.file_budget" and ex.ceiling is not None:
+            file_budget_exemptions[ex.path] = ex.ceiling
     return (
         response_model_exemptions,
         annotation_exemptions,

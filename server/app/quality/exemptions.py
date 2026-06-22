@@ -23,6 +23,7 @@ class ArchitectureExemption:
     reason: str
     owner: str
     remove_when: str
+    ceiling: int | None = None
 
 
 def _parse_exemption(raw: dict[str, Any]) -> ArchitectureExemption:
@@ -33,6 +34,7 @@ def _parse_exemption(raw: dict[str, Any]) -> ArchitectureExemption:
         reason=raw.get("reason", ""),
         owner=raw.get("owner", ""),
         remove_when=raw.get("remove_when", ""),
+        ceiling=raw.get("ceiling"),
     )
 
 
@@ -75,6 +77,32 @@ def _validate_remove_when(remove_when: str, base_path: Path) -> str | None:
     return None
 
 
+def _validate_ceiling(ex: ArchitectureExemption, root: Path, prefix: str) -> str | None:
+    """Validate the optional ceiling field for an exemption."""
+    if ex.ceiling is None:
+        if ex.check == "architecture.file_budget":
+            return "ceiling is required for architecture.file_budget"
+        return None
+
+    if type(ex.ceiling) is not int or isinstance(ex.ceiling, bool):
+        return "ceiling must be a positive non-boolean integer"
+
+    if ex.ceiling <= 0:
+        return "ceiling must be a positive non-boolean integer"
+
+    if ex.check != "architecture.file_budget":
+        return "ceiling is only allowed for architecture.file_budget"
+
+    if ex.check == "architecture.file_budget" and ex.path.strip():
+        file_path = root / ex.path
+        if file_path.is_file():
+            actual = len(file_path.read_text(encoding="utf-8").splitlines())
+            if ex.ceiling < actual:
+                return f"ceiling {ex.ceiling} is below actual file size ({actual} lines)"
+
+    return None
+
+
 def validate_exemptions(
     exemptions: tuple[ArchitectureExemption, ...],
     base_path: str | Path | None = None,
@@ -107,5 +135,9 @@ def validate_exemptions(
         remove_when_error = _validate_remove_when(ex.remove_when, root)
         if remove_when_error:
             errors.append(f"{prefix}: {remove_when_error}")
+
+        ceiling_error = _validate_ceiling(ex, root, prefix)
+        if ceiling_error:
+            errors.append(f"{prefix}: {ceiling_error}")
 
     return errors
