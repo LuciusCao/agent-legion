@@ -78,10 +78,19 @@ class NodeRunResponse(BaseModel):
     session_dir: str
 
 
+class LogEventResponse(BaseModel):
+    type: str
+    title: str
+    detail: str
+    truncated: bool
+
+
 class JobLogResponse(BaseModel):
     run_id: int
     log: str
     truncated: bool
+    structured: list[LogEventResponse] | None = None
+    raw_url: str | None = None
 
 
 class JobDetailResponse(BaseModel):

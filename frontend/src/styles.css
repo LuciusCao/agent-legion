@@ -28,6 +28,14 @@ body {
   --status-failed-border: #ef4444;
   --status-partial-bg: #fef3c7;
   --status-partial-text: #92400e;
+  --log-bg: #f9fafb;
+  --log-header-bg: #f3f4f6;
+  --log-border: #e5e7eb;
+  --log-code-bg: #0f172a;
+  --log-code-text: #e2e8f0;
+  --log-text-primary: #111827;
+  --log-text-secondary: #4b5563;
+  --log-link: #2563eb;
 }
 
 button,

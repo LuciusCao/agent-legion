@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -8,6 +9,8 @@ from server.app.cms.client import get_token
 from server.app.cms.question import CmsQuestionDetail, fetch_question_detail
 from server.app.executors.cancellation import check_cancellation
 from server.app.workflows.resources import resolve_cms_resource
+
+logger = logging.getLogger(__name__)
 
 
 def _decode_json_object(value: Any) -> dict[str, Any]:
@@ -63,20 +66,29 @@ def fetch_question_context(
 ) -> None:
     context = context or {}
     check_cancellation(context)
+    logger.info(
+        "fetch_question_context: source_id=%s title=%s",
+        job["source_id"],
+        job.get("title", ""),
+    )
     cms_config = _effective_cms_config(job, context)
     api_url = cms_config.get("api_url") or cms_config.get("question_detail_url")
     if api_url:
+        logger.info("  fetching from CMS: %s", api_url)
         token = get_token(str(cms_config.get("env", "")), cms_config)
         detail = fetch_question_detail(str(job["source_id"]), str(api_url), token)
         check_cancellation(context)
         payload = _payload_from_detail(job, detail)
     else:
+        logger.info("  no CMS configured, using base payload")
         payload = _base_payload(job)
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    (artifact_dir / "question_context.json").write_text(
+    out_path = artifact_dir / "question_context.json"
+    out_path.write_text(
         json.dumps(payload, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    logger.info("  wrote %s", out_path.name)
 
 
 def assemble_package(
@@ -97,6 +109,7 @@ def assemble_package(
         "review_result.json",
     ]
 
+    logger.info("assemble_package: source_id=%s", job.get("source_id"))
     manifest: dict[str, Any] = {
         "question_id": job.get("source_id"),
         "source_type": job.get("source_type"),
@@ -133,3 +146,4 @@ def assemble_package(
         json.dumps(manifest, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
+    logger.info("  wrote upload_params.json and manifest.json")

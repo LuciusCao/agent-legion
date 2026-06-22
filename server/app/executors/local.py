@@ -5,6 +5,7 @@ import importlib
 import logging
 import multiprocessing
 import os
+import sys
 import threading
 from collections.abc import Callable, Mapping
 from pathlib import Path
@@ -68,9 +69,16 @@ def _run_handler(
             os.dup2(log_fd, 1)
             os.dup2(log_fd, 2)
             os.close(log_fd)
+            getattr(sys.stdout, "reconfigure", lambda **_: None)(line_buffering=True)
+            getattr(sys.stderr, "reconfigure", lambda **_: None)(line_buffering=True)
+            logging.basicConfig(
+                level=logging.INFO, format="%(message)s", stream=sys.stdout, force=True
+            )
         except Exception:
-            # If redirection fails, continue with inherited stdout/stderr.
-            pass
+            logger.exception("Failed to redirect run log to %s", log_path)
+
+    prefix = f"[local:{runtime.get('node_key', '')}]"
+    logger.info("%s start capability=%s", prefix, runtime.get("capability", ""))
 
     error_message = ""
     try:
@@ -83,9 +91,11 @@ def _run_handler(
             runtime["job_db"] = JobQueries(Path(job_db_path), Path(jobs_dir))
         job_dir = Path(job_dir_str)
         handler(job, job_dir, runtime)
+        logger.info("%s completed", prefix)
         conn.send(("ok", None))
     except Exception as exc:
         error_message = f"{type(exc).__name__}: {exc}"
+        logger.error("%s failed: %s", prefix, error_message)
         logger.exception("Isolated handler %s failed", handler_key)
         with contextlib.suppress(Exception):
             conn.send(("error", error_message))
