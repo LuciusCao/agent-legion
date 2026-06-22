@@ -219,7 +219,7 @@
     "scripts/migrate-config-layout.py": 298,
     "scripts/migrate-paths-to-relative.py": 283,
     "scripts/migrate-skills-to-external-repos.py": 316,
-    "scripts/ratchet_architecture_budgets.py": 120,
+    "scripts/ratchet_architecture_budgets.py": 118,
     "scripts/update_job_titles.py": 117,
     "scripts/verify_specs.py": 255,
     "scripts/view-session.py": 261,
