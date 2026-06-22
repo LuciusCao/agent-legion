@@ -8,7 +8,7 @@ skills:
   question_comprehension_info/generate_key_info:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
     ref: v1.1.0
-    commit: da36d8c8899d9b34209f65d865f6089dd1e2f698
+    commit: 89f05a206b1e5bc96a276bc22ee4c72da3bb16ec
   question_comprehension_info/generate_possible_errors:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
     ref: v1.1.0
