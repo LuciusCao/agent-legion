@@ -245,6 +245,15 @@ server/app/
 - `scripts/export_openapi.py` 在不启动 Worker 的情况下导出 OpenAPI 模式。
 - `frontend/src/generated/api.ts` 由 OpenAPI 模式生成，并通过 `npm run api:check` 做漂移检查；禁止手写重复的传输类型。
 - `scripts/check_architecture.py` 在质量门禁中执行，负责约束模块边界与体积预算。
+- 源文件体积预算由 `config/architecture/architecture-budget-policy.yaml`（人工维护的策略）和
+  `config/architecture/architecture-budgets.json`（机器维护的基线）共同治理。基线通过 ratchet 脚本更新：
+
+  ```bash
+  UV_CACHE_DIR=.uv-cache uv run python scripts/ratchet_architecture_budgets.py
+  UV_CACHE_DIR=.uv-cache uv run python scripts/check_architecture.py
+  ```
+
+  ratchet 脚本不会提高 ceiling；超出预算的文件必须拆分或回退。
 
 ## Related Specs
 

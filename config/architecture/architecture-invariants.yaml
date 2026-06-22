@@ -191,10 +191,12 @@ invariants:
 
   - id: CONFIG-ARCH-001
     statement: |
-      Source file line budgets are enforced by scripts/check_architecture.py.
-      Temporary overruns must be recorded as architecture.file_budget exemptions
-      in config/architecture/architecture-exemptions.yaml with a tracked removal
-      condition, and the affected module must be split rather than indefinitely
+      Source file line budgets are governed by a closed-world ceiling model.
+      Every governed production file has a ceiling no more than five lines above
+      its current size. New, removed, or unclassified files, stale ceilings, test
+      files over 1000 lines, and growth above the ceiling fail the quick gate.
+      Budget exemptions freeze an explicit ceiling and must include a tracked
+      removal condition; affected modules must be split rather than indefinitely
       exempted.
     owner: architecture
     risk: high
@@ -204,4 +206,10 @@ invariants:
         gate: quick
       - kind: contract
         target: tests/test_check_architecture.py
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_file_budgets.py
+        gate: quick
+      - kind: contract
+        target: tests/test_ratchet_architecture_budgets.py
         gate: quick
