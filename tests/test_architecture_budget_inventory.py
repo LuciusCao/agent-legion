@@ -111,7 +111,7 @@ def test_duplicate_production_roots_reported(tmp_path: Path) -> None:
     assert any("duplicate classification" in e and "server/app/main.py" in e for e in errors)
 
 
-def test_missing_root_directory_is_graceful(tmp_path: Path) -> None:
+def test_missing_root_directory_is_rejected(tmp_path: Path) -> None:
     policy = BudgetPolicy(
         production_roots=(ProductionRoot(path="does/not/exist", extensions=(".py",)),),
         production_exclude=(),
@@ -120,8 +120,11 @@ def test_missing_root_directory_is_graceful(tmp_path: Path) -> None:
         test_max_lines=100,
     )
     inventory, errors = build_budget_inventory(tmp_path, policy)
-    assert errors == []
     assert inventory == BudgetInventory(production=(), tests=(), excluded=())
+    assert errors == [
+        "configured root does not exist: also/missing",
+        "configured root does not exist: does/not/exist",
+    ]
 
 
 def test_exclusion_glob_matching_nothing_reported(tmp_path: Path) -> None:
@@ -170,6 +173,9 @@ def test_output_order_is_stable(tmp_path: Path) -> None:
 
 
 def test_generated_under_frontend_excluded_by_policy(tmp_path: Path) -> None:
+    (tmp_path / "server" / "app").mkdir(parents=True)
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
     write_files(
         tmp_path,
         "frontend/src/generated/api.ts",

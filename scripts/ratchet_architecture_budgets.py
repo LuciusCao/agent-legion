@@ -18,8 +18,10 @@ if str(_PROJECT_ROOT) not in sys.path:
 
 from scripts.architecture.budget_inventory import build_budget_inventory
 from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
+from scripts.architecture.exemptions import load_exemptions
 from scripts.architecture.file_budgets import (
     _BudgetConfigurationError,
+    _build_frozen_ceilings,
     count_source_lines,
     load_budget_baseline,
 )
@@ -53,6 +55,10 @@ def ratchet_budgets(root: Path) -> RatchetResult:
 
     old_map = baseline.files
     new_map: dict[str, int] = {}
+    try:
+        frozen_ceilings = _build_frozen_ceilings(inventory.production, load_exemptions(root))
+    except _BudgetConfigurationError as exc:
+        return RatchetResult(changed=False, errors=(f"budget configuration: {exc}",))
 
     for path in inventory.production:
         actual = count_source_lines(root / path)
@@ -60,18 +66,16 @@ def ratchet_budgets(root: Path) -> RatchetResult:
         existing = old_map.get(path)
         if existing is None:
             new_map[path] = desired
-        elif existing < desired:
+        elif actual > frozen_ceilings.get(path, existing):
+            effective_ceiling = frozen_ceilings.get(path, existing)
             errors.append(
-                f"{path}: {actual} lines exceeds ceiling {existing}; "
+                f"{path}: {actual} lines exceeds ceiling {effective_ceiling}; "
                 "split the file or revert growth"
             )
         elif existing > desired:
             new_map[path] = desired
         else:
             new_map[path] = existing
-
-    # Obsolete entries (removed files or now-excluded paths) are dropped because
-    # new_map only contains current inventory.production files.
 
     if errors:
         return RatchetResult(changed=False, errors=tuple(errors))

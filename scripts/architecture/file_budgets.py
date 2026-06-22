@@ -67,7 +67,10 @@ def load_budget_baseline(path: Path) -> BudgetBaseline:
             raise _BudgetConfigurationError(f"baseline ceiling for {key} must be an integer")
         if value <= 0:
             raise _BudgetConfigurationError(f"baseline ceiling for {key} must be positive")
-        normalized[str(PurePosixPath(key))] = value
+        normalized_key = str(PurePosixPath(key))
+        if normalized_key in normalized:
+            raise _BudgetConfigurationError(f"duplicate normalized baseline path: {normalized_key}")
+        normalized[normalized_key] = value
 
     return BudgetBaseline(files=normalized)
 

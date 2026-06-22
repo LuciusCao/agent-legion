@@ -25,6 +25,7 @@ def governed_repo(tmp_path: Path, rel_path: str, *, lines: int) -> tuple[Path, B
 
     config = root / "config" / "architecture"
     config.mkdir(parents=True, exist_ok=True)
+    (root / "tests").mkdir(exist_ok=True)
     (config / "architecture-budget-policy.yaml").write_text(
         "version: 1\n"
         "production:\n"
@@ -94,6 +95,7 @@ def test_missing_production_baseline_entry_fails(tmp_path: Path) -> None:
 
 def test_stale_baseline_entry_for_excluded_file_fails(tmp_path: Path) -> None:
     root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
     (root / "server" / "app").mkdir(parents=True)
     (root / "server" / "app" / "generated.py").write_text(
         "\n".join(["line"] * 10), encoding="utf-8"
@@ -181,8 +183,20 @@ def test_load_budget_baseline_normalizes_paths(tmp_path: Path) -> None:
     assert baseline == BudgetBaseline(files={"server/app/a.py": 10})
 
 
+def test_load_budget_baseline_rejects_normalized_path_collision(tmp_path: Path) -> None:
+    path = tmp_path / "baseline.json"
+    path.write_text(
+        '{"version": 2, "files": {"server/app/a.py": 10, "server/app//a.py": 20}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="duplicate normalized baseline path"):
+        load_budget_baseline(path)
+
+
 def test_test_file_at_limit_passes(tmp_path: Path) -> None:
     root = tmp_path / "repo"
+    (root / "server" / "app").mkdir(parents=True)
     (root / "tests").mkdir(parents=True)
     (root / "tests" / "big_test.py").write_text("\n".join(["line"] * 1000), encoding="utf-8")
 
@@ -217,6 +231,7 @@ def test_test_file_at_limit_passes(tmp_path: Path) -> None:
 
 def test_test_file_over_limit_fails(tmp_path: Path) -> None:
     root = tmp_path / "repo"
+    (root / "server" / "app").mkdir(parents=True)
     (root / "tests").mkdir(parents=True)
     (root / "tests" / "big_test.py").write_text("\n".join(["line"] * 1001), encoding="utf-8")
 
@@ -253,6 +268,7 @@ def test_test_file_over_limit_fails(tmp_path: Path) -> None:
 
 def test_generated_code_excluded_not_required_in_baseline(tmp_path: Path) -> None:
     root = tmp_path / "repo"
+    (root / "tests").mkdir(parents=True)
     (root / "server" / "app" / "generated").mkdir(parents=True)
     (root / "server" / "app" / "generated" / "api.py").write_text(
         "\n".join(["line"] * 200), encoding="utf-8"

@@ -28,7 +28,9 @@ def build_budget_inventory(root: Path, policy: BudgetPolicy) -> tuple[BudgetInve
     # 1. Classify tests first.
     for test_root in policy.test_roots:
         test_dir = root / test_root.path
-        if not test_dir.exists():
+        if not test_dir.is_dir():
+            state = "does not exist" if not test_dir.exists() else "is not a directory"
+            errors.append(f"configured root {state}: {test_root.path}")
             continue
         for path in _walk_files(root, test_dir):
             rel_root = _as_posix(path.relative_to(test_dir))
@@ -41,7 +43,9 @@ def build_budget_inventory(root: Path, policy: BudgetPolicy) -> tuple[BudgetInve
     # 2. Classify production files.
     for prod_root in policy.production_roots:
         prod_dir = root / prod_root.path
-        if not prod_dir.exists():
+        if not prod_dir.is_dir():
+            state = "does not exist" if not prod_dir.exists() else "is not a directory"
+            errors.append(f"configured root {state}: {prod_root.path}")
             continue
         for path in _walk_files(root, prod_dir):
             repo_rel = _as_posix(path.relative_to(root))
