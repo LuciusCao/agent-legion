@@ -32,10 +32,6 @@ const ENTRY_ICONS: Record<string, string> = {
   raw: 'description',
 }
 
-// Entry types that are collapsed by default so the user sees the chain first,
-// then can drill into long tool results or internal thinking.
-const DEFAULT_COLLAPSED_TYPES = new Set(['thinking', 'tool_result'])
-
 function formatEntryType(type: string): string {
   const labels: Record<string, string> = {
     thinking: '思考',
@@ -60,7 +56,6 @@ export function JobLogDialog({
   const [log, setLog] = useState<JobLogResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
-  const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const requestIdRef = useRef(0)
 
   useEffect(() => {
@@ -70,7 +65,6 @@ export function JobLogDialog({
       setLog(null)
       setError('')
       setLoading(false)
-      setExpanded(new Set())
       return
     }
 
@@ -78,19 +72,10 @@ export function JobLogDialog({
     setLoading(true)
     setError('')
     setLog(null)
-    setExpanded(new Set())
 
     fetchJobLog(jobId, runId)
       .then((data) => {
         if (requestId !== requestIdRef.current) return
-        const initialExpanded = new Set<string>()
-        data.structured?.forEach((entry, index) => {
-          const key = `${entry.type}-${index}`
-          if (!DEFAULT_COLLAPSED_TYPES.has(entry.type)) {
-            initialExpanded.add(key)
-          }
-        })
-        setExpanded(initialExpanded)
         setLog(data)
       })
       .catch((err) => {
@@ -104,16 +89,18 @@ export function JobLogDialog({
       })
   }, [open, jobId, runId])
 
-  const toggleEntry = (key: string) => {
-    setExpanded((prev) => {
-      const next = new Set(prev)
-      if (next.has(key)) {
-        next.delete(key)
-      } else {
-        next.add(key)
-      }
-      return next
-    })
+  const handleDownload = () => {
+    if (!log) return
+    const text = log.log || ''
+    const blob = new Blob([text], { type: 'text/plain;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `${jobId}-${runId}.log`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   const structured = log?.structured
@@ -128,12 +115,11 @@ export function JobLogDialog({
       <DialogTitle>
         <div className={styles.titleRow}>
           <span>日志 — {nodeLabel}</span>
-          {log?.raw_url && (
+          {log && (
             <Button
               size="small"
               variant="text"
-              href={log.raw_url}
-              target="_blank"
+              onClick={handleDownload}
               startIcon={<MaterialIcon name="download" />}
             >
               原始日志
@@ -152,39 +138,16 @@ export function JobLogDialog({
             {structured!.map((entry: LogEntry, index: number) => {
               const icon = ENTRY_ICONS[entry.type] || 'description'
               const detail = entry.detail || ''
-              // The structured list is append-only and static while the dialog is
-              // open, so a composite key based on type + position is sufficient.
-              const expandKey = `${entry.type}-${index}`
-              const isExpanded = expanded.has(expandKey)
-              const needsExpand =
-                DEFAULT_COLLAPSED_TYPES.has(entry.type) ||
-                entry.truncated ||
-                detail.length > 300
+              const key = `${entry.type}-${index}`
               return (
-                <div key={expandKey} className={styles.entry}>
+                <div key={key} className={styles.entry}>
                   <div className={styles.entryHeader}>
                     <MaterialIcon name={icon} className={styles.entryIcon} />
                     <span className={styles.entryTitle}>
                       {entry.title || formatEntryType(entry.type)}
                     </span>
-                    {needsExpand && (
-                      <button
-                        type="button"
-                        className={styles.expandBtn}
-                        onClick={() => toggleEntry(expandKey)}
-                      >
-                        {isExpanded ? '收起' : '展开'}
-                      </button>
-                    )}
                   </div>
-                  <pre
-                    className={[
-                      styles.entryDetail,
-                      isExpanded ? styles.entryDetailExpanded : '',
-                    ].join(' ')}
-                  >
-                    {detail}
-                  </pre>
+                  <div className={styles.entryDetail}>{detail}</div>
                 </div>
               )
             })}

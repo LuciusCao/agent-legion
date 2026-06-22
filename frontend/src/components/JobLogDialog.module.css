@@ -52,36 +52,14 @@
   white-space: nowrap;
 }
 
-.expandBtn {
-  margin-left: auto;
-  padding: 2px 8px;
-  font-size: 12px;
-  color: var(--log-link);
-  background: transparent;
-  border: none;
-  cursor: pointer;
-}
-
-.expandBtn:hover {
-  text-decoration: underline;
-}
-
 .entryDetail {
-  margin: 0;
   padding: 12px;
-  background: var(--log-code-bg);
-  color: var(--log-code-text);
+  background: #f8fafc;
+  color: #0f172a;
   font-size: 12px;
+  line-height: 1.5;
   white-space: pre-wrap;
   word-break: break-word;
-  overflow: auto;
-  max-height: 120px;
-  min-height: 48px;
-  transition: max-height 0.2s ease;
-}
-
-.entryDetailExpanded {
-  max-height: 60vh;
 }
 
 .pre {
