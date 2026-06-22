@@ -1,8 +1,4 @@
-"""Safe ratchet for source-file architecture budgets.
-
-Adds new files, lowers stale ceilings, and removes obsolete entries.
-Never raises an existing ceiling.
-"""
+"""Safe ratchet for source-file architecture budgets: adds new, lowers stale, and removes obsolete entries; never raises an existing ceiling."""
 
 # ruff: noqa: E402
 
