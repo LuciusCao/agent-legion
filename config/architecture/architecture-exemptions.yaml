@@ -183,15 +183,3 @@ exemptions:
     owner: workspace-executor
     remove_when: issues/open/032-P2-event-driven-worker.md
 
-  # Pre-existing file budget overruns ---------------------------------------------------------
-  - check: architecture.file_budget
-    path: scripts/architecture/import_cycles.py
-    reason: Pre-existing line-count overrun before Pi skill governance work; module split tracked in issue.
-    owner: architecture
-    remove_when: issues/open/041-P2-import-cycle-budget-overrun.md
-
-  - check: architecture.file_budget
-    path: tests/test_architecture_import_cycles.py
-    reason: Pre-existing line-count overrun before Pi skill governance work; test split tracked in issue.
-    owner: architecture
-    remove_when: issues/open/041-P2-import-cycle-budget-overrun.md

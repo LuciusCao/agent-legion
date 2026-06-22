@@ -174,7 +174,7 @@ The package endpoint creates a zip with per-video JSON plus `manifest.json`. The
 
 ## Pi Agent Runner
 
-Video Hive can execute `reading_analysis` workflow agent nodes through the Pi CLI (`@earendil-works/pi-coding-agent`).
+Video Hive can execute `question_comprehension_info` workflow agent nodes through the Pi CLI (`@earendil-works/pi-coding-agent`).
 
 ### Installation
 
@@ -209,7 +209,7 @@ workflows:
 
 ### External Skills
 
-Each agent node in `reading_analysis` (and other workflows) maps to a skill in a **standalone git repository** managed by `SkillManager`. Local copies typically live under:
+Each agent node in `question_comprehension_info` (and other workflows) maps to a skill in a **standalone git repository** managed by `SkillManager`. Local copies typically live under:
 
 ```text
 ~/.agents/skills/agent-legion/<workflow>/<capability>/
@@ -218,8 +218,8 @@ Each agent node in `reading_analysis` (and other workflows) maps to a skill in a
 For example:
 
 ```text
-~/.agents/skills/agent-legion/reading_analysis/extract_keywords/
 ~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info/
+~/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors/
 ```
 
 Skill sources are declared in `config/skills.yaml` and pinned by `config/skills.lock`. To migrate or re-migrate skills from the current source tree, run:
