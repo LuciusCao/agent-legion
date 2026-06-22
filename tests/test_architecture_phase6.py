@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 
 from scripts.check_architecture import check_repository
+from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -13,10 +14,7 @@ def write(path: Path, content: str) -> None:
 
 
 def _empty_budgets(path: Path) -> None:
-    write(
-        path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(path)
 
 
 class TestWorkspaceVideoHiveBoundary:

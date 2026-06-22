@@ -1,9 +1,9 @@
-import json
 from pathlib import Path
 
 import pytest
 
 from scripts.check_architecture import check_repository, forbidden_imports, is_scheduler_path
+from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 
 def write(path: Path, content: str) -> None:
@@ -28,10 +28,7 @@ def test_rejects_new_route_without_response_model(tmp_path):
         "def example() -> dict[str, object]:\n"
         "    return {}\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -43,10 +40,7 @@ def test_rejects_route_importing_cms_client(tmp_path):
         tmp_path / "server/app/routes/example.py",
         "from server.app.cms.client import CmsClient\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -84,10 +78,7 @@ def test_rejects_route_importing_cms_client(tmp_path):
 )
 def test_rejects_scheduler_boundary_forbidden_imports(tmp_path, source, expected_error):
     write(tmp_path / "server/app/workflow_worker_thread.py", source)
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -101,11 +92,7 @@ def test_rejects_scheduler_threadpool_construction(tmp_path):
         "def build():\n"
         "    return ThreadPoolExecutor(max_workers=1)\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "scheduler_threadpool_baselines": '
-        '{"server/app/workflows/scheduler.py": {"self._local_executor": 1}}, "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -124,10 +111,7 @@ def test_accepts_scheduler_legacy_executor_assignment(tmp_path):
         "    def __init__(self):\n"
         "        self._local_executor = ThreadPoolExecutor(max_workers=1)\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
     write_exemptions(
         tmp_path,
         [
@@ -156,10 +140,7 @@ def test_route_annotation_exemptions(tmp_path):
         "def example() -> dict[str, Any]:\n"
         "    return {}\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
     write_exemptions(
         tmp_path,
         [
@@ -214,10 +195,7 @@ def test_accepts_compliant_route(tmp_path):
         "def example() -> dict[str, str]:\n"
         "    return {}\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -232,10 +210,7 @@ def test_accepts_scheduler_legacy_executor_assignment_with_annotation(tmp_path):
         "    def __init__(self):\n"
         "        self._local_executor: ThreadPoolExecutor = ThreadPoolExecutor(max_workers=1)\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
     write_exemptions(
         tmp_path,
         [
@@ -270,10 +245,7 @@ def test_route_imported_submodule_is_forbidden(tmp_path):
         tmp_path / "server/app/routes/example.py",
         "from server.app import cms\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -290,71 +262,12 @@ def test_is_scheduler_path_workflow_worker_thread():
     assert is_scheduler_path("server/app/workflow_worker_thread.py")
 
 
-def test_rejects_file_growth_above_recorded_budget(tmp_path):
-    write(tmp_path / "server/app/routes/jobs.py", "\n".join(["pass"] * 11) + "\n")
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        json.dumps(
-            {
-                "route_exemptions": [],
-                "files": {"server/app/routes/jobs.py": 10},
-            }
-        ),
-    )
-
-    errors = check_repository(tmp_path)
-
-    assert any("11 lines exceeds budget 10" in error for error in errors)
-
-
-def test_allows_file_to_shrink_below_recorded_budget(tmp_path):
-    write(tmp_path / "server/app/routes/jobs.py", "\n".join(["pass"] * 9) + "\n")
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        json.dumps(
-            {
-                "route_exemptions": [],
-                "files": {"server/app/routes/jobs.py": 10},
-            }
-        ),
-    )
-
-    assert check_repository(tmp_path) == []
-
-
-def test_default_budget_enforced_for_new_files(tmp_path):
-    write(
-        tmp_path / "server/app/services/big_service.py",
-        "\n".join(["pass"] * 401) + "\n",
-    )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        json.dumps(
-            {
-                "route_exemptions": [],
-                "files": {},
-                "defaults": {"server/app/services": 400},
-            }
-        ),
-    )
-
-    errors = check_repository(tmp_path)
-
-    assert any(
-        "server/app/services/big_service.py" in error and "401 lines exceeds budget 400" in error
-        for error in errors
-    )
-
-
 def test_rejects_workflow_worker_accessing_runner_attribute(tmp_path):
     write(
         tmp_path / "server/app/workflow_worker_thread.py",
         "class Worker:\n    def run(self, node):\n        if node.runner == 'local':\n            pass\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -366,10 +279,7 @@ def test_rejects_workflow_worker_accessing_agent_attribute(tmp_path):
         tmp_path / "server/app/workflow_worker_thread.py",
         "class Worker:\n    def run(self, node):\n        if node.agent is not None:\n            pass\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -381,10 +291,7 @@ def test_rejects_scheduler_using_futures_length_for_capacity(tmp_path):
         tmp_path / "server/app/workflows/scheduler.py",
         "class Worker:\n    def has_capacity(self):\n        return len(self._futures) < 10\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -399,11 +306,7 @@ def test_rejects_scheduler_threadpool_keyed_by_workspace(tmp_path):
         "    def build(self, workspace_id):\n"
         "        self._pools[workspace_id] = ThreadPoolExecutor(max_workers=1)\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "scheduler_threadpool_baselines": '
-        '{"server/app/workflow_worker_thread.py": {"self._pools[workspace_id]": 1}}, "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -417,10 +320,7 @@ def test_rejects_executor_module_reading_raw_executors_config(tmp_path):
         "    def __init__(self, settings):\n"
         "        self.config = settings.config['executors']\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -453,10 +353,7 @@ def test_rejects_invalid_workflow_yaml(tmp_path, yaml_content, expected_error):
     (tmp_path / "server/app").mkdir(parents=True)
     (tmp_path / "config/workflows").mkdir(parents=True)
     write(tmp_path / "config/workflows/example.yaml", yaml_content)
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -468,10 +365,7 @@ def test_rejects_legacy_module_present(tmp_path):
         tmp_path / "server/app/routes/workspace_agents.py",
         "from fastapi import APIRouter\nrouter = APIRouter()\n",
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 
@@ -483,10 +377,7 @@ def test_rejects_forbidden_pattern_in_source(tmp_path):
         tmp_path / "server/app/workflows/example.py",
         'node["runner"]\n',
     )
-    write(
-        tmp_path / "config/architecture/architecture-budgets.json",
-        '{"route_exemptions": [], "files": {}}',
-    )
+    write_neutral_budget_governance(tmp_path)
 
     errors = check_repository(tmp_path)
 

@@ -1,8 +1,7 @@
 import pytest
 
 from scripts.check_architecture import check_repository
-
-_EMPTY_BUDGETS = '{"route_exemptions": [], "files": {}}'
+from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 
 def write(path, content):
@@ -12,7 +11,7 @@ def write(path, content):
 
 @pytest.fixture(autouse=True)
 def _budgets(tmp_path):
-    write(tmp_path / "config/architecture/architecture-budgets.json", _EMPTY_BUDGETS)
+    write_neutral_budget_governance(tmp_path)
 
 
 def test_rejects_executor_response_field_typed_as_dict_any(tmp_path):

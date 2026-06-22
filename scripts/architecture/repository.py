@@ -1,10 +1,11 @@
 import ast
-import json
 from collections import Counter
 from pathlib import Path
 
+from scripts.architecture.budget_policy import BudgetConfigurationError, load_budget_policy
 from scripts.architecture.configuration import check_configuration_ownership
 from scripts.architecture.exemptions import categorize_exemptions, load_exemptions
+from scripts.architecture.file_budgets import check_file_budgets
 from scripts.architecture.helpers import (
     ROUTE_FORBIDDEN,
     SCHEDULER_FORBIDDEN,
@@ -45,9 +46,6 @@ from scripts.architecture.workflow import check_workflow_definitions
 
 
 def check_repository(root: Path) -> list[str]:
-    config = json.loads(
-        (root / "config/architecture/architecture-budgets.json").read_text(encoding="utf-8")
-    )
     errors: list[str] = []
     exemptions = load_exemptions(root)
     (
@@ -58,7 +56,7 @@ def check_repository(root: Path) -> list[str]:
         scheduler_import_exempt_files,
         scheduler_import_exempt_modules,
         scheduler_threadpool_exempt_targets,
-        file_budget_exemptions,
+        _file_budget_exemptions,
     ) = categorize_exemptions(exemptions)
     server_root = root / "server/app"
     if server_root.exists():
@@ -173,38 +171,11 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_import_cycles(root))
     errors.extend(check_configuration_ownership(root))
 
-    file_budgets = config.get("files", {})
-    for relative_path, budget in file_budgets.items():
-        if relative_path in file_budget_exemptions:
-            continue
-        path = root / relative_path
-        if not path.exists():
-            errors.append(f"{relative_path}: budgeted file does not exist")
-            continue
-        line_count = len(path.read_text(encoding="utf-8").splitlines())
-        if line_count > int(budget):
-            errors.append(
-                f"{relative_path}: {line_count} lines exceeds budget {budget}; "
-                "split responsibilities before adding more code"
-            )
-
-    budgeted_paths = set(file_budgets)
-    defaults = config.get("defaults", {})
-    for dir_rel, budget in defaults.items():
-        dir_path = root / dir_rel
-        if not dir_path.is_dir():
-            continue
-        for path in sorted(dir_path.rglob("*.py")):
-            rel = path.relative_to(root).as_posix()
-            if rel in budgeted_paths or rel in file_budget_exemptions:
-                continue
-            if path.name == "__init__.py" or path.name.startswith("test_"):
-                continue
-            line_count = len(path.read_text(encoding="utf-8").splitlines())
-            if line_count > int(budget):
-                errors.append(
-                    f"{rel}: {line_count} lines exceeds budget {budget}; "
-                    "split responsibilities before adding more code"
-                )
+    try:
+        policy = load_budget_policy(root / "config/architecture/architecture-budget-policy.yaml")
+    except BudgetConfigurationError as exc:
+        errors.append(f"budget configuration: {exc}")
+    else:
+        errors.extend(check_file_budgets(root, policy, exemptions))
 
     return errors
