@@ -48,8 +48,8 @@ def test_execute_pi_node_run_persists_relative_paths(tmp_path, monkeypatch):
     fake_pi.write_text(
         "#!/bin/bash\n"
         'echo \'{"event":"done"}\'\n'
-        "echo '{\"questions\": []}' > keywords_raw.json\n"
-        "echo '{\"summary\": {}}' > keywords_report.json\n"
+        "echo '{\"questions\": []}' > key_info_raw.json\n"
+        "echo '{\"summary\": {}}' > key_info_report.json\n"
     )
     fake_pi.chmod(0o755)
 
@@ -82,7 +82,7 @@ def test_execute_pi_node_run_persists_relative_paths(tmp_path, monkeypatch):
         job_db=queries,
         definition=definition,
         job=job,
-        node_key="extract_keywords",
+        node_key="generate_key_info",
         logs_dir=tmp_path / "logs",
         pi_runner=pi_runner,
         skill_root=tmp_path / "skills",

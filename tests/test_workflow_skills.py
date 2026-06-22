@@ -56,5 +56,3 @@ def test_resolve_workflow_skill_requires_contract_files(tmp_path: Path) -> None:
     (tmp_path / "foo" / "SKILL.md").write_text("x", encoding="utf-8")
     with pytest.raises(ValueError, match="output-contract"):
         resolve_workflow_skill(tmp_path, "foo")
-
-

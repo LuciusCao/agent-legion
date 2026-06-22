@@ -79,9 +79,9 @@ def test_job_detail_includes_pi_run_trace(tmp_path, monkeypatch):
         job_id = created["jobs"][0]["id"]
         run = app.state.job_db.start_node_run(
             job_id,
-            "extract_keywords",
+            "generate_key_info",
             ["pi", "--mode", "json"],
-            "logs/jobs/extract_keywords-events.jsonl",
+            "logs/jobs/generate_key_info-events.jsonl",
             run_dir=str(tmp_path / "run-1"),
             session_dir=str(tmp_path / "run-1" / "session"),
         )

@@ -21,8 +21,8 @@ def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
     fake_pi.write_text(
         "#!/bin/bash\n"
         'echo \'{"event":"done"}\'\n'
-        "echo '{\"questions\": []}' > keywords_raw.json\n"
-        "echo '{\"summary\": {}}' > keywords_report.json\n"
+        "echo '{\"questions\": []}' > key_info_raw.json\n"
+        "echo '{\"summary\": {}}' > key_info_report.json\n"
     )
     fake_pi.chmod(0o755)
 
@@ -55,7 +55,7 @@ def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
         job_db=queries,
         definition=definition,
         job=job,
-        node_key="extract_keywords",
+        node_key="generate_key_info",
         logs_dir=tmp_path / "logs",
         pi_runner=pi_runner,
         skill_root=tmp_path / "skills",
@@ -63,9 +63,9 @@ def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
     )
 
     assert completed is True
-    assert (job_dir / "keywords_raw.json").is_file()
-    assert (job_dir / "keywords_report.json").is_file()
-    node = queries.get_job_node(job["id"], "extract_keywords")
+    assert (job_dir / "key_info_raw.json").is_file()
+    assert (job_dir / "key_info_report.json").is_file()
+    node = queries.get_job_node(job["id"], "generate_key_info")
     assert node["status"] == "completed"
 
 
@@ -74,8 +74,8 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
     fake_pi.write_text(
         "#!/bin/bash\n"
         'echo \'{"event":"done"}\'\n'
-        "echo '{\"questions\": []}' > keywords_raw.json\n"
-        "echo '{\"summary\": {}}' > keywords_report.json\n"
+        "echo '{\"questions\": []}' > key_info_raw.json\n"
+        "echo '{\"summary\": {}}' > key_info_report.json\n"
     )
     fake_pi.chmod(0o755)
 
@@ -108,7 +108,7 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
         job_db=queries,
         definition=definition,
         job=job,
-        node_key="extract_keywords",
+        node_key="generate_key_info",
         logs_dir=tmp_path / "logs",
         pi_runner=pi_runner,
         skill_root=tmp_path / "skills",
@@ -116,7 +116,7 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
     )
 
     assert completed is True
-    node = queries.get_job_node(job["id"], "extract_keywords")
+    node = queries.get_job_node(job["id"], "generate_key_info")
     assert node["status"] == "completed"
 
 
@@ -143,7 +143,7 @@ def test_execute_node_once_raises_when_pi_runner_missing_for_agent_node(tmp_path
             job_db=queries,
             definition=definition,
             job=job,
-            node_key="extract_keywords",
+            node_key="generate_key_info",
             logs_dir=tmp_path / "logs",
             jobs_dir=tmp_path / "jobs",
         )

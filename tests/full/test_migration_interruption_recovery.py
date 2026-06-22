@@ -159,9 +159,9 @@ def test_v005_finalizer_interruption_before_commit_retains_backup_and_reruns(
     queries = JobQueries(db_path, jobs_dir)
     ensure_legacy_workspace_tables(queries)
 
-    workspace_id = queries.create_workspace(name="Legacy", default_workflow_key="question_comprehension_info")[
-        "id"
-    ]
+    workspace_id = queries.create_workspace(
+        name="Legacy", default_workflow_key="question_comprehension_info"
+    )["id"]
     with queries.connect() as conn:
         conn.execute(
             "update workspaces set pipeline_config_json = ? where id = ?",

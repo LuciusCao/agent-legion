@@ -22,14 +22,14 @@ def test_build_pi_command_uses_fresh_session_and_one_explicit_skill(tmp_path):
         skill_dir=tmp_path / "skills/question_comprehension_info/generate_key_info",
         session_dir=tmp_path / "run/session",
         tools=["read", "write", "bash"],
-        session_name="job-1:extract_keywords:7",
+        session_name="job-1:generate_key_info:7",
         prompt_file=tmp_path / "run/prompt.md",
     )
 
     assert command[:3] == ["pi", "--mode", "json"]
     assert "--session-dir" in command
     assert "--no-skills" in command
-    assert command[command.index("--skill") + 1].endswith("extract_keywords")
+    assert command[command.index("--skill") + 1].endswith("generate_key_info")
     assert command[command.index("--tools") + 1] == "read,write,bash"
     assert "--no-context-files" in command
     assert "--no-extensions" in command
