@@ -127,7 +127,7 @@ describe('settingStore', () => {
       originalExecutorConfiguration: initialExecutorConfiguration,
     })
 
-    useSettingStore.getState().setSettings({ workflowKey: 'reading_analysis' })
+    useSettingStore.getState().setSettings({ workflowKey: 'legacy_workflow' })
 
     const state = useSettingStore.getState()
     expect(state.workflowDefinition).toBeNull()

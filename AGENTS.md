@@ -99,7 +99,6 @@ video-hive/
 │   │   │   ├── executor.py     # Workflow node executor
 │   │   │   ├── scheduler.py    # DAG scheduling and downstream node resolution
 │   │   │   ├── registry.py     # Workflow definition registry by key
-│   │   │   ├── reading_analysis.py # Reading analysis local node handlers
 │   │   │   ├── question_content.py # Question content workflow presets
 │   │   │   ├── question_comprehension_info.py # Question comprehension workflow
 │   │   │   ├── pi_runner.py    # Pi CLI runner for agent nodes
@@ -507,7 +506,7 @@ Pi loads **only** the declared skill. Automatic skill discovery, extensions, pro
 
 ### Migration from old repository-owned skills
 
-If the old `server/app/workflows/skills/reading_analysis/*` directories still exist, run:
+If old repository-owned skill directories still exist under `server/app/workflows/skills/`, run:
 
 ```bash
 UV_CACHE_DIR=.uv-cache uv run python scripts/migrate-skills-to-external-repos.py
@@ -571,7 +570,7 @@ In `auto` ASR mode, the pipeline tries whisper.cpp first and falls back to Sense
 
 ### `config/workflows/*.yaml`
 
-Workflow definitions (e.g., `question_content.yaml`, `reading_analysis.yaml`, `question_comprehension_info.yaml`) declare business `capability` nodes only. They never declare `runner`, `agent`, `skill`, command templates, or Agent kinds.
+Workflow definitions (e.g., `question_content.yaml`, `question_comprehension_info.yaml`) declare business `capability` nodes only. They never declare `runner`, `agent`, `skill`, command templates, or Agent kinds.
 
 ### `config/architecture/*`
 
@@ -648,7 +647,7 @@ Wrong and correct Workflow Node declarations:
 # Wrong: Workflow leaks Agent implementation details.
 review_keywords:
   runner: pi
-  skill: reading_analysis/review_keywords
+  skill: question_comprehension_info/review_key_info
 
 # Correct: Workflow declares business capability only.
 review_keywords:

@@ -501,7 +501,7 @@ describe('SettingsPage', () => {
       entityType: 'question',
       intakeModes: [],
       labelOverrides: {},
-      workflowKey: 'reading_analysis',
+      workflowKey: 'sample_workflow',
       resources: {},
     }
     useSettingStore.setState({
@@ -521,8 +521,8 @@ describe('SettingsPage', () => {
         },
       ],
       workflowDefinition: {
-        key: 'reading_analysis',
-        label: '阅读分析',
+        key: 'sample_workflow',
+        label: '示例工作流',
         intake: { modes: [] },
         nodes: [
           {
@@ -554,7 +554,7 @@ describe('SettingsPage', () => {
     })
 
     mockFetchWorkflows.mockResolvedValueOnce({
-      workflows: [{ key: 'reading_analysis', label: '阅读分析' }],
+      workflows: [{ key: 'sample_workflow', label: '示例工作流' }],
     })
     expectConsoleWarning(/out-of-range value/)
 
@@ -571,14 +571,14 @@ describe('SettingsPage', () => {
         ],
         bindings: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
         ],
         node_limits: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
             concurrency_limit: 2,
           },
@@ -639,7 +639,7 @@ describe('SettingsPage', () => {
         useSettingStore.getState().executorConfiguration.node_limits
       ).toEqual([
         {
-          workflow_key: 'reading_analysis',
+          workflow_key: 'sample_workflow',
           node_key: 'fetch_questions',
           concurrency_limit: 2,
         },
@@ -667,14 +667,14 @@ describe('SettingsPage', () => {
       ],
       node_bindings: [
         {
-          workflow_key: 'reading_analysis',
+          workflow_key: 'sample_workflow',
           node_key: 'fetch_questions',
           executor_id: 'local-default',
         },
       ],
       node_limits: [
         {
-          workflow_key: 'reading_analysis',
+          workflow_key: 'sample_workflow',
           node_key: 'fetch_questions',
           concurrency_limit: 2,
         },
@@ -694,8 +694,8 @@ describe('SettingsPage', () => {
         },
       ],
       workflowDefinition: {
-        key: 'reading_analysis',
-        label: '阅读分析',
+        key: 'sample_workflow',
+        label: '示例工作流',
         intake: { modes: [] },
         nodes: [
           {
@@ -718,7 +718,7 @@ describe('SettingsPage', () => {
         ],
         bindings: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
@@ -736,7 +736,7 @@ describe('SettingsPage', () => {
         ],
         bindings: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
@@ -764,7 +764,7 @@ describe('SettingsPage', () => {
         screen.getByText('移除执行器会同时清除以下节点绑定')
       ).toBeInTheDocument()
       expect(
-        screen.getByText('reading_analysis / fetch_questions')
+        screen.getByText('sample_workflow / fetch_questions')
       ).toBeInTheDocument()
     })
 

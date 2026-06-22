@@ -19,8 +19,8 @@ const catalog = [
 ]
 
 const workflowDefinition = {
-  key: 'reading_analysis',
-  label: '阅读分析',
+  key: 'sample_workflow',
+  label: '示例工作流',
   concurrency: { local: 8, agent: 2, nodes: {} },
   intake: { modes: [] },
   nodes: [
@@ -84,19 +84,19 @@ describe('LocalNodeLimitSection', () => {
         ],
         bindings: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
             executor_id: 'local-default',
           },
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'review_keywords',
             executor_id: 'pi-review',
           },
         ],
         node_limits: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'fetch_questions',
             concurrency_limit: 2,
           },
@@ -141,7 +141,7 @@ describe('LocalNodeLimitSection', () => {
         useSettingStore.getState().executorConfiguration.node_limits
       ).toEqual([
         {
-          workflow_key: 'reading_analysis',
+          workflow_key: 'sample_workflow',
           node_key: 'fetch_questions',
           concurrency_limit: 3,
         },
@@ -174,7 +174,7 @@ describe('LocalNodeLimitSection', () => {
         ],
         bindings: [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'clean_and_parse',
             executor_id: 'local-default',
           },
@@ -196,7 +196,7 @@ describe('LocalNodeLimitSection', () => {
         useSettingStore.getState().executorConfiguration.node_limits
       ).toEqual([
         {
-          workflow_key: 'reading_analysis',
+          workflow_key: 'sample_workflow',
           node_key: 'clean_and_parse',
           concurrency_limit: 2,
         },

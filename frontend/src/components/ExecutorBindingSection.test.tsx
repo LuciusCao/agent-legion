@@ -25,8 +25,8 @@ const catalog = [
 ]
 
 const workflowDefinition = {
-  key: 'reading_analysis',
-  label: '阅读分析',
+  key: 'sample_workflow',
+  label: '示例工作流',
   concurrency: { local: 8, agent: 2, nodes: {} },
   intake: { modes: [] },
   nodes: [
@@ -163,7 +163,7 @@ describe('ExecutorBindingSection', () => {
       expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
         [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'review_keywords',
             executor_id: 'pi-review',
           },
@@ -176,7 +176,7 @@ describe('ExecutorBindingSection', () => {
       expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
         [
           {
-            workflow_key: 'reading_analysis',
+            workflow_key: 'sample_workflow',
             node_key: 'review_keywords',
             executor_id: 'openclaw-generate',
           },
