@@ -351,13 +351,13 @@ def test_batch_rerun_mixed_workflows(tmp_path, monkeypatch):
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "source_kind": "batch_by_ids",
                 "question_ids": ["Q702"],
             },
         )
         q_job_id = "test_question_content_Q702"
-        r_job_id = "test_reading_analysis_Q702"
+        r_job_id = "test_question_comprehension_info_Q702"
         resp = c.post(
             "/api/workspaces/test/jobs/batch-rerun",
             json={"job_ids": [q_job_id, r_job_id], "node_key": "question_understanding"},

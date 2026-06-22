@@ -53,7 +53,7 @@ def test_resolve_node_executors_maps_node_keys_to_executor_id_and_kind():
                         "executor_id": "pi-default",
                     },
                     {
-                        "workflow_key": "reading_analysis",
+                        "workflow_key": "question_comprehension_info",
                         "node_key": "node_a",
                         "executor_id": "pi-default",
                     },

@@ -25,7 +25,7 @@ from server.app.storage_paths import resolve_data_path, resolve_job_dir
 
 VIDEO_ID = "knowledge_test123"
 WORKSPACE_ID = "default"
-WORKFLOW_KEY = "reading_analysis"
+WORKFLOW_KEY = "question_comprehension_info"
 SOURCE_ID = "S123"
 JOB_ID = f"{WORKSPACE_ID}_{WORKFLOW_KEY}_{SOURCE_ID}"
 NODE_KEY = "fetch_questions"
@@ -90,7 +90,7 @@ def _seed_old_root(old_root: Path) -> None:
         conn.execute(
             """
             insert into workspaces(id, name, default_workflow_key, default_entity)
-            values ('default', 'Default', 'reading_analysis', 'question')
+            values ('default', 'Default', 'question_comprehension_info', 'question')
             """
         )
         conn.execute(

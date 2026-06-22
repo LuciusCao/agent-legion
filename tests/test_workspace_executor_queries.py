@@ -15,7 +15,7 @@ def queries(tmp_path: Path) -> JobQueries:
 
 
 def test_get_workspace_executor_configuration_empty(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="reading_analysis")
+    workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
 
     assert queries.get_workspace_executor_configuration(workspace["id"]) == {
         "allocations": [],
@@ -25,20 +25,20 @@ def test_get_workspace_executor_configuration_empty(queries: JobQueries) -> None
 
 
 def test_replace_executor_configuration_is_authoritative(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="reading_analysis")
+    workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
     queries.replace_workspace_executor_configuration(
         workspace["id"],
         allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
         bindings=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
                 "executor_id": "local-default",
             }
         ],
         node_limits=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
                 "concurrency_limit": 2,
             }
@@ -56,18 +56,18 @@ def test_replace_executor_configuration_is_authoritative(queries: JobQueries) ->
 
 
 def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
-    workspace = queries.create_workspace("Math", default_workflow_key="reading_analysis")
+    workspace = queries.create_workspace("Math", default_workflow_key="question_comprehension_info")
     original_allocations = [{"executor_id": "local-default", "concurrency_limit": 4}]
     original_bindings = [
         {
-            "workflow_key": "reading_analysis",
+            "workflow_key": "question_comprehension_info",
             "node_key": "fetch_questions",
             "executor_id": "local-default",
         }
     ]
     original_node_limits = [
         {
-            "workflow_key": "reading_analysis",
+            "workflow_key": "question_comprehension_info",
             "node_key": "fetch_questions",
             "concurrency_limit": 2,
         }
@@ -86,14 +86,14 @@ def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
             allocations=[{"executor_id": "pi-default", "concurrency_limit": 8}],
             bindings=[
                 {
-                    "workflow_key": "reading_analysis",
+                    "workflow_key": "question_comprehension_info",
                     "node_key": "fetch_questions",
                     "executor_id": "pi-default",
                 }
             ],
             node_limits=[
                 {
-                    "workflow_key": "reading_analysis",
+                    "workflow_key": "question_comprehension_info",
                     "node_key": "fetch_questions",
                     "concurrency_limit": 1,
                 }
@@ -111,14 +111,14 @@ def test_replace_executor_configuration_rollback(queries: JobQueries) -> None:
         ],
         "bindings": [
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
                 "executor_id": "local-default",
             }
         ],
         "node_limits": [
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
                 "concurrency_limit": 2,
             }

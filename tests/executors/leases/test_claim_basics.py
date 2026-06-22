@@ -229,7 +229,7 @@ def test_fail_without_lease_creates_failed_run_and_updates_job_status(
     request = ConfigurationFailureRequest(
         workspace_id=workspace_id,
         job_id=job_id,
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         node_key="review_keywords",
         capability="review_keywords",
         log_path="logs/error.log",
@@ -259,7 +259,7 @@ def test_fail_without_lease_is_idempotent_for_the_same_node(
     request = ConfigurationFailureRequest(
         workspace_id=workspace_id,
         job_id=job_id,
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         node_key="review_keywords",
         capability="review_keywords",
         log_path="logs/error.log",

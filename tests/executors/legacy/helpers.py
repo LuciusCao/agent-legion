@@ -26,8 +26,8 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
             kind="local",
             global_capacity=2,
             capabilities={
-                "local_a": LocalCapabilityConfig(handler="reading_analysis.local_a"),
-                "local_b": LocalCapabilityConfig(handler="reading_analysis.local_b"),
+                "local_a": LocalCapabilityConfig(handler="question_comprehension_info.local_a"),
+                "local_b": LocalCapabilityConfig(handler="question_comprehension_info.local_b"),
             },
         ),
         "pi-default": PiExecutorConfig(
@@ -35,7 +35,7 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
             global_capacity=8,
             capabilities={
                 "pi_a": PiCapabilityConfig(
-                    skill="reading_analysis/pi_a",
+                    skill="question_comprehension_info/pi_a",
                     tools=("read", "write", "bash"),
                 )
             },
@@ -83,7 +83,7 @@ def _list_legacy_agent_assignments(queries: JobQueries, workspace_id: str) -> li
 
 def _sample_workflow() -> WorkflowDefinition:
     return WorkflowDefinition(
-        key="reading_analysis",
+        key="question_comprehension_info",
         label="Reading Analysis",
         intake=WorkflowIntake(),
         nodes={

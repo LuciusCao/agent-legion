@@ -19,7 +19,7 @@ def test_build_pi_command_uses_fresh_session_and_one_explicit_skill(tmp_path):
         skill_root=tmp_path / "skills",
     )
     command = runner.build_command(
-        skill_dir=tmp_path / "skills/reading_analysis/extract_keywords",
+        skill_dir=tmp_path / "skills/question_comprehension_info/generate_key_info",
         session_dir=tmp_path / "run/session",
         tools=["read", "write", "bash"],
         session_name="job-1:extract_keywords:7",
@@ -124,7 +124,7 @@ def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
     )
 
     # Create a fake skill with validator
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text(
@@ -139,7 +139,7 @@ def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
-    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
 
     result = runner.run(
         job=job,
@@ -183,7 +183,7 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text(
@@ -199,7 +199,7 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
     job_db = JobQueries(db_path, tmp_path / "jobs")
     workspace = job_db.create_workspace("test_ws")
     job = job_db.create_job(
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id="b1",
@@ -243,7 +243,7 @@ def test_run_fails_when_output_missing(tmp_path, monkeypatch):
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text("#!/usr/bin/env python3\nimport sys\n")
@@ -251,7 +251,7 @@ def test_run_fails_when_output_missing(tmp_path, monkeypatch):
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
-    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
 
     result = runner.run(
         job=job,
@@ -288,7 +288,7 @@ def test_run_fails_with_model_error_when_pi_exits_zero(tmp_path):
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text("#!/usr/bin/env python3\nimport sys\n")
@@ -296,7 +296,7 @@ def test_run_fails_with_model_error_when_pi_exits_zero(tmp_path):
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
-    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
 
     result = runner.run(
         job=job,
@@ -320,7 +320,7 @@ def test_run_fails_when_binary_missing(tmp_path):
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text("#!/usr/bin/env python3\nimport sys\n")
@@ -328,7 +328,7 @@ def test_run_fails_when_binary_missing(tmp_path):
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
-    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
 
     result = runner.run(
         job=job,
@@ -356,7 +356,7 @@ def test_run_fails_when_validator_rejects_output(tmp_path, monkeypatch):
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text(
@@ -366,7 +366,7 @@ def test_run_fails_when_validator_rejects_output(tmp_path, monkeypatch):
 
     job_dir = tmp_path / "job"
     job_dir.mkdir()
-    job = {"id": "default_reading_analysis_Q1", "storage_dir": str(job_dir)}
+    job = {"id": "default_question_comprehension_info_Q1", "storage_dir": str(job_dir)}
 
     result = runner.run(
         job=job,
@@ -394,7 +394,7 @@ def test_run_persists_relative_paths_while_result_stays_absolute(tmp_path, monke
         skill_root=tmp_path / "skills",
     )
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     (skill_dir / "scripts").mkdir(parents=True)
     validator = skill_dir / "scripts/validate_output.py"
     validator.write_text(
@@ -408,7 +408,7 @@ def test_run_persists_relative_paths_while_result_stays_absolute(tmp_path, monke
     job_db = JobQueries(db_path, tmp_path / "jobs")
     workspace = job_db.create_workspace("test_ws")
     job = job_db.create_job(
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id="b1",

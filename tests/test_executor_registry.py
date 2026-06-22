@@ -72,10 +72,10 @@ def definitions() -> dict[str, ExecutorConfig]:
             global_capacity=4,
             capabilities={
                 "fetch_questions": LocalCapabilityConfig(
-                    handler="reading_analysis.fetch_questions"
+                    handler="question_comprehension_info.fetch_questions"
                 ),
                 "clean_and_parse": LocalCapabilityConfig(
-                    handler="reading_analysis.clean_and_parse"
+                    handler="question_comprehension_info.clean_and_parse"
                 ),
             },
         ),
@@ -84,11 +84,11 @@ def definitions() -> dict[str, ExecutorConfig]:
             global_capacity=8,
             capabilities={
                 "review_keywords": PiCapabilityConfig(
-                    skill="reading_analysis/review_keywords",
+                    skill="question_comprehension_info/review_key_info",
                     tools=("read", "write", "bash"),
                 ),
                 "extract_keywords": PiCapabilityConfig(
-                    skill="reading_analysis/extract_keywords",
+                    skill="question_comprehension_info/generate_key_info",
                     tools=("read", "write"),
                 ),
             },
@@ -113,8 +113,8 @@ def runtime_dependencies(tmp_path: Path) -> RuntimeDependencies:
     )
     return RuntimeDependencies(
         local_handlers={
-            "reading_analysis.fetch_questions": _fetch_questions_handler,
-            "reading_analysis.clean_and_parse": _clean_and_parse_handler,
+            "question_comprehension_info.fetch_questions": _fetch_questions_handler,
+            "question_comprehension_info.clean_and_parse": _clean_and_parse_handler,
         },
         pi_runtime=_sample_pi_runtime(),
         skill_manager=skill_manager,
@@ -209,13 +209,13 @@ def test_registry_skips_unavailable_local_handlers(
             kind="local",
             global_capacity=4,
             capabilities={
-                "available": LocalCapabilityConfig(handler="reading_analysis.available"),
-                "missing": LocalCapabilityConfig(handler="reading_analysis.missing"),
+                "available": LocalCapabilityConfig(handler="question_comprehension_info.available"),
+                "missing": LocalCapabilityConfig(handler="question_comprehension_info.missing"),
             },
         ),
     }
     runtime = RuntimeDependencies(
-        local_handlers={"reading_analysis.available": _available_handler},
+        local_handlers={"question_comprehension_info.available": _available_handler},
         pi_runtime=runtime_dependencies.pi_runtime,
         skill_manager=runtime_dependencies.skill_manager,
         openclaw_runtime=runtime_dependencies.openclaw_runtime,

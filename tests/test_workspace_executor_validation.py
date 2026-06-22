@@ -27,7 +27,7 @@ class ValidationContext:
 @pytest.fixture
 def context() -> ValidationContext:
     workflow = WorkflowDefinition(
-        key="reading_analysis",
+        key="question_comprehension_info",
         label="Reading Analysis",
         intake=WorkflowIntake(),
         nodes={
@@ -55,7 +55,7 @@ def context() -> ValidationContext:
             kind="pi",
             global_capacity=2,
             capabilities={
-                "review_keywords": PiCapabilityConfig(skill="reading_analysis/review_keywords"),
+                "review_keywords": PiCapabilityConfig(skill="question_comprehension_info/review_key_info"),
             },
         ),
     }
@@ -67,13 +67,13 @@ def allocation(executor_id: str, concurrency_limit: int) -> dict[str, object]:
 
 
 def binding(
-    node_key: str, executor_id: str, workflow_key: str = "reading_analysis"
+    node_key: str, executor_id: str, workflow_key: str = "question_comprehension_info"
 ) -> dict[str, object]:
     return {"workflow_key": workflow_key, "node_key": node_key, "executor_id": executor_id}
 
 
 def node_limit(
-    node_key: str, concurrency_limit: int, workflow_key: str = "reading_analysis"
+    node_key: str, concurrency_limit: int, workflow_key: str = "question_comprehension_info"
 ) -> dict[str, object]:
     return {
         "workflow_key": workflow_key,
@@ -135,7 +135,7 @@ def test_duplicate_node_bindings_are_rejected(context: ValidationContext) -> Non
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Duplicate Node binding reading_analysis\\.fetch_questions"
+        InvalidOperationError, match="Duplicate Node binding question_comprehension_info\\.fetch_questions"
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
@@ -172,7 +172,7 @@ def test_binding_node_must_exist_in_workflow(context: ValidationContext) -> None
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Unknown Workflow Node reading_analysis\\.unknown_node"
+        InvalidOperationError, match="Unknown Workflow Node question_comprehension_info\\.unknown_node"
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
@@ -221,7 +221,7 @@ def test_duplicate_node_limits_are_rejected(context: ValidationContext) -> None:
     )
 
     with pytest.raises(
-        InvalidOperationError, match="Duplicate Node limit reading_analysis\\.fetch_questions"
+        InvalidOperationError, match="Duplicate Node limit question_comprehension_info\\.fetch_questions"
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
@@ -242,7 +242,7 @@ def test_node_limit_requires_existing_binding(context: ValidationContext) -> Non
 
     with pytest.raises(
         InvalidOperationError,
-        match="Node limit requires binding for reading_analysis\\.fetch_questions",
+        match="Node limit requires binding for question_comprehension_info\\.fetch_questions",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
@@ -260,7 +260,7 @@ def test_node_limit_rejects_agent_bound_node(context: ValidationContext) -> None
 
     with pytest.raises(
         InvalidOperationError,
-        match="Agent-bound Node reading_analysis\\.review_keywords cannot have a Node limit",
+        match="Agent-bound Node question_comprehension_info\\.review_keywords cannot have a Node limit",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,
@@ -278,7 +278,7 @@ def test_node_limit_must_not_exceed_workspace_allocation(context: ValidationCont
 
     with pytest.raises(
         InvalidOperationError,
-        match="Node limit for reading_analysis\\.fetch_questions exceeds Workspace allocation for local-default",
+        match="Node limit for question_comprehension_info\\.fetch_questions exceeds Workspace allocation for local-default",
     ):
         validate_workspace_executor_configuration(
             workflow=context.workflow,

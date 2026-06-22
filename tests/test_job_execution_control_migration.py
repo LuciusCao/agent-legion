@@ -76,7 +76,7 @@ def test_legacy_database_gains_execution_control_defaults(tmp_path: Path) -> Non
               id, workspace_id, workflow_key, source_type, source_id, batch_id,
               title, status, storage_dir, error_message, stem
             ) values (
-              'job1', 'ws1', 'reading_analysis', 'question_id', 'Q1', 'batch1',
+              'job1', 'ws1', 'question_comprehension_info', 'question_id', 'Q1', 'batch1',
               'Legacy Job', 'queued', '/tmp/job1', '', 'stem-value'
             );
             """
@@ -147,7 +147,7 @@ def test_v006_execution_mode_check_constraint(tmp_path: Path) -> None:
     with closing(connect_sqlite(path)) as conn, conn:
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, execution_mode) "
-            "values ('job1', 'ws1', 'reading_analysis', 'question_id', 'Q1', 'until_node')"
+            "values ('job1', 'ws1', 'question_comprehension_info', 'question_id', 'Q1', 'until_node')"
         )
         job = conn.execute("select * from jobs where id = 'job1'").fetchone()
         assert job is not None
@@ -156,5 +156,5 @@ def test_v006_execution_mode_check_constraint(tmp_path: Path) -> None:
         with pytest.raises(sqlite3.IntegrityError):
             conn.execute(
                 "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, execution_mode) "
-                "values ('job2', 'ws1', 'reading_analysis', 'question_id', 'Q2', 'targeted')"
+                "values ('job2', 'ws1', 'question_comprehension_info', 'question_id', 'Q2', 'targeted')"
             )

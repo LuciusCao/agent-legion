@@ -110,7 +110,7 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
             kind="local",
             global_capacity=2,
             capabilities={
-                "local_a": LocalCapabilityConfig(handler="reading_analysis.local_a"),
+                "local_a": LocalCapabilityConfig(handler="question_comprehension_info.local_a"),
             },
         ),
         "pi-default": PiExecutorConfig(
@@ -118,7 +118,7 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
             global_capacity=8,
             capabilities={
                 "pi_a": PiCapabilityConfig(
-                    skill="reading_analysis/pi_a",
+                    skill="question_comprehension_info/pi_a",
                     tools=("read", "write", "bash"),
                 )
             },
@@ -128,7 +128,7 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
 
 def _sample_workflow() -> WorkflowDefinition:
     return WorkflowDefinition(
-        key="reading_analysis",
+        key="question_comprehension_info",
         label="Reading Analysis",
         intake=WorkflowIntake(),
         nodes={
@@ -159,7 +159,7 @@ def test_v005_finalizer_interruption_before_commit_retains_backup_and_reruns(
     queries = JobQueries(db_path, jobs_dir)
     ensure_legacy_workspace_tables(queries)
 
-    workspace_id = queries.create_workspace(name="Legacy", default_workflow_key="reading_analysis")[
+    workspace_id = queries.create_workspace(name="Legacy", default_workflow_key="question_comprehension_info")[
         "id"
     ]
     with queries.connect() as conn:

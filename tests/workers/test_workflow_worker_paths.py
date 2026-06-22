@@ -53,14 +53,14 @@ def test_execute_pi_node_run_persists_relative_paths(tmp_path, monkeypatch):
     )
     fake_pi.chmod(0o755)
 
-    skill_dir = tmp_path / "skills/reading_analysis/extract_keywords"
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
     _make_fake_skill(skill_dir)
 
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     workspace = queries.create_workspace("test_ws")
-    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
-        workflow_key="reading_analysis",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q100",
         batch_id="",

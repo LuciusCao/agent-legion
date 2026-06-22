@@ -191,7 +191,7 @@ def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
         "    global_capacity: 4\n"
         "    capabilities:\n"
         "      fetch_questions:\n"
-        "        handler: reading_analysis.fetch_questions\n",
+        "        handler: question_comprehension_info.fetch_questions\n",
         encoding="utf-8",
     )
 

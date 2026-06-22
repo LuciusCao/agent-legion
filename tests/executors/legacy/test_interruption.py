@@ -20,7 +20,7 @@ def test_finalizer_interruption_before_commit_retains_backup_and_reruns(
     queries: JobQueries,
 ) -> None:
     """A crash before the finalizer commits leaves the backup and allows a safe rerun."""
-    workspace_id = queries.create_workspace(name="Legacy", default_workflow_key="reading_analysis")[
+    workspace_id = queries.create_workspace(name="Legacy", default_workflow_key="question_comprehension_info")[
         "id"
     ]
     _set_workflow_config(queries, workspace_id, {"local": 3})

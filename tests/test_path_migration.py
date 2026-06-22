@@ -63,7 +63,7 @@ def _insert_phase_run(conn: sqlite3.Connection, log_path: str) -> int:
 def _insert_job(conn: sqlite3.Connection, job_id: str, storage_dir: str) -> None:
     conn.execute(
         "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir) values (?, ?, ?, ?, ?, ?)",
-        (job_id, "default", "reading_analysis", "question", "q1", storage_dir),
+        (job_id, "default", "question_comprehension_info", "question", "q1", storage_dir),
     )
 
 

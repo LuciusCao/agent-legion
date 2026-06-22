@@ -43,25 +43,25 @@ def test_replace_configuration_saves_workspace_and_executors_in_one_transaction(
     result = workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={"name": "Reading"},
-        settings_patch={"workflowKey": "reading_analysis"},
+        settings_patch={"workflowKey": "question_comprehension_info"},
         executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
         node_bindings=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
                 "executor_id": "local-default",
             }
         ],
         node_limits=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
                 "concurrency_limit": 2,
             }
         ],
     )
     assert result["workspace"]["name"] == "Reading"
-    assert result["settings"]["workflowKey"] == "reading_analysis"
+    assert result["settings"]["workflowKey"] == "question_comprehension_info"
     assert result["executor_configuration"]["allocations"][0]["concurrency_limit"] == 4
     assert result["executor_configuration"]["bindings"][0]["node_key"] == "fetch_questions"
     assert result["executor_configuration"]["node_limits"][0]["concurrency_limit"] == 2
@@ -76,11 +76,11 @@ def test_replace_configuration_rolls_back_workspace_on_invalid_binding(
         workspace_service.replace_configuration(
             workspace["id"],
             workspace_patch={"name": "Must Roll Back"},
-            settings_patch={"workflowKey": "reading_analysis"},
+            settings_patch={"workflowKey": "question_comprehension_info"},
             executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
             node_bindings=[
                 {
-                    "workflow_key": "reading_analysis",
+                    "workflow_key": "question_comprehension_info",
                     "node_key": "unknown_node",
                     "executor_id": "local-default",
                 }
@@ -310,21 +310,21 @@ def test_replace_configuration_adds_pi_agent_for_pi_allocation(
     workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={},
-        settings_patch={"workflowKey": "reading_analysis"},
+        settings_patch={"workflowKey": "question_comprehension_info"},
         executor_allocations=[
             {"executor_id": "local-default", "concurrency_limit": 4},
             {"executor_id": "pi-default", "concurrency_limit": 3},
         ],
         node_bindings=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
                 "executor_id": "local-default",
             }
         ],
         node_limits=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
                 "concurrency_limit": 2,
             }
@@ -365,11 +365,11 @@ def test_replace_configuration_removes_pi_agent_when_pi_allocation_dropped(
     workspace_service.replace_configuration(
         workspace["id"],
         workspace_patch={},
-        settings_patch={"workflowKey": "reading_analysis"},
+        settings_patch={"workflowKey": "question_comprehension_info"},
         executor_allocations=[{"executor_id": "local-default", "concurrency_limit": 4}],
         node_bindings=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch_questions",
                 "executor_id": "local-default",
             }
@@ -394,7 +394,7 @@ def test_sync_workspace_pi_agents_registers_existing_pi_allocations(
         allocations=[{"executor_id": "pi-default", "concurrency_limit": 5}],
         bindings=[
             {
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "extract_keywords",
                 "executor_id": "pi-default",
             }

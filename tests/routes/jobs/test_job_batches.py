@@ -306,7 +306,7 @@ def test_job_batch_rejects_disabled_resource_provider(tmp_path):
     assert "disabled" in response.json()["detail"].lower()
 
 
-def test_reading_analysis_batch_by_ids_creates_one_job_per_question(client, monkeypatch):
+def test_question_comprehension_info_batch_by_ids_creates_one_job_per_question(client, monkeypatch):
     from server.app.cms.question import CmsQuestionDetail
 
     def fake_fetch_question_detail(question_id, api_url=None, token=None):
@@ -329,7 +329,7 @@ def test_reading_analysis_batch_by_ids_creates_one_job_per_question(client, monk
     response = client.post(
         f"/api/workspaces/{ws_id}/job-batches",
         json={
-            "workflow_key": "reading_analysis",
+            "workflow_key": "question_comprehension_info",
             "source_kind": "batch_by_ids",
             "question_ids": ["Q1", "Q2", "Q1"],
         },
@@ -339,10 +339,10 @@ def test_reading_analysis_batch_by_ids_creates_one_job_per_question(client, monk
     body = response.json()
     assert body["created_count"] == 2
     assert {job["source_id"] for job in body["jobs"]} == {"Q1", "Q2"}
-    assert all(job["workflow_key"] == "reading_analysis" for job in body["jobs"])
+    assert all(job["workflow_key"] == "question_comprehension_info" for job in body["jobs"])
 
 
-def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkeypatch):
+def test_question_comprehension_info_batch_by_knowledge_resolves_questions(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from server.app.cms.question import CmsQuestionSummary
@@ -376,7 +376,7 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
         response = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "reading_analysis",
+                "workflow_key": "question_comprehension_info",
                 "source_kind": "batch_by_knowledge",
                 "question_ids": [],
                 "knowledge_codes": ["K001", "K001", " K002 "],
@@ -392,4 +392,4 @@ def test_reading_analysis_batch_by_knowledge_resolves_questions(tmp_path, monkey
     assert body["created_count"] == 2
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["title"] for job in body["jobs"]] == ["题目一", "题目二"]
-    assert all(job["workflow_key"] == "reading_analysis" for job in body["jobs"])
+    assert all(job["workflow_key"] == "question_comprehension_info" for job in body["jobs"])
