@@ -233,3 +233,116 @@ def test_empty_exemptions_valid(write_exemptions, exemptions_root):
     exemptions = write_exemptions({"exemptions": []})
     assert exemptions == ()
     assert validate_exemptions(exemptions, exemptions_root) == []
+
+
+def test_file_budget_requires_ceiling(write_exemptions, exemptions_root):
+    exemptions = write_exemptions(
+        {
+            "exemptions": [
+                {
+                    "check": "architecture.file_budget",
+                    "path": "server/app/example.py",
+                    "reason": "Oversized module needs staged split.",
+                    "owner": "video-hive",
+                    "remove_when": "docs/superpowers/plans/example.md#task-3",
+                }
+            ]
+        }
+    )
+    errors = validate_exemptions(exemptions, exemptions_root)
+    assert any("ceiling is required" in e.lower() for e in errors)
+
+
+@pytest.mark.parametrize("bad_ceiling", [True, False, 0, -1, "100", 1.5])
+def test_file_budget_rejects_invalid_ceiling(write_exemptions, exemptions_root, bad_ceiling):
+    exemptions = write_exemptions(
+        {
+            "exemptions": [
+                {
+                    "check": "architecture.file_budget",
+                    "path": "server/app/example.py",
+                    "reason": "Oversized module needs staged split.",
+                    "owner": "video-hive",
+                    "remove_when": "docs/superpowers/plans/example.md#task-3",
+                    "ceiling": bad_ceiling,
+                }
+            ]
+        }
+    )
+    errors = validate_exemptions(exemptions, exemptions_root)
+    assert any("ceiling must be a positive non-boolean integer" in e.lower() for e in errors)
+
+
+def test_file_budget_ceiling_below_actual_rejected(write_exemptions, exemptions_root):
+    (exemptions_root / "server" / "app").mkdir(parents=True)
+    (exemptions_root / "server" / "app" / "example.py").write_text(
+        "\n".join(["line"] * 100), encoding="utf-8"
+    )
+    exemptions = write_exemptions(
+        {
+            "exemptions": [
+                {
+                    "check": "architecture.file_budget",
+                    "path": "server/app/example.py",
+                    "reason": "Oversized module needs staged split.",
+                    "owner": "video-hive",
+                    "remove_when": "docs/superpowers/plans/example.md#task-3",
+                    "ceiling": 50,
+                }
+            ]
+        }
+    )
+    errors = validate_exemptions(exemptions, exemptions_root)
+    assert any("ceiling 50 is below actual file size" in e for e in errors)
+
+
+@pytest.mark.parametrize(
+    "check",
+    [
+        "architecture.route_response_model",
+        "architecture.route_annotation_any",
+        "architecture.route_import_boundary",
+        "architecture.scheduler_import_boundary",
+        "architecture.scheduler_threadpool",
+        "architecture.import_boundary",
+    ],
+)
+def test_non_file_budget_exemption_rejects_ceiling(write_exemptions, exemptions_root, check):
+    exemptions = write_exemptions(
+        {
+            "exemptions": [
+                {
+                    "check": check,
+                    "path": "server/app/example.py",
+                    "reason": "Specific technical reason.",
+                    "owner": "video-hive",
+                    "remove_when": "docs/superpowers/plans/example.md#task-3",
+                    "ceiling": 100,
+                }
+            ]
+        }
+    )
+    errors = validate_exemptions(exemptions, exemptions_root)
+    assert any("ceiling is only allowed for architecture.file_budget" in e for e in errors)
+
+
+def test_file_budget_valid_ceiling_accepted(write_exemptions, exemptions_root):
+    (exemptions_root / "server" / "app").mkdir(parents=True)
+    (exemptions_root / "server" / "app" / "example.py").write_text(
+        "\n".join(["line"] * 50), encoding="utf-8"
+    )
+    exemptions = write_exemptions(
+        {
+            "exemptions": [
+                {
+                    "check": "architecture.file_budget",
+                    "path": "server/app/example.py",
+                    "reason": "Oversized module needs staged split.",
+                    "owner": "video-hive",
+                    "remove_when": "docs/superpowers/plans/example.md#task-3",
+                    "ceiling": 100,
+                }
+            ]
+        }
+    )
+    assert validate_exemptions(exemptions, exemptions_root) == []
