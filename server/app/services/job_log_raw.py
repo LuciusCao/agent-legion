@@ -49,6 +49,51 @@ def resolve_run_dir(run_dir: str, settings: Settings) -> Path | None:
     return path
 
 
+def resolve_run_dir_fallback(
+    log_path: Path,
+    node_key: str,
+    job_id: str,
+    settings: Settings,
+) -> Path | None:
+    """Infer the Pi run directory from the filesystem when the DB value is empty.
+
+    Pi runs store per-token directories under
+    ``jobs/<workspace>/<job_id>/runs/<node_key>/<token>/``. The log file itself
+    only records ``logs/jobs/<job_id>-<node_key>.log``, so we scan the managed
+    ``jobs_dir`` for a workspace that contains this ``job_id``.
+    """
+    if not node_key or not job_id:
+        return None
+
+    jobs_dir = settings.jobs_dir
+    if not jobs_dir.is_dir():
+        return None
+
+    job_dir: Path | None = None
+    for workspace_dir in jobs_dir.iterdir():
+        if not workspace_dir.is_dir():
+            continue
+        candidate = workspace_dir / job_id
+        if candidate.is_dir():
+            job_dir = candidate
+            break
+
+    if job_dir is None:
+        return None
+
+    run_parent = job_dir / "runs" / node_key
+    if not run_parent.is_dir():
+        return None
+
+    token_dirs = [d for d in run_parent.iterdir() if d.is_dir()]
+    if not token_dirs:
+        return None
+
+    # Prefer the most recently modified token directory; in practice there is
+    # usually only one per node run.
+    return max(token_dirs, key=lambda p: p.stat().st_mtime)
+
+
 def read_raw_log(job_id: str, run_id: int, job_db: JobQueries, settings: Settings) -> str:
     run = job_db.get_node_run(job_id, run_id)
     if run is None:
