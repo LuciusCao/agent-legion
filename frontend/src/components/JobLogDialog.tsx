@@ -56,6 +56,7 @@ export function JobLogDialog({
   const [log, setLog] = useState<JobLogResponse | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [expandedEntries, setExpandedEntries] = useState<Set<string>>(new Set())
   const requestIdRef = useRef(0)
 
   useEffect(() => {
@@ -65,6 +66,7 @@ export function JobLogDialog({
       setLog(null)
       setError('')
       setLoading(false)
+      setExpandedEntries(new Set())
       return
     }
 
@@ -72,6 +74,7 @@ export function JobLogDialog({
     setLoading(true)
     setError('')
     setLog(null)
+    setExpandedEntries(new Set())
 
     fetchJobLog(jobId, runId)
       .then((data) => {
@@ -106,6 +109,15 @@ export function JobLogDialog({
   const structured = log?.structured
   const hasStructured = !!structured && structured.length > 0
 
+  const toggleEntry = (key: string) => {
+    setExpandedEntries((current) => {
+      const next = new Set(current)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
+  }
+
   return (
     <Dialog
       open={open}
@@ -139,15 +151,33 @@ export function JobLogDialog({
               const icon = ENTRY_ICONS[entry.type] || 'description'
               const detail = entry.detail || ''
               const key = `${entry.type}-${index}`
+              const hasDetail = detail.trim().length > 0
+              const isExpanded = expandedEntries.has(key)
               return (
-                <div key={key} className={styles.entry}>
-                  <div className={styles.entryHeader}>
+                <div
+                  key={key}
+                  className={`${styles.entry} ${styles.nonShrinkingEntry}`}
+                >
+                  <button
+                    type="button"
+                    className={styles.entryHeader}
+                    aria-expanded={hasDetail ? isExpanded : undefined}
+                    onClick={hasDetail ? () => toggleEntry(key) : undefined}
+                  >
                     <MaterialIcon name={icon} className={styles.entryIcon} />
                     <span className={styles.entryTitle}>
                       {entry.title || formatEntryType(entry.type)}
                     </span>
-                  </div>
-                  <div className={styles.entryDetail}>{detail}</div>
+                    {hasDetail && (
+                      <MaterialIcon
+                        name={isExpanded ? 'expand_less' : 'expand_more'}
+                        className={styles.expandIcon}
+                      />
+                    )}
+                  </button>
+                  {hasDetail && isExpanded && (
+                    <div className={styles.entryDetail}>{detail}</div>
+                  )}
                 </div>
               )
             })}

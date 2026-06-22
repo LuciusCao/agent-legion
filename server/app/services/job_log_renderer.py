@@ -2,12 +2,10 @@ from __future__ import annotations
 
 import json
 import re
+import shlex
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
-
-MAX_DETAIL_LEN = 800
-TRUNCATION_HINT = "\n... (已截断，下载原始日志可查看完整内容)"
 
 
 class LogEntry(TypedDict):
@@ -15,12 +13,6 @@ class LogEntry(TypedDict):
     title: str
     detail: str
     truncated: bool
-
-
-def _truncate(text: str, limit: int = MAX_DETAIL_LEN) -> tuple[str, bool]:
-    if len(text) <= limit:
-        return text, False
-    return text[:limit] + TRUNCATION_HINT, True
 
 
 def _extract_text(
@@ -55,7 +47,7 @@ def _format_tool_call(tool_call: dict[str, Any]) -> str:
 def _format_tool_result(result: dict[str, Any]) -> str:
     content = result.get("content")
     text = _extract_text(content)
-    detail = text or json.dumps(content, ensure_ascii=False, indent=2)[:MAX_DETAIL_LEN]
+    detail = text or json.dumps(content, ensure_ascii=False, indent=2)
     if result.get("isError"):
         detail = "[ERROR]\n" + detail
     return detail
@@ -69,7 +61,17 @@ def _collect_stderr_lines(events_path: Path) -> list[str]:
     return [line for line in text.splitlines() if line.strip()]
 
 
-def _parse_pi_events(events_path: Path) -> list[LogEntry]:
+def _parse_command(command_json: str) -> list[str]:
+    try:
+        command = json.loads(command_json)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(command, list) or not all(isinstance(arg, str) for arg in command):
+        return []
+    return command
+
+
+def _parse_pi_events(events_path: Path, agent_start_detail: str = "") -> list[LogEntry]:
     """Compress a Pi JSONL event stream into a human-readable turn chain.
 
     The real event stream uses ``message_start`` / ``message_update`` /
@@ -100,12 +102,11 @@ def _parse_pi_events(events_path: Path) -> list[LogEntry]:
 
             event_type = event.get("type")
             if event_type == "agent_start":
-                detail, _ = _truncate("")
                 entries.append(
                     {
                         "type": "session",
                         "title": "Agent 开始运行",
-                        "detail": detail,
+                        "detail": agent_start_detail,
                         "truncated": False,
                     }
                 )
@@ -128,35 +129,34 @@ def _parse_pi_events(events_path: Path) -> list[LogEntry]:
                         continue
                     item_type = item.get("type")
                     if item_type == "thinking":
-                        detail, truncated = _truncate(str(item.get("thinking", "")))
+                        detail = str(item.get("thinking", ""))
                         entries.append(
                             {
                                 "type": "thinking",
                                 "title": f"Turn {turn_number} · 思考",
                                 "detail": detail,
-                                "truncated": truncated,
+                                "truncated": False,
                             }
                         )
                     elif item_type == "toolCall":
-                        detail, truncated = _truncate(_format_tool_call(item))
+                        detail = _format_tool_call(item)
                         entries.append(
                             {
                                 "type": "tool_call",
                                 "title": f"Turn {turn_number} · 工具调用 {item.get('name', 'tool')}",
                                 "detail": detail,
-                                "truncated": truncated,
+                                "truncated": False,
                             }
                         )
                     elif item_type == "text":
                         text = str(item.get("text", "")).strip()
                         if text:
-                            detail, truncated = _truncate(text)
                             entries.append(
                                 {
                                     "type": "message",
                                     "title": f"Turn {turn_number} · 回复",
-                                    "detail": detail,
-                                    "truncated": truncated,
+                                    "detail": text,
+                                    "truncated": False,
                                 }
                             )
 
@@ -179,36 +179,34 @@ def _parse_pi_events(events_path: Path) -> list[LogEntry]:
                 title = f"Turn {turn_number} · 工具结果 {tool_name}"
                 if tool_call_id:
                     title += f" ({tool_call_id})"
-                detail, truncated = _truncate(_format_tool_result(message))
+                detail = _format_tool_result(message)
                 entries.append(
                     {
                         "type": "tool_result",
                         "title": title,
                         "detail": detail,
-                        "truncated": truncated,
+                        "truncated": False,
                     }
                 )
 
     stderr_lines = _collect_stderr_lines(events_path)
     if stderr_lines:
-        detail, truncated = _truncate("\n".join(stderr_lines))
         entries.append(
             {
                 "type": "stderr",
                 "title": "标准错误输出",
-                "detail": detail,
-                "truncated": truncated,
+                "detail": "\n".join(stderr_lines),
+                "truncated": False,
             }
         )
 
     if non_json_lines and not entries:
-        detail, truncated = _truncate("\n".join(non_json_lines))
         entries.append(
             {
                 "type": "raw",
                 "title": "原始日志",
-                "detail": detail,
-                "truncated": truncated,
+                "detail": "\n".join(non_json_lines),
+                "truncated": False,
             }
         )
 
@@ -219,6 +217,7 @@ def render_log(
     log_path: Path,
     run_dir: Path | None,
     sanitize: Callable[[str], str] | None = None,
+    command_json: str = "[]",
 ) -> dict[str, Any]:
     """Return a human-readable log and optional structured entries for a node run."""
     structured: list[LogEntry] = []
@@ -232,7 +231,21 @@ def render_log(
     if events_path is None and log_path.name == "events.jsonl" and log_path.is_file():
         events_path = log_path
     if events_path is not None:
-        structured = _parse_pi_events(events_path)
+        start_parts: list[str] = []
+        command = _parse_command(command_json)
+        if command:
+            start_parts.extend(["启动命令", shlex.join(command)])
+        if run_dir is not None:
+            prompt_path = run_dir / "prompt.md"
+            if prompt_path.is_file():
+                prompt = prompt_path.read_text(encoding="utf-8", errors="replace")
+                start_parts.extend(["提示词", prompt])
+        structured = _parse_pi_events(events_path, "\n".join(start_parts))
+
+    if sanitize is not None:
+        for entry in structured:
+            entry["title"] = sanitize(entry["title"])
+            entry["detail"] = sanitize(entry["detail"])
 
     if structured:
         log_lines: list[str] = []
@@ -241,8 +254,6 @@ def render_log(
             log_lines.append(entry["detail"])
             log_lines.append("")
         log_text = "\n".join(log_lines)
-        if sanitize is not None:
-            log_text = sanitize(log_text)
         return {"log": log_text, "structured": structured, "truncated": False}
 
     if not log_path.is_file():

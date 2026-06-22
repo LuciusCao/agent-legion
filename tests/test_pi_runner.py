@@ -36,6 +36,8 @@ def test_build_pi_command_uses_fresh_session_and_one_explicit_skill(tmp_path):
     assert "--no-prompt-templates" in command
     assert "--approve" in command
     assert "--no-session" not in command
+    assert command[-2] == f"@{tmp_path / 'run/prompt.md'}"
+    assert command[-1] == "Execute the attached node instructions."
 
 
 def test_build_pi_command_omits_empty_provider_and_model(tmp_path):

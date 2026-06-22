@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react'
 import { JobLogDialog } from './JobLogDialog'
 import * as jobApi from '../jobApi'
+import styles from './JobLogDialog.module.css'
 
 vi.mock('../jobApi')
 
@@ -318,9 +319,21 @@ describe('JobLogDialog', () => {
       />
     )
 
-    await waitFor(() => {
-      expect(screen.getByText('hello')).toBeInTheDocument()
+    const toggle = await screen.findByRole('button', {
+      name: 'Turn 1 · 思考',
     })
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('hello')).not.toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByText('hello')).toBeInTheDocument()
+
+    fireEvent.click(toggle)
+
+    expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByText('hello')).not.toBeInTheDocument()
     expect(document.body.textContent).not.toContain('/logs/jobs/')
   })
 
@@ -361,6 +374,7 @@ describe('JobLogDialog', () => {
     await waitFor(() => {
       expect(screen.getByText('原始日志')).toBeInTheDocument()
     })
+    expect(document.querySelector(`.${styles.entryDetail}`)).toBeNull()
     fireEvent.click(screen.getByText('原始日志'))
 
     expect(createObjectURL).toHaveBeenCalledOnce()
