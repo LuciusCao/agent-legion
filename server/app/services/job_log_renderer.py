@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any, TypedDict
@@ -78,11 +79,18 @@ def _parse_pi_events(events_path: Path) -> list[LogEntry]:
     entries: list[LogEntry] = []
     turn_number = 0
     non_json_lines: list[str] = []
+    # Real Pi output is compact; tests and pretty-printed streams may include
+    # whitespace after the colon. Match both forms without parsing every line.
+    _RELEVANT_EVENT_RE = re.compile(r'"type"\s*:\s*"(agent_start|turn_start|message_end)"')
 
     with events_path.open("r", encoding="utf-8", errors="replace") as fh:
         for raw_line in fh:
             line = raw_line.strip()
             if not line:
+                continue
+            # The Pi stream contains millions of ``message_update`` deltas and
+            # other events we do not render. Avoid parsing them.
+            if not _RELEVANT_EVENT_RE.search(line):
                 continue
             try:
                 event = json.loads(line)
