@@ -56,7 +56,6 @@ def check_repository(root: Path) -> list[str]:
         scheduler_import_exempt_files,
         scheduler_import_exempt_modules,
         scheduler_threadpool_exempt_targets,
-        _file_budget_exemptions,
     ) = categorize_exemptions(exemptions)
     server_root = root / "server/app"
     if server_root.exists():
