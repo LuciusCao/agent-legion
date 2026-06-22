@@ -9,7 +9,7 @@ from typing import Any
 import yaml
 
 CONFIG_FILE_KEYS: dict[str, frozenset[str]] = {
-    "app.yaml": frozenset({"data_dir", "server", "worker"}),
+    "app.yaml": frozenset({"data_dir", "server", "worker", "cleanup"}),
     "video_hive.yaml": frozenset(
         {
             "asr",
