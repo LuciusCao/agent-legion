@@ -292,4 +292,83 @@ describe('JobLogDialog', () => {
     expect(document.body.textContent).not.toContain('/logs/jobs/')
     expect(document.body.textContent).not.toContain('.log')
   })
+
+  it('renders structured entries without raw log path', async () => {
+    mockFetchJobLog.mockResolvedValue({
+      run_id: 1,
+      log: '## Turn 1 · 思考\nhello',
+      truncated: false,
+      structured: [
+        {
+          type: 'thinking',
+          title: 'Turn 1 · 思考',
+          detail: 'hello',
+          truncated: false,
+        },
+      ],
+    })
+
+    render(
+      <JobLogDialog
+        jobId="j1"
+        runId={1}
+        nodeLabel="extract"
+        open={true}
+        onClose={vi.fn()}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('hello')).toBeInTheDocument()
+    })
+    expect(document.body.textContent).not.toContain('/logs/jobs/')
+  })
+
+  it('downloads rendered log as plain text when raw button is clicked', async () => {
+    const createObjectURL = vi.fn().mockReturnValue('blob:dummy')
+    const revokeObjectURL = vi.fn()
+    vi.stubGlobal('URL', {
+      createObjectURL,
+      revokeObjectURL,
+    })
+
+    const clickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click')
+
+    mockFetchJobLog.mockResolvedValue({
+      run_id: 1,
+      log: 'readable log',
+      truncated: false,
+      structured: [
+        {
+          type: 'session',
+          title: 'Agent 开始运行',
+          detail: '',
+          truncated: false,
+        },
+      ],
+    })
+
+    render(
+      <JobLogDialog
+        jobId="j1"
+        runId={1}
+        nodeLabel="extract"
+        open={true}
+        onClose={vi.fn()}
+      />
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('原始日志')).toBeInTheDocument()
+    })
+    fireEvent.click(screen.getByText('原始日志'))
+
+    expect(createObjectURL).toHaveBeenCalledOnce()
+    const call = createObjectURL.mock.calls[0] as unknown as [Blob]
+    expect(call[0].type).toBe('text/plain;charset=utf-8')
+    expect(clickSpy).toHaveBeenCalledOnce()
+    expect(revokeObjectURL).toHaveBeenCalledWith('blob:dummy')
+
+    clickSpy.mockRestore()
+  })
 })
