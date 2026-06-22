@@ -16,11 +16,6 @@ from server.app.workflows.question_comprehension_info import (
     fetch_questions as qci_fetch_questions,
 )
 from server.app.workflows.question_content import fetch_question_context
-from server.app.workflows.reading_analysis import (
-    clean_and_parse,
-    fetch_questions,
-    mark_question,
-)
 from server.app.workflows.scheduler import (
     _node_statuses,
     _refresh_job_status,
@@ -32,11 +27,6 @@ LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
 LOCAL_HANDLERS: dict[str, dict[str, LocalHandler]] = {
     "question_content": {
         "fetch_question_context": fetch_question_context,
-    },
-    "reading_analysis": {
-        "fetch_questions": fetch_questions,
-        "clean_and_parse": clean_and_parse,
-        "mark_question": mark_question,
     },
     "question_comprehension_info": {
         "fetch_questions": qci_fetch_questions,
