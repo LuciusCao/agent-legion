@@ -14,21 +14,3 @@ skills:
   question_comprehension_info/review_possible_errors:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
     ref: v1.0.1
-  reading_analysis/assess_difficulty:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/assess_difficulty
-    ref: v1.0.0
-  reading_analysis/extract_keywords:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/extract_keywords
-    ref: v1.0.0
-  reading_analysis/generate_distractors:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/generate_distractors
-    ref: v1.0.0
-  reading_analysis/review_difficulty:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/review_difficulty
-    ref: v1.0.0
-  reading_analysis/review_distractors:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/review_distractors
-    ref: v1.0.0
-  reading_analysis/review_keywords:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/review_keywords
-    ref: v1.0.0

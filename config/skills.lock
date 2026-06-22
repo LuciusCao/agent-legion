@@ -21,27 +21,3 @@ skills:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
     ref: v1.0.1
     commit: 74e5353f31f4a5fc506e17ed16ffff7478375bff
-  reading_analysis/assess_difficulty:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/assess_difficulty
-    ref: v1.0.0
-    commit: 42de381bdb5a1c3022f3ee09f03e4e092f800595
-  reading_analysis/extract_keywords:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/extract_keywords
-    ref: v1.0.0
-    commit: c4429ba009eb42cdfaa5302f299b8d90c834d394
-  reading_analysis/generate_distractors:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/generate_distractors
-    ref: v1.0.0
-    commit: dde243c58336083f5cb6df1fc533c7e62fc2982e
-  reading_analysis/review_difficulty:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/review_difficulty
-    ref: v1.0.0
-    commit: 96f52647f0a84e3012775bb84d6b7f55db5c0402
-  reading_analysis/review_distractors:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/review_distractors
-    ref: v1.0.0
-    commit: cb65e678a829e5f753c45b9d13d35b72bc57e8a4
-  reading_analysis/review_keywords:
-    repo: file:///Users/user/.agents/skills/agent-legion/reading_analysis/review_keywords
-    ref: v1.0.0
-    commit: 7586e222f9e28de8a8195078af1afc198b46ab22
