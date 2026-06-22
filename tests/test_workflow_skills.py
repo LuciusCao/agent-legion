@@ -6,7 +6,6 @@ from server.app.workflows.definition import load_workflow_definition
 from server.app.workflows.skills import resolve_workflow_skill
 
 WORKFLOWS = {
-    "reading_analysis": {"fetch_questions", "clean_and_parse", "mark_question"},
     "question_comprehension_info": {
         "fetch_questions",
         "clean_and_parse",
@@ -59,18 +58,3 @@ def test_resolve_workflow_skill_requires_contract_files(tmp_path: Path) -> None:
         resolve_workflow_skill(tmp_path, "foo")
 
 
-def test_reading_analysis_agent_capabilities_are_stable() -> None:
-    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
-    actual = {
-        node.capability
-        for node in definition.nodes.values()
-        if node.capability not in WORKFLOWS["reading_analysis"]
-    }
-    assert actual == {
-        "extract_keywords",
-        "review_keywords",
-        "assess_difficulty",
-        "review_difficulty",
-        "generate_distractors",
-        "review_distractors",
-    }

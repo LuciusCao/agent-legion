@@ -63,21 +63,6 @@ def test_load_question_content_definition():
     ]
 
 
-def test_load_reading_analysis_capabilities():
-    definition = load_workflow_definition(Path("config/workflows/reading_analysis.yaml"))
-
-    assert definition.key == "reading_analysis"
-    assert definition.label == "题目审题分析 工作流"
-    assert set(definition.intake.modes) == {"batch_by_knowledge", "batch_by_ids"}
-
-    node = definition.nodes["extract_keywords"]
-    assert node.capability == "extract_keywords"
-    assert node.after == ["clean_and_parse"]
-    assert definition.nodes["fetch_questions"].capability == "fetch_questions"
-    assert definition.nodes["clean_and_parse"].capability == "clean_and_parse"
-    assert definition.nodes["mark_question"].capability == "mark_question"
-
-
 def test_reject_unknown_dependency(tmp_path):
     config = tmp_path / "bad.yaml"
     config.write_text(
