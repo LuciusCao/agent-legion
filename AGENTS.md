@@ -333,7 +333,10 @@ that names the affected architecture invariant IDs and any new exemptions.
   budget, update `config/architecture/architecture-invariants.yaml` with the new invariant and its owner.
   If the change needs a temporary allowance, add a governed exemption to
   `config/architecture/architecture-exemptions.yaml` instead of editing `config/architecture/architecture-budgets.json`
-  directly.
+  directly. Source file budgets are split between policy and baseline:
+  `config/architecture/architecture-budget-policy.yaml` is human-maintained and defines the
+  governed roots, exclusions, buffer, and test maximum; `config/architecture/architecture-budgets.json`
+  is machine-maintained and stores the per-file ceiling baseline produced by the ratchet script.
 
 - **Required `Quality Impact` section**: Specs and plans under `docs/superpowers/` must include
   a `Quality Impact` subsection that lists:
@@ -357,6 +360,8 @@ that names the affected architecture invariant IDs and any new exemptions.
   owners, and untracked removal conditions are rejected by `scripts/check_invariants.py`. The
   `remove_when` field must reference either a tracked plan section
   (`docs/superpowers/plans/...`) or an issue file (`issues/open/...` or `issues/closed/...`).
+  `architecture.file_budget` exemptions must also include an explicit frozen `ceiling` value;
+  the ratchet script refuses to raise ceilings, so over-budget files must be split or reverted.
 
 - **Two-stage review**: The author runs `./scripts/check-quick.sh` before requesting review.
   The reviewer verifies the `Quality Impact` section and runs `./scripts/check.sh` before
@@ -576,7 +581,17 @@ Workflow definitions (e.g., `question_content.yaml`, `question_comprehension_inf
 
 - `architecture-invariants.yaml` — governed architecture invariants (module boundaries, budgets, critical rules).
 - `architecture-exemptions.yaml` — temporary allowances with `check`, `path`, `reason`, `owner`, `remove_when`.
-- `architecture-budgets.json` — generated budget report; do not edit directly; run `scripts/check_invariants.py` to regenerate.
+- `architecture-budget-policy.yaml` — human-maintained source budget policy: governed roots, exclusions, buffer, and test maximum.
+- `architecture-budgets.json` — machine-maintained per-file ceiling baseline; do not edit directly.
+
+Update the baseline after intentional, committed changes:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/ratchet_architecture_budgets.py
+UV_CACHE_DIR=.uv-cache uv run python scripts/check_architecture.py
+```
+
+Over-budget files must be split or reverted; the ratchet script refuses to raise ceilings.
 
 ## Video Identity Fields
 

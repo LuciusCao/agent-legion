@@ -136,6 +136,17 @@ contract checks (`scripts/check_architecture.py`), generated API type drift chec
 (`npm run api:check`), frontend Prettier + ESLint + typecheck + Vitest, and the spec health check
 (`scripts/verify_specs.py --check`).
 
+Architecture source budgets are governed by `config/architecture/architecture-budget-policy.yaml`
+(human-maintained policy) and `config/architecture/architecture-budgets.json` (machine-maintained
+baseline). Update the baseline and verify it with:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/ratchet_architecture_budgets.py
+UV_CACHE_DIR=.uv-cache uv run python scripts/check_architecture.py
+```
+
+The ratchet script refuses to raise ceilings; over-budget files must be split or reverted.
+
 Full gate (before committing or handing off):
 
 ```bash
