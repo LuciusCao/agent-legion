@@ -5,7 +5,6 @@ from server.app.workflows.definition import WorkflowDefinition, load_workflow_de
 
 WORKFLOW_FILES = {
     "question_content": "question_content.yaml",
-    "reading_analysis": "reading_analysis.yaml",
     "question_comprehension_info": "question_comprehension_info.yaml",
 }
 
