@@ -45,6 +45,27 @@ def _write_source_files(root: Path, files_dict: dict[str, int]) -> None:
         )
 
 
+def _write_file_budget_exemption(root: Path, path: str, ceiling: int) -> None:
+    exemption_path = root / "config/architecture/architecture-exemptions.yaml"
+    exemption_path.write_text(
+        yaml.safe_dump(
+            {
+                "exemptions": [
+                    {
+                        "check": "architecture.file_budget",
+                        "path": path,
+                        "ceiling": ceiling,
+                        "reason": "Oversized module split is tracked.",
+                        "owner": "architecture",
+                        "remove_when": "issues/open/011-P2-testing-and-architecture-debt.md",
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def configured_repo(
     tmp_path: Path,
     files_dict: dict[str, int],
@@ -53,6 +74,7 @@ def configured_repo(
 ) -> Path:
     root = tmp_path / "repo"
     root.mkdir()
+    (root / "tests").mkdir()
     _write_policy(root, exclude=exclude)
     _write_baseline(root, baseline if baseline is not None else {})
     _write_source_files(root, files_dict)
@@ -87,6 +109,41 @@ def test_refuses_to_raise_existing_ceiling(tmp_path):
     assert "exceeds ceiling 25" in result.errors[0]
     assert result.changed is False
     assert baseline_text(root) == before
+
+
+def test_preserves_tighter_valid_ceiling_while_adding_new_file(tmp_path):
+    root = configured_repo(
+        tmp_path,
+        {"server/app/example.py": 100, "server/app/new.py": 5},
+        baseline={"server/app/example.py": 103},
+    )
+
+    result = ratchet_budgets(root)
+
+    assert result.errors == ()
+    assert result.changed is True
+    assert read_baseline(root) == {
+        "server/app/example.py": 103,
+        "server/app/new.py": 10,
+    }
+
+
+def test_respects_frozen_exemption_while_adding_new_file(tmp_path):
+    root = configured_repo(
+        tmp_path,
+        {"server/app/exempt.py": 100, "server/app/new.py": 5},
+        baseline={"server/app/exempt.py": 50},
+    )
+    _write_file_budget_exemption(root, "server/app/exempt.py", 100)
+
+    result = ratchet_budgets(root)
+
+    assert result.errors == ()
+    assert result.changed is True
+    assert read_baseline(root) == {
+        "server/app/exempt.py": 50,
+        "server/app/new.py": 10,
+    }
 
 
 def test_lowers_stale_ceiling(tmp_path):
