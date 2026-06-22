@@ -7,7 +7,7 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 
-from server.app.executors._lease_lifecycle import active_lease_counts
+from server.app.executors._lease_control import active_lease_counts
 from server.app.jobs.executor_configuration import (
     get_workspace_executor_configuration,
     replace_workspace_executor_configuration,

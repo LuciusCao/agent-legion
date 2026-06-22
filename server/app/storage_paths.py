@@ -228,3 +228,42 @@ def resolve_job_dir(job: Any, jobs_dir: Path) -> Path:
     # Job records may be partial dicts constructed in tests/services without an
     # ``id`` key, so fall back to "" rather than requiring the key.
     return _resolve_record_dir(job, "", jobs_dir, "job")
+
+
+def derive_run_dir_from_log_path(
+    log_path: str | Path,
+    node_key: str,
+    job_id: str,
+    jobs_dir: Path,
+) -> Path | None:
+    """Find the Pi token directory from the legacy log file path.
+
+    Pi artifacts live under ``jobs/<workspace>/<job_id>/runs/<node_key>/<token>/``
+    while the log file is stored at ``logs/jobs/<job_id>-<node_key>.log``. When the
+    executor result does not include ``run_dir``, we scan ``jobs_dir`` for the
+    workspace that contains this ``job_id`` and pick the most recently modified
+    token directory.
+    """
+    if not log_path or not node_key or not job_id:
+        return None
+    if not jobs_dir.is_dir():
+        return None
+
+    job_dir: Path | None = None
+    for workspace_dir in jobs_dir.iterdir():
+        if not workspace_dir.is_dir():
+            continue
+        candidate = workspace_dir / job_id
+        if candidate.is_dir():
+            job_dir = candidate
+            break
+    if job_dir is None:
+        return None
+
+    run_parent = job_dir / "runs" / node_key
+    if not run_parent.is_dir():
+        return None
+    token_dirs = [d for d in run_parent.iterdir() if d.is_dir()]
+    if not token_dirs:
+        return None
+    return max(token_dirs, key=lambda p: p.stat().st_mtime)

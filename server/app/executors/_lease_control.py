@@ -136,3 +136,38 @@ def _pause_job_on_target_completion(
             """,
             (now_str, job_id),
         )
+
+
+def active_lease_counts(conn: sqlite3.Connection, executor_id: str) -> dict[str, int]:
+    now_str = _sqlite_timestamp(datetime.now(UTC))
+    counts: dict[str, int] = {"global": 0}
+
+    allocated = conn.execute(
+        "select workspace_id from workspace_executor_allocations where executor_id=?",
+        (executor_id,),
+    ).fetchall()
+    for row in allocated:
+        counts[row["workspace_id"]] = 0
+
+    global_row = conn.execute(
+        """
+        select count(*) as cnt
+        from executor_leases
+        where executor_id=? and status='active' and expires_at>?
+        """,
+        (executor_id, now_str),
+    ).fetchone()
+    counts["global"] = global_row["cnt"]
+
+    rows = conn.execute(
+        """
+        select workspace_id, count(*) as cnt
+        from executor_leases
+        where executor_id=? and status='active' and expires_at>?
+        group by workspace_id
+        """,
+        (executor_id, now_str),
+    ).fetchall()
+    for row in rows:
+        counts[row["workspace_id"]] = row["cnt"]
+    return counts
