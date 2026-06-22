@@ -267,3 +267,10 @@ def derive_run_dir_from_log_path(
     if not token_dirs:
         return None
     return max(token_dirs, key=lambda p: p.stat().st_mtime)
+
+
+def derive_session_dir_from_run_dir(run_dir: Path | None) -> Path | None:
+    if run_dir is None:
+        return None
+    session_dir = run_dir / "session"
+    return session_dir if session_dir.is_dir() else None

@@ -23,6 +23,7 @@ from server.app.jobs import JobQueries
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflow_worker_agent_status import agent_status_scope
+from server.app.workflow_worker_maintenance import WorkflowMaintenance
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
 from server.app.workflows.registry import list_registered_workflows
@@ -56,6 +57,7 @@ class WorkflowWorkerThread:
         self._pools: dict[str, ThreadPoolExecutor] = {}
         self._futures: dict[str, Future[ExecutionResult]] = {}
         self._round_robin = WorkspaceRoundRobin()
+        self._maintenance = WorkflowMaintenance(job_db, settings)
 
     @staticmethod
     def is_enabled(settings: Settings) -> bool:
@@ -76,6 +78,7 @@ class WorkflowWorkerThread:
         recovered = self.leases.recover_orphaned_running_jobs(datetime.now(UTC))
         if recovered:
             logger.warning("recovered orphaned running jobs on startup: %s", ", ".join(recovered))
+        self._maintenance.run_backfill()
 
         def _loop() -> None:
             while not self.stop_event.is_set():
@@ -90,6 +93,7 @@ class WorkflowWorkerThread:
         self._thread.start()
 
     def _poll(self) -> bool:
+        self._maintenance.maybe_cleanup()
         if not self._definitions:
             return False
 
@@ -192,7 +196,8 @@ class WorkflowWorkerThread:
         workspace_id = workspace["id"]
         workflow_key = definition.key
         node_key = node.key
-        log_path = self._log_path(job_dir, f"{job['id']}-{node_key}")
+        log_path = self.settings.logs_dir / "jobs" / f"{job['id']}-{node_key}.log"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
 
         binding = self._get_binding(workspace_id, workflow_key, node_key)
         if binding is None:
@@ -366,11 +371,6 @@ class WorkflowWorkerThread:
                 (workspace_id, workflow_key, node_key),
             ).fetchone()
         return row is not None
-
-    def _log_path(self, job_dir: Path, name: str) -> Path:
-        log_path = self.settings.logs_dir / "jobs" / f"{name}.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        return log_path
 
     def stop(self, timeout: float = 3) -> None:
         self.stop_event.set()
