@@ -32,6 +32,10 @@ const ENTRY_ICONS: Record<string, string> = {
   raw: 'description',
 }
 
+// Entry types that are collapsed by default so the user sees the chain first,
+// then can drill into long tool results or internal thinking.
+const DEFAULT_COLLAPSED_TYPES = new Set(['thinking', 'tool_result'])
+
 function formatEntryType(type: string): string {
   const labels: Record<string, string> = {
     thinking: '思考',
@@ -79,6 +83,14 @@ export function JobLogDialog({
     fetchJobLog(jobId, runId)
       .then((data) => {
         if (requestId !== requestIdRef.current) return
+        const initialExpanded = new Set<string>()
+        data.structured?.forEach((entry, index) => {
+          const key = `${entry.type}-${index}`
+          if (!DEFAULT_COLLAPSED_TYPES.has(entry.type)) {
+            initialExpanded.add(key)
+          }
+        })
+        setExpanded(initialExpanded)
         setLog(data)
       })
       .catch((err) => {
@@ -144,7 +156,10 @@ export function JobLogDialog({
               // open, so a composite key based on type + position is sufficient.
               const expandKey = `${entry.type}-${index}`
               const isExpanded = expanded.has(expandKey)
-              const needsExpand = entry.truncated || detail.length > 300
+              const needsExpand =
+                DEFAULT_COLLAPSED_TYPES.has(entry.type) ||
+                entry.truncated ||
+                detail.length > 300
               return (
                 <div key={expandKey} className={styles.entry}>
                   <div className={styles.entryHeader}>

@@ -34,10 +34,8 @@ def _extract_text(
         if not isinstance(item, dict):
             continue
         item_type = item.get("type")
-        if item_type == "text":
-            parts.append(str(item.get("text", "")))
-        elif item_type == "thinking":
-            parts.append(str(item.get("thinking", "")))
+        if item_type in ("text", "thinking"):
+            parts.append(str(item.get(item_type) or ""))
     return "\n".join(parts)
 
 
@@ -56,10 +54,10 @@ def _format_tool_call(tool_call: dict[str, Any]) -> str:
 def _format_tool_result(result: dict[str, Any]) -> str:
     content = result.get("content")
     text = _extract_text(content)
-    if text:
-        return text
-    # Fallback to a compact JSON preview when the result is not plain text.
-    return json.dumps(content, ensure_ascii=False, indent=2)[:MAX_DETAIL_LEN]
+    detail = text or json.dumps(content, ensure_ascii=False, indent=2)[:MAX_DETAIL_LEN]
+    if result.get("isError"):
+        detail = "[ERROR]\n" + detail
+    return detail
 
 
 def _collect_stderr_lines(events_path: Path) -> list[str]:
@@ -67,12 +65,16 @@ def _collect_stderr_lines(events_path: Path) -> list[str]:
     if not stderr_path.is_file():
         return []
     text = stderr_path.read_text(encoding="utf-8", errors="replace")
-    lines = [line for line in text.splitlines() if line.strip()]
-    return lines
+    return [line for line in text.splitlines() if line.strip()]
 
 
 def _parse_pi_events(events_path: Path) -> list[LogEntry]:
-    """Compress a Pi JSONL event stream into human-readable turns."""
+    """Compress a Pi JSONL event stream into a human-readable turn chain.
+
+    The real event stream uses ``message_start`` / ``message_update`` /
+    ``message_end``. We only read the final ``message_end`` snapshots and
+    ignore the thousands of streaming deltas in between.
+    """
     entries: list[LogEntry] = []
     turn_number = 0
     non_json_lines: list[str] = []
@@ -89,83 +91,93 @@ def _parse_pi_events(events_path: Path) -> list[LogEntry]:
                 continue
 
             event_type = event.get("type")
-            if event_type != "turn_end":
+            if event_type == "agent_start":
+                detail, _ = _truncate("")
+                entries.append(
+                    {
+                        "type": "session",
+                        "title": "Agent 开始运行",
+                        "detail": detail,
+                        "truncated": False,
+                    }
+                )
+                continue
+            if event_type == "turn_start":
+                turn_number += 1
+                continue
+            if event_type != "message_end":
                 continue
 
-            turn_number += 1
             message = event.get("message") or {}
+            role = message.get("role")
             content = message.get("content") or []
             if not isinstance(content, list):
                 content = []
 
-            thinking = ""
-            tool_calls: list[dict[str, Any]] = []
-            assistant_texts: list[str] = []
-            for item in content:
-                if not isinstance(item, dict):
-                    continue
-                item_type = item.get("type")
-                if item_type == "thinking":
-                    thinking = str(item.get("thinking", ""))
-                elif item_type == "toolCall":
-                    tool_calls.append(item)
-                elif item_type == "text":
-                    assistant_texts.append(str(item.get("text", "")))
+            if role == "assistant":
+                for item in content:
+                    if not isinstance(item, dict):
+                        continue
+                    item_type = item.get("type")
+                    if item_type == "thinking":
+                        detail, truncated = _truncate(str(item.get("thinking", "")))
+                        entries.append(
+                            {
+                                "type": "thinking",
+                                "title": f"Turn {turn_number} · 思考",
+                                "detail": detail,
+                                "truncated": truncated,
+                            }
+                        )
+                    elif item_type == "toolCall":
+                        detail, truncated = _truncate(_format_tool_call(item))
+                        entries.append(
+                            {
+                                "type": "tool_call",
+                                "title": f"Turn {turn_number} · 工具调用 {item.get('name', 'tool')}",
+                                "detail": detail,
+                                "truncated": truncated,
+                            }
+                        )
+                    elif item_type == "text":
+                        text = str(item.get("text", "")).strip()
+                        if text:
+                            detail, truncated = _truncate(text)
+                            entries.append(
+                                {
+                                    "type": "message",
+                                    "title": f"Turn {turn_number} · 回复",
+                                    "detail": detail,
+                                    "truncated": truncated,
+                                }
+                            )
 
-            if thinking:
-                detail, truncated = _truncate(thinking)
-                entries.append(
-                    {
-                        "type": "thinking",
-                        "title": f"Turn {turn_number} · 思考",
-                        "detail": detail,
-                        "truncated": truncated,
-                    }
-                )
+                stop_reason = message.get("stopReason")
+                error_message = message.get("errorMessage") or ""
+                if (stop_reason and stop_reason not in ("stop", "toolUse")) or error_message:
+                    detail = error_message or f"stop_reason={stop_reason}"
+                    entries.append(
+                        {
+                            "type": "error",
+                            "title": f"Turn {turn_number} · 模型调用错误",
+                            "detail": detail,
+                            "truncated": False,
+                        }
+                    )
 
-            for tool_call in tool_calls:
-                entries.append(
-                    {
-                        "type": "tool_call",
-                        "title": f"Turn {turn_number} · 工具调用 {tool_call.get('name', 'tool')}",
-                        "detail": _format_tool_call(tool_call),
-                        "truncated": False,
-                    }
-                )
-
-            for tool_result in event.get("toolResults") or []:
-                if not isinstance(tool_result, dict):
-                    continue
-                detail, truncated = _truncate(_format_tool_result(tool_result))
+            elif role == "toolResult":
+                tool_name = message.get("toolName") or "tool"
+                tool_call_id = message.get("toolCallId", "")[:8]
+                title = f"Turn {turn_number} · 工具结果 {tool_name}"
+                if tool_call_id:
+                    title += f" ({tool_call_id})"
+                detail, truncated = _truncate(_format_tool_result(message))
                 entries.append(
                     {
                         "type": "tool_result",
-                        "title": f"Turn {turn_number} · 工具结果 {tool_result.get('toolName', 'tool')}",
+                        "title": title,
                         "detail": detail,
                         "truncated": truncated,
-                    }
-                )
-
-            if assistant_texts:
-                detail, truncated = _truncate("\n".join(assistant_texts))
-                entries.append(
-                    {
-                        "type": "message",
-                        "title": f"Turn {turn_number} · 回复",
-                        "detail": detail,
-                        "truncated": truncated,
-                    }
-                )
-
-            stop_reason = message.get("stopReason")
-            error_message = message.get("errorMessage") or ""
-            if stop_reason == "error" or error_message:
-                entries.append(
-                    {
-                        "type": "error",
-                        "title": f"Turn {turn_number} · 模型调用错误",
-                        "detail": error_message or f"stop_reason={stop_reason}",
-                        "truncated": False,
                     }
                 )
 
@@ -182,7 +194,6 @@ def _parse_pi_events(events_path: Path) -> list[LogEntry]:
         )
 
     if non_json_lines and not entries:
-        # The file did not contain recognizable Pi events; show the raw text.
         detail, truncated = _truncate("\n".join(non_json_lines))
         entries.append(
             {

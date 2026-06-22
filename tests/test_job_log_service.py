@@ -362,26 +362,43 @@ def test_job_log_service_renders_pi_structured_events(log_service):
     _write_events(
         log_file,
         [
+            {"type": "agent_start"},
+            {"type": "turn_start"},
             {
-                "type": "turn_end",
+                "type": "message_end",
                 "message": {
+                    "role": "assistant",
                     "content": [
                         {"type": "thinking", "thinking": "Need to fetch context."},
                         {
                             "type": "toolCall",
+                            "id": "tool_001",
                             "name": "fetch_context",
                             "arguments": {"question_id": "Q100"},
                         },
-                        {"type": "text", "text": "Working on it."},
-                    ]
+                    ],
+                    "stopReason": "toolUse",
                 },
-                "toolResults": [
-                    {
-                        "toolName": "fetch_context",
-                        "content": [{"type": "text", "text": "context body"}],
-                    }
-                ],
-            }
+            },
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "toolResult",
+                    "toolCallId": "tool_001",
+                    "toolName": "fetch_context",
+                    "content": [{"type": "text", "text": "context body"}],
+                    "isError": False,
+                },
+            },
+            {"type": "turn_start"},
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Done."}],
+                    "stopReason": "stop",
+                },
+            },
         ],
     )
 
@@ -389,11 +406,10 @@ def test_job_log_service_renders_pi_structured_events(log_service):
 
     assert result["run_id"] == run["id"]
     assert result["truncated"] is False
-    assert len(result["structured"]) == 4
     types = [entry["type"] for entry in result["structured"]]
-    assert types == ["thinking", "tool_call", "tool_result", "message"]
-    assert "Turn 1 · 思考" in result["log"]
-    assert "fetch_context" in result["log"]
+    assert types == ["session", "thinking", "tool_call", "tool_result", "message"]
+    assert any(entry["title"].startswith("Turn 1") for entry in result["structured"])
+    assert any(entry["title"].startswith("Turn 2") for entry in result["structured"])
     assert result["raw_url"] == f"/api/jobs/{job['id']}/runs/{run['id']}/log?raw=1"
 
 
@@ -405,14 +421,16 @@ def test_job_log_service_renders_pi_error_stop_reason(log_service):
     _write_events(
         log_file,
         [
+            {"type": "turn_start"},
             {
-                "type": "turn_end",
+                "type": "message_end",
                 "message": {
+                    "role": "assistant",
+                    "content": [],
                     "stopReason": "error",
                     "errorMessage": "model refused",
-                    "content": [],
                 },
-            }
+            },
         ],
     )
 
@@ -431,7 +449,7 @@ def test_job_log_service_renders_pi_stderr(log_service):
 
     _write_events(
         log_file,
-        [{"type": "turn_end", "message": {"content": []}}],
+        [{"type": "message_end", "message": {"role": "assistant", "content": []}}],
     )
 
     result = service.read(job["id"], run["id"])
