@@ -27,6 +27,21 @@ UV_CACHE_DIR=.uv-cache uv sync
 
 > For architecture details, code style, and testing conventions, see [AGENTS.md](AGENTS.md).
 
+## Makefile Shortcuts
+
+A `Makefile` is provided to simplify the most common commands. It automatically sets `UV_CACHE_DIR=.uv-cache`, so you can omit the prefix in restricted sandboxes.
+
+```bash
+make help              # 显示所有可用命令
+make sync              # uv sync
+make dev-backend       # 启动后端开发服务器
+make dev-frontend      # 启动前端开发服务器
+make check-quick       # 快速质量门
+make check             # 完整质量门（提交前）
+make skills-lock       # 刷新 config/skills.lock
+make api-generate      # 重新生成前端 API 类型
+```
+
 ## Configuration
 
 Configuration is split by domain into three files under `config/`:
