@@ -100,26 +100,21 @@ def _matches_any_pattern(rel_path: str, patterns: tuple[str, ...]) -> bool:
 
 
 def _matches_pattern(rel_path: str, pattern: str) -> bool:
-    if fnmatch.fnmatch(rel_path, pattern):
-        return True
-    if pattern.startswith("**/"):
-        alt = pattern[3:]
-        if fnmatch.fnmatch(rel_path, alt):
-            return True
-    return False
+    return _matches_glob(rel_path, pattern)
 
 
 def _matches_exclude(rel_path: str, exclude_glob: str) -> bool:
     """Match a path against an exclude glob anchored at the repository root."""
-    if fnmatch.fnmatch(rel_path, exclude_glob):
+    return _matches_glob(rel_path, exclude_glob, allow_dir_prefix=True)
+
+
+def _matches_glob(rel_path: str, pattern: str, *, allow_dir_prefix: bool = False) -> bool:
+    if fnmatch.fnmatch(rel_path, pattern):
         return True
-    if exclude_glob.startswith("**/"):
-        alt = exclude_glob[3:]
-        if fnmatch.fnmatch(rel_path, alt):
-            return True
-    # A trailing '/**' should match everything inside that directory prefix.
-    if exclude_glob.endswith("/**"):
-        prefix = exclude_glob[:-3]
+    if pattern.startswith("**/") and fnmatch.fnmatch(rel_path, pattern[3:]):
+        return True
+    if allow_dir_prefix and pattern.endswith("/**"):
+        prefix = pattern[:-3]
         if rel_path == prefix or rel_path.startswith(prefix + "/"):
             return True
     return False
