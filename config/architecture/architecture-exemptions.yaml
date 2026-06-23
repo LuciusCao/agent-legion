@@ -206,3 +206,18 @@ exemptions:
     remove_when: docs/superpowers/plans/2026-06-23-align-workspace-packaging.md#task-6
     ceiling: 117
 
+  # Task 8 frontend package lifecycle growth exemptions -----------------------------------------
+  - check: architecture.file_budget
+    path: frontend/src/api.ts
+    reason: Task 8 of the align-workspace-packaging plan adds workspace package DELETE/PATCH helpers; the file will be split once the plan is complete.
+    owner: workspace-executor
+    remove_when: docs/superpowers/plans/2026-06-23-align-workspace-packaging.md#task-8
+    ceiling: 242
+
+  - check: architecture.file_budget
+    path: frontend/src/components/PackageHistoryDialog.tsx
+    reason: Task 8 of the align-workspace-packaging plan adds workspace-scoped rename/lock/delete handlers; the component will be split once the plan is complete.
+    owner: workspace-executor
+    remove_when: docs/superpowers/plans/2026-06-23-align-workspace-packaging.md#task-8
+    ceiling: 290
+

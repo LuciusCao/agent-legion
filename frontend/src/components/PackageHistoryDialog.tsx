@@ -8,7 +8,13 @@ import {
   IconButton,
   TextField,
 } from '@mui/material'
-import { deletePackage, updatePackage, api } from '../api'
+import {
+  api,
+  deletePackage,
+  deleteWorkspacePackage,
+  updatePackage,
+  updateWorkspacePackage,
+} from '../api'
 import { triggerDownload } from '../lib/download'
 import { usePackageStore } from '../stores/packageStore'
 import { MaterialIcon } from './MaterialIcon'
@@ -109,8 +115,13 @@ export function PackageHistoryDialog({
   const handleDelete = async (id: number) => {
     if (!window.confirm('确定要删除这个包吗？')) return
     try {
-      await deletePackage(id)
-      removePackage(id)
+      if (isWorkspace && workspaceId) {
+        await deleteWorkspacePackage(workspaceId, id)
+        setWorkspacePackages((prev) => prev.filter((p) => p.id !== id))
+      } else {
+        await deletePackage(id)
+        removePackage(id)
+      }
     } catch (err) {
       alert('删除失败: ' + (err instanceof Error ? err.message : String(err)))
     }
@@ -119,8 +130,17 @@ export function PackageHistoryDialog({
   const handleToggleLock = async (pkg: PackageItem) => {
     const newLocked = !pkg.locked
     try {
-      await updatePackage(pkg.id, { locked: newLocked })
-      toggleLockStore(pkg.id, newLocked)
+      if (isWorkspace && workspaceId) {
+        await updateWorkspacePackage(workspaceId, pkg.id, { locked: newLocked })
+        setWorkspacePackages((prev) =>
+          prev.map((p) =>
+            p.id === pkg.id ? { ...p, locked: newLocked ? 1 : 0 } : p
+          )
+        )
+      } else {
+        await updatePackage(pkg.id, { locked: newLocked })
+        toggleLockStore(pkg.id, newLocked)
+      }
     } catch (err) {
       alert('操作失败: ' + (err instanceof Error ? err.message : String(err)))
     }
@@ -137,8 +157,17 @@ export function PackageHistoryDialog({
       return
     }
     try {
-      await updatePackage(id, { name: editValue.trim() })
-      renamePackage(id, editValue.trim())
+      if (isWorkspace && workspaceId) {
+        await updateWorkspacePackage(workspaceId, id, {
+          name: editValue.trim(),
+        })
+        setWorkspacePackages((prev) =>
+          prev.map((p) => (p.id === id ? { ...p, name: editValue.trim() } : p))
+        )
+      } else {
+        await updatePackage(id, { name: editValue.trim() })
+        renamePackage(id, editValue.trim())
+      }
     } catch (err) {
       alert('重命名失败: ' + (err instanceof Error ? err.message : String(err)))
     }
@@ -161,7 +190,7 @@ export function PackageHistoryDialog({
             {displayPackages.map((pkg) => (
               <div key={pkg.id} className={styles.item}>
                 <div className={styles.itemInfo}>
-                  {editingId === pkg.id && !isWorkspace ? (
+                  {editingId === pkg.id ? (
                     <TextField
                       value={editValue}
                       onChange={(e) => setEditValue(e.target.value)}
@@ -178,11 +207,9 @@ export function PackageHistoryDialog({
                     <>
                       <span
                         className={styles.itemName}
-                        onClick={() => !isWorkspace && startEdit(pkg)}
-                        style={{
-                          cursor: isWorkspace ? 'default' : 'pointer',
-                        }}
-                        title={isWorkspace ? '' : '点击重命名'}
+                        onClick={() => startEdit(pkg)}
+                        style={{ cursor: 'pointer' }}
+                        title="点击重命名"
                       >
                         {pkg.locked ? (
                           <MaterialIcon
@@ -197,14 +224,17 @@ export function PackageHistoryDialog({
                         {pkg.name || '未命名'}
                       </span>
                       <span className={styles.itemMeta}>
-                        {pkg.video_count}个视频 · {formatSize(pkg.size_bytes)} ·{' '}
+                        {isWorkspace
+                          ? `${pkg.video_count}个任务`
+                          : `${pkg.video_count}个视频`}{' '}
+                        · {formatSize(pkg.size_bytes)} ·{' '}
                         {formatRelativeTime(pkg.created_at)}
                       </span>
                     </>
                   )}
                 </div>
                 <div className={styles.itemActions}>
-                  {editingId === pkg.id && !isWorkspace ? (
+                  {editingId === pkg.id ? (
                     <IconButton
                       onClick={() => handleRename(pkg.id)}
                       title="确认"
@@ -214,46 +244,33 @@ export function PackageHistoryDialog({
                     </IconButton>
                   ) : (
                     <>
-                      {!isWorkspace && (
-                        <>
-                          <IconButton
-                            onClick={() => handleToggleLock(pkg)}
-                            title={pkg.locked ? '解锁' : '锁定'}
-                            size="small"
-                          >
-                            <MaterialIcon
-                              name={pkg.locked ? 'lock' : 'lock_open'}
-                            />
-                          </IconButton>
-                          <IconButton
-                            onClick={() => handleDownload(pkg)}
-                            title="下载"
-                            size="small"
-                          >
-                            <MaterialIcon name="download" />
-                          </IconButton>
-                          <IconButton
-                            disabled={!!pkg.locked}
-                            onClick={() => handleDelete(pkg.id)}
-                            title={pkg.locked ? '已锁定，无法删除' : '删除'}
-                            size="small"
-                            sx={{
-                              color: pkg.locked ? '#9ca3af' : '#ba1a1a',
-                            }}
-                          >
-                            <MaterialIcon name="delete" />
-                          </IconButton>
-                        </>
-                      )}
-                      {isWorkspace && (
-                        <IconButton
-                          onClick={() => handleDownload(pkg)}
-                          title="下载"
-                          size="small"
-                        >
-                          <MaterialIcon name="download" />
-                        </IconButton>
-                      )}
+                      <IconButton
+                        onClick={() => handleToggleLock(pkg)}
+                        title={pkg.locked ? '解锁' : '锁定'}
+                        size="small"
+                      >
+                        <MaterialIcon
+                          name={pkg.locked ? 'lock' : 'lock_open'}
+                        />
+                      </IconButton>
+                      <IconButton
+                        onClick={() => handleDownload(pkg)}
+                        title="下载"
+                        size="small"
+                      >
+                        <MaterialIcon name="download" />
+                      </IconButton>
+                      <IconButton
+                        disabled={!!pkg.locked}
+                        onClick={() => handleDelete(pkg.id)}
+                        title={pkg.locked ? '已锁定，无法删除' : '删除'}
+                        size="small"
+                        sx={{
+                          color: pkg.locked ? '#9ca3af' : '#ba1a1a',
+                        }}
+                      >
+                        <MaterialIcon name="delete" />
+                      </IconButton>
                     </>
                   )}
                 </div>
