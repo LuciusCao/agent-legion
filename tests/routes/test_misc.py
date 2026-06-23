@@ -24,7 +24,7 @@ def test_app_ignores_partial_frontend_dist(tmp_path, monkeypatch):
         response = c.get("/")
 
     assert response.status_code == 200
-    assert "Video Hive API" in response.text
+    assert "Agent Legion API" in response.text
 
 
 def test_video_hive_config_field_whitelist(client: TestClient):

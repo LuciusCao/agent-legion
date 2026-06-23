@@ -181,7 +181,7 @@ def create_app(
         if worker_thread is not None:
             worker_thread.stop()
 
-    app = FastAPI(title="Video Hive", lifespan=lifespan)
+    app = FastAPI(title="Agent Legion", lifespan=lifespan)
     app.state.settings = settings
     app.state.db = db
     app.state.job_db = job_db
@@ -224,7 +224,7 @@ def create_app(
         def frontend_missing() -> str:
             return (
                 "<main style='font-family: system-ui; padding: 24px'>"
-                "<h1>Video Hive API</h1>"
+                "<h1>Agent Legion API</h1>"
                 "<p>Run the TypeScript frontend with <code>cd frontend && npm run dev</code>.</p>"
                 "</main>"
             )
