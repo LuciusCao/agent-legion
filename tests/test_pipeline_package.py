@@ -288,6 +288,7 @@ def test_workspace_package_includes_only_whitelisted_artifacts(tmp_path):
     (job_dir / "result.json").write_text('{"ok": true}', encoding="utf-8")
     (job_dir / "comprehension_info.json").write_text('{"q": 1}', encoding="utf-8")
     (job_dir / "question_context.json").write_text('{"ctx": 1}', encoding="utf-8")
+    (job_dir / "question.json").write_text('{"question": 1}', encoding="utf-8")
     (job_dir / "upload_params.json").write_text('{"up": 1}', encoding="utf-8")
     (job_dir / "metadata.json").write_text('{"meta": 1}', encoding="utf-8")
     (job_dir / "report.md").write_text("report", encoding="utf-8")
@@ -318,6 +319,7 @@ def test_workspace_package_includes_only_whitelisted_artifacts(tmp_path):
         assert "job_1/result.json" in names
         assert "job_1/comprehension_info.json" in names
         assert "job_1/question_context.json" in names
+        assert "job_1/question.json" in names
         assert "job_1/upload_params.json" in names
         assert "job_1/metadata.json" in names
         assert "job_1/report.md" in names
