@@ -88,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
         "--data-dir",
         type=Path,
         default=None,
-        help="Video Hive data directory (defaults to config/data_dir).",
+        help="Application data directory (defaults to config/data_dir).",
     )
     args = parser.parse_args(argv)
 
