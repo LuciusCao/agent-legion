@@ -420,6 +420,34 @@ describe('QuestionContentPanel', () => {
     )
   })
 
+  it('shows derived_text in the annotation and derivation in the detail card for hidden key info', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
+    )
+
+    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    await waitFor(() =>
+      expect(screen.getByText('审题信息')).toBeInTheDocument()
+    )
+    const chips = screen.getAllByRole('button')
+    fireEvent.click(chips[1])
+    await waitFor(() =>
+      expect(screen.getByText('隐含信息')).toBeInTheDocument()
+    )
+
+    const detailCard = screen.getByText('隐含信息').parentElement?.parentElement
+    expect(detailCard).toBeTruthy()
+    expect(detailCard).toHaveTextContent(/有两个不等实根/)
+    expect(
+      within(detailCard as HTMLElement).queryByText(/判别式大于零/)
+    ).not.toBeInTheDocument()
+
+    const annotationCard = document.getElementById('annotation-ki_002')
+    expect(annotationCard).toBeInTheDocument()
+    expect(annotationCard).toHaveTextContent(/判别式大于零/)
+    expect(annotationCard).not.toHaveTextContent(/有两个不等实根/)
+  })
+
   it('renders chips from intermediate artifacts when comprehension_info.json is missing', async () => {
     comprehensionArtifactEnabled = false
     mockFetchJobArtifact.mockResolvedValue(
