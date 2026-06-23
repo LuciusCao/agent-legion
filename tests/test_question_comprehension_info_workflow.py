@@ -147,7 +147,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
                             "text": "小明一共参加了多少场比赛？",
                             "options": [{"label": "A", "text": "14场", "is_correct": True}],
                         },
-                        "question_comprehension_abilities": ["information_locating"],
+                        "question_comprehension_ability": "information_locating",
                     }
                 ],
             },
