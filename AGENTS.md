@@ -501,6 +501,8 @@ Pi skills are **not** repository-owned; they live in standalone git repositories
 - Resolved lockfile: `config/skills.lock` pins the exact commit for reproducible checkouts.
 - Example local layout: `~/.agents/skills/agent-legion/<workflow>/<capability>/`.
 
+> **Do not copy or symlink external skill repos into the Video Hive project root.** Skill files must be edited only in their external locations (e.g. `~/.agents/skills/agent-legion/...`). Any `question_comprehension_info/`, `question_content/`, or similar directory that appears under the project root is accidental and should be removed; it is also excluded from Ruff in `pyproject.toml`.
+
 ### Required files in each skill repo
 
 - `SKILL.md` — execution workflow and I/O contract
