@@ -386,6 +386,7 @@
     "server/app/services/workspace_executor_configuration.py": 21,
     "server/app/services/workspace_executor_validation.py": 81,
     "server/app/services/workspace_executor_warnings.py": 21,
+    "server/app/services/workspace_package_lifecycle.py": 64,
     "server/app/services/workspace_pi_agents.py": 58,
     "server/app/services/workspace_settings_payload.py": 30,
     "server/app/settings.py": 171,

@@ -5,6 +5,11 @@ from typing import Any, TypedDict
 
 from server.app.jobs import JobQueries
 from server.app.pipeline.package import create_workspace_package
+from server.app.services.workspace_package_lifecycle import (
+    WorkspacePackageLifecycleMixin,
+    WorkspacePackageLockedError,  # noqa: F401
+    WorkspacePackageNotFoundError,  # noqa: F401
+)
 from server.app.settings import Settings
 from server.app.storage_paths import make_data_relative
 
@@ -26,7 +31,7 @@ class JobPackageResult(TypedDict):
     download_url: str | None
 
 
-class JobPackageService:
+class JobPackageService(WorkspacePackageLifecycleMixin):
     def __init__(self, job_db: JobQueries, settings: Settings) -> None:
         self.job_db = job_db
         self.settings = settings
