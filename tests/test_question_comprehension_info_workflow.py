@@ -56,7 +56,7 @@ def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
     assert parsed["questions"][0]["fingerprint_missing"] is False
 
 
-def test_clean_and_parse_marks_missing_fingerprint_without_hashing(tmp_path):
+def test_clean_and_parse_uses_md5_fallback_when_cms_fingerprint_missing(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace("test_ws")
@@ -95,10 +95,9 @@ def test_clean_and_parse_marks_missing_fingerprint_without_hashing(tmp_path):
 
     parsed = json.loads((artifact_dir / "questions_parsed.json").read_text(encoding="utf-8"))
     question = parsed["questions"][0]
-    assert question["fingerprint"] is None
-    assert question["fingerprint_source"] == "missing"
-    assert question["fingerprint_missing"] is True
-    assert "sha256" not in json.dumps(question, ensure_ascii=False).lower()
+    assert question["fingerprint"] == "597781f6fc22c1444e1f7c066faefd52"
+    assert question["fingerprint_source"] == "md5"
+    assert question["fingerprint_missing"] is False
 
 
 def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
@@ -194,6 +193,107 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
     assert manifest["question_id"] == "Q100"
     assert manifest["fingerprint_missing"] is True
     assert manifest["artifacts"]["comprehension_info.json"]["present"] is True
+
+
+def test_clean_and_parse_md5_is_deterministic(tmp_path):
+    db_path = tmp_path / "jobs.sqlite"
+    queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
+    job = queries.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q100",
+        batch_id="batch1",
+        title="Question Q100",
+        node_keys=["fetch_questions", "clean_and_parse", "assemble_comprehension_info"],
+        workspace_id=workspace["id"],
+    )
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
+
+    def _write_questions(stem, options):
+        (artifact_dir / "questions.json").write_text(
+            json.dumps(
+                {
+                    "questions": [
+                        {
+                            "question_id": "Q100",
+                            "title": "CMS 题目一",
+                            "normalized": {
+                                "stem": stem,
+                                "options": options,
+                                "answer": "A",
+                                "analysis": "",
+                            },
+                            "cms_payload": {"data": {"question_id": "Q100"}},
+                        }
+                    ]
+                }
+            ),
+            encoding="utf-8",
+        )
+
+    _write_questions(
+        "  小明参加了14场象棋比赛，胜5场，负5场，其余为平局。  ",
+        [{"label": "A", "text": "  4场  "}, {"label": "B", "text": "5场"}],
+    )
+    clean_and_parse(job, artifact_dir, {})
+    parsed = json.loads((artifact_dir / "questions_parsed.json").read_text(encoding="utf-8"))
+    first_fingerprint = parsed["questions"][0]["fingerprint"]
+    assert first_fingerprint is not None
+
+    _write_questions(
+        "小明参加了14场象棋比赛，胜5场，负5场，其余为平局。",
+        [{"label": "B", "text": "5场"}, {"label": "A", "text": "4场"}],
+    )
+    clean_and_parse(job, artifact_dir, {})
+    parsed = json.loads((artifact_dir / "questions_parsed.json").read_text(encoding="utf-8"))
+    second_fingerprint = parsed["questions"][0]["fingerprint"]
+
+    assert first_fingerprint == second_fingerprint
+
+
+def test_clean_and_parse_missing_fingerprint_when_no_content(tmp_path):
+    db_path = tmp_path / "jobs.sqlite"
+    queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace("test_ws")
+    job = queries.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q100",
+        batch_id="batch1",
+        title="Question Q100",
+        node_keys=["fetch_questions", "clean_and_parse", "assemble_comprehension_info"],
+        workspace_id=workspace["id"],
+    )
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
+    (artifact_dir / "questions.json").write_text(
+        json.dumps(
+            {
+                "questions": [
+                    {
+                        "question_id": "Q100",
+                        "title": "CMS 题目一",
+                        "normalized": {
+                            "stem": "   ",
+                            "options": [],
+                            "answer": "A",
+                            "analysis": "",
+                        },
+                        "cms_payload": {"data": {"question_id": "Q100"}},
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    clean_and_parse(job, artifact_dir, {})
+
+    parsed = json.loads((artifact_dir / "questions_parsed.json").read_text(encoding="utf-8"))
+    question = parsed["questions"][0]
+    assert question["fingerprint"] is None
+    assert question["fingerprint_source"] == "missing"
+    assert question["fingerprint_missing"] is True
 
 
 def test_local_executor_config_binds_question_comprehension_info_handlers():

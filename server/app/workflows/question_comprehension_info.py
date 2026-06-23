@@ -3,39 +3,18 @@ from __future__ import annotations
 import json
 import logging
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from server.app.cms.client import get_token
 from server.app.cms.question import fetch_question_detail
 from server.app.executors.cancellation import check_cancellation
 from server.app.workflows.question_content import _effective_cms_config
+from server.app.workflows.question_fingerprint import (
+    compute_question_fingerprint,
+    extract_cms_fingerprint,
+)
 
 logger = logging.getLogger(__name__)
-
-
-def _first_string(*values: Any) -> str | None:
-    for value in values:
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def _nested_dict(value: Any, key: str) -> dict[str, Any]:
-    if isinstance(value, dict) and isinstance(value.get(key), dict):
-        return cast(dict[str, Any], value[key])
-    return {}
-
-
-def _extract_cms_fingerprint(question: dict[str, Any]) -> str | None:
-    normalized = question.get("normalized")
-    cms_payload = question.get("cms_payload")
-    data = _nested_dict(cms_payload, "data")
-    return _first_string(
-        normalized.get("fingerprint") if isinstance(normalized, dict) else None,
-        data.get("fingerprint"),
-        data.get("question_fingerprint"),
-        data.get("content_fingerprint"),
-    )
 
 
 def fetch_questions(
@@ -111,7 +90,14 @@ def clean_and_parse(
         normalized = q.get("normalized") or {}
         if not isinstance(normalized, dict):
             normalized = {}
-        fingerprint = _extract_cms_fingerprint(q)
+        fingerprint = extract_cms_fingerprint(q)
+        source = "cms"
+        if fingerprint is None:
+            fingerprint = compute_question_fingerprint(
+                normalized.get("stem") or "",
+                normalized.get("options") or [],
+            )
+            source = "md5" if fingerprint is not None else "missing"
         parsed_questions.append(
             {
                 "question_id": str(qid),
@@ -120,14 +106,15 @@ def clean_and_parse(
                 "answer": normalized.get("answer") or "",
                 "analysis": normalized.get("analysis") or "",
                 "fingerprint": fingerprint,
-                "fingerprint_source": "cms" if fingerprint else "missing",
+                "fingerprint_source": source,
                 "fingerprint_missing": fingerprint is None,
             }
         )
         logger.info(
-            "    parsed question_id=%s fingerprint=%s",
+            "    parsed question_id=%s fingerprint=%s source=%s",
             qid,
             "present" if fingerprint else "missing",
+            source,
         )
 
     artifact_dir.mkdir(parents=True, exist_ok=True)
