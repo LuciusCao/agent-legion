@@ -258,6 +258,7 @@
     "server/app/db/migrations/v009_relative_path_storage.py": 14,
     "server/app/db/migrations/v010_remove_default_workspace.py": 29,
     "server/app/db/migrations/v011_remove_workspace_id_defaults.py": 89,
+    "server/app/db/migrations/v012_workspace_packages.py": 52,
     "server/app/db/notifications.py": 44,
     "server/app/db/queries/__init__.py": 22,
     "server/app/db/queries/base.py": 50,
