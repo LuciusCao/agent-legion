@@ -103,7 +103,7 @@ def build_openapi_schema(data_dir: Path) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Export the Video Hive OpenAPI schema")
+    parser = argparse.ArgumentParser(description="Export the Agent Legion OpenAPI schema")
     parser.add_argument("output", type=Path)
     args = parser.parse_args()
 
