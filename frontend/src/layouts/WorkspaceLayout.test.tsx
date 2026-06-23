@@ -50,6 +50,7 @@ vi.mock('../stores/workspaceStore', () => ({
 
 const setWorkerPausedMock = vi.fn()
 const fetchWorkerStatusMock = vi.fn()
+const setWorkspacePackageDialogOpenMock = vi.fn()
 
 vi.mock('../stores/uiStore', () => ({
   useUiStore: (
@@ -58,6 +59,7 @@ vi.mock('../stores/uiStore', () => ({
     const state = createMockUiState({
       fetchWorkerStatus: fetchWorkerStatusMock,
       setWorkerPaused: setWorkerPausedMock,
+      setWorkspacePackageDialogOpen: setWorkspacePackageDialogOpenMock,
     })
     return selector ? selector(state) : state
   },
@@ -68,6 +70,7 @@ describe('WorkspaceLayout', () => {
     mockNavigate.mockClear()
     setWorkerPausedMock.mockClear()
     fetchWorkerStatusMock.mockClear()
+    setWorkspacePackageDialogOpenMock.mockClear()
     fetchWorkerStatusMock.mockResolvedValue(undefined)
   })
 
@@ -194,5 +197,21 @@ describe('WorkspaceLayout', () => {
       </MemoryRouter>
     )
     expect(screen.getByLabelText('Agent 状态')).toBeInTheDocument()
+  })
+
+  it('opens workspace package history dialog when package button is clicked', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByLabelText('包历史'))
+    expect(setWorkspacePackageDialogOpenMock).toHaveBeenCalledWith(true)
+    expect(mockNavigate).not.toHaveBeenCalled()
   })
 })

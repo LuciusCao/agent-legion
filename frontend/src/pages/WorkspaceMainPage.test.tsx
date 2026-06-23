@@ -167,6 +167,7 @@ describe('WorkspaceMainPage', () => {
       addContentType: 'knowledge',
       rerunDialogOpen: false,
       deleteDialogOpen: false,
+      workspacePackageDialogOpen: false,
       workerPaused: false,
       toast: null,
     })
@@ -613,5 +614,39 @@ describe('WorkspaceMainPage', () => {
     await waitFor(() => {
       expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
     })
+  })
+
+  it('renders workspace package history dialog when open', async () => {
+    mockApi.mockImplementation((path: string) => {
+      if (path === '/api/workspaces/ws1/stats') {
+        return Promise.resolve(baseStats)
+      }
+      if (path === '/api/workspaces/ws1/packages') {
+        return Promise.resolve({
+          packages: [
+            {
+              id: 1,
+              name: '批次 1',
+              path: '/data/packages/ws1.zip',
+              video_count: 3,
+              size_bytes: 1024,
+              locked: 0,
+              created_at: new Date().toISOString(),
+            },
+          ],
+        })
+      }
+      return Promise.resolve({})
+    })
+    useUiStore.setState({ workspacePackageDialogOpen: true })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText('包历史')).toBeInTheDocument()
+    })
+    expect(screen.getByText('批次 1')).toBeInTheDocument()
   })
 })

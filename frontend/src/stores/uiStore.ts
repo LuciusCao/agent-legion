@@ -16,6 +16,7 @@ export interface UiState {
   addDialogWorkspaceId: string | undefined
   rerunDialogOpen: boolean
   deleteDialogOpen: boolean
+  workspacePackageDialogOpen: boolean
   workerPaused: boolean
   workerPausedByWorkspace: Record<string, boolean>
   toast: Toast | null
@@ -35,6 +36,7 @@ export interface UiState {
   closeRerunDialog: () => void
   openDeleteDialog: () => void
   closeDeleteDialog: () => void
+  setWorkspacePackageDialogOpen: (open: boolean) => void
   showToast: (message: string, type: 'success' | 'error') => void
   clearToast: () => void
   setPageTitle: (title: string | null) => void
@@ -53,6 +55,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   addDialogWorkspaceId: undefined,
   rerunDialogOpen: false,
   deleteDialogOpen: false,
+  workspacePackageDialogOpen: false,
   workerPaused: true,
   workerPausedByWorkspace: {},
   toast: null,
@@ -151,6 +154,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   closeRerunDialog: () => set({ rerunDialogOpen: false }),
   openDeleteDialog: () => set({ deleteDialogOpen: true }),
   closeDeleteDialog: () => set({ deleteDialogOpen: false }),
+  setWorkspacePackageDialogOpen: (open) =>
+    set({ workspacePackageDialogOpen: open }),
   showToast: (message, type) => set({ toast: { message, type } }),
   clearToast: () => set({ toast: null }),
   setPageTitle: (title) => set({ pageTitle: title }),

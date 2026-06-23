@@ -1,16 +1,8 @@
 import { lazy, Suspense, useEffect } from 'react'
-import {
-  Routes,
-  Route,
-  useLocation,
-  Navigate,
-  useParams,
-  useNavigate,
-} from 'react-router-dom'
+import { Routes, Route, useLocation, Navigate } from 'react-router-dom'
 import { useUiStore } from './stores/uiStore'
 import Toast from './components/Toast'
 import JobDetailPage from './pages/JobDetailPage'
-import { PackageHistoryDialog } from './components/PackageHistoryDialog'
 
 const ListPage = lazy(() =>
   import('./pages/ListPage').then((m) => ({ default: m.ListPage }))
@@ -34,19 +26,6 @@ const SettingsPage = lazy(() =>
 const WorkspaceMainPage = lazy(() =>
   import('./pages/WorkspaceMainPage').then((m) => ({ default: m.default }))
 )
-
-function WorkspacePackagesPage() {
-  const { workspaceId } = useParams()
-  const navigate = useNavigate()
-  return (
-    <PackageHistoryDialog
-      open={true}
-      onClose={() => navigate(`/workspaces/${workspaceId}`)}
-      scope="workspace"
-      workspaceId={workspaceId}
-    />
-  )
-}
 
 export default function App() {
   const { connectAgentsWs, closeAddDialog } = useUiStore()
@@ -77,7 +56,6 @@ export default function App() {
           <Route path="/workspaces/:workspaceId" element={<WorkspaceLayout />}>
             <Route index element={<WorkspaceMainPage />} />
             <Route path="jobs/:jobId" element={<JobDetailPage />} />
-            <Route path="packages" element={<WorkspacePackagesPage />} />
           </Route>
           <Route
             path="/workspaces/:workspaceId/settings"

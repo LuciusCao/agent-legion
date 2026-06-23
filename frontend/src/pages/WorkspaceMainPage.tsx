@@ -13,6 +13,7 @@ import {
   type JobActionBarFilter,
 } from '../components/JobActionBar'
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
+import { WorkspacePackageHistoryDialog } from '../components/WorkspacePackageHistoryDialog'
 import { fetchWorkflowDefinition } from '../api'
 import type { WorkflowDefinitionRecord } from '../types'
 import styles from './WorkspaceMainPage.module.css'
@@ -242,6 +243,10 @@ export default function WorkspaceMainPage() {
         <section style={{ ...sectionStyle, flex: 1, padding: 0 }}>
           {workspaceId ? <JobList workspaceId={workspaceId} /> : null}
         </section>
+      )}
+
+      {workspaceId && (
+        <WorkspacePackageHistoryDialog workspaceId={workspaceId} />
       )}
     </div>
   )

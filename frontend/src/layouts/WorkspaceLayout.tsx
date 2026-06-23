@@ -34,6 +34,7 @@ export default function WorkspaceLayout() {
     closeAddDialog,
     addDialogContext,
     addDialogWorkspaceId,
+    setWorkspacePackageDialogOpen,
   } = useUiStore()
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
@@ -136,7 +137,7 @@ export default function WorkspaceLayout() {
                   aria-label="包历史"
                   onClick={() => {
                     if (workspaceId) {
-                      navigate(`/workspaces/${workspaceId}/packages`)
+                      setWorkspacePackageDialogOpen(true)
                     }
                   }}
                 >
