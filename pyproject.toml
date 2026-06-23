@@ -52,6 +52,9 @@ exclude = [
   ".venv",
   "frontend/dist",
   "frontend/node_modules",
+  # External Pi skill repos live under ~/.agents/skills/agent-legion/.
+  # Any copy under the project root is accidental and must not be linted.
+  "question_comprehension_info",
 ]
 
 [tool.ruff.lint]
