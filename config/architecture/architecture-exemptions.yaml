@@ -189,7 +189,7 @@ exemptions:
     reason: Task 3 of the align-workspace-packaging plan adds a curated workspace artifact whitelist to package.py; the module will be split once the plan is complete.
     owner: workspace-executor
     remove_when: docs/superpowers/plans/2026-06-23-align-workspace-packaging.md#task-3
-    ceiling: 112
+    ceiling: 113
 
   # Workspace package lifecycle route/service growth exemptions ---------------------------------
   - check: architecture.file_budget
