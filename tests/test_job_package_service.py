@@ -187,3 +187,18 @@ def test_workspace_package_lifecycle_respects_locked(job_db: JobQueries, tmp_pat
     service.lock_workspace_package(workspace_id, pkg["id"], False)
     service.delete_workspace_package(workspace_id, pkg["id"])
     assert job_db.list_workspace_packages(workspace_id) == []
+
+
+def test_rerun_resets_packed_flag(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+
+    workspace_id = "pkg-ws-rerun"
+    completed = _create_job(job_db, workspace_id, "Q500", status="completed")
+    _write_artifact(completed, settings)
+
+    service.package(workspace_id, [completed["id"]])
+    assert job_db.get_job(completed["id"])["packed"] == 1
+
+    job_db.mark_node_for_rerun(completed["id"], "extract_question", [])
+    assert job_db.get_job(completed["id"])["packed"] == 0
