@@ -20,10 +20,10 @@ describe('AppBar', () => {
   it('renders title and home button', () => {
     render(
       <MemoryRouter>
-        <AppBar title="Video Hive" home />
+        <AppBar title="Agent Legion" home />
       </MemoryRouter>
     )
-    expect(screen.getByText('Video Hive')).toBeInTheDocument()
+    expect(screen.getByText('Agent Legion')).toBeInTheDocument()
     expect(screen.getByTestId('app-bar-home')).toBeInTheDocument()
   })
 
@@ -64,7 +64,7 @@ describe('AppBar', () => {
     mockedUseNavigate.mockReturnValue(navigate)
     render(
       <MemoryRouter>
-        <AppBar title="Video Hive" home />
+        <AppBar title="Agent Legion" home />
       </MemoryRouter>
     )
     fireEvent.click(screen.getByTestId('app-bar-home'))
