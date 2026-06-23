@@ -23,7 +23,7 @@ WORKSPACE_PACKAGE_FILES = [
     "result.json",
     "comprehension_info.json",
     "question_context.json",
-    "question.json",
+    "questions.json",
     "upload_params.json",
     "metadata.json",
     "report.md",
