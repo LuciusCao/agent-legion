@@ -1,8 +1,8 @@
-# Video Hive — Agent Guide
+# Agent Legion — Agent Guide
 
 ## Project Overview
 
-Video Hive is a local processing console for educational videos. It maintains a queue of video links, distinguishes between **knowledge videos** and **question explanation videos**, downloads and transcribes them, runs the applicable external agent stages through `openclaw`, previews partial and final artifacts in a web UI, and packages completed results into a ZIP with per-video JSON and a manifest.
+Agent Legion is a local processing console for educational videos. It maintains a queue of video links, distinguishes between **knowledge videos** and **question explanation videos**, downloads and transcribes them, runs the applicable external agent stages through `openclaw`, previews partial and final artifacts in a web UI, and packages completed results into a ZIP with per-video JSON and a manifest. (Formerly Video Hive.)
 
 The project is a monorepo with a Python FastAPI backend and a React + TypeScript frontend built with Vite.
 

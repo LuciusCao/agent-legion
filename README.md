@@ -1,6 +1,6 @@
-# Video Hive
+# Agent Legion
 
-Local processing console for educational videos. It queues knowledge videos and question explanation videos, downloads and transcribes them, runs the applicable openclaw content stages, previews partial/final artifacts, and packages completed JSON for handoff.
+Local processing console for educational videos. It queues knowledge videos and question explanation videos, downloads and transcribes them, runs the applicable openclaw content stages, previews partial/final artifacts, and packages completed JSON for handoff. (Formerly Video Hive.)
 
 ## Current Shape
 
