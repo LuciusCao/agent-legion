@@ -62,7 +62,7 @@ const mockComprehensionInfo = {
           position: { start: 9, end: 28 },
         },
         question: { text: '', options: [] },
-        question_comprehension_abilities: ['识别方程结构'],
+        question_comprehension_ability: '识别方程结构',
       },
       {
         key_info_id: 'ki_002',
@@ -73,7 +73,7 @@ const mockComprehensionInfo = {
           position: { start: 44, end: 48 },
         },
         question: { text: '', options: [] },
-        question_comprehension_abilities: ['应用判别式'],
+        question_comprehension_ability: '应用判别式',
       },
     ],
     possible_error_list: [

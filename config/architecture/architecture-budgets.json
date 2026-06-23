@@ -90,7 +90,7 @@
     "frontend/src/components/QuestionAnnotations.module.css": 62,
     "frontend/src/components/QuestionAnnotations.tsx": 331,
     "frontend/src/components/QuestionContentPanel.module.css": 382,
-    "frontend/src/components/QuestionContentPanel.tsx": 552,
+    "frontend/src/components/QuestionContentPanel.tsx": 548,
     "frontend/src/components/RerunDialog.tsx": 96,
     "frontend/src/components/RunToDialog.module.css": 100,
     "frontend/src/components/RunToDialog.tsx": 200,

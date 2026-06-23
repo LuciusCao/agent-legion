@@ -15,7 +15,7 @@ function makeKeyInfo(start: number, end: number): KeyInfoItem {
       position: { start, end },
     },
     question: { text: '', options: [] },
-    question_comprehension_abilities: [],
+    question_comprehension_ability: '',
   }
 }
 
@@ -29,7 +29,7 @@ function makeKeyInfoWithText(
     type: 'given',
     content: { text, position: { start, end } },
     question: { text: '', options: [] },
-    question_comprehension_abilities: [],
+    question_comprehension_ability: '',
   }
 }
 

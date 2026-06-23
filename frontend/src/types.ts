@@ -253,7 +253,7 @@ export type KeyInfoItem = {
     text: string
     options: QuestionOption[]
   }
-  question_comprehension_abilities: string[]
+  question_comprehension_ability: string
 }
 
 export type PossibleErrorItem = {
