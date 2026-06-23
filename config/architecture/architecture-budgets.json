@@ -303,6 +303,7 @@
     "server/app/jobs/queries/job_nodes.py": 385,
     "server/app/jobs/queries/status.py": 44,
     "server/app/jobs/queries/workspace.py": 306,
+    "server/app/jobs/queries/workspace_packages.py": 110,
     "server/app/main.py": 240,
     "server/app/pipeline/__init__.py": 32,
     "server/app/pipeline/agent_workspace.py": 44,
