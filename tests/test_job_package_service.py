@@ -129,3 +129,33 @@ def test_package_requires_at_least_one_eligible_job(job_db: JobQueries, tmp_path
     assert response["failed_count"] == 1
     assert response.get("package_filename") is None
     assert response.get("download_url") is None
+
+
+def test_package_creates_workspace_package_record_and_marks_jobs_packed(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+
+    workspace_id = "pkg-ws-record"
+    completed_a = _create_job(job_db, workspace_id, "Q300", status="completed")
+    _write_artifact(completed_a, settings)
+    completed_b = _create_job(job_db, workspace_id, "Q301", status="completed")
+    _write_artifact(completed_b, settings)
+
+    response = service.package(workspace_id, [completed_a["id"], completed_b["id"]])
+
+    assert response["succeeded_count"] == 2
+    assert response["package_filename"]
+
+    packages = job_db.list_workspace_packages(workspace_id)
+    assert len(packages) == 1
+    pkg = packages[0]
+    assert pkg["job_count"] == 2
+    assert pkg["size_bytes"] > 0
+    assert pkg["name"] == "批次 (2个任务)"
+    assert pkg["path"].startswith("packages/workspace-pkg-ws-record/")
+    assert pkg["locked"] == 0
+
+    assert job_db.get_job(completed_a["id"])["packed"] == 1
+    assert job_db.get_job(completed_b["id"])["packed"] == 1
