@@ -285,7 +285,7 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** Get Video Hive Config */
+    /** Get Agent Legion video pipeline config */
     get: operations['get_video_hive_config_api_video_hive_config_get']
     put?: never
     post?: never
