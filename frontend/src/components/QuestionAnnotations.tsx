@@ -315,7 +315,7 @@ export function QuestionAnnotations({
             }}
             dangerouslySetInnerHTML={{
               __html: renderLatexInHtml(
-                escapeHtml(item.content.derivation || '')
+                escapeHtml(item.content.derived_text || item.content.text || '')
               ),
             }}
           />

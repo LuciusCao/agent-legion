@@ -304,17 +304,13 @@ export function QuestionContentPanel({
                     </div>
                     <div className={styles.detailText}>
                       <LaTeXText>
-                        {info.content.text || info.content.derived_text || ''}
+                        {info.type === 'hidden'
+                          ? info.content.derivation || ''
+                          : info.content.text ||
+                            info.content.derived_text ||
+                            ''}
                       </LaTeXText>
                     </div>
-                    {info.type === 'hidden' && (
-                      <div
-                        className={styles.detailSection}
-                        style={{ color: '#5f6368' }}
-                      >
-                        👉 推导过程见题干右侧批注
-                      </div>
-                    )}
                     <div className={styles.detailSection}>
                       <strong>关联能力</strong>
                       <div className={styles.abilityList}>
