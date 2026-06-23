@@ -1,6 +1,6 @@
-# Video Hive 文档体系
+# Agent Legion 文档体系
 
-本文档说明 Video Hive 的三层文档体系及其职责边界。
+本文档说明 Agent Legion 的三层文档体系及其职责边界。
 
 ## 三层文档
 

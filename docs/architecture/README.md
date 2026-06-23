@@ -1,6 +1,6 @@
-# Video Hive 架构文档
+# Agent Legion 架构文档
 
-本目录存放 Video Hive 的**统一架构文档**，描述当前系统的模块划分、数据流和关键设计决策。
+本目录存放 Agent Legion 的**统一架构文档**，描述当前系统的模块划分、数据流和关键设计决策。
 
 如需了解历史设计规格（spec）和开发过程，请参阅 [`docs/superpowers/`](../superpowers/)。
 
