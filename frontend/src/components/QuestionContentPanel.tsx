@@ -314,13 +314,9 @@ export function QuestionContentPanel({
                     <div className={styles.detailSection}>
                       <strong>关联能力</strong>
                       <div className={styles.abilityList}>
-                        {info.question_comprehension_abilities.map(
-                          (ability) => (
-                            <span key={ability} className={styles.abilityTag}>
-                              {ability}
-                            </span>
-                          )
-                        )}
+                        <span className={styles.abilityTag}>
+                          {info.question_comprehension_ability}
+                        </span>
                       </div>
                     </div>
                     {errors.length > 0 && (

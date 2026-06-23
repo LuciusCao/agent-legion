@@ -39,21 +39,21 @@ const realComprehension = {
           type: 'given',
           content: { text: '24箱牛奶', position: { start: 4, end: 9 } },
           question: { text: '', options: [] },
-          question_comprehension_abilities: ['information_locating'],
+          question_comprehension_ability: 'information_locating',
         },
         {
           key_info_id: 'ki_002',
           type: 'given',
           content: { text: '每箱10盒', position: { start: 10, end: 15 } },
           question: { text: '', options: [] },
-          question_comprehension_abilities: ['information_locating'],
+          question_comprehension_ability: 'information_locating',
         },
         {
           key_info_id: 'ki_003',
           type: 'given',
           content: { text: '每盒15袋', position: { start: 16, end: 21 } },
           question: { text: '', options: [] },
-          question_comprehension_abilities: ['information_locating'],
+          question_comprehension_ability: 'information_locating',
         },
         {
           key_info_id: 'ki_004',
@@ -64,7 +64,7 @@ const realComprehension = {
             derivation: '24箱 × 10盒/箱 = 240盒',
           },
           question: { text: '', options: [] },
-          question_comprehension_abilities: ['condition_sequencing'],
+          question_comprehension_ability: 'condition_sequencing',
         },
         {
           key_info_id: 'ki_005',
@@ -75,7 +75,7 @@ const realComprehension = {
             derivation: '240盒 × 15袋/盒 = 3600袋',
           },
           question: { text: '', options: [] },
-          question_comprehension_abilities: ['relationship_identification'],
+          question_comprehension_ability: 'relationship_identification',
         },
         {
           key_info_id: 'ki_006',
@@ -86,7 +86,7 @@ const realComprehension = {
             derivation: '题干末尾为“...袋牛奶”，因此答案应以袋为单位',
           },
           question: { text: '', options: [] },
-          question_comprehension_abilities: ['answer_type_recognition'],
+          question_comprehension_ability: 'answer_type_recognition',
         },
       ],
       possible_error_list: [
