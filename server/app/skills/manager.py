@@ -219,7 +219,8 @@ class SkillManager:
         return result.returncode == 0 and "commit" in result.stdout
 
     def _rev_parse(self, cache_dir: Path, rev: str) -> str:
-        result = self._run_git(["-C", str(cache_dir), "rev-parse", rev])
+        # Use ^{commit} to resolve annotated tags to their underlying commit.
+        result = self._run_git(["-C", str(cache_dir), "rev-parse", f"{rev}^{{commit}}"])
         return result.stdout.strip()
 
     def _run_git(self, args: list[str], check: bool = True) -> subprocess.CompletedProcess[str]:
