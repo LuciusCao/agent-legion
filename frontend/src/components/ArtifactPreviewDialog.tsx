@@ -5,6 +5,7 @@ import {
   DialogContent,
   DialogTitle,
 } from '@mui/material'
+import { JsonTree } from './JsonTree'
 import styles from './ArtifactPreviewDialog.module.css'
 
 export interface ArtifactPreviewDialogProps {
@@ -14,16 +15,8 @@ export interface ArtifactPreviewDialogProps {
   onClose: () => void
 }
 
-function formatContent(name: string, content: string): string {
-  if (name.endsWith('.json')) {
-    try {
-      return JSON.stringify(JSON.parse(content), null, 2)
-    } catch {
-      return content
-    }
-  }
-  return content
-}
+// prettier-ignore
+const tryParseJson = (content: string): unknown | null => { try { return JSON.parse(content) } catch { return null } }
 
 export function ArtifactPreviewDialog({
   open,
@@ -32,6 +25,8 @@ export function ArtifactPreviewDialog({
   onClose,
 }: ArtifactPreviewDialogProps) {
   if (!open) return null
+
+  const parsedJson = name.endsWith('.json') ? tryParseJson(content) : null
 
   return (
     <Dialog
@@ -42,7 +37,11 @@ export function ArtifactPreviewDialog({
     >
       <DialogTitle>{name}</DialogTitle>
       <DialogContent className={styles.content}>
-        <pre className={styles.pre}>{formatContent(name, content)}</pre>
+        {parsedJson !== null ? (
+          <JsonTree data={parsedJson} />
+        ) : (
+          <pre className={styles.pre}>{content}</pre>
+        )}
       </DialogContent>
       <DialogActions>
         <Button variant="text" onClick={onClose}>
