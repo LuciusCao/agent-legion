@@ -30,7 +30,11 @@ class VideoHiveConfigResponse(BaseModel):
 def create_video_hive_router(settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/video-hive")
 
-    @router.get("/config", response_model=VideoHiveConfigResponse)
+    @router.get(
+        "/config",
+        response_model=VideoHiveConfigResponse,
+        summary="Get Agent Legion video pipeline config",
+    )
     def get_video_hive_config() -> VideoHiveConfigResponse:
         asr = settings.config.get("asr", {}) or {}
         whisper = asr.get("whisper", {}) or {}
