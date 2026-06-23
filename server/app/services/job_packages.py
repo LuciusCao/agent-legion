@@ -6,6 +6,7 @@ from typing import Any, TypedDict
 from server.app.jobs import JobQueries
 from server.app.pipeline.package import create_workspace_package
 from server.app.settings import Settings
+from server.app.storage_paths import make_data_relative
 
 logger = logging.getLogger(__name__)
 
@@ -31,18 +32,9 @@ class JobPackageService:
         self.settings = settings
 
     def _result(
-        self,
-        job_id: str,
-        status: str,
-        reason_code: str | None = None,
-        message: str | None = None,
+        self, job_id: str, status: str, reason_code: str | None = None, message: str | None = None
     ) -> JobPackageItemResult:
-        return {
-            "job_id": job_id,
-            "status": status,
-            "reason_code": reason_code,
-            "message": message,
-        }
+        return {"job_id": job_id, "status": status, "reason_code": reason_code, "message": message}
 
     def package(self, workspace_id: str, job_ids: list[str]) -> JobPackageResult:
         results: list[JobPackageItemResult] = []
@@ -103,6 +95,14 @@ class JobPackageService:
         )
         package_filename = package_path.name
         download_url = f"/api/workspaces/{workspace_id}/packages/{package_filename}"
+
+        size_bytes = package_path.stat().st_size
+        relative_path = make_data_relative(package_path, self.settings.data_dir)
+        name = f"批次 ({count}个任务)"
+        self.job_db.insert_workspace_package(
+            workspace_id, relative_path, name=name, job_count=count, size_bytes=size_bytes
+        )
+        self.job_db.set_jobs_packed([job["id"] for job in eligible_jobs], packed=1)
 
         response["package_filename"] = package_filename
         response["download_url"] = download_url
