@@ -25,6 +25,9 @@ from server.app.db.migrations.v010_remove_default_workspace import (
 from server.app.db.migrations.v011_remove_workspace_id_defaults import (
     MIGRATION as V011_REMOVE_WORKSPACE_ID_DEFAULTS,
 )
+from server.app.db.migrations.v012_workspace_packages import (
+    MIGRATION as V012_WORKSPACE_PACKAGES,
+)
 
 MIGRATIONS: tuple[Migration, ...] = (
     V001_EXECUTOR_CORE,
@@ -37,4 +40,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     V009_RELATIVE_PATH_STORAGE,
     V010_REMOVE_DEFAULT_WORKSPACE,
     V011_REMOVE_WORKSPACE_ID_DEFAULTS,
+    V012_WORKSPACE_PACKAGES,
 )
