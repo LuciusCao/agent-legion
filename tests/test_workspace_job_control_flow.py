@@ -317,8 +317,9 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
 
         with zipfile.ZipFile(io.BytesIO(download_response.content)) as zf:
             names = zf.namelist()
-        assert any("prepare.json" in name for name in names)
-        assert any("merge.json" in name for name in names)
+        assert "manifest.json" in names
+        assert not any("prepare.json" in name for name in names)
+        assert not any("merge.json" in name for name in names)
 
         # 8. delete removes database rows, storage, and logs.
         job = app.state.job_db.get_job(job_id)

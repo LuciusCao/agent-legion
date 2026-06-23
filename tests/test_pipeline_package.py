@@ -180,7 +180,7 @@ def test_workspace_package_falls_back_to_jobs_base_dir_when_storage_dir_empty(tm
     packages_dir = tmp_path / "packages"
     job_dir = jobs_dir / "job_2"
     job_dir.mkdir(parents=True)
-    (job_dir / "artifact.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
+    (job_dir / "result.json").write_text(json.dumps({"ok": True}), encoding="utf-8")
 
     jobs = [
         {
@@ -200,7 +200,7 @@ def test_workspace_package_falls_back_to_jobs_base_dir_when_storage_dir_empty(tm
         names = set(zf.namelist())
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
 
-    assert "job_2/artifact.json" in names
+    assert "job_2/result.json" in names
     assert manifest["jobs"][0]["workflow_key"] == "question_content"
 
 
@@ -222,7 +222,7 @@ def test_workspace_package_skips_job_when_directory_missing(tmp_path):
     package_path, job_count = create_workspace_package(jobs, packages_dir, jobs_dir)
 
     assert package_path.exists()
-    assert job_count == 1
+    assert job_count == 0
     with zipfile.ZipFile(package_path) as zf:
         names = set(zf.namelist())
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
@@ -278,3 +278,55 @@ def test_workspace_package_includes_comprehension_info(tmp_path):
     assert payload["comprehension_data"]["comprehension_difficulty"] == 65
     assert payload["comprehension_data"]["key_info_list"] == []
     assert payload["comprehension_data"]["possible_error_list"] == []
+
+
+def test_workspace_package_includes_only_whitelisted_artifacts(tmp_path):
+    jobs_dir = tmp_path / "jobs"
+    packages_dir = tmp_path / "packages"
+    job_dir = jobs_dir / "job_1"
+    job_dir.mkdir(parents=True)
+    (job_dir / "result.json").write_text('{"ok": true}', encoding="utf-8")
+    (job_dir / "comprehension_info.json").write_text('{"q": 1}', encoding="utf-8")
+    (job_dir / "question_context.json").write_text('{"ctx": 1}', encoding="utf-8")
+    (job_dir / "upload_params.json").write_text('{"up": 1}', encoding="utf-8")
+    (job_dir / "metadata.json").write_text('{"meta": 1}', encoding="utf-8")
+    (job_dir / "report.md").write_text("report", encoding="utf-8")
+    (job_dir / "extra.log").write_text("log", encoding="utf-8")
+    (job_dir / "AGENTS.md").write_text("agent", encoding="utf-8")
+    (job_dir / "BOOTSTRAP.md").write_text("bootstrap", encoding="utf-8")
+    (job_dir / ".openclaw").mkdir()
+    (job_dir / ".openclaw" / "state.json").write_text("{}", encoding="utf-8")
+    (job_dir / "runs").mkdir()
+    (job_dir / "runs" / "extract_keywords").mkdir()
+    (job_dir / "runs" / "extract_keywords" / "run.json").write_text("{}", encoding="utf-8")
+
+    jobs = [
+        {
+            "id": "job_1",
+            "source_id": "S1",
+            "workflow_key": "question_content",
+            "status": "completed",
+        }
+    ]
+
+    package_path, job_count = create_workspace_package(jobs, packages_dir, jobs_dir)
+
+    assert job_count == 1
+    with zipfile.ZipFile(package_path) as zf:
+        names = set(zf.namelist())
+        assert "manifest.json" in names
+        assert "job_1/result.json" in names
+        assert "job_1/comprehension_info.json" in names
+        assert "job_1/question_context.json" in names
+        assert "job_1/upload_params.json" in names
+        assert "job_1/metadata.json" in names
+        assert "job_1/report.md" in names
+        assert "job_1/extra.log" not in names
+        assert "job_1/AGENTS.md" not in names
+        assert "job_1/BOOTSTRAP.md" not in names
+        assert not any(name.startswith("job_1/.openclaw/") for name in names)
+        assert not any(name.startswith("job_1/runs/") for name in names)
+        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        assert manifest["jobs"][0]["id"] == "job_1"
+        assert manifest["jobs"][0]["source_id"] == "S1"
+        assert manifest["jobs"][0]["workflow_key"] == "question_content"

@@ -19,6 +19,15 @@ PACKAGE_FILES = [
     "upload_params.json",
 ]
 
+WORKSPACE_PACKAGE_FILES = [
+    "result.json",
+    "comprehension_info.json",
+    "question_context.json",
+    "upload_params.json",
+    "metadata.json",
+    "report.md",
+]
+
 
 def create_workspace_package(
     jobs: list[Any], packages_dir: Path, jobs_base_dir: Path
@@ -43,12 +52,16 @@ def create_workspace_package(
     with zipfile.ZipFile(package_path, "w", zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("manifest.json", json.dumps(manifest, ensure_ascii=False, indent=2))
         for job in jobs:
-            job_dir = resolve_job_dir(job, jobs_base_dir)
-            if job_dir.exists():
-                for f in job_dir.rglob("*"):
-                    if f.is_file():
-                        arcname = f"{job['id']}/{f.relative_to(job_dir)}"
-                        zf.write(f, arcname)
+            try:
+                job_dir = resolve_job_dir(job, jobs_base_dir)
+            except ManagedPathError:
+                continue
+            if not job_dir.exists():
+                continue
+            for name in WORKSPACE_PACKAGE_FILES:
+                path = job_dir / name
+                if path.exists():
+                    zf.write(path, f"{job['id']}/{name}")
             job_count += 1
     return package_path, job_count
 
