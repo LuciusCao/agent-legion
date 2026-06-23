@@ -13,7 +13,7 @@ def test_build_openapi_schema_is_deterministic_and_portable(tmp_path):
     second = build_openapi_schema(tmp_path / "second")
 
     assert first == second
-    assert first["info"]["title"] == "Video Hive"
+    assert first["info"]["title"] == "Agent Legion"
     paths = first["paths"]
     assert paths
     assert all(path.startswith("/api") for path in paths)
