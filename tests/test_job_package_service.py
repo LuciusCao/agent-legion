@@ -3,8 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from server.app.jobs import JobQueries
-from server.app.services.job_packages import JobPackageResult, JobPackageService
+from server.app.services.job_packages import (
+    JobPackageResult,
+    JobPackageService,
+    WorkspacePackageLockedError,
+)
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 
@@ -159,3 +165,25 @@ def test_package_creates_workspace_package_record_and_marks_jobs_packed(
 
     assert job_db.get_job(completed_a["id"])["packed"] == 1
     assert job_db.get_job(completed_b["id"])["packed"] == 1
+
+
+def test_workspace_package_lifecycle_respects_locked(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    service = JobPackageService(job_db, settings)
+
+    workspace_id = "pkg-ws-lifecycle"
+    completed = _create_job(job_db, workspace_id, "Q400", status="completed")
+    _write_artifact(completed, settings)
+
+    service.package(workspace_id, [completed["id"]])
+    pkg = job_db.list_workspace_packages(workspace_id)[0]
+
+    service.lock_workspace_package(workspace_id, pkg["id"], True)
+    assert job_db.get_workspace_package(workspace_id, pkg["id"])["locked"] == 1
+
+    with pytest.raises(WorkspacePackageLockedError):
+        service.delete_workspace_package(workspace_id, pkg["id"])
+
+    service.lock_workspace_package(workspace_id, pkg["id"], False)
+    service.delete_workspace_package(workspace_id, pkg["id"])
+    assert job_db.list_workspace_packages(workspace_id) == []
