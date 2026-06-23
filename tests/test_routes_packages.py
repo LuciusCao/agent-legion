@@ -279,3 +279,46 @@ def test_delete_package_removes_relative_package(client, monkeypatch):
     assert response.json()["deleted"] is True
     assert not package_path.exists()
     assert client.app.state.db.list_packages(limit=10) == []
+
+
+def test_workspace_package_lifecycle_rename_lock_delete(workspace_client):
+    ws = workspace_client.post("/api/workspaces", json={"name": "Lifecycle WS"})
+    ws_id = ws.json()["workspace"]["id"]
+    job_id = _create_completed_job(workspace_client, ws_id, "Q501")
+
+    create_resp = workspace_client.post(
+        f"/api/workspaces/{ws_id}/jobs/package", json={"job_ids": [job_id]}
+    )
+    assert create_resp.status_code == 200
+
+    list_resp = workspace_client.get(f"/api/workspaces/{ws_id}/packages")
+    assert list_resp.status_code == 200
+    packages = list_resp.json()["packages"]
+    assert len(packages) == 1
+    pkg_id = packages[0]["id"]
+    assert packages[0]["video_count"] == 1
+    assert packages[0]["size_bytes"] > 0
+
+    patch_resp = workspace_client.patch(
+        f"/api/workspaces/{ws_id}/packages/{pkg_id}", json={"name": "Renamed"}
+    )
+    assert patch_resp.status_code == 200
+    assert patch_resp.json()["name"] == "Renamed"
+
+    lock_resp = workspace_client.patch(
+        f"/api/workspaces/{ws_id}/packages/{pkg_id}", json={"locked": True}
+    )
+    assert lock_resp.status_code == 200
+    assert lock_resp.json()["locked"] is True
+
+    del_resp = workspace_client.delete(f"/api/workspaces/{ws_id}/packages/{pkg_id}")
+    assert del_resp.status_code == 400
+    assert "locked" in del_resp.json()["detail"].lower()
+
+    workspace_client.patch(f"/api/workspaces/{ws_id}/packages/{pkg_id}", json={"locked": False})
+    del_resp = workspace_client.delete(f"/api/workspaces/{ws_id}/packages/{pkg_id}")
+    assert del_resp.status_code == 200
+    assert del_resp.json()["deleted"] is True
+
+    list_resp = workspace_client.get(f"/api/workspaces/{ws_id}/packages")
+    assert list_resp.json()["packages"] == []

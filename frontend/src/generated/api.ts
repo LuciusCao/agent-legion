@@ -862,6 +862,24 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/packages/{package_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    post?: never
+    /** Delete Workspace Package Route */
+    delete: operations['delete_workspace_package_route_api_workspaces__workspace_id__packages__package_id__delete']
+    options?: never
+    head?: never
+    /** Update Workspace Package Route */
+    patch: operations['update_workspace_package_route_api_workspaces__workspace_id__packages__package_id__patch']
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/questions/{question_id}': {
     parameters: {
       query?: never
@@ -1722,6 +1740,11 @@ export interface components {
       /** Node Limits */
       node_limits: components['schemas']['NodeLimitRequest'][]
     }
+    /** WorkspacePackageDeleteResponse */
+    WorkspacePackageDeleteResponse: {
+      /** Deleted */
+      deleted: boolean
+    }
     /** WorkspacePackageRequest */
     WorkspacePackageRequest: {
       /** Job Ids */
@@ -1753,6 +1776,22 @@ export interface components {
        * @enum {string}
        */
       status: 'succeeded' | 'failed'
+    }
+    /** WorkspacePackageUpdate */
+    WorkspacePackageUpdate: {
+      /** Locked */
+      locked?: boolean | null
+      /** Name */
+      name?: string | null
+    }
+    /** WorkspacePackageUpdateResponse */
+    WorkspacePackageUpdateResponse: {
+      /** Id */
+      id: number
+      /** Locked */
+      locked?: boolean | null
+      /** Name */
+      name?: string | null
     }
     /** WorkspaceResponse */
     WorkspaceResponse: {
@@ -3703,6 +3742,74 @@ export interface operations {
         }
         content: {
           'application/zip': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  delete_workspace_package_route_api_workspaces__workspace_id__packages__package_id__delete: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        package_id: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspacePackageDeleteResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  update_workspace_package_route_api_workspaces__workspace_id__packages__package_id__patch: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        package_id: number
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkspacePackageUpdate']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspacePackageUpdateResponse']
         }
       }
       /** @description Validation Error */

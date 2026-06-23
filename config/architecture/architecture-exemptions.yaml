@@ -191,3 +191,18 @@ exemptions:
     remove_when: docs/superpowers/plans/2026-06-23-align-workspace-packaging.md#task-3
     ceiling: 112
 
+  # Workspace package lifecycle route/service growth exemptions ---------------------------------
+  - check: architecture.file_budget
+    path: server/app/routes/packages.py
+    reason: Task 6 of the align-workspace-packaging plan adds DB-backed workspace package list and lifecycle routes; the module will be split once the plan is complete.
+    owner: workspace-executor
+    remove_when: docs/superpowers/plans/2026-06-23-align-workspace-packaging.md#task-6
+    ceiling: 321
+
+  - check: architecture.file_budget
+    path: server/app/services/job_packages.py
+    reason: Task 6 of the align-workspace-packaging plan adds the list_workspace_packages delegation and lifecycle re-exports; the module will be split once the plan is complete.
+    owner: workspace-executor
+    remove_when: docs/superpowers/plans/2026-06-23-align-workspace-packaging.md#task-6
+    ceiling: 117
+

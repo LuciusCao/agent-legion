@@ -3,7 +3,6 @@ import json
 import logging
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
-from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -15,7 +14,11 @@ from ..events import VideoEventManager
 from ..jobs import JobQueries
 from ..pipeline.package import create_package
 from ..security import validate_package_filename
-from ..services.job_packages import JobPackageService
+from ..services.job_packages import (
+    JobPackageService,
+    WorkspacePackageLockedError,
+    WorkspacePackageNotFoundError,
+)
 from ..services.package_deletion import (
     PackageDeletionService,
     PackageLockedError,
@@ -42,6 +45,21 @@ class PackageRequest(BaseModel):
 
 
 class PackageUpdate(BaseModel):
+    name: str | None = None
+    locked: bool | None = None
+
+
+class WorkspacePackageUpdate(BaseModel):
+    name: str | None = None
+    locked: bool | None = None
+
+
+class WorkspacePackageDeleteResponse(BaseModel):
+    deleted: bool
+
+
+class WorkspacePackageUpdateResponse(BaseModel):
+    id: int
     name: str | None = None
     locked: bool | None = None
 
@@ -202,24 +220,64 @@ def create_packages_router(
 
     @router.get("/workspaces/{workspace_id}/packages")
     def list_workspace_packages(workspace_id: str) -> dict[str, Any]:
-        packages_dir = settings.packages_dir / f"workspace-{workspace_id}"
-        if not packages_dir.exists():
-            return {"packages": []}
-        packages = []
-        for p in sorted(packages_dir.iterdir(), key=lambda x: x.stat().st_mtime, reverse=True):
-            if p.suffix == ".zip":
-                packages.append(
-                    {
-                        "id": p.name,
-                        "name": p.stem,
-                        "path": str(p),
-                        "size_bytes": p.stat().st_size,
-                        "created_at": datetime.fromtimestamp(p.stat().st_mtime, UTC).isoformat(),
-                        "locked": 0,
-                        "video_count": 0,
-                    }
-                )
-        return {"packages": packages}
+        packages = job_packages.list_workspace_packages(workspace_id, limit=10)
+        workspace_packages_dir = settings.packages_dir / f"workspace-{workspace_id}"
+        result: list[dict[str, Any]] = []
+        for pkg in packages:
+            stored_path = pkg.get("path") or ""
+            pkg_out = dict(pkg)
+            if "job_count" in pkg_out:
+                pkg_out["video_count"] = pkg_out.pop("job_count")
+            if stored_path:
+                try:
+                    resolved_path = resolve_data_path(
+                        stored_path, settings.data_dir, allow_missing=True
+                    )
+                    if not resolved_path.is_relative_to(workspace_packages_dir.resolve()):
+                        continue
+                except ManagedPathError:
+                    continue
+                pkg_out["path"] = str(resolved_path)
+            result.append(pkg_out)
+        return {"packages": result}
+
+    @router.delete(
+        "/workspaces/{workspace_id}/packages/{package_id:int}",
+        response_model=WorkspacePackageDeleteResponse,
+    )
+    def delete_workspace_package_route(
+        workspace_id: str, package_id: int
+    ) -> WorkspacePackageDeleteResponse:
+        try:
+            job_packages.delete_workspace_package(workspace_id, package_id)
+        except WorkspacePackageNotFoundError:
+            raise HTTPException(status_code=404, detail="Package not found") from None
+        except WorkspacePackageLockedError:
+            raise HTTPException(status_code=400, detail="Package is locked") from None
+        return WorkspacePackageDeleteResponse(deleted=True)
+
+    @router.patch(
+        "/workspaces/{workspace_id}/packages/{package_id:int}",
+        response_model=WorkspacePackageUpdateResponse,
+    )
+    def update_workspace_package_route(
+        workspace_id: str, package_id: int, body: WorkspacePackageUpdate
+    ) -> WorkspacePackageUpdateResponse:
+        try:
+            if body.name is not None:
+                job_packages.rename_workspace_package(workspace_id, package_id, body.name)
+            if body.locked is not None:
+                job_packages.lock_workspace_package(workspace_id, package_id, body.locked)
+        except WorkspacePackageNotFoundError:
+            raise HTTPException(status_code=404, detail="Package not found") from None
+        except WorkspacePackageLockedError:
+            raise HTTPException(status_code=400, detail="Package is locked") from None
+
+        return WorkspacePackageUpdateResponse(
+            id=package_id,
+            name=body.name if body.name is not None else None,
+            locked=body.locked if body.locked is not None else None,
+        )
 
     @router.post("/workspaces/{workspace_id}/jobs/package", response_model=WorkspacePackageResponse)
     def package_workspace_jobs(

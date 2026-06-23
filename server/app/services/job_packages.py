@@ -41,6 +41,9 @@ class JobPackageService(WorkspacePackageLifecycleMixin):
     ) -> JobPackageItemResult:
         return {"job_id": job_id, "status": status, "reason_code": reason_code, "message": message}
 
+    def list_workspace_packages(self, workspace_id: str, limit: int = 10) -> list[dict[str, Any]]:
+        return self.job_db.list_workspace_packages(workspace_id, limit=limit)
+
     def package(self, workspace_id: str, job_ids: list[str]) -> JobPackageResult:
         results: list[JobPackageItemResult] = []
         eligible_jobs: list[dict[str, Any]] = []
