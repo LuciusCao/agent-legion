@@ -9,6 +9,7 @@ import BuildCircleIcon from '@mui/icons-material/BuildCircle'
 import CheckIcon from '@mui/icons-material/Check'
 import CheckCircleIcon from '@mui/icons-material/CheckCircle'
 import ChecklistIcon from '@mui/icons-material/Checklist'
+import ChevronRightIcon from '@mui/icons-material/ChevronRight'
 import CloseIcon from '@mui/icons-material/Close'
 import CloudIcon from '@mui/icons-material/Cloud'
 import CloudOffIcon from '@mui/icons-material/CloudOff'
@@ -58,6 +59,7 @@ export type MaterialIconName =
   | 'check'
   | 'check_circle'
   | 'checklist'
+  | 'chevron_right'
   | 'close'
   | 'cloud'
   | 'cloud_off'
@@ -106,6 +108,7 @@ const ICON_MAP: Record<MaterialIconName, FC<SvgIconProps>> = {
   check: CheckIcon,
   check_circle: CheckCircleIcon,
   checklist: ChecklistIcon,
+  chevron_right: ChevronRightIcon,
   close: CloseIcon,
   cloud: CloudIcon,
   cloud_off: CloudOffIcon,

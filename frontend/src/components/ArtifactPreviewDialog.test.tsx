@@ -37,7 +37,7 @@ describe('ArtifactPreviewDialog', () => {
     expect(pre).toHaveTextContent('# Report')
   })
 
-  it('formats JSON content', () => {
+  it('renders JSON content as an interactive tree', () => {
     render(
       <ArtifactPreviewDialog
         open={true}
@@ -47,9 +47,24 @@ describe('ArtifactPreviewDialog', () => {
       />
     )
 
+    expect(screen.getByText('key')).toBeInTheDocument()
+    expect(screen.getByText('"value"')).toBeInTheDocument()
+    expect(document.querySelector('pre')).not.toBeInTheDocument()
+  })
+
+  it('falls back to pre block for invalid JSON', () => {
+    render(
+      <ArtifactPreviewDialog
+        open={true}
+        name="metadata.json"
+        content="{not valid json}"
+        onClose={onClose}
+      />
+    )
+
     const pre = document.querySelector('pre')
     expect(pre).toBeInTheDocument()
-    expect(pre).toHaveTextContent('"key": "value"')
+    expect(pre).toHaveTextContent('{not valid json}')
   })
 
   it('calls onClose when close button is clicked', () => {
