@@ -39,6 +39,30 @@ export async function updatePackage(
   })
 }
 
+export async function deleteWorkspacePackage(
+  workspaceId: string,
+  packageId: number
+): Promise<{ deleted: boolean }> {
+  return api<{ deleted: boolean }>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/packages/${packageId}`,
+    { method: 'DELETE' }
+  )
+}
+
+export async function updateWorkspacePackage(
+  workspaceId: string,
+  packageId: number,
+  body: { name?: string; locked?: boolean }
+): Promise<{ id: number; name?: string; locked?: boolean }> {
+  return api<{ id: number; name?: string; locked?: boolean }>(
+    `/api/workspaces/${encodeURIComponent(workspaceId)}/packages/${packageId}`,
+    {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }
+  )
+}
+
 export async function fetchJobs(
   workspaceId: string,
   workflowKey?: string
