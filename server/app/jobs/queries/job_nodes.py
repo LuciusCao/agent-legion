@@ -194,6 +194,7 @@ class JobNodeQueriesMixin(JobQueriesBase):
                 update jobs
                 set status='queued',
                     error_message='',
+                    packed=0,
                     updated_at=current_timestamp
                 where id=?
                 """,
