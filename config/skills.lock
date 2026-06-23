@@ -1,5 +1,5 @@
 version: '1'
-resolved_at: '2026-06-22T12:30:00Z'
+resolved_at: '2026-06-23T02:53:12Z'
 skills:
   question_comprehension_info/assess_comprehension_difficulty:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
