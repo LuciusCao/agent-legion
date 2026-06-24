@@ -3,6 +3,7 @@ import { useJobQuestion } from '../hooks/useJobQuestion'
 import { useJobComprehensionInfo } from '../hooks/useJobComprehensionInfo'
 import { extractLatexParts, renderLatexInHtml } from '../lib/latex'
 import { buildHighlightedStemParts } from '../lib/questionHighlight'
+import { ErrorAnswerBadges } from './ErrorAnswerBadges'
 import { QuestionAnnotations } from './QuestionAnnotations'
 import { LaTeXText } from './LaTeXText'
 import { MaterialIcon } from './MaterialIcon'
@@ -77,14 +78,12 @@ function extractAnswerItems(answer: unknown): string[] | null {
   }
   return null
 }
-
 export interface QuestionContentPanelProps {
   jobId: string
   refreshKey?: string
   comprehensionRefreshKey?: string
   comprehensionCompleted?: boolean
 }
-
 export function QuestionContentPanel({
   jobId,
   refreshKey,
@@ -108,13 +107,11 @@ export function QuestionContentPanel({
     () => comprehensionInfo?.comprehension_data?.possible_error_list ?? [],
     [comprehensionInfo]
   )
-
   const stem = question?.stem
   const stemHtml = useMemo(() => {
     if (!stem) return ''
     return renderLatexInHtml(sanitizeHtml(stem))
   }, [stem])
-
   const selectedKeyInfos = useMemo(() => {
     return Array.from(selectedIds)
       .map((id) => keyInfoList.find((k) => k.key_info_id === id))
@@ -461,7 +458,14 @@ export function QuestionContentPanel({
               <div className={styles.detailCard}>
                 <div className={styles.detailCardHeader}>
                   <span className={styles.errorAnswerBadge}>
-                    错误答案：{selectedError.error_answer}
+                    错误答案：
+                    <ErrorAnswerBadges
+                      answers={
+                        Array.isArray(selectedError.error_answer)
+                          ? selectedError.error_answer
+                          : [selectedError.error_answer]
+                      }
+                    />
                   </span>
                   <span className={styles.detailId}>
                     {selectedError.error_id}

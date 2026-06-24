@@ -93,7 +93,7 @@ const realComprehension = {
         {
           error_id: 'pe_001',
           error_type: 'question_comprehension',
-          error_answer: '240',
+          error_answer: ['240'],
           error_description:
             '学生把“盒”误当作最终单位，只计算出24箱共有多少盒牛奶（24×10），漏看了“每盒15袋”和题目末尾要求的“袋”。',
           related_key_info_ids: ['ki_003', 'ki_005', 'ki_006'],
@@ -101,7 +101,7 @@ const realComprehension = {
         {
           error_id: 'pe_002',
           error_type: 'question_comprehension',
-          error_answer: '360',
+          error_answer: ['360'],
           error_description:
             '学生跳过了“先求总盒数”的中间步骤，直接用箱数乘每盒袋数（24×15），说明没有理解数量之间的层级关系。',
           related_key_info_ids: ['ki_002', 'ki_003', 'ki_004'],
@@ -109,7 +109,7 @@ const realComprehension = {
         {
           error_id: 'pe_003',
           error_type: 'question_comprehension',
-          error_answer: '150',
+          error_answer: ['150'],
           error_description:
             '学生只计算了一盒牛奶有多少袋（10×15），忽略了学校一共订了24箱这个总量条件。',
           related_key_info_ids: ['ki_001', 'ki_005'],
@@ -117,7 +117,7 @@ const realComprehension = {
         {
           error_id: 'pe_004',
           error_type: 'question_comprehension',
-          error_answer: '49',
+          error_answer: ['49'],
           error_description:
             '学生把题目中的三个数直接相加（24+10+15），没有理解“每箱”“每盒”表示的是乘法关系。',
           related_key_info_ids: ['ki_001', 'ki_002', 'ki_003', 'ki_004'],
@@ -125,7 +125,7 @@ const realComprehension = {
         {
           error_id: 'pe_005',
           error_type: 'question_comprehension',
-          error_answer: '3600盒',
+          error_answer: ['3600盒'],
           error_description:
             '学生虽然算对了数值3600，但把最终单位写成了“盒”，没有注意到题目要求用“袋”作单位。',
           related_key_info_ids: ['ki_006'],
@@ -133,7 +133,7 @@ const realComprehension = {
         {
           error_id: 'pe_006',
           error_type: 'question_comprehension',
-          error_answer: '24箱',
+          error_answer: ['24箱'],
           error_description:
             '学生只从题干中找到了“24箱牛奶”这个已知条件，没有理解题目真正要求计算的是总袋数。',
           related_key_info_ids: ['ki_001', 'ki_006'],
@@ -177,15 +177,11 @@ describe('QuestionContentPanel regression', () => {
 
     // Click possible error 3
     fireEvent.click(errorChips[2])
-    await waitFor(() =>
-      expect(screen.getByText('错误答案：150')).toBeInTheDocument()
-    )
+    await waitFor(() => expect(screen.getByText('150')).toBeInTheDocument())
 
     // Click possible error 6 - previously caused white screen
     fireEvent.click(errorChips[5])
-    await waitFor(() =>
-      expect(screen.getByText('错误答案：24箱')).toBeInTheDocument()
-    )
+    await waitFor(() => expect(screen.getByText('24箱')).toBeInTheDocument())
   })
 
   it('keeps only one of key info or possible error active at a time', async () => {
@@ -206,9 +202,7 @@ describe('QuestionContentPanel regression', () => {
 
     // Activate possible error 3 - should deactivate key info detail
     fireEvent.click(errorChips[2])
-    await waitFor(() =>
-      expect(screen.getByText('错误答案：150')).toBeInTheDocument()
-    )
+    await waitFor(() => expect(screen.getByText('150')).toBeInTheDocument())
     expect(screen.queryByText('隐含信息')).not.toBeInTheDocument()
 
     // Activate key info 1 - should deactivate possible error detail
@@ -216,6 +210,6 @@ describe('QuestionContentPanel regression', () => {
     await waitFor(() =>
       expect(screen.getByText('题干信息')).toBeInTheDocument()
     )
-    expect(screen.queryByText('错误答案：150')).not.toBeInTheDocument()
+    expect(screen.queryByText('150')).not.toBeInTheDocument()
   })
 })
