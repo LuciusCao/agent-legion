@@ -10,6 +10,7 @@ import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
 import { JobDetailActions } from '../components/JobDetailActions'
+import { JobReviewPanel } from '../components/JobReviewPanel'
 import { useJobDetail } from './jobDetail/useJobDetail'
 
 export default function JobDetailPage() {
@@ -38,15 +39,13 @@ export default function JobDetailPage() {
   const artifactRequestId = useRef(0)
 
   useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    setArtifactListOpen(false)
-    setPreviewOpen(false)
-    setPreviewArtifact(null)
-    return () => {
+    const reset = () => {
       setArtifactListOpen(false)
       setPreviewOpen(false)
       setPreviewArtifact(null)
     }
+    reset()
+    return reset
   }, [jobId])
 
   const {
@@ -98,9 +97,7 @@ export default function JobDetailPage() {
         onOpenArtifacts={() => setArtifactListOpen(true)}
       />
     )
-    return () => {
-      setDetailPageActions(null)
-    }
+    return () => setDetailPageActions(null)
   }, [
     detail,
     setDetailPageActions,
@@ -134,6 +131,14 @@ export default function JobDetailPage() {
               refreshKey={questionArtifactRefreshKey}
               comprehensionRefreshKey={comprehensionRefreshKey}
               comprehensionCompleted={comprehensionCompleted}
+            />
+          )}
+          {detail && (
+            <JobReviewPanel
+              key={detail.job.updated_at}
+              jobId={jobId}
+              artifacts={detail.artifacts}
+              refreshKey={detail.job.updated_at}
             />
           )}
         </div>
