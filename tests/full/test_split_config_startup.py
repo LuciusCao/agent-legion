@@ -1,7 +1,11 @@
 from pathlib import Path
 
+import pytest
+
 from server.app.main import create_app
 from server.app.settings import load_settings
+
+pytestmark = pytest.mark.full_gate
 
 
 def test_repository_split_configuration_builds_application(tmp_path: Path, monkeypatch):

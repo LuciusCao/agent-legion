@@ -1,3 +1,4 @@
+from contextlib import closing
 from datetime import UTC, datetime, timedelta
 
 from server.app.db.connection import connect_sqlite
@@ -29,24 +30,24 @@ def test_cleanup_removes_old_logs_and_run_dirs(tmp_path):
     log_path.parent.mkdir(parents=True)
     log_path.write_text("old log")
 
-    conn = connect_sqlite(tmp_path / "db.sqlite")
-    _setup(conn)
-    old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
-    conn.execute(
-        """
-        insert into node_runs(job_id, node_key, status, log_path, run_dir, finished_at)
-        values (?, ?, 'completed', ?, '', ?)
-        """,
-        ("job-1", "node-a", make_data_relative(log_path, data_dir), old_finished),
-    )
-    conn.commit()
+    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+        _setup(conn)
+        old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+        conn.execute(
+            """
+            insert into node_runs(job_id, node_key, status, log_path, run_dir, finished_at)
+            values (?, ?, 'completed', ?, '', ?)
+            """,
+            ("job-1", "node-a", make_data_relative(log_path, data_dir), old_finished),
+        )
+        conn.commit()
 
-    cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
-    logs, dirs = cleanup_old_logs(conn, data_dir, cfg)
-    assert logs == 1
-    assert dirs == 1
-    assert not log_path.exists()
-    assert not jobs_dir.exists()
+        cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
+        logs, dirs = cleanup_old_logs(conn, data_dir, cfg)
+        assert logs == 1
+        assert dirs == 1
+        assert not log_path.exists()
+        assert not jobs_dir.exists()
 
 
 def test_cleanup_keeps_recent_logs_and_run_dirs(tmp_path):
@@ -57,24 +58,24 @@ def test_cleanup_keeps_recent_logs_and_run_dirs(tmp_path):
     log_path.parent.mkdir(parents=True)
     log_path.write_text("recent log")
 
-    conn = connect_sqlite(tmp_path / "db.sqlite")
-    _setup(conn)
-    recent_finished = (datetime.now(UTC) - timedelta(days=5)).isoformat()
-    conn.execute(
-        """
-        insert into node_runs(job_id, node_key, status, log_path, run_dir, finished_at)
-        values (?, ?, 'completed', ?, '', ?)
-        """,
-        ("job-1", "node-a", make_data_relative(log_path, data_dir), recent_finished),
-    )
-    conn.commit()
+    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+        _setup(conn)
+        recent_finished = (datetime.now(UTC) - timedelta(days=5)).isoformat()
+        conn.execute(
+            """
+            insert into node_runs(job_id, node_key, status, log_path, run_dir, finished_at)
+            values (?, ?, 'completed', ?, '', ?)
+            """,
+            ("job-1", "node-a", make_data_relative(log_path, data_dir), recent_finished),
+        )
+        conn.commit()
 
-    cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
-    logs, dirs = cleanup_old_logs(conn, data_dir, cfg)
-    assert logs == 0
-    assert dirs == 0
-    assert log_path.exists()
-    assert jobs_dir.exists()
+        cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
+        logs, dirs = cleanup_old_logs(conn, data_dir, cfg)
+        assert logs == 0
+        assert dirs == 0
+        assert log_path.exists()
+        assert jobs_dir.exists()
 
 
 def test_cleanup_derives_run_dir_when_empty(tmp_path):
@@ -85,23 +86,23 @@ def test_cleanup_derives_run_dir_when_empty(tmp_path):
     log_path.parent.mkdir(parents=True)
     log_path.write_text("old log")
 
-    conn = connect_sqlite(tmp_path / "db.sqlite")
-    _setup(conn)
-    old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
-    conn.execute(
-        """
-        insert into node_runs(job_id, node_key, status, log_path, run_dir, finished_at)
-        values (?, ?, 'completed', ?, '', ?)
-        """,
-        ("job-1", "node-a", make_data_relative(log_path, data_dir), old_finished),
-    )
-    conn.commit()
+    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+        _setup(conn)
+        old_finished = (datetime.now(UTC) - timedelta(days=40)).isoformat()
+        conn.execute(
+            """
+            insert into node_runs(job_id, node_key, status, log_path, run_dir, finished_at)
+            values (?, ?, 'completed', ?, '', ?)
+            """,
+            ("job-1", "node-a", make_data_relative(log_path, data_dir), old_finished),
+        )
+        conn.commit()
 
-    cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
-    logs, dirs = cleanup_old_logs(conn, data_dir, cfg)
-    assert logs == 1
-    assert dirs == 1
-    assert not jobs_dir.exists()
+        cfg = CleanupConfig(log_retention_days=30, run_dir_retention_days=30)
+        logs, dirs = cleanup_old_logs(conn, data_dir, cfg)
+        assert logs == 1
+        assert dirs == 1
+        assert not jobs_dir.exists()
 
 
 def test_cleanup_config_from_settings():

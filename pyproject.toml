@@ -63,7 +63,13 @@ ignore = ["E501"]
 
 [tool.coverage.run]
 source = ["server"]
-omit = ["*/__pycache__/*"]
+omit = [
+  "*/__pycache__/*",
+  # These paths are referenced only by tests/test_export_openapi.py via
+  # compile() filenames; the files do not exist and must not be measured.
+  "server/app/routes/legacy.py",
+  "server/app/routes/unrelated.py",
+]
 
 [tool.coverage.report]
 fail_under = 85

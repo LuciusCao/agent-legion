@@ -17,8 +17,7 @@ EXPECTED_VERSIONS = [m.version for m in MIGRATIONS]
 
 
 def _create_pre_v004_database(path: Path) -> None:
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.executescript(
             """
             create table workspaces (
@@ -113,7 +112,6 @@ def _create_pre_v004_database(path: Path) -> None:
             insert into workspaces(id, name) values ('ws1', 'Workspace One');
             """
         )
-    conn.close()
 
 
 def _foreign_key_relationships(conn) -> set[tuple[str, str, str]]:
@@ -128,8 +126,7 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
     path = tmp_path / "orphans.sqlite"
     _create_pre_v004_database(path)
 
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         # Disable FK enforcement so we can insert intentional orphan rows.
         conn.execute("pragma foreign_keys = off")
         conn.execute(
@@ -179,7 +176,6 @@ def test_v004_blocked_by_orphan_rows_and_leaves_data_intact(tmp_path: Path) -> N
             "'2024-01-01 10:00:00', '2024-01-01 11:00:00')"
         )
         conn.execute("pragma foreign_keys = on")
-    conn.close()
 
     from server.app.db.migrations.report import MigrationBlockedError
 
@@ -245,8 +241,7 @@ def test_v004_rebuilds_tables_with_pre_existing_indexes(tmp_path: Path) -> None:
     path = tmp_path / "v004_with_indexes.sqlite"
     _create_pre_v004_database(path)
 
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         # Indexes that may already exist on a real database from prior schema init.
         conn.execute("create index idx_jobs_workflow_status on jobs(workflow_key, status)")
         conn.execute(
@@ -270,7 +265,6 @@ def test_v004_rebuilds_tables_with_pre_existing_indexes(tmp_path: Path) -> None:
         conn.execute(
             "insert into job_nodes(job_id, node_key, status) values ('job1', 'extract', 'pending')"
         )
-    conn.close()
 
     init_db(path)
 
@@ -301,8 +295,7 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
     path = tmp_path / "v004_fk.sqlite"
     _create_pre_v004_database(path)
 
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.execute(
             "insert into job_batches(id, workspace_id, workflow_key, source_kind, source_payload_json, "
             "status, created_count, error_message, created_at) "
@@ -333,7 +326,6 @@ def test_v004_preserves_data_indexes_and_foreign_keys(tmp_path: Path) -> None:
             "'extract', 1, 'active', '2024-01-01 10:00:00', '2024-01-01 10:00:00', "
             "'2024-01-01 11:00:00')"
         )
-    conn.close()
 
     init_db(path)
 
@@ -474,8 +466,7 @@ def test_v004_interruption_after_copy_recovers_on_reopen(tmp_path: Path) -> None
     path = tmp_path / "v004_interrupt.sqlite"
     _create_pre_v004_database(path)
 
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
             "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
@@ -483,16 +474,16 @@ def test_v004_interruption_after_copy_recovers_on_reopen(tmp_path: Path) -> None
         conn.execute(
             "insert into job_nodes(job_id, node_key, status) values ('job1', 'extract', 'pending')"
         )
-    conn.close()
 
     def hook(phase: str) -> None:
         if phase == "v004:copy:job_batches":
             raise RuntimeError("interrupted after copy")
 
-    conn = connect_sqlite(path)
-    with pytest.raises(RuntimeError, match="interrupted after copy"):
+    with (
+        closing(connect_sqlite(path)) as conn,
+        pytest.raises(RuntimeError, match="interrupted after copy"),
+    ):
         run_migrations(conn, MIGRATIONS, _phase_hook=hook)
-    conn.close()
 
     init_db(path)
 

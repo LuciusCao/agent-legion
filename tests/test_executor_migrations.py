@@ -85,8 +85,7 @@ def test_v007_creates_pre_migration_backup_for_pipeline_columns(tmp_path: Path) 
 def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
     """A pre-Phase-3 database with workspace_agent_assignments is upgraded cleanly."""
     path = tmp_path / "legacy.sqlite"
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.executescript(
             """
             create table workspaces (
@@ -163,7 +162,6 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
             values ('ws1', 'agent_a', 3);
             """
         )
-    conn.close()
 
     init_db(path)
 
@@ -186,8 +184,7 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
 def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
     """A pre-V004 database with data survives the rebuild with no column misalignment."""
     path = tmp_path / "v004_preserve.sqlite"
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.executescript(
             """
             create table workspaces (
@@ -287,7 +284,6 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
             );
             """
         )
-    conn.close()
 
     init_db(path)
 

@@ -40,8 +40,7 @@ def test_empty_database_applies_v006_job_execution_control(tmp_path: Path) -> No
 
 def test_legacy_database_gains_execution_control_defaults(tmp_path: Path) -> None:
     path = tmp_path / "legacy.sqlite"
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.executescript(
             """
             create table workspaces (
@@ -81,7 +80,6 @@ def test_legacy_database_gains_execution_control_defaults(tmp_path: Path) -> Non
             );
             """
         )
-    conn.close()
 
     init_db(path)
 
@@ -121,8 +119,7 @@ def test_v006_migration_is_idempotent(tmp_path: Path) -> None:
 
 def test_v006_execution_mode_check_constraint(tmp_path: Path) -> None:
     path = tmp_path / "constraint.sqlite"
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.executescript(
             """
             create table workspaces (
@@ -140,7 +137,6 @@ def test_v006_execution_mode_check_constraint(tmp_path: Path) -> None:
             insert into workspaces(id, name) values ('ws1', 'Constraint Workspace');
             """
         )
-    conn.close()
 
     init_db(path)
 

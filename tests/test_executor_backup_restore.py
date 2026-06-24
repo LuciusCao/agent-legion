@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -24,9 +25,8 @@ def test_restore_rejects_missing_backup(tmp_path: Path) -> None:
 
 def test_restore_rejects_missing_target(tmp_path: Path) -> None:
     backup_path = tmp_path / "backup.sqlite"
-    conn = sqlite3.connect(backup_path)
-    conn.execute("create table t (id integer primary key)")
-    conn.close()
+    with closing(sqlite3.connect(backup_path)) as conn:
+        conn.execute("create table t (id integer primary key)")
     with pytest.raises(RestoreError, match="target database not found"):
         restore_sqlite_database(backup_path, tmp_path / "missing.sqlite")
 
