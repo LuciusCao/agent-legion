@@ -5,6 +5,7 @@ import pytest
 
 from server.app.jobs import JobQueries
 from server.app.workflows.pi_runner import PiConfig, PiRunner
+from server.app.workflows.skill_version import resolve_skill_version
 
 
 def test_build_pi_command_uses_fresh_session_and_one_explicit_skill(tmp_path):
@@ -106,6 +107,87 @@ def test_pirunner_rejects_invalid_timeout():
         )
 
 
+def _git_env():
+    import os
+
+    env = {**dict(os.environ)}
+    env.pop("GIT_DIR", None)
+    env.pop("GIT_WORK_TREE", None)
+    env.pop("GIT_INDEX_FILE", None)
+    return env
+
+
+def test_resolve_skill_version_returns_empty_for_non_git_dir(tmp_path):
+    assert resolve_skill_version(tmp_path) == ""
+
+
+def test_resolve_skill_version_returns_commit_for_untagged_commit(tmp_path):
+    import subprocess
+
+    env = _git_env()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=env)
+    (tmp_path / "file.txt").write_text("x")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "test@test.com"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "Test"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"],
+        check=True,
+        env=env,
+    )
+    commit = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    ).stdout.strip()
+
+    assert resolve_skill_version(tmp_path) == commit
+
+
+def test_resolve_skill_version_returns_tag_and_commit(tmp_path):
+    import subprocess
+
+    env = _git_env()
+    subprocess.run(["git", "init", "-q", str(tmp_path)], check=True, env=env)
+    (tmp_path / "file.txt").write_text("x")
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.email", "test@test.com"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "config", "user.name", "Test"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(tmp_path), "add", "."], check=True, env=env)
+    subprocess.run(
+        ["git", "-C", str(tmp_path), "commit", "-q", "-m", "init"],
+        check=True,
+        env=env,
+    )
+    subprocess.run(["git", "-C", str(tmp_path), "tag", "v1.2.3"], check=True, env=env)
+    commit = subprocess.run(
+        ["git", "-C", str(tmp_path), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=True,
+        env=env,
+    ).stdout.strip()
+
+    assert resolve_skill_version(tmp_path) == f"v1.2.3@{commit}"
+
+
 def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
     # Create a fake pi executable that writes valid JSON lines and creates outputs
     fake_pi = tmp_path / "fake_pi"
@@ -171,6 +253,8 @@ def test_run_creates_trace_artifacts_and_returns_result(tmp_path, monkeypatch):
     assert "end_time" in run_meta
     assert run_meta["start_time"] is not None
     assert run_meta["end_time"] is not None
+    assert "skill_version" in run_meta
+    assert run_meta["skill_version"] == ""
 
 
 def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
@@ -233,6 +317,64 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
 
     node = job_db.get_job_node(job["id"], "extract_keywords")
     assert node["status"] == "completed"
+
+
+def test_run_persists_skill_version(tmp_path, monkeypatch):
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        '#!/bin/bash\necho \'{"event":"done"}\'\necho \'{"questions": []}\' > keywords_raw.json\n'
+    )
+    fake_pi.chmod(0o755)
+
+    runner = PiRunner.from_config(
+        {"binary": str(fake_pi), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text(
+        "#!/usr/bin/env python3\nimport sys\nfrom pathlib import Path\n"
+        "job_dir = Path(sys.argv[1])\n"
+        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+    )
+    validator.chmod(0o755)
+
+    db_path = tmp_path / "jobs.sqlite"
+    job_db = JobQueries(db_path, tmp_path / "jobs")
+    workspace = job_db.create_workspace("test_ws")
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id="b1",
+        title="Q1",
+        node_keys=["extract_keywords"],
+        workspace_id=workspace["id"],
+    )
+    job_dir = tmp_path / job["storage_dir"]
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    result = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=job_db,
+        job_dir=job_dir,
+        skill_version="v1.2.3@abc123def456",
+    )
+
+    assert result.status == "completed"
+
+    run_meta = json.loads((result.run_dir / "run.json").read_text())
+    assert run_meta["skill_version"] == "v1.2.3@abc123def456"
+
+    runs = job_db.list_node_runs(job["id"])
+    assert len(runs) == 1
+    assert runs[0]["skill_version"] == "v1.2.3@abc123def456"
 
 
 def test_run_fails_when_output_missing(tmp_path, monkeypatch):

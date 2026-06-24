@@ -6,9 +6,14 @@ from pathlib import Path
 from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.skills.manager import SkillManager
+from server.app.workflows.skill_version import resolve_skill_version
 from server.app.workflows.skills import resolve_workflow_skill
 
 logger = logging.getLogger(__name__)
+
+
+def get_skill_version(skill_manager: SkillManager, skill: str) -> str:
+    return resolve_skill_version(skill_manager.base_dir / skill)
 
 
 def prepare_execution(

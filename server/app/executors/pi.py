@@ -5,7 +5,7 @@ from collections.abc import Mapping
 
 from server.app.executors._log_utils import copy_pi_logs
 from server.app.executors._pi_result import to_execution_result
-from server.app.executors._pi_skill import prepare_execution, resolve_skill_dir
+from server.app.executors._pi_skill import get_skill_version, prepare_execution, resolve_skill_dir
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
@@ -72,12 +72,15 @@ class PiExecutor:
             context.job_dir.mkdir(parents=True, exist_ok=True)
             context.log_path.parent.mkdir(parents=True, exist_ok=True)
 
-            raw_token = (
+            maybe_token = (
                 context.runtime.get("cancellation")
                 if isinstance(context.runtime, Mapping)
                 else None
             )
-            token = raw_token if isinstance(raw_token, CancellationToken) else None
+            token = maybe_token if isinstance(maybe_token, CancellationToken) else None
+
+            skill_version = get_skill_version(self.skill_manager, capability_config.skill)
+
             result = self._runner.run(
                 job=dict(context.job),
                 node_key=context.node_key,
@@ -90,6 +93,7 @@ class PiExecutor:
                 execution_id=context.execution_id,
                 cancellation_token=token,
                 tracker=self._tracker,
+                skill_version=skill_version,
             )
 
             copy_pi_logs(result.run_dir, context.log_path)

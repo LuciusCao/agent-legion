@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -88,6 +89,11 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
     assert ctx.log_path.is_file()
     assert "event" in ctx.log_path.read_text(encoding="utf-8")
     assert not (skill_manager.runs_dir / ctx.execution_id).exists()
+
+    run_json_text = (Path(result.run_dir) / "run.json").read_text(encoding="utf-8")
+    run_json = json.loads(run_json_text)
+    assert run_json["skill_version"] != ""
+    assert len(run_json["skill_version"]) == 40
 
 
 def test_pi_executor_cleans_snapshot_when_runner_raises(

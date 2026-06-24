@@ -133,6 +133,7 @@ class PiRunner:
         execution_id: str | None = None,
         cancellation_token: CancellationToken | None = None,
         tracker: SubprocessTracker | None = None,
+        skill_version: str = "",
     ) -> PiRunResult:
         if job_dir is None:
             if jobs_dir is None:
@@ -187,6 +188,7 @@ class PiRunner:
                     make_data_relative(events_file, data_dir),
                     run_dir=make_data_relative(run_dir, data_dir),
                     session_dir=make_data_relative(session_dir, data_dir),
+                    skill_version=skill_version,
                 )
                 if run_record is None:
                     return PiRunResult(
@@ -278,6 +280,7 @@ class PiRunner:
             "inputs": inputs,
             "outputs": outputs,
             "skill": str(skill_dir),
+            "skill_version": skill_version,
             "error_message": error_message,
         }
         (run_dir / "run.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2))
