@@ -1,25 +1,58 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { DashboardPage } from './DashboardPage'
 
+const fetchWorkspaces = vi.fn()
+const fetchWorkspaceStats = vi.fn()
+const fetchVideos = vi.fn()
+const deleteWorkspace = vi.fn()
+const navigate = vi.fn()
+
+const mockWorkspaceStore = {
+  workspaces: [] as Array<{
+    id: string
+    name: string
+    default_workflow_key: string
+  }>,
+  workspaceStats: {} as Record<string, unknown>,
+  fetchWorkspaces,
+  fetchWorkspaceStats,
+  deleteWorkspace,
+}
+
+const mockVideoStore = {
+  videos: [] as Array<unknown>,
+  fetchVideos,
+}
+
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom')
+  return {
+    ...actual,
+    useNavigate: () => navigate,
+  }
+})
+
 vi.mock('../stores/workspaceStore', () => ({
-  useWorkspaceStore: () => ({
-    workspaces: [],
-    workspaceStats: {},
-    fetchWorkspaces: vi.fn(),
-    fetchWorkspaceStats: vi.fn(),
-  }),
+  useWorkspaceStore: () => mockWorkspaceStore,
 }))
 
 vi.mock('../stores/videoStore', () => ({
-  useVideoStore: () => ({
-    videos: [],
-    fetchVideos: vi.fn(),
-  }),
+  useVideoStore: () => mockVideoStore,
 }))
 
 describe('DashboardPage', () => {
+  beforeEach(() => {
+    mockWorkspaceStore.workspaces = []
+    mockWorkspaceStore.workspaceStats = {}
+    mockVideoStore.videos = []
+    fetchWorkspaces.mockClear()
+    fetchWorkspaceStats.mockClear()
+    fetchVideos.mockClear()
+    navigate.mockClear()
+  })
+
   it('renders Agent Legion title', () => {
     render(
       <MemoryRouter>
@@ -36,5 +69,120 @@ describe('DashboardPage', () => {
       </MemoryRouter>
     )
     expect(screen.getByText('Video Hive')).toBeInTheDocument()
+  })
+
+  it('opens create workspace dialog', () => {
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByText('新建 Workspace'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('fetches workspaces and videos on mount', () => {
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+    expect(fetchWorkspaces).toHaveBeenCalled()
+    expect(fetchVideos).toHaveBeenCalled()
+  })
+
+  it('renders workspace cards and fetches stats', async () => {
+    mockWorkspaceStore.workspaces = [
+      {
+        id: 'ws-1',
+        name: 'Test Workspace',
+        default_workflow_key: 'question_comprehension_info',
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('Test Workspace')).toBeInTheDocument()
+    await waitFor(() => {
+      expect(fetchWorkspaceStats).toHaveBeenCalledWith('ws-1')
+    })
+  })
+
+  it('shows workflow label from stats when available', async () => {
+    mockWorkspaceStore.workspaces = [
+      {
+        id: 'ws-1',
+        name: 'Test Workspace',
+        default_workflow_key: 'question_comprehension_info',
+      },
+    ]
+    mockWorkspaceStore.workspaceStats = {
+      'ws-1': {
+        workflow_label: '题目理解',
+        job_stats: { running: 1, completed: 2, failed: 0 },
+        executor_status: { executors: [] },
+      },
+    }
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(screen.getByText('题目理解')).toBeInTheDocument()
+    })
+  })
+
+  it('opens delete dialog for non-default workspace', () => {
+    mockWorkspaceStore.workspaces = [
+      {
+        id: 'ws-1',
+        name: 'Deletable Workspace',
+        default_workflow_key: 'question_comprehension_info',
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+
+    fireEvent.click(screen.getByLabelText('删除'))
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('navigates to video-hive when clicking system card', () => {
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByText('Video Hive'))
+    expect(navigate).toHaveBeenCalledWith('/video-hive')
+  })
+
+  it('navigates to workspace when clicking workspace card', () => {
+    mockWorkspaceStore.workspaces = [
+      {
+        id: 'ws-1',
+        name: 'Test Workspace',
+        default_workflow_key: 'question_comprehension_info',
+      },
+    ]
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByText('Test Workspace'))
+    expect(navigate).toHaveBeenCalledWith('/workspaces/ws-1')
   })
 })
