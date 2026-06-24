@@ -236,7 +236,6 @@
     "server/app/cms/question.py": 319,
     "server/app/configuration/__init__.py": 18,
     "server/app/configuration/loader.py": 147,
-    "server/app/db.py": 8,
     "server/app/db/__init__.py": 17,
     "server/app/db/connection.py": 17,
     "server/app/db/migrations/__init__.py": 22,
