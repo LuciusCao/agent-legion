@@ -465,6 +465,56 @@ def test_v006_is_compatible_with_later_v005_finalizer(tmp_path: Path) -> None:
         assert conn.execute("pragma foreign_key_check").fetchall() == []
 
 
+def test_v013_adds_node_runs_skill_version_column(tmp_path: Path) -> None:
+    """A pre-V013 database gets the skill_version column added to node_runs."""
+    path = tmp_path / "v013_upgrade.sqlite"
+    with closing(connect_sqlite(path)) as conn, conn:
+        conn.executescript(
+            """
+            create table schema_migrations (
+              version integer primary key,
+              name text not null,
+              applied_at text not null default current_timestamp
+            );
+            insert into schema_migrations(version, name) values (1, 'executor_core');
+            insert into schema_migrations(version, name) values (2, 'executor_bootstrap_state');
+            insert into schema_migrations(version, name) values (3, 'legacy_columns');
+            insert into schema_migrations(version, name) values (4, 'workspace_dag_foreign_keys');
+            insert into schema_migrations(version, name) values (6, 'job_execution_control');
+            insert into schema_migrations(version, name) values (7, 'rename_pipeline_to_workflow');
+            insert into schema_migrations(version, name) values (8, 'job_node_created_at');
+            insert into schema_migrations(version, name) values (9, 'relative_path_storage');
+            insert into schema_migrations(version, name) values (10, 'remove_default_workspace');
+            insert into schema_migrations(version, name) values (11, 'remove_workspace_id_defaults');
+            insert into schema_migrations(version, name) values (12, 'workspace_packages');
+            create table node_runs (
+              id integer primary key autoincrement,
+              job_id text not null,
+              node_key text not null,
+              status text not null,
+              started_at text not null default current_timestamp,
+              finished_at text,
+              command_json text not null default '[]',
+              exit_code integer,
+              log_path text not null default '',
+              error_message text not null default '',
+              run_dir text not null default '',
+              session_dir text not null default ''
+            );
+            """
+        )
+
+    init_db(path)
+
+    with closing(connect_sqlite(path)) as conn, conn:
+        columns = {
+            row["name"]: row for row in conn.execute("pragma table_info(node_runs)").fetchall()
+        }
+        assert "skill_version" in columns
+        assert columns["skill_version"]["notnull"] == 1
+        assert columns["skill_version"]["dflt_value"] == "''"
+
+
 def test_failed_migration_is_fully_rolled_back(tmp_path: Path) -> None:
     """A migration that fails partway through leaves no version row or partial schema."""
     path = tmp_path / "rollback.sqlite"

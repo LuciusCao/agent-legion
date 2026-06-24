@@ -240,6 +240,7 @@
     "server/app/db/__init__.py": 17,
     "server/app/db/connection.py": 17,
     "server/app/db/migrations/__init__.py": 22,
+    "server/app/db/migrations/_migration_imports.py": 52,
     "server/app/db/migrations/backup.py": 38,
     "server/app/db/migrations/errors.py": 15,
     "server/app/db/migrations/execution.py": 29,
@@ -247,7 +248,7 @@
     "server/app/db/migrations/history.py": 45,
     "server/app/db/migrations/hooks.py": 37,
     "server/app/db/migrations/models.py": 28,
-    "server/app/db/migrations/registry.py": 45,
+    "server/app/db/migrations/registry.py": 35,
     "server/app/db/migrations/registry_validation.py": 29,
     "server/app/db/migrations/report.py": 70,
     "server/app/db/migrations/runner.py": 49,
@@ -263,6 +264,7 @@
     "server/app/db/migrations/v010_remove_default_workspace.py": 29,
     "server/app/db/migrations/v011_remove_workspace_id_defaults.py": 89,
     "server/app/db/migrations/v012_workspace_packages.py": 52,
+    "server/app/db/migrations/v013_node_run_skill_version.py": 32,
     "server/app/db/notifications.py": 44,
     "server/app/db/queries/__init__.py": 22,
     "server/app/db/queries/base.py": 50,
@@ -417,6 +419,7 @@
     "server/app/workflows/registry.py": 29,
     "server/app/workflows/resources.py": 170,
     "server/app/workflows/scheduler.py": 83,
+    "server/app/workflows/skill_version.py": 44,
     "server/app/workflows/skills.py": 33
   }
 }

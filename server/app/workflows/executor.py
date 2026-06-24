@@ -21,6 +21,7 @@ from server.app.workflows.scheduler import (
     _refresh_job_status,
     find_ready_nodes,
 )
+from server.app.workflows.skill_version import resolve_skill_version
 from server.app.workflows.skills import resolve_workflow_skill
 
 LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
@@ -109,6 +110,7 @@ def execute_node_once(
         raise ValueError("Pi runner is not configured")
     node = definition.nodes[node_key]
     skill_dir = resolve_workflow_skill(skill_root, f"{definition.key}/{node.capability}")
+    skill_version = resolve_skill_version(skill_dir)
     result = pi_runner.run(
         job=job,
         node_key=node_key,
@@ -118,6 +120,7 @@ def execute_node_once(
         tools=["read", "write", "bash"],
         job_db=job_db,
         job_dir=_resolve_job_dir(job, jobs_dir),
+        skill_version=skill_version,
     )
     return result.status == "completed"
 

@@ -210,6 +210,7 @@ class JobNodeQueriesMixin(JobQueriesBase):
         *,
         run_dir: str = "",
         session_dir: str = "",
+        skill_version: str = "",
     ) -> dict[str, Any] | None:
         command_json = json.dumps(list(command))
         with self.connect() as conn:
@@ -243,10 +244,12 @@ class JobNodeQueriesMixin(JobQueriesBase):
             )
             cursor = conn.execute(
                 """
-                insert into node_runs(job_id, node_key, status, command_json, log_path, run_dir, session_dir)
-                values (?, ?, 'running', ?, ?, ?, ?)
+                insert into node_runs(
+                  job_id, node_key, status, command_json, log_path, run_dir, session_dir, skill_version
+                )
+                values (?, ?, 'running', ?, ?, ?, ?, ?)
                 """,
-                (job_id, node_key, command_json, log_path, run_dir, session_dir),
+                (job_id, node_key, command_json, log_path, run_dir, session_dir, skill_version),
             )
             row = conn.execute("select * from node_runs where id=?", (cursor.lastrowid,)).fetchone()
         return dict(row)
