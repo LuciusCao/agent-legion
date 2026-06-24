@@ -163,7 +163,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
                     {
                         "error_id": "pe_001",
                         "error_type": "question_comprehension",
-                        "error_answer": "5",
+                        "error_answer": ["5"],
                         "error_description": "学生只看了胜5场，直接选5。",
                         "related_key_info_ids": ["ki_001"],
                     }

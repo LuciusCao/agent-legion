@@ -36,6 +36,7 @@
     "frontend/src/components/DeleteWorkspaceDialog.tsx": 126,
     "frontend/src/components/EmptyStateGuide.module.css": 104,
     "frontend/src/components/EmptyStateGuide.tsx": 58,
+    "frontend/src/components/ErrorAnswerBadges.tsx": 28,
     "frontend/src/components/ExecutorAllocationRemovalDialog.tsx": 58,
     "frontend/src/components/ExecutorAllocationSection.tsx": 173,
     "frontend/src/components/ExecutorBindingSection.tsx": 151,

@@ -259,7 +259,7 @@ export type KeyInfoItem = {
 export type PossibleErrorItem = {
   error_id: string
   error_type: 'question_comprehension'
-  error_answer: string
+  error_answer: string[]
   error_description: string
   related_key_info_ids: string[]
 }
