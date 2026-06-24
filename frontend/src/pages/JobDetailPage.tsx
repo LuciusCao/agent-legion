@@ -135,7 +135,6 @@ export default function JobDetailPage() {
           )}
           {detail && (
             <JobReviewPanel
-              key={detail.job.updated_at}
               jobId={jobId}
               artifacts={detail.artifacts}
               refreshKey={detail.job.updated_at}

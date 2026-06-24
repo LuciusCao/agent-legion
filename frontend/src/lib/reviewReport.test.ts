@@ -70,6 +70,47 @@ describe('parseReviewReport', () => {
     expect(report.decisions[0].decision).toBe('approved')
   })
 
+  it('preserves needs_revision as a distinct decision', () => {
+    const content = JSON.stringify({
+      review_status: 'needs_revision',
+      review_msg: 'please revise',
+      details: [{ item: 'x', result: 'needs_revision', reason: 'unclear' }],
+    })
+    const report = parseReviewReport('review_result.json', content)
+    expect(report.decisions[0].decision).toBe('needs_revision')
+    expect(report.decisions[0].reason).toBe('unclear')
+    expect(report.summary.rejected).toBe(0)
+  })
+
+  it('preserves needs_revision in key_info decisions', () => {
+    const content = JSON.stringify({
+      question_id: 'q1',
+      approved_count: 0,
+      rejected_count: 0,
+      warnings: [],
+      decisions: [
+        { key_info_id: 'ki_1', decision: 'needs_revision', reason: 'revise' },
+      ],
+    })
+    const report = parseReviewReport('key_info_review_report.json', content)
+    expect(report.decisions[0].decision).toBe('needs_revision')
+  })
+
+  it('returns empty decisions but keeps raw for unknown review_result shapes', () => {
+    const content = JSON.stringify({
+      status: 'pending',
+      message: 'not yet finalized',
+      custom_field: 123,
+    })
+    const report = parseReviewReport('review_result.json', content)
+    expect(report.decisions).toEqual([])
+    expect(report.raw).toEqual({
+      status: 'pending',
+      message: 'not yet finalized',
+      custom_field: 123,
+    })
+  })
+
   it('returns empty report for invalid json', () => {
     const report = parseReviewReport('key_info_review_report.json', 'not json')
     expect(report.decisions).toEqual([])
