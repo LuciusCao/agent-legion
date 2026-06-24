@@ -41,6 +41,20 @@ describe('useWorkspaceEvents', () => {
     )
   })
 
+  it('refreshes stats and jobs on open', async () => {
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+    })
+
+    await waitFor(() => {
+      expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
+      expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+    })
+  })
+
   it('receiving a non-heartbeat message triggers refresh', async () => {
     renderHook(() => useWorkspaceEvents('ws1'))
     const source = EventSourceMock.instances[0]
@@ -102,5 +116,84 @@ describe('useWorkspaceEvents', () => {
       expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
     })
     expect(mockFetchJobs).not.toHaveBeenCalled()
+  })
+
+  it('updates workspace stats from payload stats', async () => {
+    mockFetchWorkspaceStats.mockResolvedValue({
+      job_stats: { running: 2, completed: 5 },
+    } as unknown as WorkspaceStats)
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'stats_updated',
+            workspace_id: 'ws1',
+            stats: { running: 2, completed: 5 },
+          }),
+        })
+      )
+    })
+
+    await waitFor(() => {
+      expect(useWorkspaceStore.getState().workspaceStats.ws1).toEqual({
+        job_stats: { running: 2, completed: 5 },
+      })
+    })
+  })
+
+  it('ignores messages for other workspaces', async () => {
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onmessage?.(
+        new MessageEvent('message', {
+          data: JSON.stringify({
+            type: 'job_updated',
+            workspace_id: 'ws2',
+            job_id: 'job1',
+          }),
+        })
+      )
+    })
+
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(mockFetchWorkspaceStats).not.toHaveBeenCalled()
+  })
+
+  it('ignores heartbeat messages', async () => {
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onmessage?.(
+        new MessageEvent('message', {
+          data: ':heartbeat',
+        })
+      )
+    })
+
+    await act(async () => new Promise((resolve) => setTimeout(resolve, 50)))
+    expect(mockFetchWorkspaceStats).not.toHaveBeenCalled()
+  })
+
+  it('reconnects after an error', async () => {
+    vi.useFakeTimers()
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onerror?.()
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(1100)
+    })
+
+    expect(EventSourceMock.instances.length).toBe(2)
+    vi.useRealTimers()
   })
 })

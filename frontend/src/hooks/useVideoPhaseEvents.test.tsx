@@ -76,4 +76,45 @@ describe('useVideoPhaseEvents', () => {
     )
     expect(useDetailStore.getState().phaseRuns).toHaveLength(1)
   })
+
+  it('does not connect when videoId is undefined', () => {
+    renderHook(() => useVideoPhaseEvents(undefined))
+    expect(FakeEventSource.instances.length).toBe(0)
+  })
+
+  it('ignores heartbeat and invalid payloads', () => {
+    renderHook(() => useVideoPhaseEvents('v1'))
+    const source = FakeEventSource.instances[0]
+
+    act(() => {
+      source.onmessage?.({
+        data: ':heartbeat',
+      } as MessageEvent)
+      source.onmessage?.({
+        data: 'not-json',
+      } as MessageEvent)
+      source.onmessage?.({
+        data: JSON.stringify({ type: 'other' }),
+      } as MessageEvent)
+    })
+
+    expect(useDetailStore.getState().currentVideo).toBeNull()
+  })
+
+  it('reconnects after an error', async () => {
+    vi.useFakeTimers()
+    renderHook(() => useVideoPhaseEvents('v1'))
+    const source = FakeEventSource.instances[0]
+
+    act(() => {
+      source.onerror?.()
+    })
+
+    act(() => {
+      vi.advanceTimersByTime(1100)
+    })
+
+    expect(FakeEventSource.instances.length).toBe(2)
+    vi.useRealTimers()
+  })
 })
