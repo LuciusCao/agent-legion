@@ -1,0 +1,130 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.title {
+  font-size: 16px;
+  font-weight: 600;
+  color: #1a1c1e;
+  margin: 0;
+}
+
+.card {
+  background: #fafafa;
+  border-radius: 12px;
+  padding: 16px;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.cardTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #1a1c1e;
+  margin: 0;
+}
+
+.summary {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.approved {
+  color: #2e7d32;
+}
+
+.rejected {
+  color: #c62828;
+}
+
+.icon {
+  font-size: 16px;
+  vertical-align: -3px;
+  margin-right: 4px;
+}
+
+.warnings {
+  margin: 0 0 12px 0;
+  padding-left: 18px;
+  color: #b45309;
+  font-size: 13px;
+}
+
+.warnings li {
+  margin-bottom: 4px;
+}
+
+.decisions {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.decision {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #ffffff;
+  font-size: 13px;
+}
+
+.approvedBadge,
+.rejectedBadge,
+.unknownBadge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.approvedBadge {
+  color: #2e7d32;
+}
+
+.rejectedBadge {
+  color: #c62828;
+}
+
+.unknownBadge {
+  color: #757575;
+}
+
+.decisionId {
+  font-weight: 600;
+  color: #1a1c1e;
+  flex-shrink: 0;
+}
+
+.reason {
+  color: #43474e;
+  flex: 1;
+}
+
+.loading {
+  padding: 12px 16px;
+  color: #43474e;
+  text-align: center;
+}
+
+.error {
+  padding: 12px 16px;
+  background: #fee2e2;
+  color: #b91c1c;
+  border-radius: 8px;
+  font-size: 13px;
+}

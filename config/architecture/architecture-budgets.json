@@ -64,6 +64,8 @@
     "frontend/src/components/JobProgressPanel.tsx": 259,
     "frontend/src/components/JobRerunDialog.module.css": 46,
     "frontend/src/components/JobRerunDialog.tsx": 154,
+    "frontend/src/components/JobReviewPanel.module.css": 135,
+    "frontend/src/components/JobReviewPanel.tsx": 150,
     "frontend/src/components/JobRunToDialog.module.css": 85,
     "frontend/src/components/JobRunToDialog.tsx": 241,
     "frontend/src/components/JsonTree.module.css": 139,
