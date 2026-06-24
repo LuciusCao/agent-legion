@@ -146,6 +146,7 @@
     "frontend/src/lib/parsers.ts": 57,
     "frontend/src/lib/phases.ts": 75,
     "frontend/src/lib/questionHighlight.ts": 251,
+    "frontend/src/lib/reviewReport.ts": 142,
     "frontend/src/lib/search.ts": 54,
     "frontend/src/lib/workflowNodes.ts": 77,
     "frontend/src/main.tsx": 31,
