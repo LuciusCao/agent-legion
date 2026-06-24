@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { fetchJobArtifact } from '../api'
+import { DECISION_BADGE } from '../lib/reviewBadge'
 import {
   isReviewArtifact,
   parseReviewReport,
@@ -67,17 +68,13 @@ export function JobReviewPanel({
       {reviewArtifactNames.map((name) => {
         const state = reports[name]
         if (!state || state.status === 'loading') {
-          return (
-            <div key={name} className={styles.loading}>
-              加载 {name}...
-            </div>
-          )
+          return <div key={name}>加载 {name}...</div>
         }
         if (state.status === 'error') {
           return (
-            <div key={name} className={styles.error}>
+            <p key={name} className="error-text">
               {state.message}
-            </div>
+            </p>
           )
         }
         const report = state.report
@@ -94,6 +91,14 @@ export function JobReviewPanel({
                   <MaterialIcon name="close" className={styles.icon} />
                   {report.summary.rejected}
                 </span>
+                {report.summary.warnings.length > 0 && (
+                  <span
+                    className={styles.attention}
+                    title={`警告: ${report.summary.warnings.length}`}
+                  >
+                    {report.summary.warnings.length}
+                  </span>
+                )}
               </div>
             </div>
             {report.summary.warnings.length > 0 && (
@@ -105,37 +110,24 @@ export function JobReviewPanel({
             )}
             {report.decisions.length > 0 && (
               <ul className={styles.decisions}>
-                {report.decisions.map((decision) => (
-                  <li key={decision.id} className={styles.decision}>
-                    <span
-                      className={
-                        styles[
-                          decision.decision === 'approved'
-                            ? 'approvedBadge'
-                            : decision.decision === 'rejected'
-                              ? 'rejectedBadge'
-                              : 'unknownBadge'
-                        ]
-                      }
-                    >
-                      <MaterialIcon
-                        name={
-                          decision.decision === 'approved'
-                            ? 'check_circle'
-                            : decision.decision === 'rejected'
-                              ? 'close'
-                              : 'help'
-                        }
-                        className={styles.icon}
-                      />
-                    </span>
-                    <span className={styles.decisionId}>{decision.id}</span>
-                    {decision.reason && (
-                      <span className={styles.reason}>{decision.reason}</span>
-                    )}
-                  </li>
-                ))}
+                {report.decisions.map((decision) => {
+                  const { className, icon } = DECISION_BADGE[decision.decision]
+                  return (
+                    <li key={decision.id} className={styles.decision}>
+                      <span className={styles[className]}>
+                        <MaterialIcon name={icon} className={styles.icon} />
+                      </span>
+                      <span className={styles.decisionId}>{decision.id}</span>
+                      {decision.reason && (
+                        <span className={styles.reason}>{decision.reason}</span>
+                      )}
+                    </li>
+                  )
+                })}
               </ul>
+            )}
+            {report.decisions.length === 0 && report.raw != null && (
+              <pre>{JSON.stringify(report.raw, null, 2)}</pre>
             )}
           </section>
         )

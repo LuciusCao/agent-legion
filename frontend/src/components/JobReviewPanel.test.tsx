@@ -106,6 +106,63 @@ describe('JobReviewPanel', () => {
     })
   })
 
+  it('renders needs_revision decision with distinct badge', async () => {
+    mockFetchJobArtifact.mockResolvedValue({
+      content: JSON.stringify({
+        review_status: 'needs_revision',
+        review_msg: 'please revise',
+        details: [
+          { item: 'x', result: 'needs_revision', reason: 'unclear wording' },
+        ],
+      }),
+    })
+    render(<JobReviewPanel jobId="j1" artifacts={['review_result.json']} />)
+    await waitFor(() => {
+      expect(screen.getByText('内容审核')).toBeInTheDocument()
+    })
+    expect(screen.getByText('x')).toBeInTheDocument()
+    expect(screen.getByText('unclear wording')).toBeInTheDocument()
+    expect(screen.getByTestId('BuildCircleIcon')).toBeInTheDocument()
+  })
+
+  it('renders raw JSON fallback when review_result has no known fields', async () => {
+    mockFetchJobArtifact.mockResolvedValue({
+      content: JSON.stringify({
+        status: 'pending',
+        message: 'not yet finalized',
+      }),
+    })
+    render(<JobReviewPanel jobId="j1" artifacts={['review_result.json']} />)
+    await waitFor(() => {
+      expect(screen.getByText('内容审核')).toBeInTheDocument()
+    })
+    expect(screen.getByText(/"status": "pending"/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/"message": "not yet finalized"/)
+    ).toBeInTheDocument()
+  })
+
+  it('shows warnings count in summary', async () => {
+    mockFetchJobArtifact.mockResolvedValue({
+      content: JSON.stringify({
+        question_id: 'q1',
+        approved_count: 1,
+        rejected_count: 0,
+        warnings: ['warning one', 'warning two'],
+        decisions: [{ key_info_id: 'ki_1', decision: 'approved' }],
+      }),
+    })
+    render(
+      <JobReviewPanel jobId="j1" artifacts={['key_info_review_report.json']} />
+    )
+    await waitFor(() => {
+      expect(screen.getByText('审核关键信息')).toBeInTheDocument()
+    })
+    expect(screen.getByTitle('警告: 2')).toBeInTheDocument()
+    expect(screen.getByText('warning one')).toBeInTheDocument()
+    expect(screen.getByText('warning two')).toBeInTheDocument()
+  })
+
   it('refetches when refreshKey changes', async () => {
     mockFetchJobArtifact.mockResolvedValue({
       content: JSON.stringify({

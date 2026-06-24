@@ -1,6 +1,6 @@
 export type ReviewDecision = {
   id: string
-  decision: 'approved' | 'rejected' | 'unknown'
+  decision: 'approved' | 'rejected' | 'needs_revision' | 'unknown'
   reason?: string
 }
 
@@ -32,7 +32,9 @@ function normalizeSummary(data: Record<string, unknown>): ReviewSummary {
   return {
     approved: typeof data.approved_count === 'number' ? data.approved_count : 0,
     rejected: typeof data.rejected_count === 'number' ? data.rejected_count : 0,
-    warnings: Array.isArray(data.warnings) ? (data.warnings as string[]) : [],
+    warnings: Array.isArray(data.warnings)
+      ? data.warnings.filter((w): w is string => typeof w === 'string')
+      : [],
   }
 }
 
@@ -42,13 +44,16 @@ function parseDecisionList(items: unknown, idKey: string): ReviewDecision[] {
   items.forEach((item) => {
     if (!item || typeof item !== 'object') return
     const d = item as Record<string, unknown>
-    const decision = String(d.decision ?? 'unknown')
+    const rawDecision = String(d.decision ?? 'unknown')
+    const decision =
+      rawDecision === 'approved' ||
+      rawDecision === 'rejected' ||
+      rawDecision === 'needs_revision'
+        ? rawDecision
+        : 'unknown'
     decisions.push({
       id: String(d[idKey] ?? 'unknown'),
-      decision:
-        decision === 'approved' || decision === 'rejected'
-          ? decision
-          : 'unknown',
+      decision,
       reason: d.reason ? String(d.reason) : undefined,
     })
   })
@@ -57,14 +62,12 @@ function parseDecisionList(items: unknown, idKey: string): ReviewDecision[] {
 
 function normalizeStatus(status: string): ReviewDecision['decision'] {
   if (status === 'approved') return 'approved'
-  if (status === 'rejected' || status === 'needs_revision') return 'rejected'
+  if (status === 'rejected') return 'rejected'
+  if (status === 'needs_revision') return 'needs_revision'
   return 'unknown'
 }
 
-function normalizeContentReview(data: Record<string, unknown>): {
-  summary: ReviewSummary
-  decisions: ReviewDecision[]
-} {
+function normalizeContentReview(data: Record<string, unknown>) {
   const status = String(data.review_status ?? 'unknown')
   const decisions: ReviewDecision[] = []
   if (Array.isArray(data.details)) {
@@ -87,19 +90,20 @@ function normalizeContentReview(data: Record<string, unknown>): {
     })
   }
   const approved = decisions.filter((d) => d.decision === 'approved').length
+  const rejected = decisions.filter((d) => d.decision === 'rejected').length
   return {
-    summary: { approved, rejected: decisions.length - approved, warnings: [] },
+    summary: { approved, rejected, warnings: [] },
     decisions,
   }
 }
 
 export function parseReviewReport(name: string, content: string): ReviewReport {
   const title = REVIEW_ARTIFACTS[name] ?? name
-  let data: unknown
+  let data: unknown = null
   try {
     data = JSON.parse(content)
   } catch {
-    data = null
+    /* empty */
   }
   if (!data || typeof data !== 'object') {
     return {

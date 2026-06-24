@@ -41,11 +41,15 @@
 }
 
 .approved {
-  color: #2e7d32;
+  color: var(--status-completed-text);
 }
 
 .rejected {
-  color: #c62828;
+  color: var(--status-failed-text);
+}
+
+.attention {
+  color: var(--status-partial-text);
 }
 
 .icon {
@@ -57,7 +61,7 @@
 .warnings {
   margin: 0 0 12px 0;
   padding-left: 18px;
-  color: #b45309;
+  color: var(--status-partial-text);
   font-size: 13px;
 }
 
@@ -86,6 +90,7 @@
 
 .approvedBadge,
 .rejectedBadge,
+.attentionBadge,
 .unknownBadge {
   display: inline-flex;
   align-items: center;
@@ -93,11 +98,15 @@
 }
 
 .approvedBadge {
-  color: #2e7d32;
+  color: var(--status-completed-text);
 }
 
 .rejectedBadge {
-  color: #c62828;
+  color: var(--status-failed-text);
+}
+
+.attentionBadge {
+  color: var(--status-partial-text);
 }
 
 .unknownBadge {
@@ -113,18 +122,4 @@
 .reason {
   color: #43474e;
   flex: 1;
-}
-
-.loading {
-  padding: 12px 16px;
-  color: #43474e;
-  text-align: center;
-}
-
-.error {
-  padding: 12px 16px;
-  background: #fee2e2;
-  color: #b91c1c;
-  border-radius: 8px;
-  font-size: 13px;
 }
