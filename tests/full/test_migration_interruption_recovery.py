@@ -66,8 +66,7 @@ def test_v004_interruption_at_phase_boundary_recovers(tmp_path: Path, interrupt_
     path = tmp_path / "v004_interrupt.sqlite"
     _create_pre_v004_database(path)
 
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
             "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
@@ -75,16 +74,16 @@ def test_v004_interruption_at_phase_boundary_recovers(tmp_path: Path, interrupt_
         conn.execute(
             "insert into job_nodes(job_id, node_key, status) values ('job1', 'extract', 'pending')"
         )
-    conn.close()
 
     def hook(phase: str) -> None:
         if phase == interrupt_phase:
             raise RuntimeError(f"interrupted at {phase}")
 
-    conn = connect_sqlite(path)
-    with pytest.raises(RuntimeError, match=f"interrupted at {interrupt_phase}"):
+    with (
+        closing(connect_sqlite(path)) as conn,
+        pytest.raises(RuntimeError, match=f"interrupted at {interrupt_phase}"),
+    ):
         run_migrations(conn, MIGRATIONS, _phase_hook=hook)
-    conn.close()
 
     # Reopen normally.  init_db() reruns migrations from a clean state.
     init_db(path)

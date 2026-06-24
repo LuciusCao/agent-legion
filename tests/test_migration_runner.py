@@ -19,7 +19,6 @@ from server.app.db.schema import init_db
 def test_migrations_run_in_ascending_version_order(tmp_path: Path) -> None:
     """Guarantee 1: registered migrations run in ascending version order."""
     path = tmp_path / "order.sqlite"
-    conn = connect_sqlite(path)
     order: list[int] = []
 
     def make_migration(version: int, name: str) -> Migration:
@@ -35,13 +34,15 @@ def test_migrations_run_in_ascending_version_order(tmp_path: Path) -> None:
         make_migration(2, "second"),
     )
 
-    run_migrations(conn, migrations)
+    with closing(connect_sqlite(path)) as conn:
+        run_migrations(conn, migrations)
 
-    versions = [
-        row["version"]
-        for row in conn.execute("select version from schema_migrations order by version").fetchall()
-    ]
-    conn.close()
+        versions = [
+            row["version"]
+            for row in conn.execute(
+                "select version from schema_migrations order by version"
+            ).fetchall()
+        ]
 
     assert order == [1, 2, 3]
     assert versions == [1, 2, 3]
@@ -50,22 +51,23 @@ def test_migrations_run_in_ascending_version_order(tmp_path: Path) -> None:
 def test_migrations_are_idempotent(tmp_path: Path) -> None:
     """Guarantee 2: applying the registry twice is idempotent."""
     path = tmp_path / "idempotent.sqlite"
-    conn = connect_sqlite(path)
 
     def apply(conn: sqlite3.Connection) -> None:
         conn.execute("create table if not exists stable (id integer primary key)")
 
     migrations = (Migration(version=1, name="stable", apply=apply),)
 
-    run_migrations(conn, migrations)
-    run_migrations(conn, migrations)
+    with closing(connect_sqlite(path)) as conn:
+        run_migrations(conn, migrations)
+        run_migrations(conn, migrations)
 
-    versions = [
-        row["version"]
-        for row in conn.execute("select version from schema_migrations order by version").fetchall()
-    ]
-    count = conn.execute("select count(*) from stable").fetchone()[0]
-    conn.close()
+        versions = [
+            row["version"]
+            for row in conn.execute(
+                "select version from schema_migrations order by version"
+            ).fetchall()
+        ]
+        count = conn.execute("select count(*) from stable").fetchone()[0]
 
     assert versions == [1]
     assert count == 0
@@ -74,7 +76,6 @@ def test_migrations_are_idempotent(tmp_path: Path) -> None:
 def test_duplicate_migration_versions_fail_before_running(tmp_path: Path) -> None:
     """Guarantee 3: duplicate migration versions fail before any migration runs."""
     path = tmp_path / "dup.sqlite"
-    conn = connect_sqlite(path)
     ran: list[int] = []
 
     def apply(conn: sqlite3.Connection) -> None:
@@ -86,17 +87,18 @@ def test_duplicate_migration_versions_fail_before_running(tmp_path: Path) -> Non
         Migration(version=1, name="one_again", apply=apply),
     )
 
-    with pytest.raises(MigrationRegistryError, match="duplicate migration versions"):
+    with (
+        closing(connect_sqlite(path)) as conn,
+        pytest.raises(MigrationRegistryError, match="duplicate migration versions"),
+    ):
         run_migrations(conn, migrations)
 
-    conn.close()
     assert ran == []
 
 
 def test_failed_migration_rolls_back_and_does_not_record_version(tmp_path: Path) -> None:
     """Guarantee 4: a failed migration rolls back its changes and does not write history."""
     path = tmp_path / "rollback.sqlite"
-    conn = connect_sqlite(path)
 
     def apply_ok(conn: sqlite3.Connection) -> None:
         conn.execute("create table ok_table (id integer primary key)")
@@ -110,10 +112,11 @@ def test_failed_migration_rolls_back_and_does_not_record_version(tmp_path: Path)
         Migration(version=2, name="bad", apply=apply_bad),
     )
 
-    with pytest.raises(RuntimeError, match="intentional failure"):
+    with (
+        closing(connect_sqlite(path)) as conn,
+        pytest.raises(RuntimeError, match="intentional failure"),
+    ):
         run_migrations(conn, migrations)
-
-    conn.close()
 
     with closing(connect_sqlite(path)) as check, check:
         tables = {
@@ -135,51 +138,50 @@ def test_failed_migration_rolls_back_and_does_not_record_version(tmp_path: Path)
 def test_stored_version_with_different_name_raises_history_error(tmp_path: Path) -> None:
     """Guarantee 5: a stored version with a different name fails with a corruption error."""
     path = tmp_path / "history.sqlite"
-    conn = connect_sqlite(path)
-    conn.execute(
-        """
-        create table schema_migrations (
-          version integer primary key,
-          name text not null,
-          applied_at text not null default current_timestamp
+    with closing(connect_sqlite(path)) as conn, conn:
+        conn.execute(
+            """
+            create table schema_migrations (
+              version integer primary key,
+              name text not null,
+              applied_at text not null default current_timestamp
+            )
+            """
         )
-        """
-    )
-    conn.execute("insert into schema_migrations(version, name) values (1, 'legacy_name')")
-    conn.commit()
-    conn.close()
-
-    conn = connect_sqlite(path)
+        conn.execute("insert into schema_migrations(version, name) values (1, 'legacy_name')")
+        conn.commit()
 
     def apply(conn: sqlite3.Connection) -> None:
         pass
 
     migrations = (Migration(version=1, name="new_name", apply=apply),)
 
-    with pytest.raises(MigrationHistoryError, match="version 1"):
+    with (
+        closing(connect_sqlite(path)) as conn,
+        pytest.raises(MigrationHistoryError, match="version 1"),
+    ):
         run_migrations(conn, migrations)
-
-    conn.close()
 
 
 def test_runner_owns_transaction_per_migration(tmp_path: Path) -> None:
     """Guarantee 6: the runner owns one transaction per migration; callers need not begin one."""
     path = tmp_path / "transaction.sqlite"
-    conn = connect_sqlite(path)
 
-    assert not conn.in_transaction
+    with closing(connect_sqlite(path)) as conn:
+        assert not conn.in_transaction
 
-    def apply(conn: sqlite3.Connection) -> None:
-        conn.execute("create table tx_table (id integer primary key)")
+        def apply(conn: sqlite3.Connection) -> None:
+            conn.execute("create table tx_table (id integer primary key)")
 
-    run_migrations(conn, (Migration(version=1, name="tx", apply=apply),))
+        run_migrations(conn, (Migration(version=1, name="tx", apply=apply),))
 
-    assert not conn.in_transaction
-    versions = [
-        row["version"]
-        for row in conn.execute("select version from schema_migrations order by version").fetchall()
-    ]
-    conn.close()
+        assert not conn.in_transaction
+        versions = [
+            row["version"]
+            for row in conn.execute(
+                "select version from schema_migrations order by version"
+            ).fetchall()
+        ]
 
     assert versions == [1]
 
@@ -187,39 +189,36 @@ def test_runner_owns_transaction_per_migration(tmp_path: Path) -> None:
 def test_foreign_keys_restored_after_success(tmp_path: Path) -> None:
     """Guarantee 7a: foreign_keys is restored to ON after success."""
     path = tmp_path / "fk_success.sqlite"
-    conn = connect_sqlite(path)
-    conn.execute("pragma foreign_keys=OFF")
 
     def apply(conn: sqlite3.Connection) -> None:
         conn.execute("create table fk_ok (id integer primary key)")
 
-    run_migrations(conn, (Migration(version=1, name="fk_ok", apply=apply),))
+    with closing(connect_sqlite(path)) as conn:
+        conn.execute("pragma foreign_keys=OFF")
+        run_migrations(conn, (Migration(version=1, name="fk_ok", apply=apply),))
 
-    assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
-    conn.close()
+        assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
 
 
 def test_foreign_keys_restored_after_failure(tmp_path: Path) -> None:
     """Guarantee 7b: foreign_keys is restored to ON after failure."""
     path = tmp_path / "fk_fail.sqlite"
-    conn = connect_sqlite(path)
-    conn.execute("pragma foreign_keys=OFF")
 
     def apply_bad(conn: sqlite3.Connection) -> None:
         conn.execute("create table fk_partial (id integer primary key)")
         raise RuntimeError("boom")
 
-    with pytest.raises(RuntimeError, match="boom"):
-        run_migrations(conn, (Migration(version=1, name="fk_bad", apply=apply_bad),))
+    with closing(connect_sqlite(path)) as conn:
+        conn.execute("pragma foreign_keys=OFF")
+        with pytest.raises(RuntimeError, match="boom"):
+            run_migrations(conn, (Migration(version=1, name="fk_bad", apply=apply_bad),))
 
-    assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
-    conn.close()
+        assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
 
 
 def test_rebuilds_fk_runs_foreign_key_check_before_commit(tmp_path: Path) -> None:
     """Migrations that rebuild FK tables are checked before the history row is written."""
     path = tmp_path / "fk_check.sqlite"
-    conn = connect_sqlite(path)
 
     def apply_parent(conn: sqlite3.Connection) -> None:
         conn.execute("create table parent (id text primary key)")
@@ -238,14 +237,16 @@ def test_rebuilds_fk_runs_foreign_key_check_before_commit(tmp_path: Path) -> Non
         Migration(version=2, name="orphan", apply=apply_orphan, rebuilds_fk=True),
     )
 
-    with pytest.raises(MigrationError, match="foreign key check failed"):
-        run_migrations(conn, migrations)
+    with closing(connect_sqlite(path)) as conn:
+        with pytest.raises(MigrationError, match="foreign key check failed"):
+            run_migrations(conn, migrations)
 
-    versions = [
-        row["version"]
-        for row in conn.execute("select version from schema_migrations order by version").fetchall()
-    ]
-    conn.close()
+        versions = [
+            row["version"]
+            for row in conn.execute(
+                "select version from schema_migrations order by version"
+            ).fetchall()
+        ]
 
     assert versions == [1]
 
@@ -253,7 +254,6 @@ def test_rebuilds_fk_runs_foreign_key_check_before_commit(tmp_path: Path) -> Non
 def test_phase_hook_is_invoked_at_migration_boundaries(tmp_path: Path) -> None:
     """The internal _phase_hook is called around every applied migration."""
     path = tmp_path / "hook.sqlite"
-    conn = connect_sqlite(path)
 
     def apply_one(conn: sqlite3.Connection) -> None:
         conn.execute("create table t_one (id integer primary key)")
@@ -266,15 +266,15 @@ def test_phase_hook_is_invoked_at_migration_boundaries(tmp_path: Path) -> None:
     def hook(phase: str) -> None:
         phases.append(phase)
 
-    run_migrations(
-        conn,
-        (
-            Migration(version=1, name="one", apply=apply_one),
-            Migration(version=2, name="two", apply=apply_two),
-        ),
-        _phase_hook=hook,
-    )
-    conn.close()
+    with closing(connect_sqlite(path)) as conn:
+        run_migrations(
+            conn,
+            (
+                Migration(version=1, name="one", apply=apply_one),
+                Migration(version=2, name="two", apply=apply_two),
+            ),
+            _phase_hook=hook,
+        )
 
     assert phases == ["pre:one", "post:one", "pre:two", "post:two"]
 
@@ -284,7 +284,6 @@ def test_phase_hook_interruption_rolls_back_and_restores_foreign_keys(
 ) -> None:
     """Raising inside a phase hook aborts the active migration and leaves FKs ON."""
     path = tmp_path / "hook_interrupt.sqlite"
-    conn = connect_sqlite(path)
 
     def apply_ok(conn: sqlite3.Connection) -> None:
         conn.execute("create table ok_table (id integer primary key)")
@@ -301,18 +300,20 @@ def test_phase_hook_interruption_rolls_back_and_restores_foreign_keys(
         Migration(version=2, name="bad", apply=apply_bad),
     )
 
-    with pytest.raises(RuntimeError, match="interrupted by hook"):
-        run_migrations(conn, migrations, _phase_hook=hook)
+    with closing(connect_sqlite(path)) as conn:
+        with pytest.raises(RuntimeError, match="interrupted by hook"):
+            run_migrations(conn, migrations, _phase_hook=hook)
 
-    assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
-    tables = {
-        row["name"] for row in conn.execute("select name from sqlite_master where type='table'")
-    }
-    versions = [
-        row["version"]
-        for row in conn.execute("select version from schema_migrations order by version").fetchall()
-    ]
-    conn.close()
+        assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
+        tables = {
+            row["name"] for row in conn.execute("select name from sqlite_master where type='table'")
+        }
+        versions = [
+            row["version"]
+            for row in conn.execute(
+                "select version from schema_migrations order by version"
+            ).fetchall()
+        ]
 
     assert "ok_table" in tables
     assert "partial_table" not in tables
@@ -330,10 +331,11 @@ def test_v009_relative_path_storage_is_recorded_on_fresh_database(tmp_path: Path
     """A fresh database records the relative path storage rollout migration."""
     path = tmp_path / "fresh.sqlite"
     init_db(path)
-    conn = connect_sqlite(path)
 
-    row = conn.execute("select version, name from schema_migrations where version = 9").fetchone()
-    conn.close()
+    with closing(connect_sqlite(path)) as conn:
+        row = conn.execute(
+            "select version, name from schema_migrations where version = 9"
+        ).fetchone()
 
     assert row is not None
     assert row["version"] == 9
@@ -343,8 +345,7 @@ def test_v009_relative_path_storage_is_recorded_on_fresh_database(tmp_path: Path
 def test_v009_relative_path_storage_is_recorded_on_legacy_database(tmp_path: Path) -> None:
     """A legacy database already at V8 records V9 after running migrations."""
     path = tmp_path / "legacy.sqlite"
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.executescript(
             """
             create table schema_migrations (
@@ -362,10 +363,12 @@ def test_v009_relative_path_storage_is_recorded_on_legacy_database(tmp_path: Pat
             """
         )
 
-    run_migrations(conn, MIGRATIONS)
+    with closing(connect_sqlite(path)) as conn:
+        run_migrations(conn, MIGRATIONS)
 
-    row = conn.execute("select version, name from schema_migrations where version = 9").fetchone()
-    conn.close()
+        row = conn.execute(
+            "select version, name from schema_migrations where version = 9"
+        ).fetchone()
 
     assert row is not None
     assert row["version"] == 9
@@ -375,8 +378,7 @@ def test_v009_relative_path_storage_is_recorded_on_legacy_database(tmp_path: Pat
 def test_v011_skips_rebuild_when_schema_is_incomplete(tmp_path: Path) -> None:
     """V011 does not partially rebuild tables when a dependent table is incomplete."""
     path = tmp_path / "v011_partial.sqlite"
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.executescript(
             """
             create table schema_migrations (
@@ -455,17 +457,17 @@ def test_v011_skips_rebuild_when_schema_is_incomplete(tmp_path: Path) -> None:
             """
         )
 
-    run_migrations(conn, MIGRATIONS)
+    with closing(connect_sqlite(path)) as conn:
+        run_migrations(conn, MIGRATIONS)
 
-    # job_nodes was incomplete (missing stale_reason, error_message, started_at,
-    # finished_at, created_at), so V011 should skip the whole rebuild group.
-    # The job_node row must survive and there must be no dangling old tables.
-    assert conn.execute("select count(*) from job_nodes").fetchone()[0] == 1
-    assert conn.execute("select job_id from job_nodes").fetchone()[0] == "j1"
-    assert (
-        conn.execute("select 1 from sqlite_master where name like '%__v004_old%'").fetchone()
-        is None
-    )
-    fk_violations = conn.execute("pragma foreign_key_check").fetchall()
-    assert fk_violations == []
-    conn.close()
+        # job_nodes was incomplete (missing stale_reason, error_message, started_at,
+        # finished_at, created_at), so V011 should skip the whole rebuild group.
+        # The job_node row must survive and there must be no dangling old tables.
+        assert conn.execute("select count(*) from job_nodes").fetchone()[0] == 1
+        assert conn.execute("select job_id from job_nodes").fetchone()[0] == "j1"
+        assert (
+            conn.execute("select 1 from sqlite_master where name like '%__v004_old%'").fetchone()
+            is None
+        )
+        fk_violations = conn.execute("pragma foreign_key_check").fetchall()
+        assert fk_violations == []

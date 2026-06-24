@@ -1,4 +1,5 @@
 import sqlite3
+from contextlib import closing
 from pathlib import Path
 
 from server.app.db.connection import connect_sqlite
@@ -188,59 +189,58 @@ def test_v003_adds_missing_columns_and_preserves_rows(tmp_path: Path) -> None:
     conn = _create_legacy_fixture(path)
     conn.close()
 
-    conn = connect_sqlite(path)
-    run_migrations(conn, (V003,))
-    conn.close()
+    with closing(connect_sqlite(path)) as conn:
+        run_migrations(conn, (V003,))
 
-    conn = connect_sqlite(path)
-    for table, expected_columns in _V003_ADDED_COLUMNS.items():
-        columns = {row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()}
-        assert expected_columns.issubset(columns), (
-            f"{table} missing columns: {expected_columns - columns}"
-        )
+        for table, expected_columns in _V003_ADDED_COLUMNS.items():
+            columns = {
+                row["name"] for row in conn.execute(f"pragma table_info({table})").fetchall()
+            }
+            assert expected_columns.issubset(columns), (
+                f"{table} missing columns: {expected_columns - columns}"
+            )
 
-    video = conn.execute("select * from videos where id = 'v1'").fetchone()
-    assert video["content_type"] == "knowledge"
-    assert video["external_id"] == ""
-    assert video["knowledge_code"] == ""
-    assert video["question_id"] == ""
-    assert video["source_uuid"] == ""
-    assert video["packed"] == 0
-    assert video["interaction_stats_json"] == ""
-    assert video["interaction_review_status"] == ""
+        video = conn.execute("select * from videos where id = 'v1'").fetchone()
+        assert video["content_type"] == "knowledge"
+        assert video["external_id"] == ""
+        assert video["knowledge_code"] == ""
+        assert video["question_id"] == ""
+        assert video["source_uuid"] == ""
+        assert video["packed"] == 0
+        assert video["interaction_stats_json"] == ""
+        assert video["interaction_review_status"] == ""
 
-    package = conn.execute("select * from packages").fetchone()
-    assert package["video_count"] == 0
-    assert package["size_bytes"] == 0
-    assert package["name"] == ""
-    assert package["locked"] == 0
+        package = conn.execute("select * from packages").fetchone()
+        assert package["video_count"] == 0
+        assert package["size_bytes"] == 0
+        assert package["name"] == ""
+        assert package["locked"] == 0
 
-    workspace = conn.execute("select * from workspaces where id = 'default'").fetchone()
-    assert workspace["cms_config_json"] == "{}"
-    assert workspace["resource_config_json"] == "{}"
-    assert workspace["default_entity"] == "question"
-    assert workspace["intake_config_json"] == "{}"
-    assert workspace["description"] == ""
-    assert workspace["pipeline_config_json"] == "{}"
+        workspace = conn.execute("select * from workspaces where id = 'default'").fetchone()
+        assert workspace["cms_config_json"] == "{}"
+        assert workspace["resource_config_json"] == "{}"
+        assert workspace["default_entity"] == "question"
+        assert workspace["intake_config_json"] == "{}"
+        assert workspace["description"] == ""
+        assert workspace["pipeline_config_json"] == "{}"
 
-    batch = conn.execute("select * from job_batches").fetchone()
-    assert batch["workspace_id"] == "default"
+        batch = conn.execute("select * from job_batches").fetchone()
+        assert batch["workspace_id"] == "default"
 
-    job = conn.execute("select * from jobs").fetchone()
-    assert job["workspace_id"] == "default"
-    assert job["stem"] == ""
+        job = conn.execute("select * from jobs").fetchone()
+        assert job["workspace_id"] == "default"
+        assert job["stem"] == ""
 
-    node_run = conn.execute("select * from node_runs").fetchone()
-    assert node_run["run_dir"] == ""
-    assert node_run["session_dir"] == ""
+        node_run = conn.execute("select * from node_runs").fetchone()
+        assert node_run["run_dir"] == ""
+        assert node_run["session_dir"] == ""
 
-    # Values written before the migration must survive.
-    assert video["title"] == "Video 1"
-    assert package["path"] == "/tmp/p1.zip"
-    assert batch["workflow_key"] == "question_content"
-    assert job["source_id"] == "Q001"
-    assert node_run["status"] == "completed"
-    conn.close()
+        # Values written before the migration must survive.
+        assert video["title"] == "Video 1"
+        assert package["path"] == "/tmp/p1.zip"
+        assert batch["workflow_key"] == "question_content"
+        assert job["source_id"] == "Q001"
+        assert node_run["status"] == "completed"
 
 
 def test_v003_is_idempotent(tmp_path: Path) -> None:
@@ -248,17 +248,15 @@ def test_v003_is_idempotent(tmp_path: Path) -> None:
     conn = _create_legacy_fixture(path)
     conn.close()
 
-    conn = connect_sqlite(path)
-    run_migrations(conn, (V003,))
-    run_migrations(conn, (V003,))
-    conn.close()
+    with closing(connect_sqlite(path)) as conn:
+        run_migrations(conn, (V003,))
+        run_migrations(conn, (V003,))
 
-    conn = connect_sqlite(path)
-    for table in _V003_ADDED_COLUMNS:
-        rows = conn.execute(f"select name from pragma_table_info('{table}')").fetchall()
-        names = {row["name"] for row in rows}
-        assert _V003_ADDED_COLUMNS[table].issubset(names)
-    conn.close()
+    with closing(connect_sqlite(path)) as conn:
+        for table in _V003_ADDED_COLUMNS:
+            rows = conn.execute(f"select name from pragma_table_info('{table}')").fetchall()
+            names = {row["name"] for row in rows}
+            assert _V003_ADDED_COLUMNS[table].issubset(names)
 
 
 def test_fresh_and_legacy_db_schemas_are_equivalent(tmp_path: Path) -> None:
@@ -292,11 +290,11 @@ def test_init_db_records_all_migrations(tmp_path: Path) -> None:
     path = tmp_path / "fresh.sqlite"
     init_db(path)
 
-    conn = connect_sqlite(path)
-    versions = {
-        row["version"] for row in conn.execute("select version from schema_migrations").fetchall()
-    }
-    # V005 is applied by the one-time legacy finalizer, not by init_db.
-    expected = {m.version for m in MIGRATIONS if m.version != 5}
-    assert versions == expected, f"Missing migrations: {expected - versions}"
-    conn.close()
+    with closing(connect_sqlite(path)) as conn:
+        versions = {
+            row["version"]
+            for row in conn.execute("select version from schema_migrations").fetchall()
+        }
+        # V005 is applied by the one-time legacy finalizer, not by init_db.
+        expected = {m.version for m in MIGRATIONS if m.version != 5}
+        assert versions == expected, f"Missing migrations: {expected - versions}"

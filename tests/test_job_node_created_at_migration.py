@@ -11,8 +11,7 @@ EXPECTED_VERSIONS = [m.version for m in MIGRATIONS]
 def test_v008_adds_created_at_to_existing_job_nodes(tmp_path: Path) -> None:
     """A database created before V008 gets created_at backfilled on job_nodes."""
     path = tmp_path / "pre_v008.sqlite"
-    conn = connect_sqlite(path)
-    with conn:
+    with closing(connect_sqlite(path)) as conn, conn:
         conn.executescript(
             """
             create table workspaces (
@@ -76,7 +75,6 @@ def test_v008_adds_created_at_to_existing_job_nodes(tmp_path: Path) -> None:
               values ('job1', 'pending_node', 'pending');
             """
         )
-    conn.close()
 
     init_db(path)
 
