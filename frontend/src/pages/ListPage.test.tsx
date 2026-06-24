@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, act, waitFor } from '@testing-library/react'
+import { render, screen, act, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { ListPage } from './ListPage'
 import { useVideoStore } from '../stores/videoStore'
@@ -150,5 +150,118 @@ describe('ListPage', () => {
     ) as HTMLInputElement
     expect(search).toHaveValue('K001')
     expect(screen.queryByText('知识视频B')).not.toBeInTheDocument()
+  })
+
+  it('toggles select mode and shows batch toolbar', async () => {
+    mockApi.mockImplementation((path: string) => {
+      if (path === '/api/worker/status')
+        return Promise.resolve({ paused: false })
+      return Promise.resolve({ videos: [] })
+    })
+    render(
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <ListPage />
+      </MemoryRouter>
+    )
+    await act(async () => {})
+
+    act(() => {
+      screen.getByTitle('多选').click()
+    })
+
+    expect(screen.getByTitle('完成')).toBeInTheDocument()
+    expect(screen.getByText('已选择 0 项')).toBeInTheDocument()
+  })
+
+  it('opens add dialog', async () => {
+    mockApi.mockImplementation((path: string) => {
+      if (path === '/api/worker/status')
+        return Promise.resolve({ paused: false })
+      return Promise.resolve({ videos: [] })
+    })
+    render(
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <ListPage />
+      </MemoryRouter>
+    )
+    await act(async () => {})
+
+    act(() => {
+      screen.getByTitle('添加').click()
+    })
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('opens package history dialog', async () => {
+    mockApi.mockImplementation((path: string) => {
+      if (path === '/api/worker/status')
+        return Promise.resolve({ paused: false })
+      return Promise.resolve({ videos: [] })
+    })
+    render(
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <ListPage />
+      </MemoryRouter>
+    )
+    await act(async () => {})
+
+    act(() => {
+      screen.getByTitle('包历史').click()
+    })
+
+    expect(screen.getByRole('dialog')).toBeInTheDocument()
+  })
+
+  it('shows disconnected sse status', async () => {
+    useVideoStore.setState({ sseConnected: false })
+    mockApi.mockImplementation((path: string) => {
+      if (path === '/api/worker/status')
+        return Promise.resolve({ paused: false })
+      return Promise.resolve({ videos: [] })
+    })
+    render(
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <ListPage />
+      </MemoryRouter>
+    )
+    await act(async () => {})
+
+    expect(
+      screen.getByTitle('实时连接已断开，正在尝试重连…')
+    ).toBeInTheDocument()
+  })
+
+  it('updates search query on input', async () => {
+    mockApi.mockImplementation((path: string) => {
+      if (path === '/api/worker/status')
+        return Promise.resolve({ paused: false })
+      return Promise.resolve({ videos: [] })
+    })
+    render(
+      <MemoryRouter
+        future={{ v7_startTransition: true, v7_relativeSplatPath: true }}
+      >
+        <ListPage />
+      </MemoryRouter>
+    )
+    await act(async () => {})
+
+    const search = screen.getByPlaceholderText(
+      '搜索 ID、标题或内部记录'
+    ) as HTMLInputElement
+    fireEvent.change(search, { target: { value: 'K001' } })
+
+    await waitFor(() => {
+      expect(useVideoStore.getState().searchQuery).toBe('K001')
+    })
   })
 })
