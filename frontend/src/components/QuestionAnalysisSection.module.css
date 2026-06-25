@@ -1,0 +1,38 @@
+.analysisGroups {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.analysisGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.analysisStep {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.stepTitle {
+  font-size: 14px;
+  font-weight: 600;
+  color: #43474e;
+  margin: 0;
+}
+
+.stepTitle :global(p) {
+  margin: 0;
+}
+
+.pre {
+  background: #ffffff;
+  padding: 12px;
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 13px;
+  line-height: 1.5;
+  margin: 0;
+}

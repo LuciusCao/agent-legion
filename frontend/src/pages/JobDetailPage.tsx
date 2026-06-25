@@ -10,7 +10,7 @@ import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
 import { JobDetailActions } from '../components/JobDetailActions'
-import { JobReviewPanel } from '../components/JobReviewPanel'
+import { isReviewArtifact } from '../lib/reviewReport'
 import { useJobDetail } from './jobDetail/useJobDetail'
 
 export default function JobDetailPage() {
@@ -56,6 +56,11 @@ export default function JobDetailPage() {
     comprehensionRefreshKey,
     comprehensionCompleted,
   } = useMemo(() => deriveJobDetailPresentation(detail), [detail])
+
+  const reviewArtifactNames = useMemo(
+    () => detail?.artifacts?.filter(isReviewArtifact) ?? [],
+    [detail?.artifacts]
+  )
 
   const openArtifact = useCallback(
     async (name: string) => {
@@ -131,13 +136,8 @@ export default function JobDetailPage() {
               refreshKey={questionArtifactRefreshKey}
               comprehensionRefreshKey={comprehensionRefreshKey}
               comprehensionCompleted={comprehensionCompleted}
-            />
-          )}
-          {detail && (
-            <JobReviewPanel
-              jobId={jobId}
-              artifacts={detail.artifacts}
-              refreshKey={detail.job.updated_at}
+              reviewArtifactNames={reviewArtifactNames}
+              reviewRefreshKey={detail?.job.updated_at}
             />
           )}
         </div>
