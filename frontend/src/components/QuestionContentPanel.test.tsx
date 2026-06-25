@@ -510,32 +510,34 @@ describe('QuestionContentPanel', () => {
         options: [],
       }
 
-      mockFetchJobArtifact.mockResolvedValue(
-        makeQuestionsJson({ stem: '<p>What is x?</p>' })
-      )
+      try {
+        mockFetchJobArtifact.mockResolvedValue(
+          makeQuestionsJson({ stem: '<p>What is x?</p>' })
+        )
 
-      render(
-        <QuestionContentPanel
-          jobId="job1"
-          comprehensionCompleted={true}
-          reviewArtifactNames={[]}
-        />
-      )
+        render(
+          <QuestionContentPanel
+            jobId="job1"
+            comprehensionCompleted={true}
+            reviewArtifactNames={[]}
+          />
+        )
 
-      await waitFor(() => {
-        expect(screen.getByText('审题信息')).toBeInTheDocument()
-      })
+        await waitFor(() => {
+          expect(screen.getByText('审题信息')).toBeInTheDocument()
+        })
 
-      const chips = screen.getAllByRole('button')
-      fireEvent.click(chips[0])
+        const chips = screen.getAllByRole('button')
+        fireEvent.click(chips[0])
 
-      await waitFor(() => {
-        expect(screen.getByText('题干信息')).toBeInTheDocument()
-      })
-      expect(screen.queryByText('苏格拉底提问')).not.toBeInTheDocument()
-
-      mockComprehensionInfo.comprehension_data.key_info_list[0].question =
-        originalQuestion
+        await waitFor(() => {
+          expect(screen.getByText('题干信息')).toBeInTheDocument()
+        })
+        expect(screen.queryByText('苏格拉底提问')).not.toBeInTheDocument()
+      } finally {
+        mockComprehensionInfo.comprehension_data.key_info_list[0].question =
+          originalQuestion
+      }
     })
   })
 })
