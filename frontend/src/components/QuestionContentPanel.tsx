@@ -44,9 +44,14 @@ function extractAnswerItems(answer: unknown): string[] | null {
   return null
 }
 
-function SocraticQuestion({ question }: { question: KeyInfoItem['question'] }) {
-  const hasText = Boolean(question?.text)
-  const hasOptions = question?.options && question.options.length > 0
+function SocraticQuestion({
+  question,
+}: {
+  question?: KeyInfoItem['question']
+}) {
+  if (!question) return null
+  const hasText = Boolean(question.text)
+  const hasOptions = question.options.length > 0
   if (!hasText && !hasOptions) return null
 
   return (

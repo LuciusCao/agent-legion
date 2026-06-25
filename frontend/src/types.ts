@@ -255,7 +255,7 @@ export type KeyInfoItem = {
   key_info_id: string
   type: 'given' | 'hidden'
   content: KeyInfoContent
-  question: {
+  question?: {
     text: string
     options: SocraticOption[]
   }
