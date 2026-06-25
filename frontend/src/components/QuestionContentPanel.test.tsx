@@ -61,7 +61,13 @@ const mockComprehensionInfo = {
           text: '方程 $x^2+mx+1=0$',
           position: { start: 9, end: 28 },
         },
-        question: { text: '', options: [] },
+        question: {
+          text: '这个方程是什么类型？',
+          options: [
+            { label: 'A', text: '一元二次方程', is_correct: true },
+            { label: 'B', text: '一次方程', is_correct: false },
+          ],
+        },
         question_comprehension_ability: '识别方程结构',
       },
       {
@@ -72,7 +78,13 @@ const mockComprehensionInfo = {
           derivation: '有两个不等实根 $\\Leftrightarrow \\Delta>0$',
           position: { start: 44, end: 48 },
         },
-        question: { text: '', options: [] },
+        question: {
+          text: '有两个不等实根的条件是什么？',
+          options: [
+            { label: 'A', text: '$\\Delta > 0$', is_correct: true },
+            { label: 'B', text: '$\\Delta = 0$', is_correct: false },
+          ],
+        },
         question_comprehension_ability: '应用判别式',
       },
     ],
@@ -458,5 +470,72 @@ describe('QuestionContentPanel', () => {
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.getByText('审题信息')).toBeInTheDocument()
     expect(screen.getByText('常见审题错误')).toBeInTheDocument()
+  })
+
+  describe('socratic question', () => {
+    it('renders socratic question and options after selecting a key info chip', async () => {
+      mockFetchJobArtifact.mockResolvedValue(
+        makeQuestionsJson({ stem: '<p>What is x?</p>' })
+      )
+
+      render(
+        <QuestionContentPanel
+          jobId="job1"
+          comprehensionCompleted={true}
+          reviewArtifactNames={[]}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('审题信息')).toBeInTheDocument()
+      })
+
+      const chips = screen.getAllByRole('button')
+      fireEvent.click(chips[0])
+
+      await waitFor(() => {
+        expect(screen.getByText('苏格拉底提问')).toBeInTheDocument()
+      })
+      expect(screen.getByText('这个方程是什么类型？')).toBeInTheDocument()
+      expect(screen.getByText('A.')).toBeInTheDocument()
+      expect(screen.getByText('一元二次方程')).toBeInTheDocument()
+      expect(screen.getByText('✓ 正确')).toBeInTheDocument()
+    })
+
+    it('hides socratic section when question text and options are empty', async () => {
+      const originalQuestion =
+        mockComprehensionInfo.comprehension_data.key_info_list[0].question
+      mockComprehensionInfo.comprehension_data.key_info_list[0].question = {
+        text: '',
+        options: [],
+      }
+
+      mockFetchJobArtifact.mockResolvedValue(
+        makeQuestionsJson({ stem: '<p>What is x?</p>' })
+      )
+
+      render(
+        <QuestionContentPanel
+          jobId="job1"
+          comprehensionCompleted={true}
+          reviewArtifactNames={[]}
+        />
+      )
+
+      await waitFor(() => {
+        expect(screen.getByText('审题信息')).toBeInTheDocument()
+      })
+
+      const chips = screen.getAllByRole('button')
+      fireEvent.click(chips[0])
+
+      await waitFor(() => {
+        expect(screen.getByText('题干信息')).toBeInTheDocument()
+      })
+      expect(screen.queryByText('苏格拉底提问')).not.toBeInTheDocument()
+
+      mockComprehensionInfo.comprehension_data.key_info_list[0].question =
+        originalQuestion
+    })
   })
 })
