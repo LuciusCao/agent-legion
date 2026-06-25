@@ -1,57 +1,22 @@
 import { useMemo, useRef, useState } from 'react'
 import { useJobQuestion } from '../hooks/useJobQuestion'
 import { useJobComprehensionInfo } from '../hooks/useJobComprehensionInfo'
+import { useJobReviewReports } from '../hooks/useJobReviewReports'
 import { extractLatexParts, renderLatexInHtml } from '../lib/latex'
+import { sanitizeHtml } from '../lib/sanitizeHtml'
 import { buildHighlightedStemParts } from '../lib/questionHighlight'
 import { ErrorAnswerBadges } from './ErrorAnswerBadges'
 import { QuestionAnnotations } from './QuestionAnnotations'
 import { LaTeXText } from './LaTeXText'
 import { MaterialIcon } from './MaterialIcon'
+import {
+  ReviewChipStatus,
+  ReviewDetailStatus,
+  useReviewDecisionMaps,
+} from './QuestionContentReview'
+import { QuestionAnalysisSection } from './QuestionAnalysisSection'
 import styles from './QuestionContentPanel.module.css'
 import type { KeyInfoItem, PossibleErrorItem } from '../types'
-
-const ALLOWED_TAGS = new Set([
-  'P',
-  'BR',
-  'STRONG',
-  'EM',
-  'UL',
-  'OL',
-  'LI',
-  'SPAN',
-  'DIV',
-])
-
-function sanitizeHtml(html: string): string {
-  const parser = new DOMParser()
-  const doc = parser.parseFromString(html, 'text/html')
-  const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
-  const toRemove: Element[] = []
-  while (walker.nextNode()) {
-    const el = walker.currentNode as Element
-    if (!ALLOWED_TAGS.has(el.tagName)) {
-      toRemove.push(el)
-    }
-  }
-  toRemove.forEach((el) => {
-    const parent = el.parentNode
-    if (!parent) return
-    while (el.firstChild) {
-      parent.insertBefore(el.firstChild, el)
-    }
-    parent.removeChild(el)
-  })
-  const attrWalker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT)
-  while (attrWalker.nextNode()) {
-    const el = attrWalker.currentNode as Element
-    if (ALLOWED_TAGS.has(el.tagName)) {
-      while (el.attributes.length > 0) {
-        el.removeAttribute(el.attributes[0].name)
-      }
-    }
-  }
-  return doc.body.innerHTML
-}
 
 function extractAnswerItems(answer: unknown): string[] | null {
   if (answer == null) return null
@@ -78,22 +43,33 @@ function extractAnswerItems(answer: unknown): string[] | null {
   }
   return null
 }
+
 export interface QuestionContentPanelProps {
   jobId: string
   refreshKey?: string
   comprehensionRefreshKey?: string
   comprehensionCompleted?: boolean
+  reviewArtifactNames?: string[]
+  reviewRefreshKey?: string
 }
+
 export function QuestionContentPanel({
   jobId,
   refreshKey,
   comprehensionRefreshKey,
   comprehensionCompleted = false,
+  reviewArtifactNames = [],
+  reviewRefreshKey,
 }: QuestionContentPanelProps) {
   const { question, loading, error } = useJobQuestion(jobId, refreshKey)
   const { info: comprehensionInfo } = useJobComprehensionInfo(
     jobId,
     comprehensionRefreshKey ?? refreshKey
+  )
+  const { reports: reviewReports } = useJobReviewReports(
+    jobId,
+    reviewArtifactNames,
+    reviewRefreshKey
   )
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectedErrorId, setSelectedErrorId] = useState<string | null>(null)
@@ -107,6 +83,10 @@ export function QuestionContentPanel({
     () => comprehensionInfo?.comprehension_data?.possible_error_list ?? [],
     [comprehensionInfo]
   )
+
+  const { keyInfoDecisions, possibleErrorDecisions } =
+    useReviewDecisionMaps(reviewReports)
+
   const stem = question?.stem
   const stemHtml = useMemo(() => {
     if (!stem) return ''
@@ -157,12 +137,6 @@ export function QuestionContentPanel({
         })[c] as string
     )
   }
-
-  const analysis = question?.analysis
-  const analysisHtml = useMemo(() => {
-    if (!analysis || typeof analysis !== 'string') return ''
-    return renderLatexInHtml(sanitizeHtml(analysis))
-  }, [analysis])
 
   const analysisSteps = question?.analysis_steps
 
@@ -242,6 +216,7 @@ export function QuestionContentPanel({
             <div className={styles.chipRow}>
               {keyInfoList.map((info, idx) => {
                 const isSelected = selectedIds.has(info.key_info_id)
+                const decision = keyInfoDecisions.get(info.key_info_id)
                 const labelSource =
                   info.content.text ||
                   info.content.derived_text ||
@@ -268,6 +243,7 @@ export function QuestionContentPanel({
                   >
                     <span className={styles.chipIndex}>{idx + 1}</span>
                     <LaTeXText>{label}</LaTeXText>
+                    {decision && <ReviewChipStatus decision={decision} />}
                   </button>
                 )
               })}
@@ -283,6 +259,7 @@ export function QuestionContentPanel({
                   (e: PossibleErrorItem) =>
                     e.related_key_info_ids.includes(info.key_info_id)
                 )
+                const decision = keyInfoDecisions.get(info.key_info_id)
                 return (
                   <div key={info.key_info_id} className={styles.detailCard}>
                     <div className={styles.detailCardHeader}>
@@ -328,6 +305,7 @@ export function QuestionContentPanel({
                         </ul>
                       </div>
                     )}
+                    {decision && <ReviewDetailStatus decision={decision} />}
                   </div>
                 )
               })}
@@ -427,6 +405,7 @@ export function QuestionContentPanel({
             <div className={styles.chipRow}>
               {possibleErrorList.map((err, idx) => {
                 const isSelected = selectedErrorId === err.error_id
+                const decision = possibleErrorDecisions.get(err.error_id)
                 const labelSource = err.error_description || `易错点 ${idx + 1}`
                 const label =
                   labelSource.length > 12
@@ -447,6 +426,7 @@ export function QuestionContentPanel({
                   >
                     <span className={styles.chipIndex}>{idx + 1}</span>
                     <LaTeXText>{label}</LaTeXText>
+                    {decision && <ReviewChipStatus decision={decision} />}
                   </button>
                 )
               })}
@@ -495,6 +475,14 @@ export function QuestionContentPanel({
                     )}
                   </div>
                 </div>
+                {(() => {
+                  const decision = possibleErrorDecisions.get(
+                    selectedError.error_id
+                  )
+                  return decision ? (
+                    <ReviewDetailStatus decision={decision} />
+                  ) : null
+                })()}
               </div>
             </div>
           )}
@@ -505,41 +493,10 @@ export function QuestionContentPanel({
         (analysisSteps != null && analysisSteps.length > 0)) && (
         <section className={styles.card}>
           <h2 className={styles.sectionTitle}>解析</h2>
-          {analysisSteps != null && analysisSteps.length > 0 ? (
-            <div className={styles.analysisGroups}>
-              {analysisSteps.map((group, gidx) => (
-                <div key={gidx} className={styles.analysisGroup}>
-                  {group.map((step, sidx) => (
-                    <div key={sidx} className={styles.analysisStep}>
-                      {step.title ? (
-                        <h4
-                          className={styles.stepTitle}
-                          dangerouslySetInnerHTML={{
-                            __html: renderLatexInHtml(sanitizeHtml(step.title)),
-                          }}
-                        />
-                      ) : null}
-                      <div
-                        className={styles.richText}
-                        dangerouslySetInnerHTML={{
-                          __html: renderLatexInHtml(sanitizeHtml(step.content)),
-                        }}
-                      />
-                    </div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          ) : typeof question.analysis === 'string' ? (
-            <div
-              className={styles.richText}
-              dangerouslySetInnerHTML={{ __html: analysisHtml }}
-            />
-          ) : (
-            <pre className={styles.pre}>
-              {JSON.stringify(question.analysis, null, 2)}
-            </pre>
-          )}
+          <QuestionAnalysisSection
+            analysis={question.analysis}
+            analysisSteps={analysisSteps}
+          />
         </section>
       )}
     </div>
