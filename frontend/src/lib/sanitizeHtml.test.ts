@@ -26,4 +26,21 @@ describe('sanitizeHtml', () => {
     const html = '<img src="https://example.com/img.png" onerror="alert(1)">'
     expect(sanitizeHtml(html)).toBe('<img src="https://example.com/img.png">')
   })
+
+  it('removes img src with dangerous schemes', () => {
+    expect(sanitizeHtml('<img src="javascript:alert(1)">')).toBe('<img>')
+    expect(sanitizeHtml('<img src="data:image/svg+xml,<svg></svg>">')).toBe(
+      '<img>'
+    )
+  })
+
+  it('removes relative img src', () => {
+    expect(sanitizeHtml('<img src="image.png">')).toBe('<img>')
+  })
+
+  it('preserves absolute http/https img src', () => {
+    expect(sanitizeHtml('<img src="https://example.com/img.png">')).toBe(
+      '<img src="https://example.com/img.png">'
+    )
+  })
 })
