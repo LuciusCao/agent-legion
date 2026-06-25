@@ -202,7 +202,9 @@ class JobQueryService:
         workspace = self.job_db.get_workspace(workspace_id)
         if workspace is None:
             raise NotFoundError("Workspace not found")
-        workflow_key = str(workspace.get("default_workflow_key") or "question_content")
+        workflow_key = str(workspace.get("default_workflow_key") or "")
+        if not workflow_key:
+            raise NotFoundError("Workspace workflow is not set")
         definition = self.workflows.definition(workflow_key)
         counts = self.job_db.count_workspace_job_nodes_by_status(workspace_id, workflow_key)
         statuses = ["pending", "running", "completed", "failed", "stale"]

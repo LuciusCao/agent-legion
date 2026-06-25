@@ -8,11 +8,12 @@ from typing import Any
 from server.app.cms.client import get_token
 from server.app.cms.question import fetch_question_detail
 from server.app.executors.cancellation import check_cancellation
-from server.app.workflows.question_content import _effective_cms_config
+from server.app.workflows.cms_helpers import _effective_cms_config
 from server.app.workflows.question_fingerprint import (
     compute_question_fingerprint,
     extract_cms_fingerprint,
 )
+from server.app.workflows.skill_version_collection import collect_skill_versions
 
 logger = logging.getLogger(__name__)
 
@@ -202,6 +203,7 @@ def assemble_comprehension_info(
         "artifacts": {
             "comprehension_info.json": {"present": True},
         },
+        "skill_versions": collect_skill_versions(str(job.get("id", "")), context),
     }
 
     artifact_dir.mkdir(parents=True, exist_ok=True)

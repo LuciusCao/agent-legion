@@ -7,19 +7,19 @@ from server.app.services.workflow_catalog import WorkflowCatalogService
 
 @pytest.fixture
 def intake_service(job_db, settings):
-    job_db.create_workspace("default")
+    job_db.create_workspace("default", default_workflow_key="question_comprehension_info")
     return JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
 
 def test_job_intake_creates_direct_id_jobs(job_db, settings):
-    job_db.create_workspace("default")
+    job_db.create_workspace("default", default_workflow_key="question_comprehension_info")
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
     result = service.create_batch(
         "default",
         {
-            "workflow_key": "question_content",
-            "source_kind": "direct_ids",
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
             "entity": "question",
             "question_ids": ["Q1", "Q1", " Q2 "],
             "knowledge_codes": [],
@@ -29,8 +29,8 @@ def test_job_intake_creates_direct_id_jobs(job_db, settings):
     assert result["created_count"] == 2
     assert [job["source_id"] for job in result["jobs"]] == ["Q1", "Q2"]
     assert [job["storage_dir"] for job in result["jobs"]] == [
-        str(settings.jobs_dir / "default" / "default_question_content_Q1"),
-        str(settings.jobs_dir / "default" / "default_question_content_Q2"),
+        str(settings.jobs_dir / "default" / "default_question_comprehension_info_Q1"),
+        str(settings.jobs_dir / "default" / "default_question_comprehension_info_Q2"),
     ]
     for job in result["jobs"]:
         assert (settings.data_dir / "jobs" / "default" / job["id"]).is_dir()
@@ -41,8 +41,8 @@ def test_job_intake_rejects_missing_workspace(intake_service):
         intake_service.create_batch(
             "missing",
             {
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
             },
@@ -52,15 +52,15 @@ def test_job_intake_rejects_missing_workspace(intake_service):
 def test_job_intake_rejects_disabled_mode(intake_service):
     workspace = intake_service.job_db.get_workspace("default")
     workspace = intake_service.job_db.update_workspace(
-        workspace["id"], intake_config={"enabled_modes": ["by_knowledge"]}
+        workspace["id"], intake_config={"enabled_modes": ["batch_by_knowledge"]}
     )
 
     with pytest.raises(InvalidOperationError, match="Intake mode is disabled"):
         intake_service.create_batch(
             workspace["id"],
             {
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
             },
@@ -72,8 +72,8 @@ def test_job_intake_rejects_unsupported_entity_mode(intake_service):
         intake_service.create_batch(
             "default",
             {
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "entity": "unknown_entity",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
@@ -86,8 +86,8 @@ def test_job_intake_requires_at_least_one_value(intake_service):
         intake_service.create_batch(
             "default",
             {
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": [],
                 "knowledge_codes": [],
             },

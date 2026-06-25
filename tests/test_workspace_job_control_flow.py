@@ -208,7 +208,10 @@ def test_workspace_job_control_flow(tmp_path, monkeypatch):
     app.state.settings.executor_runtime.workflows.enabled = True
 
     with TestClient(app) as client:
-        ws_response = client.post("/api/workspaces", json={"name": "Control Flow"})
+        ws_response = client.post(
+            "/api/workspaces",
+            json={"name": "Control Flow", "default_workflow_key": "question_comprehension_info"},
+        )
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
 
@@ -360,7 +363,10 @@ def test_continue_job_rejects_terminal_states(tmp_path, monkeypatch):
     app.state.settings.executor_runtime.workflows.enabled = True
 
     with TestClient(app) as client:
-        ws_response = client.post("/api/workspaces", json={"name": "Terminal State"})
+        ws_response = client.post(
+            "/api/workspaces",
+            json={"name": "Terminal State", "default_workflow_key": "question_comprehension_info"},
+        )
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)
@@ -410,7 +416,10 @@ def test_continue_job_resumes_paused_state(tmp_path, monkeypatch):
     app.state.settings.executor_runtime.workflows.enabled = True
 
     with TestClient(app) as client:
-        ws_response = client.post("/api/workspaces", json={"name": "Paused State"})
+        ws_response = client.post(
+            "/api/workspaces",
+            json={"name": "Paused State", "default_workflow_key": "question_comprehension_info"},
+        )
         assert ws_response.status_code == 200
         workspace_id = ws_response.json()["workspace"]["id"]
         _configure_workspace(app.state.job_db, workspace_id, WORKFLOW_KEY)

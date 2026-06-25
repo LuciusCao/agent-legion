@@ -23,7 +23,9 @@ def workspace_service(job_db, settings, agent_manager):
 
 @pytest.fixture
 def workspace(workspace_service):
-    return workspace_service.create({"name": "Test", "default_workflow_key": "question_content"})
+    return workspace_service.create(
+        {"name": "Test", "default_workflow_key": "question_comprehension_info"}
+    )
 
 
 def test_workspace_configuration_missing_workspace_raises_domain_error(workspace_service):
@@ -102,7 +104,7 @@ def test_workspace_configuration_update_delegates(workspace_service, workspace):
 
 def test_workspace_configuration_settings_payload(workspace_service, workspace):
     payload = workspace_service.settings_payload(workspace["id"])
-    assert payload["workflowKey"] == "question_content"
+    assert payload["workflowKey"] == "question_comprehension_info"
 
 
 def test_executor_stats_report_configured_capacity_and_leases(
@@ -126,17 +128,17 @@ def test_executor_stats_report_configured_capacity_and_leases(
         ],
         bindings=[
             {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch",
                 "executor_id": "local-default",
             },
             {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "extract",
                 "executor_id": "pi-default",
             },
             {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "review",
                 "executor_id": "openclaw-main",
             },
@@ -147,7 +149,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
     jobs = []
     for i in range(3):
         job = job_db.create_job(
-            workflow_key="question_content",
+            workflow_key="question_comprehension_info",
             source_type="question",
             source_id=f"src-{i}",
             batch_id="",
@@ -172,7 +174,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
                 global_capacity=global_capacity,
                 workspace_id=workspace["id"],
                 job_id=jobs[i]["id"],
-                workflow_key="question_content",
+                workflow_key="question_comprehension_info",
                 node_key=node_key,
                 capability=capability,
                 local_node_limit=local_limit,
@@ -221,7 +223,7 @@ def test_executor_stats_does_not_consult_agent_status_manager(
         allocations=[{"executor_id": "local-default", "concurrency_limit": 2}],
         bindings=[
             {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch",
                 "executor_id": "local-default",
             }
@@ -254,14 +256,16 @@ def test_executor_stats_does_not_consult_agent_status_manager(
 def test_executor_stats_available_respects_global_usage_by_other_workspaces(
     workspace_service, workspace, job_db, settings
 ):
-    other = workspace_service.create({"name": "Other", "default_workflow_key": "question_content"})
+    other = workspace_service.create(
+        {"name": "Other", "default_workflow_key": "question_comprehension_info"}
+    )
     for workspace_id, limit in ((workspace["id"], 8), (other["id"], 16)):
         job_db.replace_workspace_executor_configuration(
             workspace_id,
             allocations=[{"executor_id": "local-default", "concurrency_limit": limit}],
             bindings=[
                 {
-                    "workflow_key": "question_content",
+                    "workflow_key": "question_comprehension_info",
                     "node_key": "fetch",
                     "executor_id": "local-default",
                 }
@@ -273,7 +277,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
     for i in range(16):
         owner = other
         job = job_db.create_job(
-            workflow_key="question_content",
+            workflow_key="question_comprehension_info",
             source_type="question",
             source_id=f"global-{i}",
             batch_id="",
@@ -287,7 +291,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
                 global_capacity=16,
                 workspace_id=owner["id"],
                 job_id=job["id"],
-                workflow_key="question_content",
+                workflow_key="question_comprehension_info",
                 node_key="fetch",
                 capability="fetch_questions",
                 local_node_limit=None,

@@ -110,7 +110,8 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
 
     async fetchWorkflowDefinition() {
       const { settings } = get()
-      const workflowKey = settings.workflowKey || 'question_content'
+      const workflowKey = settings.workflowKey
+      if (!workflowKey) return
       try {
         const result = await api<{ workflow: WorkflowDefinitionRecord }>(
           `/api/workflows/${encodeURIComponent(workflowKey)}`

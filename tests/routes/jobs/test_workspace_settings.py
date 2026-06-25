@@ -1,5 +1,7 @@
-def _create_workspace(client, name="default"):
-    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+    return client.post(
+        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
+    ).json()["workspace"]["id"]
 
 
 def test_create_workspace_stores_cms_config_override(client_factory):
@@ -8,6 +10,7 @@ def test_create_workspace_stores_cms_config_override(client_factory):
             "/api/workspaces",
             json={
                 "name": "Math V5",
+                "default_workflow_key": "question_comprehension_info",
                 "cms_config": {
                     "subject_id": "5",
                     "question_detail_url": "https://cms.example/question/detail?bank_version=v5",
@@ -26,7 +29,10 @@ def test_create_workspace_stores_cms_config_override(client_factory):
 
 def test_update_workspace_cms_config(client_factory):
     with client_factory(workflows_enabled=True) as c:
-        created = c.post("/api/workspaces", json={"name": "Math V5"}).json()
+        created = c.post(
+            "/api/workspaces",
+            json={"name": "Math V5", "default_workflow_key": "question_comprehension_info"},
+        ).json()
         workspace_id = created["workspace"]["id"]
         response = c.patch(
             f"/api/workspaces/{workspace_id}",
@@ -53,7 +59,10 @@ def test_update_workspace_cms_config(client_factory):
 
 def test_update_workspace_resource_config(client_factory):
     with client_factory(workflows_enabled=True) as c:
-        created = c.post("/api/workspaces", json={"name": "Math Resources"}).json()
+        created = c.post(
+            "/api/workspaces",
+            json={"name": "Math Resources", "default_workflow_key": "question_comprehension_info"},
+        ).json()
         workspace_id = created["workspace"]["id"]
         response = c.patch(
             f"/api/workspaces/{workspace_id}",

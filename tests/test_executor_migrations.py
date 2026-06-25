@@ -92,7 +92,7 @@ def test_legacy_database_migrates_to_latest_version(tmp_path: Path) -> None:
               id text primary key,
               name text not null,
               description text not null default '',
-              default_workflow_key text not null default 'question_content',
+              default_workflow_key text not null default 'question_comprehension_info',
               cms_config_json text not null default '{}',
               resource_config_json text not null default '{}',
               created_at text not null default current_timestamp,
@@ -191,7 +191,7 @@ def test_v004_migration_preserves_existing_data(tmp_path: Path) -> None:
               id text primary key,
               name text not null,
               description text not null default '',
-              default_workflow_key text not null default 'question_content',
+              default_workflow_key text not null default 'question_comprehension_info',
               cms_config_json text not null default '{}',
               resource_config_json text not null default '{}',
               created_at text not null default current_timestamp,
@@ -378,11 +378,11 @@ def test_v004_foreign_key_cascades(tmp_path: Path) -> None:
         conn.execute("insert into workspaces(id, name) values ('ws1', 'Workspace One')")
         conn.execute(
             "insert into job_batches(id, workspace_id, workflow_key, source_kind) "
-            "values ('batch1', 'ws1', 'question_content', 'mixed')"
+            "values ('batch1', 'ws1', 'question_comprehension_info', 'mixed')"
         )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
+            "values ('job1', 'ws1', 'question_comprehension_info', 'question_id', 'Q1')"
         )
         conn.execute(
             "insert into job_nodes(job_id, node_key, status) values ('job1', 'node_a', 'pending')"
@@ -393,7 +393,7 @@ def test_v004_foreign_key_cascades(tmp_path: Path) -> None:
         conn.execute(
             "insert into executor_leases(id, execution_id, executor_id, workspace_id, job_id, "
             "workflow_key, node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at) "
-            "values ('lease1', 'exec1', 'exec_a', 'ws1', 'job1', 'question_content', "
+            "values ('lease1', 'exec1', 'exec_a', 'ws1', 'job1', 'question_comprehension_info', "
             "'node_a', 1, 'active', '2024-01-01 10:00:00', '2024-01-01 10:00:00', "
             "'2024-01-01 11:00:00')"
         )

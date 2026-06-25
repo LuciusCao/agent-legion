@@ -9,7 +9,7 @@ from server.app.workflows.scheduler import (
 
 
 def _definition():
-    return load_workflow_definition(Path("config/workflows/question_content.yaml"))
+    return load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
 
 
 def test_find_ready_nodes_starts_with_root(tmp_path):
@@ -18,47 +18,43 @@ def test_find_ready_nodes_starts_with_root(tmp_path):
 
     ready = find_ready_nodes(definition, nodes, artifact_dir=tmp_path)
 
-    assert [node.key for node in ready] == ["fetch_question_context"]
+    assert [node.key for node in ready] == ["fetch_questions"]
 
 
 def test_find_ready_nodes_requires_inputs(tmp_path):
     definition = _definition()
     nodes = {key: "pending" for key in definition.nodes}
-    nodes["fetch_question_context"] = "completed"
+    nodes["fetch_questions"] = "completed"
 
     assert find_ready_nodes(definition, nodes, artifact_dir=tmp_path) == []
 
-    (tmp_path / "question_context.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "questions.json").write_text("{}", encoding="utf-8")
     ready = find_ready_nodes(definition, nodes, artifact_dir=tmp_path)
 
-    assert [node.key for node in ready] == ["question_understanding"]
+    assert [node.key for node in ready] == ["clean_and_parse"]
 
 
 def test_parallel_ready_nodes_after_understanding(tmp_path):
     definition = _definition()
     nodes = {key: "pending" for key in definition.nodes}
-    nodes["fetch_question_context"] = "completed"
-    nodes["question_understanding"] = "completed"
-    (tmp_path / "question_context.json").write_text("{}", encoding="utf-8")
-    (tmp_path / "understanding.json").write_text("{}", encoding="utf-8")
+    nodes["fetch_questions"] = "completed"
+    nodes["clean_and_parse"] = "completed"
+    (tmp_path / "questions.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "questions_parsed.json").write_text("{}", encoding="utf-8")
 
     ready = find_ready_nodes(definition, nodes, artifact_dir=tmp_path)
 
-    assert [node.key for node in ready] == [
-        "misconception_analysis",
-        "natural_language_reading",
-        "solution_decomposition",
-    ]
+    assert [node.key for node in ready] == ["generate_key_info"]
 
 
 def test_downstream_nodes_are_recursive():
     definition = _definition()
 
-    downstream = downstream_nodes(definition, "question_understanding")
+    downstream = downstream_nodes(definition, "clean_and_parse")
 
-    assert "misconception_analysis" in downstream
-    assert "interactive_template_generation" in downstream
-    assert "assemble_package" in downstream
+    assert "generate_key_info" in downstream
+    assert "review_possible_errors" in downstream
+    assert "assemble_comprehension_info" in downstream
 
 
 def test_summarize_job_status():

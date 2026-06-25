@@ -4,7 +4,6 @@ from pathlib import Path
 from server.app.workflows.definition import WorkflowDefinition, load_workflow_definition
 
 WORKFLOW_FILES = {
-    "question_content": "question_content.yaml",
     "question_comprehension_info": "question_comprehension_info.yaml",
 }
 

@@ -103,6 +103,7 @@ export async function fetchWorkspaces(): Promise<WorkspacesResponse> {
 
 export async function createWorkspace(
   name: string,
+  workflowKey: string,
   cmsConfig: Record<string, unknown> = {},
   resourceConfig: Record<string, unknown> = {},
   defaultEntity: string = 'question',
@@ -112,6 +113,7 @@ export async function createWorkspace(
     method: 'POST',
     body: JSON.stringify({
       name,
+      default_workflow_key: workflowKey,
       cms_config: cmsConfig,
       resource_config: resourceConfig,
       default_entity: defaultEntity,
@@ -160,7 +162,7 @@ export async function fetchWorkflows(): Promise<WorkflowsListResponse> {
 }
 
 export async function fetchWorkflowDefinition(
-  workflowKey = 'question_content'
+  workflowKey: string
 ): Promise<WorkflowResponse> {
   return api(`/api/workflows/${encodeURIComponent(workflowKey)}`)
 }
@@ -168,14 +170,8 @@ export async function fetchWorkflowDefinition(
 export async function createJobBatch(
   input: CreateJobBatchInput
 ): Promise<JobBatchResponse> {
-  const {
-    workspaceId,
-    workflowKey = 'question_content',
-    entity,
-    sourceKind,
-    inputField,
-    values,
-  } = input
+  const { workspaceId, workflowKey, entity, sourceKind, inputField, values } =
+    input
   const body: Record<string, unknown> = {
     workflow_key: workflowKey,
     source_kind: sourceKind,

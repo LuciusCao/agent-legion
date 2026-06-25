@@ -16,10 +16,12 @@ from tests.workers.helpers import _make_fake_skill
 
 def test_execute_local_node_run_persists_relative_log_path(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q200",
         batch_id="",
@@ -32,7 +34,7 @@ def test_execute_local_node_run_persists_relative_log_path(tmp_path):
         job_db=queries,
         definition=definition,
         job=job,
-        node_key="fetch_question_context",
+        node_key="fetch_questions",
         logs_dir=tmp_path / "logs",
         jobs_dir=tmp_path / "jobs",
     )
@@ -57,7 +59,9 @@ def test_execute_pi_node_run_persists_relative_paths(tmp_path, monkeypatch):
     _make_fake_skill(skill_dir)
 
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
         workflow_key="question_comprehension_info",

@@ -25,16 +25,18 @@ def _seed_database(db_path: Path) -> tuple[str, str, str]:
     jobs_dir = db_path.parent / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir)
-    workspace = queries.create_workspace(name="Drill", default_workflow_key="question_content")
+    workspace = queries.create_workspace(
+        name="Drill", default_workflow_key="question_comprehension_info"
+    )
     workspace_id = str(workspace["id"])
     batch = queries.create_batch(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_kind="mixed",
         source_payload={"ids": [1, 2]},
         workspace_id=workspace_id,
     )
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q1",
         batch_id=batch["id"],
@@ -47,7 +49,7 @@ def _seed_database(db_path: Path) -> tuple[str, str, str]:
         workspace_id=workspace_id,
         name="Drill",
         description="",
-        default_workflow_key="question_content",
+        default_workflow_key="question_comprehension_info",
         default_entity="question",
         resource_config={},
         intake_config={},
@@ -56,13 +58,17 @@ def _seed_database(db_path: Path) -> tuple[str, str, str]:
         ],
         node_bindings=[
             {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "fetch",
                 "executor_id": "local-default",
             },
         ],
         node_limits=[
-            {"workflow_key": "question_content", "node_key": "fetch", "concurrency_limit": 2},
+            {
+                "workflow_key": "question_comprehension_info",
+                "node_key": "fetch",
+                "concurrency_limit": 2,
+            },
         ],
     )
     return workspace_id, batch["id"], job_id

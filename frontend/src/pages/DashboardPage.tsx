@@ -108,7 +108,9 @@ export function DashboardPage() {
             <WorkspaceCard
               name={w.name}
               workflowLabel={
-                workspaceStats[w.id]?.workflow_label || w.default_workflow_key
+                workspaceStats[w.id]?.workflow_label ||
+                w.default_workflow_key ||
+                ''
               }
               jobStats={workspaceStats[w.id]?.job_stats || {}}
               executorStatus={

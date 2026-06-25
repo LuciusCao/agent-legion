@@ -76,7 +76,7 @@ describe('workspace api', () => {
           workspace: {
             id: 'math',
             name: 'Math',
-            default_workflow_key: 'question_content',
+            default_workflow_key: 'question_comprehension_info',
             default_entity: 'question',
             cms_config: { subject_id: '5' },
           },
@@ -106,7 +106,7 @@ describe('workspace api', () => {
           workspace: {
             id: 'math',
             name: 'Math',
-            default_workflow_key: 'question_content',
+            default_workflow_key: 'question_comprehension_info',
             default_entity: 'knowledge',
             intake_config: { enabled_modes: ['manual'] },
           },
@@ -141,7 +141,7 @@ describe('workspace api', () => {
           workspace: {
             id: 'physics',
             name: 'Physics',
-            default_workflow_key: 'question_content',
+            default_workflow_key: 'question_comprehension_info',
             default_entity: 'knowledge',
             cms_config: { subject_id: '3' },
             resource_config: { storage: 's3' },
@@ -153,6 +153,7 @@ describe('workspace api', () => {
 
     const workspace = await createWorkspace(
       'Physics',
+      'question_comprehension_info',
       { subject_id: '3' },
       { storage: 's3' },
       'knowledge',
@@ -169,6 +170,7 @@ describe('workspace api', () => {
         method: 'POST',
         body: JSON.stringify({
           name: 'Physics',
+          default_workflow_key: 'question_comprehension_info',
           cms_config: { subject_id: '3' },
           resource_config: { storage: 's3' },
           default_entity: 'knowledge',
@@ -194,7 +196,7 @@ describe('createJobBatch', () => {
 
     await createJobBatch({
       workspaceId: 'math',
-      workflowKey: 'question_content',
+      workflowKey: 'question_comprehension_info',
       sourceKind: 'question_ids',
       inputField: 'question_ids',
       values: ['q1', 'q2'],
@@ -205,7 +207,7 @@ describe('createJobBatch', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
-          workflow_key: 'question_content',
+          workflow_key: 'question_comprehension_info',
           source_kind: 'question_ids',
           question_ids: ['q1', 'q2'],
           knowledge_codes: [],
@@ -228,6 +230,7 @@ describe('createJobBatch', () => {
 
     await createJobBatch({
       workspaceId: 'math',
+      workflowKey: 'question_comprehension_info',
       sourceKind: 'knowledge_codes',
       inputField: 'knowledge_codes',
       values: ['k1'],
@@ -238,7 +241,7 @@ describe('createJobBatch', () => {
       expect.objectContaining({
         method: 'POST',
         body: JSON.stringify({
-          workflow_key: 'question_content',
+          workflow_key: 'question_comprehension_info',
           source_kind: 'knowledge_codes',
           knowledge_codes: ['k1'],
           question_ids: [],

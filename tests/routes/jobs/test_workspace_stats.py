@@ -1,5 +1,7 @@
-def _create_workspace(client, name="default"):
-    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+    return client.post(
+        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
+    ).json()["workspace"]["id"]
 
 
 def test_workspace_stats_hidden_when_workflows_disabled(client_factory):
@@ -28,7 +30,10 @@ def test_workspace_stats_returns_counts_and_executor_status(client_factory, monk
     )
 
     with client_factory(workflows_enabled=True) as c:
-        ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "Stats WS", "default_workflow_key": "question_comprehension_info"},
+        ).json()
         ws_id = ws["workspace"]["id"]
         c.post(
             f"/api/workspaces/{ws_id}/job-batches",
@@ -76,7 +81,10 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(
 
     with client_factory(workflows_enabled=True) as c:
         job_db = c.app.state.job_db
-        ws = c.post("/api/workspaces", json={"name": "Stats WS"}).json()
+        ws = c.post(
+            "/api/workspaces",
+            json={"name": "Stats WS", "default_workflow_key": "question_comprehension_info"},
+        ).json()
         ws_id = ws["workspace"]["id"]
         job_db.replace_workspace_executor_configuration(
             ws_id,
@@ -120,15 +128,15 @@ def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q401"],
                 "knowledge_codes": [],
             },
         ).json()
         job_id = created["jobs"][0]["id"]
         job_db = c.app.state.job_db
-        run = job_db.start_node_run(job_id, "question_understanding", ["echo", "hi"], "/dev/null")
+        run = job_db.start_node_run(job_id, "review_key_info", ["echo", "hi"], "/dev/null")
         job_db.finish_node_run(run["id"], "completed", 0, "")
         stats = c.get(f"/api/workspaces/{ws_id}/stats")
 
@@ -136,7 +144,7 @@ def test_workspace_stats_latest_run_reflects_node_runs(client_factory):
     body = stats.json()
     assert body["latest_run"] is not None
     assert body["latest_run"]["job_id"] == job_id
-    assert body["latest_run"]["node_key"] == "question_understanding"
+    assert body["latest_run"]["node_key"] == "review_key_info"
     assert body["latest_run"]["status"] == "completed"
 
 

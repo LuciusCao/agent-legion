@@ -30,7 +30,9 @@ def test_execute_node_once_runs_pi_node(tmp_path, monkeypatch):
     _make_fake_skill(skill_dir)
 
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
         workflow_key="question_comprehension_info",
@@ -83,7 +85,9 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
     _make_fake_skill(skill_dir)
 
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
         workflow_key="question_comprehension_info",
@@ -122,7 +126,9 @@ def test_execute_node_once_dispatches_agent_node(tmp_path, monkeypatch):
 
 def test_execute_node_once_raises_when_pi_runner_missing_for_agent_node(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
         workflow_key="question_comprehension_info",

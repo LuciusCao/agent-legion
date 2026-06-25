@@ -241,7 +241,7 @@ def test_finalizer_is_idempotent_after_v005(queries: JobQueries) -> None:
 def test_finalizer_does_not_bind_unallocated_agent_nodes(queries: JobQueries) -> None:
     workspace_id = queries.create_workspace(
         name="Unallocated Agent",
-        default_workflow_key="question_content",
+        default_workflow_key="question_comprehension_info",
     )["id"]
 
     with queries.connect() as conn:
@@ -251,10 +251,16 @@ def test_finalizer_does_not_bind_unallocated_agent_nodes(queries: JobQueries) ->
     assert bindings == [
         {
             "workspace_id": workspace_id,
-            "workflow_key": "question_content",
-            "node_key": "fetch",
+            "workflow_key": "question_comprehension_info",
+            "node_key": "local_a",
             "executor_id": "local-default",
-        }
+        },
+        {
+            "workspace_id": workspace_id,
+            "workflow_key": "question_comprehension_info",
+            "node_key": "local_b",
+            "executor_id": "local-default",
+        },
     ]
 
 

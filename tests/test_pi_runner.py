@@ -283,7 +283,9 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
 
     db_path = tmp_path / "jobs.sqlite"
     job_db = JobQueries(db_path, tmp_path / "jobs")
-    workspace = job_db.create_workspace("test_ws")
+    workspace = job_db.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     job = job_db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
@@ -343,7 +345,9 @@ def test_run_persists_skill_version(tmp_path, monkeypatch):
 
     db_path = tmp_path / "jobs.sqlite"
     job_db = JobQueries(db_path, tmp_path / "jobs")
-    workspace = job_db.create_workspace("test_ws")
+    workspace = job_db.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     job = job_db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
@@ -550,7 +554,9 @@ def test_run_persists_relative_paths_while_result_stays_absolute(tmp_path, monke
 
     db_path = tmp_path / "jobs.sqlite"
     job_db = JobQueries(db_path, tmp_path / "jobs")
-    workspace = job_db.create_workspace("test_ws")
+    workspace = job_db.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     job = job_db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",

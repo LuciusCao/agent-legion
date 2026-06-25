@@ -54,7 +54,10 @@ def test_workspace_sse_receives_jobs_created(tmp_path):
         client = httpx.Client(trust_env=False)
         try:
             # Create workspace first via API
-            resp = client.post(f"{base_url}/api/workspaces", json={"name": "sse-test"})
+            resp = client.post(
+                f"{base_url}/api/workspaces",
+                json={"name": "sse-test", "default_workflow_key": "question_comprehension_info"},
+            )
             assert resp.status_code == 200
             workspace_id = resp.json()["workspace"]["id"]
 
@@ -67,8 +70,8 @@ def test_workspace_sse_receives_jobs_created(tmp_path):
                 resp = client.post(
                     f"{base_url}/api/workspaces/{workspace_id}/job-batches",
                     json={
-                        "workflow_key": "question_content",
-                        "source_kind": "direct_ids",
+                        "workflow_key": "question_comprehension_info",
+                        "source_kind": "batch_by_ids",
                         "question_ids": ["q123"],
                         "knowledge_codes": [],
                     },

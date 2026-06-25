@@ -46,7 +46,6 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
 def _sample_workflows() -> list[WorkflowDefinition]:
     return [
         _sample_workflow(),
-        _legacy_unconfigured_agent_workflow(),
     ]
 
 
@@ -100,26 +99,6 @@ def _sample_workflow() -> WorkflowDefinition:
                 key="pi_a",
                 label="Pi A",
                 capability="pi_a",
-            ),
-        },
-    )
-
-
-def _legacy_unconfigured_agent_workflow() -> WorkflowDefinition:
-    return WorkflowDefinition(
-        key="question_content",
-        label="Question Content",
-        intake=WorkflowIntake(),
-        nodes={
-            "fetch": WorkflowNode(
-                key="fetch",
-                label="Fetch",
-                capability="local_a",
-            ),
-            "understand": WorkflowNode(
-                key="understand",
-                label="Understand",
-                capability="understand",
             ),
         },
     )

@@ -17,8 +17,8 @@ def _create_completed_job(client: TestClient, workspace_id: str, question_id: st
     created = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",
         json={
-            "workflow_key": "question_content",
-            "source_kind": "direct_ids",
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
             "question_ids": [question_id],
             "knowledge_codes": [],
         },
@@ -32,7 +32,7 @@ def _create_completed_job(client: TestClient, workspace_id: str, question_id: st
     record = job_db.get_job(job_id)
     storage_dir = resolve_job_dir(record, client.app.state.settings.jobs_dir)
     storage_dir.mkdir(parents=True, exist_ok=True)
-    (storage_dir / "question_context.json").write_text('{"question_id":"' + question_id + '"}')
+    (storage_dir / "questions.json").write_text('{"question_id":"' + question_id + '"}')
 
     # There is no public "force complete" endpoint, so mutate the job status
     # directly through the internal DB handle.
@@ -68,7 +68,10 @@ def _create_completed_video(client: TestClient, external_id: str) -> str:
 
 
 def test_list_workspace_packages_empty_for_new_workspace(workspace_client):
-    ws = workspace_client.post("/api/workspaces", json={"name": "Empty Packages WS"})
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Empty Packages WS", "default_workflow_key": "question_comprehension_info"},
+    )
     assert ws.status_code == 200
     ws_id = ws.json()["workspace"]["id"]
 
@@ -78,7 +81,10 @@ def test_list_workspace_packages_empty_for_new_workspace(workspace_client):
 
 
 def test_create_workspace_package_job_accepted(workspace_client):
-    ws = workspace_client.post("/api/workspaces", json={"name": "Package Job WS"})
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Package Job WS", "default_workflow_key": "question_comprehension_info"},
+    )
     ws_id = ws.json()["workspace"]["id"]
     job_id = _create_completed_job(workspace_client, ws_id, "Q101")
 
@@ -102,7 +108,10 @@ def test_create_workspace_package_job_accepted(workspace_client):
 
 
 def test_create_workspace_package_job_rejects_no_job_ids(workspace_client):
-    ws = workspace_client.post("/api/workspaces", json={"name": "No Jobs WS"})
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "No Jobs WS", "default_workflow_key": "question_comprehension_info"},
+    )
     ws_id = ws.json()["workspace"]["id"]
 
     response = workspace_client.post(
@@ -114,14 +123,17 @@ def test_create_workspace_package_job_rejects_no_job_ids(workspace_client):
 
 
 def test_create_workspace_package_job_rejects_incomplete_jobs(workspace_client):
-    ws = workspace_client.post("/api/workspaces", json={"name": "Incomplete WS"})
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Incomplete WS", "default_workflow_key": "question_comprehension_info"},
+    )
     ws_id = ws.json()["workspace"]["id"]
 
     created = workspace_client.post(
         f"/api/workspaces/{ws_id}/job-batches",
         json={
-            "workflow_key": "question_content",
-            "source_kind": "direct_ids",
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
             "question_ids": ["Q201"],
             "knowledge_codes": [],
         },
@@ -141,7 +153,10 @@ def test_create_workspace_package_job_rejects_incomplete_jobs(workspace_client):
 
 
 def test_workspace_package_download_rejects_path_traversal(workspace_client):
-    ws = workspace_client.post("/api/workspaces", json={"name": "Traverse WS"})
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Traverse WS", "default_workflow_key": "question_comprehension_info"},
+    )
     ws_id = ws.json()["workspace"]["id"]
 
     response = workspace_client.get(f"/api/workspaces/{ws_id}/packages/%2e%2e/%2e%2e/etc/passwd")
@@ -155,7 +170,10 @@ def test_workspace_package_download_rejects_path_traversal(workspace_client):
 
 
 def test_workspace_package_download_rejects_subdirectory(workspace_client, tmp_path):
-    ws = workspace_client.post("/api/workspaces", json={"name": "Subdir WS"})
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Subdir WS", "default_workflow_key": "question_comprehension_info"},
+    )
     ws_id = ws.json()["workspace"]["id"]
 
     packages_dir = workspace_client.app.state.settings.packages_dir / f"workspace-{ws_id}"
@@ -282,7 +300,10 @@ def test_delete_package_removes_relative_package(client, monkeypatch):
 
 
 def test_workspace_package_lifecycle_rename_lock_delete(workspace_client):
-    ws = workspace_client.post("/api/workspaces", json={"name": "Lifecycle WS"})
+    ws = workspace_client.post(
+        "/api/workspaces",
+        json={"name": "Lifecycle WS", "default_workflow_key": "question_comprehension_info"},
+    )
     ws_id = ws.json()["workspace"]["id"]
     job_id = _create_completed_job(workspace_client, ws_id, "Q501")
 

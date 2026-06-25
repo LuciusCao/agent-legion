@@ -212,7 +212,7 @@ def _make_worker(
 def test_same_node_submitted_once(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -251,7 +251,7 @@ def test_same_node_submitted_once(tmp_path: Path) -> None:
 def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -291,8 +291,12 @@ def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
 def test_workspace_limit_does_not_reserve_unused_global_capacity(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws_a = job_db.create_workspace("Workspace A")
-    ws_b = job_db.create_workspace("Workspace B")
+    ws_a = job_db.create_workspace(
+        "Workspace A", default_workflow_key="question_comprehension_info"
+    )
+    ws_b = job_db.create_workspace(
+        "Workspace B", default_workflow_key="question_comprehension_info"
+    )
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -331,7 +335,7 @@ def test_workspace_limit_does_not_reserve_unused_global_capacity(tmp_path: Path)
 def test_two_agent_nodes_share_workspace_executor_limit(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
     executor = FakeExecutor("pi-default", kind="pi", block_event=block_event)
@@ -368,8 +372,12 @@ def test_two_agent_nodes_share_workspace_executor_limit(tmp_path: Path) -> None:
 def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws_a = job_db.create_workspace("Workspace A")
-    ws_b = job_db.create_workspace("Workspace B")
+    ws_a = job_db.create_workspace(
+        "Workspace A", default_workflow_key="question_comprehension_info"
+    )
+    ws_b = job_db.create_workspace(
+        "Workspace B", default_workflow_key="question_comprehension_info"
+    )
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -410,8 +418,12 @@ def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
 def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws_a = job_db.create_workspace("Workspace A")
-    ws_b = job_db.create_workspace("Workspace B")
+    ws_a = job_db.create_workspace(
+        "Workspace A", default_workflow_key="question_comprehension_info"
+    )
+    ws_b = job_db.create_workspace(
+        "Workspace B", default_workflow_key="question_comprehension_info"
+    )
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -460,7 +472,7 @@ def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
 def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     executor = FakeExecutor("local-default")
     registry = _make_registry(
@@ -493,7 +505,7 @@ def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
 def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     block_event = threading.Event()
     executor = FakeExecutor("local-default", block_event=block_event)
@@ -553,7 +565,7 @@ def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -
 def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     job = job_db.create_job(
         workflow_key="test",
@@ -603,7 +615,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
 def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     executor = FakeExecutor("local-default", supports={"other"})
     registry = _make_registry(
@@ -638,7 +650,7 @@ def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
     """The lease repository itself rejects claims that would exceed global capacity."""
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
     executor = FakeExecutor("local-default")
     registry = _make_registry(

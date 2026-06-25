@@ -1,11 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { DashboardPage } from './DashboardPage'
 
 const fetchWorkspaces = vi.fn()
 const fetchWorkspaceStats = vi.fn()
 const fetchVideos = vi.fn()
+const createWorkspace = vi.fn()
 const deleteWorkspace = vi.fn()
 const navigate = vi.fn()
 
@@ -18,6 +19,7 @@ const mockWorkspaceStore = {
   workspaceStats: {} as Record<string, unknown>,
   fetchWorkspaces,
   fetchWorkspaceStats,
+  createWorkspace,
   deleteWorkspace,
 }
 
@@ -42,6 +44,12 @@ vi.mock('../stores/videoStore', () => ({
   useVideoStore: () => mockVideoStore,
 }))
 
+vi.mock('../api', () => ({
+  fetchWorkflows: vi.fn().mockResolvedValue({
+    workflows: [{ key: 'question_comprehension_info', label: '题目审题信息' }],
+  }),
+}))
+
 describe('DashboardPage', () => {
   beforeEach(() => {
     mockWorkspaceStore.workspaces = []
@@ -50,6 +58,7 @@ describe('DashboardPage', () => {
     fetchWorkspaces.mockClear()
     fetchWorkspaceStats.mockClear()
     fetchVideos.mockClear()
+    createWorkspace.mockClear()
     navigate.mockClear()
   })
 
@@ -71,13 +80,15 @@ describe('DashboardPage', () => {
     expect(screen.getByText('Video Hive')).toBeInTheDocument()
   })
 
-  it('opens create workspace dialog', () => {
+  it('opens create workspace dialog', async () => {
     render(
       <MemoryRouter>
         <DashboardPage />
       </MemoryRouter>
     )
-    fireEvent.click(screen.getByText('新建 Workspace'))
+    await act(async () => {
+      fireEvent.click(screen.getByText('新建 Workspace'))
+    })
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 

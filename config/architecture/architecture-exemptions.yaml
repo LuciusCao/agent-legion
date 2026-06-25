@@ -212,7 +212,7 @@ exemptions:
     reason: Task 8 of the align-workspace-packaging plan adds workspace package DELETE/PATCH helpers; the file will be split once the plan is complete.
     owner: workspace-executor
     remove_when: docs/superpowers/plans/2026-06-23-align-workspace-packaging.md#task-8
-    ceiling: 242
+    ceiling: 238
 
   - check: architecture.file_budget
     path: frontend/src/components/PackageHistoryDialog.tsx

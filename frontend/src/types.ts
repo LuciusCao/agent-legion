@@ -213,7 +213,7 @@ export type ArtifactResponse = ApiSchemas['ArtifactResponse']
 
 export type CreateJobBatchInput = {
   workspaceId: string
-  workflowKey?: string
+  workflowKey: string
   entity?: string
   sourceKind: string
   inputField: string

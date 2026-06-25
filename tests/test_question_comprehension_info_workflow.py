@@ -15,7 +15,9 @@ from server.app.workflows.question_comprehension_info import (
 def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     job = queries.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
@@ -59,7 +61,9 @@ def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
 def test_clean_and_parse_uses_md5_fallback_when_cms_fingerprint_missing(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     job = queries.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
@@ -103,7 +107,9 @@ def test_clean_and_parse_uses_md5_fallback_when_cms_fingerprint_missing(tmp_path
 def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     job = queries.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
@@ -195,10 +201,111 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
     assert manifest["artifacts"]["comprehension_info.json"]["present"] is True
 
 
+def test_assemble_comprehension_info_records_skill_versions(tmp_path):
+    db_path = tmp_path / "jobs.sqlite"
+    queries = JobQueries(db_path, tmp_path / "jobs")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    job = queries.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q100",
+        batch_id="batch1",
+        title="Question Q100",
+        node_keys=[
+            "fetch_questions",
+            "clean_and_parse",
+            "generate_key_info",
+            "assemble_comprehension_info",
+        ],
+        workspace_id=workspace["id"],
+    )
+    artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
+    (artifact_dir / "questions_parsed.json").write_text(
+        json.dumps(
+            {
+                "questions": [
+                    {
+                        "question_id": "Q100",
+                        "stem": "小明参加了14场象棋比赛，胜5场，负5场，其余为平局。",
+                        "options": [{"label": "A", "text": "4场"}],
+                        "answer": "A",
+                        "analysis": "",
+                        "fingerprint": None,
+                        "fingerprint_source": "missing",
+                        "fingerprint_missing": True,
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "key_info_reviewed.json").write_text(
+        json.dumps(
+            {
+                "question_id": "Q100",
+                "key_info_list": [
+                    {
+                        "key_info_id": "ki_001",
+                        "type": "given",
+                        "content": {"text": "14场", "position": {"start": 6, "end": 9}},
+                        "question": {
+                            "text": "小明一共参加了多少场比赛？",
+                            "options": [
+                                {"label": "A", "text": "14场", "is_correct": True},
+                                {"label": "B", "text": "5场", "is_correct": False},
+                            ],
+                        },
+                        "question_comprehension_ability": "information_locating",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "possible_errors_reviewed.json").write_text(
+        json.dumps(
+            {
+                "question_id": "Q100",
+                "possible_error_list": [
+                    {
+                        "error_id": "pe_001",
+                        "error_type": "question_comprehension",
+                        "error_answer": ["5"],
+                        "error_description": "学生只看了胜5场，直接选5。",
+                        "related_key_info_ids": ["ki_001"],
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    (artifact_dir / "comprehension_difficulty.json").write_text(
+        json.dumps({"question_id": "Q100", "comprehension_difficulty": 65}),
+        encoding="utf-8",
+    )
+
+    run = queries.start_node_run(
+        job["id"], "generate_key_info", ["pi"], "", skill_version="v1.2.2@abc123"
+    )
+    queries.finish_node_run(run["id"], "completed", 0, "")
+
+    assemble_comprehension_info(job, artifact_dir, {"job_db": queries})
+
+    manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["skill_versions"] == {"generate_key_info": "v1.2.2@abc123"}
+
+
 def test_clean_and_parse_md5_is_deterministic(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     job = queries.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
@@ -255,7 +362,9 @@ def test_clean_and_parse_md5_is_deterministic(tmp_path):
 def test_clean_and_parse_missing_fingerprint_when_no_content(tmp_path):
     db_path = tmp_path / "jobs.sqlite"
     queries = JobQueries(db_path, tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     job = queries.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",

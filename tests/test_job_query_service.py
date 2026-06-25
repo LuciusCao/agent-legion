@@ -23,15 +23,17 @@ def query_service(job_db, settings):
 
 
 def create_question_job(job_db, source_id: str) -> dict[str, Any]:
-    workspace = job_db.get_workspace("default") or job_db.create_workspace("default")
+    workspace = job_db.get_workspace("default") or job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content",
-        "direct_ids",
+        "question_comprehension_info",
+        "batch_by_ids",
         {"question_ids": [source_id]},
         workspace_id=workspace["id"],
     )
     job: dict[str, Any] = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id=source_id,
         batch_id=batch["id"],
@@ -43,7 +45,7 @@ def create_question_job(job_db, source_id: str) -> dict[str, Any]:
 
 
 def test_job_query_service_lists_jobs(query_service, job_db):
-    job_db.create_workspace("default")
+    job_db.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = query_service.list_jobs("default")
     assert isinstance(job, list)
 
@@ -93,12 +95,17 @@ def test_list_jobs_loads_nodes_in_one_query(query_service, job_db, monkeypatch):
 
 
 def test_job_query_service_detail_enriches_nodes(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -121,12 +128,17 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
 def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
     query_service, job_db, settings
 ):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -145,12 +157,17 @@ def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
 
 
 def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -166,12 +183,12 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
         ],
         bindings=[
             {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "question_understanding",
                 "executor_id": "pi-default",
             },
             {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_package",
                 "executor_id": "local-default",
             },
@@ -189,12 +206,17 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
 
 
 def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -210,13 +232,13 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
         ],
         bindings=[
             {
-                "workflow_key": "question_content",
+                "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_package",
                 "executor_id": "local-default",
             },
             {
                 "workflow_key": "question_comprehension_info",
-                "node_key": "assemble_package",
+                "node_key": "assemble_comprehension_info",
                 "executor_id": "pi-default",
             },
         ],
@@ -231,12 +253,17 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
 
 
 def test_workspace_run_service_filters_runs(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -253,9 +280,14 @@ def test_workspace_run_service_filters_runs(query_service, job_db):
 
 
 def test_workspace_dag_preserves_status_buckets(query_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
 
     payload = query_service.workspace_dag(workspace["id"])
@@ -269,12 +301,17 @@ def test_workspace_dag_preserves_status_buckets(query_service, job_db):
 
 
 def _create_job_with_node_run(job_db, settings, workspace_id: str = "default") -> dict[str, Any]:
-    workspace = job_db.create_workspace(workspace_id)
+    workspace = job_db.create_workspace(
+        workspace_id, default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job: dict[str, Any] = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
@@ -352,12 +389,17 @@ def test_workspace_runs_resolves_run_paths_absolute(query_service, job_db, setti
 
 
 def test_detail_preserves_empty_optional_run_dirs(query_service, job_db, settings):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],

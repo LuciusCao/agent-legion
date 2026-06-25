@@ -69,7 +69,7 @@ def test_v004_interruption_at_phase_boundary_recovers(tmp_path: Path, interrupt_
     with closing(connect_sqlite(path)) as conn, conn:
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values ('job1', 'ws1', 'question_content', 'question_id', 'Q1')"
+            "values ('job1', 'ws1', 'question_comprehension_info', 'question_id', 'Q1')"
         )
         conn.execute(
             "insert into job_nodes(job_id, node_key, status) values ('job1', 'extract', 'pending')"

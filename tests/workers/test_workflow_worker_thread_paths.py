@@ -14,7 +14,7 @@ from tests.workers.helpers import (
 def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
     definition = _make_definition([_local_node("fetch")])
 

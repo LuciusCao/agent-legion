@@ -15,7 +15,6 @@ For example:
 
 ```text
 ~/.agents/skills/agent-legion/question_comprehension_info/generate_key_info/
-~/.agents/skills/agent-legion/question_content/question_understanding/
 ```
 
 ## Migration

@@ -17,9 +17,11 @@ def test_job_query_connections_enable_sqlite_safety_pragmas(tmp_path: Path) -> N
 
 def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
-    workspace = db.create_workspace("Cascade Workspace")
+    workspace = db.create_workspace(
+        "Cascade Workspace", default_workflow_key="question_comprehension_info"
+    )
     job = db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q-CASCADE",
         batch_id="",
@@ -50,9 +52,11 @@ def _looks_like_timestamp(value: str) -> bool:
 
 def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
-    workspace = db.create_workspace("Created At Workspace")
+    workspace = db.create_workspace(
+        "Created At Workspace", default_workflow_key="question_comprehension_info"
+    )
     job = db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q-CREATED",
         batch_id="",
@@ -63,7 +67,7 @@ def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
 
     assert (
         job["storage_dir"]
-        == "jobs/created_at_workspace/created_at_workspace_question_content_Q-CREATED"
+        == "jobs/created_at_workspace/created_at_workspace_question_comprehension_info_Q-CREATED"
     )
     assert (tmp_path / "jobs" / "created_at_workspace" / job["id"]).is_dir()
 
@@ -74,9 +78,11 @@ def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
 
 def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
-    workspace = db.create_workspace("Rerun Workspace")
+    workspace = db.create_workspace(
+        "Rerun Workspace", default_workflow_key="question_comprehension_info"
+    )
     job = db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q-RERUN",
         batch_id="",
@@ -118,7 +124,9 @@ def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
 
 def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
-    workspace = db.create_workspace("Target Workspace")
+    workspace = db.create_workspace(
+        "Target Workspace", default_workflow_key="question_comprehension_info"
+    )
     job = db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question_id",
@@ -151,7 +159,9 @@ def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
 
 def test_pause_and_resume_job(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
-    workspace = db.create_workspace("Pause Workspace")
+    workspace = db.create_workspace(
+        "Pause Workspace", default_workflow_key="question_comprehension_info"
+    )
     job = db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question_id",
@@ -179,7 +189,9 @@ def test_pause_and_resume_job(tmp_path: Path) -> None:
 
 def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
-    workspace = db.create_workspace("Continue Workspace")
+    workspace = db.create_workspace(
+        "Continue Workspace", default_workflow_key="question_comprehension_info"
+    )
     job = db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question_id",
@@ -213,7 +225,9 @@ def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
 
 def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
-    workspace = db.create_workspace("Validation Workspace")
+    workspace = db.create_workspace(
+        "Validation Workspace", default_workflow_key="question_comprehension_info"
+    )
     job = db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question_id",
@@ -243,7 +257,9 @@ def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: P
 
 def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
     db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
-    workspace = db.create_workspace("UpdatedAt Workspace")
+    workspace = db.create_workspace(
+        "UpdatedAt Workspace", default_workflow_key="question_comprehension_info"
+    )
     job = db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question_id",

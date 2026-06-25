@@ -186,7 +186,7 @@ def test_workspace_package_falls_back_to_jobs_base_dir_when_storage_dir_empty(tm
         {
             "id": "job_2",
             "source_id": "S2",
-            "workflow_key": "question_content",
+            "workflow_key": "question_comprehension_info",
             "status": "completed",
             "storage_dir": "",
         }
@@ -201,7 +201,7 @@ def test_workspace_package_falls_back_to_jobs_base_dir_when_storage_dir_empty(tm
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
 
     assert "job_2/result.json" in names
-    assert manifest["jobs"][0]["workflow_key"] == "question_content"
+    assert manifest["jobs"][0]["workflow_key"] == "question_comprehension_info"
 
 
 def test_workspace_package_skips_job_when_directory_missing(tmp_path):
@@ -213,7 +213,7 @@ def test_workspace_package_skips_job_when_directory_missing(tmp_path):
         {
             "id": "job_3",
             "source_id": "S3",
-            "workflow_key": "question_content",
+            "workflow_key": "question_comprehension_info",
             "status": "completed",
             "storage_dir": "",
         }
@@ -305,7 +305,7 @@ def test_workspace_package_includes_only_whitelisted_artifacts(tmp_path):
         {
             "id": "job_1",
             "source_id": "S1",
-            "workflow_key": "question_content",
+            "workflow_key": "question_comprehension_info",
             "status": "completed",
         }
     ]
@@ -331,4 +331,4 @@ def test_workspace_package_includes_only_whitelisted_artifacts(tmp_path):
         manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
         assert manifest["jobs"][0]["id"] == "job_1"
         assert manifest["jobs"][0]["source_id"] == "S1"
-        assert manifest["jobs"][0]["workflow_key"] == "question_content"
+        assert manifest["jobs"][0]["workflow_key"] == "question_comprehension_info"

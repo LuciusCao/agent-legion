@@ -53,7 +53,7 @@ describe('workspaceStore', () => {
       {
         id: 'ws1',
         name: 'Test Workspace',
-        default_workflow_key: 'question_content',
+        default_workflow_key: 'question_comprehension_info',
         default_entity: 'question',
       },
     ]
@@ -79,14 +79,14 @@ describe('workspaceStore', () => {
     const ws: WorkspaceRecord = {
       id: 'ws2',
       name: 'New Workspace',
-      default_workflow_key: 'question_content',
+      default_workflow_key: 'question_comprehension_info',
       default_entity: 'question',
     }
     mockCreateWorkspace.mockResolvedValueOnce(ws)
 
     const result = await useWorkspaceStore
       .getState()
-      .createWorkspace('New Workspace')
+      .createWorkspace('New Workspace', 'question_comprehension_info')
 
     expect(result).toEqual(ws)
     expect(useWorkspaceStore.getState().workspaces).toContainEqual(ws)
@@ -97,7 +97,9 @@ describe('workspaceStore', () => {
     mockCreateWorkspace.mockRejectedValueOnce(new Error('create failed'))
 
     await expect(
-      useWorkspaceStore.getState().createWorkspace('Bad Workspace')
+      useWorkspaceStore
+        .getState()
+        .createWorkspace('Bad Workspace', 'question_comprehension_info')
     ).rejects.toThrow('create failed')
     expect(useWorkspaceStore.getState().error).toBe('Error: create failed')
   })
@@ -106,13 +108,13 @@ describe('workspaceStore', () => {
     const existing: WorkspaceRecord = {
       id: 'ws1',
       name: 'Old',
-      default_workflow_key: 'question_content',
+      default_workflow_key: 'question_comprehension_info',
       default_entity: 'question',
     }
     const updated: WorkspaceRecord = {
       id: 'ws1',
       name: 'Old',
-      default_workflow_key: 'question_content',
+      default_workflow_key: 'question_comprehension_info',
       default_entity: 'question',
       cms_config: { subject_id: '5' },
     }
@@ -137,13 +139,13 @@ describe('workspaceStore', () => {
         {
           id: 'ws1',
           name: 'A',
-          default_workflow_key: 'question_content',
+          default_workflow_key: 'question_comprehension_info',
           default_entity: 'question',
         },
         {
           id: 'ws2',
           name: 'B',
-          default_workflow_key: 'question_content',
+          default_workflow_key: 'question_comprehension_info',
           default_entity: 'question',
         },
       ],
@@ -170,7 +172,7 @@ describe('workspaceStore', () => {
     const ws: WorkspaceRecord = {
       id: 'ws1',
       name: 'Current',
-      default_workflow_key: 'question_content',
+      default_workflow_key: 'question_comprehension_info',
       default_entity: 'question',
     }
     useWorkspaceStore.getState().setCurrentWorkspace(ws)
@@ -181,7 +183,7 @@ describe('workspaceStore', () => {
     const stats: WorkspaceStats = {
       workspace_id: 'ws1',
       name: 'Test Workspace',
-      workflow_key: 'question_content',
+      workflow_key: 'question_comprehension_info',
       workflow_label: 'Question Content',
       job_stats: {
         total_jobs: 10,

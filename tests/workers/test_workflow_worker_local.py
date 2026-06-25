@@ -21,12 +21,14 @@ from server.app.workflows.executor import (
 from tests.workers.helpers import _make_test_definition
 
 
-def test_execute_fetch_question_context_writes_artifact(tmp_path):
+def test_execute_fetch_questions_writes_artifact(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q100",
         batch_id="",
@@ -39,33 +41,37 @@ def test_execute_fetch_question_context_writes_artifact(tmp_path):
         job_db=queries,
         definition=definition,
         job=job,
-        node_key="fetch_question_context",
+        node_key="fetch_questions",
         logs_dir=tmp_path / "logs",
         jobs_dir=tmp_path / "jobs",
     )
 
     assert completed is True
-    artifact = tmp_path / job["storage_dir"] / "question_context.json"
+    artifact = tmp_path / job["storage_dir"] / "questions.json"
     assert json.loads(artifact.read_text(encoding="utf-8")) == {
-        "question_id": "Q100",
-        "title": "Question Q100",
-        "source_type": "question_id",
-        "normalized": {},
-        "cms_payload": None,
+        "questions": [
+            {
+                "question_id": "Q100",
+                "title": "Question Q100",
+                "normalized": {},
+                "cms_payload": None,
+            }
+        ]
     }
-    assert queries.get_job_node(job["id"], "fetch_question_context")["status"] == "completed"
+    assert queries.get_job_node(job["id"], "fetch_questions")["status"] == "completed"
 
 
-def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monkeypatch):
+def test_execute_fetch_questions_uses_cms_question_detail(tmp_path, monkeypatch):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     workspace = queries.create_workspace(
         "Math V5",
         cms_config={"question_detail_url": "https://cms.example/question/detail?subject_id=5"},
+        default_workflow_key="question_comprehension_info",
     )
     batch = queries.create_batch(
-        "question_content",
-        "question_ids",
+        "question_comprehension_info",
+        "batch_by_ids",
         {
             "question_ids": ["Q100"],
             "cms_config": {
@@ -75,7 +81,7 @@ def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monke
         workspace_id=workspace["id"],
     )
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q100",
         batch_id=batch["id"],
@@ -95,18 +101,18 @@ def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monke
         )
 
     monkeypatch.setattr(
-        "server.app.workflows.question_content.fetch_question_detail",
+        "server.app.workflows.question_comprehension_info.fetch_question_detail",
         fake_fetch_question_detail,
     )
     monkeypatch.setattr(
-        "server.app.workflows.question_content.get_token", lambda env, config: "token"
+        "server.app.workflows.question_comprehension_info.get_token", lambda env, config: "token"
     )
 
     completed = execute_node_once(
         job_db=queries,
         definition=definition,
         job=job,
-        node_key="fetch_question_context",
+        node_key="fetch_questions",
         logs_dir=tmp_path / "logs",
         settings_config={"cms": {"env": "prod"}},
         jobs_dir=tmp_path / "jobs",
@@ -120,19 +126,22 @@ def test_execute_fetch_question_context_uses_cms_question_detail(tmp_path, monke
             "token": "token",
         }
     ]
-    artifact = tmp_path / job["storage_dir"] / "question_context.json"
+    artifact = tmp_path / job["storage_dir"] / "questions.json"
     assert json.loads(artifact.read_text(encoding="utf-8")) == {
-        "question_id": "Q100",
-        "title": "CMS 题目一",
-        "source_type": "question_id",
-        "normalized": {"stem": "1 + 1 = ?"},
-        "cms_payload": {"data": {"uuid": "Q100", "title": "CMS 题目一"}},
+        "questions": [
+            {
+                "question_id": "Q100",
+                "title": "CMS 题目一",
+                "normalized": {"stem": "1 + 1 = ?"},
+                "cms_payload": {"data": {"uuid": "Q100", "title": "CMS 题目一"}},
+            }
+        ]
     }
 
 
-def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, monkeypatch):
+def test_fetch_questions_uses_question_detail_resource_binding(tmp_path, monkeypatch):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     workspace = queries.create_workspace(
         "Resource Math",
         resource_config={
@@ -146,15 +155,16 @@ def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, 
                 }
             }
         },
+        default_workflow_key="question_comprehension_info",
     )
     batch = queries.create_batch(
-        "question_content",
-        "question_ids",
+        "question_comprehension_info",
+        "batch_by_ids",
         {"question_ids": ["Q200"]},
         workspace_id=workspace["id"],
     )
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q200",
         batch_id=batch["id"],
@@ -174,18 +184,18 @@ def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, 
         )
 
     monkeypatch.setattr(
-        "server.app.workflows.question_content.fetch_question_detail",
+        "server.app.workflows.question_comprehension_info.fetch_question_detail",
         fake_fetch_question_detail,
     )
     monkeypatch.setattr(
-        "server.app.workflows.question_content.get_token", lambda env, config: "token"
+        "server.app.workflows.question_comprehension_info.get_token", lambda env, config: "token"
     )
 
     completed = execute_node_once(
         job_db=queries,
         definition=definition,
         job=job,
-        node_key="fetch_question_context",
+        node_key="fetch_questions",
         logs_dir=tmp_path / "logs",
         settings_config={
             "cms": {"env": "prod"},
@@ -210,10 +220,12 @@ def test_fetch_question_context_uses_question_detail_resource_binding(tmp_path, 
 
 def test_process_ready_workflow_node_runs_root(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q101",
         batch_id="",
@@ -230,15 +242,17 @@ def test_process_ready_workflow_node_runs_root(tmp_path):
     )
 
     assert processed is True
-    assert (tmp_path / job["storage_dir"] / "question_context.json").exists()
+    assert (tmp_path / job["storage_dir"] / "questions.json").exists()
 
 
 def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
-    workspace = queries.create_workspace("test_ws")
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question_id",
         source_id="Q102",
         batch_id="",
@@ -254,7 +268,7 @@ def test_execute_local_node_once_fails_when_handler_missing(tmp_path):
             job_db=queries,
             definition=definition,
             job=job,
-            node_key="assemble_package",
+            node_key="generate_key_info",
             logs_dir=tmp_path / "logs",
             jobs_dir=tmp_path / "jobs",
         )
