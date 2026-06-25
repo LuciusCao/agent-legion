@@ -1,7 +1,6 @@
 * {
   box-sizing: border-box;
 }
-
 body {
   margin: 0;
   font-family:
@@ -15,7 +14,6 @@ body {
   color: #1a1c1e;
   background: #ffffff;
 }
-
 :root {
   --status-running-bg: #dbeafe;
   --status-running-text: #1d4ed8;
@@ -662,4 +660,11 @@ main.video-hive-main {
   background: #fafafa;
   color: #1a1c1e;
   white-space: pre-wrap;
+}
+
+/* Ensure images in rendered rich text never overflow their container */
+.richText img {
+  max-width: 100%;
+  height: auto;
+  display: block;
 }

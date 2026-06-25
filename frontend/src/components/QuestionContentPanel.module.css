@@ -4,38 +4,32 @@
   gap: 16px;
   overflow-y: auto;
 }
-
 .card {
   background: #fafafa;
   border-radius: 12px;
   padding: 16px;
 }
-
 .sectionTitle {
   font-size: 16px;
   font-weight: 600;
   color: #1a1c1e;
   margin: 0 0 12px 0;
 }
-
 .loading {
   padding: 24px;
   color: #43474e;
   text-align: center;
 }
-
 .error {
   padding: 12px 16px;
   background: #fee2e2;
   color: #b91c1c;
   border-radius: 8px;
 }
-
 .empty {
   color: #43474e;
   font-style: italic;
 }
-
 .richText {
   line-height: 1.6;
   color: #1a1c1e;
@@ -69,6 +63,12 @@
   color: #1a1c1e;
   border-radius: 2px;
   padding: 0 2px;
+}
+
+.richText :global(img) {
+  max-width: 100%;
+  height: auto;
+  display: block;
 }
 
 .optionList {
