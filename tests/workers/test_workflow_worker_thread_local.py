@@ -36,7 +36,7 @@ def test_worker_creates_shared_pool_per_executor_id(tmp_path: Path) -> None:
 def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
     definition = _make_definition([_local_node("fetch")])
 
@@ -73,7 +73,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
 def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     block_event = threading.Event()
     executor = RecordingExecutor("local-default", block_event=block_event)
     definition = _make_definition([_local_node("fetch")])
@@ -111,7 +111,7 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
 def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
     definition = _make_definition([_local_node("fetch")])
 
@@ -150,7 +150,7 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
 def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
     definition = _make_definition([_local_node("fetch")])
 
@@ -183,7 +183,7 @@ def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
 def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
     executor.supports = lambda capability: capability == "other"  # type: ignore[method-assign]
     definition = _make_definition([_local_node("fetch")])
@@ -233,7 +233,7 @@ def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
 def test_poll_skips_paused_job(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
     definition = _make_definition([_local_node("fetch")])
 
@@ -271,7 +271,7 @@ def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> Non
 
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
     definition = _make_definition(
         [
@@ -360,7 +360,9 @@ def test_make_workflow_worker_runs_question_comprehension_info_local_node(
     )
     queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
-    workspace = queries.create_workspace("test_ws")
+    workspace = queries.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
     with queries.connect() as conn:
         conn.execute(
             "insert into workspace_executor_allocations (workspace_id, executor_id, concurrency_limit) values (?, ?, ?)",

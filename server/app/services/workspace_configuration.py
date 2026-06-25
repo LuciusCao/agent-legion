@@ -94,6 +94,8 @@ class WorkspaceConfigurationService:
         workspace = self._workspace(workspace_id)
         current = workspace_settings_payload(workspace)
         workflow_key = settings_patch.get("workflowKey") or str(current["workflowKey"])
+        if not workflow_key:
+            raise InvalidOperationError("Workspace workflow is not set")
         workflow = self.workflows.definition(workflow_key)
 
         validate_workspace_executor_configuration(
@@ -211,7 +213,9 @@ class WorkspaceConfigurationService:
 
     def stats(self, workspace_id: str) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
-        workflow_key = workspace.get("default_workflow_key", "question_content")
+        workflow_key = workspace.get("default_workflow_key", "")
+        if not workflow_key:
+            raise InvalidOperationError("Workspace workflow is not set")
         latest_run = self.job_db.get_latest_node_run_for_workspace(workspace_id)
         executors = []
         for count in self.job_db.get_workspace_executor_runtime_counts(workspace_id):

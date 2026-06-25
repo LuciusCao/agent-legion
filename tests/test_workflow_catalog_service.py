@@ -9,7 +9,7 @@ def test_workflow_catalog_lists_registered_workflows(settings):
 
 def test_workflow_catalog_loads_workflow_definition(settings):
     service = WorkflowCatalogService(settings)
-    payload = service.workflow("question_content")
-    assert payload["key"] == "question_content"
+    payload = service.workflow("question_comprehension_info")
+    assert payload["key"] == "question_comprehension_info"
     assert "nodes" in payload
     assert "intake" in payload

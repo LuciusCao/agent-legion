@@ -70,9 +70,15 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
 
-    ws_a = job_db.create_workspace("Workspace A")
-    ws_b = job_db.create_workspace("Workspace B")
-    ws_c = job_db.create_workspace("Workspace C")
+    ws_a = job_db.create_workspace(
+        "Workspace A", default_workflow_key="question_comprehension_info"
+    )
+    ws_b = job_db.create_workspace(
+        "Workspace B", default_workflow_key="question_comprehension_info"
+    )
+    ws_c = job_db.create_workspace(
+        "Workspace C", default_workflow_key="question_comprehension_info"
+    )
 
     events = {
         ws_a["id"]: threading.Event(),

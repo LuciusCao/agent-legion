@@ -73,7 +73,7 @@ def init_db(path: Path) -> None:
                   id text primary key,
                   name text not null,
                   description text not null default '',
-                  default_workflow_key text not null default 'question_content',
+                  default_workflow_key text not null default 'question_comprehension_info',
                   cms_config_json text not null default '{}',
                   resource_config_json text not null default '{}',
                   created_at text not null default current_timestamp,

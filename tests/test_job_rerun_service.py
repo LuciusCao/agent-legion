@@ -26,27 +26,32 @@ def rerun_service(job_db, settings):
 
 @pytest.fixture
 def job(job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     return job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
         title="Question 1",
         node_keys=[
-            "fetch_question_context",
-            "question_understanding",
-            "misconception_analysis",
-            "natural_language_reading",
-            "solution_decomposition",
-            "faq_generation",
-            "content_graph_generation",
-            "interactive_template_generation",
-            "content_review",
-            "assemble_package",
+            "fetch_questions",
+            "clean_and_parse",
+            "generate_key_info",
+            "review_key_info",
+            "generate_possible_errors",
+            "review_possible_errors",
+            "assess_comprehension_difficulty",
+            "assemble_comprehension_info",
+            "review_possible_errors",
+            "assemble_comprehension_info",
         ],
         workspace_id=workspace["id"],
     )
@@ -54,20 +59,25 @@ def job(job_db):
 
 @pytest.fixture
 def running_job(job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
         title="Question 1",
-        node_keys=["fetch_question_context"],
+        node_keys=["fetch_questions"],
         workspace_id=workspace["id"],
     )
-    job_db.update_job_node(job["id"], "fetch_question_context", status="running")
+    job_db.update_job_node(job["id"], "fetch_questions", status="running")
     return job
 
 
@@ -111,22 +121,22 @@ def _create_lease(
 
 
 def test_rerun_selected_node_and_descendants_are_stale(rerun_service, job):
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["job_id"] == job["id"]
-    assert result["node_key"] == "question_understanding"
+    assert result["node_key"] == "clean_and_parse"
     assert result["status"] == "succeeded"
 
     nodes = {n["node_key"]: n["status"] for n in rerun_service.job_db.list_job_nodes(job["id"])}
-    assert nodes["question_understanding"] == "pending"
-    assert nodes["misconception_analysis"] == "stale"
-    assert nodes["natural_language_reading"] == "stale"
-    assert nodes["solution_decomposition"] == "stale"
-    assert nodes["faq_generation"] == "stale"
-    assert nodes["content_graph_generation"] == "stale"
-    assert nodes["interactive_template_generation"] == "stale"
-    assert nodes["content_review"] == "stale"
-    assert nodes["assemble_package"] == "stale"
+    assert nodes["clean_and_parse"] == "pending"
+    assert nodes["generate_key_info"] == "stale"
+    assert nodes["review_key_info"] == "stale"
+    assert nodes["generate_possible_errors"] == "stale"
+    assert nodes["review_possible_errors"] == "stale"
+    assert nodes["assess_comprehension_difficulty"] == "stale"
+    assert nodes["assemble_comprehension_info"] == "stale"
+    assert nodes["review_possible_errors"] == "stale"
+    assert nodes["assemble_comprehension_info"] == "stale"
 
 
 def test_rerun_resets_node_created_at(rerun_service, job):
@@ -134,41 +144,39 @@ def test_rerun_resets_node_created_at(rerun_service, job):
     with rerun_service.job_db.connect() as conn:
         conn.execute(
             "update job_nodes set created_at=? where job_id=? and node_key=?",
-            (old_created_at, job["id"], "question_understanding"),
+            (old_created_at, job["id"], "clean_and_parse"),
         )
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["status"] == "succeeded"
-    rerun_node = rerun_service.job_db.get_job_node(job["id"], "question_understanding")
+    rerun_node = rerun_service.job_db.get_job_node(job["id"], "clean_and_parse")
     assert rerun_node is not None
     assert rerun_node["created_at"] != old_created_at
     assert len(rerun_node["created_at"]) >= 19
 
 
 def test_rerun_preserves_ancestors(rerun_service, job):
-    rerun_service.job_db.update_job_node(job["id"], "fetch_question_context", status="completed")
+    rerun_service.job_db.update_job_node(job["id"], "fetch_questions", status="completed")
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["status"] == "succeeded"
     nodes = {n["node_key"]: n["status"] for n in rerun_service.job_db.list_job_nodes(job["id"])}
-    assert nodes["fetch_question_context"] == "completed"
+    assert nodes["fetch_questions"] == "completed"
 
 
 def test_rerun_rejects_running_job(rerun_service, running_job):
-    result = rerun_service.rerun(
-        running_job["workspace_id"], running_job["id"], "fetch_question_context"
-    )
+    result = rerun_service.rerun(running_job["workspace_id"], running_job["id"], "fetch_questions")
 
     assert result["status"] == "skipped"
     assert result["reason_code"] == "busy"
 
 
 def test_rerun_rejects_active_lease(rerun_service, job):
-    _create_lease(rerun_service.job_db, job, "question_understanding", expires_offset_seconds=300)
+    _create_lease(rerun_service.job_db, job, "clean_and_parse", expires_offset_seconds=300)
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["status"] == "skipped"
     assert result["reason_code"] == "busy"
@@ -186,7 +194,7 @@ def test_rerun_uses_atomic_lease_guarded_mutation(rerun_service, job, monkeypatc
 
     monkeypatch.setattr(rerun_service.job_db, "lease_guarded_mutation", tracked)
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["status"] == "succeeded"
     assert calls == [job["id"]]
@@ -206,7 +214,7 @@ def test_rerun_atomic_guard_catches_lease_created_after_precheck(rerun_service, 
             _create_lease(
                 rerun_service.job_db,
                 job,
-                "question_understanding",
+                "clean_and_parse",
                 expires_offset_seconds=300,
             )
             created = True
@@ -215,14 +223,11 @@ def test_rerun_atomic_guard_catches_lease_created_after_precheck(rerun_service, 
 
     monkeypatch.setattr(rerun_service.job_db, "lease_guarded_mutation", race)
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["status"] == "skipped"
     assert result["reason_code"] == "busy"
-    assert (
-        rerun_service.job_db.get_job_node(job["id"], "question_understanding")["status"]
-        == "running"
-    )
+    assert rerun_service.job_db.get_job_node(job["id"], "clean_and_parse")["status"] == "running"
 
 
 def test_rerun_node_not_found(rerun_service, job):
@@ -233,14 +238,14 @@ def test_rerun_node_not_found(rerun_service, job):
 
 
 def test_rerun_job_not_found(rerun_service):
-    result = rerun_service.rerun("default", "missing", "question_understanding")
+    result = rerun_service.rerun("default", "missing", "clean_and_parse")
 
     assert result["status"] == "failed"
     assert result["reason_code"] == "not_found"
 
 
 def test_rerun_wrong_workspace(rerun_service, job):
-    result = rerun_service.rerun("other", job["id"], "question_understanding")
+    result = rerun_service.rerun("other", job["id"], "clean_and_parse")
 
     assert result["status"] == "failed"
     assert result["reason_code"] == "wrong_workspace"
@@ -249,22 +254,22 @@ def test_rerun_wrong_workspace(rerun_service, job):
 def test_rerun_stages_and_removes_artifacts(rerun_service, job, settings):
     storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / "understanding.json").write_text("understanding")
-    (storage / "misconceptions.json").write_text("misconceptions")
+    (storage / "questions_parsed.json").write_text("understanding")
+    (storage / "key_info_raw.json").write_text("misconceptions")
     (storage / "fetch.log").write_text("log")
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["status"] == "succeeded"
-    assert not (storage / "understanding.json").exists()
-    assert not (storage / "misconceptions.json").exists()
+    assert not (storage / "questions_parsed.json").exists()
+    assert not (storage / "key_info_raw.json").exists()
     assert (storage / "fetch.log").exists()
 
 
 def test_rerun_rolls_back_artifacts_when_db_fails(rerun_service, job, settings, monkeypatch):
     storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / "understanding.json").write_text("understanding")
+    (storage / "questions_parsed.json").write_text("understanding")
 
     def _fail(*args, **kwargs):
         raise RuntimeError("db down")
@@ -275,10 +280,10 @@ def test_rerun_rolls_back_artifacts_when_db_fails(rerun_service, job, settings, 
         _fail,
     )
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["status"] == "failed"
-    assert (storage / "understanding.json").read_text() == "understanding"
+    assert (storage / "questions_parsed.json").read_text() == "understanding"
 
 
 def test_rerun_reports_success_when_post_commit_cleanup_fails(
@@ -286,41 +291,38 @@ def test_rerun_reports_success_when_post_commit_cleanup_fails(
 ):
     storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)
-    (storage / "understanding.json").write_text("understanding")
+    (storage / "questions_parsed.json").write_text("understanding")
 
     def _fail_commit(self):
         raise OSError("cleanup failed")
 
     monkeypatch.setattr(StagedOutputs, "commit", _fail_commit)
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["status"] == "succeeded"
     assert "cleanup failed" in caplog.text
-    assert (
-        rerun_service.job_db.get_job_node(job["id"], "question_understanding")["status"]
-        == "pending"
-    )
+    assert rerun_service.job_db.get_job_node(job["id"], "clean_and_parse")["status"] == "pending"
 
 
 def test_rerun_expired_lease_is_not_blocking(rerun_service, job):
-    run = _create_lease(
-        rerun_service.job_db, job, "question_understanding", expires_offset_seconds=-1
-    )
+    run = _create_lease(rerun_service.job_db, job, "clean_and_parse", expires_offset_seconds=-1)
     rerun_service.job_db.finish_node_run(run["id"], "failed", 1, "expired")
 
-    result = rerun_service.rerun(job["workspace_id"], job["id"], "question_understanding")
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
 
     assert result["status"] == "succeeded"
     nodes = {n["node_key"]: n["status"] for n in rerun_service.job_db.list_job_nodes(job["id"])}
-    assert nodes["question_understanding"] == "pending"
+    assert nodes["clean_and_parse"] == "pending"
 
 
 def test_batch_rerun_returns_results_in_request_order(rerun_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content",
-        "direct_ids",
+        "question_comprehension_info",
+        "batch_by_ids",
         {"question_ids": ["Q1", "Q2"]},
         workspace_id=workspace["id"],
     )
@@ -328,18 +330,18 @@ def test_batch_rerun_returns_results_in_request_order(rerun_service, job_db):
     for qid in ["Q1", "Q2"]:
         jobs.append(
             job_db.create_job(
-                workflow_key="question_content",
+                workflow_key="question_comprehension_info",
                 source_type="question",
                 source_id=qid,
                 batch_id=batch["id"],
                 title=f"Question {qid}",
-                node_keys=["fetch_question_context", "question_understanding"],
+                node_keys=["fetch_questions", "clean_and_parse"],
                 workspace_id=workspace["id"],
             )
         )
 
     results = rerun_service.batch_rerun(
-        workspace["id"], [jobs[1]["id"], jobs[0]["id"]], "question_understanding"
+        workspace["id"], [jobs[1]["id"], jobs[0]["id"]], "clean_and_parse"
     )
 
     assert [r["job_id"] for r in results] == [jobs[1]["id"], jobs[0]["id"]]
@@ -347,21 +349,26 @@ def test_batch_rerun_returns_results_in_request_order(rerun_service, job_db):
 
 
 def test_batch_rerun_node_not_found_for_one_job(rerun_service, job_db):
-    workspace = job_db.create_workspace("default")
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
     )
     job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=batch["id"],
         title="Question 1",
-        node_keys=["fetch_question_context"],
+        node_keys=["fetch_questions"],
         workspace_id=workspace["id"],
     )
 
-    results = rerun_service.batch_rerun(workspace["id"], [job["id"]], "question_understanding")
+    results = rerun_service.batch_rerun(workspace["id"], [job["id"]], "clean_and_parse")
 
     assert len(results) == 1
     assert results[0]["status"] == "failed"
@@ -369,37 +376,42 @@ def test_batch_rerun_node_not_found_for_one_job(rerun_service, job_db):
 
 
 def test_batch_rerun_mixed_workflows(rerun_service, job_db):
-    workspace = job_db.create_workspace("default")
-    q_batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["Q1"]}, workspace_id=workspace["id"]
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
     )
-    r_batch = job_db.create_batch(
+    q_batch = job_db.create_batch(
         "question_comprehension_info",
         "batch_by_ids",
         {"question_ids": ["Q1"]},
         workspace_id=workspace["id"],
     )
+    r_batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q2"]},
+        workspace_id=workspace["id"],
+    )
     q_job = job_db.create_job(
-        workflow_key="question_content",
+        workflow_key="question_comprehension_info",
         source_type="question",
         source_id="Q1",
         batch_id=q_batch["id"],
         title="Question 1",
-        node_keys=["fetch_question_context", "question_understanding"],
+        node_keys=["fetch_questions", "clean_and_parse"],
         workspace_id=workspace["id"],
     )
     r_job = job_db.create_job(
         workflow_key="question_comprehension_info",
         source_type="question",
-        source_id="Q1",
+        source_id="Q2",
         batch_id=r_batch["id"],
-        title="Reading Q1",
-        node_keys=["fetch_questions", "clean_and_parse"],
+        title="Reading Q2",
+        node_keys=["fetch_questions"],
         workspace_id=workspace["id"],
     )
 
     results = rerun_service.batch_rerun(
-        workspace["id"], [q_job["id"], r_job["id"]], "question_understanding"
+        workspace["id"], [q_job["id"], r_job["id"]], "clean_and_parse"
     )
 
     assert results[0]["status"] == "succeeded"

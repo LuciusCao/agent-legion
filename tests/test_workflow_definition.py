@@ -34,32 +34,27 @@ def test_workflow_node_loads_capability(tmp_path: Path) -> None:
     assert load_workflow_definition(path).nodes["one"].capability == "fetch_questions"
 
 
-def test_load_question_content_definition():
-    definition = load_workflow_definition(Path("config/workflows/question_content.yaml"))
+def test_load_question_comprehension_info_definition():
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
 
-    assert definition.key == "question_content"
-    assert definition.label == "题目内容生成"
-    direct_mode = definition.intake.modes["direct_ids"]
-    assert direct_mode.label == "直接输入 ID"
-    assert direct_mode.input_field == "question_ids"
-    assert direct_mode.resource == ""
-    knowledge_mode = definition.intake.modes["by_knowledge"]
-    assert knowledge_mode.label == "按知识点查询"
-    assert knowledge_mode.input_field == "knowledge_codes"
-    assert knowledge_mode.resource == "by_knowledge"
-    assert definition.nodes["fetch_question_context"].label == "获取题目上下文"
-    assert definition.nodes["question_understanding"].label == "题目理解"
-    assert definition.nodes["question_understanding"].after == ["fetch_question_context"]
-    assert definition.nodes["assemble_package"].inputs == [
-        "question_context.json",
-        "understanding.json",
-        "natural_reading.md",
-        "misconceptions.json",
-        "solution_steps.json",
-        "faq.json",
-        "content_graph.json",
-        "interactive_template.json",
-        "review_result.json",
+    assert definition.key == "question_comprehension_info"
+    assert definition.label == "题目审题信息生成 DAG"
+    batch_by_ids = definition.intake.modes["batch_by_ids"]
+    assert batch_by_ids.label == "按题目ID批量"
+    assert batch_by_ids.input_field == "question_ids"
+    assert batch_by_ids.resource == ""
+    batch_by_knowledge = definition.intake.modes["batch_by_knowledge"]
+    assert batch_by_knowledge.label == "按知识点批量"
+    assert batch_by_knowledge.input_field == "knowledge_codes"
+    assert batch_by_knowledge.resource == ""
+    assert definition.nodes["fetch_questions"].label == "获取题目"
+    assert definition.nodes["clean_and_parse"].label == "清洗与解析"
+    assert definition.nodes["clean_and_parse"].after == ["fetch_questions"]
+    assert definition.nodes["assemble_comprehension_info"].inputs == [
+        "questions_parsed.json",
+        "key_info_reviewed.json",
+        "possible_errors_reviewed.json",
+        "comprehension_difficulty.json",
     ]
 
 

@@ -17,7 +17,10 @@ type WorkspaceState = {
   error: string | null
 
   fetchWorkspaces: () => Promise<void>
-  createWorkspace: (name: string) => Promise<WorkspaceRecord>
+  createWorkspace: (
+    name: string,
+    workflowKey: string
+  ) => Promise<WorkspaceRecord>
   updateWorkspace: (
     id: string,
     fields: {
@@ -53,9 +56,9 @@ export const useWorkspaceStore = create<WorkspaceState>((set) => ({
     }
   },
 
-  async createWorkspace(name: string) {
+  async createWorkspace(name: string, workflowKey: string) {
     try {
-      const ws = await apiCreateWorkspace(name)
+      const ws = await apiCreateWorkspace(name, workflowKey)
       set((s) => ({ workspaces: [...s.workspaces, ws], error: null }))
       return ws
     } catch (err) {

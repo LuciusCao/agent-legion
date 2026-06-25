@@ -398,7 +398,7 @@ def test_v011_skips_rebuild_when_schema_is_incomplete(tmp_path: Path) -> None:
               id text primary key,
               name text not null,
               description text not null default '',
-              default_workflow_key text not null default 'question_content',
+              default_workflow_key text not null default 'question_comprehension_info',
               cms_config_json text not null default '{}',
               resource_config_json text not null default '{}',
               created_at text not null default current_timestamp,
@@ -450,9 +450,9 @@ def test_v011_skips_rebuild_when_schema_is_incomplete(tmp_path: Path) -> None:
             );
 
             insert into job_batches(id, workspace_id, workflow_key, source_kind)
-            values ('b1', 'math', 'question_content', 'direct_ids');
+            values ('b1', 'math', 'question_comprehension_info', 'direct_ids');
             insert into jobs(id, workspace_id, workflow_key, source_type, source_id, batch_id)
-            values ('j1', 'math', 'question_content', 'question', 'Q1', 'b1');
+            values ('j1', 'math', 'question_comprehension_info', 'question', 'Q1', 'b1');
             insert into job_nodes(job_id, node_key) values ('j1', 'fetch_question_context');
             """
         )

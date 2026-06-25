@@ -30,6 +30,9 @@ from server.app.db.migrations.v012_workspace_packages import (
 from server.app.db.migrations.v013_node_run_skill_version import (
     MIGRATION as V013_NODE_RUN_SKILL_VERSION,
 )
+from server.app.db.migrations.v014_remove_question_content_default import (
+    MIGRATION as V014_REMOVE_QUESTION_CONTENT_DEFAULT,
+)
 
 __all__ = [
     "V001_EXECUTOR_CORE",
@@ -44,4 +47,5 @@ __all__ = [
     "V011_REMOVE_WORKSPACE_ID_DEFAULTS",
     "V012_WORKSPACE_PACKAGES",
     "V013_NODE_RUN_SKILL_VERSION",
+    "V014_REMOVE_QUESTION_CONTENT_DEFAULT",
 ]

@@ -18,7 +18,7 @@ from tests.workers.helpers import (
 def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     block_event = threading.Event()
     executor = RecordingPiExecutor("pi-default", block_event=block_event)
     definition = _make_definition([_local_node("fetch")])
@@ -72,7 +72,7 @@ def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
 def test_poll_does_not_update_agent_status_for_local_executor(tmp_path: Path) -> None:
     db_path = tmp_path / "video_hive.sqlite"
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
-    ws = job_db.create_workspace("Test WS")
+    ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
     definition = _make_definition([_local_node("fetch")])
     agent_manager = MagicMock()

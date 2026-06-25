@@ -9,10 +9,6 @@ executors:
         handler: question_comprehension_info.clean_and_parse
       assemble_comprehension_info:
         handler: question_comprehension_info.assemble_comprehension_info
-      fetch_question_context:
-        handler: question_content.fetch_question_context
-      assemble_package:
-        handler: question_content.assemble_package
   pi-default:
     kind: pi
     global_capacity: 20

@@ -21,7 +21,7 @@ class WorkspaceCreateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str
-    default_workflow_key: str = "question_comprehension_info"
+    default_workflow_key: str
     default_entity: str = "question"
     cms_config: dict[str, Any] = Field(default_factory=dict)
     resource_config: dict[str, Any] = Field(default_factory=dict)

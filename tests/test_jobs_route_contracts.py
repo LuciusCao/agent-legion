@@ -125,14 +125,17 @@ def test_catch_all_router_does_not_shadow_job_log_endpoint(client):
 
 
 def _create_test_job(client):
-    ws_response = client.post("/api/workspaces", json={"name": "test_ws"})
+    ws_response = client.post(
+        "/api/workspaces",
+        json={"name": "test_ws", "default_workflow_key": "question_comprehension_info"},
+    )
     assert ws_response.status_code == 200
     workspace_id = ws_response.json()["workspace"]["id"]
     response = client.post(
         f"/api/workspaces/{workspace_id}/job-batches",
         json={
-            "workflow_key": "question_content",
-            "source_kind": "direct_ids",
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
             "question_ids": ["Q001"],
             "knowledge_codes": [],
         },

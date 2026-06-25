@@ -45,12 +45,15 @@ def test_delete_rollback_survives_concurrent_recreation(
     )
 
     workspace_id = "ws-race"
-    job_db.create_workspace(workspace_id)
+    job_db.create_workspace(workspace_id, default_workflow_key="question_comprehension_info")
     batch = job_db.create_batch(
-        "question_content", "direct_ids", {"question_ids": ["R1"]}, workspace_id=workspace_id
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["R1"]},
+        workspace_id=workspace_id,
     )
     job = job_db.create_job(
-        "question_content",
+        "question_comprehension_info",
         "question",
         "R1",
         batch["id"],

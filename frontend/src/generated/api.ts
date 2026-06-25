@@ -1702,10 +1702,7 @@ export interface components {
        * @default question
        */
       default_entity: string
-      /**
-       * Default Workflow Key
-       * @default question_comprehension_info
-       */
+      /** Default Workflow Key */
       default_workflow_key: string
       /** Intake Config */
       intake_config?: {

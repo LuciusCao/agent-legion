@@ -9,6 +9,7 @@ import {
 } from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { WorkflowSection } from './settings/WorkflowSection'
 
 type Props = {
   open: boolean
@@ -18,22 +19,24 @@ type Props = {
 export default function CreateWorkspaceDialog({ open, onClose }: Props) {
   const { createWorkspace } = useWorkspaceStore()
   const [name, setName] = useState('')
+  const [workflowKey, setWorkflowKey] = useState('')
   const [creating, setCreating] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   function handleClose() {
     setName('')
+    setWorkflowKey('')
     setError(null)
     onClose()
   }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    if (!name.trim()) return
+    if (!name.trim() || !workflowKey) return
     setError(null)
     setCreating(true)
     try {
-      await createWorkspace(name.trim())
+      await createWorkspace(name.trim(), workflowKey)
       handleClose()
     } catch (err) {
       setError(String(err))
@@ -48,12 +51,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
       <DialogContent>
         <form
           onSubmit={handleSubmit}
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 16,
-            minWidth: 320,
-          }}
+          style={{ display: 'flex', flexDirection: 'column', gap: 16 }}
         >
           <TextField
             variant="outlined"
@@ -61,6 +59,10 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
             value={name}
             onChange={(e) => setName(e.target.value)}
             required
+          />
+          <WorkflowSection
+            workflowKey={workflowKey}
+            onChange={setWorkflowKey}
           />
           {error && (
             <div style={{ color: '#ba1a1a', fontSize: 12 }}>{error}</div>
@@ -74,7 +76,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
         <Button
           variant="contained"
           onClick={handleSubmit}
-          disabled={creating || !name.trim()}
+          disabled={creating || !name.trim() || !workflowKey}
         >
           {creating ? '创建中…' : WORKSPACE_LABELS.create}
         </Button>

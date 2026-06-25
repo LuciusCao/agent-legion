@@ -1,8 +1,10 @@
 from server.app.storage_paths import resolve_job_dir
 
 
-def _create_workspace(client, name="default"):
-    return client.post("/api/workspaces", json={"name": name}).json()["workspace"]["id"]
+def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
+    return client.post(
+        "/api/workspaces", json={"name": name, "default_workflow_key": default_workflow_key}
+    ).json()["workspace"]["id"]
 
 
 def test_rerun_node_marks_downstream_stale(tmp_path):
@@ -17,32 +19,31 @@ def test_rerun_node_marks_downstream_stale(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q201"],
                 "knowledge_codes": [],
             },
         ).json()
         job_id = created["jobs"][0]["id"]
-        response = c.post(f"/api/jobs/{job_id}/nodes/question_understanding/rerun")
+        response = c.post(f"/api/jobs/{job_id}/nodes/review_key_info/rerun")
         detail = c.get(f"/api/jobs/{job_id}").json()
 
     assert response.status_code == 200
     body = response.json()
     assert body["job_id"] == job_id
-    assert body["node_key"] == "question_understanding"
+    assert body["node_key"] == "review_key_info"
     assert body["operation"] == "rerun"
     assert body["status"] == "succeeded"
     nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
-    assert nodes["question_understanding"] == "pending"
-    assert nodes["misconception_analysis"] == "stale"
-    assert nodes["natural_language_reading"] == "stale"
-    assert nodes["solution_decomposition"] == "stale"
-    assert nodes["faq_generation"] == "stale"
-    assert nodes["content_graph_generation"] == "stale"
-    assert nodes["interactive_template_generation"] == "stale"
-    assert nodes["content_review"] == "stale"
-    assert nodes["assemble_package"] == "stale"
+    assert nodes["review_key_info"] == "pending"
+    assert nodes["fetch_questions"] == "pending"
+    assert nodes["clean_and_parse"] == "pending"
+    assert nodes["generate_key_info"] == "pending"
+    assert nodes["generate_possible_errors"] == "stale"
+    assert nodes["review_possible_errors"] == "stale"
+    assert nodes["assess_comprehension_difficulty"] == "stale"
+    assert nodes["assemble_comprehension_info"] == "stale"
 
 
 def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
@@ -57,8 +58,8 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q603"],
                 "knowledge_codes": [],
             },
@@ -67,7 +68,7 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
         app.state.job_db.update_job_status(job_id, "failed", "boom")
         response = c.post(
             f"/api/workspaces/{ws_id}/jobs/batch-rerun",
-            json={"job_ids": [job_id], "node_key": "fetch_question_context"},
+            json={"job_ids": [job_id], "node_key": "fetch_questions"},
         )
         detail = c.get(f"/api/jobs/{job_id}").json()
 
@@ -77,15 +78,15 @@ def test_workspace_batch_rerun_marks_jobs_queued(tmp_path):
             "job_id": job_id,
             "operation": "rerun",
             "status": "succeeded",
-            "node_key": "fetch_question_context",
+            "node_key": "fetch_questions",
             "reason_code": None,
             "message": None,
         }
     ]
     assert detail["job"]["status"] == "queued"
     nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
-    assert nodes["fetch_question_context"] == "pending"
-    assert nodes["question_understanding"] == "stale"
+    assert nodes["fetch_questions"] == "pending"
+    assert nodes["review_key_info"] == "stale"
 
 
 def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
@@ -96,12 +97,15 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
             },
@@ -109,7 +113,7 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
         # Rerun non-existent job
         resp = c.post(
             "/api/workspaces/test/jobs/batch-rerun",
-            json={"job_ids": ["nonexistent"], "node_key": "fetch_question_context"},
+            json={"job_ids": ["nonexistent"], "node_key": "fetch_questions"},
         )
 
     assert resp.status_code == 200
@@ -125,20 +129,23 @@ def test_rerun_node_errors(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
             },
         )
-        job_id = "test_question_content_Q1"
+        job_id = "test_question_comprehension_info_Q1"
 
         # Job not found
-        resp = c.post("/api/jobs/nonexistent/nodes/fetch_question_context/rerun")
+        resp = c.post("/api/jobs/nonexistent/nodes/fetch_questions/rerun")
         assert resp.status_code == 404
 
         # Node not found
@@ -155,28 +162,31 @@ def test_rerun_node_rejects_running_job(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
             },
         )
-        job_id = "test_question_content_Q1"
+        job_id = "test_question_comprehension_info_Q1"
         log_dir = app.state.settings.logs_dir / "jobs"
         log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = log_dir / f"{job_id}-fetch_question_context.log"
+        log_path = log_dir / f"{job_id}-fetch_questions.log"
         log_path.write_text("running")
         app.state.job_db.start_node_run(
             job_id,
-            "fetch_question_context",
+            "fetch_questions",
             ["cmd"],
-            f"logs/jobs/{job_id}-fetch_question_context.log",
+            f"logs/jobs/{job_id}-fetch_questions.log",
         )
-        resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_question_context/rerun")
+        resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_questions/rerun")
     assert resp.status_code == 400
     assert "running" in resp.json()["detail"].lower()
 
@@ -189,17 +199,20 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
             },
         )
-        job_id = "test_question_content_Q1"
+        job_id = "test_question_comprehension_info_Q1"
 
         def _fail_cleanup(*args, **kwargs):
             raise ValueError("cannot remove artifact")
@@ -208,7 +221,7 @@ def test_rerun_node_cleanup_failed(tmp_path, monkeypatch):
             "server.app.services.job_artifact_mutation.JobArtifactMutationService.stage_outputs",
             _fail_cleanup,
         )
-        resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_question_context/rerun")
+        resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_questions/rerun")
     assert resp.status_code == 400
     assert resp.json()["detail"] == "cannot remove artifact"
 
@@ -221,17 +234,20 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q1"],
                 "knowledge_codes": [],
             },
         )
-        job_id = "test_question_content_Q1"
+        job_id = "test_question_comprehension_info_Q1"
 
         def _fail_mark(*args, **kwargs):
             raise ValueError("invalid node state")
@@ -242,7 +258,7 @@ def test_rerun_node_mark_for_rerun_value_error(tmp_path, monkeypatch):
             _fail_mark,
         )
 
-        resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_question_context/rerun")
+        resp = c.post(f"/api/jobs/{job_id}/nodes/fetch_questions/rerun")
     assert resp.status_code == 400
     assert "invalid node state" in resp.json()["detail"].lower()
 
@@ -259,20 +275,20 @@ def test_rerun_node_preserves_ancestors(tmp_path):
         created = c.post(
             f"/api/workspaces/{ws_id}/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q700"],
                 "knowledge_codes": [],
             },
         ).json()
         job_id = created["jobs"][0]["id"]
-        app.state.job_db.update_job_node(job_id, "fetch_question_context", status="completed")
-        c.post(f"/api/jobs/{job_id}/nodes/question_understanding/rerun")
+        app.state.job_db.update_job_node(job_id, "fetch_questions", status="completed")
+        c.post(f"/api/jobs/{job_id}/nodes/review_key_info/rerun")
         detail = c.get(f"/api/jobs/{job_id}").json()
 
     nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
-    assert nodes["fetch_question_context"] == "completed"
-    assert nodes["question_understanding"] == "pending"
+    assert nodes["fetch_questions"] == "completed"
+    assert nodes["review_key_info"] == "pending"
 
 
 def test_batch_rerun_node_not_found_for_one_job(tmp_path):
@@ -283,27 +299,30 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q701"],
                 "knowledge_codes": [],
             },
         )
-        job_id = "test_question_content_Q701"
+        job_id = "test_question_comprehension_info_Q701"
         # Remove downstream nodes so the selected node is absent from this job.
         job_db = app.state.job_db
         with job_db.connect() as conn:
             conn.execute(
                 "delete from job_nodes where job_id=? and node_key=?",
-                (job_id, "question_understanding"),
+                (job_id, "review_key_info"),
             )
         resp = c.post(
             "/api/workspaces/test/jobs/batch-rerun",
-            json={"job_ids": [job_id], "node_key": "question_understanding"},
+            json={"job_ids": [job_id], "node_key": "review_key_info"},
         )
 
     assert resp.status_code == 200
@@ -313,7 +332,7 @@ def test_batch_rerun_node_not_found_for_one_job(tmp_path):
     assert results[0]["reason_code"] == "node_not_found"
 
 
-def test_batch_rerun_mixed_workflows(tmp_path, monkeypatch):
+def test_batch_rerun_mixed_node_availability(tmp_path, monkeypatch):
     from fastapi.testclient import TestClient
 
     from server.app.cms.question import CmsQuestionDetail
@@ -338,14 +357,16 @@ def test_batch_rerun_mixed_workflows(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
-                "question_ids": ["Q702"],
-                "knowledge_codes": [],
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q702A"],
             },
         )
         c.post(
@@ -353,14 +374,21 @@ def test_batch_rerun_mixed_workflows(tmp_path, monkeypatch):
             json={
                 "workflow_key": "question_comprehension_info",
                 "source_kind": "batch_by_ids",
-                "question_ids": ["Q702"],
+                "question_ids": ["Q702B"],
             },
         )
-        q_job_id = "test_question_content_Q702"
-        r_job_id = "test_question_comprehension_info_Q702"
+        q_job_id = "test_question_comprehension_info_Q702A"
+        r_job_id = "test_question_comprehension_info_Q702B"
+        # Remove the target node from the second job so it fails with node_not_found.
+        job_db = app.state.job_db
+        with job_db.connect() as conn:
+            conn.execute(
+                "delete from job_nodes where job_id=? and node_key=?",
+                (r_job_id, "review_key_info"),
+            )
         resp = c.post(
             "/api/workspaces/test/jobs/batch-rerun",
-            json={"job_ids": [q_job_id, r_job_id], "node_key": "question_understanding"},
+            json={"job_ids": [q_job_id, r_job_id], "node_key": "review_key_info"},
         )
 
     assert resp.status_code == 200
@@ -380,23 +408,26 @@ def test_batch_rerun_request_order_preserved(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q703", "Q704"],
                 "knowledge_codes": [],
             },
         )
-        first = "test_question_content_Q703"
-        second = "test_question_content_Q704"
+        first = "test_question_comprehension_info_Q703"
+        second = "test_question_comprehension_info_Q704"
         resp = c.post(
             "/api/workspaces/test/jobs/batch-rerun",
             json={
                 "job_ids": [second, first],
-                "node_key": "question_understanding",
+                "node_key": "review_key_info",
             },
         )
 
@@ -417,19 +448,22 @@ def test_rerun_node_rejects_active_lease(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q705"],
                 "knowledge_codes": [],
             },
         )
-        job_id = "test_question_content_Q705"
+        job_id = "test_question_comprehension_info_Q705"
         job_db = app.state.job_db
-        run = job_db.start_node_run(job_id, "question_understanding", ["cmd"], "logs/jobs/run.log")
+        run = job_db.start_node_run(job_id, "review_key_info", ["cmd"], "logs/jobs/run.log")
         now = datetime.now(UTC)
         with job_db.connect() as conn:
             conn.execute(
@@ -446,15 +480,15 @@ def test_rerun_node_rejects_active_lease(tmp_path):
                     "local-default",
                     "test",
                     job_id,
-                    "question_content",
-                    "question_understanding",
+                    "question_comprehension_info",
+                    "review_key_info",
                     run["id"],
                     _sqlite_timestamp(now),
                     _sqlite_timestamp(now),
                     _sqlite_timestamp(now + timedelta(seconds=300)),
                 ),
             )
-        resp = c.post(f"/api/jobs/{job_id}/nodes/question_understanding/rerun")
+        resp = c.post(f"/api/jobs/{job_id}/nodes/review_key_info/rerun")
 
     assert resp.status_code == 400
     assert "active" in resp.json()["detail"].lower()
@@ -471,19 +505,22 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q706"],
                 "knowledge_codes": [],
             },
         )
-        job_id = "test_question_content_Q706"
+        job_id = "test_question_comprehension_info_Q706"
         job_db = app.state.job_db
-        run = job_db.start_node_run(job_id, "question_understanding", ["cmd"], "logs/jobs/run.log")
+        run = job_db.start_node_run(job_id, "review_key_info", ["cmd"], "logs/jobs/run.log")
         job_db.finish_node_run(run["id"], "failed", 1, "expired")
         now = datetime.now(UTC)
         with job_db.connect() as conn:
@@ -501,21 +538,21 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
                     "local-default",
                     "test",
                     job_id,
-                    "question_content",
-                    "question_understanding",
+                    "question_comprehension_info",
+                    "review_key_info",
                     run["id"],
                     _sqlite_timestamp(now),
                     _sqlite_timestamp(now),
                     _sqlite_timestamp(now - timedelta(seconds=1)),
                 ),
             )
-        resp = c.post(f"/api/jobs/{job_id}/nodes/question_understanding/rerun")
+        resp = c.post(f"/api/jobs/{job_id}/nodes/review_key_info/rerun")
         detail = c.get(f"/api/jobs/{job_id}").json()
 
     assert resp.status_code == 200
     assert resp.json()["status"] == "succeeded"
     nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
-    assert nodes["question_understanding"] == "pending"
+    assert nodes["review_key_info"] == "pending"
 
 
 def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
@@ -526,20 +563,23 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Test"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Test", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/test/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q707"],
                 "knowledge_codes": [],
             },
         )
-        job_id = "test_question_content_Q707"
+        job_id = "test_question_comprehension_info_Q707"
         storage = resolve_job_dir(app.state.job_db.get_job(job_id), app.state.settings.jobs_dir)
         storage.mkdir(parents=True, exist_ok=True)
-        (storage / "understanding.json").write_text("understanding")
+        (storage / "review_key_info.json").write_text("understanding")
 
         def _fail(*args, **kwargs):
             raise RuntimeError("db down")
@@ -549,7 +589,7 @@ def test_rerun_node_rollback_on_db_failure(tmp_path, monkeypatch):
             "mark_nodes_for_rerun_in_transaction",
             _fail,
         )
-        resp = c.post(f"/api/jobs/{job_id}/nodes/question_understanding/rerun")
+        resp = c.post(f"/api/jobs/{job_id}/nodes/review_key_info/rerun")
 
     assert resp.status_code == 400
-    assert (storage / "understanding.json").read_text() == "understanding"
+    assert (storage / "review_key_info.json").read_text() == "understanding"

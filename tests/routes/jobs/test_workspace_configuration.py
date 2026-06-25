@@ -13,7 +13,7 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        ws_id = _create_workspace(c, "default", "question_content")
+        ws_id = _create_workspace(c, "default", "question_comprehension_info")
         response = c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
@@ -21,9 +21,9 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                 "description": "Atomic settings",
                 "settings": {
                     "entityType": "video",
-                    "intakeModes": ["direct_ids"],
-                    "labelOverrides": {"direct_ids": "Video IDs"},
-                    "workflowKey": "question_content",
+                    "intakeModes": ["batch_by_ids"],
+                    "labelOverrides": {"batch_by_ids": "Video IDs"},
+                    "workflowKey": "question_comprehension_info",
                     "resources": {"question_detail": {"enabled": True, "config": {}}},
                 },
                 "executor_allocations": [
@@ -31,15 +31,15 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
                 ],
                 "node_bindings": [
                     {
-                        "workflow_key": "question_content",
-                        "node_key": "fetch_question_context",
+                        "workflow_key": "question_comprehension_info",
+                        "node_key": "fetch_questions",
                         "executor_id": "local-default",
                     },
                 ],
                 "node_limits": [
                     {
-                        "workflow_key": "question_content",
-                        "node_key": "fetch_question_context",
+                        "workflow_key": "question_comprehension_info",
+                        "node_key": "fetch_questions",
                         "concurrency_limit": 3,
                     },
                 ],
@@ -55,15 +55,15 @@ def test_workspace_configuration_saves_all_sections_atomically(tmp_path):
     ]
     assert body["executor_configuration"]["bindings"] == [
         {
-            "workflow_key": "question_content",
-            "node_key": "fetch_question_context",
+            "workflow_key": "question_comprehension_info",
+            "node_key": "fetch_questions",
             "executor_id": "local-default",
         },
     ]
     assert body["executor_configuration"]["node_limits"] == [
         {
-            "workflow_key": "question_content",
-            "node_key": "fetch_question_context",
+            "workflow_key": "question_comprehension_info",
+            "node_key": "fetch_questions",
             "concurrency_limit": 3,
         },
     ]
@@ -77,28 +77,28 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.workflows.enabled = True
     with TestClient(app) as c:
-        ws_id = _create_workspace(c, "rollback", "question_content")
+        ws_id = _create_workspace(c, "rollback", "question_comprehension_info")
 
         # Establish a known good configuration first.
         c.put(
             f"/api/workspaces/{ws_id}/configuration",
             json={
                 "name": "Rollback Test",
-                "settings": {"workflowKey": "question_content"},
+                "settings": {"workflowKey": "question_comprehension_info"},
                 "executor_allocations": [
                     {"executor_id": "local-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
-                        "workflow_key": "question_content",
-                        "node_key": "fetch_question_context",
+                        "workflow_key": "question_comprehension_info",
+                        "node_key": "fetch_questions",
                         "executor_id": "local-default",
                     },
                 ],
                 "node_limits": [
                     {
-                        "workflow_key": "question_content",
-                        "node_key": "fetch_question_context",
+                        "workflow_key": "question_comprehension_info",
+                        "node_key": "fetch_questions",
                         "concurrency_limit": 2,
                     },
                 ],
@@ -110,13 +110,13 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
             f"/api/workspaces/{ws_id}/configuration",
             json={
                 "name": "Must Roll Back",
-                "settings": {"workflowKey": "question_content"},
+                "settings": {"workflowKey": "question_comprehension_info"},
                 "executor_allocations": [
                     {"executor_id": "local-default", "concurrency_limit": 4},
                 ],
                 "node_bindings": [
                     {
-                        "workflow_key": "question_content",
+                        "workflow_key": "question_comprehension_info",
                         "node_key": "unknown_node",
                         "executor_id": "local-default",
                     },

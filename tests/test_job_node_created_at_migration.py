@@ -18,7 +18,7 @@ def test_v008_adds_created_at_to_existing_job_nodes(tmp_path: Path) -> None:
               id text primary key,
               name text not null,
               description text not null default '',
-              default_workflow_key text not null default 'question_content',
+              default_workflow_key text not null default 'question_comprehension_info',
               cms_config_json text not null default '{}',
               resource_config_json text not null default '{}',
               created_at text not null default current_timestamp,
@@ -68,7 +68,7 @@ def test_v008_adds_created_at_to_existing_job_nodes(tmp_path: Path) -> None:
             insert into schema_migrations(version, name) values (7, 'rename_pipeline_to_workflow');
             insert into workspaces(id, name) values ('ws1', 'Workspace One');
             insert into jobs(id, workspace_id, workflow_key, source_type, source_id)
-              values ('job1', 'ws1', 'question_content', 'question', 'Q1');
+              values ('job1', 'ws1', 'question_comprehension_info', 'question', 'Q1');
             insert into job_nodes(job_id, node_key, status, started_at, finished_at)
               values ('job1', 'completed_node', 'completed', '2026-06-09T00:00:00Z', '2026-06-09T00:00:10Z');
             insert into job_nodes(job_id, node_key, status)

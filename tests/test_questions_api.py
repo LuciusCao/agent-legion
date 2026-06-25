@@ -1,6 +1,7 @@
+from unittest.mock import patch
+
 from fastapi.testclient import TestClient
 
-from server.app.cms.question import CmsQuestionDetail
 from server.app.main import create_app
 
 
@@ -12,44 +13,39 @@ def test_question_detail_success(tmp_path, monkeypatch):
         "question_detail_url": "https://cms.example/question/detail",
     }
 
-    def fake_fetch_question_detail(question_id, api_url, token):
-        return CmsQuestionDetail(
-            question_id=question_id,
-            title="Test Question",
-            normalized={
-                "stem": "What is 2+2?",
-                "options": [
-                    {"label": "A", "content": "3"},
-                    {"label": "B", "content": "4"},
-                ],
-                "answer": ["B"],
-                "analysis": "Basic arithmetic.",
-            },
-            payload={"code": 0, "data": {"question_uuid": question_id}},
-        )
+    fake_payload = {
+        "code": 0,
+        "data": {
+            "question_uuid": "Q001",
+            "question_title": "Test Question",
+            "body": {"content": "What is 2+2?"},
+            "option": [
+                {"label": "A", "content": "3"},
+                {"label": "B", "content": "4"},
+            ],
+            "answer": [[{"content": "B"}]],
+            "analyze": [[{"content": "Basic arithmetic.", "title": "", "step": 0}]],
+        },
+    }
 
-    monkeypatch.setattr(
-        "server.app.routes.questions.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.routes.questions.get_token",
-        lambda env, config: "token",
-    )
-
-    with TestClient(app) as c:
+    with (
+        TestClient(app) as c,
+        patch("server.app.cms.question._fetch_json", lambda url, params, token: fake_payload),
+        patch("server.app.cms.client.get_token", lambda env, config: "token"),
+    ):
         c.post(
             "/api/workspaces",
             json={
                 "name": "Math",
+                "default_workflow_key": "question_comprehension_info",
                 "cms_config": {"question_detail_url": "https://cms.example/question/detail"},
             },
         )
         c.post(
             "/api/workspaces/math/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q001"],
                 "knowledge_codes": [],
             },
@@ -84,20 +80,16 @@ def test_question_detail_cms_failure(tmp_path, monkeypatch):
     def fake_fetch_question_detail(question_id, api_url, token):
         raise RuntimeError("CMS down")
 
-    monkeypatch.setattr(
-        "server.app.routes.questions.fetch_question_detail",
-        fake_fetch_question_detail,
-    )
-    monkeypatch.setattr(
-        "server.app.routes.questions.get_token",
-        lambda env, config: "token",
-    )
-
-    with TestClient(app) as c:
+    with (
+        TestClient(app) as c,
+        patch("server.app.routes.questions.fetch_question_detail", fake_fetch_question_detail),
+        patch("server.app.routes.questions.get_token", lambda env, config: "token"),
+    ):
         c.post(
             "/api/workspaces",
             json={
                 "name": "Math",
+                "default_workflow_key": "question_comprehension_info",
                 "cms_config": {"question_detail_url": "https://cms.example/question/detail"},
             },
         )
@@ -112,12 +104,15 @@ def test_question_detail_no_cms_config_returns_empty_normalized(tmp_path):
     app.state.settings.config["cms"] = {}
 
     with TestClient(app) as c:
-        c.post("/api/workspaces", json={"name": "Math"})
+        c.post(
+            "/api/workspaces",
+            json={"name": "Math", "default_workflow_key": "question_comprehension_info"},
+        )
         c.post(
             "/api/workspaces/math/job-batches",
             json={
-                "workflow_key": "question_content",
-                "source_kind": "direct_ids",
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
                 "question_ids": ["Q001"],
                 "knowledge_codes": [],
             },
@@ -174,6 +169,7 @@ def test_question_detail_parses_nested_answer_and_analysis(tmp_path, monkeypatch
             "/api/workspaces",
             json={
                 "name": "Math",
+                "default_workflow_key": "question_comprehension_info",
                 "cms_config": {"question_detail_url": "https://cms.example/question/detail"},
             },
         )

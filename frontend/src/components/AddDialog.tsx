@@ -83,7 +83,8 @@ export function AddDialog({
       .then(({ workspace: ws }) => {
         if (cancelled) return
         setWorkspace(ws)
-        const workflowKey = ws.default_workflow_key || 'question_content'
+        const workflowKey = ws.default_workflow_key
+        if (!workflowKey) return
         return fetchWorkflowDefinition(workflowKey).then((result) => ({
           ws,
           result,
@@ -166,7 +167,7 @@ export function AddDialog({
         }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/job-batches`, {
           method: 'POST',
           body: JSON.stringify({
-            workflow_key: workspace?.default_workflow_key || 'question_content',
+            workflow_key: workspace?.default_workflow_key,
             entity: workspace?.default_entity || 'question',
             source_kind: selectedMode.key,
             [selectedMode.input_field]: values,

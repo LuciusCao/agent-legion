@@ -35,7 +35,7 @@ def test_query_helpers_close_connections(tmp_path: Path) -> None:
     with warnings.catch_warnings():
         warnings.simplefilter("error", ResourceWarning)
         queries = JobQueries(path, jobs_dir)
-        queries.create_workspace("lifecycle")
+        queries.create_workspace("lifecycle", default_workflow_key="question_comprehension_info")
         _assert_no_resource_warning()
 
 

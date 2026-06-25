@@ -48,7 +48,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
     def create_workspace(
         self,
         name: str,
-        default_workflow_key: str = "question_content",
+        default_workflow_key: str = "question_comprehension_info",
         cms_config: dict[str, Any] | None = None,
         resource_config: dict[str, Any] | None = None,
         default_entity: str = "question",
@@ -58,6 +58,9 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         clean_name = name.strip()
         if not clean_name:
             raise ValueError("Workspace name is required")
+        clean_workflow_key = (default_workflow_key or "").strip()
+        if not clean_workflow_key:
+            raise ValueError("Workspace workflow is required")
         cms_config_json = json.dumps(cms_config or {}, ensure_ascii=False, sort_keys=True)
         resource_config_json = json.dumps(
             resource_config or {},
@@ -88,7 +91,7 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                     workspace_id,
                     clean_name,
                     clean_description,
-                    default_workflow_key,
+                    clean_workflow_key,
                     cms_config_json,
                     resource_config_json,
                     clean_entity,
