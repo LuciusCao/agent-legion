@@ -131,6 +131,22 @@ describe('QuestionContentPanel', () => {
     comprehensionArtifactEnabled = true
   })
 
+  it('renders images embedded in stem html', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
+        stem: '<p>下图中有___1___个平行四边形。</p><p><img src="https://example.com/diagram.png" alt="diagram"></p>',
+      })
+    )
+
+    render(<QuestionContentPanel jobId="job1" />)
+    await waitFor(() => {
+      const img = document.querySelector(
+        'img[src="https://example.com/diagram.png"]'
+      )
+      expect(img).toBeInTheDocument()
+    })
+  })
+
   it('renders answer badges for array answer', async () => {
     mockFetchJobArtifact.mockResolvedValue(
       makeQuestionsJson({
