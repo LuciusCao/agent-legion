@@ -44,6 +44,47 @@ function extractAnswerItems(answer: unknown): string[] | null {
   return null
 }
 
+function SocraticQuestion({ question }: { question: KeyInfoItem['question'] }) {
+  const hasText = Boolean(question?.text)
+  const hasOptions = question?.options && question.options.length > 0
+  if (!hasText && !hasOptions) return null
+
+  return (
+    <div className={styles.socraticSection}>
+      <div className={styles.socraticTitle}>苏格拉底提问</div>
+      {hasText && (
+        <div className={styles.socraticText}>
+          <LaTeXText>{question.text}</LaTeXText>
+        </div>
+      )}
+      {hasOptions && (
+        <ul className={styles.socraticOptionList}>
+          {question.options.map((opt, idx) => {
+            const label = String(opt.label || String.fromCharCode(65 + idx))
+            const text = String(opt.text || '')
+            return (
+              <li
+                key={idx}
+                className={`${styles.socraticOptionItem} ${
+                  opt.is_correct ? styles.socraticOptionCorrect : ''
+                }`}
+              >
+                <span className={styles.socraticOptionLabel}>{label}.</span>
+                <span className={styles.socraticOptionContent}>
+                  <LaTeXText>{text}</LaTeXText>
+                </span>
+                {opt.is_correct && (
+                  <span className={styles.socraticCorrectMark}>✓ 正确</span>
+                )}
+              </li>
+            )
+          })}
+        </ul>
+      )}
+    </div>
+  )
+}
+
 export interface QuestionContentPanelProps {
   jobId: string
   refreshKey?: string
@@ -305,6 +346,7 @@ export function QuestionContentPanel({
                         </ul>
                       </div>
                     )}
+                    <SocraticQuestion question={info.question} />
                     {decision && <ReviewDetailStatus decision={decision} />}
                   </div>
                 )
