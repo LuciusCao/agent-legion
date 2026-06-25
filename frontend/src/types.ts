@@ -222,6 +222,12 @@ export type CreateJobBatchInput = {
 
 export type QuestionOption = Record<string, unknown>
 
+export type SocraticOption = {
+  label?: string
+  text?: string
+  is_correct?: boolean
+}
+
 export type AnswerBlank = {
   alternatives: string[]
   is_latex: boolean
@@ -251,7 +257,7 @@ export type KeyInfoItem = {
   content: KeyInfoContent
   question: {
     text: string
-    options: QuestionOption[]
+    options: SocraticOption[]
   }
   question_comprehension_ability: string
 }
