@@ -7,10 +7,12 @@ cd "$ROOT_DIR"
 
 COVERAGE_FILE="${COVERAGE_FILE:-$ROOT_DIR/.coverage.check-quick.$$}"
 export COVERAGE_FILE
-cleanup_coverage() {
-  rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*
-}
-trap cleanup_coverage EXIT
+if [[ -z "${KEEP_COVERAGE:-}" ]]; then
+  cleanup_coverage() {
+    rm -f "$COVERAGE_FILE" "$COVERAGE_FILE".*
+  }
+  trap cleanup_coverage EXIT
+fi
 
 echo "=== Ruff Lint ==="
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run ruff check .
