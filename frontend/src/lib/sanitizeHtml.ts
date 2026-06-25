@@ -33,5 +33,9 @@ export function sanitizeHtml(html: string): string {
       if (!keep) el.removeAttribute(attr.name)
     })
   })
+  // Avoid hotlink protection blocking images via the Referer header.
+  doc.body
+    .querySelectorAll('img')
+    .forEach((el) => el.setAttribute('referrerpolicy', 'no-referrer'))
   return doc.body.innerHTML
 }
