@@ -246,6 +246,38 @@ describe('QuestionContentPanel', () => {
     expect(screen.getByText('52')).toBeInTheDocument()
   })
 
+  it('strips HTML paragraph tags from answer blank alternatives', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
+        stem: '<p>Fill blank</p>',
+        answer_blanks: [
+          { alternatives: ['<p>\\(5200\\)</p>'], is_latex: true },
+        ],
+      })
+    )
+
+    render(<QuestionContentPanel jobId="job1" />)
+    await waitFor(() => expect(screen.getByText('答案')).toBeInTheDocument())
+    expect(screen.getByText(/第1空/)).toBeInTheDocument()
+    expect(screen.queryByText('<p>')).not.toBeInTheDocument()
+    expect(screen.queryByText('</p>')).not.toBeInTheDocument()
+    expect(document.querySelector('.katex')).toBeInTheDocument()
+  })
+
+  it('strips HTML tags from inline options', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({
+        stem: '<p>Pick one</p>',
+        options: [{ label: 'A', content: '<p>\\(x\\)</p>' }],
+      })
+    )
+
+    render(<QuestionContentPanel jobId="job1" />)
+    await waitFor(() => expect(screen.getByText('选项')).toBeInTheDocument())
+    expect(screen.queryByText('<p>')).not.toBeInTheDocument()
+    expect(document.querySelector('.katex')).toBeInTheDocument()
+  })
+
   it('falls back to old extractAnswerItems when answer_blanks missing', async () => {
     mockFetchJobArtifact.mockResolvedValue(
       makeQuestionsJson({
@@ -417,6 +449,50 @@ describe('QuestionContentPanel', () => {
       )
       // Key-info detail is no longer shown because selections are mutually exclusive.
       expect(screen.queryByText('题干信息')).not.toBeInTheDocument()
+    } finally {
+      mockComprehensionInfo.comprehension_data.key_info_list.forEach(
+        (k, idx) => {
+          k.content.position = originalPositions[idx]
+        }
+      )
+    }
+  })
+
+  it('highlights stem with HTML and LaTeX without leaking tags as text', async () => {
+    const originalPositions =
+      mockComprehensionInfo.comprehension_data.key_info_list.map(
+        (k) => k.content.position
+      )
+    mockComprehensionInfo.comprehension_data.key_info_list[0].content.position =
+      {
+        start: 0,
+        end: 15,
+      }
+
+    try {
+      mockFetchJobArtifact.mockResolvedValue(
+        makeQuestionsJson({
+          stem: '<p>方程 <strong>$x^2+mx+1=0$</strong> 有两个不等实根</p>',
+        })
+      )
+
+      render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+      await waitFor(() =>
+        expect(screen.getByText('审题信息')).toBeInTheDocument()
+      )
+      const chips = screen.getAllByRole('button')
+      const keyInfoChip = chips.find((c) => c.textContent?.includes('方程'))!
+      fireEvent.click(keyInfoChip)
+      await waitFor(() =>
+        expect(document.querySelectorAll('.highlight').length).toBeGreaterThan(
+          0
+        )
+      )
+
+      expect(screen.queryByText('<p>')).not.toBeInTheDocument()
+      expect(screen.queryByText('<strong>')).not.toBeInTheDocument()
+      expect(screen.queryByText('</strong>')).not.toBeInTheDocument()
+      expect(document.querySelector('.katex')).toBeInTheDocument()
     } finally {
       mockComprehensionInfo.comprehension_data.key_info_list.forEach(
         (k, idx) => {

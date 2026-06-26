@@ -1,7 +1,7 @@
 import { useRef, useCallback, useState } from 'react'
 import type { InteractionNode, VideoItem, VideoArtifacts } from '../types'
 import { InteractionOverlay } from './InteractionOverlay'
-import { LaTeXText } from './LaTeXText'
+import { RichText } from './RichText'
 import styles from './VideoPlayer.module.css'
 
 interface VideoPlayerProps {
@@ -100,7 +100,7 @@ export function VideoPlayer({
       />
       <div className={styles.subtitleOverlay}>
         <span className={styles.subtitleText}>
-          <LaTeXText>{subtitleText}</LaTeXText>
+          <RichText mode="inline">{subtitleText}</RichText>
         </span>
       </div>
     </div>

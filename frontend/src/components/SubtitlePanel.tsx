@@ -1,7 +1,7 @@
 import React, { useMemo } from 'react'
 import { List, ListItemButton, ListItemText } from '@mui/material'
 import { useArtifactStore } from '../stores/artifactStore'
-import { LaTeXText } from './LaTeXText'
+import { RichText } from './RichText'
 
 export const SubtitlePanel = React.memo(function SubtitlePanel({
   currentTime,
@@ -39,7 +39,7 @@ export const SubtitlePanel = React.memo(function SubtitlePanel({
                 {formatTime(sub.start)} → {formatTime(sub.end)}
               </span>
             }
-            secondary={<LaTeXText>{sub.text}</LaTeXText>}
+            secondary={<RichText mode="inline">{sub.text}</RichText>}
           />
         </ListItemButton>
       ))}

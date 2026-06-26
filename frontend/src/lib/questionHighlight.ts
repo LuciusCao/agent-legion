@@ -1,4 +1,5 @@
 import type { KeyInfoItem } from '../types'
+import { escapeHtml } from './htmlText'
 
 const LATEX_DELIMITERS = [
   { open: '$$', close: '$$' },
@@ -78,19 +79,6 @@ export interface StemPart {
   text: string
   ids?: string[]
   corrected?: boolean
-}
-
-function escapeHtml(s: string): string {
-  return s.replace(
-    /[&<>"]/g,
-    (c) =>
-      ({
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-      })[c] as string
-  )
 }
 
 function getItemTargetText(item: KeyInfoItem): string | undefined {
