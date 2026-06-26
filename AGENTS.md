@@ -511,6 +511,37 @@ Pi skills are **not** repository-owned; they live in standalone git repositories
 
 Pi loads **only** the declared skill. Automatic skill discovery, extensions, prompt templates, and context files are disabled.
 
+### Shared skill assets
+
+Agent Skills specification does not define a shared-directory mechanism, so this project keeps a small set of common files inside each skill's standard directories:
+
+- `scripts/validation.py` — shared Python helpers used by `scripts/validate_output.py`
+- `references/question_comprehension_abilities.json` — shared ability taxonomy
+
+These files must be **byte-identical across every skill in the same workflow**. The quick gate enforces this through `scripts/check-skills-shared.py`.
+
+If you change one skill's copy, synchronize it to the others before finishing. Run the check first to see which files drifted:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py
+```
+
+Then copy the canonical version to every skill in the workflow. The canonical source is usually the skill whose copy is most complete or most recently reviewed; when in doubt, pick `generate_key_info` for `question_comprehension_info` and propagate from there. After copying, rerun the check and the skill tests to ensure nothing broke.
+
+### Skill change and version workflow
+
+Whenever you modify an external skill, follow this sequence so Video Hive resolves the new version reproducibly:
+
+1. **Edit** the skill in its external location (e.g. `~/.agents/skills/agent-legion/<workflow>/<capability>/`).
+2. **Sync shared files** if you touched `scripts/validation.py` or `references/question_comprehension_abilities.json` (see above).
+3. **Commit** the change in the skill repo.
+4. **Tag** a new semantic version. Use patch for bug fixes, minor for new behaviour, major for breaking contract changes.
+5. **Update `config/skills.yaml`** with the new `ref` for that skill.
+6. **Update `config/skills.lock`** with the new tag's commit hash and `resolved_at` timestamp.
+7. **Run `./scripts/check-quick.sh`** (or at least `scripts/check-skills-shared.py` plus the relevant skill tests) to verify.
+
+For local `file://` repos you can read the new commit hash with `git rev-parse <tag>` in the skill directory. Remote repos should be pushed before updating the lockfile so the hash exists on the declared remote.
+
 ### Migration from old repository-owned skills
 
 If old repository-owned skill directories still exist under `server/app/workflows/skills/`, run:

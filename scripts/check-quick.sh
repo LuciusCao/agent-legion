@@ -23,6 +23,9 @@ UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run ruff format --check .
 echo "=== Architecture Invariant Registry ==="
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_invariants.py
 
+echo "=== Skill Shared Content Sync ==="
+UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check-skills-shared.py
+
 echo "=== Python Tests + Coverage ==="
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q --ignore=tests/full --ignore=tests/ci -n auto --cov=server --cov-report=term-missing
 

@@ -220,6 +220,7 @@
     "scripts/architecture/workflow.py": 54,
     "scripts/archive/backfill_source_uuid.py": 108,
     "scripts/backfill-node-run-dirs.py": 38,
+    "scripts/check-skills-shared.py": 175,
     "scripts/check_architecture.py": 33,
     "scripts/check_invariants.py": 86,
     "scripts/cleanup-agent-pollution.py": 79,
