@@ -3,7 +3,7 @@ import { useArtifactStore } from '../stores/artifactStore'
 import { useInteractionStore } from '../stores/interactionStore'
 import { INTERACTION_TYPE_LABELS } from '../labels'
 import { parseTimeSeconds } from '../helpers'
-import { LaTeXText } from './LaTeXText'
+import { RichText } from './RichText'
 import styles from './NodePanel.module.css'
 
 interface ReviewEntry {
@@ -94,7 +94,9 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
                 {formatTime(triggerTime)}
               </span>
               <span>
-                <LaTeXText>{node.instruction || '交互节点'}</LaTeXText>
+                <RichText mode="inline">
+                  {node.instruction || '交互节点'}
+                </RichText>
               </span>
               <Chip label={typeLabel} size="small" />
             </div>
@@ -115,7 +117,7 @@ export function NodePanel({ onSeek, replayInteraction }: NodePanelProps) {
                     disabled={answered}
                     size="small"
                   >
-                    <LaTeXText>{opt.text}</LaTeXText>
+                    <RichText mode="inline">{opt.text}</RichText>
                   </Button>
                 ))}
               </div>

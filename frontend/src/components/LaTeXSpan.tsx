@@ -13,7 +13,8 @@ export function LaTeXSpan({ latex }: LaTeXSpanProps) {
         throwOnError: true,
         displayMode: false,
       })
-    } catch {
+    } catch (err) {
+      console.warn('[RichText] Failed to render LaTeX:', latex, err)
       return null
     }
   }, [latex])

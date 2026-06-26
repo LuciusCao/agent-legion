@@ -1,5 +1,4 @@
-import { renderLatexInHtml } from '../lib/latex'
-import { sanitizeHtml } from '../lib/sanitizeHtml'
+import { RichText } from './RichText'
 import panelStyles from './QuestionContentPanel.module.css'
 import styles from './QuestionAnalysisSection.module.css'
 import type { AnalysisStep } from '../types'
@@ -11,11 +10,6 @@ export function QuestionAnalysisSection({
   analysis: unknown
   analysisSteps?: AnalysisStep[][]
 }) {
-  const analysisHtml =
-    typeof analysis === 'string'
-      ? renderLatexInHtml(sanitizeHtml(analysis))
-      : ''
-
   if (analysisSteps != null && analysisSteps.length > 0) {
     return (
       <div className={styles.analysisGroups}>
@@ -24,19 +18,13 @@ export function QuestionAnalysisSection({
             {group.map((step, sidx) => (
               <div key={sidx} className={styles.analysisStep}>
                 {step.title ? (
-                  <h4
-                    className={styles.stepTitle}
-                    dangerouslySetInnerHTML={{
-                      __html: renderLatexInHtml(sanitizeHtml(step.title)),
-                    }}
-                  />
+                  <h4 className={styles.stepTitle}>
+                    <RichText mode="block">{step.title}</RichText>
+                  </h4>
                 ) : null}
-                <div
-                  className={panelStyles.richText}
-                  dangerouslySetInnerHTML={{
-                    __html: renderLatexInHtml(sanitizeHtml(step.content)),
-                  }}
-                />
+                <div className={panelStyles.richText}>
+                  <RichText mode="block">{step.content}</RichText>
+                </div>
               </div>
             ))}
           </div>
@@ -47,10 +35,9 @@ export function QuestionAnalysisSection({
 
   if (typeof analysis === 'string') {
     return (
-      <div
-        className={panelStyles.richText}
-        dangerouslySetInnerHTML={{ __html: analysisHtml }}
-      />
+      <div className={panelStyles.richText}>
+        <RichText mode="block">{analysis}</RichText>
+      </div>
     )
   }
 

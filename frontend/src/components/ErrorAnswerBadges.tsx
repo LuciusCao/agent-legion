@@ -1,5 +1,4 @@
-import { extractLatexParts } from '../lib/latex'
-import { LaTeXText } from './LaTeXText'
+import { RichText } from './RichText'
 import styles from './QuestionContentPanel.module.css'
 
 export interface ErrorAnswerBadgesProps {
@@ -11,11 +10,7 @@ export function ErrorAnswerBadges({ answers }: ErrorAnswerBadgesProps) {
     <>
       {answers.map((answer, idx) => (
         <span key={idx} className={styles.answerBadge}>
-          {extractLatexParts(answer).some((p) => p.type === 'latex') ? (
-            <LaTeXText>{answer}</LaTeXText>
-          ) : (
-            answer
-          )}
+          <RichText mode="inline">{answer}</RichText>
         </span>
       ))}
     </>

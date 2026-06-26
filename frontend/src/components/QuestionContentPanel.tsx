@@ -2,12 +2,11 @@ import { useMemo, useRef, useState } from 'react'
 import { useJobQuestion } from '../hooks/useJobQuestion'
 import { useJobComprehensionInfo } from '../hooks/useJobComprehensionInfo'
 import { useJobReviewReports } from '../hooks/useJobReviewReports'
-import { extractLatexParts, renderLatexInHtml } from '../lib/latex'
-import { sanitizeHtml } from '../lib/sanitizeHtml'
 import { buildHighlightedStemParts } from '../lib/questionHighlight'
+import { escapeHtml } from '../lib/htmlText'
 import { ErrorAnswerBadges } from './ErrorAnswerBadges'
 import { QuestionAnnotations } from './QuestionAnnotations'
-import { LaTeXText } from './LaTeXText'
+import { RichText } from './RichText'
 import { MaterialIcon } from './MaterialIcon'
 import {
   ReviewChipStatus,
@@ -59,7 +58,7 @@ function SocraticQuestion({
       <div className={styles.socraticTitle}>苏格拉底提问</div>
       {hasText && (
         <div className={styles.socraticText}>
-          <LaTeXText>{question.text}</LaTeXText>
+          <RichText mode="inline">{question.text}</RichText>
         </div>
       )}
       {hasOptions && (
@@ -76,7 +75,7 @@ function SocraticQuestion({
               >
                 <span className={styles.socraticOptionLabel}>{label}.</span>
                 <span className={styles.socraticOptionContent}>
-                  <LaTeXText>{text}</LaTeXText>
+                  <RichText mode="inline">{text}</RichText>
                 </span>
                 {opt.is_correct && (
                   <span className={styles.socraticCorrectMark}>✓ 正确</span>
@@ -134,10 +133,6 @@ export function QuestionContentPanel({
     useReviewDecisionMaps(reviewReports)
 
   const stem = question?.stem
-  const stemHtml = useMemo(() => {
-    if (!stem) return ''
-    return renderLatexInHtml(sanitizeHtml(stem))
-  }, [stem])
   const selectedKeyInfos = useMemo(() => {
     return Array.from(selectedIds)
       .map((id) => keyInfoList.find((k) => k.key_info_id === id))
@@ -147,6 +142,14 @@ export function QuestionContentPanel({
   const selectedError = useMemo(
     () => possibleErrorList.find((e) => e.error_id === selectedErrorId) ?? null,
     [selectedErrorId, possibleErrorList]
+  )
+
+  const selectedErrorDecision = useMemo(
+    () =>
+      selectedError
+        ? possibleErrorDecisions.get(selectedError.error_id)
+        : undefined,
+    [selectedError, possibleErrorDecisions]
   )
 
   const errorKeyInfos = useMemo(() => {
@@ -170,19 +173,6 @@ export function QuestionContentPanel({
     () => highlightedKeyInfos.filter((k) => k.type === 'hidden'),
     [highlightedKeyInfos]
   )
-
-  function escapeHtml(s: string): string {
-    return s.replace(
-      /[&<>"]/g,
-      (c) =>
-        ({
-          '&': '&amp;',
-          '<': '&lt;',
-          '>': '&gt;',
-          '"': '&quot;',
-        })[c] as string
-    )
-  }
 
   const analysisSteps = question?.analysis_steps
 
@@ -225,17 +215,18 @@ export function QuestionContentPanel({
                           : undefined
                       }
                       data-ids={part.ids?.join(',')}
-                      dangerouslySetInnerHTML={{
-                        __html: renderLatexInHtml(escapeHtml(part.text)),
-                      }}
-                    />
+                    >
+                      {/* part.text is plain text extracted from HTML; escape it before
+                          passing to block mode, which sanitizes and then renders LaTeX
+                          inside text nodes. */}
+                      <RichText mode="block">{escapeHtml(part.text)}</RichText>
+                    </span>
                   ))}
                 </div>
               ) : (
-                <div
-                  className={styles.richText}
-                  dangerouslySetInnerHTML={{ __html: stemHtml }}
-                />
+                <div className={styles.richText}>
+                  <RichText mode="block">{stem ?? ''}</RichText>
+                </div>
               )
             ) : (
               <p className={styles.empty}>无题干</p>
@@ -288,7 +279,7 @@ export function QuestionContentPanel({
                     }}
                   >
                     <span className={styles.chipIndex}>{idx + 1}</span>
-                    <LaTeXText>{label}</LaTeXText>
+                    <RichText mode="inline">{label}</RichText>
                     {decision && <ReviewChipStatus decision={decision} />}
                   </button>
                 )
@@ -323,13 +314,13 @@ export function QuestionContentPanel({
                       </span>
                     </div>
                     <div className={styles.detailText}>
-                      <LaTeXText>
+                      <RichText mode="inline">
                         {info.type === 'hidden'
                           ? info.content.derivation || ''
                           : info.content.text ||
                             info.content.derived_text ||
                             ''}
-                      </LaTeXText>
+                      </RichText>
                     </div>
                     <div className={styles.detailSection}>
                       <strong>关联能力</strong>
@@ -345,7 +336,9 @@ export function QuestionContentPanel({
                         <ul>
                           {errors.map((err) => (
                             <li key={err.error_id}>
-                              <LaTeXText>{err.error_description}</LaTeXText>
+                              <RichText mode="inline">
+                                {err.error_description}
+                              </RichText>
                             </li>
                           ))}
                         </ul>
@@ -386,7 +379,7 @@ export function QuestionContentPanel({
                   )}
                   <span className={styles.optionLabel}>{label}.</span>
                   <span className={styles.optionContent}>
-                    <LaTeXText>{content}</LaTeXText>
+                    <RichText mode="inline">{content}</RichText>
                   </span>
                 </li>
               )
@@ -406,14 +399,7 @@ export function QuestionContentPanel({
                   <span className={styles.blankAlternatives}>
                     {blank.alternatives.map((alt, aidx) => (
                       <span key={aidx} className={styles.answerBadge}>
-                        {blank.is_latex &&
-                        extractLatexParts(alt).some(
-                          (p) => p.type === 'latex'
-                        ) ? (
-                          <LaTeXText>{alt}</LaTeXText>
-                        ) : (
-                          alt
-                        )}
+                        <RichText mode="inline">{alt}</RichText>
                       </span>
                     ))}
                   </span>
@@ -424,11 +410,7 @@ export function QuestionContentPanel({
             <div className={styles.answerBadges}>
               {answerItems.map((item, idx) => (
                 <span key={idx} className={styles.answerBadge}>
-                  {extractLatexParts(item).some((p) => p.type === 'latex') ? (
-                    <LaTeXText>{item}</LaTeXText>
-                  ) : (
-                    item
-                  )}
+                  <RichText mode="inline">{item}</RichText>
                 </span>
               ))}
             </div>
@@ -472,7 +454,7 @@ export function QuestionContentPanel({
                     }}
                   >
                     <span className={styles.chipIndex}>{idx + 1}</span>
-                    <LaTeXText>{label}</LaTeXText>
+                    <RichText mode="inline">{label}</RichText>
                     {decision && <ReviewChipStatus decision={decision} />}
                   </button>
                 )
@@ -499,7 +481,9 @@ export function QuestionContentPanel({
                   </span>
                 </div>
                 <div className={styles.detailText}>
-                  <LaTeXText>{selectedError.error_description}</LaTeXText>
+                  <RichText mode="inline">
+                    {selectedError.error_description}
+                  </RichText>
                 </div>
                 <div className={styles.detailSection}>
                   <strong>关联关键信息</strong>
@@ -510,11 +494,11 @@ export function QuestionContentPanel({
                           key={k.key_info_id}
                           className={styles.relatedKeyInfoTag}
                         >
-                          <LaTeXText>
+                          <RichText mode="inline">
                             {k.content.text ||
                               k.content.derived_text ||
                               k.key_info_id}
-                          </LaTeXText>
+                          </RichText>
                         </span>
                       ))
                     ) : (
@@ -522,14 +506,9 @@ export function QuestionContentPanel({
                     )}
                   </div>
                 </div>
-                {(() => {
-                  const decision = possibleErrorDecisions.get(
-                    selectedError.error_id
-                  )
-                  return decision ? (
-                    <ReviewDetailStatus decision={decision} />
-                  ) : null
-                })()}
+                {selectedErrorDecision ? (
+                  <ReviewDetailStatus decision={selectedErrorDecision} />
+                ) : null}
               </div>
             </div>
           )}

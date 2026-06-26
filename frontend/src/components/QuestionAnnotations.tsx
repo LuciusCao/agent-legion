@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { renderLatexInHtml } from '../lib/latex'
+import { RichText } from './RichText'
 import type { KeyInfoItem } from '../types'
 import styles from './QuestionAnnotations.module.css'
 
@@ -26,16 +26,6 @@ interface FinalLayout {
 }
 
 const GAP = 12
-
-function escapeHtml(s: string): string {
-  const map: Record<string, string> = {
-    '&': '&amp;',
-    '<': '&lt;',
-    '>': '&gt;',
-    '"': '&quot;',
-  }
-  return s.replace(/[&<>"]/g, (c) => map[c])
-}
 
 export function QuestionAnnotations({
   wrapperRef,
@@ -313,12 +303,11 @@ export function QuestionAnnotations({
               top: layout?.top ?? 0,
               opacity: isReady ? 1 : 0,
             }}
-            dangerouslySetInnerHTML={{
-              __html: renderLatexInHtml(
-                escapeHtml(item.content.derived_text || item.content.text || '')
-              ),
-            }}
-          />
+          >
+            <RichText mode="block">
+              {item.content.derived_text || item.content.text || ''}
+            </RichText>
+          </div>
         )
       })}
     </div>
