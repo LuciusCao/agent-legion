@@ -223,6 +223,7 @@ describe('JobActionBar', () => {
     expect(screen.getByTestId('rerun-chip-extract')).toHaveTextContent('提取')
     expect(screen.getByTestId('rerun-chip-generate')).toHaveTextContent('生成')
     expect(screen.getByTestId('rerun-chip-review')).toHaveTextContent('审核')
+    expect(screen.queryByTestId('rerun-chip-failed-node')).toBeInTheDocument()
   })
 
   it('disables actions when loading', () => {

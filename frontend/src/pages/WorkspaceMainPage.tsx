@@ -125,9 +125,12 @@ export default function WorkspaceMainPage() {
     { key: 'clear', label: '取消选择', onClick: clearSelection },
   ]
 
-  const handleRerun = async (nodeKey: string) => {
+  const handleRerun = async (
+    nodeKey: string | null,
+    fromFailedNode?: boolean
+  ) => {
     if (!workspaceId) return
-    await batchRerun(workspaceId, nodeKey)
+    await batchRerun(workspaceId, nodeKey, fromFailedNode)
   }
 
   const handleRunTo = async (targetKey: string, startKey?: string) => {

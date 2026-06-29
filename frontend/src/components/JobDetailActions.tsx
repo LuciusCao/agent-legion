@@ -13,7 +13,7 @@ export type JobDetailActionsProps = {
   workflowDefinition?: WorkflowDefinitionRecord | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   loading?: boolean
-  onRerun: (nodeKey: string) => void | Promise<void>
+  onRerun: (nodeKey: string | null, fromFailedNode?: boolean) => void | Promise<void>
   onRunTo?: (targetKey: string, startKey?: string) => void | Promise<void>
   onContinue?: () => void | Promise<void>
   onPackage: () => void | Promise<void>
@@ -57,8 +57,11 @@ export function JobDetailActions({
 
   const deleteDisabled = jobs.length === 0 || loading
 
-  const handleRerun = async (nodeKey: string) => {
-    await onRerun(nodeKey)
+  const handleRerun = async (
+    nodeKey: string | null,
+    fromFailedNode?: boolean
+  ) => {
+    await onRerun(nodeKey, fromFailedNode)
   }
 
   const handleRunTo = async (targetKey: string, startKey?: string) => {
