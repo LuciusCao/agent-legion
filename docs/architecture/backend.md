@@ -259,3 +259,105 @@ server/app/
 
 - [Worker 轮询性能](../superpowers/completed/2026-05-29-worker-polling-performance-design.md)
 - [数据库性能优化](../superpowers/completed/2026-05-29-database-performance-design.md)
+
+## Runtime Architecture
+
+### 后端
+
+- `server.app.main:create_app(data_dir, start_worker)` 是 FastAPI 应用工厂。
+- 当 `start_worker=True` 时，生命周期内可能启动两个守护线程：
+  - `WorkerThread` 每 1–3 秒轮询数据库，处理 `queued` 或 `running` 状态的视频。
+  - `WorkflowWorkerThread` 在 `config/workflow.yaml` 中 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
+- 视频 worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
+- 每个视频有 `content_type`（`knowledge` 或 `question`），并走类型特定的 pipeline：
+
+  **Knowledge videos (`knowledge`):**
+  1. `download` — 下载 MP4
+  2. `transcribe` — 生成 `subtitles.srt` 与 `transcription.json`
+  3. `subtitle_review` — openclaw agent
+  4. `chapter_generate` — openclaw agent
+  5. `interaction_generate` — openclaw agent
+  6. `content_review` — openclaw agent
+  7. `assemble` — 生成 `metadata.json`、`report.md`、`upload_params.json`
+  8. `package` — 标记完成
+
+  **Question explanation videos (`question`):**
+  1. `download`
+  2. `transcribe`
+  3. `subtitle_review`
+  4. `chapter_generate`
+  5. `assemble`
+  6. `package`
+
+- `assemble` 会把 artifacts 转换成 `llm_claude` 下游格式写入 `upload_params.json`：
+  - subtitles → `sequence` + 毫秒级 `start_time/end_time` + 清洗文本
+  - chapters → `clips_uuid` + 毫秒级 `start_time/end_time`
+  - interactions → 拆分为 `example_problem_trial` 与 `interaction_summary`，选项映射为 A/B/C/D，并提取 `review_status` / `review_msg`
+- 可以提交空 URL 的视频，系统会记录为 `status: missing_url`、`current_phase: waiting_for_url`，worker 会跳过直到补 URL。
+- 任一 phase 失败会把视频置为 `failed`，错误写入数据库与日志文件。
+- 支持从任意 phase 重跑；重跑会清除该 phase 及之后所有 artifacts。
+- `question` 视频从 `interaction_generate` 或 `content_review` 重跑会被自动重定向到 `assemble`。
+- `DELETE /api/videos/{video_id}` 会级联删除 `phase_runs`、`transcription_runs` 与本地视频目录。
+
+## Database
+
+- SQLite 同时服务视频 pipeline 与 Agent Legion workflow：
+  - `videos` — 视频队列（含 `content_type`, `external_id`, `knowledge_code`, `question_id`, `source_uuid`, `source_url`, `title`, `current_phase`, `status`, `duration`, `storage_dir`）
+  - `phase_runs` — 视频 pipeline 每 phase 执行历史
+  - `transcription_runs` — 转录尝试历史（whisper / SenseVoice）
+  - `packages` — 已创建 package 路径
+  - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `cms_config_json`, `resource_config_json`, `default_entity`, `intake_config_json`）
+  - `job_batches`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表
+- 初始化器使用轻量迁移（`alter table add column`），旧表可无损获得新列。
+- `VideoQueries.connect()` 与 `JobQueries.connect()` 是上下文管理器，确保 `conn.close()`。
+- `delete_video()` 先级联删除 `phase_runs` 与 `transcription_runs`，再删 `videos` 行。
+- 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。详见 `server/app/storage_paths.py` 与迁移 `v009_relative_path_storage.py`。
+
+## Configuration Reference
+
+配置按域拆分为三个文件：
+
+- `config/app.yaml`：应用路径、HTTP 设置、worker 并发。
+- `config/video_hive.yaml`：ASR、CMS、资源提供者、清理、OpenClaw 设置。
+- `config/workflow.yaml`：workspace executor 与 workflow 运行时设置。
+
+常用 `config/video_hive.yaml` 配置项：
+
+- `asr.provider`: `auto`, `whisper`, `sensevoice`
+- `asr.whisper.binary`: 本地 `whisper-cli` 路径
+- `asr.whisper.model`: 本地 whisper 模型路径
+- `asr.whisper.vad_model`: 可选 VAD 模型路径
+- `asr.sensevoice.script`: SenseVoice 转写脚本路径
+- `asr.sensevoice.model_dir`: `SenseVoiceSmall` 模型目录
+- `openclaw.command_template`: 含 `{prompt_file}`, `{video_id}`, `{video_dir}` 的命令参数列表
+- `openclaw.timeout_seconds`: 默认 600 秒
+- `openclaw.runners`: 显式 runner 定义列表，每项可含 `count` 以横向扩展
+- `workflows.enabled`: 是否启用 Agent Legion DAG workflow worker
+
+其他配置文件：
+
+- `config/skills.yaml` / `config/skills.lock`：外部 Pi skill 仓库源与固定 commit。
+- `config/workflows/*.yaml`：workflow 定义，Node 只声明 `capability`，不声明 `runner`/`agent`/`skill`。
+- `config/architecture/*`：架构不变量、豁免、源文件体积预算。
+
+## Testing
+
+- 测试位于 `tests/`，使用 pytest。
+- `pyproject.toml` 配置 `pythonpath = ["."]`，支持 `server.app.db` 这类导入。
+- 覆盖率阈值 `fail_under = 85`（`pyproject.toml`）。
+- API 测试使用 `fastapi.testclient.TestClient`，`client` fixture 必须 `with TestClient(app) as c:`。
+- Worker 测试注入 mock `TranscriptionProvider`，避免依赖真实 ASR 二进制。
+
+常用命令：
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run pytest -q
+UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
+```
+
+## Security Considerations
+
+- 后端通过 `requests` 下载任意 URL；只在可信输入环境下运行。
+- OpenClaw 命令通过 `subprocess.run` 执行，模板来自用户可写的 `config/video_hive.yaml`；需确保该文件不被未信任用户修改。
+- SQLite 与视频存储均为本地，无认证层；不要把开发服务器暴露到不可信网络。
+- `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

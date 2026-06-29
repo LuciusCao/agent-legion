@@ -2,6 +2,15 @@
 
 Local processing console for educational videos. It queues knowledge videos and question explanation videos, downloads and transcribes them, runs the applicable openclaw content stages, previews partial/final artifacts, and packages completed JSON for handoff. (Formerly Video Hive.)
 
+## Technology Stack
+
+- **Backend**: Python 3.11+ (project currently runs on Python 3.13), FastAPI, Uvicorn, SQLite, PyYAML, Requests
+- **Frontend**: React 18, TypeScript 5.8, Vite, React Router v6, Zustand, `@material/web` (Material 3 Web Components), `@mui/material` (MUI), `@xyflow/react` (React Flow), `dagre`, `katex`, `@tanstack/react-virtual`
+- **Package Management**: `uv` for Python; `npm` for the frontend
+- **Linting / Formatting**: Ruff (Python), ESLint + Prettier (TypeScript)
+- **Static Type Check**: mypy (Python)
+- **Testing**: pytest (with pytest-cov), Vitest (frontend)
+
 ## Current Shape
 
 - Backend: FastAPI, SQLite, background worker.
@@ -10,6 +19,8 @@ Local processing console for educational videos. It queues knowledge videos and 
 - Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`, `data/jobs/`.
 - Video queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
 - Agent Legion workflow model: workspace-scoped DAG jobs with configurable workflow definitions (`config/workflows/`).
+
+完整目录树见 [docs/architecture/project-structure.md](docs/architecture/project-structure.md)。
 
 ## Setup
 
@@ -25,7 +36,8 @@ When running inside a restricted sandbox, keep the uv cache in the project:
 UV_CACHE_DIR=.uv-cache uv sync
 ```
 
-> For architecture details, code style, and testing conventions, see [AGENTS.md](AGENTS.md).
+> For architecture details, code style, and testing conventions, see [docs/architecture/](docs/architecture/).
+> For Agent-specific operating rules, see [AGENTS.md](AGENTS.md).
 
 ## Makefile Shortcuts
 
@@ -62,7 +74,7 @@ Edit `config/video_hive.yaml` for:
 
 In `auto` ASR mode, Video Hive tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
 
-> See [AGENTS.md](AGENTS.md) for full configuration reference.
+> See [docs/architecture/backend.md](docs/architecture/backend.md) for full configuration reference.
 >
 > You must also configure `config/skills.yaml` (and commit the generated `config/skills.lock`) for Agent Legion / Pi workflows to resolve skills. See the Pi section below.
 
@@ -170,13 +182,25 @@ Full gate (before committing or handing off):
 
 Runs the quick gate plus the frontend production build.
 
+Run the full test suite:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run pytest -q
+```
+
+With coverage report:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
+```
+
 Install the optional pre-commit hook:
 
 ```bash
 ./scripts/install-git-hooks.sh
 ```
 
-> See [AGENTS.md](AGENTS.md) for architecture details, code style conventions, and security notes.
+> See [docs/architecture/](docs/architecture/) for architecture details, code style conventions, and security notes.
 
 ## Pipeline
 
