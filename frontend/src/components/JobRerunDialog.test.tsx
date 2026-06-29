@@ -181,7 +181,7 @@ describe('JobRerunDialog', () => {
       screen.getByText(/确认重跑/).click()
     })
 
-    expect(onConfirm).toHaveBeenCalledWith('review')
+    expect(onConfirm).toHaveBeenCalledWith('review', false)
     expect(onClose).toHaveBeenCalled()
   })
 
