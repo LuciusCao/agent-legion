@@ -60,7 +60,20 @@ class JobRerunService:
     def _job_has_running_nodes(self, job_id: str) -> bool:
         return any(node["status"] == "running" for node in self.job_db.list_job_nodes(job_id))
 
-    def rerun(self, workspace_id: str, job_id: str, node_key: str) -> dict[str, Any]:
+    def _resolve_failed_node_key(self, job_id: str) -> str | None:
+        for node in self.job_db.list_job_nodes(job_id):
+            if node["status"] == "failed":
+                return str(node["node_key"])
+        return None
+
+    def rerun(
+        self,
+        workspace_id: str,
+        job_id: str,
+        node_key: str | None = None,
+        *,
+        from_failed_node: bool = False,
+    ) -> dict[str, Any]:
         job = self.job_db.get_job(job_id)
         if job is None:
             return self._result(job_id, "failed", node_key, "not_found", "Job not found")
@@ -73,30 +86,59 @@ class JobRerunService:
                 f"Job does not belong to workspace {workspace_id}",
             )
 
+        if from_failed_node:
+            if job.get("status") != "failed":
+                return self._result(
+                    job_id,
+                    "skipped",
+                    None,
+                    "not_failed",
+                    "Job is not failed",
+                )
+            actual_node_key = self._resolve_failed_node_key(job_id)
+            if actual_node_key is None:
+                return self._result(
+                    job_id,
+                    "skipped",
+                    None,
+                    "no_failed_node",
+                    "No failed node found",
+                )
+        else:
+            if node_key is None:
+                return self._result(
+                    job_id,
+                    "failed",
+                    None,
+                    "node_key_required",
+                    "node_key is required",
+                )
+            actual_node_key = node_key
+
         definition = self.workflows.definition(str(job["workflow_key"]))
-        if node_key not in definition.nodes:
+        if actual_node_key not in definition.nodes:
             return self._result(
                 job_id,
                 "failed",
-                node_key,
+                actual_node_key,
                 "node_not_found",
-                f"Node {node_key} not found in workflow",
+                f"Node {actual_node_key} not found in workflow",
             )
 
-        if self.job_db.get_job_node(job_id, node_key) is None:
+        if self.job_db.get_job_node(job_id, actual_node_key) is None:
             return self._result(
                 job_id,
                 "failed",
-                node_key,
+                actual_node_key,
                 "node_not_found",
-                f"Node {node_key} not found for job",
+                f"Node {actual_node_key} not found for job",
             )
 
-        if self.lease_repo.has_active_for_node(job_id, node_key, self._now()):
+        if self.lease_repo.has_active_for_node(job_id, actual_node_key, self._now()):
             return self._result(
                 job_id,
                 "skipped",
-                node_key,
+                actual_node_key,
                 "busy",
                 "Node has an active executor lease",
             )
@@ -105,12 +147,12 @@ class JobRerunService:
             return self._result(
                 job_id,
                 "skipped",
-                node_key,
+                actual_node_key,
                 "busy",
                 "Job has running nodes",
             )
 
-        stale_nodes = downstream_nodes(definition, node_key)
+        stale_nodes = downstream_nodes(definition, actual_node_key)
         staged = None
         try:
             with self.job_db.lease_guarded_mutation(
@@ -118,18 +160,18 @@ class JobRerunService:
                 self._now(),
                 reject_running_nodes=True,
             ) as conn:
-                staged = self.artifact_service.stage_outputs(job, [node_key], definition)
+                staged = self.artifact_service.stage_outputs(job, [actual_node_key], definition)
                 self.job_db.mark_nodes_for_rerun_in_transaction(
-                    conn, job_id, [node_key], {node_key: stale_nodes}
+                    conn, job_id, [actual_node_key], {actual_node_key: stale_nodes}
                 )
         except JobMutationConflict as exc:
             if staged is not None:
                 staged.rollback()
-            return self._result(job_id, "skipped", node_key, exc.reason_code, str(exc))
+            return self._result(job_id, "skipped", actual_node_key, exc.reason_code, str(exc))
         except ValueError as exc:
             if staged is not None:
                 staged.rollback()
-            return self._result(job_id, "failed", node_key, "cleanup_failed", str(exc))
+            return self._result(job_id, "failed", actual_node_key, "cleanup_failed", str(exc))
         except Exception as exc:
             logger.exception("Failed to mark nodes for rerun for job %s", job_id)
             if staged is not None:
@@ -137,21 +179,33 @@ class JobRerunService:
             return self._result(
                 job_id,
                 "failed",
-                node_key,
+                actual_node_key,
                 "rerun_failed",
                 str(exc),
             )
 
         commit_staged_outputs(staged, job_id, "rerun")
         broadcast_job_update(self.job_db, self.job_event_manager, job_id)
-        return self._result(job_id, "succeeded", node_key)
+        return self._result(job_id, "succeeded", actual_node_key)
 
     def batch_rerun(
-        self, workspace_id: str, job_ids: list[str], node_key: str
+        self,
+        workspace_id: str,
+        job_ids: list[str],
+        node_key: str | None = None,
+        *,
+        from_failed_node: bool = False,
     ) -> list[dict[str, Any]]:
         results: list[dict[str, Any]] = []
         for job_id in self._normalize_values(job_ids):
-            results.append(self.rerun(workspace_id, job_id, node_key))
+            results.append(
+                self.rerun(
+                    workspace_id,
+                    job_id,
+                    node_key,
+                    from_failed_node=from_failed_node,
+                )
+            )
         return results
 
     @staticmethod
