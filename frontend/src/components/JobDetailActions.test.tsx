@@ -128,7 +128,7 @@ describe('JobDetailActions', () => {
     await act(async () => {
       screen.getByText('确认重跑').click()
     })
-    expect(onRerun).toHaveBeenCalledWith('extract')
+    expect(onRerun).toHaveBeenCalledWith('extract', false)
   })
 
   it('opens run-to dialog and calls onRunTo with selected target', async () => {

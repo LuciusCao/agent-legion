@@ -16,12 +16,18 @@ import {
 
 export function batchActions(set: JobStoreSet, get: () => JobState) {
   return {
-    async batchRerun(workspaceId: string, nodeKey: string) {
+    async batchRerun(
+      workspaceId: string,
+      nodeKey: string | null,
+      fromFailedNode?: boolean
+    ) {
       const ids = Array.from(get().selectedIds)
       if (ids.length === 0) return { results: [] }
       set({ batchRerunLoading: true })
       try {
-        const data = await batchRerunJobs(workspaceId, nodeKey, ids)
+        const data = await batchRerunJobs(workspaceId, nodeKey, ids, {
+          fromFailedNode,
+        })
         const results = data.results ?? []
         const succeededIds = new Set(
           results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)

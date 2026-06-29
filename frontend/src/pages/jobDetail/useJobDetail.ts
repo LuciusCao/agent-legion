@@ -75,8 +75,8 @@ export function useJobDetail(
   }, [jobId, setPageTitle, refreshDetail])
 
   const handleRerun = useCallback(
-    async (nodeKey: string) => {
-      if (!jobId) return
+    async (nodeKey: string | null, fromFailedNode?: boolean) => {
+      if (!jobId || !nodeKey || fromFailedNode) return
       setActionLoading(true)
       try {
         await rerunJob(jobId, nodeKey)
