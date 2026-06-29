@@ -65,7 +65,12 @@ def create_jobs_router(
         payload: JobBatchRerunRequest,
     ) -> BatchJobMutationResponse:
         require_workflows_enabled(settings)
-        results = job_rerun.batch_rerun(workspace_id, payload.job_ids, payload.node_key)
+        results = job_rerun.batch_rerun(
+            workspace_id,
+            payload.job_ids,
+            payload.node_key,
+            from_failed_node=payload.from_failed_node,
+        )
         return BatchJobMutationResponse(
             results=[JobMutationResultResponse.model_validate(result) for result in results]
         )
