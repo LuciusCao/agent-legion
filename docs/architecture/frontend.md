@@ -71,3 +71,38 @@ frontend/src/
 
 - [前端状态管理](../superpowers/completed/2026-05-29-frontend-state-management-design.md)
 - [Material Design 3 前端改造](../superpowers/completed/2026-05-23-material-design-3-redesign-design.md)
+
+## Technology Stack
+
+- React 18
+- TypeScript 5.8
+- Vite
+- React Router v6
+- Zustand
+- `@material/web` (Material 3 Web Components)
+- `@mui/material` (MUI)
+- `@xyflow/react` (React Flow)
+- `dagre`
+- `katex`
+- `@tanstack/react-virtual`
+
+## Tooling
+
+- **Linter**: ESLint 10 + `typescript-eslint` + `eslint-plugin-react-hooks`
+- **Formatter**: Prettier（`semi: false`, `singleQuote: true`, `tabWidth: 2`）
+- 常用脚本：
+  - `npm run lint`
+  - `npm run lint:fix`
+  - `npm run format`
+  - `npm run format:check`
+
+## UI Behavior Notes
+
+- 前端界面语言为中文（如“加入队列”、“重跑”、“打包完成项”）。
+- 视频播放器支持点击 subtitle / chapter / interaction 时间戳进行 seek。
+- 添加视频表单包含类型选择（知识点 / 题目解析）、`external_id` 字段与可选 `source_uuid`。
+- 批量输入支持每行 `external_id,source_uuid`（`source_uuid` 可选）。
+- 列表与详情头部展示 `content_type` 标签与 `external_id`。
+- Phase panel 与重跑下拉框会根据 `content_type` 自适应；`question` 视频隐藏 knowledge-only phases。
+- 全局 `Toast` 组件用于反馈（如“该资源正在被处理中”）。
+- 批量操作支持多选后批量重跑、批量删除、批量打包。
