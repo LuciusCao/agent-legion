@@ -12,6 +12,7 @@ from server.app.db.migrations._migration_imports import (
     V012_WORKSPACE_PACKAGES,
     V013_NODE_RUN_SKILL_VERSION,
     V014_REMOVE_QUESTION_CONTENT_DEFAULT,
+    V015_RENAME_PI_EXECUTOR_ID,
 )
 from server.app.db.migrations.models import Migration
 
@@ -29,4 +30,5 @@ MIGRATIONS: tuple[Migration, ...] = (
     V012_WORKSPACE_PACKAGES,
     V013_NODE_RUN_SKILL_VERSION,
     V014_REMOVE_QUESTION_CONTENT_DEFAULT,
+    V015_RENAME_PI_EXECUTOR_ID,
 )

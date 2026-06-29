@@ -55,5 +55,5 @@ def test_finalizer_interruption_before_commit_retains_backup_and_reruns(
         for row in _fetch_all_allocations(queries)
         if row["workspace_id"] == workspace_id
     }
-    assert allocations == {"local-default": 3, "pi-default": 2}
+    assert allocations == {"local-default": 3, "pi": 2}
     assert backup_path.is_file()

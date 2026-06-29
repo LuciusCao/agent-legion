@@ -179,13 +179,13 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
         workspace["id"],
         allocations=[
             {"executor_id": "local-default", "concurrency_limit": 1},
-            {"executor_id": "pi-default", "concurrency_limit": 1},
+            {"executor_id": "pi", "concurrency_limit": 1},
         ],
         bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "question_understanding",
-                "executor_id": "pi-default",
+                "executor_id": "pi",
             },
             {
                 "workflow_key": "question_comprehension_info",
@@ -199,7 +199,7 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
     detail = query_service.detail(job["id"])
 
     nodes = {node["node_key"]: node for node in detail["nodes"]}
-    assert nodes["question_understanding"]["executor_id"] == "pi-default"
+    assert nodes["question_understanding"]["executor_id"] == "pi"
     assert nodes["question_understanding"]["executor_kind"] == "pi"
     assert nodes["assemble_package"]["executor_id"] == "local-default"
     assert nodes["assemble_package"]["executor_kind"] == "local"
@@ -228,7 +228,7 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
         workspace["id"],
         allocations=[
             {"executor_id": "local-default", "concurrency_limit": 1},
-            {"executor_id": "pi-default", "concurrency_limit": 1},
+            {"executor_id": "pi", "concurrency_limit": 1},
         ],
         bindings=[
             {
@@ -239,7 +239,7 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_comprehension_info",
-                "executor_id": "pi-default",
+                "executor_id": "pi",
             },
         ],
         node_limits=[],

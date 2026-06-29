@@ -17,35 +17,7 @@ executors:
         handler: video_knowledge.assemble_video_metadata
       package_video_job:
         handler: video_knowledge.package_video_job
-  pi-video-main:
-    kind: pi
-    global_capacity: 8
-    capabilities:
-      review_subtitles:
-        skill: video_knowledge/review_subtitles
-        tools:
-        - read
-        - write
-        - bash
-      generate_chapters:
-        skill: video_knowledge/generate_chapters
-        tools:
-        - read
-        - write
-        - bash
-      generate_interactions:
-        skill: video_knowledge/generate_interactions
-        tools:
-        - read
-        - write
-        - bash
-      review_video_content:
-        skill: video_knowledge/review_video_content
-        tools:
-        - read
-        - write
-        - bash
-  pi-default:
+  pi:
     kind: pi
     global_capacity: 20
     capabilities:
@@ -75,6 +47,30 @@ executors:
         - bash
       assess_comprehension_difficulty:
         skill: question_comprehension_info/assess_comprehension_difficulty
+        tools:
+        - read
+        - write
+        - bash
+      review_subtitles:
+        skill: video_knowledge/review_subtitles
+        tools:
+        - read
+        - write
+        - bash
+      generate_chapters:
+        skill: video_knowledge/generate_chapters
+        tools:
+        - read
+        - write
+        - bash
+      generate_interactions:
+        skill: video_knowledge/generate_interactions
+        tools:
+        - read
+        - write
+        - bash
+      review_video_content:
+        skill: video_knowledge/review_video_content
         tools:
         - read
         - write

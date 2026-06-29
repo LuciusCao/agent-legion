@@ -264,7 +264,7 @@ class TestApply:
                 )
             }
         assert bindings["download"] == "local-default"
-        assert bindings["subtitle_review"] == "pi-video-main"
+        assert bindings["subtitle_review"] == "pi"
 
     def test_apply_marks_video_workspace_executor_configuration_authoritative(
         self, migration_module: Any, tmp_path: Path

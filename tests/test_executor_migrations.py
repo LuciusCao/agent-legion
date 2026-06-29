@@ -515,6 +515,95 @@ def test_v013_adds_node_runs_skill_version_column(tmp_path: Path) -> None:
         assert columns["skill_version"]["dflt_value"] == "''"
 
 
+def test_v015_renames_legacy_pi_executor_ids(tmp_path: Path) -> None:
+    """Existing workspace executor rows are normalized after the Pi executor rename."""
+    path = tmp_path / "v015_upgrade.sqlite"
+    init_db(path)
+
+    with closing(connect_sqlite(path)) as conn, conn:
+        conn.execute("insert into workspaces(id, name) values ('ws1', 'Workspace')")
+        conn.execute(
+            """
+            insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
+            values
+              ('ws1', 'pi', 2),
+              ('ws1', 'pi-default', 6),
+              ('ws1', 'pi-video-main', 8)
+            """
+        )
+        conn.execute(
+            """
+            insert into workspace_node_bindings(workspace_id, workflow_key, node_key, executor_id)
+            values
+              ('ws1', 'question_comprehension_info', 'generate_key_info', 'pi-default'),
+              ('ws1', 'video_knowledge', 'subtitle_review', 'pi-video-main')
+            """
+        )
+        conn.execute(
+            """
+            insert into jobs(id, workspace_id, workflow_key, source_type, source_id)
+            values ('job1', 'ws1', 'video_knowledge', 'video', 'K001')
+            """
+        )
+        node_run_id = conn.execute(
+            """
+            insert into node_runs(job_id, node_key, status)
+            values ('job1', 'subtitle_review', 'running')
+            returning id
+            """
+        ).fetchone()["id"]
+        conn.execute(
+            """
+            insert into executor_leases(
+              id, execution_id, executor_id, workspace_id, job_id, workflow_key,
+              node_key, node_run_id, status, acquired_at, heartbeat_at, expires_at
+            )
+            values (
+              'lease1', 'exec1', 'pi-video-main', 'ws1', 'job1', 'video_knowledge',
+              'subtitle_review', ?, 'active',
+              '2026-01-01 00:00:00', '2026-01-01 00:00:00', '2026-01-01 00:01:00'
+            )
+            """,
+            (node_run_id,),
+        )
+        conn.execute("delete from schema_migrations where version = 15")
+
+    init_db(path)
+
+    with closing(connect_sqlite(path)) as conn, conn:
+        allocations = {
+            row["executor_id"]: row["concurrency_limit"]
+            for row in conn.execute(
+                """
+                select executor_id, concurrency_limit
+                from workspace_executor_allocations
+                where workspace_id = 'ws1'
+                """
+            )
+        }
+        bindings = {
+            row["node_key"]: row["executor_id"]
+            for row in conn.execute(
+                """
+                select node_key, executor_id
+                from workspace_node_bindings
+                where workspace_id = 'ws1'
+                """
+            )
+        }
+        lease_executor = conn.execute(
+            "select executor_id from executor_leases where id = 'lease1'"
+        ).fetchone()["executor_id"]
+        version = conn.execute("select name from schema_migrations where version = 15").fetchone()[
+            "name"
+        ]
+
+    assert allocations == {"pi": 8}
+    assert bindings == {"generate_key_info": "pi", "subtitle_review": "pi"}
+    assert lease_executor == "pi"
+    assert version == "rename_pi_executor_id"
+
+
 def test_failed_migration_is_fully_rolled_back(tmp_path: Path) -> None:
     """A migration that fails partway through leaves no version row or partial schema."""
     path = tmp_path / "rollback.sqlite"

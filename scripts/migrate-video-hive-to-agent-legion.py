@@ -234,7 +234,7 @@ def apply_migration(env: Environment) -> MigrationReport:
     try:
         with queries.connect() as conn:
             _ensure_workspace(conn)
-            for executor_id, limit in (("local-default", 16), ("pi-video-main", 8)):
+            for executor_id, limit in (("local-default", 16), ("pi", 8)):
                 conn.execute(
                     """
                     insert into workspace_executor_allocations(workspace_id, executor_id, concurrency_limit)
@@ -264,7 +264,7 @@ def apply_migration(env: Environment) -> MigrationReport:
                     values (?, ?, ?, ?)
                     on conflict(workspace_id, workflow_key, node_key) do nothing
                     """,
-                    (WORKSPACE_ID, WORKFLOW_KEY, node_key, "pi-video-main"),
+                    (WORKSPACE_ID, WORKFLOW_KEY, node_key, "pi"),
                 )
             mark_workspace_executor_configuration_authoritative(conn, WORKSPACE_ID)
 

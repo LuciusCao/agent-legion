@@ -162,5 +162,5 @@ def test_app_startup_materializes_executor_configuration_for_workspace(tmp_path)
     assert response.status_code == 200
     assert {row["executor_id"] for row in response.json()["allocations"]} == {
         "local-default",
-        "pi-default",
+        "pi",
     }
