@@ -375,6 +375,80 @@ def test_batch_rerun_node_not_found_for_one_job(rerun_service, job_db):
     assert results[0]["reason_code"] == "node_not_found"
 
 
+def test_rerun_from_failed_node_uses_failed_node(rerun_service, job):
+    rerun_service.job_db.update_job_status(job["id"], "failed", "boom")
+    rerun_service.job_db.update_job_node(job["id"], "clean_and_parse", status="failed")
+
+    result = rerun_service.rerun(
+        job["workspace_id"], job["id"], from_failed_node=True
+    )
+
+    assert result["status"] == "succeeded"
+    assert result["node_key"] == "clean_and_parse"
+    nodes = {n["node_key"]: n["status"] for n in rerun_service.job_db.list_job_nodes(job["id"])}
+    assert nodes["clean_and_parse"] == "pending"
+
+
+def test_rerun_from_failed_node_skips_non_failed(rerun_service, job):
+    result = rerun_service.rerun(
+        job["workspace_id"], job["id"], from_failed_node=True
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason_code"] == "not_failed"
+
+
+def test_rerun_from_failed_node_skips_when_no_failed_node(rerun_service, job):
+    rerun_service.job_db.update_job_status(job["id"], "failed", "boom")
+
+    result = rerun_service.rerun(
+        job["workspace_id"], job["id"], from_failed_node=True
+    )
+
+    assert result["status"] == "skipped"
+    assert result["reason_code"] == "no_failed_node"
+
+
+def test_batch_rerun_from_failed_node_per_job(rerun_service):
+    job_db = rerun_service.job_db
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1", "Q2"]},
+        workspace_id=workspace["id"],
+    )
+    jobs = []
+    for qid in ["Q1", "Q2"]:
+        jobs.append(
+            job_db.create_job(
+                workflow_key="question_comprehension_info",
+                source_type="question",
+                source_id=qid,
+                batch_id=batch["id"],
+                title=f"Question {qid}",
+                node_keys=["fetch_questions", "clean_and_parse", "generate_key_info"],
+                workspace_id=workspace["id"],
+            )
+        )
+
+    job_db.update_job_status(jobs[0]["id"], "failed", "boom")
+    job_db.update_job_node(jobs[0]["id"], "clean_and_parse", status="failed")
+    job_db.update_job_status(jobs[1]["id"], "failed", "boom")
+    job_db.update_job_node(jobs[1]["id"], "generate_key_info", status="failed")
+
+    results = rerun_service.batch_rerun(
+        workspace["id"], [jobs[0]["id"], jobs[1]["id"]], from_failed_node=True
+    )
+
+    assert results[0]["status"] == "succeeded"
+    assert results[0]["node_key"] == "clean_and_parse"
+    assert results[1]["status"] == "succeeded"
+    assert results[1]["node_key"] == "generate_key_info"
+
+
 def test_batch_rerun_mixed_workflows(rerun_service, job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="question_comprehension_info"
