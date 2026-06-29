@@ -46,6 +46,47 @@ function makePossibleErrorsReviewedJson() {
   }
 }
 
+function makeKeyInfoReviewReportJson() {
+  return {
+    content: JSON.stringify({
+      question_id: mockComprehensionInfo.question_id,
+      approved_count: 2,
+      rejected_count: 0,
+      warnings: [],
+      decisions: [
+        {
+          key_info_id: 'ki_001',
+          decision: 'approved',
+          reason: '关键信息准确',
+        },
+        {
+          key_info_id: 'ki_002',
+          decision: 'approved',
+          reason: '关键信息准确',
+        },
+      ],
+    }),
+  }
+}
+
+function makePossibleErrorsReviewReportJson() {
+  return {
+    content: JSON.stringify({
+      question_id: mockComprehensionInfo.question_id,
+      approved_count: 0,
+      rejected_count: 1,
+      warnings: [],
+      decisions: [
+        {
+          error_id: 'pe_001',
+          decision: 'rejected',
+          reason: '描述不够具体',
+        },
+      ],
+    }),
+  }
+}
+
 const mockComprehensionInfo = {
   question_id: 'Q1',
   fingerprint: 'fp1',
@@ -117,8 +158,20 @@ vi.mock('../api', async (importOriginal) => {
       if (artifactName === 'key_info_reviewed.json') {
         return Promise.resolve(makeKeyInfoReviewedJson())
       }
+      if (artifactName === 'key_info_raw.json') {
+        return Promise.resolve(makeKeyInfoReviewedJson())
+      }
       if (artifactName === 'possible_errors_reviewed.json') {
         return Promise.resolve(makePossibleErrorsReviewedJson())
+      }
+      if (artifactName === 'possible_errors_raw.json') {
+        return Promise.resolve(makePossibleErrorsReviewedJson())
+      }
+      if (artifactName === 'key_info_review_report.json') {
+        return Promise.resolve(makeKeyInfoReviewReportJson())
+      }
+      if (artifactName === 'possible_errors_review_report.json') {
+        return Promise.resolve(makePossibleErrorsReviewReportJson())
       }
       return mockFetchJobArtifact(...args)
     },
@@ -329,7 +382,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    render(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.getByText('审题信息')).toBeInTheDocument()
     expect(screen.getByText('2 个信息点')).toBeInTheDocument()
@@ -339,12 +392,12 @@ describe('QuestionContentPanel', () => {
     expect(chips[1]).toHaveTextContent('2')
   })
 
-  it('does not render chips before comprehension node completes', async () => {
+  it('does not render key-info chips before generate node completes', async () => {
     mockFetchJobArtifact.mockResolvedValue(
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted={false} />)
+    render(<QuestionContentPanel jobId="job1" keyInfoPreviewable={false} />)
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.queryByText('审题信息')).not.toBeInTheDocument()
   })
@@ -354,7 +407,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    render(<QuestionContentPanel jobId="job1" possibleErrorsPreviewable />)
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.getByText('常见审题错误')).toBeInTheDocument()
     expect(screen.getByText('1 个易错点')).toBeInTheDocument()
@@ -365,14 +418,50 @@ describe('QuestionContentPanel', () => {
     expect(possibleErrorChip).toBeDefined()
   })
 
-  it('does not render possible-error block before comprehension node completes', async () => {
+  it('does not render possible-error block before generate node completes', async () => {
     mockFetchJobArtifact.mockResolvedValue(
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted={false} />)
+    render(
+      <QuestionContentPanel jobId="job1" possibleErrorsPreviewable={false} />
+    )
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.queryByText('常见审题错误')).not.toBeInTheDocument()
+  })
+
+  it('renders only key-info chips when only key-info is previewable', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
+    )
+
+    render(
+      <QuestionContentPanel
+        jobId="job1"
+        keyInfoPreviewable
+        possibleErrorsPreviewable={false}
+      />
+    )
+    await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
+    expect(screen.getByText('审题信息')).toBeInTheDocument()
+    expect(screen.queryByText('常见审题错误')).not.toBeInTheDocument()
+  })
+
+  it('renders only possible-error chips when only possible-error is previewable', async () => {
+    mockFetchJobArtifact.mockResolvedValue(
+      makeQuestionsJson({ stem: '<p>What is x?</p>' })
+    )
+
+    render(
+      <QuestionContentPanel
+        jobId="job1"
+        keyInfoPreviewable={false}
+        possibleErrorsPreviewable
+      />
+    )
+    await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
+    expect(screen.getByText('常见审题错误')).toBeInTheDocument()
+    expect(screen.queryByText('审题信息')).not.toBeInTheDocument()
   })
 
   it('toggles possible-error chip selection and expands detail card', async () => {
@@ -380,7 +469,13 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    render(
+      <QuestionContentPanel
+        jobId="job1"
+        keyInfoPreviewable
+        possibleErrorsPreviewable
+      />
+    )
     await waitFor(() =>
       expect(screen.getByText('常见审题错误')).toBeInTheDocument()
     )
@@ -425,7 +520,13 @@ describe('QuestionContentPanel', () => {
         })
       )
 
-      render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+      render(
+        <QuestionContentPanel
+          jobId="job1"
+          keyInfoPreviewable
+          possibleErrorsPreviewable
+        />
+      )
       await waitFor(() =>
         expect(screen.getByText('审题信息')).toBeInTheDocument()
       )
@@ -476,7 +577,7 @@ describe('QuestionContentPanel', () => {
         })
       )
 
-      render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+      render(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
       await waitFor(() =>
         expect(screen.getByText('审题信息')).toBeInTheDocument()
       )
@@ -507,7 +608,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    render(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
     )
@@ -529,7 +630,7 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    render(<QuestionContentPanel jobId="job1" keyInfoPreviewable />)
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
     )
@@ -558,7 +659,13 @@ describe('QuestionContentPanel', () => {
       makeQuestionsJson({ stem: '<p>What is x?</p>' })
     )
 
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    render(
+      <QuestionContentPanel
+        jobId="job1"
+        keyInfoPreviewable
+        possibleErrorsPreviewable
+      />
+    )
     await waitFor(() => expect(screen.getByText('题干')).toBeInTheDocument())
     expect(screen.getByText('审题信息')).toBeInTheDocument()
     expect(screen.getByText('常见审题错误')).toBeInTheDocument()
@@ -573,8 +680,9 @@ describe('QuestionContentPanel', () => {
       render(
         <QuestionContentPanel
           jobId="job1"
-          comprehensionCompleted={true}
-          reviewArtifactNames={[]}
+          keyInfoPreviewable={true}
+          keyInfoReviewAttempted={false}
+          possibleErrorsReviewAttempted={false}
         />
       )
 
@@ -610,8 +718,9 @@ describe('QuestionContentPanel', () => {
         render(
           <QuestionContentPanel
             jobId="job1"
-            comprehensionCompleted={true}
-            reviewArtifactNames={[]}
+            keyInfoPreviewable={true}
+            keyInfoReviewAttempted={false}
+            possibleErrorsReviewAttempted={false}
           />
         )
 
@@ -630,6 +739,84 @@ describe('QuestionContentPanel', () => {
         mockComprehensionInfo.comprehension_data.key_info_list[0].question =
           originalQuestion
       }
+    })
+  })
+
+  describe('review status', () => {
+    it('does not fetch review reports when review nodes are not completed', async () => {
+      mockFetchJobArtifact.mockResolvedValue(
+        makeQuestionsJson({ stem: '<p>What is x?</p>' })
+      )
+
+      render(
+        <QuestionContentPanel
+          jobId="job1"
+          keyInfoPreviewable
+          possibleErrorsPreviewable
+          keyInfoReviewAttempted={false}
+          possibleErrorsReviewAttempted={false}
+        />
+      )
+
+      await waitFor(() =>
+        expect(screen.getByText('审题信息')).toBeInTheDocument()
+      )
+      expect(
+        mockFetchJobArtifact.mock.calls.some((call) =>
+          String(call[1]).includes('review_report')
+        )
+      ).toBe(false)
+    })
+
+    it('shows approved icon on key info chip after review succeeds', async () => {
+      mockFetchJobArtifact.mockResolvedValue(
+        makeQuestionsJson({ stem: '<p>What is x?</p>' })
+      )
+
+      render(
+        <QuestionContentPanel
+          jobId="job1"
+          keyInfoPreviewable
+          keyInfoReviewAttempted
+        />
+      )
+
+      await waitFor(() =>
+        expect(screen.getByText('审题信息')).toBeInTheDocument()
+      )
+      const chips = screen.getAllByRole('button')
+      const keyInfoChip = chips[0]
+      expect(
+        within(keyInfoChip).getByTestId('CheckCircleIcon')
+      ).toBeInTheDocument()
+    })
+
+    it('shows rejected detail status on possible error after review succeeds', async () => {
+      mockFetchJobArtifact.mockResolvedValue(
+        makeQuestionsJson({ stem: '<p>What is x?</p>' })
+      )
+
+      render(
+        <QuestionContentPanel
+          jobId="job1"
+          possibleErrorsPreviewable
+          possibleErrorsReviewAttempted
+        />
+      )
+
+      await waitFor(() =>
+        expect(screen.getByText('常见审题错误')).toBeInTheDocument()
+      )
+      const chips = screen.getAllByRole('button')
+      const possibleErrorChip = chips.find((c) =>
+        c.textContent?.includes('区间写反')
+      )!
+      fireEvent.click(possibleErrorChip)
+      await waitFor(() =>
+        expect(screen.getByText(/审核结果/)).toBeInTheDocument()
+      )
+      expect(screen.getByText(/拒绝/)).toBeInTheDocument()
+      expect(screen.getByText('描述不够具体')).toBeInTheDocument()
     })
   })
 })

@@ -1,7 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { fetchJobArtifact } from '../api'
-import { isReviewArtifact, parseReviewReport } from '../lib/reviewReport'
-import type { ReviewReport } from '../lib/reviewReport'
+import { parseReviewReport, type ReviewReport } from '../lib/reviewReport'
+
+const REPORTS = {
+  keyInfo: 'key_info_review_report.json',
+  possibleErrors: 'possible_errors_review_report.json',
+}
 
 export type ReviewReportMap = Record<string, ReviewReport>
 
@@ -13,24 +17,25 @@ export interface UseJobReviewReportsReturn {
 
 export function useJobReviewReports(
   jobId: string,
-  artifactNames: string[],
+  keyInfoReviewAttempted = false,
+  possibleErrorsReviewAttempted = false,
   refreshKey = ''
 ): UseJobReviewReportsReturn {
-  const reviewNames = useMemo(
-    () => artifactNames.filter(isReviewArtifact),
-    [artifactNames]
-  )
   const [reports, setReports] = useState<ReviewReportMap>({})
   const [error, setError] = useState('')
   const requestIdRef = useRef(0)
 
   useEffect(() => {
-    if (reviewNames.length === 0) return
-
+    const toFetch: string[] = []
+    if (keyInfoReviewAttempted) toFetch.push(REPORTS.keyInfo)
+    if (possibleErrorsReviewAttempted) toFetch.push(REPORTS.possibleErrors)
+    if (toFetch.length === 0) {
+      queueMicrotask(() => setReports({}))
+      return
+    }
     const requestId = ++requestIdRef.current
-
     void Promise.all(
-      reviewNames.map(async (name) => {
+      toFetch.map(async (name) => {
         try {
           const { content } = await fetchJobArtifact(jobId, name)
           if (requestId !== requestIdRef.current) return
@@ -45,7 +50,7 @@ export function useJobReviewReports(
         }
       })
     )
-  }, [jobId, reviewNames, refreshKey])
+  }, [jobId, keyInfoReviewAttempted, possibleErrorsReviewAttempted, refreshKey])
 
   return { reports, loading: false, error }
 }
