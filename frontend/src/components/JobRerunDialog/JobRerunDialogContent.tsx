@@ -1,123 +1,61 @@
-import { useMemo, useState } from 'react'
-import {
-  Button,
-  Chip,
-  Dialog,
-  DialogActions,
-  DialogContent,
-  DialogTitle,
-} from '@mui/material'
-import type { JobSummary, WorkflowDefinitionRecord } from '../types'
-import { normalizeJobStatus } from '../stores/job/state'
+import { Button, Chip, DialogActions, DialogContent, DialogTitle } from '@mui/material'
+import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
 import {
   computeOrderedNodes,
-  excludedJobs,
   type WorkflowNodesByKey,
-} from '../lib/workflowNodes'
+} from '../../lib/workflowNodes'
 import styles from './JobRerunDialog.module.css'
 
-export type { WorkflowNodesByKey }
-
-export type JobRerunDialogProps = {
-  open: boolean
+export type JobRerunDialogContentProps = {
   jobs: JobSummary[]
   workflowDefinition?: WorkflowDefinitionRecord | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   itemLabel?: string
   allowFailedNodeMode?: boolean
-  onConfirm: (nodeKey: string | null, fromFailedNode: boolean) => void | Promise<void>
+  failedMode: boolean
+  setFailedMode: (value: boolean) => void
+  effectiveNodeKey: string | null
+  setSelectedNodeKey: (key: string) => void
+  failedJobs: JobSummary[]
+  nonFailedJobs: JobSummary[]
+  excluded: JobSummary[]
+  canConfirm: boolean
+  loading: boolean
+  onConfirm: () => void | Promise<void>
   onClose: () => void
 }
 
-export function JobRerunDialog({
-  open,
+export function JobRerunDialogContent({
   jobs,
   workflowDefinition,
   workflowNodesByKey,
   itemLabel = '任务',
   allowFailedNodeMode = false,
+  failedMode,
+  setFailedMode,
+  effectiveNodeKey,
+  setSelectedNodeKey,
+  failedJobs,
+  nonFailedJobs,
+  excluded,
+  canConfirm,
+  loading,
   onConfirm,
   onClose,
-}: JobRerunDialogProps) {
-  const orderedNodes = useMemo(
-    () => computeOrderedNodes(jobs, workflowDefinition, workflowNodesByKey),
-    [jobs, workflowDefinition, workflowNodesByKey]
+}: JobRerunDialogContentProps) {
+  const orderedNodes = computeOrderedNodes(
+    jobs,
+    workflowDefinition,
+    workflowNodesByKey
   )
-
-  const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(
-    orderedNodes[0]?.key ?? null
-  )
-  const [failedMode, setFailedMode] = useState(false)
-  const [loading, setLoading] = useState(false)
-
-  // Keep selected node valid when orderedNodes changes
-  const effectiveNodeKey = useMemo(() => {
-    if (failedMode) return null
-    if (selectedNodeKey && orderedNodes.some((n) => n.key === selectedNodeKey)) {
-      return selectedNodeKey
-    }
-    return orderedNodes[0]?.key ?? null
-  }, [failedMode, orderedNodes, selectedNodeKey])
-
-  const failedJobs = useMemo(
-    () => jobs.filter((j) => normalizeJobStatus(j.status) === 'failed'),
-    [jobs]
-  )
-  const nonFailedJobs = useMemo(
-    () => jobs.filter((j) => normalizeJobStatus(j.status) !== 'failed'),
-    [jobs]
-  )
-
-  const excluded = effectiveNodeKey
-    ? excludedJobs(
-        jobs,
-        effectiveNodeKey,
-        workflowNodesByKey,
-        workflowDefinition
-      )
-    : []
-
-  if (!open) return null
-
-  const handleConfirm = async () => {
-    if (failedMode) {
-      setLoading(true)
-      try {
-        await onConfirm(null, true)
-      } finally {
-        setLoading(false)
-      }
-      onClose()
-      return
-    }
-    if (!effectiveNodeKey) return
-    setLoading(true)
-    try {
-      await onConfirm(effectiveNodeKey, false)
-    } finally {
-      setLoading(false)
-    }
-    onClose()
-  }
-
-  const canConfirm = failedMode ? failedJobs.length > 0 : !!effectiveNodeKey
 
   return (
-    <Dialog
-      open
-      onClose={onClose}
-      PaperProps={{
-        sx: {
-          minWidth: '520px',
-          maxWidth: '760px',
-          width: 'min(760px, 92vw)',
-        },
-      }}
-    >
+    <>
       <DialogTitle>选择重跑节点</DialogTitle>
       <DialogContent>
         <div className={styles.content}>
-          {orderedNodes.length === 0 && (!allowFailedNodeMode || failedJobs.length === 0) ? (
+          {orderedNodes.length === 0 &&
+          (!allowFailedNodeMode || failedJobs.length === 0) ? (
             <p className={styles.empty}>没有可重跑的节点</p>
           ) : (
             <div className={styles.nodeGrid}>
@@ -193,7 +131,7 @@ export function JobRerunDialog({
         </Button>
         <Button
           variant="contained"
-          onClick={handleConfirm}
+          onClick={onConfirm}
           disabled={!canConfirm || loading}
         >
           {failedMode
@@ -201,6 +139,6 @@ export function JobRerunDialog({
             : '确认重跑'}
         </Button>
       </DialogActions>
-    </Dialog>
+    </>
   )
 }
