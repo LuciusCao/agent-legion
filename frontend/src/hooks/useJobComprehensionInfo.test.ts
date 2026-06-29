@@ -104,7 +104,7 @@ describe('useJobComprehensionInfo', () => {
     expect(result.current.info).toBeNull()
   })
 
-  it('returns null when intermediate possible errors is not an array', async () => {
+  it('returns key info only when possible errors intermediate is malformed', async () => {
     mockFetchJobArtifact
       .mockRejectedValueOnce(new Error('not found'))
       .mockResolvedValueOnce(
@@ -117,46 +117,108 @@ describe('useJobComprehensionInfo', () => {
     const { result } = renderHook(() => useJobComprehensionInfo('job1'))
 
     await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.info).toBeNull()
+    expect(result.current.info).not.toBeNull()
+    expect(result.current.info?.comprehension_data.key_info_list).toHaveLength(
+      1
+    )
+    expect(
+      result.current.info?.comprehension_data.possible_error_list
+    ).toHaveLength(0)
   })
 
-  it('returns null when intermediate artifacts exist but extraction fails', async () => {
+  it('returns partial info when only key info intermediate artifact is available', async () => {
+    mockFetchJobArtifact
+      .mockRejectedValueOnce(new Error('not found'))
+      .mockResolvedValueOnce(
+        artifact(
+          JSON.stringify({ question_id: 'q1', key_info_list: [{ id: 'k1' }] })
+        )
+      )
+      .mockRejectedValueOnce(new Error('possible errors reviewed failed'))
+      .mockRejectedValueOnce(new Error('possible errors raw failed'))
+
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.info).not.toBeNull()
+    expect(result.current.info?.comprehension_data.key_info_list).toHaveLength(
+      1
+    )
+    expect(
+      result.current.info?.comprehension_data.possible_error_list
+    ).toHaveLength(0)
+    expect(result.current.info?.question_id).toBe('q1')
+    expect(result.current.error).toBe('')
+  })
+
+  it('returns partial info when only possible errors intermediate artifact is available', async () => {
+    mockFetchJobArtifact
+      .mockRejectedValueOnce(new Error('not found'))
+      .mockRejectedValueOnce(new Error('key info reviewed failed'))
+      .mockRejectedValueOnce(new Error('key info raw failed'))
+      .mockResolvedValueOnce(
+        artifact(
+          JSON.stringify({
+            question_id: 'q1',
+            possible_error_list: [{ id: 'e1' }],
+          })
+        )
+      )
+
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.info).not.toBeNull()
+    expect(result.current.info?.comprehension_data.key_info_list).toHaveLength(
+      0
+    )
+    expect(
+      result.current.info?.comprehension_data.possible_error_list
+    ).toHaveLength(1)
+    expect(result.current.info?.question_id).toBe('q1')
+    expect(result.current.error).toBe('')
+  })
+
+  it('falls back to raw artifacts when reviewed artifacts are missing', async () => {
+    mockFetchJobArtifact
+      .mockRejectedValueOnce(new Error('not found'))
+      .mockRejectedValueOnce(new Error('reviewed key info not found'))
+      .mockResolvedValueOnce(
+        artifact(
+          JSON.stringify({ question_id: 'q1', key_info_list: [{ id: 'k1' }] })
+        )
+      )
+      .mockRejectedValueOnce(new Error('reviewed possible errors not found'))
+      .mockResolvedValueOnce(
+        artifact(
+          JSON.stringify({
+            question_id: 'q1',
+            possible_error_list: [{ id: 'e1' }],
+          })
+        )
+      )
+
+    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
+
+    await waitFor(() => expect(result.current.loading).toBe(false))
+    expect(result.current.info).not.toBeNull()
+    expect(result.current.info?.comprehension_data.key_info_list).toHaveLength(
+      1
+    )
+    expect(
+      result.current.info?.comprehension_data.possible_error_list
+    ).toHaveLength(1)
+    expect(result.current.info?.question_id).toBe('q1')
+    expect(result.current.error).toBe('')
+  })
+
+  it('returns null when both intermediate artifacts are empty', async () => {
     mockFetchJobArtifact
       .mockRejectedValueOnce(new Error('not found'))
       .mockResolvedValueOnce(artifact(JSON.stringify({ key_info_list: [] })))
       .mockResolvedValueOnce(
-        artifact(JSON.stringify({ possible_error_list: [{ id: 'e1' }] }))
+        artifact(JSON.stringify({ possible_error_list: [] }))
       )
-
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
-
-    await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.info).toBeNull()
-    expect(result.current.error).toBe('')
-  })
-
-  it('returns null when only one intermediate artifact is available', async () => {
-    mockFetchJobArtifact
-      .mockRejectedValueOnce(new Error('not found'))
-      .mockRejectedValueOnce(new Error('key info failed'))
-      .mockResolvedValueOnce(
-        artifact(JSON.stringify({ possible_error_list: [{ id: 'e1' }] }))
-      )
-
-    const { result } = renderHook(() => useJobComprehensionInfo('job1'))
-
-    await waitFor(() => expect(result.current.loading).toBe(false))
-    expect(result.current.info).toBeNull()
-    expect(result.current.error).toBe('')
-  })
-
-  it('returns null when possible errors artifact fails', async () => {
-    mockFetchJobArtifact
-      .mockRejectedValueOnce(new Error('not found'))
-      .mockResolvedValueOnce(
-        artifact(JSON.stringify({ key_info_list: [{ id: 'k1' }] }))
-      )
-      .mockRejectedValueOnce(new Error('possible errors failed'))
 
     const { result } = renderHook(() => useJobComprehensionInfo('job1'))
 

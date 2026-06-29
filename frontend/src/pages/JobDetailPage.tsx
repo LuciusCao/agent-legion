@@ -4,13 +4,12 @@ import { JobProgressPanel } from '../components/JobProgressPanel'
 import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact } from '../api'
 import { useUiStore } from '../stores/uiStore'
-import { deriveJobDetailPresentation } from './jobDetail/jobNodeHelpers'
+import { deriveJobDetailPresentation } from './jobDetail/deriveJobDetailPresentation'
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
 import { JobDetailActions } from '../components/JobDetailActions'
-import { isReviewArtifact } from '../lib/reviewReport'
 import { useJobDetail } from './jobDetail/useJobDetail'
 
 export default function JobDetailPage() {
@@ -54,13 +53,11 @@ export default function JobDetailPage() {
     workflowDefinition,
     questionArtifactRefreshKey,
     comprehensionRefreshKey,
-    comprehensionCompleted,
+    keyInfoPreviewable,
+    possibleErrorsPreviewable,
+    keyInfoReviewAttempted,
+    possibleErrorsReviewAttempted,
   } = useMemo(() => deriveJobDetailPresentation(detail), [detail])
-
-  const reviewArtifactNames = useMemo(
-    () => detail?.artifacts?.filter(isReviewArtifact) ?? [],
-    [detail?.artifacts]
-  )
 
   const openArtifact = useCallback(
     async (name: string) => {
@@ -135,9 +132,10 @@ export default function JobDetailPage() {
               jobId={jobId}
               refreshKey={questionArtifactRefreshKey}
               comprehensionRefreshKey={comprehensionRefreshKey}
-              comprehensionCompleted={comprehensionCompleted}
-              reviewArtifactNames={reviewArtifactNames}
-              reviewRefreshKey={detail?.job.updated_at}
+              keyInfoPreviewable={keyInfoPreviewable}
+              possibleErrorsPreviewable={possibleErrorsPreviewable}
+              keyInfoReviewAttempted={keyInfoReviewAttempted}
+              possibleErrorsReviewAttempted={possibleErrorsReviewAttempted}
             />
           )}
         </div>

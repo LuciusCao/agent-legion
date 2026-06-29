@@ -93,18 +93,20 @@ export interface QuestionContentPanelProps {
   jobId: string
   refreshKey?: string
   comprehensionRefreshKey?: string
-  comprehensionCompleted?: boolean
-  reviewArtifactNames?: string[]
-  reviewRefreshKey?: string
+  keyInfoPreviewable?: boolean
+  possibleErrorsPreviewable?: boolean
+  keyInfoReviewAttempted?: boolean
+  possibleErrorsReviewAttempted?: boolean
 }
 
 export function QuestionContentPanel({
   jobId,
   refreshKey,
   comprehensionRefreshKey,
-  comprehensionCompleted = false,
-  reviewArtifactNames = [],
-  reviewRefreshKey,
+  keyInfoPreviewable = false,
+  possibleErrorsPreviewable = false,
+  keyInfoReviewAttempted = false,
+  possibleErrorsReviewAttempted = false,
 }: QuestionContentPanelProps) {
   const { question, loading, error } = useJobQuestion(jobId, refreshKey)
   const { info: comprehensionInfo } = useJobComprehensionInfo(
@@ -113,8 +115,9 @@ export function QuestionContentPanel({
   )
   const { reports: reviewReports } = useJobReviewReports(
     jobId,
-    reviewArtifactNames,
-    reviewRefreshKey
+    keyInfoReviewAttempted,
+    possibleErrorsReviewAttempted,
+    comprehensionRefreshKey ?? refreshKey
   )
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [selectedErrorId, setSelectedErrorId] = useState<string | null>(null)
@@ -239,7 +242,7 @@ export function QuestionContentPanel({
         </div>
       </section>
 
-      {comprehensionCompleted && keyInfoList.length > 0 && (
+      {keyInfoPreviewable && keyInfoList.length > 0 && (
         <section className={styles.card}>
           <div className={styles.comprehensionChips}>
             <div className={styles.chipsHeader}>
@@ -420,7 +423,7 @@ export function QuestionContentPanel({
         </section>
       )}
 
-      {comprehensionCompleted && possibleErrorList.length > 0 && (
+      {possibleErrorsPreviewable && possibleErrorList.length > 0 && (
         <section className={styles.card}>
           <div className={styles.comprehensionChips}>
             <div className={styles.chipsHeader}>

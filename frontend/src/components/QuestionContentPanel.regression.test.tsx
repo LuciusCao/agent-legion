@@ -167,7 +167,13 @@ describe('QuestionContentPanel regression', () => {
 
   it('does not white screen when switching between possible errors', async () => {
     mockFetchJobArtifact.mockResolvedValue(realQuestions)
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    render(
+      <QuestionContentPanel
+        jobId="job1"
+        keyInfoPreviewable
+        possibleErrorsPreviewable
+      />
+    )
     await waitFor(() =>
       expect(screen.getByText('常见审题错误')).toBeInTheDocument()
     )
@@ -186,7 +192,13 @@ describe('QuestionContentPanel regression', () => {
 
   it('keeps only one of key info or possible error active at a time', async () => {
     mockFetchJobArtifact.mockResolvedValue(realQuestions)
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+    render(
+      <QuestionContentPanel
+        jobId="job1"
+        keyInfoPreviewable
+        possibleErrorsPreviewable
+      />
+    )
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
     )
