@@ -27,7 +27,7 @@ from ..services.package_deletion import (
 from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
 from ..storage_paths import ManagedPathError, make_data_relative, resolve_data_path
-from .job_operation_contracts import (
+from .package_contracts import (
     WorkspacePackageRequest,
     WorkspacePackageResponse,
     WorkspacePackageResultResponse,
