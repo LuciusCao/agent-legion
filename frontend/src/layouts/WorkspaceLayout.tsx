@@ -11,8 +11,6 @@ import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { WORKSPACE_LABELS } from '../labels'
 
-export const VIDEO_HIVE_ID = 'video-hive'
-
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
@@ -38,8 +36,6 @@ export default function WorkspaceLayout() {
   } = useUiStore()
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
-
-  const isVideoHive = workspaceId === VIDEO_HIVE_ID
 
   const isJobDetail =
     workspaceId &&
@@ -91,9 +87,7 @@ export default function WorkspaceLayout() {
     }
   }, [fetchWorkerStatus, workspaceId])
 
-  const workspaceName = isVideoHive
-    ? 'Video Hive'
-    : currentWorkspace?.name || workspaceId
+  const workspaceName = currentWorkspace?.name || workspaceId
 
   const appBarTitle = pageTitle || workspaceName || ''
 
@@ -123,9 +117,7 @@ export default function WorkspaceLayout() {
                   size="small"
                   aria-label="添加"
                   onClick={() => {
-                    if (isVideoHive) {
-                      openAddDialog({ context: 'video' })
-                    } else if (workspaceId) {
+                    if (workspaceId) {
                       openAddDialog({ context: 'workspace', workspaceId })
                     }
                   }}

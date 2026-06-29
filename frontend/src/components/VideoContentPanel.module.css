@@ -1,0 +1,90 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.loading,
+.error,
+.empty {
+  padding: 16px;
+  border-radius: 8px;
+}
+
+.loading {
+  color: #5f6368;
+}
+
+.error {
+  color: #ba1a1a;
+  background: #fce8e8;
+}
+
+.empty {
+  color: #5f6368;
+}
+
+.header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin: 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  line-height: 1.3;
+}
+
+.meta {
+  margin: 4px 0 0;
+  color: #5f6368;
+  font-size: 0.875rem;
+}
+
+.sourceLink {
+  margin-left: 12px;
+  color: #1a73e8;
+  text-decoration: none;
+}
+
+.sourceLink:hover {
+  text-decoration: underline;
+}
+
+.actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.playerSection {
+  width: 100%;
+}
+
+.timelineSection {
+  width: 100%;
+}
+
+.summarySection {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background: #f8f9fa;
+}
+
+.summaryLabel {
+  color: #5f6368;
+  font-size: 0.875rem;
+  font-weight: 500;
+}
+
+.summaryValue {
+  color: #1a1c1e;
+  font-size: 0.875rem;
+}

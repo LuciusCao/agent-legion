@@ -5,7 +5,6 @@ from fastapi.responses import FileResponse
 
 from scripts.architecture import route_contracts
 from scripts.check_architecture import check_repository
-from server.app.main import create_app
 from tests.architecture_budget_helpers import write_neutral_budget_governance
 
 
@@ -93,18 +92,6 @@ def test_accepts_protocol_annotation_with_explicit_none_response_model(tmp_path)
     errors = check_repository(tmp_path)
 
     assert not any("requires named response_model" in error for error in errors)
-
-
-def test_app_registers_video_file_protocol_union(tmp_path):
-    app = create_app(data_dir=tmp_path, start_worker=False)
-
-    methods = {
-        method
-        for route in app.routes
-        if route.path == "/api/videos/{video_id}/video"
-        for method in route.methods
-    }
-    assert {"GET", "HEAD"} <= methods
 
 
 @pytest.mark.parametrize(

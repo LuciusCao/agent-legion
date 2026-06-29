@@ -621,4 +621,96 @@ describe('JobDetailPage', () => {
     ).toBeInTheDocument()
     expect(screen.getByText('question.json')).toBeInTheDocument()
   })
+
+  it('renders QuestionContentPanel for question jobs', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (url === '/api/jobs/j1') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              ...mockDetail,
+              job: { ...mockDetail.job, source_type: 'question' },
+            }),
+          })
+        }
+        if (url === '/api/jobs/j1/artifacts/questions.json') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              content: JSON.stringify({
+                questions: [
+                  {
+                    question_id: 'Q1',
+                    normalized: { stem: '<p>Question stem</p>' },
+                  },
+                ],
+              }),
+            }),
+          })
+        }
+        if (url === '/api/jobs/j1/artifacts/comprehension_info.json') {
+          return Promise.reject(new Error('not found'))
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) })
+      })
+    )
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByText('Question stem')).toBeInTheDocument()
+    })
+    expect(screen.queryByTestId('video-content-panel')).not.toBeInTheDocument()
+  })
+
+  it('renders VideoContentPanel for video jobs', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockImplementation((url: string) => {
+        if (url === '/api/jobs/j1') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              ...mockDetail,
+              job: { ...mockDetail.job, source_type: 'video' },
+            }),
+          })
+        }
+        if (url === '/api/jobs/j1/video') {
+          return Promise.resolve({
+            ok: true,
+            json: async () => ({
+              input: {
+                title: 'Sample Video',
+                external_id: 'VID-001',
+                source_url: 'https://example.com/video.mp4',
+                source_uuid: 'uuid-1',
+                content_type: 'knowledge',
+                entity_type: 'video',
+                legacy_video_id: 'lv1',
+                schema_version: 1,
+              },
+              artifacts: {
+                video_url: 'https://cdn.example.com/video.mp4',
+                subtitles: [],
+                chapters: [],
+                interactions: [],
+                metadata: null,
+                review: null,
+                checklist: null,
+              },
+            }),
+          })
+        }
+        return Promise.resolve({ ok: true, json: async () => ({}) })
+      })
+    )
+
+    renderPage()
+    await waitFor(() => {
+      expect(screen.getByTestId('video-content-panel')).toBeInTheDocument()
+    })
+    expect(screen.getByText('Sample Video')).toBeInTheDocument()
+  })
 })

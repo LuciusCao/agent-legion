@@ -42,6 +42,7 @@ from scripts.architecture.phase6 import (
 )
 from scripts.architecture.route_contracts import has_protocol_response_annotation
 from scripts.architecture.service_boundaries import check_service_import_boundaries
+from scripts.architecture.video_legacy import check_video_legacy
 from scripts.architecture.workflow import check_workflow_definitions
 
 
@@ -163,6 +164,7 @@ def check_repository(root: Path) -> list[str]:
     errors.extend(check_forbidden_patterns(root))
     errors.extend(check_workspace_video_hive_imports(root))
     errors.extend(check_job_execution_direct_executor_calls(root))
+    errors.extend(check_video_legacy(root))
     errors.extend(check_route_dag_and_deletion(root))
     errors.extend(check_frontend_handwritten_job_transports(root))
     errors.extend(check_job_deletion_service_is_singular(root))

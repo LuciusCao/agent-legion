@@ -5,7 +5,6 @@ import { DashboardPage } from './DashboardPage'
 
 const fetchWorkspaces = vi.fn()
 const fetchWorkspaceStats = vi.fn()
-const fetchVideos = vi.fn()
 const createWorkspace = vi.fn()
 const deleteWorkspace = vi.fn()
 const navigate = vi.fn()
@@ -23,11 +22,6 @@ const mockWorkspaceStore = {
   deleteWorkspace,
 }
 
-const mockVideoStore = {
-  videos: [] as Array<unknown>,
-  fetchVideos,
-}
-
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom')
   return {
@@ -40,10 +34,6 @@ vi.mock('../stores/workspaceStore', () => ({
   useWorkspaceStore: () => mockWorkspaceStore,
 }))
 
-vi.mock('../stores/videoStore', () => ({
-  useVideoStore: () => mockVideoStore,
-}))
-
 vi.mock('../api', () => ({
   fetchWorkflows: vi.fn().mockResolvedValue({
     workflows: [{ key: 'question_comprehension_info', label: '题目审题信息' }],
@@ -54,10 +44,8 @@ describe('DashboardPage', () => {
   beforeEach(() => {
     mockWorkspaceStore.workspaces = []
     mockWorkspaceStore.workspaceStats = {}
-    mockVideoStore.videos = []
     fetchWorkspaces.mockClear()
     fetchWorkspaceStats.mockClear()
-    fetchVideos.mockClear()
     createWorkspace.mockClear()
     navigate.mockClear()
   })
@@ -71,13 +59,13 @@ describe('DashboardPage', () => {
     expect(screen.getByText('Agent Legion')).toBeInTheDocument()
   })
 
-  it('renders Video Hive card', () => {
+  it('renders Video Knowledge card', () => {
     render(
       <MemoryRouter>
         <DashboardPage />
       </MemoryRouter>
     )
-    expect(screen.getByText('Video Hive')).toBeInTheDocument()
+    expect(screen.getByText('Video Knowledge')).toBeInTheDocument()
   })
 
   it('opens create workspace dialog', async () => {
@@ -92,14 +80,13 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('fetches workspaces and videos on mount', () => {
+  it('fetches workspaces on mount', () => {
     render(
       <MemoryRouter>
         <DashboardPage />
       </MemoryRouter>
     )
     expect(fetchWorkspaces).toHaveBeenCalled()
-    expect(fetchVideos).toHaveBeenCalled()
   })
 
   it('renders workspace cards and fetches stats', async () => {
@@ -169,14 +156,14 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('navigates to video-hive when clicking system card', () => {
+  it('navigates to video knowledge workspace when clicking system card', () => {
     render(
       <MemoryRouter>
         <DashboardPage />
       </MemoryRouter>
     )
-    fireEvent.click(screen.getByText('Video Hive'))
-    expect(navigate).toHaveBeenCalledWith('/video-hive')
+    fireEvent.click(screen.getByText('Video Knowledge'))
+    expect(navigate).toHaveBeenCalledWith('/workspaces/video_knowledge')
   })
 
   it('navigates to workspace when clicking workspace card', () => {

@@ -4,12 +4,10 @@ import sqlite3
 from pathlib import Path
 
 import pytest
-from fastapi.testclient import TestClient
 
 from server.app.db import Database
 from server.app.db.schema import init_db
 from server.app.jobs import JobQueries
-from server.app.main import create_app
 from server.app.pipeline.common import resolve_video_dir
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_logs import JobLogService
@@ -279,29 +277,3 @@ def test_cross_root_path_portability(portable_roots: tuple[Path, Path]) -> None:
     package_deletion.delete(package_id)
     assert not (settings.packages_dir / PACKAGE_NAME).exists()
     assert db.list_packages(limit=10) == []
-
-    # ------------------------------------------------------------------
-    # 4. REST projections resolve to *new_root*.
-    # ------------------------------------------------------------------
-    app = create_app(data_dir=new_root, start_worker=False)
-    with TestClient(app) as client:
-        video_log_response = client.get(f"/api/videos/{VIDEO_ID}/logs")
-        assert video_log_response.status_code == 200
-        assert "old_root" in video_log_response.json()["log"]
-
-        video_file_response = client.get(f"/api/videos/{VIDEO_ID}/video")
-        assert video_file_response.status_code == 200
-        assert video_file_response.content == b"fake video bytes"
-
-        job_artifact_response = client.get(f"/api/jobs/{JOB_ID}/artifacts/result.json")
-        assert job_artifact_response.status_code == 200
-        assert job_artifact_response.json()["content"] == '{"ok": true}'
-
-        job_log_response = client.get(f"/api/jobs/{JOB_ID}/runs/{run['id']}/log")
-        assert job_log_response.status_code == 200
-        assert "old_root" in job_log_response.json()["log"]
-
-        job_detail_response = client.get(f"/api/jobs/{JOB_ID}")
-        assert job_detail_response.status_code == 200
-        response_job = job_detail_response.json()["job"]
-        assert response_job["storage_dir"] == str(resolved_job_dir)

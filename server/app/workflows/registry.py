@@ -5,6 +5,7 @@ from server.app.workflows.definition import WorkflowDefinition, load_workflow_de
 
 WORKFLOW_FILES = {
     "question_comprehension_info": "question_comprehension_info.yaml",
+    "video_knowledge": "video_knowledge.yaml",
 }
 
 

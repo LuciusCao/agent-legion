@@ -20,7 +20,7 @@ Local processing console for educational videos. It queues knowledge videos and 
 - Video queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
 - Agent Legion workflow model: workspace-scoped DAG jobs with configurable workflow definitions (`config/workflows/`).
 
-完整目录树见 [docs/architecture/project-structure.md](docs/architecture/project-structure.md)。
+For the full directory tree, see [docs/architecture/project-structure.md](docs/architecture/project-structure.md).
 
 ## Setup
 
@@ -72,7 +72,7 @@ Edit `config/video_hive.yaml` for:
 - `openclaw.command_template`: command argument list. Supported placeholders: `{prompt_file}`, `{video_id}`, `{video_dir}`.
 - `openclaw.cwd`: working directory for openclaw.
 
-In `auto` ASR mode, Video Hive tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
+In `auto` ASR mode, Agent Legion tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
 
 > See [docs/architecture/backend.md](docs/architecture/backend.md) for full configuration reference.
 >
@@ -80,7 +80,7 @@ In `auto` ASR mode, Video Hive tries whisper.cpp first and falls back to SenseVo
 
 ## Video Types
 
-Video Hive treats knowledge videos and question explanation videos differently.
+Agent Legion treats knowledge videos and question explanation videos differently.
 
 | Type | Required ID | URL | Pipeline |
 | --- | --- | --- | --- |
@@ -224,7 +224,7 @@ The package endpoint creates a zip with per-video JSON plus `manifest.json`. The
 
 ## Pi Agent Runner
 
-Video Hive can execute `question_comprehension_info` workflow agent nodes through the Pi CLI (`@earendil-works/pi-coding-agent`).
+Agent Legion can execute `question_comprehension_info` workflow agent nodes through the Pi CLI (`@earendil-works/pi-coding-agent`).
 
 ### Installation
 
@@ -324,6 +324,19 @@ If the report lists unknown legacy Agent IDs, either configure an equivalent Exe
 `config/workflow.yaml` or manually remediate the `workspace_agent_assignments` rows before
 retrying. The server refuses to start until `--check` reports zero issues.
 
+## Video Hive Legacy Migration
+
+For local single-user upgrades from the legacy Video Hive runtime:
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python scripts/migrate-video-hive-to-agent-legion.py --check
+UV_CACHE_DIR=.uv-cache uv run python scripts/migrate-video-hive-to-agent-legion.py --apply
+```
+
+Stop the application before `--apply`. The command backs up SQLite, copies legacy video artifacts
+into `data/jobs/...`, creates Workspace Jobs in `video_knowledge`, and writes a migration report
+under `data/backups/`.
+
 ## API Notes
 
 Add a knowledge video with URL:
@@ -355,18 +368,6 @@ Add a question explanation record before its URL is available:
   ]
 }
 ```
-
-Useful endpoints (video pipeline):
-
-- `POST /api/videos`
-- `GET /api/videos`
-- `GET /api/videos/{video_id}`
-- `DELETE /api/videos/{video_id}` deletes the queue record and that video's local storage directory.
-- `POST /api/videos/{video_id}/rerun`
-- `GET /api/videos/{video_id}/artifacts`
-- `GET /api/videos/{video_id}/logs`
-- `POST /api/worker/tick` processes one local non-agent phase; agent phases are handled by the background worker runner pool.
-- `POST /api/package`
 
 Agent Legion workflow (workspace / job) endpoints:
 

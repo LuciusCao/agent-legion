@@ -82,7 +82,14 @@ LocalExecutor(...).execute(context)
 - `data/` 不提交，配置与密钥不外传。
 - OpenClaw / Pi 命令模板来自本地配置，不要把 API key 写进命令行或日志。
 
-## 9. Where to look next
+## 9. Video Knowledge Workspace
+
+- Knowledge video work lives in the `video_knowledge` workspace workflow.
+- Job Detail video UI uses `VideoContentPanel`.
+- Do not add new `/api/videos` or `/video-hive` behavior.
+- Do not read legacy video tables in runtime paths.
+
+## 10. Where to look next
 
 - 项目结构 / 运行细节：[README.md](README.md) / [docs/architecture/](docs/architecture/)
 - 设计规格与计划：[docs/superpowers/](docs/superpowers/)

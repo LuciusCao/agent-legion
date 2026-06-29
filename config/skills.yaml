@@ -14,3 +14,15 @@ skills:
   question_comprehension_info/review_possible_errors:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
     ref: v1.3.0
+  video_knowledge/generate_chapters:
+    repo: file:///Users/user/.openclaw/workspace/skills/slice-chapters
+    ref: v1.0.0
+  video_knowledge/generate_interactions:
+    repo: file:///Users/user/.openclaw/workspace/skills/generate-interactions
+    ref: v1.0.0
+  video_knowledge/review_subtitles:
+    repo: file:///Users/user/.openclaw/workspace/skills/review-subtitles
+    ref: v1.0.0
+  video_knowledge/review_video_content:
+    repo: file:///Users/user/.openclaw/workspace/skills/review-interactions
+    ref: v1.0.0

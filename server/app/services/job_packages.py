@@ -1,10 +1,14 @@
 from __future__ import annotations
 
-import logging
-from typing import Any, TypedDict
+from typing import Any
 
 from server.app.jobs import JobQueries
-from server.app.pipeline.package import create_workspace_package
+from server.app.pipeline.package import WORKSPACE_PACKAGE_FILES, create_workspace_package
+from server.app.services.workspace_package_artifacts import workspace_artifact_names
+from server.app.services.workspace_package_contracts import (
+    JobPackageItemResult,
+    JobPackageResult,
+)
 from server.app.services.workspace_package_lifecycle import (
     WorkspacePackageLifecycleMixin,
     WorkspacePackageLockedError,  # noqa: F401
@@ -12,23 +16,6 @@ from server.app.services.workspace_package_lifecycle import (
 )
 from server.app.settings import Settings
 from server.app.storage_paths import make_data_relative
-
-logger = logging.getLogger(__name__)
-
-
-class JobPackageItemResult(TypedDict):
-    job_id: str
-    status: str
-    reason_code: str | None
-    message: str | None
-
-
-class JobPackageResult(TypedDict):
-    results: list[JobPackageItemResult]
-    succeeded_count: int
-    failed_count: int
-    package_filename: str | None
-    download_url: str | None
 
 
 class JobPackageService(WorkspacePackageLifecycleMixin):
@@ -98,8 +85,16 @@ class JobPackageService(WorkspacePackageLifecycleMixin):
 
         workspace_packages_dir = self.settings.packages_dir / f"workspace-{workspace_id}"
         workspace_packages_dir.mkdir(parents=True, exist_ok=True)
+        artifact_names = workspace_artifact_names(
+            self.settings.root_dir,
+            {str(job.get("workflow_key", "")) for job in eligible_jobs},
+            set(WORKSPACE_PACKAGE_FILES),
+        )
         package_path, count = create_workspace_package(
-            eligible_jobs, workspace_packages_dir, self.settings.jobs_dir
+            eligible_jobs,
+            workspace_packages_dir,
+            self.settings.jobs_dir,
+            artifact_names=artifact_names,
         )
         package_filename = package_path.name
         download_url = f"/api/workspaces/{workspace_id}/packages/{package_filename}"

@@ -2,13 +2,12 @@ from fastapi.testclient import TestClient
 
 from server.app.agents import AgentStatusManager
 from server.app.executors.registry import ExecutorRegistry
-from server.app.pipeline.runners import RunnerPool
 from server.app.worker_thread import WorkerThread
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from tests.helpers import setup_spa_app
 
 
-def test_lifespan_with_start_worker_initializes_worker_threads(tmp_path, monkeypatch):
+def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, monkeypatch):
     from server.app import main
 
     calls = []
@@ -25,17 +24,8 @@ def test_lifespan_with_start_worker_initializes_worker_threads(tmp_path, monkeyp
     monkeypatch.setattr(WorkerThread, "start", patched_worker_start)
     monkeypatch.setattr(WorkflowWorkerThread, "start", patched_workflow_start)
 
-    # Keep lifespan wiring independent of real openclaw discovery/runner creation.
+    # Keep lifespan wiring independent of real openclaw discovery.
     monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
-    monkeypatch.setattr(
-        RunnerPool,
-        "from_settings",
-        classmethod(
-            lambda cls, settings, discovered_agent_ids=None, agent_manager=None: RunnerPool(
-                runners=[], agent_manager=agent_manager
-            )
-        ),
-    )
     # Startup validation is about real runtime dependencies, not lifespan wiring.
     monkeypatch.setattr(main, "validate_settings", lambda settings: None)
 
@@ -47,7 +37,7 @@ def test_lifespan_with_start_worker_initializes_worker_threads(tmp_path, monkeyp
     with TestClient(app) as _:
         pass  # lifespan startup runs here
 
-    assert "worker" in calls
+    assert "worker" not in calls
     assert "workflow" in calls
     assert isinstance(app.state.executor_registry, ExecutorRegistry)
     assert app.state.executor_registry is received_registry

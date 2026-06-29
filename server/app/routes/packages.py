@@ -1,8 +1,5 @@
-import atexit
 import json
-import logging
 import zipfile
-from concurrent.futures import ThreadPoolExecutor
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -12,7 +9,6 @@ from pydantic import BaseModel
 from ..db import Database
 from ..events import VideoEventManager
 from ..jobs import JobQueries
-from ..pipeline.package import create_package
 from ..security import validate_package_filename
 from ..services.job_packages import (
     JobPackageService,
@@ -24,24 +20,13 @@ from ..services.package_deletion import (
     PackageLockedError,
     PackageNotFoundError,
 )
-from ..services.video_actions import select_videos_for_package
 from ..settings import Settings
-from ..storage_paths import ManagedPathError, make_data_relative, resolve_data_path
+from ..storage_paths import ManagedPathError, resolve_data_path
 from .package_contracts import (
     WorkspacePackageRequest,
     WorkspacePackageResponse,
     WorkspacePackageResultResponse,
 )
-
-logger = logging.getLogger(__name__)
-
-_package_executor = ThreadPoolExecutor(max_workers=2, thread_name_prefix="package-")
-atexit.register(_package_executor.shutdown, wait=False)
-
-
-class PackageRequest(BaseModel):
-    video_ids: list[str] | None = None
-    name: str | None = None
 
 
 class PackageUpdate(BaseModel):
@@ -64,10 +49,6 @@ class WorkspacePackageUpdateResponse(BaseModel):
     locked: bool | None = None
 
 
-class PackageResponse(BaseModel):
-    accepted: bool
-
-
 def create_packages_router(
     db: Database,
     job_db: JobQueries,
@@ -79,52 +60,6 @@ def create_packages_router(
     if job_packages is None:
         job_packages = JobPackageService(job_db, settings)
     router = APIRouter(tags=["packages"])
-
-    @router.post("/package", response_model=PackageResponse)
-    def package_completed(request: PackageRequest | None = None) -> dict[str, bool]:
-        requested_ids = request.video_ids if request is not None else None
-        selection = select_videos_for_package(db, requested_ids)
-        if selection.missing_ids:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Videos not found: {', '.join(selection.missing_ids)}",
-            )
-        if selection.incomplete_ids:
-            raise HTTPException(
-                status_code=400,
-                detail="No completed videos selected for packaging",
-            )
-        if request is not None and requested_ids == []:
-            raise HTTPException(status_code=400, detail="No videos selected for packaging")
-        if not selection.videos:
-            raise HTTPException(
-                status_code=400, detail="No completed videos available for packaging"
-            )
-
-        def _do_package() -> None:
-            try:
-                package_path, video_count = create_package(
-                    selection.videos, settings.packages_dir, settings.videos_dir
-                )
-                size_bytes = package_path.stat().st_size
-                name = (
-                    request.name
-                    if request is not None and request.name
-                    else f"批次 ({video_count}个视频)"
-                )
-                relative_path = make_data_relative(package_path, settings.data_dir)
-                db.insert_package(
-                    relative_path, name=name, video_count=video_count, size_bytes=size_bytes
-                )
-                download_url = f"/api/packages/{package_path.name}"
-                video_event_manager.broadcast_package_ready(download_url)
-                video_ids = [v["id"] for v in selection.videos]
-                db.batch_update_packed(video_ids, packed=1, notify=False)
-            except Exception:
-                logger.exception("Package creation failed")
-
-        _package_executor.submit(_do_package)
-        return {"accepted": True}
 
     @router.get("/packages")
     def list_packages() -> dict[str, Any]:

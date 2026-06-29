@@ -1,14 +1,27 @@
+from __future__ import annotations
+
 import logging
 from typing import Any
 
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
-from server.app.services.job_errors import InvalidOperationError, NotFoundError
+from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_intake_resolution import (
     RESOLVER_MAP,
     normalize_values,
     resolve_cms_question_candidates,
     resolve_direct_candidates,
+)
+from server.app.services.job_intake_video import (
+    exclude_existing_candidates,
+    resolve_cms_video_candidates,
+    write_video_input,
+)
+from server.app.services.job_intake_workspace import (
+    check_resource_enabled,
+    effective_cms_config,
+    enabled_intake_modes,
+    get_workspace,
     singular_field_name,
 )
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -31,53 +44,21 @@ class JobIntakeService:
         self.workflows = workflows
         self.job_event_manager = job_event_manager
 
-    def _workspace(self, workspace_id: str) -> dict[str, Any]:
-        workspace = self.job_db.get_workspace(workspace_id)
-        if workspace is None:
-            raise NotFoundError("Workspace not found")
-        return workspace
-
-    def _effective_cms_config(self, workspace: dict[str, Any]) -> dict[str, Any]:
-        base = self.settings.config.get("cms", {})
-        config = dict(base) if isinstance(base, dict) else {}
-        workspace_config = workspace.get("cms_config")
-        if isinstance(workspace_config, dict):
-            config.update(workspace_config)
-        return config
-
-    def _enabled_intake_modes(self, workspace: dict[str, Any]) -> set[str] | None:
-        intake_config = workspace.get("intake_config")
-        if not isinstance(intake_config, dict) or "enabled_modes" not in intake_config:
-            return None
-        enabled_modes = intake_config.get("enabled_modes")
-        if not isinstance(enabled_modes, list):
-            return None
-        return {str(mode) for mode in enabled_modes}
-
     def create_batch(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        workspace = self._workspace(workspace_id)
+        workspace = get_workspace(self.job_db, workspace_id)
         workflow_key = payload["workflow_key"]
         definition = self.workflows.definition(workflow_key)
-        intake_mode = (
-            definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
-        )
-        resource_key = intake_mode.resource if intake_mode else None
-        if resource_key:
-            ws_resource_config = workspace.get("resource_config") or {}
-            resources = ws_resource_config.get("resources") or {}
-            binding = resources.get(resource_key) or {}
-            if binding.get("enabled") is False:
-                raise InvalidOperationError(
-                    f"Resource provider '{resource_key}' is disabled for this workspace"
-                )
-        cms_config = self._effective_cms_config(workspace)
-        resource_config = workspace.get("resource_config")
-        if not isinstance(resource_config, dict):
-            resource_config = {}
         mode = definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         if mode is None:
             raise InvalidOperationError("Unsupported intake mode")
-        enabled_modes = self._enabled_intake_modes(workspace)
+        resource_key = mode.resource if mode.resource else None
+        if resource_key:
+            check_resource_enabled(workspace, resource_key)
+        cms_config = effective_cms_config(self.settings, workspace)
+        resource_config = workspace.get("resource_config")
+        if not isinstance(resource_config, dict):
+            resource_config = {}
+        enabled_modes = enabled_intake_modes(workspace)
         if enabled_modes is not None and payload["source_kind"] not in enabled_modes:
             raise InvalidOperationError(
                 "Intake mode is disabled for this workspace; "
@@ -95,6 +76,8 @@ class JobIntakeService:
 
         workspace_entity = str(workspace.get("default_entity") or "question")
         entity = (payload.get("entity") or workspace_entity).strip() or "question"
+        if entity == "video" and workflow_key != "video_knowledge":
+            raise InvalidOperationError("Unsupported entity and intake mode combination")
         resolver = RESOLVER_MAP.get((entity, mode.key))
         if resolver is None:
             raise InvalidOperationError("Unsupported entity and intake mode combination")
@@ -102,6 +85,14 @@ class JobIntakeService:
         candidates: list[dict[str, Any]] = []
         if resolver.startswith("direct."):
             candidates = resolve_direct_candidates(entity, input_values, payload["source_kind"])
+        elif resolver.startswith("cms.") and entity == "video":
+            candidates = resolve_cms_video_candidates(
+                entity,
+                input_values,
+                payload["source_kind"],
+                resolver,
+                cms_config,
+            )
         elif resolver.startswith("cms."):
             candidates = resolve_cms_question_candidates(
                 entity,
@@ -116,7 +107,16 @@ class JobIntakeService:
         else:
             raise InvalidOperationError(f"Unsupported resolver: {resolver}")
 
+        # Filter candidates that already exist in the workspace so duplicates are
+        # reported as created_count=0 instead of failing the whole batch.
+        original_candidates = candidates
+        existing_jobs = self.job_db.list_jobs(workspace_id=workspace_id)
+        existing_keys = {(str(job["source_type"]), str(job["source_id"])) for job in existing_jobs}
+        candidates = exclude_existing_candidates(candidates, existing_keys)
+
         if not candidates:
+            if entity == "video" and original_candidates:
+                return {"created_count": 0, "jobs": []}
             detail = "No tasks were resolved from input"
             if resolver.startswith("cms.") and mode.input_field == "knowledge_codes":
                 detail += f". Checked {len(input_values)} knowledge code(s) via CMS; ensure the codes are correct and the resource API URL is configured."
@@ -167,6 +167,10 @@ class JobIntakeService:
                     stem=str(candidate.get("stem", "")),
                 )
             )
+
+        if entity == "video" and workflow_key == "video_knowledge":
+            for candidate, job in zip(candidates, jobs, strict=True):
+                write_video_input(resolve_job_dir(job, self.settings.jobs_dir), candidate)
 
         resolved_jobs: list[dict[str, Any]] = []
         for job in jobs:
