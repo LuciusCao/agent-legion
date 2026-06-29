@@ -379,9 +379,7 @@ def test_rerun_from_failed_node_uses_failed_node(rerun_service, job):
     rerun_service.job_db.update_job_status(job["id"], "failed", "boom")
     rerun_service.job_db.update_job_node(job["id"], "clean_and_parse", status="failed")
 
-    result = rerun_service.rerun(
-        job["workspace_id"], job["id"], from_failed_node=True
-    )
+    result = rerun_service.rerun(job["workspace_id"], job["id"], from_failed_node=True)
 
     assert result["status"] == "succeeded"
     assert result["node_key"] == "clean_and_parse"
@@ -390,9 +388,7 @@ def test_rerun_from_failed_node_uses_failed_node(rerun_service, job):
 
 
 def test_rerun_from_failed_node_skips_non_failed(rerun_service, job):
-    result = rerun_service.rerun(
-        job["workspace_id"], job["id"], from_failed_node=True
-    )
+    result = rerun_service.rerun(job["workspace_id"], job["id"], from_failed_node=True)
 
     assert result["status"] == "skipped"
     assert result["reason_code"] == "not_failed"
@@ -401,9 +397,7 @@ def test_rerun_from_failed_node_skips_non_failed(rerun_service, job):
 def test_rerun_from_failed_node_skips_when_no_failed_node(rerun_service, job):
     rerun_service.job_db.update_job_status(job["id"], "failed", "boom")
 
-    result = rerun_service.rerun(
-        job["workspace_id"], job["id"], from_failed_node=True
-    )
+    result = rerun_service.rerun(job["workspace_id"], job["id"], from_failed_node=True)
 
     assert result["status"] == "skipped"
     assert result["reason_code"] == "no_failed_node"
