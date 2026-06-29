@@ -121,6 +121,99 @@ def test_batch_rerun_skips_not_found_and_running_jobs(tmp_path):
     assert any(r["status"] == "failed" and r["reason_code"] == "not_found" for r in results)
 
 
+def test_batch_rerun_from_failed_node(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as c:
+        ws_id = _create_workspace(c)
+        created = c.post(
+            f"/api/workspaces/{ws_id}/job-batches",
+            json={
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q701"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        job_id = created["jobs"][0]["id"]
+        app.state.job_db.update_job_status(job_id, "failed", "boom")
+        app.state.job_db.update_job_node(job_id, "clean_and_parse", status="failed")
+
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun",
+            json={"job_ids": [job_id], "from_failed_node": True},
+        )
+        detail = c.get(f"/api/jobs/{job_id}").json()
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["results"] == [
+        {
+            "job_id": job_id,
+            "operation": "rerun",
+            "status": "succeeded",
+            "node_key": "clean_and_parse",
+            "reason_code": None,
+            "message": None,
+        }
+    ]
+    assert detail["job"]["status"] == "queued"
+    nodes = {node["node_key"]: node["status"] for node in detail["nodes"]}
+    assert nodes["clean_and_parse"] == "pending"
+
+
+def test_batch_rerun_from_failed_node_skips_non_failed(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as c:
+        ws_id = _create_workspace(c)
+        created = c.post(
+            f"/api/workspaces/{ws_id}/job-batches",
+            json={
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q702"],
+                "knowledge_codes": [],
+            },
+        ).json()
+        job_id = created["jobs"][0]["id"]
+
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun",
+            json={"job_ids": [job_id], "from_failed_node": True},
+        )
+
+    assert response.status_code == 200
+    result = response.json()["results"][0]
+    assert result["status"] == "skipped"
+    assert result["reason_code"] == "not_failed"
+
+
+def test_batch_rerun_requires_node_key_or_from_failed(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/jobs/batch-rerun",
+            json={"job_ids": ["any"]},
+        )
+
+    assert response.status_code == 422
+
+
 def test_rerun_node_errors(tmp_path):
     from fastapi.testclient import TestClient
 
