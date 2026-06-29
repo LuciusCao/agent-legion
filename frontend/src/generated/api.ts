@@ -1216,10 +1216,15 @@ export interface components {
     }
     /** JobBatchRerunRequest */
     JobBatchRerunRequest: {
+      /**
+       * From Failed Node
+       * @default false
+       */
+      from_failed_node: boolean
       /** Job Ids */
       job_ids?: string[]
       /** Node Key */
-      node_key: string
+      node_key?: string | null
     }
     /** JobBatchResponse */
     JobBatchResponse: {
