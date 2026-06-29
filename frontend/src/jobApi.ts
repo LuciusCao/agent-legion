@@ -82,14 +82,22 @@ export async function batchRunToJobs(
 
 export async function batchRerunJobs(
   workspaceId: string,
-  nodeKey: string,
-  jobIds: string[]
+  nodeKey: string | null,
+  jobIds: string[],
+  options?: { fromFailedNode?: boolean }
 ): Promise<BatchJobMutationResult> {
+  const body: Record<string, unknown> = { job_ids: jobIds }
+  if (nodeKey != null) {
+    body.node_key = nodeKey
+  }
+  if (options?.fromFailedNode) {
+    body.from_failed_node = true
+  }
   return api<BatchJobMutationResult>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-rerun`,
     {
       method: 'POST',
-      body: JSON.stringify({ job_ids: jobIds, node_key: nodeKey }),
+      body: JSON.stringify(body),
     }
   )
 }
