@@ -12,47 +12,12 @@ from server.app.pipeline.executor import PhaseContext, PhaseExecutorRegistry
 from server.app.pipeline.openclaw import OpenClawRunner
 from server.app.pipeline.phases import AGENT_PHASES, next_phase
 from server.app.pipeline.runners import build_openclaw_runner
-from server.app.pipeline.transcribe import (
-    SenseVoiceProvider,
-    TranscriptionProvider,
-    WhisperCppProvider,
-    run_transcription_with_providers,
-)
+from server.app.pipeline.transcribe import TranscriptionProvider, run_transcription_with_providers
 from server.app.pipeline.validators import phase_outputs_sufficient, validate_phase_outputs
 from server.app.services.interaction_cache import InteractionCacheService
+from server.app.services.transcription_providers import build_default_providers
 from server.app.settings import Settings
 from server.app.storage_paths import make_data_relative
-
-
-def build_default_providers(settings: Settings) -> list[TranscriptionProvider]:
-    asr = settings.config.get("asr", {})
-    whisper = asr.get("whisper", {})
-    sensevoice = asr.get("sensevoice", {})
-    vad_model = whisper.get("vad_model")
-    if vad_model:
-        from pathlib import Path
-
-        if not Path(vad_model).expanduser().exists():
-            raise FileNotFoundError(f"Configured VAD model not found: {vad_model}")
-    timeout = int(asr.get("timeout_seconds", 900))
-    providers: list[TranscriptionProvider] = [
-        WhisperCppProvider(
-            binary=str(whisper.get("binary", "")),
-            model=str(whisper.get("model", "")),
-            vad_model=vad_model,
-            timeout=timeout,
-        ),
-        SenseVoiceProvider(
-            script=str(
-                settings.root_dir / str(sensevoice.get("script", "scripts/sensevoice_srt.py"))
-            ),
-            model_dir=str(
-                settings.root_dir / str(sensevoice.get("model_dir", "models/SenseVoiceSmall"))
-            ),
-            timeout=timeout,
-        ),
-    ]
-    return providers
 
 
 def _handle_download(ctx: PhaseContext) -> None:
