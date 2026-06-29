@@ -215,4 +215,76 @@ describe('JobRerunDialog', () => {
     )
     expect(container.firstChild).toBeNull()
   })
+
+  it('renders failed-node chip and calls onConfirm with fromFailedNode', async () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    const onClose = vi.fn()
+    render(
+      <JobRerunDialog
+        open
+        allowFailedNodeMode
+        jobs={[
+          makeJob({ id: 'j1', status: 'failed', workflow_key: 'question_content' }),
+          makeJob({ id: 'j2', status: 'completed', workflow_key: 'question_content', source_id: 'Q2' }),
+        ]}
+        workflowDefinition={workflow}
+        onConfirm={onConfirm}
+        onClose={onClose}
+      />
+    )
+
+    const failedChip = screen.getByTestId('rerun-chip-failed-node')
+    expect(failedChip).toHaveTextContent('失败的节点')
+
+    act(() => {
+      failedChip.click()
+    })
+
+    expect(screen.getByText(/以下任务未失败，将被跳过/)).toBeInTheDocument()
+    expect(screen.getByText('Q2')).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText(/重跑 1 个失败任务/).click()
+    })
+
+    expect(onConfirm).toHaveBeenCalledWith(null, true)
+    expect(onClose).toHaveBeenCalled()
+  })
+
+  it('disables confirm when no failed jobs in failed-node mode', () => {
+    render(
+      <JobRerunDialog
+        open
+        allowFailedNodeMode
+        jobs={[
+          makeJob({ id: 'j1', status: 'completed', workflow_key: 'question_content' }),
+        ]}
+        workflowDefinition={workflow}
+        onConfirm={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    act(() => {
+      screen.getByTestId('rerun-chip-failed-node').click()
+    })
+
+    expect(screen.getByText(/重跑 0 个失败任务/)).toBeDisabled()
+  })
+
+  it('does not render failed-node chip when allowFailedNodeMode is false', () => {
+    render(
+      <JobRerunDialog
+        open
+        jobs={[
+          makeJob({ id: 'j1', status: 'failed', workflow_key: 'question_content' }),
+        ]}
+        workflowDefinition={workflow}
+        onConfirm={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(screen.queryByTestId('rerun-chip-failed-node')).not.toBeInTheDocument()
+  })
 })
