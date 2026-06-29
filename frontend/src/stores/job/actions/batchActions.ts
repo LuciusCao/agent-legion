@@ -25,7 +25,9 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       if (ids.length === 0) return { results: [] }
       set({ batchRerunLoading: true })
       try {
-        const data = await batchRerunJobs(workspaceId, nodeKey, ids, { fromFailedNode })
+        const data = await batchRerunJobs(workspaceId, nodeKey, ids, {
+          fromFailedNode,
+        })
         const results = data.results ?? []
         const succeededIds = new Set(
           results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
@@ -59,7 +61,6 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
         set({ batchRerunLoading: false })
       }
     },
-
     async batchDelete(workspaceId: string) {
       const ids = Array.from(get().selectedIds)
       if (ids.length === 0) return { results: [] }

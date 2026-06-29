@@ -374,7 +374,9 @@ describe('WorkspaceMainPage', () => {
       screen.getByText('确认重跑').click()
     })
 
-    expect(mockBatchRerunJobs).toHaveBeenCalledWith('ws1', 'extract', ['j1'])
+    expect(mockBatchRerunJobs).toHaveBeenCalledWith('ws1', 'extract', ['j1'], {
+      fromFailedNode: false,
+    })
   })
 
   it('opens package download URL after batch package', async () => {

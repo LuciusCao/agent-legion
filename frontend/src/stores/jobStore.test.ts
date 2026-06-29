@@ -172,10 +172,12 @@ describe('jobStore', () => {
 
     await useJobStore.getState().batchRerun('ws1', 'extract')
 
-    expect(mockBatchRerunJobs).toHaveBeenCalledWith('ws1', 'extract', [
-      'j1',
-      'j2',
-    ])
+    expect(mockBatchRerunJobs).toHaveBeenCalledWith(
+      'ws1',
+      'extract',
+      ['j1', 'j2'],
+      { fromFailedNode: undefined }
+    )
     expect(useJobStore.getState().selectedIds.size).toBe(1)
     expect(useJobStore.getState().selectedIds.has('j2')).toBe(true)
     expect(useJobStore.getState().selectMode).toBe(true)
