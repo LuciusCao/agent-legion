@@ -112,7 +112,7 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
                 "local_a": LocalCapabilityConfig(handler="question_comprehension_info.local_a"),
             },
         ),
-        "pi-default": PiExecutorConfig(
+        "pi": PiExecutorConfig(
             kind="pi",
             global_capacity=8,
             capabilities={
@@ -228,7 +228,7 @@ def test_v005_finalizer_interruption_before_commit_retains_backup_and_reruns(
         ).fetchall()
         assert {row["executor_id"]: row["concurrency_limit"] for row in allocations} == {
             "local-default": 3,
-            "pi-default": 2,
+            "pi": 2,
         }
         assert conn.execute("pragma integrity_check").fetchone()[0] == "ok"
         assert conn.execute("pragma foreign_key_check").fetchall() == []
