@@ -30,7 +30,10 @@ export function useJobRerunDialog({
 
   const effectiveNodeKey = useMemo(() => {
     if (failedMode) return null
-    if (selectedNodeKey && orderedNodes.some((n) => n.key === selectedNodeKey)) {
+    if (
+      selectedNodeKey &&
+      orderedNodes.some((n) => n.key === selectedNodeKey)
+    ) {
       return selectedNodeKey
     }
     return orderedNodes[0]?.key ?? null

@@ -224,8 +224,17 @@ describe('JobRerunDialog', () => {
         open
         allowFailedNodeMode
         jobs={[
-          makeJob({ id: 'j1', status: 'failed', workflow_key: 'question_content' }),
-          makeJob({ id: 'j2', status: 'completed', workflow_key: 'question_content', source_id: 'Q2' }),
+          makeJob({
+            id: 'j1',
+            status: 'failed',
+            workflow_key: 'question_content',
+          }),
+          makeJob({
+            id: 'j2',
+            status: 'completed',
+            workflow_key: 'question_content',
+            source_id: 'Q2',
+          }),
         ]}
         workflowDefinition={workflow}
         onConfirm={onConfirm}
@@ -257,7 +266,11 @@ describe('JobRerunDialog', () => {
         open
         allowFailedNodeMode
         jobs={[
-          makeJob({ id: 'j1', status: 'completed', workflow_key: 'question_content' }),
+          makeJob({
+            id: 'j1',
+            status: 'completed',
+            workflow_key: 'question_content',
+          }),
         ]}
         workflowDefinition={workflow}
         onConfirm={vi.fn()}
@@ -277,7 +290,11 @@ describe('JobRerunDialog', () => {
       <JobRerunDialog
         open
         jobs={[
-          makeJob({ id: 'j1', status: 'failed', workflow_key: 'question_content' }),
+          makeJob({
+            id: 'j1',
+            status: 'failed',
+            workflow_key: 'question_content',
+          }),
         ]}
         workflowDefinition={workflow}
         onConfirm={vi.fn()}
@@ -285,6 +302,8 @@ describe('JobRerunDialog', () => {
       />
     )
 
-    expect(screen.queryByTestId('rerun-chip-failed-node')).not.toBeInTheDocument()
+    expect(
+      screen.queryByTestId('rerun-chip-failed-node')
+    ).not.toBeInTheDocument()
   })
 })
