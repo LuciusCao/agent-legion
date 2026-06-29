@@ -129,21 +129,17 @@ export default function WorkspaceMainPage() {
     nodeKey: string | null,
     fromFailedNode?: boolean
   ) => {
-    if (!workspaceId) return
-    await batchRerun(workspaceId, nodeKey, fromFailedNode)
+    if (workspaceId) await batchRerun(workspaceId, nodeKey, fromFailedNode)
   }
 
   const handleRunTo = async (targetKey: string, startKey?: string) => {
-    if (!workspaceId) return
-    await batchRunTo(workspaceId, targetKey, startKey)
+    if (workspaceId) await batchRunTo(workspaceId, targetKey, startKey)
   }
 
   const handlePackage = async () => {
     if (!workspaceId) return
     const result = await batchPackage(workspaceId)
-    if (result.download_url) {
-      window.open(result.download_url, '_blank')
-    }
+    if (result.download_url) window.open(result.download_url, '_blank')
   }
 
   const handleDelete = () => {

@@ -87,18 +87,11 @@ export async function batchRerunJobs(
   options?: { fromFailedNode?: boolean }
 ): Promise<BatchJobMutationResult> {
   const body: Record<string, unknown> = { job_ids: jobIds }
-  if (nodeKey != null) {
-    body.node_key = nodeKey
-  }
-  if (options?.fromFailedNode) {
-    body.from_failed_node = true
-  }
+  if (nodeKey != null) body.node_key = nodeKey
+  if (options?.fromFailedNode) body.from_failed_node = true
   return api<BatchJobMutationResult>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/jobs/batch-rerun`,
-    {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }
+    { method: 'POST', body: JSON.stringify(body) }
   )
 }
 
