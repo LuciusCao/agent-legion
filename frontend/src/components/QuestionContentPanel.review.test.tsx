@@ -115,11 +115,10 @@ describe('QuestionContentPanel review integration', () => {
     render(
       <QuestionContentPanel
         jobId="job1"
-        comprehensionCompleted
-        reviewArtifactNames={[
-          'key_info_review_report.json',
-          'possible_errors_review_report.json',
-        ]}
+        keyInfoPreviewable
+        possibleErrorsPreviewable
+        keyInfoReviewAttempted
+        possibleErrorsReviewAttempted
       />
     )
 
@@ -136,8 +135,8 @@ describe('QuestionContentPanel review integration', () => {
     render(
       <QuestionContentPanel
         jobId="job1"
-        comprehensionCompleted
-        reviewArtifactNames={['key_info_review_report.json']}
+        keyInfoPreviewable
+        keyInfoReviewAttempted
       />
     )
 
@@ -157,8 +156,8 @@ describe('QuestionContentPanel review integration', () => {
     render(
       <QuestionContentPanel
         jobId="job1"
-        comprehensionCompleted
-        reviewArtifactNames={['possible_errors_review_report.json']}
+        possibleErrorsPreviewable
+        possibleErrorsReviewAttempted
       />
     )
 
@@ -174,8 +173,14 @@ describe('QuestionContentPanel review integration', () => {
     expect(screen.getByText('描述不够具体')).toBeInTheDocument()
   })
 
-  it('does not fetch review artifacts when names are not provided', async () => {
-    render(<QuestionContentPanel jobId="job1" comprehensionCompleted />)
+  it('does not show review icons when review has not been attempted', async () => {
+    render(
+      <QuestionContentPanel
+        jobId="job1"
+        keyInfoPreviewable
+        possibleErrorsPreviewable
+      />
+    )
 
     await waitFor(() =>
       expect(screen.getByText('审题信息')).toBeInTheDocument()
