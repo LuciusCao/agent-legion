@@ -123,7 +123,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
         workspace["id"],
         allocations=[
             {"executor_id": "local-default", "concurrency_limit": 4},
-            {"executor_id": "pi-default", "concurrency_limit": 6},
+            {"executor_id": "pi", "concurrency_limit": 6},
             {"executor_id": "openclaw-main", "concurrency_limit": 2},
         ],
         bindings=[
@@ -135,7 +135,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "extract",
-                "executor_id": "pi-default",
+                "executor_id": "pi",
             },
             {
                 "workflow_key": "question_comprehension_info",
@@ -162,7 +162,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
     repo = ExecutorLeaseRepository(job_db.path)
     claim_specs = [
         ("local-default", "fetch", "fetch_questions", 16, None),
-        ("pi-default", "extract", "extract_keywords", 20, None),
+        ("pi", "extract", "extract_keywords", 20, None),
         ("openclaw-main", "review", "review", 8, None),
     ]
     for i, (executor_id, node_key, capability, global_capacity, local_limit) in enumerate(
@@ -194,11 +194,11 @@ def test_executor_stats_report_configured_capacity_and_leases(
     assert executors["local-default"]["running"] == 1
     assert executors["local-default"]["available"] == 3
 
-    assert executors["pi-default"]["kind"] == "pi"
-    assert executors["pi-default"]["global_capacity"] == 20
-    assert executors["pi-default"]["workspace_limit"] == 6
-    assert executors["pi-default"]["running"] == 1
-    assert executors["pi-default"]["available"] == 5
+    assert executors["pi"]["kind"] == "pi"
+    assert executors["pi"]["global_capacity"] == 20
+    assert executors["pi"]["workspace_limit"] == 6
+    assert executors["pi"]["running"] == 1
+    assert executors["pi"]["available"] == 5
 
     assert executors["openclaw-main"]["kind"] == "openclaw"
     assert executors["openclaw-main"]["global_capacity"] == 8
@@ -317,7 +317,7 @@ def test_replace_configuration_adds_pi_agent_for_pi_allocation(
         settings_patch={"workflowKey": "question_comprehension_info"},
         executor_allocations=[
             {"executor_id": "local-default", "concurrency_limit": 4},
-            {"executor_id": "pi-default", "concurrency_limit": 3},
+            {"executor_id": "pi", "concurrency_limit": 3},
         ],
         node_bindings=[
             {
@@ -351,12 +351,12 @@ def test_replace_configuration_removes_pi_agent_when_pi_allocation_dropped(
         workspace["id"],
         workspace_patch={},
         settings_patch={"workflowKey": "question_comprehension_info"},
-        executor_allocations=[{"executor_id": "pi-default", "concurrency_limit": 2}],
+        executor_allocations=[{"executor_id": "pi", "concurrency_limit": 2}],
         node_bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "generate_key_info",
-                "executor_id": "pi-default",
+                "executor_id": "pi",
             }
         ],
         node_limits=[],
@@ -395,12 +395,12 @@ def test_sync_workspace_pi_agents_registers_existing_pi_allocations(
 ) -> None:
     job_db.replace_workspace_executor_configuration(
         workspace["id"],
-        allocations=[{"executor_id": "pi-default", "concurrency_limit": 5}],
+        allocations=[{"executor_id": "pi", "concurrency_limit": 5}],
         bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "extract_keywords",
-                "executor_id": "pi-default",
+                "executor_id": "pi",
             }
         ],
         node_limits=[],

@@ -1,3 +1,5 @@
+# ruff: noqa: F401
+
 from server.app.db.migrations.v001_executor_core import MIGRATION as V001_EXECUTOR_CORE
 from server.app.db.migrations.v002_executor_bootstrap_state import (
     MIGRATION as V002_EXECUTOR_BOOTSTRAP_STATE,
@@ -33,19 +35,6 @@ from server.app.db.migrations.v013_node_run_skill_version import (
 from server.app.db.migrations.v014_remove_question_content_default import (
     MIGRATION as V014_REMOVE_QUESTION_CONTENT_DEFAULT,
 )
-
-__all__ = [
-    "V001_EXECUTOR_CORE",
-    "V002_EXECUTOR_BOOTSTRAP_STATE",
-    "V003_LEGACY_COLUMNS",
-    "V004_WORKSPACE_DAG_FOREIGN_KEYS",
-    "V006_JOB_EXECUTION_CONTROL",
-    "V007_RENAME_PIPELINE_TO_WORKFLOW",
-    "V008_JOB_NODE_CREATED_AT",
-    "V009_RELATIVE_PATH_STORAGE",
-    "V010_REMOVE_DEFAULT_WORKSPACE",
-    "V011_REMOVE_WORKSPACE_ID_DEFAULTS",
-    "V012_WORKSPACE_PACKAGES",
-    "V013_NODE_RUN_SKILL_VERSION",
-    "V014_REMOVE_QUESTION_CONTENT_DEFAULT",
-]
+from server.app.db.migrations.v015_rename_pi_executor_id import (
+    MIGRATION as V015_RENAME_PI_EXECUTOR_ID,
+)

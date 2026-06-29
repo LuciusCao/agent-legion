@@ -48,7 +48,7 @@ const mockDetail = {
       label: '生成',
       status: 'running',
       capability: 'generate',
-      executor_id: 'pi-default',
+      executor_id: 'pi',
       executor_kind: 'pi',
       after: ['extract'],
       inputs: [],

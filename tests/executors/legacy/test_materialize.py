@@ -89,7 +89,7 @@ def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None
         for row in _fetch_all_allocations(queries)
         if row["workspace_id"] == workspace_id
     }
-    assert allocations == {"local-default": 1, "pi-default": 3}
+    assert allocations == {"local-default": 1, "pi": 3}
 
     bindings = {
         row["node_key"]: row["executor_id"]
@@ -99,7 +99,7 @@ def test_finalizer_materializes_exact_pi_assignment(queries: JobQueries) -> None
     assert bindings == {
         "local_a": "local-default",
         "local_b": "local-default",
-        "pi_a": "pi-default",
+        "pi_a": "pi",
     }
 
     limits = {
@@ -128,7 +128,7 @@ def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) ->
         conn.execute(
             "update workspace_executor_allocations set concurrency_limit = 456 "
             "where workspace_id = ? and executor_id = ?",
-            (workspace_id, "pi-default"),
+            (workspace_id, "pi"),
         )
 
     with queries.connect() as conn:
@@ -139,7 +139,7 @@ def test_finalizer_preserves_authoritative_configuration(queries: JobQueries) ->
         for row in _fetch_all_allocations(queries)
         if row["workspace_id"] == workspace_id
     }
-    assert allocations == {"local-default": 123, "pi-default": 456}
+    assert allocations == {"local-default": 123, "pi": 456}
 
 
 def test_finalizer_blocks_on_unknown_agent(queries: JobQueries) -> None:

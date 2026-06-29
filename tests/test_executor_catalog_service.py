@@ -33,10 +33,17 @@ def test_catalog_exposes_video_pi_agent_capabilities(service: ExecutorCatalogSer
         executor["id"]: set(executor["capabilities"]) for executor in result["executors"]
     }
 
-    assert executors_by_id["pi-video-main"]["kind"] == "pi"
+    assert "pi-video-main" not in executors_by_id
+    assert "pi-default" not in executors_by_id
+    assert executors_by_id["pi"]["kind"] == "pi"
     assert {
+        "generate_key_info",
+        "review_key_info",
+        "generate_possible_errors",
+        "review_possible_errors",
+        "assess_comprehension_difficulty",
         "review_subtitles",
         "generate_chapters",
         "generate_interactions",
         "review_video_content",
-    }.issubset(capabilities_by_executor["pi-video-main"])
+    }.issubset(capabilities_by_executor["pi"])

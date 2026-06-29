@@ -30,7 +30,7 @@ def _sample_executors() -> dict[str, ExecutorConfig]:
                 "local_b": LocalCapabilityConfig(handler="question_comprehension_info.local_b"),
             },
         ),
-        "pi-default": PiExecutorConfig(
+        "pi": PiExecutorConfig(
             kind="pi",
             global_capacity=8,
             capabilities={

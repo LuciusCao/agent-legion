@@ -24,7 +24,7 @@ def test_app_startup_materializes_executor_configuration_without_worker(tmp_path
     assert response.status_code == 200
     assert {row["executor_id"] for row in response.json()["allocations"]} == {
         "local-default",
-        "pi-default",
+        "pi",
     }
     backups = list(tmp_path.glob("video_hive-before-v005-*.sqlite"))
     assert len(backups) == 1
@@ -64,7 +64,7 @@ def test_app_startup_preserves_user_modified_executor_configuration(tmp_path: Pa
 
     allocations = {row["executor_id"]: row["concurrency_limit"] for row in config["allocations"]}
     assert allocations["local-default"] == 999
-    assert allocations["pi-default"] == 3
+    assert allocations["pi"] == 3
 
 
 def test_app_startup_aborts_when_finalization_blocked(tmp_path: Path) -> None:

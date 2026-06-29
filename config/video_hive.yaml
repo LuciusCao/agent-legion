@@ -34,13 +34,13 @@ openclaw:
   skill_safety:
     enabled: true
     repos:
-    - path: ~/.openclaw/workspace/skills/generate-interactions
+    - path: ~/.agents/skills/agent-legion/video_knowledge/generate_interactions
       ref: v1.0.0
-    - path: ~/.openclaw/workspace/skills/review-interactions
+    - path: ~/.agents/skills/agent-legion/video_knowledge/review_video_content
       ref: v1.0.0
-    - path: ~/.openclaw/workspace/skills/review-subtitles
+    - path: ~/.agents/skills/agent-legion/video_knowledge/review_subtitles
       ref: v1.0.0
-    - path: ~/.openclaw/workspace/skills/slice-chapters
+    - path: ~/.agents/skills/agent-legion/video_knowledge/generate_chapters
       ref: v1.0.0
   command_template:
   - openclaw

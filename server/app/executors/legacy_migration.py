@@ -22,7 +22,7 @@ from server.app.workflows.definition import WorkflowDefinition
 logger = logging.getLogger(__name__)
 
 _DEFAULT_LOCAL_EXECUTOR_ID = "local-default"
-_DEFAULT_PI_EXECUTOR_ID = "pi-default"
+_DEFAULT_PI_EXECUTOR_ID = "pi"
 _MIGRATION_VERSION = 5
 _MIGRATION_NAME = "remove_legacy_executor_paths"
 

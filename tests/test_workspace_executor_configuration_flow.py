@@ -55,12 +55,12 @@ def _expected_pi_bindings(workspace_id: str) -> list[dict]:
         {
             "workflow_key": WORKFLOW_KEY,
             "node_key": "generate_key_info",
-            "executor_id": "pi-default",
+            "executor_id": "pi",
         },
         {
             "workflow_key": WORKFLOW_KEY,
             "node_key": "review_key_info",
-            "executor_id": "pi-default",
+            "executor_id": "pi",
         },
     ]
 
@@ -81,9 +81,9 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     catalog = catalog_response.json()["executors"]
     executor_ids = {executor["id"] for executor in catalog}
     assert "local-default" in executor_ids
-    assert "pi-default" in executor_ids
+    assert "pi" in executor_ids
     local_executor = next(executor for executor in catalog if executor["id"] == "local-default")
-    pi_executor = next(executor for executor in catalog if executor["id"] == "pi-default")
+    pi_executor = next(executor for executor in catalog if executor["id"] == "pi")
     assert local_executor["kind"] == "local"
     assert "fetch_questions" in local_executor["capabilities"]
     assert pi_executor["kind"] == "pi"
@@ -111,7 +111,7 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "settings": {"workflowKey": WORKFLOW_KEY},
         "executor_allocations": [
             {"executor_id": "local-default", "concurrency_limit": 8},
-            {"executor_id": "pi-default", "concurrency_limit": 10},
+            {"executor_id": "pi", "concurrency_limit": 10},
         ],
         "node_bindings": _expected_local_bindings(workspace_id)
         + _expected_pi_bindings(workspace_id),
@@ -133,7 +133,7 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
     assert _sort(config["allocations"]) == _sort(
         [
             {"executor_id": "local-default", "workspace_id": workspace_id, "concurrency_limit": 8},
-            {"executor_id": "pi-default", "workspace_id": workspace_id, "concurrency_limit": 10},
+            {"executor_id": "pi", "workspace_id": workspace_id, "concurrency_limit": 10},
         ]
     )
     assert _sort(config["bindings"]) == _sort(save_payload["node_bindings"])
@@ -146,13 +146,13 @@ def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> 
         "settings": {"workflowKey": WORKFLOW_KEY},
         "executor_allocations": [
             {"executor_id": "local-default", "concurrency_limit": 8},
-            {"executor_id": "pi-default", "concurrency_limit": 10},
+            {"executor_id": "pi", "concurrency_limit": 10},
         ],
         "node_bindings": [
             {
                 "workflow_key": WORKFLOW_KEY,
                 "node_key": "assemble_comprehension_info",
-                "executor_id": "pi-default",
+                "executor_id": "pi",
             },
         ],
         "node_limits": [],

@@ -11,7 +11,7 @@ const catalog = [
     global_capacity: 4,
   },
   {
-    id: 'pi-default',
+    id: 'pi',
     kind: 'pi' as const,
     capabilities: ['review'],
     global_capacity: 2,
@@ -43,7 +43,7 @@ describe('ExecutorAllocationSection', () => {
     render(<ExecutorAllocationSection />)
 
     expect(screen.getByText('local-default')).toBeInTheDocument()
-    expect(screen.getByText('pi-default')).toBeInTheDocument()
+    expect(screen.getByLabelText('分配 pi')).toBeInTheDocument()
     expect(screen.getByText('openclaw-main')).toBeInTheDocument()
     expect(screen.getAllByText('local').length).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('pi').length).toBeGreaterThanOrEqual(1)
