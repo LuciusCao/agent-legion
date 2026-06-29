@@ -14,7 +14,10 @@ export type JobRerunDialogProps = {
   workflowNodesByKey?: WorkflowNodesByKey | null
   itemLabel?: string
   allowFailedNodeMode?: boolean
-  onConfirm: (nodeKey: string | null, fromFailedNode: boolean) => void | Promise<void>
+  onConfirm: (
+    nodeKey: string | null,
+    fromFailedNode: boolean
+  ) => void | Promise<void>
   onClose: () => void
 }
 

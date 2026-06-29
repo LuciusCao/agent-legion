@@ -1,4 +1,10 @@
-import { Button, Chip, DialogActions, DialogContent, DialogTitle } from '@mui/material'
+import {
+  Button,
+  Chip,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+} from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../../types'
 import {
   computeOrderedNodes,
@@ -134,9 +140,7 @@ export function JobRerunDialogContent({
           onClick={onConfirm}
           disabled={!canConfirm || loading}
         >
-          {failedMode
-            ? `重跑 ${failedJobs.length} 个失败任务`
-            : '确认重跑'}
+          {failedMode ? `重跑 ${failedJobs.length} 个失败任务` : '确认重跑'}
         </Button>
       </DialogActions>
     </>
