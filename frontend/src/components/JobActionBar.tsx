@@ -20,7 +20,7 @@ export type JobActionBarProps = {
   loading?: boolean
   filters?: JobActionBarFilter[]
   onExitSelectMode?: () => void
-  onRerun: (nodeKey: string | null, fromFailedNode?: boolean) => void | Promise<void>
+  onRerun: (nodeKey: string | null, fromFailedNode?: boolean) => void
   onRunTo?: (targetKey: string, startKey?: string) => void | Promise<void>
   onContinue?: () => void | Promise<void>
   onPackage: () => void | Promise<void>
