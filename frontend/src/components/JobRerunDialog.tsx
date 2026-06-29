@@ -8,6 +8,7 @@ import {
   DialogTitle,
 } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
+import { normalizeJobStatus } from '../stores/job/state'
 import {
   computeOrderedNodes,
   excludedJobs,
@@ -23,7 +24,8 @@ export type JobRerunDialogProps = {
   workflowDefinition?: WorkflowDefinitionRecord | null
   workflowNodesByKey?: WorkflowNodesByKey | null
   itemLabel?: string
-  onConfirm: (nodeKey: string) => void | Promise<void>
+  allowFailedNodeMode?: boolean
+  onConfirm: (nodeKey: string | null, fromFailedNode: boolean) => void | Promise<void>
   onClose: () => void
 }
 
@@ -33,6 +35,7 @@ export function JobRerunDialog({
   workflowDefinition,
   workflowNodesByKey,
   itemLabel = '任务',
+  allowFailedNodeMode = false,
   onConfirm,
   onClose,
 }: JobRerunDialogProps) {
@@ -40,17 +43,31 @@ export function JobRerunDialog({
     () => computeOrderedNodes(jobs, workflowDefinition, workflowNodesByKey),
     [jobs, workflowDefinition, workflowNodesByKey]
   )
+
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(
     orderedNodes[0]?.key ?? null
   )
-
-  // Keep selected key valid when nodes change
-  const effectiveNodeKey =
-    selectedNodeKey && orderedNodes.some((n) => n.key === selectedNodeKey)
-      ? selectedNodeKey
-      : (orderedNodes[0]?.key ?? null)
-
+  const [failedMode, setFailedMode] = useState(false)
   const [loading, setLoading] = useState(false)
+
+  // Keep selected node valid when orderedNodes changes
+  const effectiveNodeKey = useMemo(() => {
+    if (failedMode) return null
+    if (selectedNodeKey && orderedNodes.some((n) => n.key === selectedNodeKey)) {
+      return selectedNodeKey
+    }
+    return orderedNodes[0]?.key ?? null
+  }, [failedMode, orderedNodes, selectedNodeKey])
+
+  const failedJobs = useMemo(
+    () => jobs.filter((j) => normalizeJobStatus(j.status) === 'failed'),
+    [jobs]
+  )
+  const nonFailedJobs = useMemo(
+    () => jobs.filter((j) => normalizeJobStatus(j.status) !== 'failed'),
+    [jobs]
+  )
+
   const excluded = effectiveNodeKey
     ? excludedJobs(
         jobs,
@@ -63,15 +80,27 @@ export function JobRerunDialog({
   if (!open) return null
 
   const handleConfirm = async () => {
+    if (failedMode) {
+      setLoading(true)
+      try {
+        await onConfirm(null, true)
+      } finally {
+        setLoading(false)
+      }
+      onClose()
+      return
+    }
     if (!effectiveNodeKey) return
     setLoading(true)
     try {
-      await onConfirm(effectiveNodeKey)
+      await onConfirm(effectiveNodeKey, false)
     } finally {
       setLoading(false)
     }
     onClose()
   }
+
+  const canConfirm = failedMode ? failedJobs.length > 0 : !!effectiveNodeKey
 
   return (
     <Dialog
@@ -88,25 +117,52 @@ export function JobRerunDialog({
       <DialogTitle>选择重跑节点</DialogTitle>
       <DialogContent>
         <div className={styles.content}>
-          {orderedNodes.length === 0 ? (
-            <p className={styles.empty}>没有可重跑的公共节点</p>
+          {orderedNodes.length === 0 && (!allowFailedNodeMode || failedJobs.length === 0) ? (
+            <p className={styles.empty}>没有可重跑的节点</p>
           ) : (
             <div className={styles.nodeGrid}>
+              {allowFailedNodeMode && (
+                <Chip
+                  data-testid="rerun-chip-failed-node"
+                  label="失败的节点"
+                  color="error"
+                  variant={failedMode ? 'filled' : 'outlined'}
+                  onClick={() => setFailedMode(true)}
+                />
+              )}
               {orderedNodes.map((node) => (
                 <Chip
                   key={node.key}
                   data-testid={`rerun-chip-${node.key}`}
                   label={node.label || node.key}
                   variant={
-                    effectiveNodeKey === node.key ? 'filled' : 'outlined'
+                    !failedMode && effectiveNodeKey === node.key
+                      ? 'filled'
+                      : 'outlined'
                   }
-                  onClick={() => setSelectedNodeKey(node.key)}
+                  onClick={() => {
+                    setFailedMode(false)
+                    setSelectedNodeKey(node.key)
+                  }}
                 />
               ))}
             </div>
           )}
 
-          {excluded.length > 0 && effectiveNodeKey && (
+          {failedMode && nonFailedJobs.length > 0 && (
+            <div className={styles.excludedBox}>
+              <div className={styles.excludedTitle}>
+                以下任务未失败，将被跳过：
+              </div>
+              <ul className={styles.excludedList}>
+                {nonFailedJobs.map((job) => (
+                  <li key={job.id}>{job.source_id || job.title || job.id}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {!failedMode && excluded.length > 0 && effectiveNodeKey && (
             <div className={styles.excludedBox}>
               <div className={styles.excludedTitle}>
                 以下任务不包含所选节点，将被跳过：
@@ -120,10 +176,9 @@ export function JobRerunDialog({
           )}
 
           <div className={styles.summary}>
-            已选择 {jobs.length} 个{itemLabel}
-            {effectiveNodeKey
-              ? `，重跑节点：${orderedNodes.find((n) => n.key === effectiveNodeKey)?.label || effectiveNodeKey}`
-              : ''}
+            {failedMode
+              ? `已选择 ${jobs.length} 个${itemLabel}，其中 ${failedJobs.length} 个失败任务将从各自失败节点重跑`
+              : `已选择 ${jobs.length} 个${itemLabel}${effectiveNodeKey ? `，重跑节点：${orderedNodes.find((n) => n.key === effectiveNodeKey)?.label || effectiveNodeKey}` : ''}`}
           </div>
         </div>
       </DialogContent>
@@ -139,9 +194,11 @@ export function JobRerunDialog({
         <Button
           variant="contained"
           onClick={handleConfirm}
-          disabled={!effectiveNodeKey || loading}
+          disabled={!canConfirm || loading}
         >
-          确认重跑
+          {failedMode
+            ? `重跑 ${failedJobs.length} 个失败任务`
+            : '确认重跑'}
         </Button>
       </DialogActions>
     </Dialog>
