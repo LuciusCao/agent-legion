@@ -76,3 +76,54 @@ def test_build_default_providers_without_vad_model(tmp_path, settings):
     providers = build_default_providers(settings)
     assert len(providers) == 2
     assert providers[0].vad_model is None
+
+
+def test_build_default_providers_resolves_sensevoice_tilde_paths(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    home = tmp_path / "fake_home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    model_dir = home / ".cache" / "SenseVoiceSmall"
+    model_dir.mkdir(parents=True)
+    script = tmp_path / "server" / "app" / "pipeline" / "transcribe_sensevoice.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# fake script\n", encoding="utf-8")
+
+    settings = MagicMock()
+    settings.root_dir = tmp_path
+    settings.config = {
+        "asr": {
+            "whisper": {"binary": "whisper", "model": "model.bin"},
+            "sensevoice": {
+                "script": "server/app/pipeline/transcribe_sensevoice.py",
+                "model_dir": "~/.cache/SenseVoiceSmall",
+            },
+        }
+    }
+    providers = build_default_providers(settings)
+    assert providers[1].script == script
+    assert providers[1].model_dir == model_dir
+
+
+def test_build_default_providers_uses_actual_sensevoice_script(tmp_path, monkeypatch):
+    from unittest.mock import MagicMock
+
+    home = tmp_path / "fake_home"
+    home.mkdir()
+    monkeypatch.setenv("HOME", str(home))
+    (home / ".cache" / "SenseVoiceSmall").mkdir(parents=True)
+    script = tmp_path / "server" / "app" / "pipeline" / "transcribe_sensevoice.py"
+    script.parent.mkdir(parents=True, exist_ok=True)
+    script.write_text("# fake script\n", encoding="utf-8")
+
+    settings = MagicMock()
+    settings.root_dir = tmp_path
+    settings.config = {
+        "asr": {
+            "whisper": {"binary": "whisper", "model": "model.bin"},
+            "sensevoice": {},
+        }
+    }
+    providers = build_default_providers(settings)
+    assert providers[1].script == script

@@ -1,14 +1,17 @@
-from subprocess import TimeoutExpired
+import os
+from subprocess import CompletedProcess, TimeoutExpired
 from unittest.mock import patch
 
 import pytest
 
 from server.app.pipeline.transcribe import (
-    SenseVoiceProvider,
     TranscriptionProvider,
-    WhisperCppProvider,
     run_transcription_with_providers,
     validate_srt,
+)
+from server.app.pipeline.transcribe_providers import (
+    SenseVoiceProvider,
+    WhisperCppProvider,
 )
 from tests.helpers import BadProvider, GoodProvider
 
@@ -201,13 +204,37 @@ def _make_fake_whisper_provider(tmp_path, vad_model=None):
     return WhisperCppProvider(binary=str(binary), model=str(model), vad_model=vad_model)
 
 
+def test_whisper_provider_resolves_binary_from_path(tmp_path, monkeypatch):
+    fake_bin_dir = tmp_path / "bin"
+    fake_bin_dir.mkdir()
+    fake_binary = fake_bin_dir / "whisper-cli"
+    fake_binary.write_bytes(b"fake")
+    fake_binary.chmod(0o755)
+    monkeypatch.setenv("PATH", f"{fake_bin_dir}{os.pathsep}{os.environ.get('PATH', '')}")
+
+    model = tmp_path / "model.bin"
+    model.write_bytes(b"fake")
+    provider = WhisperCppProvider(binary="whisper-cli", model=str(model))
+
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+
+    with patch("server.app.pipeline.transcribe_providers.subprocess.run") as mock_run:
+        provider.transcribe(video_path, output_path, "Test")
+
+    whisper_call = mock_run.call_args_list[1]
+    cmd = whisper_call.args[0]
+    assert str(fake_binary) == cmd[0]
+
+
 def test_whisper_provider_without_vad_omits_vad_flags(tmp_path):
     provider = _make_fake_whisper_provider(tmp_path)
     video_path = tmp_path / "video.mp4"
     video_path.write_bytes(b"fake")
     output_path = tmp_path / "subtitles.srt"
 
-    with patch("server.app.pipeline.transcribe.subprocess.run") as mock_run:
+    with patch("server.app.pipeline.transcribe_providers.subprocess.run") as mock_run:
         provider.transcribe(video_path, output_path, "Test")
 
     # Second call is whisper-cli
@@ -225,7 +252,7 @@ def test_whisper_provider_with_vad_includes_vad_flags(tmp_path):
     video_path.write_bytes(b"fake")
     output_path = tmp_path / "subtitles.srt"
 
-    with patch("server.app.pipeline.transcribe.subprocess.run") as mock_run:
+    with patch("server.app.pipeline.transcribe_providers.subprocess.run") as mock_run:
         provider.transcribe(video_path, output_path, "Test")
 
     whisper_call = mock_run.call_args_list[1]
@@ -244,7 +271,7 @@ def test_whisper_provider_with_missing_vad_model_raises(tmp_path):
     output_path = tmp_path / "subtitles.srt"
 
     with (
-        patch("server.app.pipeline.transcribe.subprocess.run"),
+        patch("server.app.pipeline.transcribe_providers.subprocess.run"),
         pytest.raises(FileNotFoundError, match="VAD model not found"),
     ):
         provider.transcribe(video_path, output_path, "Test")
@@ -266,7 +293,7 @@ def test_whisper_provider_timeout_cleans_temp_wav(tmp_path):
         raise TimeoutExpired(cmd, timeout=900)
 
     with (
-        patch("server.app.pipeline.transcribe.subprocess.run", side_effect=_fake_run),
+        patch("server.app.pipeline.transcribe_providers.subprocess.run", side_effect=_fake_run),
         pytest.raises(TimeoutExpired),
     ):
         provider.transcribe(video_path, output_path, "Test")
@@ -292,8 +319,11 @@ def test_sensevoice_provider_includes_model_dir_when_present(tmp_path):
     def _fake_run(cmd, **kwargs):
         expected_output.parent.mkdir(parents=True, exist_ok=True)
         expected_output.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+        return CompletedProcess(cmd, 0, "", "")
 
-    with patch("server.app.pipeline.transcribe.subprocess.run", side_effect=_fake_run) as mock_run:
+    with patch(
+        "server.app.pipeline.transcribe_providers.subprocess.run", side_effect=_fake_run
+    ) as mock_run:
         provider.transcribe(video_path, output_path, "Test")
 
     cmd = mock_run.call_args[0][0]
@@ -311,8 +341,11 @@ def test_sensevoice_provider_omits_model_dir_when_missing(tmp_path):
     def _fake_run(cmd, **kwargs):
         expected_output.parent.mkdir(parents=True, exist_ok=True)
         expected_output.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+        return CompletedProcess(cmd, 0, "", "")
 
-    with patch("server.app.pipeline.transcribe.subprocess.run", side_effect=_fake_run) as mock_run:
+    with patch(
+        "server.app.pipeline.transcribe_providers.subprocess.run", side_effect=_fake_run
+    ) as mock_run:
         provider.transcribe(video_path, output_path, "Test")
 
     cmd = mock_run.call_args[0][0]
@@ -329,9 +362,28 @@ def test_sensevoice_provider_omits_model_dir_when_none(tmp_path):
     def _fake_run(cmd, **kwargs):
         expected_output.parent.mkdir(parents=True, exist_ok=True)
         expected_output.write_text("1\n00:00:00,000 --> 00:00:01,000\nHello\n", encoding="utf-8")
+        return CompletedProcess(cmd, 0, "", "")
 
-    with patch("server.app.pipeline.transcribe.subprocess.run", side_effect=_fake_run) as mock_run:
+    with patch(
+        "server.app.pipeline.transcribe_providers.subprocess.run", side_effect=_fake_run
+    ) as mock_run:
         provider.transcribe(video_path, output_path, "Test")
 
     cmd = mock_run.call_args[0][0]
     assert "--model-dir" not in cmd
+
+
+def test_sensevoice_provider_includes_stderr_on_failure(tmp_path):
+    script = tmp_path / "transcribe_sensevoice.py"
+    script.write_text(
+        "#!/usr/bin/env python3\nimport sys\nsys.stderr.write('funasr not installed')\nsys.exit(1)\n",
+        encoding="utf-8",
+    )
+    script.chmod(0o755)
+    provider = SenseVoiceProvider(script=str(script))
+    video_path = tmp_path / "video.mp4"
+    video_path.write_bytes(b"fake")
+    output_path = tmp_path / "subtitles.srt"
+
+    with pytest.raises(RuntimeError, match="funasr not installed"):
+        provider.transcribe(video_path, output_path, "Test")
