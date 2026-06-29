@@ -34,42 +34,6 @@ def test_build_openapi_schema_is_deterministic_and_portable(tmp_path):
     assert str(tmp_path) not in json.dumps(first, sort_keys=True)
 
 
-def test_build_openapi_schema_accepts_annotated_protocol_routes(tmp_path):
-    schema = build_openapi_schema(tmp_path)
-
-    expected_paths = {
-        "/api/videos/events",
-        "/api/videos/{video_id}/events",
-        "/api/videos/{video_id}/video",
-        "/api/packages/{filename}",
-        "/api/workspaces/{workspace_id}/packages/{filename}",
-        "/api/workspaces/{workspace_id}/events",
-    }
-    assert expected_paths <= schema["paths"].keys()
-
-    assert schema["paths"]["/api/videos/events"]["get"]["responses"]["200"]["content"] == {
-        "text/event-stream": {}
-    }
-    assert schema["paths"]["/api/videos/{video_id}/events"]["get"]["responses"]["200"][
-        "content"
-    ] == {"text/event-stream": {}}
-    assert schema["paths"]["/api/workspaces/{workspace_id}/events"]["get"]["responses"]["200"][
-        "content"
-    ] == {"text/event-stream": {}}
-    assert schema["paths"]["/api/packages/{filename}"]["get"]["responses"]["200"]["content"] == {
-        "application/zip": {}
-    }
-    assert schema["paths"]["/api/workspaces/{workspace_id}/packages/{filename}"]["get"][
-        "responses"
-    ]["200"]["content"] == {"application/zip": {}}
-
-    video_responses = schema["paths"]["/api/videos/{video_id}/video"]["get"]["responses"]
-    assert video_responses["200"]["content"] == {"video/mp4": {}}
-    assert "Location" in video_responses["302"]["headers"]
-    assert "text/plain" in video_responses["404"]["content"]
-    assert "application/json" in video_responses["404"]["content"]
-
-
 def test_validate_response_contracts_rejects_inline_json_schema():
     schema = {
         "paths": {

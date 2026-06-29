@@ -9,6 +9,42 @@ executors:
         handler: question_comprehension_info.clean_and_parse
       assemble_comprehension_info:
         handler: question_comprehension_info.assemble_comprehension_info
+      download_video:
+        handler: video_knowledge.download_video
+      transcribe_video:
+        handler: video_knowledge.transcribe_video
+      assemble_video_metadata:
+        handler: video_knowledge.assemble_video_metadata
+      package_video_job:
+        handler: video_knowledge.package_video_job
+  pi-video-main:
+    kind: pi
+    global_capacity: 8
+    capabilities:
+      review_subtitles:
+        skill: video_knowledge/review_subtitles
+        tools:
+        - read
+        - write
+        - bash
+      generate_chapters:
+        skill: video_knowledge/generate_chapters
+        tools:
+        - read
+        - write
+        - bash
+      generate_interactions:
+        skill: video_knowledge/generate_interactions
+        tools:
+        - read
+        - write
+        - bash
+      review_video_content:
+        skill: video_knowledge/review_video_content
+        tools:
+        - read
+        - write
+        - bash
   pi-default:
     kind: pi
     global_capacity: 20

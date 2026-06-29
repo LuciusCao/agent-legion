@@ -8,8 +8,12 @@ def test_list_executors_endpoint(client):
         "global_capacity": 16,
         "capabilities": [
             "assemble_comprehension_info",
+            "assemble_video_metadata",
             "clean_and_parse",
+            "download_video",
             "fetch_questions",
+            "package_video_job",
+            "transcribe_video",
         ],
     }
 

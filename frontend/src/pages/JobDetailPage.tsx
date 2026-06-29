@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { JobProgressPanel } from '../components/JobProgressPanel'
-import { QuestionContentPanel } from '../components/QuestionContentPanel'
 import { fetchJobArtifact } from '../api'
 import { useUiStore } from '../stores/uiStore'
 import { deriveJobDetailPresentation } from './jobDetail/deriveJobDetailPresentation'
@@ -11,6 +10,7 @@ import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
 import { JobDetailActions } from '../components/JobDetailActions'
 import { useJobDetail } from './jobDetail/useJobDetail'
+import { EntityPanel } from './jobDetail/EntityPanel'
 
 export default function JobDetailPage() {
   const { workspaceId, jobId } = useParams<{
@@ -126,11 +126,11 @@ export default function JobDetailPage() {
 
       <div className={styles.columns}>
         <div className={styles.left}>
-          {detail?.job.source_type === 'question' && jobId && (
-            <QuestionContentPanel
-              key={jobId}
+          {jobId && (
+            <EntityPanel
+              detail={detail}
               jobId={jobId}
-              refreshKey={questionArtifactRefreshKey}
+              questionArtifactRefreshKey={questionArtifactRefreshKey}
               comprehensionRefreshKey={comprehensionRefreshKey}
               keyInfoPreviewable={keyInfoPreviewable}
               possibleErrorsPreviewable={possibleErrorsPreviewable}

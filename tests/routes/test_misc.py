@@ -25,30 +25,3 @@ def test_app_ignores_partial_frontend_dist(tmp_path, monkeypatch):
 
     assert response.status_code == 200
     assert "Agent Legion API" in response.text
-
-
-def test_video_hive_config_field_whitelist(client: TestClient):
-    response = client.get("/api/video-hive/config")
-    assert response.status_code == 200
-    data = response.json()
-    assert "asr" in data
-    assert "provider" in data["asr"]
-    assert isinstance(data["asr"]["whisperConfigured"], bool)
-    assert "openclaw" in data
-    assert "runnerCount" in data["openclaw"]
-    # Ensure no local paths or secrets leak
-    text = response.text.lower()
-    forbidden = [
-        "binary",
-        "model",
-        "script",
-        "cwd",
-        "command_template",
-        "token",
-        "secret",
-        "nonce",
-        "app_id",
-        "path",
-    ]
-    for word in forbidden:
-        assert word not in text, f"Field '{word}' should not appear in response"

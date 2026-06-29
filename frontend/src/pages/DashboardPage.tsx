@@ -2,9 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@mui/material'
 import { useWorkspaceStore } from '../stores/workspaceStore'
-import { useVideoStore } from '../stores/videoStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
-import type { ExecutorRuntimeStatus } from '../workspaceTypes'
 import WorkspaceCard from '../components/WorkspaceCard'
 import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
 import DeleteWorkspaceDialog from '../components/DeleteWorkspaceDialog'
@@ -23,7 +21,6 @@ export function DashboardPage() {
     fetchWorkspaceStats,
     deleteWorkspace,
   } = useWorkspaceStore()
-  const { videos, fetchVideos } = useVideoStore()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
   const [deletingWorkspace, setDeletingWorkspace] = useState<{
@@ -33,8 +30,7 @@ export function DashboardPage() {
 
   useEffect(() => {
     fetchWorkspaces()
-    fetchVideos()
-  }, [fetchWorkspaces, fetchVideos])
+  }, [fetchWorkspaces])
 
   useEffect(() => {
     workspaces.forEach((w) => {
@@ -43,14 +39,6 @@ export function DashboardPage() {
       }
     })
   }, [workspaces, workspaceStats, fetchWorkspaceStats])
-
-  const videoHiveStats = {
-    running: videos.filter((v) => v.status === 'running').length,
-    completed: videos.filter((v) => v.status === 'completed').length,
-    failed: videos.filter((v) => v.status === 'failed').length,
-  }
-
-  const videoHiveExecutorStatus: ExecutorRuntimeStatus[] = []
 
   function openDeleteDialog(id: string, name: string) {
     setDeletingWorkspace({ id, name })
@@ -91,12 +79,12 @@ export function DashboardPage() {
         }}
       >
         <WorkspaceCard
-          name="Video Hive"
-          workflowLabel="视频处理工作流"
+          name="Video Knowledge"
+          workflowLabel="视频知识 Workspace"
           isSystem={true}
-          jobStats={videoHiveStats}
-          executorStatus={videoHiveExecutorStatus}
-          onClick={() => navigate('/video-hive')}
+          jobStats={{}}
+          executorStatus={[]}
+          onClick={() => navigate('/workspaces/video_knowledge')}
         />
 
         {workspaces.map((w) => (

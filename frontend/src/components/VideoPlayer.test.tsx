@@ -40,7 +40,8 @@ describe('VideoPlayer', () => {
   it('renders an active interaction inside the player wrapper', () => {
     render(
       <VideoPlayer
-        video={{ ...video, storage_dir: '/tmp/video' }}
+        video={video}
+        src="/api/jobs/video-v1/video/source"
         artifacts={artifacts}
         onTimeUpdate={vi.fn()}
         interactionNode={{
@@ -71,7 +72,8 @@ describe('VideoPlayer', () => {
 
     render(
       <VideoPlayer
-        video={{ ...video, storage_dir: '/tmp/video' }}
+        video={video}
+        src="/api/jobs/video-v1/video/source"
         artifacts={subtitleArtifacts}
         onTimeUpdate={vi.fn()}
       />
@@ -94,7 +96,8 @@ describe('VideoPlayer', () => {
 
     render(
       <VideoPlayer
-        video={{ ...video, storage_dir: '/tmp/video' }}
+        video={video}
+        src="/api/jobs/video-v1/video/source"
         artifacts={artifacts}
         onTimeUpdate={vi.fn()}
         onPlay={onPlay}

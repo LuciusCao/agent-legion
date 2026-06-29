@@ -61,7 +61,6 @@ def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
 
 
 def test_video_event_manager_broadcast():
-    import asyncio
     import json
 
     from server.app.events import VideoEventManager
@@ -90,7 +89,6 @@ def test_video_event_manager_broadcast():
 
 
 def test_video_event_manager_max_clients():
-    import asyncio
     from unittest.mock import MagicMock
 
     from server.app.events import VideoEventManager
@@ -108,7 +106,6 @@ def test_video_event_manager_max_clients():
 
 
 def test_video_event_manager_queue_full_cleanup():
-    import asyncio
 
     from server.app.events import VideoEventManager
 
@@ -134,53 +131,7 @@ def test_video_event_manager_queue_full_cleanup():
     asyncio.run(_test())
 
 
-def test_database_broadcast_on_create_and_delete(client):
-    import json
-
-    async def _test():
-        event_manager = client.app.state.video_event_manager
-        event_manager._loop = asyncio.get_running_loop()
-
-        queue = asyncio.Queue()
-        event_manager._clients.add(queue)
-
-        # Create video triggers broadcast (create_video + update_video may both fire)
-        created = client.post(
-            "/api/videos",
-            json={
-                "items": [
-                    {
-                        "url": "https://example.com/sse_test.mp4",
-                        "title": "SSE Test",
-                        "content_type": "knowledge",
-                        "external_id": "SSE001",
-                    }
-                ]
-            },
-        )
-        assert created.status_code == 200
-        video_id = created.json()["videos"][0]["id"]
-
-        await asyncio.sleep(0)
-        # Drain creation events
-        while not queue.empty():
-            await queue.get()
-
-        # Delete video triggers broadcast_delete
-        deleted = client.delete(f"/api/videos/{video_id}")
-        assert deleted.status_code == 200
-
-        await asyncio.sleep(0)
-        payload = await asyncio.wait_for(queue.get(), timeout=1.0)
-        data = json.loads(payload)
-        assert data["type"] == "video_deleted"
-        assert data["video_id"] == video_id
-
-    asyncio.run(_test())
-
-
 def test_broadcast_package_ready():
-    import asyncio
 
     from server.app.events import VideoEventManager
 

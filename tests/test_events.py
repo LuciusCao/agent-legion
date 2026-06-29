@@ -181,23 +181,3 @@ def test_broadcast_removes_dead_clients_from_global_and_video_indexes(event_mana
         assert await asyncio.wait_for(live_queue_v2.get(), timeout=1.0)
 
     asyncio.run(_test())
-
-
-def test_connect_video_route_via_testclient(client, monkeypatch):
-    """Drive the video events endpoint through the public API to verify wiring."""
-    from fastapi.responses import StreamingResponse
-
-    video_event_manager = client.app.state.video_event_manager
-
-    async def finite_connect_video(request, video_id):
-        async def event_stream():
-            yield ":heartbeat\n\n"
-
-        return StreamingResponse(event_stream(), media_type="text/event-stream")
-
-    monkeypatch.setattr(video_event_manager, "connect_video", finite_connect_video)
-
-    with client.stream("GET", "/api/videos/v1/events") as response:
-        assert response.status_code == 200
-        chunk = next(response.iter_text())
-        assert ":heartbeat" in chunk

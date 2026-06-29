@@ -6,8 +6,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
 
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
@@ -22,14 +20,12 @@ from server.app.executors.local import LocalHandler
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.jobs import JobQueries
-from server.app.pipeline.recovery import recover_interrupted_videos
-from server.app.pipeline.runners import RunnerPool
 from server.app.routes import create_router
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
 from server.app.skills.manager import SkillManager
+from server.app.spa import mount_spa
 from server.app.worker_control import WorkerControl, WorkspaceWorkerControl
-from server.app.worker_thread import WorkerThread
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.registry import list_registered_workflows
 
@@ -131,32 +127,17 @@ def create_app(
                 f"Run `{check_cmd}` for details."
             ) from exc
 
-    worker_thread: WorkerThread | None = None
     workflow_worker_thread: WorkflowWorkerThread | None = None
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread, worker_thread
+        nonlocal workflow_worker_thread
         video_event_manager._loop = asyncio.get_running_loop()
         job_event_manager._loop = asyncio.get_running_loop()
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
             sync_workspace_pi_agents(job_db, settings, agent_manager)
-            recover_interrupted_videos(db, settings)
-            runner_pool = RunnerPool.from_settings(
-                settings, [a.id for a in agent_manager.agents], agent_manager=agent_manager
-            )
-            runner_counts: dict[str, int] = {}
-            for runner in runner_pool.all_runners():
-                aid = runner.agent_id
-                if aid:
-                    runner_counts[aid] = runner_counts.get(aid, 0) + 1
-            agent_manager.set_runner_counts(runner_counts)
-            worker_thread = WorkerThread(
-                db, settings, runner_pool, agent_manager, worker_control, max_workers
-            )
-            worker_thread.start()
             if WorkflowWorkerThread.is_enabled(settings):
                 executor_leases = ExecutorLeaseRepository(
                     job_db.path, job_db=job_db, job_event_manager=job_event_manager
@@ -178,8 +159,6 @@ def create_app(
         yield
         if workflow_worker_thread is not None:
             workflow_worker_thread.stop()
-        if worker_thread is not None:
-            worker_thread.stop()
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
     app.state.settings = settings
@@ -205,29 +184,7 @@ def create_app(
         )
     )
 
-    frontend_dist = settings.root_dir / "frontend" / "dist"
-    frontend_assets = frontend_dist / "assets"
-    frontend_index = frontend_dist / "index.html"
-    if frontend_index.exists() and frontend_assets.is_dir():
-        app.mount("/assets", StaticFiles(directory=frontend_assets), name="assets")
-
-        @app.get("/{path:path}")
-        def spa(path: str):
-            requested = frontend_dist / path
-            if path and requested.exists() and requested.is_file():
-                return FileResponse(requested)
-            return FileResponse(frontend_dist / "index.html")
-
-    else:
-
-        @app.get("/", response_class=HTMLResponse)
-        def frontend_missing() -> str:
-            return (
-                "<main style='font-family: system-ui; padding: 24px'>"
-                "<h1>Agent Legion API</h1>"
-                "<p>Run the TypeScript frontend with <code>cd frontend && npm run dev</code>.</p>"
-                "</main>"
-            )
+    mount_spa(app, settings.root_dir / "frontend" / "dist")
 
     return app
 

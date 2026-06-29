@@ -1,0 +1,67 @@
+key: video_knowledge
+label: 知识视频 DAG
+intake:
+  modes:
+    batch_by_urls:
+      label: 按视频链接批量
+      input_field: video_urls
+    batch_by_knowledge:
+      label: 按知识点批量
+      input_field: knowledge_codes
+nodes:
+  download:
+    label: 下载视频
+    capability: download_video
+    after: []
+    inputs: [video_input.json]
+    outputs: [source.mp4]
+  transcribe:
+    label: 生成字幕
+    capability: transcribe_video
+    after: [download]
+    inputs: [source.mp4, video_input.json]
+    outputs: [subtitles.srt, transcription.json]
+  subtitle_review:
+    label: 审核字幕
+    capability: review_subtitles
+    after: [transcribe]
+    inputs: [subtitles.srt, transcription.json, video_input.json]
+    outputs: [subtitles_reviewed.srt, subtitle_review_report.json]
+  chapter_generate:
+    label: 生成章节
+    capability: generate_chapters
+    after: [subtitle_review]
+    inputs: [subtitles_reviewed.srt, video_input.json]
+    outputs: [chapters_raw.json, chapters.json]
+  interaction_generate:
+    label: 生成互动题
+    capability: generate_interactions
+    after: [chapter_generate]
+    inputs: [subtitles_reviewed.srt, chapters.json, video_input.json]
+    outputs: [interactions.json]
+  content_review:
+    label: 审核内容
+    capability: review_video_content
+    after: [interaction_generate]
+    inputs: [subtitles_reviewed.srt, chapters.json, interactions.json, video_input.json]
+    outputs: [checklist.json, review_result.json]
+  assemble:
+    label: 组装元数据
+    capability: assemble_video_metadata
+    after: [content_review]
+    inputs:
+      - video_input.json
+      - source.mp4
+      - subtitles.srt
+      - subtitles_reviewed.srt
+      - chapters.json
+      - interactions.json
+      - checklist.json
+      - review_result.json
+    outputs: [metadata.json, report.md, upload_params.json]
+  package:
+    label: 打包视频
+    capability: package_video_job
+    after: [assemble]
+    inputs: [metadata.json, report.md, upload_params.json]
+    outputs: [package_manifest.json]

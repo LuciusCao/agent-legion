@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import logging
 from typing import Any
 
@@ -16,6 +18,8 @@ RESOLVER_MAP: dict[tuple[str, str], str] = {
     ("question", "batch_by_knowledge"): "cms.questions_by_knowledge",
     ("video", "direct_ids"): "direct.video_ids",
     ("video", "by_knowledge"): "cms.videos_by_knowledge",
+    ("video", "batch_by_urls"): "direct.video_urls",
+    ("video", "batch_by_knowledge"): "cms.knowledge_video",
 }
 
 
@@ -26,26 +30,21 @@ def candidate(
     source_kind: str,
     source_value: str,
     stem: str = "",
+    **extras: Any,
 ) -> dict[str, Any]:
-    return {
+    result: dict[str, Any] = {
         "entity_type": entity_type,
         "entity_id": entity_id,
         "title": title,
         "stem": stem,
         "source": {"kind": source_kind, "value": source_value},
     }
+    result.update(extras)
+    return result
 
 
 def normalize_values(values: list[str]) -> list[str]:
     return list(dict.fromkeys(value.strip() for value in values if value.strip()))
-
-
-def singular_field_name(value: str) -> str:
-    if value.endswith("ies"):
-        return f"{value[:-3]}y"
-    if value.endswith("s"):
-        return value[:-1]
-    return value
 
 
 def resolve_direct_candidates(
@@ -53,14 +52,12 @@ def resolve_direct_candidates(
     input_values: list[str],
     source_kind: str,
 ) -> list[dict[str, Any]]:
+    if entity == "video" and source_kind == "batch_by_urls":
+        from server.app.services.job_intake_video import resolve_video_url_candidates
+
+        return resolve_video_url_candidates(input_values, source_kind)
     return [
-        candidate(
-            entity,
-            value,
-            f"{entity.title()} {value}",
-            source_kind,
-            value,
-        )
+        candidate(entity, value, f"{entity.title()} {value}", source_kind, value)
         for value in input_values
     ]
 

@@ -9,6 +9,7 @@ import {
 } from '@testing-library/react'
 import { JobLogDialog } from './JobLogDialog'
 import * as jobApi from '../jobApi'
+import type { JobLogResponse } from '../jobTypes'
 import styles from './JobLogDialog.module.css'
 
 vi.mock('../jobApi')
@@ -26,7 +27,7 @@ describe('JobLogDialog', () => {
   })
 
   it('shows loading state while fetching', async () => {
-    let resolve: (value: jobApi.JobLogResponse) => void = () => {}
+    let resolve: (value: JobLogResponse) => void = () => {}
     mockFetchJobLog.mockImplementation(
       () =>
         new Promise((res) => {
@@ -141,7 +142,7 @@ describe('JobLogDialog', () => {
 
   it('cancels stale request when props change', async () => {
     const responses: Array<{
-      resolve: (value: jobApi.JobLogResponse) => void
+      resolve: (value: JobLogResponse) => void
       reject: (reason: Error) => void
     }> = []
     mockFetchJobLog.mockImplementation(
@@ -184,7 +185,7 @@ describe('JobLogDialog', () => {
 
   it('cancels stale request when dialog closes and reopens with a different run', async () => {
     const responses: Array<{
-      resolve: (value: jobApi.JobLogResponse) => void
+      resolve: (value: JobLogResponse) => void
       reject: (reason: Error) => void
     }> = []
     mockFetchJobLog.mockImplementation(

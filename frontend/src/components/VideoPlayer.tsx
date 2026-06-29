@@ -9,6 +9,7 @@ interface VideoPlayerProps {
   artifacts: VideoArtifacts
   onTimeUpdate: (time: number) => void
   videoRef?: React.RefObject<HTMLVideoElement | null>
+  src?: string
   interactionNode?: InteractionNode | null
   interactionSentence?: string[]
   onInteractionWordClick?: (word: string) => void
@@ -35,10 +36,10 @@ function findSubtitleIndex(
 }
 
 export function VideoPlayer({
-  video,
   artifacts,
   onTimeUpdate,
   videoRef,
+  src,
   interactionNode = null,
   interactionSentence = [],
   onInteractionWordClick = () => {},
@@ -73,7 +74,7 @@ export function VideoPlayer({
     setSubtitleText(artifacts.subtitles[idx]?.text ?? '')
   }, [onTimeUpdate, artifacts.subtitles])
 
-  const videoUrl = video.storage_dir ? `/api/videos/${video.id}/video` : ''
+  const videoUrl = src || ''
 
   return (
     <div className={styles.playerWrap} data-testid="video-player-wrap">

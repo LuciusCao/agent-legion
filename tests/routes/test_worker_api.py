@@ -49,16 +49,19 @@ def test_worker_pause_resume_with_workspace(client):
     assert status.json() == {"paused": False}
 
 
-def test_worker_with_video_hive_workspace_uses_global_worker(client):
-    # workspace_id == "video-hive" should fall through to the global worker control.
+def test_worker_with_video_hive_workspace_uses_workspace_worker(client):
+    # workspace_id == "video-hive" is now treated like any other workspace.
+    status = client.get("/api/worker/status", params={"workspace_id": "video-hive"})
+    assert status.json() == {"paused": True}
+
     client.post("/api/worker/resume", params={"workspace_id": "video-hive"})
-    assert client.app.state.worker_control.is_paused() is False
+    assert client.app.state.workspace_worker_control.is_paused("video-hive") is False
 
     status = client.get("/api/worker/status", params={"workspace_id": "video-hive"})
     assert status.json() == {"paused": False}
 
     client.post("/api/worker/pause", params={"workspace_id": "video-hive"})
-    assert client.app.state.worker_control.is_paused() is True
+    assert client.app.state.workspace_worker_control.is_paused("video-hive") is True
 
 
 def test_worker_without_workspace_control_defaults_to_paused():

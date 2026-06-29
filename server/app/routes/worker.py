@@ -18,7 +18,7 @@ def create_worker_router(
     def worker_status(
         workspace_id: str | None = Query(None),
     ) -> WorkerStatusResponse:
-        if workspace_id and workspace_id != "video-hive":
+        if workspace_id is not None:
             paused = (
                 workspace_worker_control.is_paused(workspace_id)
                 if workspace_worker_control is not None
@@ -31,7 +31,7 @@ def create_worker_router(
     def pause_worker(
         workspace_id: str | None = Query(None),
     ) -> WorkerStatusResponse:
-        if workspace_id and workspace_id != "video-hive":
+        if workspace_id is not None:
             if workspace_worker_control is not None:
                 workspace_worker_control.pause(workspace_id)
             return WorkerStatusResponse(paused=True)
@@ -42,7 +42,7 @@ def create_worker_router(
     def resume_worker(
         workspace_id: str | None = Query(None),
     ) -> WorkerStatusResponse:
-        if workspace_id and workspace_id != "video-hive":
+        if workspace_id is not None:
             if workspace_worker_control is not None:
                 workspace_worker_control.resume(workspace_id)
             return WorkerStatusResponse(paused=False)

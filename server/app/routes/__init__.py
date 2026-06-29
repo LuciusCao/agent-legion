@@ -7,7 +7,6 @@ from ..jobs import JobQueries
 from ..settings import Settings
 from ..worker_control import WorkerControl, WorkspaceWorkerControl
 from .agents import create_agents_router
-from .artifacts import create_artifacts_router
 from .common import create_common_router
 from .job_artifacts import create_job_artifacts_router
 from .job_batches import create_job_batches_router
@@ -15,8 +14,7 @@ from .job_invalid_paths import create_job_invalid_paths_router
 from .jobs import create_jobs_router
 from .packages import create_packages_router
 from .questions import create_questions_router
-from .video_hive import create_video_hive_router
-from .videos import create_videos_router
+from .video_jobs import create_video_jobs_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
 from .workspace_configuration import create_workspace_configuration_router
@@ -89,8 +87,6 @@ def create_router(
 
     router.include_router(create_common_router(db, settings, worker_control))
     router.include_router(create_agents_router(agent_manager))
-    router.include_router(create_videos_router(db, settings, agent_manager, video_event_manager))
-    router.include_router(create_artifacts_router(db, settings))
     router.include_router(
         create_packages_router(
             db, job_db, settings, video_event_manager, package_deletion, job_packages
@@ -115,12 +111,12 @@ def create_router(
         create_jobs_router(job_queries, job_rerun, job_deletion, job_execution, settings)
     )
     router.include_router(create_job_artifacts_router(job_artifacts, settings, job_logs))
+    router.include_router(create_video_jobs_router(job_db, settings))
     # The invalid-paths router is a catch-all for `/jobs/{job_id}/...`. It MUST be
     # registered after all other `/jobs/{job_id}/...` routers, otherwise it will
     # shadow legitimate job endpoints.
     router.include_router(create_job_invalid_paths_router(job_artifacts, settings))
     router.include_router(create_workspace_runs_router(job_queries, settings))
-    router.include_router(create_video_hive_router(settings))
     router.include_router(create_questions_router(job_db, settings))
 
     return router
