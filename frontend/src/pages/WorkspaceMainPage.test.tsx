@@ -14,11 +14,13 @@ import {
   packageJobs,
   batchRunToJobs,
 } from '../jobApi'
+import { EventSourceMock } from '../testing/eventSourceMock'
 import type { WorkspaceStats } from '../workspaceTypes'
 import { makeJob } from '../testing/fixtures'
 
 const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
+const mockFetchWorkspaceStats = vi.fn()
 const mockFetchWorkflowDefinition = vi.fn()
 const mockBatchRerunJobs = vi.fn()
 const mockBatchDeleteJobs = vi.fn()
@@ -28,6 +30,9 @@ const mockBatchRunToJobs = vi.fn()
 vi.mock('../api', () => ({
   api: (...args: Parameters<typeof api>) => mockApi(...args),
   fetchJobs: (...args: Parameters<typeof fetchJobs>) => mockFetchJobs(...args),
+  fetchWorkspaceStats: (
+    ...args: Parameters<typeof import('../api').fetchWorkspaceStats>
+  ) => mockFetchWorkspaceStats(...args),
   fetchWorkflowDefinition: (
     ...args: Parameters<typeof fetchWorkflowDefinition>
   ) => mockFetchWorkflowDefinition(...args),
@@ -111,9 +116,15 @@ const workflowDefinition = {
 }
 
 describe('WorkspaceMainPage', () => {
+  const originalEventSource = globalThis.EventSource
+
   beforeEach(() => {
+    EventSourceMock.reset()
+    globalThis.EventSource = EventSourceMock as unknown as typeof EventSource
+
     mockApi.mockReset()
     mockFetchJobs.mockReset()
+    mockFetchWorkspaceStats.mockReset()
     mockFetchWorkflowDefinition.mockReset()
     mockBatchRerunJobs.mockReset()
     mockBatchDeleteJobs.mockReset()
@@ -121,6 +132,7 @@ describe('WorkspaceMainPage', () => {
     mockBatchRunToJobs.mockReset()
 
     mockFetchJobs.mockResolvedValue({ jobs: [] })
+    mockFetchWorkspaceStats.mockResolvedValue(baseStats)
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: workflowDefinition,
     })
@@ -214,6 +226,7 @@ describe('WorkspaceMainPage', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+    globalThis.EventSource = originalEventSource
   })
 
   it('renders stat cards when jobs exist', async () => {
@@ -236,20 +249,19 @@ describe('WorkspaceMainPage', () => {
   })
 
   it('shows empty message when no jobs', async () => {
+    const emptyStats = {
+      ...baseStats,
+      job_stats: { pending: 0, running: 0, completed: 0, failed: 0 },
+    }
     useWorkspaceStore.setState({
       workspaceStats: {
-        ws1: {
-          ...baseStats,
-          job_stats: { pending: 0, running: 0, completed: 0, failed: 0 },
-        },
+        ws1: emptyStats,
       },
     })
+    mockFetchWorkspaceStats.mockResolvedValue(emptyStats)
     mockApi.mockImplementation((path: string) => {
       if (path === '/api/workspaces/ws1/stats') {
-        return Promise.resolve({
-          ...baseStats,
-          job_stats: { pending: 0, running: 0, completed: 0, failed: 0 },
-        })
+        return Promise.resolve(emptyStats)
       }
       return Promise.resolve({})
     })
@@ -289,21 +301,20 @@ describe('WorkspaceMainPage', () => {
     expect(screen.getByText('仅失败')).toBeInTheDocument()
   })
 
-  it('fetches jobs once on mount without polling', async () => {
-    vi.useFakeTimers()
-
+  it('fetches jobs once on mount via SSE without polling', async () => {
     await act(async () => {
       renderPage()
     })
 
-    expect(mockFetchJobs).toHaveBeenCalledTimes(1)
-    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
-
+    const source = EventSourceMock.instances[0]
     await act(async () => {
-      vi.advanceTimersByTime(5000)
+      source.onopen?.()
     })
 
-    expect(mockFetchJobs).toHaveBeenCalledTimes(1)
+    await waitFor(() => {
+      expect(mockFetchJobs).toHaveBeenCalledTimes(1)
+    })
+    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
   })
 
   it('search input updates query after debounce', async () => {

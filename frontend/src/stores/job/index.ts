@@ -6,6 +6,7 @@ import { batchActions } from './actions/batchActions'
 
 export const useJobStore = create<JobState>((set, get) => ({
   jobs: [],
+  jobsWorkspaceId: null,
   isLoading: false,
   error: null,
   selectedIds: new Set(),

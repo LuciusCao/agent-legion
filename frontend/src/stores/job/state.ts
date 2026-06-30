@@ -8,6 +8,7 @@ export type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
 
 export interface JobState {
   jobs: JobSummary[]
+  jobsWorkspaceId: string | null
   isLoading: boolean
   error: string | null
   selectedIds: Set<string>
