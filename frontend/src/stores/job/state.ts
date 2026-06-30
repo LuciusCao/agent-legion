@@ -24,7 +24,8 @@ export interface JobState {
 
   fetchJobs: (workspaceId: string) => Promise<void>
   resetForWorkspace: (workspaceId: string) => void
-  setJobs: (jobs: JobSummary[]) => void
+  setJobsAndFinishLoading: (jobs: JobSummary[]) => void
+  failJobFetch: (workspaceId: string, message: string) => void
   setStatusFilter: (filter: JobStatus | 'all') => void
   setSearchQuery: (query: string) => void
   toggleSelectMode: () => void

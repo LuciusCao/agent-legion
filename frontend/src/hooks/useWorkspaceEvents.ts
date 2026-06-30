@@ -16,11 +16,14 @@ export function useWorkspaceEvents(
   enabled = true,
   statsOnly = false
 ) {
-  const setJobs = useJobStore((state) => state.setJobs)
-  const setWorkspaceStats = useWorkspaceStore(
-    (state) => state.setWorkspaceStats
-  )
+  const setJobsAndFinishLoading = useJobStore((state) => state.setJobsAndFinishLoading)
+  const failJobFetch = useJobStore((state) => state.failJobFetch)
+  const resetForWorkspace = useJobStore((state) => state.resetForWorkspace)
+  const setWorkspaceStats = useWorkspaceStore((state) => state.setWorkspaceStats)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (workspaceId) resetForWorkspace(workspaceId)
+  }, [workspaceId, resetForWorkspace])
 
   useEffect(() => {
     if (!enabled || !workspaceId || typeof EventSource === 'undefined') return
@@ -39,10 +42,10 @@ export function useWorkspaceEvents(
         if (includeJobs && !statsOnly) {
           const jobsData = await fetchJobs(workspaceId)
           if (stale || closed) return
-          setJobs(jobsData.jobs)
+          setJobsAndFinishLoading(jobsData.jobs)
         }
-      } catch {
-        // ignore refresh errors
+      } catch (err) {
+        failJobFetch(workspaceId, err instanceof Error ? err.message : 'Failed to refresh jobs')
       }
     }
 
@@ -88,7 +91,6 @@ export function useWorkspaceEvents(
     }
 
     connect()
-
     return () => {
       stale = true
       closed = true
@@ -99,5 +101,5 @@ export function useWorkspaceEvents(
         source.close()
       }
     }
-  }, [enabled, workspaceId, statsOnly, setJobs, setWorkspaceStats])
+  }, [enabled, workspaceId, statsOnly, setJobsAndFinishLoading, failJobFetch, setWorkspaceStats])
 }

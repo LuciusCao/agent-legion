@@ -1,11 +1,6 @@
 import type { JobSummary } from '../../../jobTypes'
 import type { JobStoreSet } from '../state'
-import {
-  failJobFetch,
-  finishJobFetch,
-  resetForWorkspace as resetForWorkspaceState,
-  startJobFetch,
-} from './fetchState'
+import { failJobFetch, finishJobFetch, resetForWorkspace, startJobFetch } from './fetchState'
 import { getOrStartFetch } from './fetchInflight'
 
 export function fetchActions(set: JobStoreSet) {
@@ -20,8 +15,8 @@ export function fetchActions(set: JobStoreSet) {
         set(failJobFetch(workspaceId, msg))
       }
     },
-    resetForWorkspace: (workspaceId: string) =>
-      set(resetForWorkspaceState(workspaceId)),
-    setJobs: (jobs: JobSummary[]) => set({ jobs }),
+    resetForWorkspace: (workspaceId: string) => set(resetForWorkspace(workspaceId)),
+    setJobsAndFinishLoading: (jobs: JobSummary[]) => set({ jobs, isLoading: false }),
+    failJobFetch: (workspaceId: string, message: string) => set(failJobFetch(workspaceId, message)),
   }
 }
