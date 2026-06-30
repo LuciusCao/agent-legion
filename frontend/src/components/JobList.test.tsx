@@ -101,4 +101,21 @@ describe('JobList', () => {
     expect(screen.getByText('暂无任务')).toBeInTheDocument()
     expect(mockFetchJobs).not.toHaveBeenCalled()
   })
+
+  it('renders skeleton while loading', () => {
+    useJobStore.setState({ jobs: [], isLoading: true })
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<JobList workspaceId="ws1" />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+
+    expect(screen.getByTestId('job-list-skeleton')).toBeInTheDocument()
+    expect(screen.queryByText('暂无任务')).not.toBeInTheDocument()
+  })
 })
