@@ -27,6 +27,13 @@ describe('theme', () => {
     expect(buttonStyle?.textTransform).toBe('uppercase')
   })
 
+  it('keeps buttons rounded as capsules', () => {
+    const buttonStyle = theme.components?.MuiButton?.styleOverrides?.root as
+      | Record<string, unknown>
+      | undefined
+    expect(buttonStyle?.borderRadius).toBe(12)
+  })
+
   it('uses heavier headings so titles feel grounded', () => {
     expect(theme.typography.h1?.fontWeight).toBe(500)
     expect(theme.typography.h6?.fontWeight).toBe(500)
