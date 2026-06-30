@@ -1,8 +1,6 @@
-from __future__ import annotations
-
 import json
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from server.app.pipeline.common import parse_srt_file
 from server.app.video_capabilities.response_contracts import (
@@ -36,15 +34,13 @@ def _load_subtitles(job_dir: Path) -> list[VideoSubtitleResponse]:
 def project_video_job_detail(
     job_dir: Path, *, local_video_url: str | None = None
 ) -> VideoJobDetailResponse:
-    """Project a video job directory into a frontend detail response.
-
-    This function is intentionally db-free: it only reads artifact files from
-    ``job_dir`` and never queries the orchestration tables.
-    """
     video_input = _load_video_input(job_dir)
     subtitles = _load_subtitles(job_dir)
     chapters = _read_json(job_dir / "chapters.json") or []
-    interactions = _read_json(job_dir / "interactions.json") or []
+    interactions_data = _read_json(job_dir / "interactions.json") or []
+    if isinstance(interactions_data, dict):
+        interactions_data = interactions_data.get("interactions") or []
+    interactions = cast(list[dict[str, Any]], interactions_data)
     metadata = _read_json(job_dir / "metadata.json")
     review = _read_json(job_dir / "review_result.json")
     checklist = _read_json(job_dir / "checklist.json")
