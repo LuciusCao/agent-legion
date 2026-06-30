@@ -1,13 +1,9 @@
 import { useJobStore } from '../stores/jobStore'
-import { JobListItem } from './JobListItem'
 import { MaterialIcon } from './MaterialIcon'
+import { JobListVirtualized } from './JobListVirtualized'
 import styles from './JobList.module.css'
 
-export interface JobListProps {
-  workspaceId: string
-}
-
-export function JobList({ workspaceId }: JobListProps) {
+export function JobList({ workspaceId }: { workspaceId: string }) {
   const jobs = useJobStore((state) => state.getFilteredJobs())
   const selectedIds = useJobStore((state) => state.selectedIds)
   const toggleSelect = useJobStore((state) => state.toggleSelect)
@@ -26,18 +22,12 @@ export function JobList({ workspaceId }: JobListProps) {
   }
 
   return (
-    <div className={styles.list} role="list">
-      {jobs.map((job) => (
-        <div key={job.id} className={styles.item} role="listitem">
-          <JobListItem
-            job={job}
-            selected={selectedIds.has(job.id)}
-            selectMode={selectMode}
-            onToggleSelect={() => toggleSelect(job.id)}
-            workspaceId={workspaceId}
-          />
-        </div>
-      ))}
-    </div>
+    <JobListVirtualized
+      jobs={jobs}
+      selectedIds={selectedIds}
+      selectMode={selectMode}
+      workspaceId={workspaceId}
+      onToggleSelect={toggleSelect}
+    />
   )
 }
