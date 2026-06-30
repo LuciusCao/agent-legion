@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { JobProgressPanel } from '../components/JobProgressPanel'
 import { fetchJobArtifact } from '../api'
-import { useUiStore } from '../stores/uiStore'
+import { usePageHeaderStore } from '../stores/pageHeaderStore'
 import { deriveJobDetailPresentation } from './jobDetail/deriveJobDetailPresentation'
 import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
@@ -17,7 +17,7 @@ export default function JobDetailPage() {
     workspaceId: string
     jobId: string
   }>()
-  const { setDetailPageActions } = useUiStore()
+  const { setDetailPageActions } = usePageHeaderStore()
   const {
     detail,
     error,

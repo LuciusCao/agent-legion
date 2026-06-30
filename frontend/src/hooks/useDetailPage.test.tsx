@@ -138,8 +138,6 @@ function resetStores() {
     workerPaused: true,
     workerPausedByWorkspace: {},
     toast: null,
-    pageTitle: null,
-    detailPageActions: null,
   })
 }
 

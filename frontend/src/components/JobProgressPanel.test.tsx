@@ -2,12 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { JobProgressPanel } from './JobProgressPanel'
 import * as jobApi from '../jobApi'
+import type { JobNode, NodeRun } from '../jobTypes'
 
 vi.mock('../jobApi')
 
 const mockFetchJobLog = vi.mocked(jobApi.fetchJobLog)
 
-const mockNodes = [
+const mockNodes: JobNode[] = [
   {
     id: 1,
     job_id: 'j1',
@@ -23,6 +24,8 @@ const mockNodes = [
     capability: 'extract',
     inputs: [],
     outputs: [],
+    executor_kind: 'local',
+    executor_id: 'local-1',
   },
   {
     id: 2,
@@ -38,10 +41,12 @@ const mockNodes = [
     capability: 'generate',
     inputs: [],
     outputs: [],
+    executor_kind: 'pi',
+    executor_id: 'pi-1',
   },
 ]
 
-const mockRuns = [
+const mockRuns: NodeRun[] = [
   {
     id: 1,
     job_id: 'j1',
@@ -179,7 +184,7 @@ describe('JobProgressPanel', () => {
       />
     )
     expect(
-      screen.getAllByText(/\d+h\d+m\d+s|\d+m\d+s|\d+s/).length
+      screen.getAllByText(/\d+时\d+分\d+秒|\d+分\d+秒|\d+秒/).length
     ).toBeGreaterThanOrEqual(1)
     expect(screen.queryByText(/2026\/6\/9 08:00:00/)).not.toBeInTheDocument()
   })
@@ -194,7 +199,7 @@ describe('JobProgressPanel', () => {
       />
     )
     // generate started 13s after job creation, but only 1s after extract finished.
-    expect(screen.getByText('1s')).toBeInTheDocument()
+    expect(screen.getByText('1秒')).toBeInTheDocument()
   })
 
   it('uses node created_at instead of job created_at for wait time', () => {
@@ -214,7 +219,20 @@ describe('JobProgressPanel', () => {
       />
     )
     // Wait time should be 1s (from node created_at to started_at), not ~29h.
-    expect(screen.getByText('1s')).toBeInTheDocument()
+    expect(screen.getByText('1秒')).toBeInTheDocument()
+  })
+
+  it('renders executor kind labels for local and agent nodes', () => {
+    render(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={mockNodes}
+        runs={mockRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    expect(screen.getByText('本地')).toBeInTheDocument()
+    expect(screen.getByText('Pi Agent')).toBeInTheDocument()
   })
 
   it('hides old run errors and logs after a node rerun', () => {
