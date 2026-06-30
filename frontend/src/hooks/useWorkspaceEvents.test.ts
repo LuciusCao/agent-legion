@@ -6,6 +6,7 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { EventSourceMock } from '../testing/eventSourceMock'
 import * as api from '../api'
 import type { WorkspaceStats } from '../workspaceTypes'
+import { createJobSummary } from '../stores/job/actions/testHelpers'
 
 vi.mock('../api')
 
@@ -84,6 +85,38 @@ describe('useWorkspaceEvents', () => {
     unmount()
 
     expect(source.close).toHaveBeenCalled()
+  })
+
+  it('resets jobs and sets loading when workspaceId changes', () => {
+    useJobStore.setState({
+      jobs: [createJobSummary({ id: 'j1', workspace_id: 'ws1' })],
+      isLoading: false,
+      jobsWorkspaceId: 'ws1',
+    })
+
+    renderHook(() => useWorkspaceEvents('ws1'))
+
+    expect(useJobStore.getState().jobs).toEqual([])
+    expect(useJobStore.getState().isLoading).toBe(true)
+    expect(useJobStore.getState().jobsWorkspaceId).toBe('ws1')
+  })
+
+  it('clears loading after SSE opens and jobs are fetched', async () => {
+    mockFetchJobs.mockResolvedValue({
+      jobs: [createJobSummary({ id: 'j2', workspace_id: 'ws1' })],
+    })
+
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+    })
+
+    await waitFor(() => {
+      expect(useJobStore.getState().isLoading).toBe(false)
+      expect(useJobStore.getState().jobs).toHaveLength(1)
+    })
   })
 
   it('does not connect when enabled is false', () => {

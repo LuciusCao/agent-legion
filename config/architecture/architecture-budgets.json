@@ -180,7 +180,7 @@
     "frontend/src/stores/detailStore.ts": 106,
     "frontend/src/stores/interactionStore.ts": 69,
     "frontend/src/stores/job/actions/batchActions.ts": 221,
-    "frontend/src/stores/job/actions/fetchActions.ts": 28,
+    "frontend/src/stores/job/actions/fetchActions.ts": 27,
     "frontend/src/stores/job/actions/fetchInflight.ts": 20,
     "frontend/src/stores/job/actions/fetchState.ts": 37,
     "frontend/src/stores/job/actions/selectionActions.ts": 64,
