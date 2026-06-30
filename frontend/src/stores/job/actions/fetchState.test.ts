@@ -25,6 +25,32 @@ describe('resetForWorkspace', () => {
     expect(next.error).toBeNull()
     expect(next.selectedIds).toEqual(new Set())
   })
+
+  it('preserves selectedIds when jobsWorkspaceId matches target workspace and clears jobs', () => {
+    const state = createJobState({
+      jobsWorkspaceId: 'ws1',
+      jobs: [createJobSummary({ id: 'j1', workspace_id: 'ws1' })],
+      selectedIds: new Set(['j1']),
+    })
+
+    const next = resetForWorkspace('ws1')(state)
+
+    expect(next.jobs).toEqual([])
+    expect(next.selectedIds).toEqual(new Set(['j1']))
+  })
+
+  it('preserves selectedIds when all jobs belong to target workspace and clears jobs', () => {
+    const state = createJobState({
+      jobsWorkspaceId: null,
+      jobs: [createJobSummary({ id: 'j1', workspace_id: 'ws1' })],
+      selectedIds: new Set(['j1']),
+    })
+
+    const next = resetForWorkspace('ws1')(state)
+
+    expect(next.jobs).toEqual([])
+    expect(next.selectedIds).toEqual(new Set(['j1']))
+  })
 })
 
 describe('startJobFetch', () => {

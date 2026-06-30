@@ -9,25 +9,18 @@ function isCurrentWorkspace(state: JobState, workspaceId: string): boolean {
   )
 }
 
-export const startJobFetch = (ws: string) => (state: JobState) => ({
+const baseReset = (ws: string, keepJobs: boolean) => (state: JobState) => ({
   error: null,
   isLoading: true,
-  jobs: [],
+  jobs: keepJobs && isCurrentWorkspace(state, ws) ? state.jobs : [],
   jobsWorkspaceId: ws,
   selectedIds: isCurrentWorkspace(state, ws)
     ? state.selectedIds
     : new Set<string>(),
 })
 
-// _state is unused because resetForWorkspace always clears selection.
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export const resetForWorkspace = (ws: string) => (_state: JobState) => ({
-  error: null,
-  isLoading: true,
-  jobs: [],
-  jobsWorkspaceId: ws,
-  selectedIds: new Set<string>(),
-})
+export const startJobFetch = (ws: string) => baseReset(ws, false)
+export const resetForWorkspace = (ws: string) => baseReset(ws, false)
 
 export const finishJobFetch =
   (ws: string, jobs: JobSummary[]) => (state: JobState) =>

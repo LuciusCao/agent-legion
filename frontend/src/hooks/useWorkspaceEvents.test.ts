@@ -94,11 +94,11 @@ describe('useWorkspaceEvents', () => {
       jobsWorkspaceId: 'ws1',
     })
 
-    renderHook(() => useWorkspaceEvents('ws1'))
+    renderHook(() => useWorkspaceEvents('ws2'))
 
     expect(useJobStore.getState().jobs).toEqual([])
     expect(useJobStore.getState().isLoading).toBe(true)
-    expect(useJobStore.getState().jobsWorkspaceId).toBe('ws1')
+    expect(useJobStore.getState().jobsWorkspaceId).toBe('ws2')
   })
 
   it('clears loading after SSE opens and jobs are fetched', async () => {
