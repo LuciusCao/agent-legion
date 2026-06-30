@@ -46,7 +46,7 @@ export default function CreateWorkspaceDialog({ open, onClose }: Props) {
   }
 
   return (
-    <Dialog open={open} onClose={handleClose}>
+    <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
       <DialogTitle>{WORKSPACE_LABELS.createWorkspace}</DialogTitle>
       <DialogContent>
         <form
