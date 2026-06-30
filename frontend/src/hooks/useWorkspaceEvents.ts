@@ -7,7 +7,6 @@ interface WorkspaceEventPayload {
   type: string
   workspace_id: string
   job_id?: string
-  jobs?: Array<Record<string, unknown>>
   stats?: Record<string, number>
 }
 
@@ -16,14 +15,11 @@ export function useWorkspaceEvents(
   enabled = true,
   statsOnly = false
 ) {
-  const setJobsAndFinishLoading = useJobStore((state) => state.setJobsAndFinishLoading)
-  const failJobFetch = useJobStore((state) => state.failJobFetch)
-  const resetForWorkspace = useJobStore((state) => state.resetForWorkspace)
-  const setWorkspaceStats = useWorkspaceStore((state) => state.setWorkspaceStats)
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
-    if (workspaceId) resetForWorkspace(workspaceId)
-  }, [workspaceId, resetForWorkspace])
+    if (workspaceId) useJobStore.getState().resetForWorkspace(workspaceId)
+  }, [workspaceId])
 
   useEffect(() => {
     if (!enabled || !workspaceId || typeof EventSource === 'undefined') return
@@ -38,14 +34,19 @@ export function useWorkspaceEvents(
       try {
         const stats = await fetchWorkspaceStats(workspaceId)
         if (stale || closed) return
-        setWorkspaceStats(workspaceId, stats)
+        useWorkspaceStore.getState().setWorkspaceStats(workspaceId, stats)
         if (includeJobs && !statsOnly) {
           const jobsData = await fetchJobs(workspaceId)
           if (stale || closed) return
-          setJobsAndFinishLoading(jobsData.jobs)
+          useJobStore.getState().setJobsAndFinishLoading(jobsData.jobs)
         }
       } catch (err) {
-        failJobFetch(workspaceId, err instanceof Error ? err.message : 'Failed to refresh jobs')
+        useJobStore
+          .getState()
+          .failJobFetch(
+            workspaceId,
+            err instanceof Error ? err.message : 'Failed to refresh jobs'
+          )
       }
     }
 
@@ -66,7 +67,7 @@ export function useWorkspaceEvents(
           const payload = JSON.parse(event.data) as WorkspaceEventPayload
           if (payload.workspace_id !== workspaceId) return
           if (payload.stats) {
-            setWorkspaceStats(workspaceId, {
+            useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
               ...useWorkspaceStore.getState().workspaceStats[workspaceId],
               job_stats: payload.stats,
             })
@@ -101,5 +102,5 @@ export function useWorkspaceEvents(
         source.close()
       }
     }
-  }, [enabled, workspaceId, statsOnly, setJobsAndFinishLoading, failJobFetch, setWorkspaceStats])
+  }, [enabled, workspaceId, statsOnly])
 }
