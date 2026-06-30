@@ -10,7 +10,7 @@ import {
 import { Route, Routes } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import JobDetailPage from './JobDetailPage'
-import { useUiStore } from '../stores/uiStore'
+import { usePageHeaderStore } from '../stores/pageHeaderStore'
 
 const mockDetail = {
   job: {
@@ -88,11 +88,11 @@ const mockDetail = {
   artifacts: ['question.json'],
 }
 
-// JobDetailPage injects app-bar actions into useUiStore, but WorkspaceLayout/AppBar
+// JobDetailPage injects app-bar actions into usePageHeaderStore, but WorkspaceLayout/AppBar
 // is not rendered in this isolated test, so ActionRenderer renders the stored actions
 // so tests can interact with them.
 function ActionRenderer() {
-  const actions = useUiStore((state) => state.detailPageActions)
+  const actions = usePageHeaderStore((state) => state.detailPageActions)
   return <div data-testid="detail-actions-host">{actions}</div>
 }
 
@@ -711,6 +711,6 @@ describe('JobDetailPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('video-content-panel')).toBeInTheDocument()
     })
-    expect(screen.getByText('Sample Video')).toBeInTheDocument()
+    expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
   })
 })

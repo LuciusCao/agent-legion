@@ -1,5 +1,4 @@
 import { create } from 'zustand'
-import type { ReactNode } from 'react'
 import { api } from '../api'
 import type { AgentStatus, ContentType } from '../types'
 
@@ -20,8 +19,6 @@ export interface UiState {
   workerPaused: boolean
   workerPausedByWorkspace: Record<string, boolean>
   toast: Toast | null
-  pageTitle: string | null
-  detailPageActions: ReactNode | null
   getWorkerPaused: (workspaceId?: string) => boolean
   connectAgentsWs: () => () => void
   fetchWorkerStatus: (workspaceId?: string) => Promise<void>
@@ -39,8 +36,6 @@ export interface UiState {
   setWorkspacePackageDialogOpen: (open: boolean) => void
   showToast: (message: string, type: 'success' | 'error') => void
   clearToast: () => void
-  setPageTitle: (title: string | null) => void
-  setDetailPageActions: (actions: ReactNode | null) => void
 }
 
 let wsInstance: WebSocket | null = null
@@ -59,8 +54,6 @@ export const useUiStore = create<UiState>((set, get) => ({
   workerPaused: true,
   workerPausedByWorkspace: {},
   toast: null,
-  pageTitle: null,
-  detailPageActions: null,
 
   getWorkerPaused: (workspaceId) => {
     const key = workerStatusKey(workspaceId)
@@ -158,6 +151,4 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ workspacePackageDialogOpen: open }),
   showToast: (message, type) => set({ toast: { message, type } }),
   clearToast: () => set({ toast: null }),
-  setPageTitle: (title) => set({ pageTitle: title }),
-  setDetailPageActions: (actions) => set({ detailPageActions: actions }),
 }))

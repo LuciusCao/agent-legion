@@ -225,7 +225,7 @@ export default function WorkspaceMainPage() {
               setSearchInputValue(value)
               debouncedSetSearchQuery(value)
             }}
-            sx={{ width: 280, flexShrink: 0 }}
+            sx={{ width: 220, flexShrink: 0 }}
           />
         </div>
       </section>

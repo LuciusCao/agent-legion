@@ -1,8 +1,12 @@
 import { createTheme, ThemeOptions } from '@mui/material/styles'
+import { themeComponents } from './themeComponents'
 
 /**
  * Neutral (black/white/gray) theme for MUI v6.
  * Mirrors the previous Material Web token palette so the UI stays visually consistent.
+ *
+ * The shape is intentionally more angular than MUI's defaults to preserve the
+ * structured, mechanical feel of the original Material Design spec.
  */
 const themeOptions: ThemeOptions = {
   palette: {
@@ -32,35 +36,18 @@ const themeOptions: ThemeOptions = {
   typography: {
     fontFamily:
       'Roboto, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+    h1: { fontWeight: 500 },
+    h2: { fontWeight: 500 },
+    h3: { fontWeight: 500 },
+    h4: { fontWeight: 500 },
+    h5: { fontWeight: 500 },
+    h6: { fontWeight: 500 },
+    button: { fontWeight: 500, letterSpacing: '0.05em' },
   },
   shape: {
-    borderRadius: 12,
+    borderRadius: 2,
   },
-  components: {
-    MuiButton: {
-      styleOverrides: {
-        root: {
-          textTransform: 'none',
-        },
-      },
-    },
-    MuiDialog: {
-      styleOverrides: {
-        paper: {
-          borderRadius: 28,
-        },
-      },
-    },
-    MuiDialogContent: {
-      styleOverrides: {
-        root: {
-          '&&': {
-            paddingTop: '16px',
-          },
-        },
-      },
-    },
-  },
+  components: themeComponents,
 }
 
 export const theme = createTheme(themeOptions)
