@@ -4,17 +4,13 @@ import logging
 import sqlite3
 from pathlib import Path
 
-from server.app.storage_paths import (
-    derive_run_dir_from_log_path,
-    derive_session_dir_from_run_dir,
-    make_data_relative,
+from server.app.services.job_run_dir_lookup import (
+    build_job_dir_index,
+    derive_run_dir_from_index,
 )
+from server.app.storage_paths import derive_session_dir_from_run_dir, make_data_relative
 
 logger = logging.getLogger(__name__)
-
-
-def _canonicalize_below_data(path: Path, data_dir: Path) -> str:
-    return make_data_relative(path, data_dir)
 
 
 def backfill_node_run_dirs(
@@ -31,15 +27,15 @@ def backfill_node_run_dirs(
         """
     ).fetchall()
 
+    target_job_ids = {str(row["job_id"]) for row in rows}
+    job_dir_index = build_job_dir_index(jobs_dir, target_job_ids)
     updated = 0
     for row in rows:
-        run_dir = derive_run_dir_from_log_path(
-            row["log_path"], row["node_key"], row["job_id"], jobs_dir
-        )
+        run_dir = derive_run_dir_from_index(row["job_id"], row["node_key"], job_dir_index)
         if run_dir is None:
             continue
         try:
-            new_run_dir = _canonicalize_below_data(run_dir, data_dir)
+            new_run_dir = make_data_relative(run_dir, data_dir)
         except Exception as exc:
             logger.warning("Cannot canonicalize run_dir for node_run %s: %s", row["id"], exc)
             continue
@@ -49,7 +45,7 @@ def backfill_node_run_dirs(
             session_dir = derive_session_dir_from_run_dir(run_dir)
             if session_dir is not None:
                 try:
-                    new_session_dir = _canonicalize_below_data(session_dir, data_dir)
+                    new_session_dir = make_data_relative(session_dir, data_dir)
                 except Exception as exc:
                     logger.warning(
                         "Cannot canonicalize session_dir for node_run %s: %s", row["id"], exc

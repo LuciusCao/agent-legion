@@ -94,6 +94,27 @@ def test_list_jobs_loads_nodes_in_one_query(query_service, job_db, monkeypatch):
     assert len(node_selects) == 1
 
 
+def test_list_jobs_does_not_reload_each_job_for_execution_control(
+    query_service, job_db, monkeypatch
+):
+    for source_id in ("Q1", "Q2", "Q3"):
+        create_question_job(job_db, source_id=source_id)
+    statements: list[str] = []
+    original = job_db._connect_read
+
+    @contextmanager
+    def traced():
+        with original() as conn:
+            conn.set_trace_callback(statements.append)
+            yield conn
+
+    monkeypatch.setattr(job_db, "_connect_read", traced)
+    query_service.list_jobs("default")
+
+    job_selects = [sql for sql in statements if "from jobs" in sql.lower()]
+    assert len(job_selects) == 1
+
+
 def test_job_query_service_detail_enriches_nodes(query_service, job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="question_comprehension_info"

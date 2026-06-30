@@ -106,7 +106,6 @@ class JobQueryService:
             if active_summary is not None:
                 error_summary = active_summary["error_message"][:240]
 
-        control = self.job_db.get_job_execution_control(job["id"])
         job = resolve_record_paths(job, self.settings.data_dir, {"storage_dir"})
         return {
             **job,
@@ -116,10 +115,10 @@ class JobQueryService:
             "active_node_key": active_node_key,
             "error_summary": error_summary,
             "execution_control": {
-                "mode": control["execution_mode"] if control else "full",
-                "target_node_key": control["target_node_key"] if control else None,
-                "paused": control["execution_paused"] if control else False,
-                "pause_reason": control["pause_reason"] if control else "",
+                "mode": job.get("execution_mode", "full"),
+                "target_node_key": job.get("target_node_key"),
+                "paused": bool(job.get("execution_paused", False)),
+                "pause_reason": job.get("pause_reason", ""),
             },
         }
 

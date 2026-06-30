@@ -1,21 +1,24 @@
-import { fetchJobs as apiFetchJobs } from '../../../api'
 import type { JobSummary } from '../../../jobTypes'
 import type { JobStoreSet } from '../state'
+import { failJobFetch, finishJobFetch, startJobFetch } from './fetchState'
+import { getOrStartFetch } from './fetchInflight'
 
 export function fetchActions(set: JobStoreSet) {
   return {
     async fetchJobs(workspaceId: string) {
-      set({ isLoading: true, error: null })
+      set(startJobFetch(workspaceId))
       try {
-        const data = await apiFetchJobs(workspaceId)
-        set({ jobs: data.jobs, error: null, isLoading: false })
+        const data = await getOrStartFetch(workspaceId)
+        set(finishJobFetch(workspaceId, data.jobs))
       } catch (err) {
-        const message =
-          err instanceof Error ? err.message : 'Failed to load jobs'
-        set({ error: message, isLoading: false })
+        set(
+          failJobFetch(
+            workspaceId,
+            err instanceof Error ? err.message : 'Failed to load jobs'
+          )
+        )
       }
     },
-
     setJobs(jobs: JobSummary[]) {
       set({ jobs })
     },

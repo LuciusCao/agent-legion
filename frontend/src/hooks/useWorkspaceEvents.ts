@@ -31,12 +31,12 @@ export function useWorkspaceEvents(
     let closed = false
     let stale = false
 
-    const refresh = async () => {
+    const refresh = async (includeJobs: boolean) => {
       try {
         const stats = await fetchWorkspaceStats(workspaceId)
         if (stale || closed) return
         setWorkspaceStats(workspaceId, stats)
-        if (!statsOnly) {
+        if (includeJobs && !statsOnly) {
           const jobsData = await fetchJobs(workspaceId)
           if (stale || closed) return
           setJobs(jobsData.jobs)
@@ -54,7 +54,7 @@ export function useWorkspaceEvents(
 
       source.onopen = () => {
         reconnectDelay = 1000
-        refresh()
+        refresh(true)
       }
 
       source.onmessage = (event) => {
@@ -68,7 +68,7 @@ export function useWorkspaceEvents(
               job_stats: payload.stats,
             })
           }
-          refresh()
+          refresh(true)
         } catch {
           // ignore invalid payloads
         }

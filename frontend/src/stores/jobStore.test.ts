@@ -135,6 +135,48 @@ describe('jobStore', () => {
     expect(useJobStore.getState().isLoading).toBe(false)
   })
 
+  it('clears stale jobs while fetching and after fetch failure', async () => {
+    useJobStore.setState({
+      jobs: [makeJob({ id: 'video-job', workspace_id: 'video_knowledge' })],
+    })
+    mockFetchJobs.mockRejectedValueOnce(new Error('network down'))
+
+    const promise = useJobStore.getState().fetchJobs('question_comprehension')
+
+    expect(useJobStore.getState().jobs).toEqual([])
+    await promise
+    expect(useJobStore.getState().jobs).toEqual([])
+  })
+
+  it('ignores stale fetch responses from a previous workspace', async () => {
+    let resolveVideo: (value: { jobs: ReturnType<typeof makeJob>[] }) => void
+    mockFetchJobs
+      .mockReturnValueOnce(
+        new Promise((resolve) => {
+          resolveVideo = resolve
+        })
+      )
+      .mockResolvedValueOnce({
+        jobs: [
+          makeJob({
+            id: 'question-job',
+            workspace_id: 'question_comprehension',
+          }),
+        ],
+      })
+
+    const videoPromise = useJobStore.getState().fetchJobs('video_knowledge')
+    await useJobStore.getState().fetchJobs('question_comprehension')
+    resolveVideo!({
+      jobs: [makeJob({ id: 'video-job', workspace_id: 'video_knowledge' })],
+    })
+    await videoPromise
+
+    expect(useJobStore.getState().jobs.map((job) => job.id)).toEqual([
+      'question-job',
+    ])
+  })
+
   it('clears selection when filter changes', () => {
     useJobStore.setState({ selectedIds: new Set(['j1', 'j2']) })
     useJobStore.getState().setStatusFilter('completed')

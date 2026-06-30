@@ -29,7 +29,6 @@ export default function WorkspaceMainPage() {
   const navigate = useNavigate()
   const { fetchWorkspaceStats, workspaceStats } = useWorkspaceStore()
   const {
-    fetchJobs,
     jobs,
     selectedIds,
     statusFilter,
@@ -64,10 +63,7 @@ export default function WorkspaceMainPage() {
     }
   }, [workspaceId, fetchWorkspaceStats])
 
-  useEffect(() => {
-    if (!workspaceId) return
-    fetchJobs(workspaceId)
-  }, [workspaceId, fetchJobs])
+  // Jobs are loaded once by useWorkspaceEvents when the SSE connection opens.
 
   useEffect(() => {
     const workflowKey = workspaceId

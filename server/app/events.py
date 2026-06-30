@@ -193,6 +193,10 @@ class JobEventManager:
         self._stop_events[queue] = stop_event
 
         async def event_stream():
+            # Flush headers immediately so proxies (e.g. Vite dev server) forward
+            # the SSE connection and browsers fire onopen without waiting for the
+            # first real event or heartbeat timeout.
+            yield ":ok\n\n"
             try:
                 while not stop_event.is_set():
                     try:
