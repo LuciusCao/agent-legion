@@ -119,6 +119,22 @@ describe('useWorkspaceEvents', () => {
     })
   })
 
+  it('clears a previous error after successful refresh', async () => {
+    useJobStore.setState({ error: 'previous error' })
+    mockFetchJobs.mockResolvedValue({ jobs: [] })
+
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+    })
+
+    await waitFor(() => {
+      expect(useJobStore.getState().error).toBeNull()
+    })
+  })
+
   it('does not connect when enabled is false', () => {
     renderHook(() => useWorkspaceEvents('ws1', false))
     expect(EventSourceMock.instances.length).toBe(0)
