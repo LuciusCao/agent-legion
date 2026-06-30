@@ -3,9 +3,15 @@ import { IconButton } from '@mui/material'
 import { DagStepper } from './DagStepper'
 import { MaterialIcon } from './MaterialIcon'
 import { durationSeconds, filterRelevantRuns } from '../helpers'
+import { formatDuration } from '../lib/formatters'
 import type { JobNodeRecord, NodeRunRecord } from '../types'
 import { JOB_STATUS_LABELS } from '../labels'
 import { JobLogDialog } from './JobLogDialog'
+import {
+  computeWaitTime,
+  EXECUTOR_KIND_ICONS,
+  EXECUTOR_KIND_LABELS,
+} from './jobProgressHelpers'
 import styles from './JobProgressPanel.module.css'
 
 const STATUS_ICONS: Record<string, string> = {
@@ -30,50 +36,6 @@ const BADGE_STATUS_CLASS: Record<string, string> = {
   failed: styles.badgeFailed,
   stale: styles.badgePending,
   pending: styles.badgePending,
-}
-
-function formatDuration(seconds?: number): string {
-  if (seconds === undefined) return '—'
-  if (seconds < 60) return `${seconds}s`
-  if (seconds < 3600) {
-    const m = Math.floor(seconds / 60)
-    const s = seconds % 60
-    return `${m}m${s}s`
-  }
-  const h = Math.floor(seconds / 3600)
-  const remainder = seconds % 3600
-  const m = Math.floor(remainder / 60)
-  const s = remainder % 60
-  return `${h}h${m}m${s}s`
-}
-
-function computeWaitTime(
-  node: JobNodeRecord,
-  nodes: JobNodeRecord[]
-): string | undefined {
-  if (!node.started_at) return undefined
-  const started = new Date(node.started_at).getTime()
-  if (Number.isNaN(started)) return undefined
-
-  let readySince: number | undefined = node.created_at
-    ? new Date(node.created_at).getTime()
-    : undefined
-  if (readySince !== undefined && Number.isNaN(readySince)) {
-    readySince = undefined
-  }
-
-  for (const depKey of node.after ?? []) {
-    const depNode = nodes.find((n) => n.node_key === depKey)
-    if (!depNode?.finished_at) continue
-    const depFinished = new Date(depNode.finished_at).getTime()
-    if (Number.isNaN(depFinished)) continue
-    readySince =
-      readySince === undefined ? depFinished : Math.max(readySince, depFinished)
-  }
-
-  if (readySince === undefined) return undefined
-  const seconds = Math.max(0, Math.floor((started - readySince) / 1000))
-  return formatDuration(seconds)
 }
 
 interface JobProgressPanelProps {
@@ -138,11 +100,27 @@ export function JobProgressPanel({
             const statusText = JOB_STATUS_LABELS[node.status] || node.status
             const hasError = !!(run?.error_message || node.error_message)
             const isExpanded = expandedErrors.has(node.node_key)
-            const dur = durationSeconds(node.started_at, node.finished_at)
+            const durSeconds = durationSeconds(
+              node.started_at,
+              node.finished_at
+            )
+            const durLabel =
+              durSeconds === undefined
+                ? '—'
+                : durSeconds === 0
+                  ? '0秒'
+                  : formatDuration(durSeconds * 1000)
             const waitLabel =
               node.status === 'pending'
                 ? '等待中'
                 : (computeWaitTime(node, nodes) ?? '—')
+            const executorKind = node.executor_kind
+            const executorLabel = executorKind
+              ? (EXECUTOR_KIND_LABELS[executorKind] ?? executorKind)
+              : undefined
+            const executorIcon = executorKind
+              ? (EXECUTOR_KIND_ICONS[executorKind] ?? 'computer')
+              : undefined
 
             return (
               <div key={node.node_key} className={styles.timelineItem}>
@@ -186,8 +164,21 @@ export function JobProgressPanel({
                         className={styles.metaIcon}
                         sx={{ fontSize: 14 }}
                       />
-                      {formatDuration(dur)}
+                      {durLabel}
                     </span>
+                    {executorLabel && executorIcon && (
+                      <span
+                        className={styles.executorBadge}
+                        title={`执行器: ${executorLabel}`}
+                      >
+                        <MaterialIcon
+                          name={executorIcon}
+                          className={styles.metaIcon}
+                          sx={{ fontSize: 14 }}
+                        />
+                        {executorLabel}
+                      </span>
+                    )}
                   </div>
 
                   {run?.log_path && (

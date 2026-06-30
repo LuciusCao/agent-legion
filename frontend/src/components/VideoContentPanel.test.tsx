@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, waitFor } from '@testing-library/react'
+import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { VideoContentPanel } from './VideoContentPanel'
 
 const mockFetchJobVideoDetail = vi.fn()
@@ -53,7 +53,7 @@ describe('VideoContentPanel', () => {
     mockFetchJobVideoDetail.mockReset()
   })
 
-  it('shows loading state then renders video title and external id', async () => {
+  it('shows loading state then renders video player and timeline', async () => {
     mockFetchJobVideoDetail.mockResolvedValue(mockVideoDetail)
 
     render(<VideoContentPanel jobId="job1" />)
@@ -61,24 +61,47 @@ describe('VideoContentPanel', () => {
     expect(screen.getByText('加载视频内容中...')).toBeInTheDocument()
 
     await waitFor(() => {
-      expect(screen.getByText('Sample Video')).toBeInTheDocument()
+      expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
     })
-    expect(screen.getByText(/VID-001/)).toBeInTheDocument()
   })
 
-  it('renders subtitle, chapter and interaction summaries', async () => {
+  it('renders collapsible subtitle and interaction panels', async () => {
     mockFetchJobVideoDetail.mockResolvedValue(mockVideoDetail)
 
     render(<VideoContentPanel jobId="job1" />)
 
     await waitFor(() => {
-      expect(screen.getByText('Sample Video')).toBeInTheDocument()
+      expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
     })
 
+    expect(screen.getByText('字幕')).toBeInTheDocument()
     expect(screen.getByText('2 条')).toBeInTheDocument()
-    expect(screen.getByText('1 个')).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '字幕' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '交互节点' })).toBeInTheDocument()
+    expect(screen.getByText('交互节点')).toBeInTheDocument()
+    expect(screen.getByText('1 条')).toBeInTheDocument()
+  })
+
+  it('expands and collapses the subtitle panel', async () => {
+    mockFetchJobVideoDetail.mockResolvedValue(mockVideoDetail)
+
+    render(<VideoContentPanel jobId="job1" />)
+
+    await waitFor(() => {
+      expect(screen.getByText('字幕')).toBeInTheDocument()
+    })
+
+    expect(screen.queryByText('Hello world')).not.toBeInTheDocument()
+
+    fireEvent.click(screen.getByText('字幕'))
+
+    await waitFor(() => {
+      expect(screen.getByText('Hello world')).toBeInTheDocument()
+    })
+
+    fireEvent.click(screen.getByText('字幕'))
+
+    await waitFor(() => {
+      expect(screen.queryByText('Hello world')).not.toBeInTheDocument()
+    })
   })
 
   it('renders an error message when the endpoint fails', async () => {
@@ -99,7 +122,7 @@ describe('VideoContentPanel', () => {
     )
 
     await waitFor(() => {
-      expect(screen.getByText('Sample Video')).toBeInTheDocument()
+      expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
     })
     expect(mockFetchJobVideoDetail).toHaveBeenCalledTimes(1)
 
@@ -107,6 +130,30 @@ describe('VideoContentPanel', () => {
 
     await waitFor(() => {
       expect(mockFetchJobVideoDetail).toHaveBeenCalledTimes(2)
+    })
+  })
+
+  it('pauses and renders an interaction overlay at the trigger time', async () => {
+    mockFetchJobVideoDetail.mockResolvedValue(mockVideoDetail)
+
+    render(<VideoContentPanel jobId="job1" />)
+
+    await waitFor(() => {
+      expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
+    })
+
+    const videoEl = document.getElementById('player') as HTMLVideoElement
+
+    videoEl.currentTime = 3
+    fireEvent.timeUpdate(videoEl)
+
+    expect(screen.getByText('例题试做')).toBeInTheDocument()
+    expect(screen.getByText('先试做例题')).toBeInTheDocument()
+
+    fireEvent.click(screen.getByRole('button', { name: '我已完成，继续' }))
+
+    await waitFor(() => {
+      expect(screen.queryByText('例题试做')).not.toBeInTheDocument()
     })
   })
 })

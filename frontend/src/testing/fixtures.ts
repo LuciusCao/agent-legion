@@ -15,8 +15,6 @@ export function createMockUiState(partial: Partial<UiState> = {}): UiState {
     workerPaused: false,
     workerPausedByWorkspace: {},
     toast: null,
-    pageTitle: null,
-    detailPageActions: null,
     getWorkerPaused: vi.fn(() => partial.workerPaused ?? false),
     connectAgentsWs: vi.fn(() => vi.fn()),
     fetchWorkerStatus: vi.fn(),
@@ -31,8 +29,6 @@ export function createMockUiState(partial: Partial<UiState> = {}): UiState {
     setWorkspacePackageDialogOpen: vi.fn(),
     showToast: vi.fn(),
     clearToast: vi.fn(),
-    setPageTitle: vi.fn(),
-    setDetailPageActions: vi.fn(),
     ...partial,
   }
 }

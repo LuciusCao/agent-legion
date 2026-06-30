@@ -7,6 +7,7 @@
 
 - 每次独立开发任务优先在新的 git worktree 中进行。
 - 不同 worktree 使用不同 backend/frontend 端口与独立 `data/` 目录，避免 SQLite、视频、日志、package 互相覆盖。
+- 创建新 worktree 后，从基准 worktree 复制 `.env` 到新的 worktree 根目录，确保测试、后端服务与外部集成配置一致。
 - 不要污染主工作区或他人 worktree 的运行时数据。
 
 ## 2. Agent Tool Discipline

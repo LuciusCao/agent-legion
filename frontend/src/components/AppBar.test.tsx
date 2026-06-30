@@ -27,6 +27,16 @@ describe('AppBar', () => {
     expect(screen.getByTestId('app-bar-home')).toBeInTheDocument()
   })
 
+  it('renders subtitle when provided', () => {
+    render(
+      <MemoryRouter>
+        <AppBar title="Sample Video" subtitle="VID-001" />
+      </MemoryRouter>
+    )
+    expect(screen.getByText('Sample Video')).toBeInTheDocument()
+    expect(screen.getByText('VID-001')).toBeInTheDocument()
+  })
+
   it('prefers backTo over home', () => {
     render(
       <MemoryRouter>

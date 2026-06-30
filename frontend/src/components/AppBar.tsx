@@ -1,10 +1,12 @@
 import { IconButton } from '@mui/material'
 import { MaterialIcon } from './MaterialIcon'
 import { useNavigate } from 'react-router-dom'
+import { AppBarSubtitle } from './AppBarSubtitle'
 import styles from './AppBar.module.css'
 
 export interface AppBarProps {
   title: string
+  subtitle?: string | null
   home?: boolean
   backTo?: string
   scrolled?: boolean
@@ -13,6 +15,7 @@ export interface AppBarProps {
 
 export function AppBar({
   title,
+  subtitle,
   home,
   backTo,
   scrolled,
@@ -20,25 +23,17 @@ export function AppBar({
 }: AppBarProps) {
   const navigate = useNavigate()
 
-  const leftButton = backTo ? (
-    <IconButton
-      size="small"
-      onClick={() => navigate(backTo)}
-      aria-label="返回"
-      data-testid="app-bar-back"
-    >
-      <MaterialIcon name="arrow_back" />
-    </IconButton>
-  ) : home ? (
-    <IconButton
-      size="small"
-      onClick={() => navigate('/')}
-      aria-label="主页"
-      data-testid="app-bar-home"
-    >
-      <MaterialIcon name="home" />
-    </IconButton>
-  ) : null
+  const leftButton =
+    backTo || home ? (
+      <IconButton
+        size="small"
+        onClick={() => navigate(backTo || '/')}
+        aria-label={backTo ? '返回' : '主页'}
+        data-testid={backTo ? 'app-bar-back' : 'app-bar-home'}
+      >
+        <MaterialIcon name={backTo ? 'arrow_back' : 'home'} />
+      </IconButton>
+    ) : null
 
   return (
     <header
@@ -47,7 +42,7 @@ export function AppBar({
     >
       <div className={styles.left}>
         {leftButton}
-        <h1 className={styles.title}>{title}</h1>
+        <AppBarSubtitle title={title} subtitle={subtitle} />
       </div>
       {rightActions && <div className={styles.right}>{rightActions}</div>}
     </header>
