@@ -1,13 +1,3 @@
-.list {
-  display: flex;
-  flex-direction: column;
-}
-
-.item {
-  display: flex;
-  flex-direction: column;
-}
-
 .empty {
   display: flex;
   flex-direction: column;
@@ -15,4 +5,18 @@
   gap: 12px;
   padding: 48px 16px;
   color: #6b7280;
+}
+
+.item {
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+.list {
+  contain: strict;
+  height: min(72vh, 760px);
+  min-height: 320px;
+  overflow: auto;
 }
