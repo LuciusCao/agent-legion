@@ -163,7 +163,7 @@
     "frontend/src/lib/search.ts": 54,
     "frontend/src/lib/workflowNodes.ts": 77,
     "frontend/src/main.tsx": 31,
-    "frontend/src/pages/DashboardPage.tsx": 139,
+    "frontend/src/pages/DashboardPage.tsx": 130,
     "frontend/src/pages/JobDetailPage.module.css": 50,
     "frontend/src/pages/JobDetailPage.tsx": 183,
     "frontend/src/pages/SettingsPage.module.css": 103,

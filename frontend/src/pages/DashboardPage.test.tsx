@@ -59,13 +59,13 @@ describe('DashboardPage', () => {
     expect(screen.getByText('Agent Legion')).toBeInTheDocument()
   })
 
-  it('renders Video Knowledge card', () => {
+  it('does not render a hardcoded Video Knowledge card when workspaces are empty', () => {
     render(
       <MemoryRouter>
         <DashboardPage />
       </MemoryRouter>
     )
-    expect(screen.getByText('Video Knowledge')).toBeInTheDocument()
+    expect(screen.queryByText('Video Knowledge')).not.toBeInTheDocument()
   })
 
   it('opens create workspace dialog', async () => {
@@ -156,7 +156,15 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('dialog')).toBeInTheDocument()
   })
 
-  it('navigates to video knowledge workspace when clicking system card', () => {
+  it('navigates to video knowledge workspace when it is returned by the API', () => {
+    mockWorkspaceStore.workspaces = [
+      {
+        id: 'video_knowledge',
+        name: 'Video Knowledge',
+        default_workflow_key: 'video_knowledge',
+      },
+    ]
+
     render(
       <MemoryRouter>
         <DashboardPage />
