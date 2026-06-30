@@ -56,6 +56,8 @@
     "frontend/src/components/JobList.tsx": 35,
     "frontend/src/components/JobListItem.module.css": 124,
     "frontend/src/components/JobListItem.tsx": 182,
+    "frontend/src/components/JobListSkeleton.module.css": 107,
+    "frontend/src/components/JobListSkeleton.tsx": 33,
     "frontend/src/components/JobListVirtualRow.tsx": 43,
     "frontend/src/components/JobListVirtualized.tsx": 61,
     "frontend/src/components/JobLogDialog.module.css": 120,
