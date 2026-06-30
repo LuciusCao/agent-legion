@@ -9,7 +9,7 @@ export const themeComponents: NonNullable<ThemeOptions['components']> = {
   MuiButton: {
     styleOverrides: {
       root: {
-        borderRadius: 12,
+        borderRadius: 9999,
         textTransform: 'uppercase',
       },
     },
