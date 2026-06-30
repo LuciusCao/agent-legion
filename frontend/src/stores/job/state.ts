@@ -23,6 +23,7 @@ export interface JobState {
   continueLoading: boolean
 
   fetchJobs: (workspaceId: string) => Promise<void>
+  resetForWorkspace: (workspaceId: string) => void
   setJobs: (jobs: JobSummary[]) => void
   setStatusFilter: (filter: JobStatus | 'all') => void
   setSearchQuery: (query: string) => void

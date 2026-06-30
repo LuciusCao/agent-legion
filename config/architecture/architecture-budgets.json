@@ -184,6 +184,7 @@
     "frontend/src/stores/job/actions/fetchInflight.ts": 20,
     "frontend/src/stores/job/actions/fetchState.ts": 37,
     "frontend/src/stores/job/actions/selectionActions.ts": 64,
+    "frontend/src/stores/job/actions/testHelpers.ts": 83,
     "frontend/src/stores/job/index.ts": 30,
     "frontend/src/stores/job/selectors.ts": 26,
     "frontend/src/stores/job/state.ts": 112,
