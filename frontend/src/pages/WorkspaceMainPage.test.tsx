@@ -62,6 +62,16 @@ function renderPage(workspaceId = 'ws1') {
   )
 }
 
+async function loadJobsViaSSE() {
+  const source = EventSourceMock.instances[0]
+  await act(async () => {
+    source.onopen?.()
+  })
+  await waitFor(() => {
+    expect(useJobStore.getState().jobs.length).toBeGreaterThan(0)
+  })
+}
+
 const baseStats: WorkspaceStats = {
   workspace_id: 'ws1',
   name: 'WS One',
@@ -369,6 +379,8 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    await loadJobsViaSSE()
+
     await waitFor(() =>
       expect(mockFetchWorkflowDefinition).toHaveBeenCalledWith(
         'question_content'
@@ -412,6 +424,8 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    await loadJobsViaSSE()
+
     await act(async () => {
       screen.getByText('打包').click()
     })
@@ -440,6 +454,8 @@ describe('WorkspaceMainPage', () => {
     await act(async () => {
       renderPage()
     })
+
+    await loadJobsViaSSE()
 
     await act(async () => {
       screen.getByText('删除').click()
@@ -483,6 +499,8 @@ describe('WorkspaceMainPage', () => {
     await act(async () => {
       renderPage()
     })
+
+    await loadJobsViaSSE()
 
     await waitFor(() =>
       expect(mockFetchWorkflowDefinition).toHaveBeenCalledWith(
@@ -559,6 +577,8 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    await loadJobsViaSSE()
+
     await act(async () => {
       screen.getByText('运行到').click()
     })
@@ -608,6 +628,8 @@ describe('WorkspaceMainPage', () => {
     await act(async () => {
       renderPage()
     })
+
+    await loadJobsViaSSE()
 
     await act(async () => {
       screen.getByText('运行到').click()
