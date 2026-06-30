@@ -78,15 +78,6 @@ export function DashboardPage() {
           gap: 16,
         }}
       >
-        <WorkspaceCard
-          name="Video Knowledge"
-          workflowLabel="视频知识 Workspace"
-          isSystem={true}
-          jobStats={{}}
-          executorStatus={[]}
-          onClick={() => navigate('/workspaces/video_knowledge')}
-        />
-
         {workspaces.map((w) => (
           <div key={w.id} style={{ display: 'contents' }}>
             <WorkspaceEventSubscriber
