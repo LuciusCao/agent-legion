@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { fetchJobDetail, deleteJob } from '../../api'
 import { rerunJob, runToJob, packageJobs } from '../../jobApi'
-import { useUiStore } from '../../stores/uiStore'
+import { usePageHeaderStore } from '../../stores/pageHeaderStore'
 import { useJobStore } from '../../stores/jobStore'
 import type { JobDetailResponse } from '../../types'
 import { POLLING_STATUSES } from './jobNodeHelpers'
@@ -12,7 +12,7 @@ export function useJobDetail(
   jobId: string | undefined
 ) {
   const navigate = useNavigate()
-  const { setPageTitle } = useUiStore()
+  const { setPageTitle, setPageSubtitle } = usePageHeaderStore()
   const [detail, setDetail] = useState<JobDetailResponse | null>(null)
   const [error, setError] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
@@ -67,12 +67,14 @@ export function useJobDetail(
     refreshDetail({ signal: controller.signal }).then((data) => {
       if (controller.signal.aborted || !data) return
       setPageTitle(data.job.title || data.job.source_id || '任务详情')
+      setPageSubtitle(data.job.source_id || null)
     })
     return () => {
       controller.abort()
       setPageTitle(null)
+      setPageSubtitle(null)
     }
-  }, [jobId, setPageTitle, refreshDetail])
+  }, [jobId, setPageTitle, setPageSubtitle, refreshDetail])
 
   const handleRerun = useCallback(
     async (nodeKey: string | null, fromFailedNode?: boolean) => {
