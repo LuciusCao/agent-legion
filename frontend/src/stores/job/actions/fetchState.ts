@@ -9,28 +9,29 @@ function isCurrentWorkspace(state: JobState, workspaceId: string): boolean {
   )
 }
 
-export function startJobFetch(workspaceId: string) {
-  return (state: JobState) => ({
-    error: null,
-    isLoading: true,
-    jobs: [],
-    jobsWorkspaceId: workspaceId,
-    selectedIds: isCurrentWorkspace(state, workspaceId)
-      ? state.selectedIds
-      : new Set<string>(),
-  })
-}
+export const startJobFetch = (ws: string) => (state: JobState) => ({
+  error: null,
+  isLoading: true,
+  jobs: [],
+  jobsWorkspaceId: ws,
+  selectedIds: isCurrentWorkspace(state, ws)
+    ? state.selectedIds
+    : new Set<string>(),
+})
 
-export function finishJobFetch(workspaceId: string, jobs: JobSummary[]) {
-  return (state: JobState) =>
-    state.jobsWorkspaceId === workspaceId
-      ? { jobs, error: null, isLoading: false }
-      : {}
-}
+// _state is unused because resetForWorkspace always clears selection.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export const resetForWorkspace = (ws: string) => (_state: JobState) => ({
+  error: null,
+  isLoading: true,
+  jobs: [],
+  jobsWorkspaceId: ws,
+  selectedIds: new Set<string>(),
+})
 
-export function failJobFetch(workspaceId: string, message: string) {
-  return (state: JobState) =>
-    state.jobsWorkspaceId === workspaceId
-      ? { error: message, isLoading: false, jobs: [] }
-      : {}
-}
+export const finishJobFetch =
+  (ws: string, jobs: JobSummary[]) => (state: JobState) =>
+    state.jobsWorkspaceId === ws ? { jobs, error: null, isLoading: false } : {}
+
+export const failJobFetch = (ws: string, msg: string) => (state: JobState) =>
+  state.jobsWorkspaceId === ws ? { error: msg, isLoading: false, jobs: [] } : {}
