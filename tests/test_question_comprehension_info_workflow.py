@@ -172,6 +172,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
                         "position": 1,
                         "error_answer": ["5"],
                         "error_description": "学生只看了胜5场，直接选5。",
+                        "cognitive_basis": "学生只关注部分条件，忽略总数。",
                         "related_key_info_ids": ["ki_001"],
                     }
                 ],
@@ -191,6 +192,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
     assert payload["question_id"] == "Q100"
     assert payload["fingerprint"] is None
     assert payload["fingerprint_missing"] is True
+    assert payload["schema_version"] == "v1"
     assert payload["comprehension_data"]["fingerprint"] is None
     assert payload["comprehension_data"]["comprehension_difficulty"] == 65
     assert payload["comprehension_data"]["key_info_list"][0]["key_info_id"] == "ki_001"
@@ -278,6 +280,7 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
                         "position": 1,
                         "error_answer": ["5"],
                         "error_description": "学生只看了胜5场，直接选5。",
+                        "cognitive_basis": "学生只关注部分条件，忽略总数。",
                         "related_key_info_ids": ["ki_001"],
                     }
                 ],

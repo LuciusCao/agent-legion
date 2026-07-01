@@ -66,9 +66,33 @@ Each line is a JSON object:
 
 - `comprehension_data` may be a dict or list; it is JSON-stringified before
   calling the API.
+- `format_vno` is the comprehension info schema version. It is resolved in this
+  order:
+  1. The `format_vno` field on the input line.
+  2. The `comprehension_info_schema_version` field on the input line.
+  3. Defaults to `"v1"` with a warning.
+- The resolved `format_vno` is written back to the upload record and sent to the
+  API, so the API payload, update fields and upload logs always agree.
 - The fingerprint is computed from `stem` + `options`. If those fields are
   missing but a `fingerprint` field is provided, the provided fingerprint is
   trusted with a warning.
+
+## Schema versioning
+
+`comprehension_info.json` declares its structure version in the top-level
+`schema_version` field. The version maps directly to the API's `format_vno`:
+
+```json
+{
+  "question_id": "Q100",
+  "schema_version": "v1",
+  "comprehension_data": { ... }
+}
+```
+
+The `comprehension_data` field itself does **not** contain `schema_version`;
+that stays at the top level. Supported versions are defined under
+`tools/comprehension-uploader/schemas/` and validated before upload.
 
 ## Commands
 
@@ -92,21 +116,29 @@ the SQLite logs, and the `batch_id` defaults to `<workspace>-<timestamp>` so
 each run has a unique batch id. If you need a fixed batch id, pass
 `--batch-id` explicitly; it overrides the generated one.
 
-### Makefile shortcuts
-
-`make` does not parse `--flags` directly, so pass arguments via variables or
-`ARGS`:
+Build a `package.jsonl` from `comprehension_info.json` files:
 
 ```bash
-# Variable style (recommended)
-make upload WORKSPACE=ws-123 CONFIG=config.prod.yaml PACKAGE=package.jsonl
-
-# ARGS style (passes raw flags to the CLI)
-make upload ARGS="--workspace ws-123 --config config.prod.yaml package.jsonl"
-
-# Scan for stale questions
-make scan-comprehension CONFIG=config.prod.yaml OUTPUT=stale.json
+uv run python tools/comprehension-uploader/run.py package \
+  --config config.yaml \
+  --input-dir ./workspace-output \
+  --output package.jsonl
 ```
+
+The `package` command walks `--input-dir`, reads each `comprehension_info.json`,
+takes the top-level `schema_version` as `format_vno` (defaulting to `"v1"`), and
+looks up the latest question content from the configured `question_source` to
+fill `question_id`, `subject_id`, `question_uuid`, `question_vno`, `stem` and
+`options`.
+
+Validate a package without uploading:
+
+```bash
+uv run python tools/comprehension-uploader/run.py validate package.jsonl
+```
+
+This parses every line and runs the declared schema version validator,
+printing a pass/fail summary.
 
 Scan for questions whose fingerprint has changed and need re-generation:
 
@@ -128,6 +160,25 @@ You can also run the package module directly when the tool directory is on
 ```bash
 PYTHONPATH=tools/comprehension-uploader \
   uv run python -m comprehension_uploader upload --config config.yaml --batch-id 20260701-v1 package.jsonl
+```
+
+### Makefile shortcuts
+
+`make` does not parse `--flags` directly, so pass arguments via variables or
+`ARGS`:
+
+```bash
+# Variable style (recommended)
+make upload WORKSPACE=ws-123 CONFIG=config.prod.yaml PACKAGE=package.jsonl
+
+# ARGS style (passes raw flags to the CLI)
+make upload ARGS="--workspace ws-123 --config config.prod.yaml package.jsonl"
+
+# Build a package.jsonl from comprehension_info.json files
+make package-comprehension INPUT_DIR=./workspace-output CONFIG=config.prod.yaml OUTPUT=package.jsonl
+
+# Scan for stale questions
+make scan-comprehension CONFIG=config.prod.yaml OUTPUT=stale.json
 ```
 
 ## Duplicate handling

@@ -12,6 +12,7 @@ from comprehension_uploader.config import Config
 from comprehension_uploader.db import Database
 from comprehension_uploader.fingerprint import compute_question_fingerprint
 from comprehension_uploader.package_parser import UploadRecord
+from comprehension_uploader.schemas import validate
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +50,27 @@ class Uploader:
         if workspace_id is not None:
             self.workspace_id = workspace_id
         fingerprint = self._resolve_fingerprint(record)
+
+        try:
+            raw_data = json.loads(record.comprehension_data)
+            validate(record.format_vno or "v1", raw_data)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Schema validation failed for %s (version %s): %s",
+                record.question_id,
+                record.format_vno,
+                exc,
+            )
+            self._record_failure(
+                record,
+                batch_id,
+                fingerprint,
+                "validate",
+                api_code=10011,
+                api_message=str(exc),
+            )
+            return
+
         for attempt in range(self.config.max_retries + 1):
             try:
                 response = self.api.add(record, fingerprint)

@@ -2,11 +2,20 @@ from __future__ import annotations
 
 import hashlib
 import json
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field, ValidationError, field_validator
+
+from comprehension_uploader.schemas import (
+    SchemaValidationError,
+    UnsupportedSchemaVersionError,
+    validate,
+)
+
+logger = logging.getLogger(__name__)
 
 
 class UploadRecord(BaseModel):
@@ -37,6 +46,46 @@ class PackageParseError(Exception):
     """Raised when a package.jsonl line cannot be parsed or validated."""
 
 
+def _normalize_version(value: Any) -> str:
+    """Return a trimmed string version identifier."""
+    return str(value).strip()
+
+
+def _resolve_format_vno(payload: dict[str, Any], line_no: int) -> str:
+    """Determine the effective schema/format version for a package line.
+
+    Priority:
+        1. ``format_vno`` field.
+        2. ``comprehension_info_schema_version`` field.
+        3. Default to ``"v1"`` with a warning.
+    """
+    for key in ("format_vno", "comprehension_info_schema_version"):
+        value = payload.get(key)
+        if value is not None and str(value).strip():
+            return _normalize_version(value)
+    logger.warning("Line %d: missing format version, defaulting to v1", line_no)
+    return "v1"
+
+
+def _validate_comprehension_data(record: UploadRecord, line_no: int) -> None:
+    """Validate ``record.comprehension_data`` against its declared schema version."""
+    version = record.format_vno or "v1"
+    try:
+        raw = json.loads(record.comprehension_data)
+    except json.JSONDecodeError as exc:
+        raise PackageParseError(
+            f"Line {line_no}: comprehension_data is not valid JSON ({exc})"
+        ) from exc
+    try:
+        validate(version, raw)
+    except UnsupportedSchemaVersionError as exc:
+        raise PackageParseError(f"Line {line_no}: unsupported schema version {version!r}") from exc
+    except SchemaValidationError as exc:
+        raise PackageParseError(
+            f"Line {line_no}: comprehension_data schema validation failed for version {version!r}: {exc}"
+        ) from exc
+
+
 def parse_package(path: Path) -> Iterator[UploadRecord]:
     """Yield validated upload records from a JSONL package file."""
     with path.open(encoding="utf-8") as handle:
@@ -50,8 +99,17 @@ def parse_package(path: Path) -> Iterator[UploadRecord]:
                 raise PackageParseError(f"Invalid JSON on line {line_no}: {exc}") from exc
             if not isinstance(payload, dict):
                 raise PackageParseError(f"Line {line_no} is not a JSON object")
+
+            effective_version = _resolve_format_vno(payload, line_no)
+            payload["format_vno"] = effective_version
+
             try:
                 record = UploadRecord.model_validate(payload)
             except ValidationError as exc:
                 raise PackageParseError(f"Line {line_no} validation failed: {exc}") from exc
+
+            _validate_comprehension_data(record, line_no)
+
+            # Ensure the effective version is reflected on the yielded record.
+            record.format_vno = effective_version
             yield record
