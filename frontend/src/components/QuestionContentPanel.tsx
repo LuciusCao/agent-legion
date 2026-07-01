@@ -440,9 +440,10 @@ export function QuestionContentPanel({
                 const decision = possibleErrorDecisions.get(err.error_id)
                 const labelSource = err.error_description || `易错点 ${idx + 1}`
                 const label =
-                  labelSource.length > 12
+                  (err.position != null ? `第${err.position}空：` : '') +
+                  (labelSource.length > 12
                     ? labelSource.slice(0, 12) + '…'
-                    : labelSource
+                    : labelSource)
                 return (
                   <button
                     key={err.error_id}

@@ -133,6 +133,7 @@ const mockComprehensionInfo = {
       {
         error_id: 'pe_001',
         error_type: 'question_comprehension',
+        position: 1,
         error_answer: ['C'],
         error_description: '区间写反',
         related_key_info_ids: ['ki_002'],
@@ -488,7 +489,8 @@ describe('QuestionContentPanel', () => {
       expect(screen.getByText(/错误答案/)).toBeInTheDocument()
     )
     expect(screen.getByText('C')).toBeInTheDocument()
-    expect(screen.getAllByText('区间写反').length).toBeGreaterThanOrEqual(2)
+    expect(screen.getByText('第1空：区间写反')).toBeInTheDocument()
+    expect(screen.getByText('区间写反')).toBeInTheDocument()
     expect(screen.getAllByText('判别式大于零').length).toBeGreaterThanOrEqual(2)
 
     fireEvent.click(possibleErrorChip)
