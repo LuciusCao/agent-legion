@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -41,14 +42,23 @@ def cmd_upload(args: argparse.Namespace) -> int:
     api = ComprehensionAPIClient(config)
     uploader = Uploader(config, db, api)
 
+    workspace_id = args.workspace
+    if args.batch_id:
+        batch_id = args.batch_id
+    elif workspace_id:
+        batch_id = f"{workspace_id}-{datetime.now(timezone.utc).strftime('%Y%m%d%H%M%S')}"  # noqa: UP017
+    else:
+        print("Either --workspace or --batch-id is required", file=sys.stderr)
+        return 2
+
     try:
         records = list(parse_package(Path(args.package)))
     except PackageParseError as exc:
         print(f"Parse error: {exc}", file=sys.stderr)
         return 2
 
-    uploader.upload_batch(records, args.batch_id)
-    print(f"Uploaded batch {args.batch_id} ({len(records)} records)")
+    uploader.upload_batch(records, batch_id, workspace_id=workspace_id)
+    print(f"Uploaded batch {batch_id} ({len(records)} records)")
     return 0
 
 
@@ -86,7 +96,13 @@ def main(argv: list[str] | None = None) -> int:
 
     upload_parser = sub.add_parser("upload", help="Upload a package.jsonl batch")
     upload_parser.add_argument("--config", required=True, help="Path to YAML config")
-    upload_parser.add_argument("--batch-id", required=True)
+    upload_parser.add_argument(
+        "--workspace",
+        help="Workspace identifier; stored in logs and used to generate batch-id if --batch-id is omitted",
+    )
+    upload_parser.add_argument(
+        "--batch-id", help="Batch identifier (defaults to workspace-<timestamp>)"
+    )
     upload_parser.add_argument("package", help="Path to package.jsonl")
     upload_parser.set_defaults(func=cmd_upload)
 

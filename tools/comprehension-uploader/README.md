@@ -65,8 +65,29 @@ Upload a batch:
 ```bash
 uv run python tools/comprehension-uploader/run.py upload \
   --config config.yaml \
-  --batch-id 20260701-v1 \
+  --workspace ws-123 \
   package.jsonl
+```
+
+`--workspace` is the recommended identifier. It is stored as `workspace_id` in
+the SQLite logs, and the `batch_id` defaults to `<workspace>-<timestamp>` so
+each run has a unique batch id. If you need a fixed batch id, pass
+`--batch-id` explicitly; it overrides the generated one.
+
+### Makefile shortcuts
+
+`make` does not parse `--flags` directly, so pass arguments via variables or
+`ARGS`:
+
+```bash
+# Variable style (recommended)
+make upload WORKSPACE=ws-123 CONFIG=config.prod.yaml PACKAGE=package.jsonl
+
+# ARGS style (passes raw flags to the CLI)
+make upload ARGS="--workspace ws-123 --config config.prod.yaml package.jsonl"
+
+# Scan for stale questions
+make scan-comprehension CONFIG=config.prod.yaml OUTPUT=stale.json
 ```
 
 Scan for questions whose fingerprint has changed and need re-generation:

@@ -28,12 +28,26 @@ class Uploader:
         self.config = config
         self.db = db
         self.api = api
+        self.workspace_id: str | None = None
 
-    def upload_batch(self, records: list[UploadRecord], batch_id: str) -> None:
+    def upload_batch(
+        self,
+        records: list[UploadRecord],
+        batch_id: str,
+        workspace_id: str | None = None,
+    ) -> None:
+        self.workspace_id = workspace_id
         for record in records:
-            self.upload_one(record, batch_id)
+            self.upload_one(record, batch_id, workspace_id=workspace_id)
 
-    def upload_one(self, record: UploadRecord, batch_id: str) -> None:
+    def upload_one(
+        self,
+        record: UploadRecord,
+        batch_id: str,
+        workspace_id: str | None = None,
+    ) -> None:
+        if workspace_id is not None:
+            self.workspace_id = workspace_id
         fingerprint = self._resolve_fingerprint(record)
         for attempt in range(self.config.max_retries + 1):
             try:
@@ -103,7 +117,9 @@ class Uploader:
                 api_message=response.get("message", ""),
                 api_response=response,
             )
-            self.db.states.upsert_state(record.question_id, fingerprint, log_id)
+            self.db.states.upsert_state(
+                record.question_id, fingerprint, log_id, workspace_id=self.workspace_id
+            )
             return
 
         update_fields = self._build_update_fields(record)
@@ -116,7 +132,9 @@ class Uploader:
                 status="skipped",
                 api_message="no fields to update",
             )
-            self.db.states.upsert_state(record.question_id, fingerprint, log_id)
+            self.db.states.upsert_state(
+                record.question_id, fingerprint, log_id, workspace_id=self.workspace_id
+            )
             return
 
         try:
@@ -151,7 +169,9 @@ class Uploader:
                 "update",
                 api_message=str(exc),
             )
-        self.db.states.upsert_state(record.question_id, fingerprint, log_id)
+        self.db.states.upsert_state(
+            record.question_id, fingerprint, log_id, workspace_id=self.workspace_id
+        )
 
     def _build_update_fields(self, record: UploadRecord) -> dict[str, Any]:
         previous = self.db.logs.get_latest_success(record.question_id)
@@ -191,7 +211,9 @@ class Uploader:
             response,
             uploaded_record_id=self._extract_uploaded_id(response),
         )
-        self.db.states.upsert_state(record.question_id, fingerprint, log_id)
+        self.db.states.upsert_state(
+            record.question_id, fingerprint, log_id, workspace_id=self.workspace_id
+        )
 
     def _record_success(
         self,
@@ -205,6 +227,7 @@ class Uploader:
         uploaded_record_id: int | None = None,
     ) -> int:
         return self.db.logs.insert(
+            workspace_id=self.workspace_id,
             batch_id=batch_id,
             question_id=record.question_id,
             fingerprint=fingerprint,
@@ -234,6 +257,7 @@ class Uploader:
         status: str = "failed",
     ) -> int:
         return self.db.logs.insert(
+            workspace_id=self.workspace_id,
             batch_id=batch_id,
             question_id=record.question_id,
             fingerprint=fingerprint,

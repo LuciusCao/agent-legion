@@ -8,6 +8,7 @@ from typing import Any
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS upload_logs (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
+    workspace_id TEXT,
     batch_id TEXT NOT NULL,
     question_id TEXT NOT NULL,
     fingerprint TEXT NOT NULL,
@@ -29,9 +30,11 @@ CREATE TABLE IF NOT EXISTS upload_logs (
 CREATE INDEX IF NOT EXISTS idx_logs_question ON upload_logs(question_id);
 CREATE INDEX IF NOT EXISTS idx_logs_fingerprint ON upload_logs(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_logs_batch ON upload_logs(batch_id);
+CREATE INDEX IF NOT EXISTS idx_logs_workspace ON upload_logs(workspace_id);
 
 CREATE TABLE IF NOT EXISTS question_state (
     question_id TEXT PRIMARY KEY,
+    workspace_id TEXT,
     latest_fingerprint TEXT NOT NULL,
     latest_upload_log_id INTEGER REFERENCES upload_logs(id),
     last_scan_at TEXT,
@@ -85,6 +88,7 @@ class LogStore:
     def insert(
         self,
         *,
+        workspace_id: str | None = None,
         batch_id: str,
         question_id: str,
         fingerprint: str,
@@ -105,13 +109,14 @@ class LogStore:
         cursor = self._conn.execute(
             """
             INSERT INTO upload_logs (
-                batch_id, question_id, fingerprint, subject_id, question_uuid,
+                workspace_id, batch_id, question_id, fingerprint, subject_id, question_uuid,
                 question_vno, format_vno, comprehension_difficulty, comprehension_data_hash,
                 action, status, api_code, api_message, api_response, uploaded_record_id,
                 created_at, updated_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
+                workspace_id,
                 batch_id,
                 question_id,
                 fingerprint,
@@ -160,19 +165,21 @@ class QuestionStateStore:
         question_id: str,
         fingerprint: str,
         upload_log_id: int | None,
+        workspace_id: str | None = None,
     ) -> None:
         now = _now()
         self._conn.execute(
             """
             INSERT INTO question_state (
-                question_id, latest_fingerprint, latest_upload_log_id, updated_at
-            ) VALUES (?, ?, ?, ?)
+                question_id, workspace_id, latest_fingerprint, latest_upload_log_id, updated_at
+            ) VALUES (?, ?, ?, ?, ?)
             ON CONFLICT(question_id) DO UPDATE SET
+                workspace_id = excluded.workspace_id,
                 latest_fingerprint = excluded.latest_fingerprint,
                 latest_upload_log_id = excluded.latest_upload_log_id,
                 updated_at = excluded.updated_at
             """,
-            (question_id, fingerprint, upload_log_id, now),
+            (question_id, workspace_id, fingerprint, upload_log_id, now),
         )
         self._conn.commit()
 

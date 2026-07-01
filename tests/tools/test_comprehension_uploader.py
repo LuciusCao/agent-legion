@@ -13,6 +13,7 @@ import pytest
 _TOOL_DIR = Path(__file__).parents[2] / "tools" / "comprehension-uploader"
 sys.path.insert(0, str(_TOOL_DIR))
 
+from comprehension_uploader import cli
 from comprehension_uploader.config import Config
 from comprehension_uploader.db import Database
 from comprehension_uploader.fingerprint import compute_question_fingerprint
@@ -265,4 +266,115 @@ def test_db_schema_and_indexes(tmp_path: Path) -> None:
     assert "idx_logs_question" in names
     assert "idx_logs_fingerprint" in names
     assert "idx_logs_batch" in names
+    assert "idx_logs_workspace" in names
     assert "idx_scan_question" in names
+
+
+def _make_cli_config(tmp_path: Path) -> Path:
+    config = tmp_path / "config.yaml"
+    config.write_text(
+        "\n".join(
+            [
+                "api_base_url: http://example.com",
+                "auth_token_env: COMPREHENSION_API_TOKEN",
+                f"db_path: {tmp_path / 'cli.db'}",
+                f'question_source: {{"type": "json_file", "path": "{tmp_path / "questions.json"}"}}',
+                "upload_on_duplicate: skip",
+                "request_timeout: 5",
+                "max_retries: 0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+    return config
+
+
+def _make_cli_package(tmp_path: Path) -> Path:
+    package = tmp_path / "package.jsonl"
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "QCLI",
+                "subject_id": 2,
+                "question_uuid": "uuid-cli",
+                "question_vno": 1,
+                "comprehension_difficulty": 50,
+                "format_vno": "v1",
+                "comprehension_data": {"steps": []},
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    return package
+
+
+def test_cli_upload_uses_workspace_as_batch_id(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    config_path = _make_cli_config(tmp_path)
+    package_path = _make_cli_package(tmp_path)
+
+    captured: dict[str, Any] = {}
+
+    def fake_upload_batch(
+        self: Uploader, records: list[Any], batch_id: str, workspace_id: str | None = None
+    ) -> None:
+        captured["batch_id"] = batch_id
+        captured["workspace_id"] = workspace_id
+        captured["count"] = len(records)
+
+    monkeypatch.setattr(Uploader, "upload_batch", fake_upload_batch)
+    monkeypatch.setenv("COMPREHENSION_API_TOKEN", "token")
+
+    rc = cli.main(
+        [
+            "upload",
+            "--config",
+            str(config_path),
+            "--workspace",
+            "ws-123",
+            str(package_path),
+        ]
+    )
+    assert rc == 0
+    assert captured["batch_id"].startswith("ws-123-")
+    assert captured["workspace_id"] == "ws-123"
+    assert captured["count"] == 1
+    assert "ws-123" in capsys.readouterr().out
+
+
+def test_cli_upload_batch_id_overrides_workspace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    config_path = _make_cli_config(tmp_path)
+    package_path = _make_cli_package(tmp_path)
+
+    captured: dict[str, Any] = {}
+
+    def fake_upload_batch(
+        self: Uploader, records: list[Any], batch_id: str, workspace_id: str | None = None
+    ) -> None:
+        captured["batch_id"] = batch_id
+        captured["workspace_id"] = workspace_id
+
+    monkeypatch.setattr(Uploader, "upload_batch", fake_upload_batch)
+    monkeypatch.setenv("COMPREHENSION_API_TOKEN", "token")
+
+    rc = cli.main(
+        [
+            "upload",
+            "--config",
+            str(config_path),
+            "--workspace",
+            "ws-123",
+            "--batch-id",
+            "batch-999",
+            str(package_path),
+        ]
+    )
+    assert rc == 0
+    assert captured["batch_id"] == "batch-999"
+    assert captured["workspace_id"] == "ws-123"
