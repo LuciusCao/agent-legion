@@ -191,6 +191,7 @@ def assemble_comprehension_info(
         "fingerprint": fingerprint,
         "fingerprint_source": question.get("fingerprint_source", "missing"),
         "fingerprint_missing": fingerprint is None,
+        "schema_version": "v1",
         "comprehension_data": comprehension_data,
     }
     manifest = {

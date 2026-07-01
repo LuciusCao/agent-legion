@@ -74,3 +74,10 @@ scan-comprehension: ## 扫描审题信息 fingerprint 变化 (CONFIG/OUTPUT)
 	$(UV) run python tools/content-uploader/run.py scan \
 		$(if $(CONFIG),--config $(CONFIG)) \
 		$(if $(OUTPUT),--output $(OUTPUT))
+
+.PHONY: package-comprehension
+package-comprehension: ## 从 comprehension_info.json 生成 package.jsonl (INPUT_DIR/CONFIG/OUTPUT)
+	$(UV) run python tools/content-uploader/run.py package \
+		$(if $(INPUT_DIR),--input-dir $(INPUT_DIR)) \
+		$(if $(CONFIG),--config $(CONFIG)) \
+		$(if $(OUTPUT),--output $(OUTPUT))
