@@ -75,7 +75,7 @@ LocalExecutor(...).execute(context)
 
 - Skill 只在外部仓库（如 `~/.agents/skills/agent-legion/...`）修改，不要复制或 symlink 到项目根。
 - 修改后同步 shared assets，更新 `config/skills.yaml` 与 `config/skills.lock`。
-- 跑 `UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py` 验证字节一致。
+- 跑 `UV_CACHE_DIR=.uv-cache uv run python scripts/check-skills-shared.py` 验证共享引用文件一致。
 - 完整流程见 [README.md](README.md) 的 Pi Agent Runner 章节。
 
 ## 8. Security & Data

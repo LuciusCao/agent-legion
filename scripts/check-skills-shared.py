@@ -17,7 +17,6 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SKILLS_CONFIG = PROJECT_ROOT / "config" / "skills.yaml"
 
 SHARED_FILES = {
-    "validation helpers": "scripts/validation.py",
     "ability taxonomy": "references/question_comprehension_abilities.json",
 }
 

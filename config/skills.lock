@@ -1,26 +1,26 @@
 version: '1'
-resolved_at: '2026-06-29T04:29:39Z'
+resolved_at: '2026-07-01T02:58:00Z'
 skills:
   question_comprehension_info/assess_comprehension_difficulty:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
-    ref: v1.1.4
-    commit: ce83a2f9f56a8e1d121df39465d32042fc6dbe94
+    ref: v1.1.5
+    commit: 837767e2f4052a2e7dca795c087a2852c8a82a1b
   question_comprehension_info/generate_key_info:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
-    ref: v1.3.4
-    commit: 7092456081796581933b3081ec02a21798b34386
+    ref: v1.3.5
+    commit: ef8f6c48dacc29f7d6631f822574e1dee3df8442
   question_comprehension_info/generate_possible_errors:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
-    ref: v1.3.1
-    commit: b28175f33b1abd4cfe46e4265282b207d6007d18
+    ref: v1.3.2
+    commit: efd8aabeb43636925038ca2013eaabe840a49292
   question_comprehension_info/review_key_info:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_key_info
-    ref: v1.1.7
-    commit: 63c1206be3138acaf06a0efafe83842a31208f35
+    ref: v1.1.8
+    commit: a891c9686ad8f96f1e6d01de2c05c23a78b20978
   question_comprehension_info/review_possible_errors:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
-    ref: v1.3.1
-    commit: 3f080b921b3d87934ad8436cc05586be67cca9c8
+    ref: v1.3.2
+    commit: 4417c4414e788ceaec60555f3e04eb7e9343ffef
   video_knowledge/generate_chapters:
     repo: file:///Users/user/.agents/skills/agent-legion/video_knowledge/generate_chapters
     ref: v1.0.0
