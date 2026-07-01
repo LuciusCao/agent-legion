@@ -1,0 +1,21 @@
+# Example configuration for the standalone comprehension uploader.
+# Copy this file and adjust the values for your environment.
+
+api_base_url: "http://dev-basic-be-addonsquestionsource.be.dev.example.com"
+auth_token_env: "COMPREHENSION_API_TOKEN"   # reads Bearer token from this env var
+
+db_path: "data/comprehension_uploader.db"
+
+question_source:
+  type: "json_file"
+  path: "data/question_snapshots.json"      # question_id -> {stem, options, ...}
+  # Or use an HTTP source:
+  # type: "http"
+  # url_template: "https://cms.example.com/api/question/{question_id}"
+  # headers:
+  #   Authorization: "Bearer {token}"
+  # response_path: "data.normalized"
+
+upload_on_duplicate: "update"   # "update" | "skip"
+request_timeout: 30
+max_retries: 3
