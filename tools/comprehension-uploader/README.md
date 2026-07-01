@@ -15,7 +15,6 @@ Copy `config.example.yaml` to `config.yaml` and edit it for your environment:
 
 ```yaml
 api_base_url: "http://dev-basic-be-addonsquestionsource.be.dev.example.com"
-auth_token_env: "COMPREHENSION_API_TOKEN"
 db_path: "data/comprehension_uploader.db"
 question_source:
   type: "json_file"
@@ -25,8 +24,27 @@ request_timeout: 30
 max_retries: 3
 ```
 
-The bearer token is read from the environment variable named by
-`auth_token_env`.
+## Authentication
+
+The tool follows the same CMS token flow used by the rest of the project. It
+automatically loads `.env` if present.
+
+Priority:
+
+1. `BASECMS_TOKEN` environment variable (or `.env` entry).
+2. Generated token from `BASECMS_APP_ID`, `BASECMS_NONCE`, `BASECMS_SECRET`,
+   `BASECMS_TOKEN_URL`. The generation is the same HMAC-SHA256 flow as
+   `server/app/cms/auth.py`.
+3. Optional `token` / `token_gen` overrides in `config.yaml`.
+
+Typical usage with the project's `.env`:
+
+```bash
+make upload WORKSPACE=ws-123 CONFIG=config.prod.yaml PACKAGE=package.jsonl
+```
+
+No extra `export` is needed as long as `BASECMS_APP_ID`, `BASECMS_NONCE`,
+`BASECMS_SECRET`, and `BASECMS_TOKEN_URL` are set in `.env`.
 
 ## Input format (`package.jsonl`)
 

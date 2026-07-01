@@ -4,6 +4,7 @@ from typing import Any
 
 import requests
 
+from comprehension_uploader.auth import get_token
 from comprehension_uploader.config import Config
 from comprehension_uploader.package_parser import UploadRecord
 
@@ -14,9 +15,10 @@ class ComprehensionAPIClient:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.session = requests.Session()
+        token = get_token(config.model_dump())
         headers: dict[str, str] = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {config.auth_token()}",
+            "Authorization": f"Bearer {token}",
         }
         self.session.headers.update(headers)
 

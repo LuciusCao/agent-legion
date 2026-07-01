@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -14,6 +15,7 @@ _TOOL_DIR = Path(__file__).parents[2] / "tools" / "comprehension-uploader"
 sys.path.insert(0, str(_TOOL_DIR))
 
 from comprehension_uploader import cli
+from comprehension_uploader.auth import AuthError, get_token
 from comprehension_uploader.config import Config
 from comprehension_uploader.db import Database
 from comprehension_uploader.fingerprint import compute_question_fingerprint
@@ -30,7 +32,6 @@ from server.app.workflows.question_fingerprint import (
 def _make_config(tmp_path: Path, upload_on_duplicate: str = "update") -> Config:
     return Config(
         api_base_url="http://example.com",
-        auth_token_env="COMPREHENSION_API_TOKEN",
         db_path=str(tmp_path / "test.db"),
         question_source={"type": "json_file", "path": str(tmp_path / "questions.json")},
         upload_on_duplicate=upload_on_duplicate,  # type: ignore[arg-type]
@@ -276,7 +277,6 @@ def _make_cli_config(tmp_path: Path) -> Path:
         "\n".join(
             [
                 "api_base_url: http://example.com",
-                "auth_token_env: COMPREHENSION_API_TOKEN",
                 f"db_path: {tmp_path / 'cli.db'}",
                 f'question_source: {{"type": "json_file", "path": "{tmp_path / "questions.json"}"}}',
                 "upload_on_duplicate: skip",
@@ -327,7 +327,7 @@ def test_cli_upload_uses_workspace_as_batch_id(
         captured["count"] = len(records)
 
     monkeypatch.setattr(Uploader, "upload_batch", fake_upload_batch)
-    monkeypatch.setenv("COMPREHENSION_API_TOKEN", "token")
+    monkeypatch.setenv("BASECMS_TOKEN", "token")
 
     rc = cli.main(
         [
@@ -361,7 +361,7 @@ def test_cli_upload_batch_id_overrides_workspace(
         captured["workspace_id"] = workspace_id
 
     monkeypatch.setattr(Uploader, "upload_batch", fake_upload_batch)
-    monkeypatch.setenv("COMPREHENSION_API_TOKEN", "token")
+    monkeypatch.setenv("BASECMS_TOKEN", "token")
 
     rc = cli.main(
         [
@@ -378,3 +378,42 @@ def test_cli_upload_batch_id_overrides_workspace(
     assert rc == 0
     assert captured["batch_id"] == "batch-999"
     assert captured["workspace_id"] == "ws-123"
+
+
+def test_get_token_prefers_basecms_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BASECMS_TOKEN", "direct-token")
+    monkeypatch.delenv("BASECMS_APP_ID", raising=False)
+    assert get_token({}) == "direct-token"
+
+
+def test_get_token_generates_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BASECMS_TOKEN", raising=False)
+    monkeypatch.setenv("BASECMS_APP_ID", "app-1")
+    monkeypatch.setenv("BASECMS_NONCE", "nonce-1")
+    monkeypatch.setenv("BASECMS_SECRET", "secret-1")
+    monkeypatch.setenv("BASECMS_TOKEN_URL", "http://auth.example.com/token")
+
+    with patch("comprehension_uploader.auth.requests.post") as mock_post:
+        mock_post.return_value.json.return_value = {"data": {"token": "generated-token"}}
+        mock_post.return_value.raise_for_status = lambda: None
+        token = get_token({})
+
+    assert token == "generated-token"
+    call_kwargs = mock_post.call_args.kwargs
+    payload = call_kwargs["json"]
+    assert payload["app_id"] == "app-1"
+    assert payload["nonce"] == "nonce-1"
+    assert payload["secret"] == "secret-1"
+    assert "timestamp" in payload
+    assert "sign" in payload
+    assert call_kwargs["timeout"] == 10
+
+
+def test_get_token_raises_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BASECMS_TOKEN", raising=False)
+    monkeypatch.delenv("BASECMS_APP_ID", raising=False)
+    monkeypatch.delenv("BASECMS_NONCE", raising=False)
+    monkeypatch.delenv("BASECMS_SECRET", raising=False)
+    monkeypatch.delenv("BASECMS_TOKEN_URL", raising=False)
+    with pytest.raises(AuthError):
+        get_token({})
