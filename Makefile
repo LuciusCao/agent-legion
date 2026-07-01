@@ -58,3 +58,19 @@ api-generate: ## 重新生成前端 API 类型
 .PHONY: install-hooks
 install-hooks: ## 安装可选的预提交钩子
 	./scripts/install-git-hooks.sh
+
+# 审题信息上传工具
+.PHONY: upload
+upload: ## 上传审题信息包 (WORKSPACE/CONFIG/BATCH/PACKAGE)
+	$(UV) run python tools/content-uploader/run.py upload \
+		$(if $(WORKSPACE),--workspace $(WORKSPACE)) \
+		$(if $(CONFIG),--config $(CONFIG)) \
+		$(if $(BATCH),--batch-id $(BATCH)) \
+		$(ARGS) \
+		$(PACKAGE)
+
+.PHONY: scan-comprehension
+scan-comprehension: ## 扫描审题信息 fingerprint 变化 (CONFIG/OUTPUT)
+	$(UV) run python tools/content-uploader/run.py scan \
+		$(if $(CONFIG),--config $(CONFIG)) \
+		$(if $(OUTPUT),--output $(OUTPUT))
