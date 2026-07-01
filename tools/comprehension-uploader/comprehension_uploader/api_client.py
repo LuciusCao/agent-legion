@@ -14,10 +14,10 @@ class ComprehensionAPIClient:
     def __init__(self, config: Config) -> None:
         self.config = config
         self.session = requests.Session()
-        headers: dict[str, str] = {"Content-Type": "application/json"}
-        token = config.auth_token()
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+        headers: dict[str, str] = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {config.auth_token()}",
+        }
         self.session.headers.update(headers)
 
     def _url(self, path: str) -> str:

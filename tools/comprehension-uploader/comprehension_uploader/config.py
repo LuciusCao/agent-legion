@@ -27,5 +27,10 @@ class Config(BaseModel):
     request_timeout: int = Field(default=30, ge=1)
     max_retries: int = Field(default=3, ge=0)
 
-    def auth_token(self) -> str | None:
-        return os.environ.get(self.auth_token_env)
+    def auth_token(self) -> str:
+        token = os.environ.get(self.auth_token_env)
+        if not token:
+            raise ConfigError(
+                f"Authentication token environment variable {self.auth_token_env!r} is not set"
+            )
+        return token
