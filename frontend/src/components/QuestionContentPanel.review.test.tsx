@@ -24,6 +24,7 @@ const mockComprehensionInfo = {
       {
         error_id: 'pe_001',
         error_type: 'question_comprehension',
+        position: 1,
         error_answer: ['C'],
         error_description: '区间写反',
         related_key_info_ids: ['ki_001'],
@@ -164,7 +165,7 @@ describe('QuestionContentPanel review integration', () => {
     await waitFor(() =>
       expect(screen.getByText('常见审题错误')).toBeInTheDocument()
     )
-    const chip = screen.getByText('区间写反').closest('button')!
+    const chip = screen.getByText('第1空：区间写反').closest('button')!
     fireEvent.click(chip)
 
     await waitFor(() =>

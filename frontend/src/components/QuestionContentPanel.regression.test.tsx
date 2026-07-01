@@ -93,6 +93,7 @@ const realComprehension = {
         {
           error_id: 'pe_001',
           error_type: 'question_comprehension',
+          position: 1,
           error_answer: ['240'],
           error_description:
             '学生把“盒”误当作最终单位，只计算出24箱共有多少盒牛奶（24×10），漏看了“每盒15袋”和题目末尾要求的“袋”。',
@@ -101,6 +102,7 @@ const realComprehension = {
         {
           error_id: 'pe_002',
           error_type: 'question_comprehension',
+          position: 1,
           error_answer: ['360'],
           error_description:
             '学生跳过了“先求总盒数”的中间步骤，直接用箱数乘每盒袋数（24×15），说明没有理解数量之间的层级关系。',
@@ -109,6 +111,7 @@ const realComprehension = {
         {
           error_id: 'pe_003',
           error_type: 'question_comprehension',
+          position: 1,
           error_answer: ['150'],
           error_description:
             '学生只计算了一盒牛奶有多少袋（10×15），忽略了学校一共订了24箱这个总量条件。',
@@ -117,6 +120,7 @@ const realComprehension = {
         {
           error_id: 'pe_004',
           error_type: 'question_comprehension',
+          position: 1,
           error_answer: ['49'],
           error_description:
             '学生把题目中的三个数直接相加（24+10+15），没有理解“每箱”“每盒”表示的是乘法关系。',
@@ -125,6 +129,7 @@ const realComprehension = {
         {
           error_id: 'pe_005',
           error_type: 'question_comprehension',
+          position: 1,
           error_answer: ['3600盒'],
           error_description:
             '学生虽然算对了数值3600，但把最终单位写成了“盒”，没有注意到题目要求用“袋”作单位。',
@@ -133,6 +138,7 @@ const realComprehension = {
         {
           error_id: 'pe_006',
           error_type: 'question_comprehension',
+          position: 1,
           error_answer: ['24箱'],
           error_description:
             '学生只从题干中找到了“24箱牛奶”这个已知条件，没有理解题目真正要求计算的是总袋数。',
