@@ -1,8 +1,8 @@
-"""Re-export the comprehension info schema registry for the uploader package."""
+"""Comprehension info schema definitions and registry."""
 
 from __future__ import annotations
 
-from schemas.registry import (
+from comprehension_uploader.schemas.registry import (
     SUPPORTED_VERSIONS,
     SchemaValidationError,
     UnsupportedSchemaVersionError,

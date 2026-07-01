@@ -6,7 +6,7 @@ from typing import Any
 
 from pydantic import BaseModel, ValidationError
 
-from schemas.v1 import ComprehensionDataV1
+from comprehension_uploader.schemas.v1 import ComprehensionDataV1
 
 SUPPORTED_VERSIONS: dict[str, type[BaseModel]] = {
     "v1": ComprehensionDataV1,

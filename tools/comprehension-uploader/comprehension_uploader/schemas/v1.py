@@ -47,6 +47,7 @@ class KeyInfoItem(BaseModel):
     content: GivenContent | HiddenContent
     question: SocraticQuestion
     question_comprehension_ability: str
+    decision: Literal["approved", "rejected"] | None = None
 
     @model_validator(mode="after")
     def _content_matches_type(self) -> KeyInfoItem:
