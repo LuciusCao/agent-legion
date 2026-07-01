@@ -17,3 +17,4 @@ frontend/dist/
 coverage/
 .DS_Store
 config/workflow.yaml.bak-*
+tools/comprehension-uploader/config.dev.yaml
