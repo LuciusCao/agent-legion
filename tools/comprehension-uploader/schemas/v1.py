@@ -4,31 +4,36 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class Position(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     start: int | None
     end: int | None
 
 
 class SocraticOption(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     label: str
     text: str
     is_correct: bool
 
 
 class SocraticQuestion(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     text: str
     options: list[SocraticOption]
 
 
 class GivenContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     text: str
     position: Position
 
 
 class HiddenContent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     derived_text: str
     source_text: str
     position: Position
@@ -36,6 +41,7 @@ class HiddenContent(BaseModel):
 
 
 class KeyInfoItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     key_info_id: str
     type: Literal["given", "hidden"]
     content: GivenContent | HiddenContent
@@ -44,6 +50,7 @@ class KeyInfoItem(BaseModel):
 
 
 class PossibleErrorItem(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     error_id: str
     error_type: Literal["question_comprehension"]
     position: int
@@ -54,6 +61,7 @@ class PossibleErrorItem(BaseModel):
 
 
 class ComprehensionDataV1(BaseModel):
+    model_config = ConfigDict(extra="forbid")
     fingerprint: str | None
     comprehension_difficulty: int = Field(ge=1, le=99)
     key_info_list: list[KeyInfoItem]
