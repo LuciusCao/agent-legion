@@ -13,7 +13,11 @@ import yaml
 from comprehension_uploader.api_client import ComprehensionAPIClient
 from comprehension_uploader.config import Config, ConfigError
 from comprehension_uploader.db import Database
-from comprehension_uploader.package_parser import PackageParseError, parse_package
+from comprehension_uploader.package_parser import (
+    PackageParseError,
+    parse_package,
+    validate_package,
+)
 from comprehension_uploader.packager import package_comprehension_info
 from comprehension_uploader.question_source import build_question_source
 from comprehension_uploader.scanner import Scanner
@@ -101,14 +105,9 @@ def cmd_package(args: argparse.Namespace) -> int:
 
 def cmd_validate(args: argparse.Namespace) -> int:
     package_path = Path(args.package)
-    passed = 0
-    failed = 0
-    try:
-        for _record in parse_package(package_path):
-            passed += 1
-    except PackageParseError as exc:
-        failed += 1
-        print(f"FAIL: {exc}", file=sys.stderr)
+    passed, failed, errors = validate_package(package_path)
+    for error in errors:
+        print(f"FAIL: {error}", file=sys.stderr)
     print(f"Validated {package_path}: passed={passed}, failed={failed}")
     return 0 if failed == 0 else 1
 

@@ -106,7 +106,7 @@ Each line is a JSON object:
 
 The `comprehension_data` field itself does **not** contain `schema_version`;
 that stays at the top level. Supported versions are defined under
-`tools/comprehension-uploader/schemas/` and validated before upload.
+`tools/comprehension-uploader/comprehension_uploader/schemas/` and validated before upload.
 
 ## Commands
 

@@ -19,7 +19,12 @@ from comprehension_uploader.auth import AuthError, get_token
 from comprehension_uploader.config import Config
 from comprehension_uploader.db import Database
 from comprehension_uploader.fingerprint import compute_question_fingerprint
-from comprehension_uploader.package_parser import PackageParseError, UploadRecord, parse_package
+from comprehension_uploader.package_parser import (
+    PackageParseError,
+    UploadRecord,
+    parse_package,
+    validate_package,
+)
 from comprehension_uploader.question_source import JSONFileQuestionSource
 from comprehension_uploader.scanner import Scanner
 from comprehension_uploader.uploader import Uploader
@@ -516,7 +521,7 @@ def test_package_parser_accepts_valid_v1_comprehension_data(tmp_path: Path) -> N
     assert record.question_id == "Q1"
 
 
-def test_package_parser_rejects_invalid_v1_comprehension_data(tmp_path: Path) -> None:
+def test_validate_package_rejects_invalid_v1_comprehension_data(tmp_path: Path) -> None:
     package = tmp_path / "package.jsonl"
     invalid_data = _make_valid_comprehension_data()
     invalid_data["possible_error_list"][0].pop("cognitive_basis")
@@ -533,13 +538,14 @@ def test_package_parser_rejects_invalid_v1_comprehension_data(tmp_path: Path) ->
         + "\n",
         encoding="utf-8",
     )
-    with pytest.raises(PackageParseError) as exc_info:
-        list(parse_package(package))
-    assert "v1" in str(exc_info.value)
-    assert "schema validation failed" in str(exc_info.value).lower()
+    passed, failed, errors = validate_package(package)
+    assert passed == 0
+    assert failed == 1
+    assert "v1" in errors[0]
+    assert "schema validation failed" in errors[0].lower()
 
 
-def test_package_parser_unsupported_version(tmp_path: Path) -> None:
+def test_validate_package_unsupported_version(tmp_path: Path) -> None:
     package = tmp_path / "package.jsonl"
     package.write_text(
         json.dumps(
@@ -554,10 +560,33 @@ def test_package_parser_unsupported_version(tmp_path: Path) -> None:
         + "\n",
         encoding="utf-8",
     )
-    with pytest.raises(PackageParseError) as exc_info:
-        list(parse_package(package))
-    assert "v99" in str(exc_info.value)
-    assert "unsupported" in str(exc_info.value).lower()
+    passed, failed, errors = validate_package(package)
+    assert passed == 0
+    assert failed == 1
+    assert "v99" in errors[0]
+    assert "unsupported" in errors[0].lower()
+
+
+def test_parse_package_does_not_validate_schema(tmp_path: Path) -> None:
+    package = tmp_path / "package.jsonl"
+    invalid_data = _make_valid_comprehension_data()
+    invalid_data["possible_error_list"][0].pop("cognitive_basis")
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "Q1",
+                "format_vno": "v1",
+                "comprehension_data": invalid_data,
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    records = list(parse_package(package))
+    assert len(records) == 1
+    assert records[0].question_id == "Q1"
 
 
 def test_package_parser_format_vno_fallback_to_v1(

@@ -67,8 +67,13 @@ def _resolve_format_vno(payload: dict[str, Any], line_no: int) -> str:
     return "v1"
 
 
-def _validate_comprehension_data(record: UploadRecord, line_no: int) -> None:
-    """Validate ``record.comprehension_data`` against its declared schema version."""
+def validate_record(record: UploadRecord, line_no: int) -> None:
+    """Validate ``record.comprehension_data`` against its declared schema version.
+
+    Raises:
+        PackageParseError: If ``comprehension_data`` is not valid JSON, the schema
+            version is unsupported, or the data fails schema validation.
+    """
     version = record.format_vno or "v1"
     try:
         raw = json.loads(record.comprehension_data)
@@ -87,7 +92,12 @@ def _validate_comprehension_data(record: UploadRecord, line_no: int) -> None:
 
 
 def parse_package(path: Path) -> Iterator[UploadRecord]:
-    """Yield validated upload records from a JSONL package file."""
+    """Yield upload records from a JSONL package file.
+
+    This function performs structural parsing only. Schema validation of
+    ``comprehension_data`` is the responsibility of the caller (see
+    :func:`validate_record` and :func:`validate_package`).
+    """
     with path.open(encoding="utf-8") as handle:
         for line_no, raw_line in enumerate(handle, start=1):
             line = raw_line.strip()
@@ -108,8 +118,41 @@ def parse_package(path: Path) -> Iterator[UploadRecord]:
             except ValidationError as exc:
                 raise PackageParseError(f"Line {line_no} validation failed: {exc}") from exc
 
-            _validate_comprehension_data(record, line_no)
-
             # Ensure the effective version is reflected on the yielded record.
             record.format_vno = effective_version
             yield record
+
+
+def validate_package(path: Path) -> tuple[int, int, list[str]]:
+    """Validate every line of a JSONL package file and return a summary.
+
+    Returns:
+        A tuple of ``(passed_count, failed_count, error_messages)``.
+    """
+    passed = 0
+    failed = 0
+    errors: list[str] = []
+    with path.open(encoding="utf-8") as handle:
+        for line_no, raw_line in enumerate(handle, start=1):
+            line = raw_line.strip()
+            if not line:
+                continue
+            try:
+                payload = json.loads(line)
+                if not isinstance(payload, dict):
+                    raise PackageParseError(f"Line {line_no} is not a JSON object")
+                effective_version = _resolve_format_vno(payload, line_no)
+                payload["format_vno"] = effective_version
+                record = UploadRecord.model_validate(payload)
+                record.format_vno = effective_version
+                validate_record(record, line_no)
+            except PackageParseError as exc:
+                failed += 1
+                errors.append(str(exc))
+                continue
+            except ValidationError as exc:
+                failed += 1
+                errors.append(f"Line {line_no} validation failed: {exc}")
+                continue
+            passed += 1
+    return passed, failed, errors
