@@ -40,7 +40,17 @@ Priority:
 Typical usage with the project's `.env`:
 
 ```bash
+# 1. Build package.jsonl from agent-legion comprehension_info.json artifacts
+make package-comprehension \
+  INPUT_DIR=./workspace-output \
+  CONFIG=config.prod.yaml \
+  OUTPUT=package.jsonl
+
+# 2. Upload the batch
 make upload WORKSPACE=ws-123 CONFIG=config.prod.yaml PACKAGE=package.jsonl
+
+# 3. (Later) scan for questions whose content changed and need re-generation
+make scan-comprehension CONFIG=config.prod.yaml OUTPUT=stale.json
 ```
 
 No extra `export` is needed as long as `BASECMS_APP_ID`, `BASECMS_NONCE`,
@@ -58,14 +68,18 @@ Each line is a JSON object:
   "question_vno": 1745999400,
   "comprehension_difficulty": 50,
   "format_vno": "v1",
-  "comprehension_data": { "steps": [...] },
+  "comprehension_data": {
+    "fingerprint": "...",
+    "comprehension_difficulty": 50,
+    "key_info_list": [...],
+    "possible_error_list": [...]
+  },
   "stem": "题干文本",
   "options": [{"label": "A", "text": "选项 A"}]
 }
 ```
 
-- `comprehension_data` may be a dict or list; it is JSON-stringified before
-  calling the API.
+- `comprehension_data` is JSON-stringified before calling the API.
 - `format_vno` is the comprehension info schema version. It is resolved in this
   order:
   1. The `format_vno` field on the input line.
