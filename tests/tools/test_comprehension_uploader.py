@@ -486,6 +486,7 @@ def test_get_token_raises_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> 
     monkeypatch.delenv("BASECMS_NONCE", raising=False)
     monkeypatch.delenv("BASECMS_SECRET", raising=False)
     monkeypatch.delenv("BASECMS_TOKEN_URL", raising=False)
+    monkeypatch.setattr("comprehension_uploader.auth._maybe_load_dotenv", lambda: None)
     with pytest.raises(AuthError):
         get_token({})
 

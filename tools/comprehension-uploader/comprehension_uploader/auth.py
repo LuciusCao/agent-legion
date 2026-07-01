@@ -20,10 +20,41 @@ class AuthError(Exception):
     """Raised when a token cannot be obtained."""
 
 
+_dotenv_loaded = False
+
+
+def _load_dotenv_builtin(path: Path) -> None:
+    """Minimal .env loader used when python-dotenv is not installed."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        key, sep, value = line.partition("=")
+        if not sep:
+            continue
+        key = key.strip()
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = value
+
+
 def _maybe_load_dotenv() -> None:
+    global _dotenv_loaded
+    if _dotenv_loaded:
+        return
     env_path = Path(".env")
-    if load_dotenv is not None and env_path.exists():
-        load_dotenv(env_path)
+    if env_path.exists():
+        if load_dotenv is not None:
+            load_dotenv(env_path)
+        else:
+            _load_dotenv_builtin(env_path)
+    _dotenv_loaded = True
 
 
 def _token_gen_config(config: dict[str, Any]) -> dict[str, str]:
