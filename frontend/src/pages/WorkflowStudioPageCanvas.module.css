@@ -1,0 +1,13 @@
+.canvas {
+  min-width: 0;
+  padding: 16px;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.canvasToolbar {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+}
