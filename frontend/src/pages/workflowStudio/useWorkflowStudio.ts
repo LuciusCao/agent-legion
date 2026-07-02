@@ -68,7 +68,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
   }, [reload, workspaceId])
 
   const dirty = isDefinitionDirty(originalYaml, definitionYaml)
-  const canSubmit = Boolean(workspaceId && definitionYaml.trim())
+  const canSubmit = Boolean(workspaceId && definitionYaml.trim() && dirty)
   const nodes = useMemo(() => buildDagNodes(workflow), [workflow])
   const edges = useMemo(() => buildDagEdges(workflow), [workflow])
 

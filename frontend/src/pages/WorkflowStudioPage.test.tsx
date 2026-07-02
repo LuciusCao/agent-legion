@@ -116,6 +116,8 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     await screen.findByText('Workflow Studio')
+    const editor = screen.getByLabelText('Workflow definition')
+    await user.type(editor, '\n# edited')
     await user.click(screen.getByRole('button', { name: '发布' }))
 
     expect(await screen.findByText('发布成功')).toBeInTheDocument()
