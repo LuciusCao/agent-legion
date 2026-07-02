@@ -212,7 +212,7 @@ class WorkflowWorkerThread:
         workspace_id = workspace["id"]
         workflow_key = definition.key
         node_key = node.key
-        log_path = self.settings.logs_dir / "jobs" / f"{job['id']}-{node_key}.log"
+        log_path = self.settings.logs_dir.resolve() / "jobs" / f"{job['id']}-{node_key}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
         with self.job_db._connect_read() as conn:

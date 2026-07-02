@@ -7,7 +7,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
-from server.app.storage_paths import derive_run_dir_from_log_path, resolve_data_path
+from server.app.services.job_run_dir_lookup import (
+    build_job_dir_index,
+    derive_run_dir_from_index,
+)
+from server.app.storage_paths import resolve_data_path
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +50,8 @@ def cleanup_old_logs(
     now = now or datetime.now(UTC)
     logs_removed = 0
     run_dirs_removed = 0
-
     log_cutoff = now - timedelta(days=config.log_retention_days)
     run_dir_cutoff = now - timedelta(days=config.run_dir_retention_days)
-
     rows = conn.execute(
         """
         select id, job_id, node_key, log_path, run_dir, finished_at
@@ -57,7 +59,7 @@ def cleanup_old_logs(
         where status in ('completed', 'failed') and finished_at != ''
         """
     ).fetchall()
-
+    job_dir_index = build_job_dir_index(data_dir / "jobs", {row["job_id"] for row in rows})
     for row in rows:
         finished_at = row["finished_at"]
         try:
@@ -66,30 +68,23 @@ def cleanup_old_logs(
                 finished = finished.replace(tzinfo=UTC)
         except ValueError:
             continue
-
         log_path_str = row["log_path"]
         if log_path_str and finished <= log_cutoff:
             try:
-                log_path = resolve_data_path(log_path_str, data_dir, allow_missing=True)
-                _remove_path(log_path)
+                _remove_path(resolve_data_path(log_path_str, data_dir, allow_missing=True))
                 logs_removed += 1
             except Exception as exc:
                 logger.warning("Failed to remove log %s: %s", log_path_str, exc)
-
         run_dir_str = row["run_dir"]
-        if not run_dir_str and finished <= run_dir_cutoff:
-            run_dir = derive_run_dir_from_log_path(
-                row["log_path"], row["node_key"], row["job_id"], data_dir / "jobs"
-            )
-            if run_dir is not None:
-                run_dir_str = str(run_dir)
-
-        if run_dir_str and finished <= run_dir_cutoff:
-            try:
-                run_dir_path = resolve_data_path(run_dir_str, data_dir, allow_missing=True)
-                _remove_path(run_dir_path)
-                run_dirs_removed += 1
-            except Exception as exc:
-                logger.warning("Failed to remove run_dir %s: %s", run_dir_str, exc)
-
+        if finished <= run_dir_cutoff:
+            if not run_dir_str:
+                run_dir = derive_run_dir_from_index(row["job_id"], row["node_key"], job_dir_index)
+                if run_dir is not None:
+                    run_dir_str = str(run_dir)
+            if run_dir_str:
+                try:
+                    _remove_path(resolve_data_path(run_dir_str, data_dir, allow_missing=True))
+                    run_dirs_removed += 1
+                except Exception as exc:
+                    logger.warning("Failed to remove run_dir %s: %s", run_dir_str, exc)
     return logs_removed, run_dirs_removed
