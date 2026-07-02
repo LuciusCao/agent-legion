@@ -767,8 +767,8 @@ export interface paths {
     }
     get?: never
     put?: never
-    /** Publish Workflow Draft */
-    post: operations['publish_workflow_draft_api_workspaces__workspace_id__workflow_drafts_publish_post']
+    /** Publish Draft */
+    post: operations['publish_draft_api_workspaces__workspace_id__workflow_drafts_publish_post']
     delete?: never
     options?: never
     head?: never
@@ -809,10 +809,34 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/workflow-revisions/active': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Active Workflow Revision */
+    get: operations['get_active_workflow_revision_api_workspaces__workspace_id__workflow_revisions_active_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
   schemas: {
+    /** ActiveWorkflowRevisionResponse */
+    ActiveWorkflowRevisionResponse: {
+      /** Definition Yaml */
+      definition_yaml: string
+      revision: components['schemas']['WorkflowRevisionSummary']
+      workflow: components['schemas']['WorkflowDefinitionResponse']
+    }
     /** AgentStatusResponse */
     AgentStatusResponse: {
       /** Busy */
@@ -1477,6 +1501,7 @@ export interface components {
       label: string
       /** Outputs */
       outputs: string[]
+      terminal?: components['schemas']['WorkflowTerminalResponse'] | null
     }
     /** WorkflowResponse */
     WorkflowResponse: {
@@ -1512,6 +1537,11 @@ export interface components {
       key: string
       /** Label */
       label: string
+    }
+    /** WorkflowTerminalResponse */
+    WorkflowTerminalResponse: {
+      /** Outcome */
+      outcome: string
     }
     /** WorkflowsListResponse */
     WorkflowsListResponse: {
@@ -3312,7 +3342,7 @@ export interface operations {
       }
     }
   }
-  publish_workflow_draft_api_workspaces__workspace_id__workflow_drafts_publish_post: {
+  publish_draft_api_workspaces__workspace_id__workflow_drafts_publish_post: {
     parameters: {
       query?: never
       header?: never
@@ -3400,6 +3430,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkflowRevisionsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_active_workflow_revision_api_workspaces__workspace_id__workflow_revisions_active_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ActiveWorkflowRevisionResponse']
         }
       }
       /** @description Validation Error */

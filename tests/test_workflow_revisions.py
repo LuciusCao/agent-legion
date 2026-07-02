@@ -1,9 +1,17 @@
 from pathlib import Path
 
+from fastapi.testclient import TestClient
+
 from server.app.jobs.queries import JobQueries
+from server.app.main import create_app
 from server.app.services.workflow_drafts import (
     validate_workflow_definition,
     validate_workflow_for_publish,
+    workflow_definition_from_yaml_string,
+)
+from server.app.services.workflow_revision_format import (
+    definition_to_yaml,
+    workflow_definition_to_response_payload,
 )
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import load_workflow_definition
@@ -107,3 +115,67 @@ def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> 
     assert (
         queries.get_active_workflow_revision(workspace["id"], definition.key)["id"] == active["id"]
     )
+
+
+def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/workspaces",
+            json={"name": "Studio", "default_workflow_key": "question_comprehension_info"},
+        )
+        assert response.status_code == 200
+        workspace_id = response.json()["workspace"]["id"]
+
+        active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+
+    assert active.status_code == 200
+    payload = active.json()
+    assert payload["revision"]["status"] == "active"
+    assert payload["revision"]["version"] == 1
+    assert payload["workflow"]["key"] == "question_comprehension_info"
+    assert payload["workflow"]["nodes"]
+    assert "key: question_comprehension_info" in payload["definition_yaml"]
+
+    definition = workflow_definition_from_yaml_string(payload["definition_yaml"])
+    assert definition.key == "question_comprehension_info"
+    assert definition.nodes
+    assert definition.edges
+
+
+def test_get_active_workflow_revision_returns_404_for_workspace_without_revision(
+    tmp_path: Path,
+) -> None:
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    workspace = app.state.job_db.create_workspace(
+        "No Revision",
+        default_workflow_key="question_comprehension_info",
+    )
+    with TestClient(app) as client:
+        response = client.get(f"/api/workspaces/{workspace['id']}/workflow-revisions/active")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "No active workflow revision"
+
+
+def test_definition_to_yaml_upgrades_v1_to_schema_version_2(tmp_path: Path) -> None:
+    definition = load_workflow_definition(Path("config/workflows/video_knowledge.yaml"))
+
+    yaml_text = definition_to_yaml(definition)
+
+    assert "schema_version: 2" in yaml_text
+    parsed = workflow_definition_from_yaml_string(yaml_text)
+    assert parsed.schema_version == 2
+    assert parsed.edges
+
+
+def test_response_payload_includes_terminal_outcome(tmp_path: Path) -> None:
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+
+    payload = workflow_definition_to_response_payload(definition)
+
+    terminal_nodes = [node for node in payload["nodes"] if node.get("terminal")]
+    assert terminal_nodes
+    assert all(node["terminal"]["outcome"] for node in terminal_nodes)

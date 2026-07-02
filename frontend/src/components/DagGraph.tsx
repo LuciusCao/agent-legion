@@ -12,6 +12,7 @@ import {
 } from '@xyflow/react'
 import '@xyflow/react/dist/style.css'
 import * as dagre from 'dagre'
+import { buildRfEdges, DagEdgeLabels } from './DagEdgeLabels'
 import { DagNode as DagNodeComponent } from './DagNode'
 import type { DagNodeData } from './DagNode'
 import type { DagNodeStatus } from './dagNodeStatus'
@@ -26,6 +27,7 @@ export interface DagGraphNode {
   created_at: string
   duration?: number
   executorKind?: 'local' | 'pi' | 'openclaw' | null
+  terminalOutcome?: string
   inputs?: string[]
   outputs?: string[]
 }
@@ -33,6 +35,8 @@ export interface DagGraphNode {
 export interface DagGraphEdge {
   from: string
   to: string
+  label?: string
+  conditional?: boolean
 }
 
 export type DagNode = DagGraphNode
@@ -117,21 +121,14 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
         status: node.status,
         duration: node.duration,
         executorKind: normalizeExecutorKind(node.executorKind),
+        terminalOutcome: node.terminalOutcome,
         inputs: node.inputs || [],
         outputs: node.outputs || [],
       },
     }
   })
 
-  const rfEdges: Edge[] = edges.map((edge, idx) => ({
-    id: `e-${edge.from}-${edge.to}-${idx}`,
-    source: edge.from,
-    target: edge.to,
-    markerEnd: { type: MarkerType.ArrowClosed, color: '#9ca3af' },
-    style: { stroke: '#9ca3af', strokeWidth: 2 },
-  }))
-
-  return { rfNodes, rfEdges }
+  return { rfNodes, rfEdges: buildRfEdges(edges) }
 }
 
 function buildRelationMaps(rfEdges: Edge[]) {
@@ -330,6 +327,7 @@ export function DagGraph({
           />
         </ReactFlow>
       </div>
+      <DagEdgeLabels edges={edges} />
       {selectedData && (
         <NodeDetailsPanel
           nodeKey={selectedData.nodeKey}

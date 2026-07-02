@@ -68,7 +68,7 @@ def apply(conn: sqlite3.Connection) -> None:
 def _backfill_workspace_revisions(conn: sqlite3.Connection) -> None:
     from pathlib import Path
 
-    from server.app.services.workflow_revisions import definition_hash, serialize_definition
+    from server.app.services.workflow_revision_format import definition_hash, serialize_definition
     from server.app.workflows.definition import load_workflow_definition
 
     root_dir = Path(__file__).resolve().parents[4]

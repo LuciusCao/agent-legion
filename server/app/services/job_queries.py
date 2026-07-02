@@ -10,7 +10,7 @@ from server.app.services.job_query_presenters import (
     node_summary,
 )
 from server.app.services.workflow_catalog import WorkflowCatalogService
-from server.app.services.workflow_revisions import definition_from_job_snapshot
+from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.services.workspace_dag import build_workspace_dag
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,

@@ -1,39 +1,25 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
+import json
 
+from fastapi import APIRouter, HTTPException
+
+import server.app.routes.workflow_contracts as workflow_contracts
 from server.app.jobs import JobQueries
 from server.app.routes.job_http import require_workflows_enabled
-from server.app.services.workflow_drafts import (
-    validate_workflow_definition,
-    validate_workflow_for_publish,
-    workflow_definition_from_yaml_string,
+from server.app.routes.workflow_revisions_contracts import (
+    ActiveWorkflowRevisionResponse,
+    WorkflowDraftRequest,
+    WorkflowDraftValidationResponse,
+    WorkflowRevisionsResponse,
+    WorkflowRevisionSummary,
 )
-from server.app.services.workflow_revisions import WorkflowRevisionService
+from server.app.services.workflow_draft_publish import publish_workflow_draft
+from server.app.services.workflow_drafts import validate_workflow_definition
+from server.app.services.workflow_revision_format import (
+    definition_to_yaml,
+    workflow_definition_to_response_payload,
+)
 from server.app.settings import Settings
-
-
-class WorkflowRevisionSummary(BaseModel):
-    id: str
-    workspace_id: str
-    workflow_key: str
-    version: int
-    status: str
-    definition_hash: str
-    created_at: str
-    published_at: str | None = None
-
-
-class WorkflowRevisionsResponse(BaseModel):
-    revisions: list[WorkflowRevisionSummary]
-
-
-class WorkflowDraftRequest(BaseModel):
-    definition_yaml: str
-
-
-class WorkflowDraftValidationResponse(BaseModel):
-    valid: bool
-    errors: list[str]
+from server.app.workflows.definition import workflow_definition_from_dict
 
 
 def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> APIRouter:
@@ -52,6 +38,30 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         rows = job_db.list_workflow_revisions(workspace_id, workflow_key)
         return WorkflowRevisionsResponse(revisions=[WorkflowRevisionSummary(**row) for row in rows])
 
+    @router.get(
+        "/workspaces/{workspace_id}/workflow-revisions/active",
+        response_model=ActiveWorkflowRevisionResponse,
+    )
+    def get_active_workflow_revision(
+        workspace_id: str,
+    ) -> ActiveWorkflowRevisionResponse:
+        require_workflows_enabled(settings)
+        workspace = job_db.get_workspace(workspace_id)
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        workflow_key = str(workspace.get("default_workflow_key") or "")
+        revision = job_db.get_active_workflow_revision(workspace_id, workflow_key)
+        if revision is None:
+            raise HTTPException(status_code=404, detail="No active workflow revision")
+        definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
+        return ActiveWorkflowRevisionResponse(
+            revision=WorkflowRevisionSummary.model_validate(revision),
+            workflow=workflow_contracts.WorkflowDefinitionResponse.model_validate(
+                workflow_definition_to_response_payload(definition)
+            ),
+            definition_yaml=definition_to_yaml(definition),
+        )
+
     @router.post(
         "/workspaces/{workspace_id}/workflow-drafts/validate",
         response_model=WorkflowDraftValidationResponse,
@@ -68,24 +78,17 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         "/workspaces/{workspace_id}/workflow-drafts/publish",
         response_model=WorkflowDraftValidationResponse,
     )
-    def publish_workflow_draft(
+    def publish_draft(
         workspace_id: str,
         request: WorkflowDraftRequest,
     ) -> WorkflowDraftValidationResponse:
         require_workflows_enabled(settings)
-        structural_errors = validate_workflow_definition(request.definition_yaml)
-        if structural_errors:
-            return WorkflowDraftValidationResponse(valid=False, errors=structural_errors)
-        definition = workflow_definition_from_yaml_string(request.definition_yaml)
-        publish_errors = validate_workflow_for_publish(
-            definition=definition,
-            workspace_id=workspace_id,
-            job_db=job_db,
-            settings_executor_definitions=settings.executor_definitions,
+        valid, errors = publish_workflow_draft(
+            job_db,
+            workspace_id,
+            request.definition_yaml,
+            settings.executor_definitions,
         )
-        if publish_errors:
-            return WorkflowDraftValidationResponse(valid=False, errors=publish_errors)
-        WorkflowRevisionService(job_db).publish_workspace_revision(workspace_id, definition)
-        return WorkflowDraftValidationResponse(valid=True, errors=[])
+        return WorkflowDraftValidationResponse(valid=valid, errors=errors)
 
     return router

@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel
 
+from server.app.routes.workflow_node_contracts import WorkflowNodeResponse
+
 
 class WorkflowSummaryResponse(BaseModel):
     key: str
@@ -17,15 +19,6 @@ class WorkflowIntakeModeResponse(BaseModel):
 
 class WorkflowIntakeResponse(BaseModel):
     modes: list[WorkflowIntakeModeResponse]
-
-
-class WorkflowNodeResponse(BaseModel):
-    key: str
-    label: str
-    capability: str
-    after: list[str]
-    inputs: list[str]
-    outputs: list[str]
 
 
 class WorkflowConditionResponse(BaseModel):
