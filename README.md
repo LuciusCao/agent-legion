@@ -160,8 +160,10 @@ Quick gate (for daily development):
 
 Runs Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy, architecture
 contract checks (`scripts/check_architecture.py`), generated API type drift check
-(`npm run api:check`), frontend Prettier + ESLint + typecheck + Vitest, and the spec health check
-(`scripts/verify_specs.py --check`).
+(`npm run api:check`), frontend Prettier + ESLint + typecheck + Vitest (without coverage),
+and the spec health check (`scripts/verify_specs.py --check`).
+
+To check frontend coverage explicitly, run `npm run test:coverage` in `frontend/`, or run the full gate.
 
 Architecture source budgets are governed by `config/architecture/architecture-budget-policy.yaml`
 (human-maintained policy) and `config/architecture/architecture-budgets.json` (machine-maintained
@@ -180,7 +182,7 @@ Full gate (before committing or handing off):
 ./scripts/check.sh
 ```
 
-Runs the quick gate plus the frontend production build.
+Runs the quick gate, frontend tests with coverage (`npm run test:coverage`), and the frontend production build.
 
 Run the full test suite:
 

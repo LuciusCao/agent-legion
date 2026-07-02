@@ -44,7 +44,7 @@ cd "$ROOT_DIR/frontend"
 npm run format:check
 npm run lint
 npm run typecheck
-npm run test:coverage
+npm run test
 
 echo "=== Spec Health Check ==="
 cd "$ROOT_DIR"
