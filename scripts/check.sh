@@ -24,6 +24,10 @@ echo "=== Combined Coverage Report ==="
 cd "$ROOT_DIR"
 UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run coverage report
 
+echo "=== Frontend Tests + Coverage ==="
+cd "$ROOT_DIR/frontend"
+npm run test:coverage
+
 echo "=== Frontend Production Build ==="
 cd "$ROOT_DIR/frontend"
 npm run build
