@@ -1,4 +1,5 @@
 import type { WorkflowDefinitionRecord } from '../../types'
+import styles from './WorkflowNodeOutline.module.css'
 
 type Props = {
   workflow: WorkflowDefinitionRecord | null
@@ -12,23 +13,24 @@ export function WorkflowNodeOutline({
   onSelectNode,
 }: Props) {
   return (
-    <section aria-label="Workflow nodes">
-      <h2>节点</h2>
+    <section aria-label="Workflow nodes" className={styles.section}>
+      <h2 className={styles.title}>节点</h2>
       {!workflow ? (
-        <p>暂无节点</p>
+        <p className={styles.meta}>暂无节点</p>
       ) : (
-        <ul>
+        <ul className={styles.list}>
           {workflow.nodes.map((node) => (
             <li key={node.key}>
               <button
                 type="button"
+                className={styles.item}
                 aria-pressed={node.key === selectedNodeKey}
                 onClick={() => onSelectNode(node.key)}
               >
-                <span>{node.label}</span>
-                <span>{node.capability}</span>
-                <span>
-                  输入 {node.inputs.length} / 输出 {node.outputs.length}
+                <span className={styles.label}>{node.label}</span>
+                <span className={styles.meta}>
+                  {node.capability} · 输入 {node.inputs.length} / 输出{' '}
+                  {node.outputs.length}
                 </span>
               </button>
             </li>

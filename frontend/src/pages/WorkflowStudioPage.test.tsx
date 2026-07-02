@@ -103,7 +103,7 @@ describe('WorkflowStudioPage', () => {
 
     expect(screen.getByText('有未保存修改')).toBeInTheDocument()
 
-    await user.click(screen.getByRole('button', { name: '重置为当前版本' }))
+    await user.click(screen.getByRole('button', { name: '重置' }))
 
     expect(
       screen.getByDisplayValue(/key: question_comprehension_info/)

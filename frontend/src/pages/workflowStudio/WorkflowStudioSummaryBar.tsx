@@ -2,6 +2,10 @@ import type {
   WorkflowDefinitionRecord,
   WorkflowRevisionSummary,
 } from '../../types'
+import styles from './WorkflowStudioSummaryBar.module.css'
+import { WorkflowStudioSummaryBarActions } from './WorkflowStudioSummaryBarActions'
+import { WorkflowStudioSummaryBarMeta } from './WorkflowStudioSummaryBarMeta'
+
 type Props = {
   workflow: WorkflowDefinitionRecord | null
   revision: WorkflowRevisionSummary | null
@@ -12,6 +16,7 @@ type Props = {
   onPublish: () => void
   onReset: () => void
 }
+
 export function WorkflowStudioSummaryBar({
   workflow,
   revision,
@@ -22,34 +27,21 @@ export function WorkflowStudioSummaryBar({
   onPublish,
   onReset,
 }: Props) {
-  const hash = revision?.definition_hash?.slice(0, 8) ?? '--------'
-  const busy = actionState !== 'idle'
   return (
-    <section aria-label="Workflow summary">
-      <div>
-        <h1>{workflow?.label ?? '工作流'}</h1>
-        <span>{workflow?.key ?? '未加载'}</span>
+    <section aria-label="Workflow summary" className={styles.bar}>
+      <div className={styles.titleBlock}>
+        <h1 className={styles.title}>{workflow?.label ?? '工作流'}</h1>
+        <p className={styles.subtitle}>{workflow?.key ?? '未加载'}</p>
       </div>
-      <div>
-        <span>{revision ? `v${revision.version}` : '无 active revision'}</span>
-        <span>{hash}</span>
-        <span>{dirty ? '有未保存修改' : '已同步'}</span>
-      </div>
-      <div>
-        <button
-          type="button"
-          onClick={onValidate}
-          disabled={!canSubmit || busy}
-        >
-          {actionState === 'validating' ? '校验中' : '校验'}
-        </button>
-        <button type="button" onClick={onPublish} disabled={!canSubmit || busy}>
-          {actionState === 'publishing' ? '发布中' : '发布'}
-        </button>
-        <button type="button" onClick={onReset} disabled={!dirty || busy}>
-          重置为当前版本
-        </button>
-      </div>
+      <WorkflowStudioSummaryBarMeta revision={revision} dirty={dirty} />
+      <WorkflowStudioSummaryBarActions
+        actionState={actionState}
+        canSubmit={canSubmit}
+        dirty={dirty}
+        onValidate={onValidate}
+        onPublish={onPublish}
+        onReset={onReset}
+      />
     </section>
   )
 }

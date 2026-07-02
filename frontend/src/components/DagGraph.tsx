@@ -58,6 +58,7 @@ interface DagGraphProps {
   onViewLogs?: (nodeKey: string) => void
   selectedNode?: string | null
   onSelectedNodeChange?: (nodeKey: string | null) => void
+  hideNodeDetails?: boolean
 }
 
 const NODE_WIDTH = 240
@@ -176,6 +177,7 @@ export function DagGraph({
   onViewLogs = () => {},
   selectedNode: controlledSelectedNode,
   onSelectedNodeChange,
+  hideNodeDetails = false,
 }: DagGraphProps) {
   const { rfNodes: initialNodes, rfEdges: initialEdges } = useMemo(
     () => computeLayout(nodes, edges),
@@ -328,7 +330,7 @@ export function DagGraph({
         </ReactFlow>
       </div>
       <DagEdgeLabels edges={edges} />
-      {selectedData && (
+      {selectedData && !hideNodeDetails && (
         <NodeDetailsPanel
           nodeKey={selectedData.nodeKey}
           data={selectedData.data}

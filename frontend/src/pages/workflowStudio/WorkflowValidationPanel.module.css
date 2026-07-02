@@ -1,0 +1,46 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
+}
+.message {
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 10px;
+  border-radius: 8px;
+}
+.success {
+  background: #dcfce7;
+  color: #15803d;
+}
+.error {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.groupTitle {
+  font-size: 12px;
+  font-weight: 500;
+  color: #1a1c1e;
+}
+.list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.listItem {
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fee2e2;
+  color: #b91c1c;
+  word-break: break-word;
+}
