@@ -6,6 +6,7 @@ from typing import Any, Protocol
 
 import requests
 
+from comprehension_uploader.auth import get_token
 from comprehension_uploader.config import Config, QuestionSourceConfig
 
 
@@ -60,4 +61,5 @@ class HTTPQuestionSource:
 def build_question_source(config: Config) -> QuestionSource:
     if config.question_source.type == "json_file":
         return JSONFileQuestionSource(config.question_source.path or "")
-    return HTTPQuestionSource(config.question_source, config.auth_token())
+    token = get_token(config.model_dump())
+    return HTTPQuestionSource(config.question_source, token)

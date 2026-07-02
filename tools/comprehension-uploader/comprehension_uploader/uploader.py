@@ -12,6 +12,7 @@ from comprehension_uploader.config import Config
 from comprehension_uploader.db import Database
 from comprehension_uploader.fingerprint import compute_question_fingerprint
 from comprehension_uploader.package_parser import UploadRecord
+from comprehension_uploader.schemas import validate
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,45 @@ class Uploader:
         if record.uploadable is False or record.outcome == "non_uploadable":
             logger.info("Skipping non-uploadable record %s", record.question_id)
             return
-        fingerprint = self._resolve_fingerprint(record)
+
+        # 1. Schema validation first. If it fails, log a failure record with a
+        #    best-effort fingerprint (explicit value, computed from stem/options,
+        #    or empty string if neither is available).
+        try:
+            raw_data = json.loads(record.comprehension_data)
+            validate(record.format_vno or "v1", raw_data)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                "Schema validation failed for %s (version %s): %s",
+                record.question_id,
+                record.format_vno,
+                exc,
+            )
+            fingerprint = self._resolve_fingerprint(record, raise_on_missing=False)
+            self._record_failure(
+                record,
+                batch_id,
+                fingerprint,
+                "validate",
+                api_code=10011,
+                api_message=str(exc),
+            )
+            return
+
+        # 2. Resolve fingerprint for the actual API call.
+        try:
+            fingerprint = self._resolve_fingerprint(record, raise_on_missing=True)
+        except ValueError as exc:
+            logger.warning("Fingerprint resolution failed for %s: %s", record.question_id, exc)
+            self._record_failure(
+                record,
+                batch_id,
+                "",
+                "validate",
+                api_code=10011,
+                api_message=str(exc),
+            )
+            return
         for attempt in range(self.config.max_retries + 1):
             try:
                 response = self.api.add(record, fingerprint)
@@ -86,7 +125,7 @@ class Uploader:
                 )
                 return
 
-    def _resolve_fingerprint(self, record: UploadRecord) -> str:
+    def _resolve_fingerprint(self, record: UploadRecord, *, raise_on_missing: bool = True) -> str:
         if record.stem is not None and record.options is not None:
             fingerprint = compute_question_fingerprint(record.stem, record.options)
             if fingerprint is not None:
@@ -97,10 +136,12 @@ class Uploader:
                 record.question_id,
             )
             return record.fingerprint
-        raise ValueError(
-            f"Cannot compute fingerprint for {record.question_id}: "
-            "missing stem/options and fingerprint"
-        )
+        if raise_on_missing:
+            raise ValueError(
+                f"Cannot compute fingerprint for {record.question_id}: "
+                "missing stem/options and fingerprint"
+            )
+        return ""
 
     def _handle_duplicate(
         self,

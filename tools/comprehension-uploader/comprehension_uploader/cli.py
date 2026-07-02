@@ -13,7 +13,12 @@ import yaml
 from comprehension_uploader.api_client import ComprehensionAPIClient
 from comprehension_uploader.config import Config, ConfigError
 from comprehension_uploader.db import Database
-from comprehension_uploader.package_parser import PackageParseError, parse_package
+from comprehension_uploader.package_parser import (
+    PackageParseError,
+    parse_package,
+    validate_package,
+)
+from comprehension_uploader.packager import package_comprehension_info
 from comprehension_uploader.question_source import build_question_source
 from comprehension_uploader.scanner import Scanner
 from comprehension_uploader.uploader import Uploader
@@ -86,6 +91,27 @@ def cmd_status(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_package(args: argparse.Namespace) -> int:
+    config = _load_config(args.config)
+    source = build_question_source(config)
+    summary = package_comprehension_info(
+        input_dir=Path(args.input_dir),
+        output_path=Path(args.output),
+        question_source=source,
+    )
+    print(json.dumps(summary, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    package_path = Path(args.package)
+    passed, failed, errors = validate_package(package_path)
+    for error in errors:
+        print(f"FAIL: {error}", file=sys.stderr)
+    print(f"Validated {package_path}: passed={passed}, failed={failed}")
+    return 0 if failed == 0 else 1
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="comprehension-uploader")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -115,6 +141,22 @@ def main(argv: list[str] | None = None) -> int:
     status_parser.add_argument("--config", required=True, help="Path to YAML config")
     status_parser.add_argument("question_id")
     status_parser.set_defaults(func=cmd_status)
+
+    package_parser_cmd = sub.add_parser(
+        "package", help="Build a package.jsonl from comprehension_info.json files"
+    )
+    package_parser_cmd.add_argument("--config", required=True, help="Path to YAML config")
+    package_parser_cmd.add_argument(
+        "--input-dir", required=True, help="Directory containing comprehension_info.json files"
+    )
+    package_parser_cmd.add_argument("--output", required=True, help="Path to write package.jsonl")
+    package_parser_cmd.set_defaults(func=cmd_package)
+
+    validate_parser_cmd = sub.add_parser(
+        "validate", help="Validate a package.jsonl without uploading"
+    )
+    validate_parser_cmd.add_argument("package", help="Path to package.jsonl")
+    validate_parser_cmd.set_defaults(func=cmd_validate)
 
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")

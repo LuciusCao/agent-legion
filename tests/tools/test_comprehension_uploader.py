@@ -5,6 +5,7 @@ import json
 import sys
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import pytest
 
@@ -14,10 +15,16 @@ _TOOL_DIR = Path(__file__).parents[2] / "tools" / "comprehension-uploader"
 sys.path.insert(0, str(_TOOL_DIR))
 
 from comprehension_uploader import cli
+from comprehension_uploader.auth import AuthError, get_token
 from comprehension_uploader.config import Config
 from comprehension_uploader.db import Database
 from comprehension_uploader.fingerprint import compute_question_fingerprint
-from comprehension_uploader.package_parser import PackageParseError, UploadRecord, parse_package
+from comprehension_uploader.package_parser import (
+    PackageParseError,
+    UploadRecord,
+    parse_package,
+    validate_package,
+)
 from comprehension_uploader.question_source import JSONFileQuestionSource
 from comprehension_uploader.scanner import Scanner
 from comprehension_uploader.uploader import Uploader
@@ -30,13 +37,45 @@ from server.app.workflows.question_fingerprint import (
 def _make_config(tmp_path: Path, upload_on_duplicate: str = "update") -> Config:
     return Config(
         api_base_url="http://example.com",
-        auth_token_env="COMPREHENSION_API_TOKEN",
         db_path=str(tmp_path / "test.db"),
         question_source={"type": "json_file", "path": str(tmp_path / "questions.json")},
         upload_on_duplicate=upload_on_duplicate,  # type: ignore[arg-type]
         request_timeout=5,
         max_retries=0,
     )
+
+
+def _make_valid_comprehension_data(difficulty: int = 50) -> dict[str, Any]:
+    return {
+        "fingerprint": "fp-1",
+        "comprehension_difficulty": difficulty,
+        "key_info_list": [
+            {
+                "key_info_id": "ki_001",
+                "type": "given",
+                "content": {
+                    "text": "题干中的关键信息",
+                    "position": {"start": 0, "end": 5},
+                },
+                "question": {
+                    "text": "关键问题是什么？",
+                    "options": [{"label": "A", "text": "正确选项", "is_correct": True}],
+                },
+                "question_comprehension_ability": "information_locating",
+            }
+        ],
+        "possible_error_list": [
+            {
+                "error_id": "pe_001",
+                "error_type": "question_comprehension",
+                "position": 1,
+                "error_answer": ["错误答案"],
+                "error_description": "学生可能误解题意。",
+                "cognitive_basis": "学生尚未掌握相关概念。",
+                "related_key_info_ids": ["ki_001"],
+            }
+        ],
+    }
 
 
 def _make_record(
@@ -50,7 +89,7 @@ def _make_record(
     if options is None:
         options = [{"label": "A", "text": "3"}, {"label": "B", "text": "4"}]
     if comprehension_data is None:
-        comprehension_data = {"steps": [{"text": "step1"}]}
+        comprehension_data = _make_valid_comprehension_data(difficulty)
     return UploadRecord(
         question_id=question_id,
         subject_id=2,
@@ -101,7 +140,7 @@ def test_fingerprint_trusts_provided_value_when_components_missing(
             {
                 "question_id": "Q101",
                 "fingerprint": "deadbeef",
-                "comprehension_data": {"x": 1},
+                "comprehension_data": _make_valid_comprehension_data(),
             }
         )
         + "\n",
@@ -136,13 +175,13 @@ def test_package_parser_stringifies_comprehension_data(tmp_path: Path) -> None:
         "question_id": "Q1",
         "stem": "s",
         "options": [{"label": "A", "text": "a"}],
-        "comprehension_data": [{"step": 1}, {"step": 2}],
+        "comprehension_data": _make_valid_comprehension_data(),
     }
     package.write_text(json.dumps(payload) + "\n", encoding="utf-8")
     record = next(parse_package(package))
     assert isinstance(record.comprehension_data, str)
     parsed = json.loads(record.comprehension_data)
-    assert parsed == [{"step": 1}, {"step": 2}]
+    assert parsed == payload["comprehension_data"]
 
 
 def test_uploader_add_success_and_duplicate_update(tmp_path: Path) -> None:
@@ -154,8 +193,8 @@ def test_uploader_add_success_and_duplicate_update(tmp_path: Path) -> None:
     record2 = _make_record(
         question_id="Q100",
         difficulty=60,
-        format_vno="v2",
-        comprehension_data={"steps": [{"text": "updated"}]},
+        format_vno="v1",
+        comprehension_data=_make_valid_comprehension_data(60),
     )
 
     client = _FakeAPIClient(
@@ -182,8 +221,46 @@ def test_uploader_add_success_and_duplicate_update(tmp_path: Path) -> None:
     assert client.calls[2][0] == "update"
     update_fields = client.calls[2][2]
     assert update_fields["comprehension_difficulty"] == 60
-    assert update_fields["format_vno"] == "v2"
     assert "comprehension_data" in update_fields
+
+
+def test_uploader_duplicate_update_includes_format_vno_when_changed(
+    tmp_path: Path,
+) -> None:
+    config = _make_config(tmp_path, upload_on_duplicate="update")
+    db = Database(config.db_path)
+    db.init_schema()
+
+    record1 = UploadRecord(
+        question_id="Q100",
+        subject_id=2,
+        question_uuid="uuid-1",
+        question_vno=1,
+        comprehension_difficulty=50,
+        format_vno=None,
+        comprehension_data=_make_valid_comprehension_data(50),
+        stem="What is 2+2?",
+        options=[{"label": "A", "text": "3"}, {"label": "B", "text": "4"}],
+    )
+    record2 = _make_record(
+        question_id="Q100",
+        difficulty=50,
+        format_vno="v1",
+        comprehension_data=_make_valid_comprehension_data(50),
+    )
+
+    client = _FakeAPIClient(
+        [
+            {"code": 0, "message": "ok", "data": {"result": 42}},
+            {"code": 11051, "message": "duplicate"},
+            {"code": 0, "message": "updated"},
+        ]
+    )
+    uploader = Uploader(config, db, client)
+    uploader.upload_batch([record1, record2], "batch-1")
+
+    update_fields = client.calls[2][2]
+    assert update_fields["format_vno"] == "v1"
 
 
 def test_uploader_add_success_and_duplicate_skip(tmp_path: Path) -> None:
@@ -227,7 +304,12 @@ def test_uploader_skips_non_uploadable_records(tmp_path: Path) -> None:
                         "question_vno": 1,
                         "comprehension_difficulty": 50,
                         "format_vno": "v1",
-                        "comprehension_data": {"steps": []},
+                        "comprehension_data": {
+                            "fingerprint": "fp1",
+                            "comprehension_difficulty": 50,
+                            "key_info_list": [],
+                            "possible_error_list": [],
+                        },
                         "stem": "uploadable stem",
                         "options": [{"label": "A", "text": "a"}],
                     }
@@ -236,7 +318,12 @@ def test_uploader_skips_non_uploadable_records(tmp_path: Path) -> None:
                     {
                         "question_id": "Q-uploadable-false",
                         "uploadable": False,
-                        "comprehension_data": {"steps": []},
+                        "comprehension_data": {
+                            "fingerprint": "fp2",
+                            "comprehension_difficulty": 50,
+                            "key_info_list": [],
+                            "possible_error_list": [],
+                        },
                         "stem": "skipped stem",
                         "options": [{"label": "A", "text": "a"}],
                     }
@@ -245,7 +332,12 @@ def test_uploader_skips_non_uploadable_records(tmp_path: Path) -> None:
                     {
                         "question_id": "Q-non-uploadable-outcome",
                         "outcome": "non_uploadable",
-                        "comprehension_data": {"steps": []},
+                        "comprehension_data": {
+                            "fingerprint": "fp3",
+                            "comprehension_difficulty": 50,
+                            "key_info_list": [],
+                            "possible_error_list": [],
+                        },
                         "stem": "skipped stem 2",
                         "options": [{"label": "A", "text": "a"}],
                     }
@@ -337,7 +429,6 @@ def _make_cli_config(tmp_path: Path) -> Path:
         "\n".join(
             [
                 "api_base_url: http://example.com",
-                "auth_token_env: COMPREHENSION_API_TOKEN",
                 f"db_path: {tmp_path / 'cli.db'}",
                 f'question_source: {{"type": "json_file", "path": "{tmp_path / "questions.json"}"}}',
                 "upload_on_duplicate: skip",
@@ -361,7 +452,7 @@ def _make_cli_package(tmp_path: Path) -> Path:
                 "question_vno": 1,
                 "comprehension_difficulty": 50,
                 "format_vno": "v1",
-                "comprehension_data": {"steps": []},
+                "comprehension_data": _make_valid_comprehension_data(),
                 "stem": "s",
                 "options": [{"label": "A", "text": "a"}],
             }
@@ -388,7 +479,7 @@ def test_cli_upload_uses_workspace_as_batch_id(
         captured["count"] = len(records)
 
     monkeypatch.setattr(Uploader, "upload_batch", fake_upload_batch)
-    monkeypatch.setenv("COMPREHENSION_API_TOKEN", "token")
+    monkeypatch.setenv("BASECMS_TOKEN", "token")
 
     rc = cli.main(
         [
@@ -422,7 +513,7 @@ def test_cli_upload_batch_id_overrides_workspace(
         captured["workspace_id"] = workspace_id
 
     monkeypatch.setattr(Uploader, "upload_batch", fake_upload_batch)
-    monkeypatch.setenv("COMPREHENSION_API_TOKEN", "token")
+    monkeypatch.setenv("BASECMS_TOKEN", "token")
 
     rc = cli.main(
         [
@@ -439,3 +530,352 @@ def test_cli_upload_batch_id_overrides_workspace(
     assert rc == 0
     assert captured["batch_id"] == "batch-999"
     assert captured["workspace_id"] == "ws-123"
+
+
+def test_get_token_prefers_basecms_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BASECMS_TOKEN", "direct-token")
+    monkeypatch.delenv("BASECMS_APP_ID", raising=False)
+    assert get_token({}) == "direct-token"
+
+
+def test_get_token_generates_token(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BASECMS_TOKEN", raising=False)
+    monkeypatch.setenv("BASECMS_APP_ID", "app-1")
+    monkeypatch.setenv("BASECMS_NONCE", "nonce-1")
+    monkeypatch.setenv("BASECMS_SECRET", "secret-1")
+    monkeypatch.setenv("BASECMS_TOKEN_URL", "http://auth.example.com/token")
+
+    with patch("comprehension_uploader.auth.requests.post") as mock_post:
+        mock_post.return_value.json.return_value = {"data": {"token": "generated-token"}}
+        mock_post.return_value.raise_for_status = lambda: None
+        token = get_token({})
+
+    assert token == "generated-token"
+    call_kwargs = mock_post.call_args.kwargs
+    payload = call_kwargs["json"]
+    assert payload["app_id"] == "app-1"
+    assert payload["nonce"] == "nonce-1"
+    assert payload["secret"] == "secret-1"
+    assert "timestamp" in payload
+    assert "sign" in payload
+    assert call_kwargs["timeout"] == 10
+
+
+def test_get_token_raises_when_unconfigured(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BASECMS_TOKEN", raising=False)
+    monkeypatch.delenv("BASECMS_APP_ID", raising=False)
+    monkeypatch.delenv("BASECMS_NONCE", raising=False)
+    monkeypatch.delenv("BASECMS_SECRET", raising=False)
+    monkeypatch.delenv("BASECMS_TOKEN_URL", raising=False)
+    monkeypatch.setattr("comprehension_uploader.auth._maybe_load_dotenv", lambda: None)
+    with pytest.raises(AuthError):
+        get_token({})
+
+
+# ---------------------------------------------------------------------------
+# Schema validation and format_vno resolution
+# ---------------------------------------------------------------------------
+
+
+def test_package_parser_accepts_valid_v1_comprehension_data(tmp_path: Path) -> None:
+    package = tmp_path / "package.jsonl"
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "Q1",
+                "format_vno": "v1",
+                "comprehension_data": _make_valid_comprehension_data(),
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    record = next(parse_package(package))
+    assert record.format_vno == "v1"
+    assert record.question_id == "Q1"
+
+
+def test_validate_package_rejects_invalid_v1_comprehension_data(tmp_path: Path) -> None:
+    package = tmp_path / "package.jsonl"
+    invalid_data = _make_valid_comprehension_data()
+    invalid_data["possible_error_list"][0].pop("cognitive_basis")
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "Q1",
+                "format_vno": "v1",
+                "comprehension_data": invalid_data,
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    passed, failed, errors = validate_package(package)
+    assert passed == 0
+    assert failed == 1
+    assert "v1" in errors[0]
+    assert "schema validation failed" in errors[0].lower()
+
+
+def test_validate_package_unsupported_version(tmp_path: Path) -> None:
+    package = tmp_path / "package.jsonl"
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "Q1",
+                "format_vno": "v99",
+                "comprehension_data": _make_valid_comprehension_data(),
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    passed, failed, errors = validate_package(package)
+    assert passed == 0
+    assert failed == 1
+    assert "v99" in errors[0]
+    assert "unsupported" in errors[0].lower()
+
+
+def test_parse_package_does_not_validate_schema(tmp_path: Path) -> None:
+    package = tmp_path / "package.jsonl"
+    invalid_data = _make_valid_comprehension_data()
+    invalid_data["possible_error_list"][0].pop("cognitive_basis")
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "Q1",
+                "format_vno": "v1",
+                "comprehension_data": invalid_data,
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    records = list(parse_package(package))
+    assert len(records) == 1
+    assert records[0].question_id == "Q1"
+
+
+def test_package_parser_format_vno_fallback_to_v1(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    package = tmp_path / "package.jsonl"
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "Q1",
+                "comprehension_data": _make_valid_comprehension_data(),
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with caplog.at_level("WARNING"):
+        record = next(parse_package(package))
+    assert record.format_vno == "v1"
+    assert "defaulting to v1" in caplog.text
+
+
+def test_package_parser_format_vno_from_comprehension_info_schema_version(
+    tmp_path: Path,
+) -> None:
+    package = tmp_path / "package.jsonl"
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "Q1",
+                "comprehension_info_schema_version": "v1",
+                "comprehension_data": _make_valid_comprehension_data(),
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    record = next(parse_package(package))
+    assert record.format_vno == "v1"
+
+
+def test_package_parser_format_vno_normalization(tmp_path: Path) -> None:
+    package = tmp_path / "package.jsonl"
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "Q1",
+                "format_vno": "  v1  ",
+                "comprehension_data": _make_valid_comprehension_data(),
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    record = next(parse_package(package))
+    assert record.format_vno == "v1"
+
+
+def test_uploader_logs_api_code_10011_on_validation_failure(
+    tmp_path: Path,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    config = _make_config(tmp_path)
+    db = Database(config.db_path)
+    db.init_schema()
+
+    record = _make_record(question_id="Q400")
+    # Corrupt the already-serialized comprehension_data so it fails the
+    # defensive validation inside upload_one.
+    record.comprehension_data = json.dumps({"invalid": "data"})
+
+    uploader = Uploader(config, db, _FakeAPIClient([]))
+    with caplog.at_level("WARNING"):
+        uploader.upload_one(record, "batch-4")
+
+    logs = db.logs.get_logs("Q400")
+    assert len(logs) == 1
+    assert logs[0]["action"] == "validate"
+    assert logs[0]["status"] == "failed"
+    assert logs[0]["api_code"] == 10011
+    assert logs[0]["format_vno"] == "v1"
+
+
+# ---------------------------------------------------------------------------
+# Package and validate CLI commands
+# ---------------------------------------------------------------------------
+
+
+def test_cli_package_command_builds_jsonl(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    input_dir = tmp_path / "input"
+    input_dir.mkdir()
+    question_dir = input_dir / "QPKG"
+    question_dir.mkdir()
+    question_dir.joinpath("comprehension_info.json").write_text(
+        json.dumps(
+            {
+                "question_id": "QPKG",
+                "schema_version": "v1",
+                "comprehension_data": _make_valid_comprehension_data(55),
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    questions_path = tmp_path / "questions.json"
+    questions_path.write_text(
+        json.dumps(
+            {
+                "QPKG": {
+                    "question_id": "QPKG",
+                    "subject_id": 3,
+                    "question_uuid": "uuid-pkg",
+                    "question_vno": 2,
+                    "stem": "Package stem",
+                    "options": [{"label": "A", "text": "pkg-a"}],
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        "\n".join(
+            [
+                "api_base_url: http://example.com",
+                f"db_path: {tmp_path / 'pkg.db'}",
+                f'question_source: {{"type": "json_file", "path": "{questions_path}"}}',
+                "upload_on_duplicate: skip",
+                "request_timeout: 5",
+                "max_retries: 0",
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    output_path = tmp_path / "package.jsonl"
+    rc = cli.main(
+        [
+            "package",
+            "--config",
+            str(config_path),
+            "--input-dir",
+            str(input_dir),
+            "--output",
+            str(output_path),
+        ]
+    )
+    assert rc == 0
+    lines = output_path.read_text(encoding="utf-8").strip().split("\n")
+    assert len(lines) == 1
+    package_line = json.loads(lines[0])
+    assert package_line["question_id"] == "QPKG"
+    assert package_line["subject_id"] == 3
+    assert package_line["question_uuid"] == "uuid-pkg"
+    assert package_line["question_vno"] == 2
+    assert package_line["comprehension_difficulty"] == 55
+    assert package_line["format_vno"] == "v1"
+    assert package_line["stem"] == "Package stem"
+    assert package_line["options"] == [{"label": "A", "text": "pkg-a"}]
+    assert "written" in capsys.readouterr().out
+
+
+def test_cli_validate_command_passes(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    package = tmp_path / "package.jsonl"
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "QV1",
+                "format_vno": "v1",
+                "comprehension_data": _make_valid_comprehension_data(),
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rc = cli.main(["validate", str(package)])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "passed=1" in out
+    assert "failed=0" in out
+
+
+def test_cli_validate_command_fails(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    package = tmp_path / "package.jsonl"
+    invalid_data = _make_valid_comprehension_data()
+    invalid_data["comprehension_difficulty"] = 0
+    package.write_text(
+        json.dumps(
+            {
+                "question_id": "QV2",
+                "format_vno": "v1",
+                "comprehension_data": invalid_data,
+                "stem": "s",
+                "options": [{"label": "A", "text": "a"}],
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    rc = cli.main(["validate", str(package)])
+    assert rc == 1
+    captured = capsys.readouterr()
+    assert "passed=0" in captured.out
+    assert "failed=1" in captured.out
+    assert "v1" in captured.err
