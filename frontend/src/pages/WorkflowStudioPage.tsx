@@ -39,7 +39,7 @@ export function WorkflowStudioPage() {
       appBar={({ scrolled }) => (
         <AppBar
           title="Workflow Studio"
-          backTo={workspaceId ? `/workspaces/${workspaceId}/settings` : '/'}
+          backTo={workspaceId ? `/workspaces/${workspaceId}` : '/'}
           scrolled={scrolled}
         />
       )}
