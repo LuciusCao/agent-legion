@@ -14,6 +14,7 @@ import '@xyflow/react/dist/style.css'
 import * as dagre from 'dagre'
 import { DagNode as DagNodeComponent } from './DagNode'
 import type { DagNodeData } from './DagNode'
+import type { DagNodeStatus } from './dagNodeStatus'
 import { NodeDetailsPanel } from './NodeDetailsPanel'
 import { filterRelevantRuns } from '../helpers'
 import styles from './DagGraph.module.css'
@@ -21,7 +22,7 @@ import styles from './DagGraph.module.css'
 export interface DagGraphNode {
   key: string
   label: string
-  status: 'pending' | 'running' | 'completed' | 'failed' | 'stale'
+  status: DagNodeStatus
   created_at: string
   duration?: number
   executorKind?: 'local' | 'pi' | 'openclaw' | null

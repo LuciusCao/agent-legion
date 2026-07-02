@@ -98,3 +98,17 @@ def test_workflow_openapi_contract_is_capability_only(tmp_path: Path) -> None:
     assert "agent" not in node
     assert "concurrency" not in detail
     assert "concurrency" not in summary
+
+
+def test_lists_workspace_workflow_revisions(client):
+    response = client.post(
+        "/api/workspaces",
+        json={"name": "Workflow Studio", "default_workflow_key": "question_comprehension_info"},
+    )
+    workspace_id = response.json()["workspace"]["id"]
+
+    revisions = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions")
+
+    assert revisions.status_code == 200
+    payload = revisions.json()
+    assert "revisions" in payload

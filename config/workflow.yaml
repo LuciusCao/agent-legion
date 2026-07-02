@@ -7,6 +7,10 @@ executors:
         handler: question_comprehension_info.fetch_questions
       clean_and_parse:
         handler: question_comprehension_info.clean_and_parse
+      classify_comprehension_eligibility:
+        handler: question_comprehension_info.classify_comprehension_eligibility
+      finalize_non_uploadable:
+        handler: question_comprehension_info.finalize_non_uploadable
       assemble_comprehension_info:
         handler: question_comprehension_info.assemble_comprehension_info
       download_video:

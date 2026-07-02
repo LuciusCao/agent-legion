@@ -1,5 +1,6 @@
 key: question_comprehension_info
 label: 题目审题信息生成 DAG
+schema_version: 2
 intake:
   modes:
     batch_by_knowledge:
@@ -21,6 +22,11 @@ nodes:
     after: [fetch_questions]
     inputs: [questions.json]
     outputs: [questions_parsed.json]
+  classify_comprehension_eligibility:
+    label: 判断是否适合审题
+    capability: classify_comprehension_eligibility
+    inputs: [questions_parsed.json]
+    outputs: [comprehension_eligibility.json]
   generate_key_info:
     label: 生成关键信息
     capability: generate_key_info
@@ -63,3 +69,41 @@ nodes:
     outputs:
       - comprehension_info.json
       - manifest.json
+    terminal:
+      outcome: uploadable
+  finalize_non_uploadable:
+    label: 结束：不上传
+    capability: finalize_non_uploadable
+    inputs: [questions_parsed.json, comprehension_eligibility.json]
+    outputs: [manifest.json]
+    terminal:
+      outcome: non_uploadable
+edges:
+  - from: fetch_questions
+    to: clean_and_parse
+  - from: clean_and_parse
+    to: classify_comprehension_eligibility
+  - from: classify_comprehension_eligibility
+    to: generate_key_info
+    when:
+      artifact: comprehension_eligibility.json
+      path: $.eligible
+      equals: true
+  - from: classify_comprehension_eligibility
+    to: finalize_non_uploadable
+    when:
+      artifact: comprehension_eligibility.json
+      path: $.eligible
+      equals: false
+  - from: generate_key_info
+    to: review_key_info
+  - from: review_key_info
+    to: generate_possible_errors
+  - from: review_key_info
+    to: assess_comprehension_difficulty
+  - from: generate_possible_errors
+    to: review_possible_errors
+  - from: review_possible_errors
+    to: assess_comprehension_difficulty
+  - from: assess_comprehension_difficulty
+    to: assemble_comprehension_info

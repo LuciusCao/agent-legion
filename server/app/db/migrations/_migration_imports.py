@@ -38,3 +38,6 @@ from server.app.db.migrations.v014_remove_question_content_default import (
 from server.app.db.migrations.v015_rename_pi_executor_id import (
     MIGRATION as V015_RENAME_PI_EXECUTOR_ID,
 )
+from server.app.db.migrations.v016_workflow_revisions import (
+    MIGRATION as V016_WORKFLOW_REVISIONS,
+)

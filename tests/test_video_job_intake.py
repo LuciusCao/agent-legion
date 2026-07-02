@@ -6,6 +6,7 @@ from server.app.cms.client import CmsVideoLookup
 from server.app.main import create_app
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_revisions import WorkflowRevisionService
 
 
 @pytest.fixture
@@ -24,10 +25,17 @@ def make_job_intake_service(app):
     )
 
 
-def test_video_url_intake_creates_video_job_and_input_artifact(app) -> None:
-    app.state.job_db.create_workspace(
-        "video_knowledge", default_workflow_key="video_knowledge", default_entity="video"
+def _create_workspace_with_revision(app, workflow_key="video_knowledge"):
+    workspace = app.state.job_db.create_workspace(
+        "video_knowledge", default_workflow_key=workflow_key, default_entity="video"
     )
+    definition = WorkflowCatalogService(app.state.settings).definition(workflow_key)
+    WorkflowRevisionService(app.state.job_db).ensure_active_revision(workspace["id"], definition)
+    return workspace
+
+
+def test_video_url_intake_creates_video_job_and_input_artifact(app) -> None:
+    _create_workspace_with_revision(app)
     service = make_job_intake_service(app)
     payload = {
         "workflow_key": "video_knowledge",
@@ -46,9 +54,7 @@ def test_video_url_intake_creates_video_job_and_input_artifact(app) -> None:
 
 
 def test_video_external_id_duplicate_is_rejected_or_reported(app, monkeypatch) -> None:
-    app.state.job_db.create_workspace(
-        "video_knowledge", default_workflow_key="video_knowledge", default_entity="video"
-    )
+    _create_workspace_with_revision(app)
 
     def fake_lookup_knowledge_video(code, api_url=None, token=None):
         return CmsVideoLookup(

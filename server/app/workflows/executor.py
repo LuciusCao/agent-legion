@@ -6,15 +6,6 @@ from server.app.jobs import JobQueries
 from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.pi_runner import PiRunner
-from server.app.workflows.question_comprehension_info import (
-    assemble_comprehension_info as qci_assemble_comprehension_info,
-)
-from server.app.workflows.question_comprehension_info import (
-    clean_and_parse as qci_clean_and_parse,
-)
-from server.app.workflows.question_comprehension_info import (
-    fetch_questions as qci_fetch_questions,
-)
 from server.app.workflows.scheduler import (
     _node_statuses,
     _refresh_job_status,
@@ -23,11 +14,25 @@ from server.app.workflows.scheduler import (
 from server.app.workflows.skill_version import resolve_skill_version
 from server.app.workflows.skills import resolve_workflow_skill
 
+# isort: off
+# fmt: off
+from server.app.workflows.question_comprehension_info import (
+    assemble_comprehension_info as qci_assemble_comprehension_info,
+    classify_comprehension_eligibility as qci_classify_comprehension_eligibility,
+    clean_and_parse as qci_clean_and_parse,
+    fetch_questions as qci_fetch_questions,
+    finalize_non_uploadable as qci_finalize_non_uploadable,
+)
+# fmt: on
+# isort: on
+
 LocalHandler = Callable[[dict[str, Any], Path, dict[str, Any] | None], None]
 LOCAL_HANDLERS: dict[str, dict[str, LocalHandler]] = {
     "question_comprehension_info": {
         "fetch_questions": qci_fetch_questions,
         "clean_and_parse": qci_clean_and_parse,
+        "classify_comprehension_eligibility": qci_classify_comprehension_eligibility,
+        "finalize_non_uploadable": qci_finalize_non_uploadable,
         "assemble_comprehension_info": qci_assemble_comprehension_info,
     },
 }

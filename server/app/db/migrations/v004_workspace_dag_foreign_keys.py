@@ -40,6 +40,10 @@ create table jobs__v004 (
   target_node_key text,
   execution_paused integer not null default 0 check(execution_paused in (0, 1)),
   pause_reason text not null default '',
+  workflow_revision_id text not null default '',
+  workflow_definition_hash text not null default '',
+  workflow_definition_snapshot_json text not null default '',
+  outcome text not null default '',
   foreign key(workspace_id) references workspaces(id) on delete cascade
 )
 """
@@ -145,12 +149,9 @@ _EXECUTOR_LEASES = (
     ),
 )
 
-
 _MIGRATION_VERSION = 4
 _MIGRATION_NAME = "workspace_dag_foreign_keys"
 
-# V006 adds execution-control columns to jobs.  Ensure they are present on
-# legacy tables before the V004 rebuild so source/replacement column sets match.
 _JOB_EXECUTION_CONTROL_COLUMNS: tuple[tuple[str, str], ...] = (
     (
         "execution_mode",
@@ -159,6 +160,10 @@ _JOB_EXECUTION_CONTROL_COLUMNS: tuple[tuple[str, str], ...] = (
     ("target_node_key", "text"),
     ("execution_paused", "integer not null default 0 check(execution_paused in (0, 1))"),
     ("pause_reason", "text not null default ''"),
+    ("workflow_revision_id", "text not null default ''"),
+    ("workflow_definition_hash", "text not null default ''"),
+    ("workflow_definition_snapshot_json", "text not null default ''"),
+    ("outcome", "text not null default ''"),
 )
 
 
@@ -177,7 +182,6 @@ def _preflight_orphans(conn: sqlite3.Connection) -> None:
                 message=f"workspace_id '{row['workspace_id']}' does not exist",
             )
         )
-
     for row in conn.execute(
         "select id, workspace_id from jobs where workspace_id not in (select id from workspaces)"
     ).fetchall():
@@ -409,7 +413,6 @@ def _apply(conn: sqlite3.Connection) -> None:
     source_table, create_sql, replacement_table, index_sqls = _EXECUTOR_LEASES
     _copy_table(conn, source_table, replacement_table, create_sql, index_sqls)
 
-    # Now safe to drop the kept old copies of jobs and node_runs.
     conn.execute("drop table if exists jobs__v004_old")
     conn.execute("drop table if exists node_runs__v004_old")
 

@@ -4,13 +4,35 @@ from server.app.agents import AgentStatusManager
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_executor_validation import (
     validate_workspace_executor_configuration,
 )
 from server.app.services.workspace_executor_warnings import configuration_with_warnings
 from server.app.services.workspace_pi_agents import sync_pi_agents_for_workspace
 from server.app.services.workspace_settings_payload import workspace_settings_payload
+from server.app.services.workspace_stats import build_workspace_stats
 from server.app.settings import Settings
+
+
+def _build_settings_config(
+    current: dict[str, Any], patch: dict[str, Any]
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    return (
+        {
+            "resources": patch["resources"]
+            if patch.get("resources") is not None
+            else current["resources"]
+        },
+        {
+            "enabled_modes": patch["intakeModes"]
+            if patch.get("intakeModes") is not None
+            else current["intakeModes"],
+            "label_overrides": patch["labelOverrides"]
+            if patch.get("labelOverrides") is not None
+            else current["labelOverrides"],
+        },
+    )
 
 
 class WorkspaceConfigurationService:
@@ -36,9 +58,9 @@ class WorkspaceConfigurationService:
         return self.job_db.list_workspaces()
 
     def create(self, payload: dict[str, Any]) -> dict[str, Any]:
-        self.workflows.definition(payload["default_workflow_key"])
+        definition = self.workflows.definition(payload["default_workflow_key"])
         try:
-            return self.job_db.create_workspace(
+            workspace = self.job_db.create_workspace(
                 payload["name"],
                 default_workflow_key=payload["default_workflow_key"],
                 default_entity=payload.get("default_entity", "question"),
@@ -48,6 +70,8 @@ class WorkspaceConfigurationService:
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
+        WorkflowRevisionService(self.job_db).ensure_active_revision(workspace["id"], definition)
+        return workspace
 
     def get(self, workspace_id: str) -> dict[str, Any]:
         return self._workspace(workspace_id)
@@ -113,6 +137,7 @@ class WorkspaceConfigurationService:
             if description_value is not None
             else str(workspace.get("description") or "")
         )
+        resource_config, intake_config = _build_settings_config(current, settings_patch)
         try:
             saved_workspace = self.job_db.update_workspace_configuration(
                 workspace_id,
@@ -120,25 +145,15 @@ class WorkspaceConfigurationService:
                 description=description,
                 default_workflow_key=workflow_key,
                 default_entity=settings_patch.get("entityType") or str(current["entityType"]),
-                resource_config={
-                    "resources": settings_patch.get("resources")
-                    if settings_patch.get("resources") is not None
-                    else current["resources"]
-                },
-                intake_config={
-                    "enabled_modes": settings_patch.get("intakeModes")
-                    if settings_patch.get("intakeModes") is not None
-                    else current["intakeModes"],
-                    "label_overrides": settings_patch.get("labelOverrides")
-                    if settings_patch.get("labelOverrides") is not None
-                    else current["labelOverrides"],
-                },
+                resource_config=resource_config,
+                intake_config=intake_config,
                 executor_allocations=executor_allocations,
                 node_bindings=node_bindings,
                 node_limits=node_limits,
             )
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
+        WorkflowRevisionService(self.job_db).ensure_active_revision(workspace_id, workflow)
         sync_pi_agents_for_workspace(
             workspace_id,
             executor_allocations,
@@ -195,11 +210,16 @@ class WorkspaceConfigurationService:
             )
         elif section == "workflow":
             if patch.get("workflowKey") is not None:
-                self.workflows.definition(patch["workflowKey"])
+                definition = self.workflows.definition(patch["workflowKey"])
             workspace = self.job_db.update_workspace(
                 workspace_id,
                 default_workflow_key=patch.get("workflowKey"),
             )
+            if patch.get("workflowKey") is not None:
+                WorkflowRevisionService(self.job_db).ensure_active_revision(
+                    workspace_id, definition
+                )
+
         else:
             raise NotFoundError("Unknown settings section")
         return workspace_settings_payload(workspace)
@@ -212,34 +232,10 @@ class WorkspaceConfigurationService:
         return {"ok": True, "message": "全局配置已就绪"}
 
     def stats(self, workspace_id: str) -> dict[str, Any]:
-        workspace = self._workspace(workspace_id)
-        workflow_key = workspace.get("default_workflow_key", "")
-        if not workflow_key:
-            raise InvalidOperationError("Workspace workflow is not set")
-        latest_run = self.job_db.get_latest_node_run_for_workspace(workspace_id)
-        executors = []
-        for count in self.job_db.get_workspace_executor_runtime_counts(workspace_id):
-            definition = self.settings.executor_definitions.get(count["executor_id"])
-            global_capacity = definition.global_capacity if definition is not None else 0
-            global_available = global_capacity - count["global_running"]
-            available = max(0, min(count["workspace_limit"] - count["running"], global_available))
-            executors.append(
-                {
-                    "executor_id": count["executor_id"],
-                    "kind": definition.kind if definition is not None else "unknown",
-                    "global_capacity": global_capacity,
-                    "workspace_limit": count["workspace_limit"],
-                    "running": count["running"],
-                    "available": available,
-                    "binding_count": count["binding_count"],
-                }
-            )
-        return {
-            "workspace_id": workspace_id,
-            "name": workspace.get("name", ""),
-            "workflow_key": workflow_key,
-            "workflow_label": self.workflows.definition(str(workflow_key)).label,
-            "job_stats": self.job_db.count_jobs_by_status(workspace_id),
-            "executor_status": {"executors": executors},
-            "latest_run": dict(latest_run) if latest_run else None,
-        }
+        return build_workspace_stats(
+            self._workspace(workspace_id),
+            workspace_id,
+            self.job_db,
+            self.workflows,
+            self.settings,
+        )

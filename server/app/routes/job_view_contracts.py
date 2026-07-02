@@ -30,6 +30,11 @@ class JobSummaryResponse(BaseModel):
     error_message: str
     created_at: str
     updated_at: str
+    workflow_revision_id: str = ""
+    workflow_definition_hash: str = ""
+    outcome: str = ""
+    current_workflow_revision_id: str = ""
+    current_workflow_revision_version: int | None = None
     node_summaries: list[JobNodeSummaryResponse] = Field(default_factory=list)
     completed_nodes: int = 0
     total_nodes: int = 0

@@ -29,6 +29,7 @@ const workflowDefinition = {
   label: '示例工作流',
   concurrency: { local: 8, agent: 2, nodes: {} },
   intake: { modes: [] },
+  edges: [],
   nodes: [
     {
       key: 'fetch_questions',

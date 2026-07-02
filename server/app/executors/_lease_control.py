@@ -89,7 +89,7 @@ def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:
     non_terminal = conn.execute(
         """
         select 1 from job_nodes
-        where job_id=? and status not in ('completed', 'failed')
+        where job_id=? and status not in ('completed', 'not_applicable')
         """,
         (job_id,),
     ).fetchone()

@@ -20,6 +20,11 @@ const mockJob: JobRecord = {
   error_summary: '',
   completed_nodes: 2,
   total_nodes: 5,
+  workflow_revision_id: '',
+  workflow_definition_hash: '',
+  outcome: '',
+  current_workflow_revision_id: '',
+  current_workflow_revision_version: null,
   active_node_key: 'natural_language_reading',
   node_summaries: [
     {

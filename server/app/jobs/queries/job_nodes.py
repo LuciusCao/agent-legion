@@ -5,7 +5,8 @@ from collections.abc import Sequence
 from pathlib import Path
 from typing import Any
 
-from server.app.jobs.queries.base import JobQueriesBase
+from server.app.jobs.queries.job_node_lifecycle import JobNodeLifecycleQueriesMixin
+from server.app.services.workflow_revisions import definition_from_job_snapshot
 from server.app.storage_paths import make_data_relative
 
 
@@ -14,7 +15,7 @@ def _job_id(workspace_id: str, workflow_key: str, source_id: str) -> str:
     return f"{workspace_id}_{workflow_key}_{safe_source_id}"
 
 
-class JobNodeQueriesMixin(JobQueriesBase):
+class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
     jobs_dir: Path
 
     def create_job(
@@ -27,6 +28,9 @@ class JobNodeQueriesMixin(JobQueriesBase):
         node_keys: list[str],
         workspace_id: str,
         stem: str = "",
+        workflow_revision_id: str = "",
+        workflow_definition_hash: str = "",
+        workflow_definition_snapshot_json: str = "",
     ) -> dict[str, Any]:
         job_id = _job_id(workspace_id, workflow_key, source_id)
         storage_dir = self.jobs_dir / workspace_id / job_id
@@ -45,9 +49,10 @@ class JobNodeQueriesMixin(JobQueriesBase):
             conn.execute(
                 """
                 insert into jobs(
-                  id, workspace_id, workflow_key, source_type, source_id, batch_id, title, storage_dir, stem
+                  id, workspace_id, workflow_key, source_type, source_id, batch_id, title, storage_dir, stem,
+                  workflow_revision_id, workflow_definition_hash, workflow_definition_snapshot_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                   title=excluded.title,
                   stem=excluded.stem,
@@ -64,6 +69,9 @@ class JobNodeQueriesMixin(JobQueriesBase):
                     title,
                     make_data_relative(storage_dir, data_dir),
                     stem,
+                    workflow_revision_id,
+                    workflow_definition_hash,
+                    workflow_definition_snapshot_json,
                 ),
             )
             for node_key in node_keys:
@@ -119,6 +127,10 @@ class JobNodeQueriesMixin(JobQueriesBase):
                 (status, error_message, job_id),
             )
 
+    def update_job_outcome(self, job_id: str, outcome: str) -> None:
+        with self.connect() as conn:
+            conn.execute("update jobs set outcome=? where id=?", (outcome, job_id))
+
     def list_job_nodes(self, job_id: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
             rows = conn.execute("select * from job_nodes where job_id=? order by id", (job_id,))
@@ -158,47 +170,6 @@ class JobNodeQueriesMixin(JobQueriesBase):
             conn.execute(
                 f"update job_nodes set {assignments} where job_id=? and node_key=?",
                 params,
-            )
-
-    def mark_node_for_rerun(self, job_id: str, node_key: str, downstream: list[str]) -> None:
-        with self.connect() as conn:
-            cursor = conn.execute(
-                """
-                update job_nodes
-                set status='pending',
-                    stale_reason='',
-                    error_message='',
-                    started_at=null,
-                    finished_at=null,
-                    created_at=current_timestamp
-                where job_id=? and node_key=?
-                """,
-                (job_id, node_key),
-            )
-            if cursor.rowcount == 0:
-                raise ValueError(f"Unknown job node: {job_id}.{node_key}")
-            for downstream_key in downstream:
-                conn.execute(
-                    """
-                    update job_nodes
-                    set status='stale',
-                        stale_reason=?,
-                        error_message='',
-                        created_at=current_timestamp
-                    where job_id=? and node_key=?
-                    """,
-                    (f"upstream {node_key} rerun", job_id, downstream_key),
-                )
-            conn.execute(
-                """
-                update jobs
-                set status='queued',
-                    error_message='',
-                    packed=0,
-                    updated_at=current_timestamp
-                where id=?
-                """,
-                (job_id,),
             )
 
     def start_node_run(
@@ -279,28 +250,9 @@ class JobNodeQueriesMixin(JobQueriesBase):
                 """,
                 (node_status, error_message, run["job_id"], run["node_key"]),
             )
-            # Sync jobs.status when no nodes are still running
-            still_running = conn.execute(
-                "select 1 from job_nodes where job_id=? and status='running'",
-                (run["job_id"],),
-            ).fetchone()
-            if still_running is None:
-                any_failed = conn.execute(
-                    "select 1 from job_nodes where job_id=? and status='failed'",
-                    (run["job_id"],),
-                ).fetchone()
-                if any_failed is not None:
-                    new_status = "failed"
-                else:
-                    all_completed = conn.execute(
-                        "select 1 from job_nodes where job_id=? and status != 'completed'",
-                        (run["job_id"],),
-                    ).fetchone()
-                    new_status = "completed" if all_completed is None else "queued"
-                conn.execute(
-                    "update jobs set status=?, updated_at=current_timestamp where id=?",
-                    (new_status, run["job_id"]),
-                )
+            job = conn.execute("select * from jobs where id=?", (run["job_id"],)).fetchone()
+            definition = definition_from_job_snapshot(dict(job)) if job is not None else None
+            self._sync_job_status_after_node_run(conn, run, status, definition)
 
     def list_node_runs(self, job_id: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:

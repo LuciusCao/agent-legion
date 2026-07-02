@@ -20,6 +20,12 @@ from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
+from server.app.jobs.queries.workspace_node_bindings import (
+    get_binding,
+    get_local_node_limit,
+    has_local_node_limit,
+)
+from server.app.services.workflow_revisions import definition_from_job_snapshot
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflow_worker_agent_status import agent_status_scope
@@ -27,7 +33,7 @@ from server.app.workflow_worker_maintenance import WorkflowMaintenance
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
 from server.app.workflows.registry import list_registered_workflows
-from server.app.workflows.scheduler import _node_statuses, find_ready_nodes
+from server.app.workflows.scheduler import _node_statuses, evaluate_branches, find_ready_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -160,8 +166,18 @@ class WorkflowWorkerThread:
                 continue
             if job.get("execution_paused"):
                 continue
+            snapshot_definition = definition_from_job_snapshot(job)
+            definition_to_run = snapshot_definition or definition
             job_dir = resolve_job_dir(job, self.settings.jobs_dir)
             statuses = _node_statuses(self.job_db, job["id"])
+            branch_evaluation = evaluate_branches(definition_to_run, statuses, job_dir)
+            self.job_db.mark_nodes_not_applicable(
+                job["id"],
+                sorted(branch_evaluation.not_applicable),
+                "unselected workflow branch",
+            )
+            if branch_evaluation.not_applicable:
+                statuses = _node_statuses(self.job_db, job["id"])
             control_snapshot = {
                 "execution_mode": job.get("execution_mode", "full"),
                 "target_node_key": job.get("target_node_key"),
@@ -169,16 +185,16 @@ class WorkflowWorkerThread:
                 "pause_reason": job.get("pause_reason", ""),
             }
             try:
-                allowed = allowed_nodes(definition, control_snapshot)
+                allowed = allowed_nodes(definition_to_run, control_snapshot)
             except Exception:
                 logger.exception("failed to compute allowed nodes for job %s", job["id"])
                 continue
-            ready_nodes = find_ready_nodes(definition, statuses, job_dir)
+            ready_nodes = find_ready_nodes(definition_to_run, statuses, job_dir)
             for node in ready_nodes:
                 if node.key not in allowed:
                     continue
                 if self._try_claim_and_submit(
-                    workspace, definition, job, node, job_dir, control_snapshot, allowed
+                    workspace, definition_to_run, job, node, job_dir, control_snapshot, allowed
                 ):
                     return True
         return False
@@ -199,54 +215,55 @@ class WorkflowWorkerThread:
         log_path = self.settings.logs_dir / "jobs" / f"{job['id']}-{node_key}.log"
         log_path.parent.mkdir(parents=True, exist_ok=True)
 
-        binding = self._get_binding(workspace_id, workflow_key, node_key)
-        if binding is None:
-            self.leases.fail_without_lease(
-                ConfigurationFailureRequest(
-                    workspace_id=workspace_id,
-                    job_id=job["id"],
-                    workflow_key=workflow_key,
-                    node_key=node_key,
-                    capability=node.capability,
-                    log_path=str(log_path),
-                ),
-                "No Executor binding",
-            )
-            return True
+        with self.job_db._connect_read() as conn:
+            binding = get_binding(conn, workspace_id, workflow_key, node_key)
+            if binding is None:
+                self.leases.fail_without_lease(
+                    ConfigurationFailureRequest(
+                        workspace_id=workspace_id,
+                        job_id=job["id"],
+                        workflow_key=workflow_key,
+                        node_key=node_key,
+                        capability=node.capability,
+                        log_path=str(log_path),
+                    ),
+                    "No Executor binding",
+                )
+                return True
 
-        executor_id = binding["executor_id"]
-        try:
-            executor = self.registry.require(executor_id, node.capability)
-        except Exception as exc:
-            self.leases.fail_without_lease(
-                ConfigurationFailureRequest(
-                    workspace_id=workspace_id,
-                    job_id=job["id"],
-                    workflow_key=workflow_key,
-                    node_key=node_key,
-                    capability=node.capability,
-                    log_path=str(log_path),
-                ),
-                str(exc),
-            )
-            return True
+            executor_id = binding["executor_id"]
+            try:
+                executor = self.registry.require(executor_id, node.capability)
+            except Exception as exc:
+                self.leases.fail_without_lease(
+                    ConfigurationFailureRequest(
+                        workspace_id=workspace_id,
+                        job_id=job["id"],
+                        workflow_key=workflow_key,
+                        node_key=node_key,
+                        capability=node.capability,
+                        log_path=str(log_path),
+                    ),
+                    str(exc),
+                )
+                return True
 
-        local_node_limit: int | None = None
-        if executor.kind == "local":
-            local_node_limit = self._get_local_node_limit(workspace_id, workflow_key, node_key)
-        elif self._has_local_node_limit(workspace_id, workflow_key, node_key):
-            self.leases.fail_without_lease(
-                ConfigurationFailureRequest(
-                    workspace_id=workspace_id,
-                    job_id=job["id"],
-                    workflow_key=workflow_key,
-                    node_key=node_key,
-                    capability=node.capability,
-                    log_path=str(log_path),
-                ),
-                "Node limits are not supported for agent executors",
-            )
-            return True
+            local_node_limit: int | None = None
+            if executor.kind == "local":
+                local_node_limit = get_local_node_limit(conn, workspace_id, workflow_key, node_key)
+            elif has_local_node_limit(conn, workspace_id, workflow_key, node_key):
+                self.leases.fail_without_lease(
+                    ConfigurationFailureRequest(
+                        workspace_id=workspace_id,
+                        job_id=job["id"],
+                        workflow_key=workflow_key,
+                        node_key=node_key,
+                        capability=node.capability,
+                        log_path=str(log_path),
+                    ),
+                    "Node limits are not supported for agent executors",
+                )
+                return True
 
         global_capacity = self.registry.global_capacity(executor_id)
         if global_capacity is None:
@@ -323,54 +340,6 @@ class WorkflowWorkerThread:
                 except Exception:
                     logger.exception("workflow future %s failed", execution_id)
                 self._futures.pop(execution_id, None)
-
-    def _get_binding(
-        self,
-        workspace_id: str,
-        workflow_key: str,
-        node_key: str,
-    ) -> dict[str, Any] | None:
-        with self.job_db._connect_read() as conn:
-            row = conn.execute(
-                """
-                select executor_id from workspace_node_bindings
-                where workspace_id=? and workflow_key=? and node_key=?
-                """,
-                (workspace_id, workflow_key, node_key),
-            ).fetchone()
-        return dict(row) if row else None
-
-    def _get_local_node_limit(
-        self,
-        workspace_id: str,
-        workflow_key: str,
-        node_key: str,
-    ) -> int | None:
-        with self.job_db._connect_read() as conn:
-            row = conn.execute(
-                """
-                select concurrency_limit from workspace_node_limits
-                where workspace_id=? and workflow_key=? and node_key=?
-                """,
-                (workspace_id, workflow_key, node_key),
-            ).fetchone()
-        return int(row["concurrency_limit"]) if row else None
-
-    def _has_local_node_limit(
-        self,
-        workspace_id: str,
-        workflow_key: str,
-        node_key: str,
-    ) -> bool:
-        with self.job_db._connect_read() as conn:
-            row = conn.execute(
-                """
-                select 1 from workspace_node_limits
-                where workspace_id=? and workflow_key=? and node_key=?
-                """,
-                (workspace_id, workflow_key, node_key),
-            ).fetchone()
-        return row is not None
 
     def stop(self, timeout: float = 3) -> None:
         self.stop_event.set()

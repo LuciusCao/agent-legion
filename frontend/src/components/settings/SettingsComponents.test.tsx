@@ -42,6 +42,7 @@ const workflowDefinition: WorkflowDefinitionRecord = {
       { key: 'auto', label: 'Auto', input_field: 'source', resource: 'asr' },
     ],
   },
+  edges: [],
   nodes: [],
 }
 

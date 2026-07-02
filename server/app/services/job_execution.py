@@ -12,6 +12,7 @@ from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_revisions import definition_from_job_snapshot
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.execution_control import ExecutionControlError, ancestor_closure
 from server.app.workflows.scheduler import downstream_nodes
@@ -64,8 +65,10 @@ class JobExecutionService:
     def _has_active_lease(self, job_id: str) -> bool:
         return self.lease_repo.has_active_for_job(job_id, self._now())
 
-    def _definition(self, workflow_key: str) -> WorkflowDefinition:
-        return self.workflows.definition(workflow_key)
+    def _definition(self, job: dict[str, Any]) -> WorkflowDefinition:
+        return definition_from_job_snapshot(job) or self.workflows.definition(
+            str(job["workflow_key"])
+        )
 
     def run_to(
         self,
@@ -89,7 +92,7 @@ class JobExecutionService:
                 f"Job does not belong to workspace {workspace_id}",
             )
 
-        definition = self._definition(str(job["workflow_key"]))
+        definition = self._definition(job)
         if target_node_key not in definition.nodes:
             return self._result(
                 job_id,

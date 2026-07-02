@@ -51,7 +51,7 @@ def test_inventory_includes_replacement_for_every_legacy_path() -> None:
 # Concrete replacement tokens that demonstrate the legacy concepts were replaced.
 REPLACEMENT_TOKENS: dict[str, list[tuple[str, str]]] = {
     "workflow runner": [
-        ("server/app/workflows/definition.py", "capability"),
+        ("server/app/workflows/schema.py", "capability"),
         ("server/app/workflow_worker_thread.py", "workspace_node_bindings"),
     ],
     "workflow concurrency": [

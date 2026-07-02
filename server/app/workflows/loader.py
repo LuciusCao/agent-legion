@@ -1,0 +1,242 @@
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import yaml
+
+from server.app.workflows.schema import (
+    WorkflowCondition,
+    WorkflowDefinition,
+    WorkflowDefinitionError,
+    WorkflowEdge,
+    WorkflowIntake,
+    WorkflowIntakeMode,
+    WorkflowNode,
+    WorkflowTerminal,
+)
+from server.app.workflows.validator import _validate_acyclic
+
+
+def _string_list(value: Any, field_name: str, node_key: str) -> list[str]:
+    if value is None:
+        return []
+    if not isinstance(value, list) or not all(isinstance(item, str) for item in value):
+        raise WorkflowDefinitionError(f"{node_key}.{field_name} must be a list of strings")
+    return list(value)
+
+
+def _load_terminal(raw_node: dict[str, Any], node_key: str) -> WorkflowTerminal | None:
+    raw_terminal = raw_node.get("terminal")
+    if raw_terminal is None:
+        return None
+    if not isinstance(raw_terminal, dict):
+        raise WorkflowDefinitionError(f"Node {node_key}.terminal must be a mapping")
+    outcome = raw_terminal.get("outcome")
+    if not isinstance(outcome, str) or not outcome:
+        raise WorkflowDefinitionError(f"Node {node_key}.terminal.outcome is required")
+    return WorkflowTerminal(outcome=outcome)
+
+
+def _load_condition(raw_edge: dict[str, Any], edge_name: str) -> WorkflowCondition | None:
+    raw_condition = raw_edge.get("when")
+    if raw_condition is None:
+        return None
+    if not isinstance(raw_condition, dict):
+        raise WorkflowDefinitionError(f"{edge_name}.when must be a mapping")
+    artifact = raw_condition.get("artifact")
+    path = raw_condition.get("path")
+    if not isinstance(artifact, str) or not artifact:
+        raise WorkflowDefinitionError(f"{edge_name}.when.artifact is required")
+    if not isinstance(path, str) or not path.startswith("$."):
+        raise WorkflowDefinitionError(f"{edge_name}.when.path must start with $.")
+    if "equals" not in raw_condition:
+        raise WorkflowDefinitionError(f"{edge_name}.when.equals is required")
+    return WorkflowCondition(artifact=artifact, path=path, equals=raw_condition["equals"])
+
+
+def _load_edges(
+    raw: dict[str, Any], nodes: dict[str, WorkflowNode], schema_version: int
+) -> list[WorkflowEdge]:
+    if schema_version == 1:
+        return [
+            WorkflowEdge(source=dep, target=node.key)
+            for node in nodes.values()
+            for dep in node.after
+        ]
+    raw_edges = raw.get("edges")
+    if not isinstance(raw_edges, list):
+        raise WorkflowDefinitionError("Workflow schema_version 2 requires edges")
+    edges: list[WorkflowEdge] = []
+    for index, raw_edge in enumerate(raw_edges):
+        edge_name = f"edges[{index}]"
+        if not isinstance(raw_edge, dict):
+            raise WorkflowDefinitionError(f"{edge_name} must be a mapping")
+        source = raw_edge.get("from")
+        target = raw_edge.get("to")
+        if not isinstance(source, str) or source not in nodes:
+            raise WorkflowDefinitionError(f"Unknown edge source {source!r}")
+        if not isinstance(target, str) or target not in nodes:
+            raise WorkflowDefinitionError(f"Unknown edge target {target!r}")
+        edges.append(
+            WorkflowEdge(
+                source=source,
+                target=target,
+                condition=_load_condition(raw_edge, edge_name),
+            )
+        )
+    return edges
+
+
+def _load_intake(raw: dict[str, Any]) -> WorkflowIntake:
+    raw_intake = raw.get("intake", {})
+    if raw_intake is None:
+        raw_intake = {}
+    if not isinstance(raw_intake, dict):
+        raise WorkflowDefinitionError("Workflow intake must be a mapping")
+    raw_modes = raw_intake.get("modes", {})
+    if raw_modes is None:
+        raw_modes = {}
+    if not isinstance(raw_modes, dict):
+        raise WorkflowDefinitionError("Workflow intake.modes must be a mapping")
+
+    modes: dict[str, WorkflowIntakeMode] = {}
+    for mode_key, raw_mode in raw_modes.items():
+        if not isinstance(mode_key, str) or not mode_key:
+            raise WorkflowDefinitionError("Intake mode keys must be non-empty strings")
+        if not isinstance(raw_mode, dict):
+            raise WorkflowDefinitionError(f"Intake mode {mode_key} must be a mapping")
+        label = raw_mode.get("label", mode_key)
+        input_field = raw_mode.get("input_field", mode_key)
+        resource = raw_mode.get("resource", "")
+        if not isinstance(label, str) or not label:
+            raise WorkflowDefinitionError(f"Intake mode {mode_key}.label must be a string")
+        if not isinstance(input_field, str) or not input_field:
+            raise WorkflowDefinitionError(f"Intake mode {mode_key}.input_field must be a string")
+        if not isinstance(resource, str):
+            raise WorkflowDefinitionError(f"Intake mode {mode_key}.resource must be a string")
+        modes[mode_key] = WorkflowIntakeMode(
+            key=mode_key,
+            label=label,
+            input_field=input_field,
+            resource=resource,
+        )
+    return WorkflowIntake(modes=modes)
+
+
+def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
+    nodes: dict[str, WorkflowNode] = {}
+    for node_key, raw_node in raw_nodes.items():
+        if not isinstance(node_key, str) or not node_key:
+            raise WorkflowDefinitionError("Node keys must be non-empty strings")
+        if not isinstance(raw_node, dict):
+            raise WorkflowDefinitionError(f"Node {node_key} must be a mapping")
+
+        if "runner" in raw_node:
+            raise WorkflowDefinitionError(
+                "Node field 'runner' was removed; bind a compatible Executor in Workspace settings."
+            )
+        if "agent" in raw_node:
+            raise WorkflowDefinitionError(
+                "Node field 'agent' was removed; invocation details belong to Executor capabilities."
+            )
+
+        node_label = raw_node.get("label", node_key)
+        if not isinstance(node_label, str) or not node_label:
+            raise WorkflowDefinitionError(f"Node {node_key} label must be a non-empty string")
+
+        capability = raw_node.get("capability", "")
+        if not isinstance(capability, str) or not capability:
+            raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
+
+        nodes[node_key] = WorkflowNode(
+            key=node_key,
+            label=node_label,
+            capability=capability,
+            after=_string_list(raw_node.get("after"), "after", node_key),
+            inputs=_string_list(raw_node.get("inputs"), "inputs", node_key),
+            outputs=_string_list(raw_node.get("outputs"), "outputs", node_key),
+            terminal=_load_terminal(raw_node, node_key),
+        )
+
+    for node in nodes.values():
+        for dep in node.after:
+            if dep not in nodes:
+                raise WorkflowDefinitionError(f"Unknown dependency {dep!r} for node {node.key}")
+
+    return nodes
+
+
+def workflow_definition_from_mapping(raw: dict[str, Any]) -> WorkflowDefinition:
+    key = raw.get("key")
+    label = raw.get("label")
+    raw_nodes = raw.get("nodes")
+
+    if not isinstance(key, str) or not key:
+        raise WorkflowDefinitionError("Workflow key is required")
+    if not isinstance(label, str) or not label:
+        raise WorkflowDefinitionError("Workflow label is required")
+    if not isinstance(raw_nodes, dict) or not raw_nodes:
+        raise WorkflowDefinitionError("Workflow nodes are required")
+
+    if "concurrency" in raw:
+        raise WorkflowDefinitionError(
+            "Workflow field 'concurrency' was removed; configure Executor limits at Workspace level."
+        )
+
+    schema_version = raw.get("schema_version", 1)
+    if not isinstance(schema_version, int):
+        raise WorkflowDefinitionError("Workflow schema_version must be an integer")
+
+    intake = _load_intake(raw)
+    nodes = _load_nodes(raw_nodes)
+    edges = _load_edges(raw, nodes, schema_version)
+    _validate_acyclic(nodes, edges)
+    return WorkflowDefinition(
+        key=key,
+        label=label,
+        intake=intake,
+        nodes=nodes,
+        edges=edges,
+        schema_version=schema_version,
+    )
+
+
+def workflow_definition_from_dict(payload: dict[str, Any]) -> WorkflowDefinition:
+    if not isinstance(payload, dict):
+        raise WorkflowDefinitionError("Workflow definition snapshot must be a mapping")
+    raw = {
+        "key": payload.get("key"),
+        "label": payload.get("label"),
+        "schema_version": payload.get("schema_version", 1),
+        "intake": payload.get("intake", {}),
+        "nodes": {},
+        "edges": [],
+    }
+    for node_key, node in (payload.get("nodes") or {}).items():
+        raw_node = dict(node)
+        terminal = raw_node.get("terminal")
+        if terminal is not None:
+            raw_node["terminal"] = dict(terminal)
+        raw["nodes"][node_key] = raw_node
+    for edge in payload.get("edges") or []:
+        raw_edge = {
+            "from": edge.get("source") or edge.get("from"),
+            "to": edge.get("target") or edge.get("to"),
+        }
+        condition = edge.get("condition") or edge.get("when")
+        if condition is not None:
+            raw_edge["when"] = {
+                "artifact": condition.get("artifact"),
+                "path": condition.get("path"),
+                "equals": condition.get("equals"),
+            }
+        raw["edges"].append(raw_edge)
+    return workflow_definition_from_mapping(raw)
+
+
+def load_workflow_definition(path: Path) -> WorkflowDefinition:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise WorkflowDefinitionError("Workflow definition must be a mapping")
+    return workflow_definition_from_mapping(raw)

@@ -9,9 +9,11 @@ def test_list_executors_endpoint(client):
         "capabilities": [
             "assemble_comprehension_info",
             "assemble_video_metadata",
+            "classify_comprehension_eligibility",
             "clean_and_parse",
             "download_video",
             "fetch_questions",
+            "finalize_non_uploadable",
             "package_video_job",
             "transcribe_video",
         ],

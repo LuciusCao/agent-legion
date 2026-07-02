@@ -24,6 +24,11 @@ function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
     error_summary: '',
     completed_nodes: 0,
     total_nodes: 0,
+    workflow_revision_id: '',
+    workflow_definition_hash: '',
+    outcome: '',
+    current_workflow_revision_id: '',
+    current_workflow_revision_version: null,
     ...overrides,
   }
 }
@@ -32,6 +37,7 @@ const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
+  edges: [],
   nodes: [
     {
       key: 'extract',
@@ -64,6 +70,7 @@ const otherWorkflow: WorkflowDefinitionRecord = {
   key: 'other_workflow',
   label: 'Other',
   intake: { modes: [] },
+  edges: [],
   nodes: [
     {
       key: 'extract',

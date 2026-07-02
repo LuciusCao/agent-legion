@@ -197,15 +197,21 @@ def test_load_question_comprehension_info_capabilities():
     assert list(definition.nodes) == [
         "fetch_questions",
         "clean_and_parse",
+        "classify_comprehension_eligibility",
         "generate_key_info",
         "review_key_info",
         "generate_possible_errors",
         "review_possible_errors",
         "assess_comprehension_difficulty",
         "assemble_comprehension_info",
+        "finalize_non_uploadable",
     ]
     assert definition.nodes["fetch_questions"].capability == "fetch_questions"
     assert definition.nodes["clean_and_parse"].capability == "clean_and_parse"
+    assert (
+        definition.nodes["classify_comprehension_eligibility"].capability
+        == "classify_comprehension_eligibility"
+    )
     assert definition.nodes["generate_key_info"].after == ["clean_and_parse"]
     assert definition.nodes["review_key_info"].after == ["generate_key_info"]
     assert definition.nodes["generate_possible_errors"].after == ["review_key_info"]
@@ -221,3 +227,6 @@ def test_load_question_comprehension_info_capabilities():
         "comprehension_info.json",
         "manifest.json",
     ]
+    assert definition.nodes["finalize_non_uploadable"].capability == "finalize_non_uploadable"
+    assert definition.nodes["finalize_non_uploadable"].terminal is not None
+    assert definition.nodes["finalize_non_uploadable"].terminal.outcome == "non_uploadable"

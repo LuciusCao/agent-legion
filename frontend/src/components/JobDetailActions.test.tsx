@@ -8,6 +8,7 @@ const workflow: WorkflowDefinitionRecord = {
   key: 'question_content',
   label: 'Question Content',
   intake: { modes: [] },
+  edges: [],
   nodes: [
     {
       key: 'extract',

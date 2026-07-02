@@ -120,6 +120,7 @@ describe('settingStore', () => {
         key: 'question_content',
         label: 'Question Content',
         intake: { modes: [] },
+        edges: [],
         nodes: [],
       },
       executorConfiguration: initialExecutorConfiguration,

@@ -3,6 +3,7 @@ import { Handle, Position, NodeProps, type Node } from '@xyflow/react'
 import {
   formatDuration,
   STATUS_ICON,
+  STATUS_LABEL,
   type DagNodeStatus,
 } from './dagNodeStatus'
 import styles from './DagNode.module.css'
@@ -101,6 +102,9 @@ export const DagNode = memo(function DagNode(props: NodeProps<DagNodeType>) {
         )}
       </div>
       {durationText && <div className={styles.duration}>{durationText}</div>}
+      {data.status === 'not_applicable' && (
+        <div className={styles.statusText}>{STATUS_LABEL.not_applicable}</div>
+      )}
       <ChipList title="输入" items={data.inputs} variant="in" />
       <ChipList title="输出" items={data.outputs} variant="out" />
       <Handle

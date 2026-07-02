@@ -113,6 +113,7 @@ describe('AddDialog', () => {
             },
           ],
         },
+        edges: [],
         nodes: [],
       },
     })
@@ -171,6 +172,7 @@ describe('AddDialog', () => {
             },
           ],
         },
+        edges: [],
         nodes: [],
       },
     })
@@ -248,6 +250,7 @@ describe('AddDialog', () => {
             },
           ],
         },
+        edges: [],
         nodes: [],
       },
     })
@@ -326,6 +329,7 @@ describe('AddDialog', () => {
             },
           ],
         },
+        edges: [],
         nodes: [],
       },
     })

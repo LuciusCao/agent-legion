@@ -110,6 +110,10 @@ def init_db(path: Path) -> None:
                   target_node_key text,
                   execution_paused integer not null default 0 check(execution_paused in (0, 1)),
                   pause_reason text not null default '',
+                  workflow_revision_id text not null default '',
+                  workflow_definition_hash text not null default '',
+                  workflow_definition_snapshot_json text not null default '',
+                  outcome text not null default '',
                   foreign key(workspace_id) references workspaces(id) on delete cascade
                 );
                 create table if not exists job_nodes (
@@ -144,14 +148,6 @@ def init_db(path: Path) -> None:
             )
 
         run_migrations(conn, MIGRATIONS)
-
-        with conn:
-            conn.execute(
-                """
-                insert or ignore into workspaces(id, name, default_workflow_key, default_entity)
-                values ('question_comprehension', '题目审题信息', 'question_comprehension_info', 'question')
-                """
-            )
 
         # Performance indexes for issue 012. These are created after migrations
         # so that columns added by V003 (e.g. videos.content_type) are present.
