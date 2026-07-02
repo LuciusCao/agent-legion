@@ -16,6 +16,7 @@ def _setup(conn):
             status text not null,
             log_path text not null default '',
             run_dir text not null default '',
+            session_dir text not null default '',
             finished_at text not null default ''
         );
         """
@@ -111,3 +112,58 @@ def test_cleanup_config_from_settings():
     )
     assert cfg.log_retention_days == 7
     assert cfg.run_dir_retention_days == 14
+    assert cfg.keep_only_latest_run_per_node is True
+
+
+def test_cleanup_keeps_only_latest_run_per_node(tmp_path):
+    data_dir = tmp_path / "data"
+    node_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a"
+    old_dir = node_dir / "tok-old"
+    new_dir = node_dir / "tok-new"
+    old_dir.mkdir(parents=True)
+    new_dir.mkdir(parents=True)
+    (old_dir / "events.jsonl").write_text("old")
+    (new_dir / "events.jsonl").write_text("new")
+
+    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+        _setup(conn)
+        conn.execute(
+            """
+            insert into node_runs(job_id, node_key, status, log_path, run_dir, finished_at)
+            values (?, ?, 'completed', '', ?, ?)
+            """,
+            (
+                "job-1",
+                "node-a",
+                make_data_relative(old_dir, data_dir),
+                (datetime.now(UTC) - timedelta(days=1)).isoformat(),
+            ),
+        )
+        conn.commit()
+
+        cfg = CleanupConfig(keep_only_latest_run_per_node=True)
+        logs, dirs = cleanup_old_logs(conn, data_dir, cfg)
+        assert dirs == 1
+        assert not old_dir.exists()
+        assert new_dir.exists()
+        row = conn.execute("select run_dir from node_runs").fetchone()
+        assert row["run_dir"] == ""
+
+
+def test_cleanup_respects_keep_all_runs_flag(tmp_path):
+    data_dir = tmp_path / "data"
+    node_dir = data_dir / "jobs" / "ws1" / "job-1" / "runs" / "node-a"
+    old_dir = node_dir / "tok-old"
+    new_dir = node_dir / "tok-new"
+    old_dir.mkdir(parents=True)
+    new_dir.mkdir(parents=True)
+
+    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+        _setup(conn)
+        conn.commit()
+
+        cfg = CleanupConfig(keep_only_latest_run_per_node=False)
+        logs, dirs = cleanup_old_logs(conn, data_dir, cfg)
+        assert dirs == 0
+        assert old_dir.exists()
+        assert new_dir.exists()

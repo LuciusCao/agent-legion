@@ -8,51 +8,18 @@ import subprocess
 import sys
 import time
 import uuid
-from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.models import ExecutionStatus
-from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.jobs import JobQueries
+from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node
 from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
+from server.app.workflows.pi_command_builder import build_pi_command
+from server.app.workflows.pi_config import PiConfig, PiRunResult
 
 logger = logging.getLogger(__name__)
-
-
-@dataclass(frozen=True)
-class PiConfig:
-    binary: str = "pi"
-    provider: str = ""
-    model: str = ""
-    thinking: str = "low"
-    timeout_seconds: int = 600
-    cancellation_grace_seconds: int = 5
-    environment: dict[str, str] = field(default_factory=dict)
-
-    @classmethod
-    def from_runtime(cls, config: PiRuntimeConfig) -> PiConfig:
-        """Build an immutable PiConfig from a validated PiRuntimeConfig."""
-        return cls(
-            binary=config.binary,
-            provider=config.provider,
-            model=config.model,
-            thinking=config.thinking or "low",
-            timeout_seconds=config.timeout_seconds,
-            cancellation_grace_seconds=config.cancellation_grace_seconds,
-            environment=dict(config.environment),
-        )
-
-
-@dataclass(frozen=True)
-class PiRunResult:
-    status: ExecutionStatus
-    exit_code: int
-    command: list[str]
-    run_dir: Path
-    session_dir: Path
-    error_message: str = ""
 
 
 class PiRunner:
@@ -62,60 +29,7 @@ class PiRunner:
 
     @classmethod
     def from_config(cls, raw: dict[str, Any], skill_root: Path) -> PiRunner:
-        binary = raw.get("binary")
-        if not binary or not isinstance(binary, str):
-            raise ValueError("Pi binary is required")
-        timeout = raw.get("timeout_seconds", 600)
-        if not isinstance(timeout, int) or timeout < 1:
-            raise ValueError("Pi timeout_seconds must be a positive integer")
-        env = raw.get("environment", {})
-        if not isinstance(env, dict):
-            env = {}
-        config = PiConfig(
-            binary=binary,
-            provider=str(raw.get("provider", "")),
-            model=str(raw.get("model", "")),
-            thinking=str(raw.get("thinking", "low")),
-            timeout_seconds=timeout,
-            environment={str(k): str(v) for k, v in env.items()},
-        )
-        return cls(config, skill_root)
-
-    def build_command(
-        self,
-        *,
-        skill_dir: Path,
-        session_dir: Path,
-        tools: list[str],
-        session_name: str,
-        prompt_file: Path,
-    ) -> list[str]:
-        cmd: list[str] = [
-            self.config.binary,
-            "--mode",
-            "json",
-            "--session-dir",
-            str(session_dir),
-            "--name",
-            session_name,
-            "--no-context-files",
-            "--no-extensions",
-            "--no-prompt-templates",
-            "--no-skills",
-            "--skill",
-            str(skill_dir),
-            "--tools",
-            ",".join(tools),
-            "--approve",
-        ]
-        if self.config.provider:
-            cmd.extend(["--provider", self.config.provider])
-        if self.config.model:
-            cmd.extend(["--model", self.config.model])
-        if self.config.thinking:
-            cmd.extend(["--thinking", self.config.thinking])
-        cmd.extend([f"@{prompt_file}", "Execute the attached node instructions."])
-        return cmd
+        return cls(PiConfig.from_config(raw), skill_root)
 
     def run(
         self,
@@ -143,6 +57,7 @@ class PiRunner:
                     root_kind="job",
                 )
             job_dir = resolve_job_dir(job, jobs_dir)
+        data_dir = job_db.jobs_dir.parent if job_db is not None else None
         run_token = str(uuid.uuid4())
         run_dir = job_dir / "runs" / node_key / run_token
         session_dir = run_dir / "session"
@@ -165,7 +80,8 @@ class PiRunner:
         prompt_file.write_text(prompt, encoding="utf-8")
 
         session_name = f"{job['id']}:{node_key}:{run_token}"
-        command = self.build_command(
+        command = build_pi_command(
+            self.config,
             skill_dir=skill_dir,
             session_dir=session_dir,
             tools=tools or ["read", "write", "bash"],
@@ -288,6 +204,16 @@ class PiRunner:
         status: ExecutionStatus = "completed" if exit_code == 0 else "failed"
         if job_db is not None and persist_run and run_record is not None:
             job_db.finish_node_run(run_record["id"], status, exit_code, error_message)
+
+        # This run is now the latest for this node; remove any older run dirs.
+        if data_dir is not None and job_db is not None:
+            try:
+                with job_db.connect() as conn:
+                    cleanup_extra_runs_for_node(conn, data_dir, job_dir, node_key)
+            except Exception:
+                logger.exception(
+                    "Failed to clean up old run dirs for %s/%s", job_dir.name, node_key
+                )
 
         return PiRunResult(
             status=status,
