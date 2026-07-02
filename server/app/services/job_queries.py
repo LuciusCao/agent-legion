@@ -3,6 +3,7 @@ from typing import Any
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_node_executor_resolver import resolve_node_executors
+from server.app.services.job_node_ordering import ordered_job_nodes
 from server.app.services.job_path_projection import resolve_record_paths
 from server.app.services.job_query_presenters import (
     artifact_names,
@@ -51,7 +52,8 @@ class JobQueryService:
         nodes: list[dict[str, Any]],
         definition: WorkflowDefinition,
     ) -> dict[str, Any]:
-        summaries = [node_summary(node, definition) for node in nodes]
+        ordered_nodes = ordered_job_nodes(nodes, definition)
+        summaries = [node_summary(node, definition) for node in ordered_nodes]
         completed_nodes = sum(1 for summary in summaries if summary["status"] == "completed")
         total_nodes = len(summaries)
 

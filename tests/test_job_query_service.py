@@ -76,6 +76,50 @@ def test_list_jobs_returns_typed_node_summaries(query_service, job_db):
     }
 
 
+def test_list_jobs_orders_node_summaries_by_workflow_dag(query_service, job_db):
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=[
+            "assemble_comprehension_info",
+            "assess_comprehension_difficulty",
+            "classify_comprehension_eligibility",
+            "clean_and_parse",
+            "fetch_questions",
+            "finalize_non_uploadable",
+            "generate_key_info",
+            "generate_possible_errors",
+            "review_key_info",
+            "review_possible_errors",
+        ],
+        workspace_id=workspace["id"],
+    )
+
+    listed = query_service.list_jobs(job["workspace_id"])
+
+    node_keys = [node["node_key"] for node in listed[0]["node_summaries"]]
+    assert node_keys[:3] == [
+        "fetch_questions",
+        "clean_and_parse",
+        "classify_comprehension_eligibility",
+    ]
+    assert node_keys.index("assemble_comprehension_info") > node_keys.index(
+        "assess_comprehension_difficulty"
+    )
+
+
 def test_list_jobs_loads_nodes_in_one_query(query_service, job_db, monkeypatch):
     for source_id in ("Q1", "Q2", "Q3"):
         create_question_job(job_db, source_id=source_id)
@@ -145,6 +189,43 @@ def test_job_query_service_detail_enriches_nodes(query_service, job_db):
     for node in detail["nodes"]:
         assert node["executor_id"] is None
         assert node["executor_kind"] is None
+
+
+def test_job_query_service_detail_orders_nodes_and_uses_edge_dependencies(query_service, job_db):
+    workspace = job_db.create_workspace(
+        "default", default_workflow_key="question_comprehension_info"
+    )
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=[
+            "assemble_comprehension_info",
+            "classify_comprehension_eligibility",
+            "clean_and_parse",
+            "fetch_questions",
+        ],
+        workspace_id=workspace["id"],
+    )
+
+    detail = query_service.detail(job["id"])
+
+    assert [node["node_key"] for node in detail["nodes"]] == [
+        "fetch_questions",
+        "clean_and_parse",
+        "classify_comprehension_eligibility",
+        "assemble_comprehension_info",
+    ]
+    nodes = {node["node_key"]: node for node in detail["nodes"]}
+    assert nodes["classify_comprehension_eligibility"]["after"] == ["clean_and_parse"]
 
 
 def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
