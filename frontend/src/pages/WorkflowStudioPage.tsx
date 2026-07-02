@@ -6,6 +6,7 @@ import { WorkflowNodeInspector } from './workflowStudio/WorkflowNodeInspector'
 import { WorkflowNodeOutline } from './workflowStudio/WorkflowNodeOutline'
 import { WorkflowRevisionList } from './workflowStudio/WorkflowRevisionList'
 import { WorkflowStudioSummaryBar } from './workflowStudio/WorkflowStudioSummaryBar'
+import { WorkflowDefinitionEditor } from './workflowStudio/WorkflowDefinitionEditor'
 import { WorkflowValidationPanel } from './workflowStudio/WorkflowValidationPanel'
 import { useWorkflowStudio } from './workflowStudio/useWorkflowStudio'
 import styles from './WorkflowStudioPage.module.css'
@@ -76,6 +77,7 @@ export function WorkflowStudioPage() {
                   edges={edges}
                   selectedNode={selectedNodeKey}
                   onSelectedNodeChange={setSelectedNodeKey}
+                  hideNodeDetails
                 />
               )}
             </main>
@@ -84,19 +86,9 @@ export function WorkflowStudioPage() {
                 workflow={workflow}
                 selectedNodeKey={selectedNodeKey}
               />
-              <label
-                className={styles.editorLabel}
-                htmlFor="workflow-definition"
-              >
-                Workflow definition
-              </label>
-              <textarea
-                id="workflow-definition"
-                aria-label="Workflow definition"
-                className={styles.yamlEditor}
+              <WorkflowDefinitionEditor
                 value={definitionYaml}
-                onChange={(event) => setDefinitionYaml(event.target.value)}
-                rows={20}
+                onChange={setDefinitionYaml}
               />
               <WorkflowValidationPanel
                 message={validationMessage}

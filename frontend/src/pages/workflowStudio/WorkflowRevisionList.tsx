@@ -1,28 +1,28 @@
 import type { WorkflowRevisionSummary } from '../../types'
-
-type Props = {
-  revisions: WorkflowRevisionSummary[]
-  activeRevisionId?: string
-}
+import styles from './WorkflowRevisionList.module.css'
+type Props = { revisions: WorkflowRevisionSummary[]; activeRevisionId?: string }
 
 export function WorkflowRevisionList({ revisions, activeRevisionId }: Props) {
   return (
-    <section aria-label="Workflow revisions">
-      <h2>版本</h2>
+    <section aria-label="Workflow revisions" className={styles.section}>
+      <h2 className={styles.title}>版本</h2>
       {revisions.length === 0 ? (
-        <p>当前 workspace 还没有 workflow revision</p>
+        <p className={styles.hash}>当前 workspace 还没有 workflow revision</p>
       ) : (
-        <ul>
+        <ul className={styles.list}>
           {revisions.map((revision) => (
             <li
               key={revision.id}
+              className={styles.item}
               aria-current={
                 revision.id === activeRevisionId ? 'true' : undefined
               }
             >
-              <span>v{revision.version}</span>
-              <span>{revision.status}</span>
-              <span>{revision.definition_hash.slice(0, 8)}</span>
+              <span className={styles.version}>v{revision.version}</span>
+              <span className={styles.status}>{revision.status}</span>
+              <span className={styles.hash}>
+                {revision.definition_hash.slice(0, 8)}
+              </span>
             </li>
           ))}
         </ul>
