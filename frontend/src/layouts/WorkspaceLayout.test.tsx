@@ -133,6 +133,21 @@ describe('WorkspaceLayout', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/settings')
   })
 
+  it('navigates to workflow studio when workflow studio button is clicked', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByLabelText('Workflow Studio'))
+    expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/workflow-studio')
+  })
+
   it('navigates to home when home button is clicked', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
