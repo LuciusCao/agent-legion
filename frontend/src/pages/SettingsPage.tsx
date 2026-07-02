@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { useParams } from 'react-router-dom'
 import { IconButton } from '@mui/material'
 import { useSettingStore } from '../stores/settingStore'
 import { AppShell } from '../layouts/AppShell'
@@ -152,11 +152,6 @@ export function SettingsPage() {
                 {item.label}
               </li>
             ))}
-            <li className={styles.navItem}>
-              <Link to={`/workspaces/${workspaceId}/workflow-studio`}>
-                Workflow Studio
-              </Link>
-            </li>
           </ul>
         </nav>
 

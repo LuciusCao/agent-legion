@@ -10,8 +10,6 @@ import { AppBar } from '../components/AppBar'
 import { AddDialog } from '../components/AddDialog'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 import { MaterialIcon } from '../components/MaterialIcon'
-import { WORKSPACE_LABELS } from '../labels'
-
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
@@ -37,12 +35,9 @@ export default function WorkspaceLayout() {
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
 
-  const isJobDetail =
+  const isDetailPage =
     workspaceId &&
     location.pathname.startsWith(`/workspaces/${workspaceId}/jobs/`)
-  const isDetailPage = isJobDetail
-
-  const backTo = isDetailPage ? `/workspaces/${workspaceId}` : undefined
 
   useEffect(() => {
     if (workspaces.length === 0) {
@@ -87,23 +82,19 @@ export default function WorkspaceLayout() {
     }
   }, [fetchWorkerStatus, workspaceId])
 
-  const workspaceName = currentWorkspace?.name || workspaceId
-
-  const appBarTitle = pageTitle || workspaceName || ''
-
-  const showListActions = !isDetailPage
+  const title = pageTitle || currentWorkspace?.name || workspaceId || ''
 
   return (
     <AppShell
       appBar={({ scrolled }) => (
         <AppBar
-          title={appBarTitle}
+          title={title}
           subtitle={pageSubtitle}
           home={!isDetailPage}
-          backTo={backTo}
+          backTo={isDetailPage ? `/workspaces/${workspaceId}` : undefined}
           scrolled={scrolled}
           rightActions={
-            showListActions ? (
+            !isDetailPage ? (
               <>
                 <AgentStatusIndicator workspaceId={workspaceId} />
                 <IconButton
@@ -138,7 +129,16 @@ export default function WorkspaceLayout() {
                 </IconButton>
                 <IconButton
                   size="small"
-                  aria-label={WORKSPACE_LABELS.settings}
+                  aria-label="Workflow Studio"
+                  onClick={() =>
+                    navigate(`/workspaces/${workspaceId}/workflow-studio`)
+                  }
+                >
+                  <MaterialIcon name="account_tree" />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  aria-label="设置"
                   onClick={() =>
                     navigate(`/workspaces/${workspaceId}/settings`)
                   }
