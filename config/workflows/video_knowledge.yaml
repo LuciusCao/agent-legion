@@ -1,5 +1,6 @@
 key: video_knowledge
 label: 知识视频 DAG
+schema_version: 2
 intake:
   modes:
     batch_by_urls:
@@ -65,3 +66,18 @@ nodes:
     after: [assemble]
     inputs: [metadata.json, report.md, upload_params.json]
     outputs: [package_manifest.json]
+edges:
+  - from: download
+    to: transcribe
+  - from: transcribe
+    to: subtitle_review
+  - from: subtitle_review
+    to: chapter_generate
+  - from: chapter_generate
+    to: interaction_generate
+  - from: interaction_generate
+    to: content_review
+  - from: content_review
+    to: assemble
+  - from: assemble
+    to: package
