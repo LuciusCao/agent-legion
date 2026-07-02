@@ -190,7 +190,7 @@ describe('WorkspaceMainPage', () => {
       rerunDialogOpen: false,
       deleteDialogOpen: false,
       workspacePackageDialogOpen: false,
-      workerPaused: false,
+      workerPausedByWorkspace: {},
       toast: null,
     })
     useSettingStore.setState({

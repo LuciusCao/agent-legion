@@ -8,12 +8,12 @@ const fetchWorkerStatusMock = vi.fn()
 const setWorkerPausedMock = vi.fn()
 const showToastMock = vi.fn()
 
-let mockWorkerPaused = true
+let mockWorkerPausedByWorkspace: Record<string, boolean> = {}
 let mockAgents: AgentStatus[] = [
   {
     id: 'main',
     name: 'Main',
-    workspace_id: '',
+    workspace_id: 'ws1',
     busy: false,
     task_count: 0,
     max_tasks: 8,
@@ -26,8 +26,10 @@ vi.mock('../stores/uiStore', () => ({
     selector?: (state: ReturnType<typeof createMockUiState>) => unknown
   ) => {
     const state = createMockUiState({
-      workerPaused: mockWorkerPaused,
+      workerPausedByWorkspace: mockWorkerPausedByWorkspace,
       agents: mockAgents,
+      getWorkerPaused: (workspaceId: string) =>
+        mockWorkerPausedByWorkspace[workspaceId] ?? true,
       fetchWorkerStatus: fetchWorkerStatusMock,
       setWorkerPaused: setWorkerPausedMock,
       showToast: showToastMock,
@@ -39,12 +41,12 @@ vi.mock('../stores/uiStore', () => ({
 describe('AgentStatusIndicator', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    mockWorkerPaused = true
+    mockWorkerPausedByWorkspace = {}
     mockAgents = [
       {
         id: 'main',
         name: 'Main',
-        workspace_id: '',
+        workspace_id: 'ws1',
         busy: false,
         task_count: 0,
         max_tasks: 8,
@@ -56,7 +58,7 @@ describe('AgentStatusIndicator', () => {
   })
 
   it('renders agent status button', () => {
-    render(<AgentStatusIndicator />)
+    render(<AgentStatusIndicator workspaceId="ws1" />)
     expect(screen.getByLabelText('Agent 状态')).toBeInTheDocument()
   })
 
@@ -71,6 +73,7 @@ describe('AgentStatusIndicator', () => {
   })
 
   it('resumes scheduling when switch is toggled on', async () => {
+    mockWorkerPausedByWorkspace = { ws1: true }
     render(<AgentStatusIndicator workspaceId="ws1" />)
     const switchEl = screen.getByRole('checkbox')
     expect(switchEl).toBeInTheDocument()
@@ -84,7 +87,7 @@ describe('AgentStatusIndicator', () => {
   })
 
   it('pauses scheduling when switch is toggled off', async () => {
-    mockWorkerPaused = false
+    mockWorkerPausedByWorkspace = { ws1: false }
     render(<AgentStatusIndicator workspaceId="ws1" />)
     const switchEl = screen.getByRole('checkbox')
     expect(switchEl).toBeInTheDocument()
@@ -97,12 +100,12 @@ describe('AgentStatusIndicator', () => {
     expect(showToastMock).toHaveBeenCalledWith('已暂停自动调度', 'success')
   })
 
-  it('shows global openclaw agents in video-hive workspace', () => {
+  it('shows workspace-specific agents', () => {
     mockAgents = [
       {
         id: 'main',
         name: 'Main',
-        workspace_id: '',
+        workspace_id: 'ws1',
         busy: false,
         task_count: 0,
         max_tasks: 8,
@@ -111,33 +114,7 @@ describe('AgentStatusIndicator', () => {
       {
         id: 'pi',
         name: 'Pi Agent',
-        workspace_id: 'ws1',
-        busy: false,
-        task_count: 0,
-        max_tasks: 2,
-        current_video_id: null,
-      },
-    ]
-    render(<AgentStatusIndicator workspaceId="video-hive" />)
-    expect(screen.getByText('Main')).toBeInTheDocument()
-    expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
-  })
-
-  it('shows workspace-specific pi agents in non-video-hive workspace', () => {
-    mockAgents = [
-      {
-        id: 'main',
-        name: 'Main',
-        workspace_id: '',
-        busy: false,
-        task_count: 0,
-        max_tasks: 8,
-        current_video_id: null,
-      },
-      {
-        id: 'pi',
-        name: 'Pi Agent',
-        workspace_id: 'ws1',
+        workspace_id: 'ws2',
         busy: false,
         task_count: 0,
         max_tasks: 2,
@@ -145,7 +122,7 @@ describe('AgentStatusIndicator', () => {
       },
     ]
     render(<AgentStatusIndicator workspaceId="ws1" />)
-    expect(screen.queryByText('Main')).not.toBeInTheDocument()
-    expect(screen.getByText('Pi Agent')).toBeInTheDocument()
+    expect(screen.getByText('Main')).toBeInTheDocument()
+    expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
   })
 })

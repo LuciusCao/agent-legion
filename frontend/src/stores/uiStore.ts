@@ -16,13 +16,12 @@ export interface UiState {
   rerunDialogOpen: boolean
   deleteDialogOpen: boolean
   workspacePackageDialogOpen: boolean
-  workerPaused: boolean
   workerPausedByWorkspace: Record<string, boolean>
   toast: Toast | null
-  getWorkerPaused: (workspaceId?: string) => boolean
+  getWorkerPaused: (workspaceId: string) => boolean
   connectAgentsWs: () => () => void
-  fetchWorkerStatus: (workspaceId?: string) => Promise<void>
-  setWorkerPaused: (paused: boolean, workspaceId?: string) => Promise<void>
+  fetchWorkerStatus: (workspaceId: string) => Promise<void>
+  setWorkerPaused: (paused: boolean, workspaceId: string) => Promise<void>
   openAddDialog: (opts?: {
     context?: 'video' | 'workspace'
     workspaceId?: string
@@ -40,7 +39,6 @@ export interface UiState {
 
 let wsInstance: WebSocket | null = null
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
-const workerStatusKey = (workspaceId?: string) => workspaceId || 'video-hive'
 
 export const useUiStore = create<UiState>((set, get) => ({
   agents: [],
@@ -51,15 +49,12 @@ export const useUiStore = create<UiState>((set, get) => ({
   rerunDialogOpen: false,
   deleteDialogOpen: false,
   workspacePackageDialogOpen: false,
-  workerPaused: true,
   workerPausedByWorkspace: {},
   toast: null,
 
   getWorkerPaused: (workspaceId) => {
-    const key = workerStatusKey(workspaceId)
-    const paused = get().workerPausedByWorkspace[key]
-    if (paused !== undefined) return paused
-    return key === 'video-hive' ? get().workerPaused : true
+    const paused = get().workerPausedByWorkspace[workspaceId]
+    return paused !== undefined ? paused : true
   },
 
   connectAgentsWs: () => {
@@ -102,34 +97,26 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
 
   fetchWorkerStatus: async (workspaceId) => {
-    const query = workspaceId
-      ? `?workspace_id=${encodeURIComponent(workspaceId)}`
-      : ''
+    const query = `?workspace_id=${encodeURIComponent(workspaceId)}`
     const data = await api<{ paused: boolean }>(`/api/worker/status${query}`)
-    const key = workerStatusKey(workspaceId)
     set((state) => ({
-      workerPaused: key === 'video-hive' ? data.paused : state.workerPaused,
       workerPausedByWorkspace: {
         ...state.workerPausedByWorkspace,
-        [key]: data.paused,
+        [workspaceId]: data.paused,
       },
     }))
   },
 
   setWorkerPaused: async (paused, workspaceId) => {
-    const query = workspaceId
-      ? `?workspace_id=${encodeURIComponent(workspaceId)}`
-      : ''
+    const query = `?workspace_id=${encodeURIComponent(workspaceId)}`
     const data = await api<{ paused: boolean }>(
       `${paused ? '/api/worker/pause' : '/api/worker/resume'}${query}`,
       { method: 'POST' }
     )
-    const key = workerStatusKey(workspaceId)
     set((state) => ({
-      workerPaused: key === 'video-hive' ? data.paused : state.workerPaused,
       workerPausedByWorkspace: {
         ...state.workerPausedByWorkspace,
-        [key]: data.paused,
+        [workspaceId]: data.paused,
       },
     }))
   },

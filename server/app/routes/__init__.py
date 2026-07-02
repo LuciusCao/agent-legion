@@ -5,7 +5,7 @@ from ..db import Database
 from ..events import JobEventManager, VideoEventManager
 from ..jobs import JobQueries
 from ..settings import Settings
-from ..worker_control import WorkerControl, WorkspaceWorkerControl
+from ..worker_control import WorkspaceWorkerControl
 from .agents import create_agents_router
 from .common import create_common_router
 from .job_artifacts import create_job_artifacts_router
@@ -32,7 +32,6 @@ def create_router(
     settings: Settings,
     agent_manager: AgentStatusManager,
     video_event_manager: VideoEventManager,
-    worker_control: WorkerControl,
     workspace_worker_control: WorkspaceWorkerControl | None = None,
     job_event_manager: JobEventManager | None = None,
 ) -> APIRouter:
@@ -87,14 +86,14 @@ def create_router(
     package_deletion = PackageDeletionService(db, settings.packages_dir)
     job_packages = JobPackageService(job_db, settings)
 
-    router.include_router(create_common_router(db, settings, worker_control))
+    router.include_router(create_common_router(db, settings))
     router.include_router(create_agents_router(agent_manager))
     router.include_router(
         create_packages_router(
             db, job_db, settings, video_event_manager, package_deletion, job_packages
         )
     )
-    router.include_router(create_worker_router(worker_control, workspace_worker_control))
+    router.include_router(create_worker_router(workspace_worker_control))
     router.include_router(create_workflow_catalog_router(workflow_catalog, settings))
     router.include_router(create_workflow_resource_providers_router(workflow_catalog, settings))
     router.include_router(

@@ -135,7 +135,6 @@ function resetStores() {
     rerunDialogOpen: false,
     deleteDialogOpen: false,
     workspacePackageDialogOpen: false,
-    workerPaused: true,
     workerPausedByWorkspace: {},
     toast: null,
   })

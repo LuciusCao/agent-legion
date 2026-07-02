@@ -6,7 +6,7 @@ const originalFetch = global.fetch
 function mockWorkerStatusFetch(pausedByWorkspace: Record<string, boolean>) {
   return vi.fn().mockImplementation((url: string) => {
     const parsed = new URL(url, 'http://localhost')
-    const workspaceId = parsed.searchParams.get('workspace_id') || 'video-hive'
+    const workspaceId = parsed.searchParams.get('workspace_id') || 'ws1'
     return Promise.resolve({
       ok: true,
       headers: new Headers({ 'content-type': 'application/json' }),
@@ -28,7 +28,6 @@ describe('uiStore', () => {
       addContentType: 'knowledge',
       rerunDialogOpen: false,
       toast: null,
-      workerPaused: true,
       workerPausedByWorkspace: {},
     })
   })
@@ -52,8 +51,8 @@ describe('uiStore', () => {
     })
   })
 
-  it('defaults workerPaused to true to match backend', () => {
-    expect(useUiStore.getState().workerPaused).toBe(true)
+  it('defaults worker paused to true for unknown workspaces', () => {
+    expect(useUiStore.getState().getWorkerPaused('unknown')).toBe(true)
   })
 
   it('keeps worker paused state isolated by workspace', async () => {

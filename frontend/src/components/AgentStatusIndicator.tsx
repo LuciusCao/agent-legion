@@ -5,7 +5,7 @@ import { useUiStore } from '../stores/uiStore'
 import styles from './AgentStatusIndicator.module.css'
 
 export interface AgentStatusIndicatorProps {
-  workspaceId?: string
+  workspaceId: string
 }
 
 export function AgentStatusIndicator({
@@ -17,12 +17,10 @@ export function AgentStatusIndicator({
   const setWorkerPaused = useUiStore((state) => state.setWorkerPaused)
   const showToast = useUiStore((state) => state.showToast)
 
-  const agents = useMemo(() => {
-    if (!workspaceId || workspaceId === 'video-hive') {
-      return allAgents.filter((agent) => !agent.workspace_id)
-    }
-    return allAgents.filter((agent) => agent.workspace_id === workspaceId)
-  }, [allAgents, workspaceId])
+  const agents = useMemo(
+    () => allAgents.filter((agent) => agent.workspace_id === workspaceId),
+    [allAgents, workspaceId]
+  )
   const busy = agents.some((agent) => agent.busy)
 
   useEffect(() => {
