@@ -96,7 +96,9 @@ export default function WorkspaceLayout() {
           rightActions={
             !isDetailPage ? (
               <>
-                <AgentStatusIndicator workspaceId={workspaceId} />
+                {workspaceId && (
+                  <AgentStatusIndicator workspaceId={workspaceId} />
+                )}
                 <IconButton
                   size="small"
                   aria-label={selectMode ? '完成' : '多选'}

@@ -25,7 +25,7 @@ from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
 from server.app.skills.manager import SkillManager
 from server.app.spa import mount_spa
-from server.app.worker_control import WorkerControl, WorkspaceWorkerControl
+from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.registry import list_registered_workflows
 
@@ -91,7 +91,6 @@ def create_app(
     settings = load_settings(data_dir=data_dir)
 
     agent_manager = AgentStatusManager()
-    worker_control = WorkerControl()
     workspace_worker_control = WorkspaceWorkerControl()
     video_event_manager = VideoEventManager()
     job_event_manager = JobEventManager()
@@ -166,7 +165,6 @@ def create_app(
     app.state.job_db = job_db
     app.state.executor_registry = executor_registry
     app.state.agent_manager = agent_manager
-    app.state.worker_control = worker_control
     app.state.workspace_worker_control = workspace_worker_control
     app.state.video_event_manager = video_event_manager
     app.state.job_event_manager = job_event_manager
@@ -178,7 +176,6 @@ def create_app(
             settings,
             agent_manager,
             video_event_manager,
-            worker_control,
             workspace_worker_control,
             job_event_manager=job_event_manager,
         )

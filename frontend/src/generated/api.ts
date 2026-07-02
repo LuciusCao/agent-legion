@@ -346,23 +346,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/worker/tick': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Worker Tick */
-    post: operations['worker_tick_api_worker_tick_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/workflows': {
     parameters: {
       query?: never
@@ -2361,8 +2344,8 @@ export interface operations {
   }
   pause_worker_api_worker_pause_post: {
     parameters: {
-      query?: {
-        workspace_id?: string | null
+      query: {
+        workspace_id: string
       }
       header?: never
       path?: never
@@ -2392,8 +2375,8 @@ export interface operations {
   }
   resume_worker_api_worker_resume_post: {
     parameters: {
-      query?: {
-        workspace_id?: string | null
+      query: {
+        workspace_id: string
       }
       header?: never
       path?: never
@@ -2423,8 +2406,8 @@ export interface operations {
   }
   worker_status_api_worker_status_get: {
     parameters: {
-      query?: {
-        workspace_id?: string | null
+      query: {
+        workspace_id: string
       }
       header?: never
       path?: never
@@ -2448,28 +2431,6 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  worker_tick_api_worker_tick_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': {
-            [key: string]: boolean
-          }
         }
       }
     }
