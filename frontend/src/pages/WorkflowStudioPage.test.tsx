@@ -70,6 +70,36 @@ vi.mock('../api', () => {
     validateWorkflowDraft: vi
       .fn()
       .mockResolvedValue({ valid: true, errors: [] }),
+    compareWorkflowDraft: vi.fn().mockResolvedValue({
+      valid: true,
+      base_revision: {
+        id: activeRevisionPayload.revision.id,
+        workflow_key: activeRevisionPayload.revision.workflow_key,
+        version: activeRevisionPayload.revision.version,
+        definition_hash: activeRevisionPayload.revision.definition_hash,
+      },
+      draft_workflow: {
+        key: activeRevisionPayload.workflow.key,
+        label: activeRevisionPayload.workflow.label,
+        version: activeRevisionPayload.revision.version + 1,
+      },
+      summary: {
+        risk_level: 'info',
+        node_changes: [
+          {
+            type: 'added',
+            node_key: 'new_node',
+            label: '新节点',
+            fields: [],
+            risk: 'info',
+          },
+        ],
+        edge_changes: [],
+        intake_changes: [],
+        risk_flags: [],
+      },
+      errors: [],
+    }),
   }
 })
 
@@ -89,7 +119,7 @@ describe('WorkflowStudioPage', () => {
     expect(screen.getAllByText('v2')[0]).toBeInTheDocument()
     expect(screen.getAllByText('abcdef12')[0]).toBeInTheDocument()
     expect(
-      screen.getByDisplayValue(/key: question_comprehension_info/)
+      await screen.findByDisplayValue(/key: question_comprehension_info/)
     ).toBeInTheDocument()
   })
 
@@ -97,7 +127,7 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
-    const editor = await screen.findByLabelText('Workflow definition')
+    const editor = await screen.findByLabelText('高级 YAML 编辑器')
     await user.clear(editor)
     await user.type(editor, 'key: changed')
 
@@ -111,14 +141,36 @@ describe('WorkflowStudioPage', () => {
     expect(screen.getByText('已同步')).toBeInTheDocument()
   })
 
-  it('shows publish success after clicking publish', async () => {
+  it('opens publish review dialog before publishing', async () => {
     const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
     await screen.findByText('Workflow Studio')
-    const editor = screen.getByLabelText('Workflow definition')
+    const editor = screen.getByLabelText('高级 YAML 编辑器')
     await user.type(editor, '\n# edited')
+
+    await screen.findByText('有未发布变更')
     await user.click(screen.getByRole('button', { name: '发布' }))
+
+    expect(
+      await screen.findByText('发布 workflow revision')
+    ).toBeInTheDocument()
+    expect(screen.getByText('确认发布')).toBeInTheDocument()
+  })
+
+  it('publishes after confirming the review dialog', async () => {
+    const user = userEvent.setup()
+    render(<WorkflowStudioPage />)
+
+    await screen.findByText('Workflow Studio')
+    const editor = screen.getByLabelText('高级 YAML 编辑器')
+    await user.type(editor, '\n# edited')
+
+    await screen.findByText('有未发布变更')
+    await user.click(screen.getByRole('button', { name: '发布' }))
+    await screen.findByText('发布 workflow revision')
+
+    await user.click(screen.getByRole('button', { name: '确认发布' }))
 
     expect(await screen.findByText('发布成功')).toBeInTheDocument()
   })

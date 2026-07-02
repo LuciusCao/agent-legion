@@ -1,0 +1,34 @@
+.listItem {
+  font-size: 12px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: #fee2e2;
+  color: #b91c1c;
+  word-break: break-word;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.nodeScope {
+  align-self: flex-start;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  border: 1px solid #b91c1c;
+  background: transparent;
+  color: #b91c1c;
+  cursor: pointer;
+}
+.nodeScope:hover {
+  background: #b91c1c;
+  color: #ffffff;
+}
+.edgeScope {
+  font-size: 11px;
+  color: #7f1d1d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+}
+.location {
+  font-size: 11px;
+  color: #7f1d1d;
+}

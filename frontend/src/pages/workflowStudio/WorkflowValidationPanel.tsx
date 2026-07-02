@@ -1,33 +1,38 @@
 import { groupValidationErrors } from './workflowStudioModel'
+import { WorkflowScopedErrorGroups } from './components/WorkflowScopedErrorGroups'
+import { WorkflowValidationPanelMessage } from './components/WorkflowValidationPanelMessage'
+import { WorkflowValidationPanelStringGroups } from './components/WorkflowValidationPanelStringGroups'
+import type { components } from '../../generated/api'
 import styles from './WorkflowValidationPanel.module.css'
 
-type Props = { message: string; errors: string[] }
+type CompareError = components['schemas']['WorkflowDraftCompareError']
 
-function ErrorGroup({ title, errors }: { title: string; errors: string[] }) {
-  if (errors.length === 0) return null
-  return (
-    <div className={styles.group}>
-      <h3 className={styles.groupTitle}>{title}</h3>
-      <ul className={styles.list}>
-        {errors.map((error) => (
-          <li key={error} className={styles.listItem}>
-            {error}
-          </li>
-        ))}
-      </ul>
-    </div>
-  )
+type Props = {
+  message: string
+  errors: string[]
+  compareErrors?: CompareError[]
+  onSelectNode?: (nodeKey: string) => void
 }
 
-export function WorkflowValidationPanel({ message, errors }: Props) {
+export function WorkflowValidationPanel({
+  message,
+  errors,
+  compareErrors,
+  onSelectNode,
+}: Props) {
   const groups = groupValidationErrors(errors)
-  if (!message && errors.length === 0) return null
-  const messageClass = `${styles.message} ${message.includes('成功') || message.includes('通过') ? styles.success : styles.error}`
+  if (!message && errors.length === 0 && (compareErrors ?? []).length === 0)
+    return null
   return (
     <section aria-label="Workflow validation" className={styles.panel}>
-      {message && <p className={messageClass}>{message}</p>}
-      <ErrorGroup title="结构校验" errors={groups.structural} />
-      <ErrorGroup title="执行器绑定" errors={groups.executor} />
+      {message && <WorkflowValidationPanelMessage message={message} />}
+      <WorkflowValidationPanelStringGroups groups={groups} />
+      {(compareErrors ?? []).length > 0 && (
+        <WorkflowScopedErrorGroups
+          errors={compareErrors!}
+          onSelectNode={onSelectNode}
+        />
+      )}
     </section>
   )
 }

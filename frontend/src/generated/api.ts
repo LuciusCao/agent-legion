@@ -758,6 +758,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/workflow-drafts/compare': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Compare Workflow Draft Route */
+    post: operations['compare_workflow_draft_route_api_workspaces__workspace_id__workflow_drafts_compare_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/workflow-drafts/publish': {
     parameters: {
       query?: never
@@ -1430,6 +1447,22 @@ export interface components {
       /** Paused */
       paused: boolean
     }
+    /** WorkflowCompareSummary */
+    WorkflowCompareSummary: {
+      /** Edge Changes */
+      edge_changes: components['schemas']['WorkflowEdgeChange'][]
+      /** Intake Changes */
+      intake_changes: components['schemas']['WorkflowIntakeChange'][]
+      /** Node Changes */
+      node_changes: components['schemas']['WorkflowNodeChange'][]
+      /** Risk Flags */
+      risk_flags: components['schemas']['WorkflowRiskFlag'][]
+      /**
+       * Risk Level
+       * @enum {string}
+       */
+      risk_level: 'none' | 'info' | 'warning' | 'breaking'
+    }
     /** WorkflowConditionResponse */
     WorkflowConditionResponse: {
       /** Artifact */
@@ -1451,10 +1484,56 @@ export interface components {
       /** Nodes */
       nodes: components['schemas']['WorkflowNodeResponse'][]
     }
+    /** WorkflowDraftCompareError */
+    WorkflowDraftCompareError: {
+      /** Category */
+      category: string
+      /** Column */
+      column?: number | null
+      /** Line */
+      line?: number | null
+      /** Message */
+      message: string
+      /** Node Key */
+      node_key?: string | null
+      /** Source */
+      source?: string | null
+      /** Target */
+      target?: string | null
+    }
+    /** WorkflowDraftCompareRequest */
+    WorkflowDraftCompareRequest: {
+      /** Definition Yaml */
+      definition_yaml: string
+    }
+    /** WorkflowDraftCompareResponse */
+    WorkflowDraftCompareResponse: {
+      base_revision?:
+        | components['schemas']['WorkflowRevisionSummaryItem']
+        | null
+      draft_workflow?: components['schemas']['WorkflowDraftSummaryItem'] | null
+      /**
+       * Errors
+       * @default []
+       */
+      errors: components['schemas']['WorkflowDraftCompareError'][]
+      summary?: components['schemas']['WorkflowCompareSummary'] | null
+      /** Valid */
+      valid: boolean
+    }
     /** WorkflowDraftRequest */
     WorkflowDraftRequest: {
       /** Definition Yaml */
       definition_yaml: string
+    }
+    /** WorkflowDraftSummaryItem */
+    WorkflowDraftSummaryItem: {
+      /** Key */
+      key: string
+      /** Label */
+      label: string
+      /** Version */
+      version: number
     }
     /** WorkflowDraftValidationResponse */
     WorkflowDraftValidationResponse: {
@@ -1463,6 +1542,27 @@ export interface components {
       /** Valid */
       valid: boolean
     }
+    /** WorkflowEdgeChange */
+    WorkflowEdgeChange: {
+      /** After Condition */
+      after_condition?: string | null
+      /** Before Condition */
+      before_condition?: string | null
+      /**
+       * Risk
+       * @enum {string}
+       */
+      risk: 'none' | 'info' | 'warning' | 'breaking'
+      /** Source */
+      source: string
+      /** Target */
+      target: string
+      /**
+       * Type
+       * @enum {string}
+       */
+      type: 'added' | 'removed' | 'condition_changed' | 'label_changed'
+    }
     /** WorkflowEdgeResponse */
     WorkflowEdgeResponse: {
       condition?: components['schemas']['WorkflowConditionResponse'] | null
@@ -1470,6 +1570,23 @@ export interface components {
       source: string
       /** Target */
       target: string
+    }
+    /** WorkflowIntakeChange */
+    WorkflowIntakeChange: {
+      /** Field Key */
+      field_key?: string | null
+      /** Mode Key */
+      mode_key: string
+      /**
+       * Risk
+       * @enum {string}
+       */
+      risk: 'none' | 'info' | 'warning' | 'breaking'
+      /**
+       * Type
+       * @enum {string}
+       */
+      type: 'mode_changed' | 'field_added' | 'field_removed'
     }
     /** WorkflowIntakeModeResponse */
     WorkflowIntakeModeResponse: {
@@ -1486,6 +1603,25 @@ export interface components {
     WorkflowIntakeResponse: {
       /** Modes */
       modes: components['schemas']['WorkflowIntakeModeResponse'][]
+    }
+    /** WorkflowNodeChange */
+    WorkflowNodeChange: {
+      /** Fields */
+      fields: string[]
+      /** Label */
+      label: string
+      /** Node Key */
+      node_key: string
+      /**
+       * Risk
+       * @enum {string}
+       */
+      risk: 'none' | 'info' | 'warning' | 'breaking'
+      /**
+       * Type
+       * @enum {string}
+       */
+      type: 'added' | 'removed' | 'modified'
     }
     /** WorkflowNodeResponse */
     WorkflowNodeResponse: {
@@ -1526,10 +1662,33 @@ export interface components {
       /** Workspace Id */
       workspace_id: string
     }
+    /** WorkflowRevisionSummaryItem */
+    WorkflowRevisionSummaryItem: {
+      /** Definition Hash */
+      definition_hash: string
+      /** Id */
+      id: string
+      /** Version */
+      version: number
+      /** Workflow Key */
+      workflow_key: string
+    }
     /** WorkflowRevisionsResponse */
     WorkflowRevisionsResponse: {
       /** Revisions */
       revisions: components['schemas']['WorkflowRevisionSummary'][]
+    }
+    /** WorkflowRiskFlag */
+    WorkflowRiskFlag: {
+      /** Code */
+      code: string
+      /** Message */
+      message: string
+      /**
+       * Severity
+       * @enum {string}
+       */
+      severity: 'none' | 'info' | 'warning' | 'breaking'
     }
     /** WorkflowSummaryResponse */
     WorkflowSummaryResponse: {
@@ -3329,6 +3488,41 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceStatsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  compare_workflow_draft_route_api_workspaces__workspace_id__workflow_drafts_compare_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowDraftCompareRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftCompareResponse']
         }
       }
       /** @description Validation Error */

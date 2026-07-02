@@ -1,42 +1,35 @@
-import type {
-  WorkflowDefinitionRecord,
-  WorkflowRevisionSummary,
-} from '../../types'
-import styles from './WorkflowStudioSummaryBar.module.css'
 import { WorkflowStudioSummaryBarActions } from './WorkflowStudioSummaryBarActions'
 import { WorkflowStudioSummaryBarMeta } from './WorkflowStudioSummaryBarMeta'
-
-type Props = {
-  workflow: WorkflowDefinitionRecord | null
-  revision: WorkflowRevisionSummary | null
-  dirty: boolean
-  actionState: 'idle' | 'validating' | 'publishing'
-  canSubmit: boolean
-  onValidate: () => void
-  onPublish: () => void
-  onReset: () => void
-}
+import { WorkflowStudioSummaryBarTitle } from './WorkflowStudioSummaryBarTitle'
+import type { StudioSummaryBarProps } from './workflowStudioSummaryBarProps'
+import styles from './WorkflowStudioSummaryBar.module.css'
 
 export function WorkflowStudioSummaryBar({
   workflow,
   revision,
+  compareSummary,
+  compareState,
   dirty,
   actionState,
   canSubmit,
+  canPublish,
   onValidate,
   onPublish,
   onReset,
-}: Props) {
+}: StudioSummaryBarProps) {
   return (
     <section aria-label="Workflow summary" className={styles.bar}>
-      <div className={styles.titleBlock}>
-        <h1 className={styles.title}>{workflow?.label ?? '工作流'}</h1>
-        <p className={styles.subtitle}>{workflow?.key ?? '未加载'}</p>
-      </div>
-      <WorkflowStudioSummaryBarMeta revision={revision} dirty={dirty} />
+      <WorkflowStudioSummaryBarTitle workflow={workflow} />
+      <WorkflowStudioSummaryBarMeta
+        revision={revision}
+        dirty={dirty}
+        compareSummary={compareSummary}
+        compareState={compareState}
+      />
       <WorkflowStudioSummaryBarActions
         actionState={actionState}
         canSubmit={canSubmit}
+        canPublish={canPublish}
         dirty={dirty}
         onValidate={onValidate}
         onPublish={onPublish}
