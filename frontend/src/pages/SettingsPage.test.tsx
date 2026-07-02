@@ -149,6 +149,7 @@ describe('SettingsPage', () => {
             },
           ],
         },
+        edges: [],
         nodes: [
           {
             key: 'fetch_questions',
@@ -344,6 +345,7 @@ describe('SettingsPage', () => {
             },
           ],
         },
+        edges: [],
         nodes: [],
       },
       resourceProviders: [
@@ -392,6 +394,7 @@ describe('SettingsPage', () => {
             },
           ],
         },
+        edges: [],
         nodes: [],
       },
       settings: {
@@ -423,6 +426,7 @@ describe('SettingsPage', () => {
             },
           ],
         },
+        edges: [],
         nodes: [],
       },
       settings: {
@@ -445,6 +449,7 @@ describe('SettingsPage', () => {
         key: 'question_content',
         label: '题目内容生成',
         intake: { modes: [] },
+        edges: [],
         nodes: [
           {
             key: 'fetch_questions',
@@ -524,6 +529,7 @@ describe('SettingsPage', () => {
         key: 'sample_workflow',
         label: '示例工作流',
         intake: { modes: [] },
+        edges: [],
         nodes: [
           {
             key: 'fetch_questions',
@@ -697,6 +703,7 @@ describe('SettingsPage', () => {
         key: 'sample_workflow',
         label: '示例工作流',
         intake: { modes: [] },
+        edges: [],
         nodes: [
           {
             key: 'fetch_questions',

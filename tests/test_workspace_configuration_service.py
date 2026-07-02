@@ -386,6 +386,25 @@ def test_replace_configuration_removes_pi_agent_when_pi_allocation_dropped(
     )
 
 
+def test_create_workspace_seeds_active_workflow_revision(workspace_service, job_db):
+    workspace = workspace_service.create(
+        {"name": "WS", "default_workflow_key": "question_comprehension_info"}
+    )
+    active = job_db.get_active_workflow_revision(workspace["id"], "question_comprehension_info")
+    assert active is not None
+    assert active["version"] == 1
+
+
+def test_update_workflow_seeds_revision_for_new_workflow(workspace_service, job_db):
+    workspace = workspace_service.create(
+        {"name": "WS", "default_workflow_key": "question_comprehension_info"}
+    )
+    workspace_service.update_section(
+        workspace["id"], "workflow", {"workflowKey": "video_knowledge"}
+    )
+    assert job_db.get_active_workflow_revision(workspace["id"], "video_knowledge") is not None
+
+
 def test_sync_workspace_pi_agents_registers_existing_pi_allocations(
     workspace_service: WorkspaceConfigurationService,
     workspace,

@@ -1,0 +1,52 @@
+from __future__ import annotations
+
+import sqlite3
+from typing import Any
+
+
+def get_binding(
+    conn: sqlite3.Connection,
+    workspace_id: str,
+    workflow_key: str,
+    node_key: str,
+) -> dict[str, Any] | None:
+    row = conn.execute(
+        """
+        select executor_id from workspace_node_bindings
+        where workspace_id=? and workflow_key=? and node_key=?
+        """,
+        (workspace_id, workflow_key, node_key),
+    ).fetchone()
+    return dict(row) if row else None
+
+
+def get_local_node_limit(
+    conn: sqlite3.Connection,
+    workspace_id: str,
+    workflow_key: str,
+    node_key: str,
+) -> int | None:
+    row = conn.execute(
+        """
+        select concurrency_limit from workspace_node_limits
+        where workspace_id=? and workflow_key=? and node_key=?
+        """,
+        (workspace_id, workflow_key, node_key),
+    ).fetchone()
+    return int(row["concurrency_limit"]) if row else None
+
+
+def has_local_node_limit(
+    conn: sqlite3.Connection,
+    workspace_id: str,
+    workflow_key: str,
+    node_key: str,
+) -> bool:
+    row = conn.execute(
+        """
+        select 1 from workspace_node_limits
+        where workspace_id=? and workflow_key=? and node_key=?
+        """,
+        (workspace_id, workflow_key, node_key),
+    ).fetchone()
+    return row is not None

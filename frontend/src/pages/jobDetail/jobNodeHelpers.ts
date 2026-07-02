@@ -3,10 +3,12 @@ import type { JobNodeRecord } from '../../types'
 
 const VALID_STATUSES = new Set<DagGraphNode['status']>([
   'pending',
+  'ready',
   'running',
   'completed',
   'failed',
   'stale',
+  'not_applicable',
 ])
 
 const POLLING_STATUSES = new Set(['queued', 'running'])

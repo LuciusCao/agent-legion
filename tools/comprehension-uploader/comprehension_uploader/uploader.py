@@ -48,6 +48,9 @@ class Uploader:
     ) -> None:
         if workspace_id is not None:
             self.workspace_id = workspace_id
+        if record.uploadable is False or record.outcome == "non_uploadable":
+            logger.info("Skipping non-uploadable record %s", record.question_id)
+            return
         fingerprint = self._resolve_fingerprint(record)
         for attempt in range(self.config.max_retries + 1):
             try:

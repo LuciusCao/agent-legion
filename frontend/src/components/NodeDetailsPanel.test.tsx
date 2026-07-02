@@ -75,7 +75,9 @@ describe('NodeDetailsPanel', () => {
     ['running', 'hourglass_empty', '运行中'],
     ['completed', 'check_circle', '已完成'],
     ['failed', 'error', '失败'],
-    ['stale', 'warning', '过期'],
+    ['stale', 'warning', '需重跑'],
+    ['ready', 'play_circle', '就绪'],
+    ['not_applicable', 'block', '不适用'],
   ] as const)(
     'renders %s status with icon %s and label %s',
     (status, icon, label) => {

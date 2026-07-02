@@ -8,7 +8,9 @@ from server.app.jobs.queries import JobQueries
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.question_comprehension_info import (
     assemble_comprehension_info,
+    classify_comprehension_eligibility,
     clean_and_parse,
+    finalize_non_uploadable,
 )
 
 
@@ -413,8 +415,90 @@ def test_local_executor_config_binds_question_comprehension_info_handlers():
     local = config["local-default"]
     assert local.kind == "local"
 
-    for capability in ("fetch_questions", "clean_and_parse", "assemble_comprehension_info"):
+    for capability in (
+        "fetch_questions",
+        "clean_and_parse",
+        "classify_comprehension_eligibility",
+        "finalize_non_uploadable",
+        "assemble_comprehension_info",
+    ):
         handler = local.capabilities[capability].handler
         assert handler.startswith("question_comprehension_info."), (
             f"capability {capability!r} must bind to question_comprehension_info, got {handler!r}"
         )
+
+
+def test_classify_comprehension_eligibility_marks_pure_calculation_non_uploadable(tmp_path):
+    job = {"source_id": "Q200"}
+    tmp_path.joinpath("questions_parsed.json").write_text(
+        json.dumps(
+            {
+                "questions": [
+                    {
+                        "question_id": "Q200",
+                        "stem": "计算：125 + 76 = ?",
+                        "options": [{"label": "A", "text": "201"}],
+                        "answer": "A",
+                        "analysis": "",
+                    }
+                ]
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    classify_comprehension_eligibility(job, tmp_path, {})
+
+    payload = json.loads(
+        tmp_path.joinpath("comprehension_eligibility.json").read_text(encoding="utf-8")
+    )
+    assert payload["question_id"] == "Q200"
+    assert payload["eligible"] is False
+    assert payload["reason_code"] == "pure_calculation"
+
+
+def test_finalize_non_uploadable_writes_non_uploadable_manifest(tmp_path):
+    job = {
+        "id": "job1",
+        "source_id": "Q200",
+        "workflow_key": "question_comprehension_info",
+        "source_type": "question",
+        "title": "Question Q200",
+    }
+    tmp_path.joinpath("questions_parsed.json").write_text(
+        json.dumps(
+            {
+                "questions": [
+                    {
+                        "question_id": "Q200",
+                        "fingerprint": "fp-1",
+                        "fingerprint_source": "cms",
+                        "fingerprint_missing": False,
+                    }
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
+    tmp_path.joinpath("comprehension_eligibility.json").write_text(
+        json.dumps(
+            {
+                "question_id": "Q200",
+                "eligible": False,
+                "reason_code": "pure_calculation",
+                "reason": "题目主要考查直接计算，没有独立审题信息。",
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+
+    finalize_non_uploadable(job, tmp_path, {})
+
+    manifest = json.loads(tmp_path.joinpath("manifest.json").read_text(encoding="utf-8"))
+    assert manifest["question_id"] == "Q200"
+    assert manifest["uploadable"] is False
+    assert manifest["outcome"] == "non_uploadable"
+    assert manifest["skip_reason_code"] == "pure_calculation"
+    assert not tmp_path.joinpath("comprehension_info.json").exists()

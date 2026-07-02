@@ -28,9 +28,22 @@ class WorkflowNodeResponse(BaseModel):
     outputs: list[str]
 
 
+class WorkflowConditionResponse(BaseModel):
+    artifact: str
+    path: str
+    equals: Any
+
+
+class WorkflowEdgeResponse(BaseModel):
+    source: str
+    target: str
+    condition: WorkflowConditionResponse | None = None
+
+
 class WorkflowDefinitionResponse(WorkflowSummaryResponse):
     intake: WorkflowIntakeResponse
     nodes: list[WorkflowNodeResponse]
+    edges: list[WorkflowEdgeResponse]
 
 
 class WorkflowResponse(BaseModel):
@@ -39,13 +52,3 @@ class WorkflowResponse(BaseModel):
 
 class WorkflowsListResponse(BaseModel):
     workflows: list[WorkflowSummaryResponse]
-
-
-def workflow_response(value: dict[str, Any]) -> WorkflowResponse:
-    return WorkflowResponse(workflow=WorkflowDefinitionResponse.model_validate(value))
-
-
-def workflows_list_response(values: list[dict[str, Any]]) -> WorkflowsListResponse:
-    return WorkflowsListResponse(
-        workflows=[WorkflowSummaryResponse.model_validate(value) for value in values]
-    )

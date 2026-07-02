@@ -74,4 +74,15 @@ describe('DagNode', () => {
     expect(card).toHaveAttribute('data-status', status)
     expect(screen.getByText(icon)).toBeInTheDocument()
   })
+
+  it('renders not applicable node status', () => {
+    renderWithProvider({
+      label: '生成关键信息',
+      status: 'not_applicable',
+      inputs: [],
+      outputs: [],
+    })
+
+    expect(screen.getByText('不适用')).toBeInTheDocument()
+  })
 })

@@ -30,6 +30,7 @@ WHITELIST: set[str] = {
     str(ROOT / "server" / "app" / "jobs" / "executor_configuration.py"),
     # Pipeline definition loader intentionally rejects removed 'runner'/'agent' fields.
     str(ROOT / "server" / "app" / "workflows" / "definition.py"),
+    str(ROOT / "server" / "app" / "workflows" / "loader.py"),
     # Video pipeline runner uses openclaw command template strings.
     str(ROOT / "server" / "app" / "pipeline" / "runners.py"),
     # Video work scheduler uses 'agent' as a local work-item kind.

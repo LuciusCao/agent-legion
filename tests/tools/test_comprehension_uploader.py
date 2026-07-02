@@ -210,6 +210,67 @@ def test_uploader_add_success_and_duplicate_skip(tmp_path: Path) -> None:
     assert not any(call[0] == "update" for call in client.calls)
 
 
+def test_uploader_skips_non_uploadable_records(tmp_path: Path) -> None:
+    config = _make_config(tmp_path)
+    db = Database(config.db_path)
+    db.init_schema()
+
+    package = tmp_path / "package.jsonl"
+    package.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "question_id": "Q-uploadable",
+                        "subject_id": 2,
+                        "question_uuid": "uuid-1",
+                        "question_vno": 1,
+                        "comprehension_difficulty": 50,
+                        "format_vno": "v1",
+                        "comprehension_data": {"steps": []},
+                        "stem": "uploadable stem",
+                        "options": [{"label": "A", "text": "a"}],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "question_id": "Q-uploadable-false",
+                        "uploadable": False,
+                        "comprehension_data": {"steps": []},
+                        "stem": "skipped stem",
+                        "options": [{"label": "A", "text": "a"}],
+                    }
+                ),
+                json.dumps(
+                    {
+                        "question_id": "Q-non-uploadable-outcome",
+                        "outcome": "non_uploadable",
+                        "comprehension_data": {"steps": []},
+                        "stem": "skipped stem 2",
+                        "options": [{"label": "A", "text": "a"}],
+                    }
+                ),
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    records = list(parse_package(package))
+    client = _FakeAPIClient([{"code": 0, "message": "ok", "data": {"result": 1}}])
+    uploader = Uploader(config, db, client)
+    uploader.upload_batch(records, "batch-skip")
+
+    assert len(client.calls) == 1
+    assert client.calls[0] == (
+        "add",
+        compute_question_fingerprint("uploadable stem", [{"label": "A", "text": "a"}]),
+        None,
+    )
+    assert db.logs.get_logs("Q-uploadable-false") == []
+    assert db.logs.get_logs("Q-non-uploadable-outcome") == []
+
+
 def test_scan_detects_fingerprint_change(tmp_path: Path) -> None:
     config = _make_config(tmp_path)
     db = Database(config.db_path)

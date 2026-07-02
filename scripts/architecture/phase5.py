@@ -22,6 +22,7 @@ _FORBIDDEN_PATTERN_WHITELIST = {
     "server/app/executors/legacy_migration.py",
     "server/app/jobs/executor_configuration.py",
     "server/app/workflows/definition.py",
+    "server/app/workflows/loader.py",
     "server/app/pipeline/runners.py",
     "server/app/worker_scheduler.py",
     "server/app/worker_thread.py",

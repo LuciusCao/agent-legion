@@ -3,16 +3,24 @@ import pytest
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_revisions import WorkflowRevisionService
+
+
+def _create_workspace_with_revision(job_db, settings, workflow_key="question_comprehension_info"):
+    workspace = job_db.create_workspace("default", default_workflow_key=workflow_key)
+    definition = WorkflowCatalogService(settings).definition(workflow_key)
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
+    return workspace
 
 
 @pytest.fixture
 def intake_service(job_db, settings):
-    job_db.create_workspace("default", default_workflow_key="question_comprehension_info")
+    _create_workspace_with_revision(job_db, settings)
     return JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
 
 def test_job_intake_creates_direct_id_jobs(job_db, settings):
-    job_db.create_workspace("default", default_workflow_key="question_comprehension_info")
+    _create_workspace_with_revision(job_db, settings)
     service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
 
     result = service.create_batch(

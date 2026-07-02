@@ -2,6 +2,8 @@ import type { components } from './generated/api'
 
 type ApiSchemas = components['schemas']
 
+export type JobSummary = ApiSchemas['JobSummaryResponse']
+
 export type ContentType = 'knowledge' | 'question'
 export type DetailTab = 'nodes' | 'subtitles' | 'logs' | 'metadata'
 export type RunToMode = 'continue' | 'rerun'
@@ -151,7 +153,6 @@ export type TranscriptionRun = {
 }
 
 import type {
-  JobSummary,
   JobNodeSummary,
   JobDetail,
   JobNode,
@@ -161,7 +162,6 @@ import type {
 } from './jobTypes'
 
 export type {
-  JobSummary,
   JobNodeSummary,
   JobDetail,
   JobNode,

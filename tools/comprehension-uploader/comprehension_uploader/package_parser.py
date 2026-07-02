@@ -20,6 +20,8 @@ class UploadRecord(BaseModel):
     stem: str | None = None
     options: list[Any] | None = None
     fingerprint: str | None = None
+    uploadable: bool | None = None
+    outcome: str | None = None
 
     @field_validator("comprehension_data", mode="before")
     @classmethod

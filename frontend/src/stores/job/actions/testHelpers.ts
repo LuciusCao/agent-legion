@@ -27,10 +27,14 @@ export function createJobSummary(
     updated_at: '',
     workflow_key: '',
     workspace_id: '',
+    workflow_revision_id: '',
+    workflow_definition_hash: '',
+    outcome: '',
+    current_workflow_revision_id: '',
+    current_workflow_revision_version: null,
     ...partial,
   }
 }
-
 export function createJobState(partial: Partial<JobState> = {}): JobState {
   return {
     jobs: [],

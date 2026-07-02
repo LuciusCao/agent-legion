@@ -1,6 +1,5 @@
 import type { JobDetailResponse, WorkflowDefinitionRecord } from '../../types'
 import { toDagEdges, toDagNodes } from './jobNodeHelpers'
-
 function toWorkflowDefinition(
   detail: JobDetailResponse | null
 ): WorkflowDefinitionRecord | null {
@@ -9,6 +8,7 @@ function toWorkflowDefinition(
     key: detail.job.workflow_key,
     label: detail.job.workflow_key,
     intake: { modes: [] },
+    edges: [],
     nodes: detail.nodes.map((n) => ({
       key: n.node_key,
       label: n.label,
@@ -80,6 +80,11 @@ export function deriveJobDetailPresentation(detail: JobDetailResponse | null) {
     dagNodes: nodes,
     dagEdges: edges,
     workflowDefinition,
+    workflowLabel: workflowDefinition?.label ?? detail?.job.workflow_key ?? '',
+    outcome: detail?.job.outcome ?? '',
+    workflowRevisionId: detail?.job.workflow_revision_id ?? '',
+    currentWorkflowRevisionVersion:
+      detail?.job.current_workflow_revision_version ?? null,
     questionArtifactRefreshKey,
     comprehensionRefreshKey,
     keyInfoPreviewable,

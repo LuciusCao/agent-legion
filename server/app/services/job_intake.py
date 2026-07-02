@@ -1,20 +1,16 @@
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any
 
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError
-from server.app.services.job_intake_resolution import (
-    RESOLVER_MAP,
-    normalize_values,
-    resolve_cms_question_candidates,
-    resolve_direct_candidates,
-)
+from server.app.services.job_intake_resolution import RESOLVER_MAP, normalize_values
+from server.app.services.job_intake_resolver import resolve_candidates
 from server.app.services.job_intake_video import (
     exclude_existing_candidates,
-    resolve_cms_video_candidates,
     write_video_input,
 )
 from server.app.services.job_intake_workspace import (
@@ -27,6 +23,7 @@ from server.app.services.job_intake_workspace import (
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflows.definition import workflow_definition_from_dict
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +44,12 @@ class JobIntakeService:
     def create_batch(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         workspace = get_workspace(self.job_db, workspace_id)
         workflow_key = payload["workflow_key"]
-        definition = self.workflows.definition(workflow_key)
+        active_revision = self.job_db.get_active_workflow_revision(workspace_id, workflow_key)
+        if active_revision is None:
+            raise InvalidOperationError(
+                "Workspace has no active workflow revision; publish a workflow revision before intake"
+            )
+        definition = workflow_definition_from_dict(json.loads(active_revision["definition_json"]))
         mode = definition.intake.modes.get(payload["source_kind"]) if definition.intake else None
         if mode is None:
             raise InvalidOperationError("Unsupported intake mode")
@@ -82,30 +84,17 @@ class JobIntakeService:
         if resolver is None:
             raise InvalidOperationError("Unsupported entity and intake mode combination")
 
-        candidates: list[dict[str, Any]] = []
-        if resolver.startswith("direct."):
-            candidates = resolve_direct_candidates(entity, input_values, payload["source_kind"])
-        elif resolver.startswith("cms.") and entity == "video":
-            candidates = resolve_cms_video_candidates(
-                entity,
-                input_values,
-                payload["source_kind"],
-                resolver,
-                cms_config,
-            )
-        elif resolver.startswith("cms."):
-            candidates = resolve_cms_question_candidates(
-                entity,
-                input_values,
-                payload["source_kind"],
-                resolver,
-                mode,
-                self.settings,
-                workspace,
-                workspace_id,
-            )
-        else:
-            raise InvalidOperationError(f"Unsupported resolver: {resolver}")
+        candidates = resolve_candidates(
+            resolver,
+            entity,
+            input_values,
+            payload["source_kind"],
+            cms_config,
+            mode,
+            self.settings,
+            workspace,
+            workspace_id,
+        )
 
         # Filter candidates that already exist in the workspace so duplicates are
         # reported as created_count=0 instead of failing the whole batch.
@@ -165,6 +154,9 @@ class JobIntakeService:
                     node_keys=list(definition.nodes),
                     workspace_id=workspace_id,
                     stem=str(candidate.get("stem", "")),
+                    workflow_revision_id=active_revision["id"],
+                    workflow_definition_hash=active_revision["definition_hash"],
+                    workflow_definition_snapshot_json=active_revision["definition_json"],
                 )
             )
 

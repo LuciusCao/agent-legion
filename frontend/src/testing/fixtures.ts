@@ -70,6 +70,11 @@ export function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
     error_summary: '',
     completed_nodes: 0,
     total_nodes: 0,
+    workflow_revision_id: '',
+    workflow_definition_hash: '',
+    outcome: '',
+    current_workflow_revision_id: '',
+    current_workflow_revision_version: null,
     ...overrides,
   }
 }

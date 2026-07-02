@@ -9,6 +9,17 @@ from server.app.cms.client import get_token
 from server.app.cms.question import fetch_question_detail
 from server.app.executors.cancellation import check_cancellation
 from server.app.workflows.cms_helpers import _effective_cms_config
+from server.app.workflows.comprehension_common import (
+    _assert_artifact_question_id,
+    _load_json_object,
+    _single_parsed_question,
+)
+from server.app.workflows.comprehension_eligibility import (
+    classify_comprehension_eligibility as _classify_comprehension_eligibility,
+)
+from server.app.workflows.comprehension_eligibility import (
+    finalize_non_uploadable as _finalize_non_uploadable,
+)
 from server.app.workflows.question_fingerprint import (
     compute_question_fingerprint,
     extract_cms_fingerprint,
@@ -16,6 +27,10 @@ from server.app.workflows.question_fingerprint import (
 from server.app.workflows.skill_version_collection import collect_skill_versions
 
 logger = logging.getLogger(__name__)
+
+# Backwards-compatible re-exports for workflow executor dispatch.
+classify_comprehension_eligibility = _classify_comprehension_eligibility
+finalize_non_uploadable = _finalize_non_uploadable
 
 
 def fetch_questions(
@@ -125,33 +140,6 @@ def clean_and_parse(
         encoding="utf-8",
     )
     logger.info("  wrote %s", out_path.name)
-
-
-def _load_json_object(path: Path) -> dict[str, Any]:
-    if not path.is_file():
-        raise ValueError(f"Missing input: {path.name}")
-    content = json.loads(path.read_text(encoding="utf-8"))
-    if not isinstance(content, dict):
-        raise ValueError(f"Invalid content in {path.name}")
-    return content
-
-
-def _single_parsed_question(artifact_dir: Path, source_id: str) -> dict[str, Any]:
-    parsed = _load_json_object(artifact_dir / "questions_parsed.json")
-    questions = parsed.get("questions")
-    if not isinstance(questions, list) or len(questions) != 1:
-        raise ValueError("questions_parsed.json must contain exactly one question")
-    question = questions[0]
-    if not isinstance(question, dict):
-        raise ValueError("questions_parsed.json contains an invalid question")
-    if question.get("question_id") != source_id:
-        raise ValueError(f"Expected question_id {source_id}, got {question.get('question_id')}")
-    return question
-
-
-def _assert_artifact_question_id(name: str, content: dict[str, Any], source_id: str) -> None:
-    if content.get("question_id") != source_id:
-        raise ValueError(f"{name} question_id mismatch: {content.get('question_id')}")
 
 
 def assemble_comprehension_info(

@@ -390,9 +390,9 @@ def test_get_workspace_dag_returns_node_status_counts(tmp_path, monkeypatch):
     body = response.json()
     assert body["workflow"]["key"] == "question_comprehension_info"
     assert all("label" in node for node in body["nodes"])
-    first = body["nodes"][0]
-    assert first["key"] == "fetch_questions"
-    assert first["status_counts"]["pending"] == 2
+    fetch_node = next((node for node in body["nodes"] if node["key"] == "fetch_questions"), None)
+    assert fetch_node is not None
+    assert fetch_node["status_counts"]["pending"] == 2
 
 
 def test_get_artifact_returns_404(tmp_path):

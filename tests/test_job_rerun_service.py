@@ -1,5 +1,6 @@
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import pytest
@@ -11,6 +12,7 @@ from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_rerun import JobRerunService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.storage_paths import resolve_job_dir
+from server.app.workflows.definition import load_workflow_definition
 
 
 @pytest.fixture
@@ -485,3 +487,31 @@ def test_batch_rerun_mixed_workflows(rerun_service, job_db):
     assert results[0]["status"] == "succeeded"
     assert results[1]["status"] == "failed"
     assert results[1]["reason_code"] == "node_not_found"
+
+
+def _node_statuses(job_db, job_id):
+    return {node["node_key"]: node["status"] for node in job_db.list_job_nodes(job_id)}
+
+
+def test_rerun_from_classifier_resets_not_applicable_downstream(job_db, rerun_service):
+    workspace = job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id="batch1",
+        title="Question 1",
+        node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
+    )
+    job_db.update_job_node(job["id"], "generate_key_info", status="not_applicable")
+    result = rerun_service.rerun(
+        workspace["id"],
+        job["id"],
+        "classify_comprehension_eligibility",
+    )
+    assert result["status"] == "succeeded"
+    statuses = _node_statuses(job_db, job["id"])
+    assert statuses["classify_comprehension_eligibility"] == "pending"
+    assert statuses["generate_key_info"] == "stale"

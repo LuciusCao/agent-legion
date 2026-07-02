@@ -758,6 +758,57 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/workflow-drafts/publish': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Publish Workflow Draft */
+    post: operations['publish_workflow_draft_api_workspaces__workspace_id__workflow_drafts_publish_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-drafts/validate': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Validate Workflow Draft */
+    post: operations['validate_workflow_draft_api_workspaces__workspace_id__workflow_drafts_validate_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/workflow-revisions': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Workflow Revisions */
+    get: operations['list_workflow_revisions_api_workspaces__workspace_id__workflow_revisions_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1075,6 +1126,13 @@ export interface components {
       completed_nodes: number
       /** Created At */
       created_at: string
+      /**
+       * Current Workflow Revision Id
+       * @default
+       */
+      current_workflow_revision_id: string
+      /** Current Workflow Revision Version */
+      current_workflow_revision_version?: number | null
       /** Error Message */
       error_message: string
       /**
@@ -1087,6 +1145,11 @@ export interface components {
       id: string
       /** Node Summaries */
       node_summaries?: components['schemas']['JobNodeSummaryResponse'][]
+      /**
+       * Outcome
+       * @default
+       */
+      outcome: string
       /** Source Id */
       source_id: string
       /** Source Type */
@@ -1104,8 +1167,18 @@ export interface components {
       total_nodes: number
       /** Updated At */
       updated_at: string
+      /**
+       * Workflow Definition Hash
+       * @default
+       */
+      workflow_definition_hash: string
       /** Workflow Key */
       workflow_key: string
+      /**
+       * Workflow Revision Id
+       * @default
+       */
+      workflow_revision_id: string
       /** Workspace Id */
       workspace_id: string
     }
@@ -1333,8 +1406,19 @@ export interface components {
       /** Paused */
       paused: boolean
     }
+    /** WorkflowConditionResponse */
+    WorkflowConditionResponse: {
+      /** Artifact */
+      artifact: string
+      /** Equals */
+      equals: unknown
+      /** Path */
+      path: string
+    }
     /** WorkflowDefinitionResponse */
     WorkflowDefinitionResponse: {
+      /** Edges */
+      edges: components['schemas']['WorkflowEdgeResponse'][]
       intake: components['schemas']['WorkflowIntakeResponse']
       /** Key */
       key: string
@@ -1342,6 +1426,26 @@ export interface components {
       label: string
       /** Nodes */
       nodes: components['schemas']['WorkflowNodeResponse'][]
+    }
+    /** WorkflowDraftRequest */
+    WorkflowDraftRequest: {
+      /** Definition Yaml */
+      definition_yaml: string
+    }
+    /** WorkflowDraftValidationResponse */
+    WorkflowDraftValidationResponse: {
+      /** Errors */
+      errors: string[]
+      /** Valid */
+      valid: boolean
+    }
+    /** WorkflowEdgeResponse */
+    WorkflowEdgeResponse: {
+      condition?: components['schemas']['WorkflowConditionResponse'] | null
+      /** Source */
+      source: string
+      /** Target */
+      target: string
     }
     /** WorkflowIntakeModeResponse */
     WorkflowIntakeModeResponse: {
@@ -1377,6 +1481,30 @@ export interface components {
     /** WorkflowResponse */
     WorkflowResponse: {
       workflow: components['schemas']['WorkflowDefinitionResponse']
+    }
+    /** WorkflowRevisionSummary */
+    WorkflowRevisionSummary: {
+      /** Created At */
+      created_at: string
+      /** Definition Hash */
+      definition_hash: string
+      /** Id */
+      id: string
+      /** Published At */
+      published_at?: string | null
+      /** Status */
+      status: string
+      /** Version */
+      version: number
+      /** Workflow Key */
+      workflow_key: string
+      /** Workspace Id */
+      workspace_id: string
+    }
+    /** WorkflowRevisionsResponse */
+    WorkflowRevisionsResponse: {
+      /** Revisions */
+      revisions: components['schemas']['WorkflowRevisionSummary'][]
     }
     /** WorkflowSummaryResponse */
     WorkflowSummaryResponse: {
@@ -3171,6 +3299,107 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceStatsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  publish_workflow_draft_api_workspaces__workspace_id__workflow_drafts_publish_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowDraftRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftValidationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  validate_workflow_draft_api_workspaces__workspace_id__workflow_drafts_validate_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkflowDraftRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowDraftValidationResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_workflow_revisions_api_workspaces__workspace_id__workflow_revisions_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRevisionsResponse']
         }
       }
       /** @description Validation Error */

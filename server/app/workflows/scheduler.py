@@ -3,9 +3,24 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from server.app.workflows.conditions import selected_edges
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
+from server.app.workflows.workflow_branching import (
+    RUNNABLE_STATUSES,
+    _incoming_edges,
+)
+from server.app.workflows.workflow_branching import (
+    downstream_nodes as _downstream_nodes,
+)
+from server.app.workflows.workflow_branching import (
+    evaluate_branches as _evaluate_branches,
+)
 
-RUNNABLE_STATUSES = {"pending", "ready", "stale"}
+TERMINAL_SUCCESS_STATUSES = {"completed", "not_applicable"}
+
+# Backwards-compatible re-exports for consumers that pre-date the split.
+evaluate_branches = _evaluate_branches
+downstream_nodes = _downstream_nodes
 
 
 def _inputs_exist(node: WorkflowNode, artifact_dir: Path) -> bool:
@@ -34,36 +49,21 @@ def find_ready_nodes(
     artifact_dir: Path,
 ) -> list[WorkflowNode]:
     ready: list[WorkflowNode] = []
+    incoming = _incoming_edges(definition)
     for node in definition.nodes.values():
         if node_statuses.get(node.key, "pending") not in RUNNABLE_STATUSES:
             continue
-        if any(node_statuses.get(dep) != "completed" for dep in node.after):
+        active_incoming = selected_edges(incoming[node.key], artifact_dir)
+        if incoming[node.key] and not active_incoming:
+            continue
+        if any(node_statuses.get(edge.source) == "not_applicable" for edge in active_incoming):
+            continue
+        if any(node_statuses.get(edge.source) != "completed" for edge in active_incoming):
             continue
         if not _inputs_exist(node, artifact_dir):
             continue
         ready.append(node)
     return ready
-
-
-def downstream_nodes(definition: WorkflowDefinition, node_key: str) -> list[str]:
-    children: dict[str, list[str]] = {key: [] for key in definition.nodes}
-    for candidate in definition.nodes.values():
-        for dep in candidate.after:
-            children[dep].append(candidate.key)
-
-    seen: set[str] = set()
-    ordered: list[str] = []
-
-    def visit(key: str) -> None:
-        for child in children.get(key, []):
-            if child in seen:
-                continue
-            seen.add(child)
-            ordered.append(child)
-            visit(child)
-
-    visit(node_key)
-    return ordered
 
 
 def summarize_job_status(statuses: list[str]) -> str:
@@ -73,6 +73,6 @@ def summarize_job_status(statuses: list[str]) -> str:
         return "running"
     if any(status == "failed" for status in statuses):
         return "failed"
-    if all(status == "completed" for status in statuses):
+    if all(status in TERMINAL_SUCCESS_STATUSES for status in statuses):
         return "completed"
     return "queued"

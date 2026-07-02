@@ -6,6 +6,7 @@ import pytest
 
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
@@ -304,6 +305,8 @@ def test_workspace_dag_preserves_status_buckets(query_service, job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="question_comprehension_info"
     )
+    definition = query_service.workflows.definition(workspace["default_workflow_key"])
+    WorkflowRevisionService(job_db).ensure_active_revision(workspace["id"], definition)
     job_db.create_batch(
         "question_comprehension_info",
         "batch_by_ids",
@@ -454,3 +457,29 @@ def test_query_service_does_not_mutate_repository_records(query_service, job_db,
 
     assert job_db.get_job(job["id"])["storage_dir"] == original_storage_dir
     assert job_db.list_node_runs(job["id"])[0]["log_path"] == original_log_path
+
+
+def test_job_detail_includes_workflow_revision_and_outcome(query_service, job_db):
+    workspace = job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id="batch1",
+        title="Question 1",
+        node_keys=["fetch_questions"],
+        workspace_id=workspace["id"],
+        workflow_revision_id="question_comprehension_info:v1",
+        workflow_definition_hash="hash1",
+        workflow_definition_snapshot_json='{"key":"question_comprehension_info"}',
+    )
+    job_db.update_job_status(job["id"], "completed")
+    job_db.update_job_outcome(job["id"], "non_uploadable")
+
+    detail = query_service.detail(job["id"])["job"]
+
+    assert detail["workflow_revision_id"] == "question_comprehension_info:v1"
+    assert detail["workflow_definition_hash"] == "hash1"
+    assert detail["outcome"] == "non_uploadable"
+    assert "current_workflow_revision_id" in detail
+    assert "current_workflow_revision_version" in detail
