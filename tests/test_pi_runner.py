@@ -1,10 +1,13 @@
 import json
+import time
 from pathlib import Path
 
 import pytest
 
 from server.app.jobs import JobQueries
-from server.app.workflows.pi_runner import PiConfig, PiRunner
+from server.app.workflows.pi_command_builder import build_pi_command
+from server.app.workflows.pi_config import PiConfig
+from server.app.workflows.pi_runner import PiRunner
 from server.app.workflows.skill_version import resolve_skill_version
 
 
@@ -19,7 +22,8 @@ def test_build_pi_command_uses_fresh_session_and_one_explicit_skill(tmp_path):
         },
         skill_root=tmp_path / "skills",
     )
-    command = runner.build_command(
+    command = build_pi_command(
+        runner.config,
         skill_dir=tmp_path / "skills/question_comprehension_info/generate_key_info",
         session_dir=tmp_path / "run/session",
         tools=["read", "write", "bash"],
@@ -46,7 +50,8 @@ def test_build_pi_command_omits_empty_provider_and_model(tmp_path):
         {"binary": "pi", "provider": "", "model": "", "thinking": "low"},
         skill_root=tmp_path / "skills",
     )
-    command = runner.build_command(
+    command = build_pi_command(
+        runner.config,
         skill_dir=tmp_path / "skills/foo",
         session_dir=tmp_path / "run/session",
         tools=["read"],
@@ -67,7 +72,8 @@ def test_build_pi_command_includes_provider_and_model_when_set(tmp_path):
         },
         skill_root=tmp_path / "skills",
     )
-    command = runner.build_command(
+    command = build_pi_command(
+        runner.config,
         skill_dir=tmp_path / "skills/foo",
         session_dir=tmp_path / "run/session",
         tools=["read"],
@@ -591,3 +597,90 @@ def test_run_persists_relative_paths_while_result_stays_absolute(tmp_path, monke
     assert not Path(runs[0]["log_path"]).is_absolute()
     assert not Path(runs[0]["run_dir"]).is_absolute()
     assert not Path(runs[0]["session_dir"]).is_absolute()
+
+
+def test_run_cleans_up_old_run_dirs_on_retry(tmp_path, monkeypatch):
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text(
+        '#!/bin/bash\necho \'{"event":"done"}\'\necho \'{"questions": []}\' > keywords_raw.json\n'
+    )
+    fake_pi.chmod(0o755)
+
+    runner = PiRunner.from_config(
+        {"binary": str(fake_pi), "timeout_seconds": 10},
+        skill_root=tmp_path / "skills",
+    )
+
+    skill_dir = tmp_path / "skills/question_comprehension_info/generate_key_info"
+    (skill_dir / "scripts").mkdir(parents=True)
+    validator = skill_dir / "scripts/validate_output.py"
+    validator.write_text(
+        "#!/usr/bin/env python3\n"
+        "import sys\n"
+        "from pathlib import Path\n"
+        "job_dir = Path(sys.argv[1])\n"
+        "(job_dir / 'keywords_raw.json').write_text('{\"questions\": []}')\n"
+    )
+    validator.chmod(0o755)
+
+    db_path = tmp_path / "jobs.sqlite"
+    job_db = JobQueries(db_path, tmp_path / "jobs")
+    workspace = job_db.create_workspace(
+        "test_ws", default_workflow_key="question_comprehension_info"
+    )
+    job = job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id="b1",
+        title="Q1",
+        node_keys=["extract_keywords"],
+        workspace_id=workspace["id"],
+    )
+    job_dir = tmp_path / job["storage_dir"]
+    job_dir.mkdir(parents=True, exist_ok=True)
+
+    result1 = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=job_db,
+        job_dir=job_dir,
+    )
+    first_run_dir = result1.run_dir
+
+    # Ensure distinct birthtimes so the cleanup heuristic keeps the newest run.
+    time.sleep(0.05)
+
+    # Reset the node so the retry can start a fresh node run.
+    with job_db.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='ready', finished_at='', error_message='' "
+            "where job_id=? and node_key=?",
+            (job["id"], "extract_keywords"),
+        )
+
+    result2 = runner.run(
+        job=job,
+        node_key="extract_keywords",
+        skill_dir=skill_dir,
+        inputs=["questions_parsed.json"],
+        outputs=["keywords_raw.json"],
+        job_db=job_db,
+        job_dir=job_dir,
+    )
+
+    assert result2.status == "completed"
+    assert not first_run_dir.exists()
+    assert result2.run_dir.exists()
+
+    runs = job_db.list_node_runs(job["id"])
+    assert len(runs) == 2
+    # The older node_run record should have its run_dir cleared.
+    old_run = next(r for r in runs if r["run_dir"] == "")
+    new_run = next(r for r in runs if r["run_dir"] != "")
+    assert old_run["status"] == "completed"
+    assert new_run["status"] == "completed"
+    assert Path(tmp_path / new_run["run_dir"]).resolve() == result2.run_dir.resolve()

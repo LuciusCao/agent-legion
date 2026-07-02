@@ -11,6 +11,6 @@ worker:
     waiting_for_url: 10
 
 cleanup:
-  log_retention_days: 30
-  run_dir_retention_days: 30
+  log_retention_days: 7
+  run_dir_retention_days: 3
   interval_seconds: 3600
