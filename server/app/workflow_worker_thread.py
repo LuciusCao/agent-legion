@@ -25,7 +25,7 @@ from server.app.jobs.queries.workspace_node_bindings import (
     get_local_node_limit,
     has_local_node_limit,
 )
-from server.app.services.workflow_revisions import definition_from_job_snapshot
+from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.settings import Settings
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflow_worker_agent_status import agent_status_scope

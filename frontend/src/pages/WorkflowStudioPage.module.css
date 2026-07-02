@@ -1,11 +1,20 @@
+.page {
+  min-height: calc(100vh - 64px);
+  background: #f8fafc;
+}
+
 .layout {
   display: grid;
-  grid-template-columns: 260px minmax(0, 1fr) 320px;
-  min-height: calc(100vh - 64px);
+  grid-template-columns: 280px minmax(0, 1fr) 360px;
+  min-height: calc(100vh - 140px);
+  border-top: 1px solid #d7d9df;
 }
 
 .sidePanel {
+  min-width: 0;
+  overflow: auto;
   border-right: 1px solid #d7d9df;
+  background: #fff;
   padding: 16px;
 }
 
@@ -19,48 +28,23 @@
   padding: 16px;
 }
 
-.nodeButton {
-  width: 100%;
-  border: 1px solid #c3c6cf;
-  background: #fff;
-  border-radius: 8px;
-  padding: 8px 10px;
-  text-align: left;
-}
-
-.actions {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-}
-
-.actions button {
-  border: 1px solid #c3c6cf;
-  background: #fff;
-  border-radius: 8px;
-  padding: 6px 12px;
-  cursor: pointer;
+.editorLabel {
+  display: block;
+  margin-top: 16px;
+  margin-bottom: 6px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #374151;
 }
 
 .yamlEditor {
   width: 100%;
+  min-height: 320px;
   border: 1px solid #d1d5db;
-  border-radius: 8px;
+  border-radius: 6px;
   padding: 8px;
-  font-family: monospace;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
   resize: vertical;
-}
-
-.validationMessage {
-  margin-top: 12px;
-  font-size: 13px;
-  color: #374151;
-}
-
-.errorList {
-  margin-top: 12px;
-  padding-left: 16px;
-  color: #b91c1c;
-  font-size: 12px;
+  box-sizing: border-box;
 }

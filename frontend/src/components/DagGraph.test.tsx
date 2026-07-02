@@ -75,4 +75,39 @@ describe('DagGraph', () => {
     fireEvent.click(screen.getByText('提取'))
     expect(onSelectedNodeChange).toHaveBeenCalledWith('a')
   })
+
+  it('renders conditional edge labels', async () => {
+    render(
+      <DagGraph
+        nodes={[
+          {
+            key: 'classify',
+            label: '判断是否适合审题',
+            status: 'pending',
+            created_at: '',
+            inputs: [],
+            outputs: ['decision.json'],
+          },
+          {
+            key: 'assemble',
+            label: '组装审题信息',
+            status: 'pending',
+            created_at: '',
+            inputs: ['decision.json'],
+            outputs: [],
+          },
+        ]}
+        edges={[
+          {
+            from: 'classify',
+            to: 'assemble',
+            label: '$.eligible == true',
+            conditional: true,
+          },
+        ]}
+      />
+    )
+
+    expect(await screen.findByText('$.eligible == true')).toBeInTheDocument()
+  })
 })

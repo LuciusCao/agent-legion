@@ -208,6 +208,10 @@ export type WorkflowIntakeModeRecord = ApiSchemas['WorkflowIntakeModeResponse']
 export type WorkflowDefinitionRecord = ApiSchemas['WorkflowDefinitionResponse']
 export type WorkflowResponse = ApiSchemas['WorkflowResponse']
 export type WorkflowsListResponse = ApiSchemas['WorkflowsListResponse']
+export type WorkflowRevisionSummary = ApiSchemas['WorkflowRevisionSummary']
+export type ActiveWorkflowRevisionResponse =
+  ApiSchemas['ActiveWorkflowRevisionResponse']
+export type WorkflowRevisionsResponse = ApiSchemas['WorkflowRevisionsResponse']
 
 export type ArtifactResponse = ApiSchemas['ArtifactResponse']
 

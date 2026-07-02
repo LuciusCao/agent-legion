@@ -5,8 +5,10 @@ import {
   api,
   createJobBatch,
   createWorkspace,
+  fetchActiveWorkflowRevision,
   fetchJobArtifact,
   fetchJobDetail,
+  fetchWorkflowRevisions,
   updateWorkspace,
 } from './api'
 import {
@@ -328,5 +330,74 @@ describe('executor configuration api', () => {
       '/api/workspaces/reading%20team/executor-configuration',
       expect.objectContaining({ cache: 'no-store' })
     )
+  })
+})
+
+describe('workflow revisions api', () => {
+  it('fetches the active workspace workflow revision', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          revision: {
+            id: 'ws1:question_comprehension_info:v1',
+            workspace_id: 'ws1',
+            workflow_key: 'question_comprehension_info',
+            version: 1,
+            status: 'active',
+            definition_hash: 'abcdef123456',
+            created_at: '2026-07-02T00:00:00Z',
+            published_at: '2026-07-02T00:00:00Z',
+          },
+          workflow: {
+            key: 'question_comprehension_info',
+            label: '题目审题信息生成 DAG',
+            intake: { modes: [] },
+            nodes: [],
+            edges: [],
+          },
+          definition_yaml: 'key: question_comprehension_info\n',
+        }),
+    } as Response)
+    global.fetch = fetchMock
+
+    const result = await fetchActiveWorkflowRevision('ws1')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/ws1/workflow-revisions/active',
+      expect.any(Object)
+    )
+    expect(result.revision.version).toBe(1)
+    expect(result.definition_yaml).toContain('question_comprehension_info')
+  })
+
+  it('fetches workspace workflow revisions', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          revisions: [
+            {
+              id: 'ws1:question_comprehension_info:v1',
+              workspace_id: 'ws1',
+              workflow_key: 'question_comprehension_info',
+              version: 1,
+              status: 'active',
+              definition_hash: 'abcdef123456',
+              created_at: '2026-07-02T00:00:00Z',
+              published_at: '2026-07-02T00:00:00Z',
+            },
+          ],
+        }),
+    } as Response)
+    global.fetch = fetchMock
+
+    const result = await fetchWorkflowRevisions('ws1')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/ws1/workflow-revisions',
+      expect.any(Object)
+    )
+    expect(result.revisions[0].status).toBe('active')
   })
 })

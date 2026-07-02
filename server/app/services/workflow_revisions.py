@@ -1,34 +1,15 @@
 from __future__ import annotations
 
-import hashlib
-import json
-from dataclasses import asdict
 from typing import TYPE_CHECKING
 
-from server.app.workflows.definition import WorkflowDefinition, workflow_definition_from_dict
+from server.app.services.workflow_revision_format import (
+    definition_hash,
+    serialize_definition,
+)
+from server.app.workflows.definition import WorkflowDefinition
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
-
-
-def serialize_definition(definition: WorkflowDefinition) -> str:
-    payload = asdict(definition)
-    return json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-
-
-def definition_hash(definition_json: str) -> str:
-    return hashlib.sha256(definition_json.encode("utf-8")).hexdigest()
-
-
-def definition_from_job_snapshot(job: dict) -> WorkflowDefinition | None:
-    raw = job.get("workflow_definition_snapshot_json") or ""
-    if not raw:
-        return None
-    try:
-        payload = json.loads(str(raw))
-        return workflow_definition_from_dict(payload)
-    except Exception:
-        return None
 
 
 class WorkflowRevisionService:

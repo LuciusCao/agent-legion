@@ -12,6 +12,10 @@ import type { WorkspaceStats } from './workspaceTypes'
 
 export { api } from './api/core'
 export {
+  fetchActiveWorkflowRevision,
+  fetchWorkflowRevisions,
+} from './api/workflow_revisions'
+export {
   fetchWorkflowDefinition,
   fetchWorkflows,
   publishWorkflowDraft,

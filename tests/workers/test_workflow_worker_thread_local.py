@@ -6,7 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import MagicMock
 
 from server.app.jobs import JobQueries
-from server.app.services.workflow_revisions import serialize_definition
+from server.app.services.workflow_revision_format import serialize_definition
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
 from tests.helpers import make_workflow_worker
