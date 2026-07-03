@@ -12,7 +12,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from server.app.storage_paths import resolve_video_dir
 from server.app.workflows.registry import load_registered_workflow
 
 VIDEO_NODES = (
@@ -206,10 +205,6 @@ def _ensure_workspace(conn: sqlite3.Connection) -> None:
 
 def _workflow_definition(env: Environment) -> Any:
     return load_registered_workflow(env.root_dir, WORKFLOW_KEY)
-
-
-def _legacy_video_dir(video: Mapping[str, Any], env: Environment) -> Path:
-    return resolve_video_dir(video, env.videos_dir)
 
 
 def _legacy_source_mp4(video: Mapping[str, Any], video_dir: Path) -> Path | None:
