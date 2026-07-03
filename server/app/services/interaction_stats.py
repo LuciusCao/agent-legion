@@ -39,17 +39,6 @@ def _backfill_interaction_stats(video: Any, video_dir: Path) -> None:
         video["interaction_review_status"] = review_status
 
 
-def cache_interaction_stats(db: Any, video_id: str, video_dir: Path) -> None:
-    """Compute interaction stats from disk and write them to the DB cache."""
-    stats = compute_interaction_stats(video_dir)
-    review_status = compute_interaction_review_status(video_dir)
-    db.update_video(
-        video_id,
-        interaction_stats_json=json.dumps(stats, ensure_ascii=False) if stats else "",
-        interaction_review_status=review_status or "",
-    )
-
-
 def _load_interactions(video_dir: Path) -> list[dict] | None:
     """Load interactions list from interactions.json, or None if missing/invalid."""
     interactions_path = video_dir / "interactions.json"

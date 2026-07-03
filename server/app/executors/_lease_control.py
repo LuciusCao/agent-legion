@@ -49,7 +49,6 @@ def _execution_control_rejects_claim(
         if current_control["target_node_key"] != request.target_node_key:
             return True
         return request.node_key not in request.allowed_node_keys
-    return True
 
 
 def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:

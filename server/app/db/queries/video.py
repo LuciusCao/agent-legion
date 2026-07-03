@@ -210,15 +210,6 @@ class VideoQueriesMixin(VideoQueriesBase):
             ).fetchone()
             return row is not None
 
-    def find_video_by_identity(self, content_type: str, external_id: str) -> VideoRecord | None:
-        with self._connect_read() as conn:
-            return self._row(
-                conn.execute(
-                    "select * from videos where content_type=? and external_id=?",
-                    (content_type, external_id),
-                ).fetchone()
-            )
-
     def find_videos_by_identities(
         self, identities: list[tuple[str, str]]
     ) -> dict[tuple[str, str], VideoRecord]:
