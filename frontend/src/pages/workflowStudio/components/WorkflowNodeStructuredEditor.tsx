@@ -1,5 +1,6 @@
 import type { WorkflowNodeRecord } from '../../../types'
 import {
+  parseWorkflowNode,
   patchWorkflowNodeInputs,
   patchWorkflowNodeLabel,
   patchWorkflowNodeOutputs,
@@ -19,6 +20,41 @@ export function WorkflowNodeStructuredEditor({
   definitionYaml,
   onDefinitionYamlChange,
 }: Props) {
+  const draftNode = parseWorkflowNode(definitionYaml, node.key) ?? node
+  const label = draftNode.label
+  const capability = node.capability
+  const inputs = draftNode.inputs ?? []
+  const outputs = draftNode.outputs ?? []
+  const terminalOutcome = draftNode.terminal?.outcome ?? ''
+  const handleLabelChange = (event: React.ChangeEvent<HTMLInputElement>) =>
+    onDefinitionYamlChange(
+      patchWorkflowNodeLabel(definitionYaml, node.key, event.target.value)
+    )
+  const handleInputsChange = (event: React.ChangeEvent<HTMLTextAreaElement>) =>
+    onDefinitionYamlChange(
+      patchWorkflowNodeInputs(
+        definitionYaml,
+        node.key,
+        parseLines(event.target.value)
+      )
+    )
+  const handleOutputsChange = (event: React.ChangeEvent<HTMLTextAreaElement>) =>
+    onDefinitionYamlChange(
+      patchWorkflowNodeOutputs(
+        definitionYaml,
+        node.key,
+        parseLines(event.target.value)
+      )
+    )
+  const handleTerminalChange = (event: React.ChangeEvent<HTMLInputElement>) =>
+    onDefinitionYamlChange(
+      patchWorkflowNodeTerminalOutcome(
+        definitionYaml,
+        node.key,
+        event.target.value
+      )
+    )
+
   return (
     <section
       aria-label="Workflow node structured editor"
@@ -30,16 +66,8 @@ export function WorkflowNodeStructuredEditor({
         <input
           aria-label="节点名称"
           className={styles.fieldInput}
-          value={node.label}
-          onChange={(event) =>
-            onDefinitionYamlChange(
-              patchWorkflowNodeLabel(
-                definitionYaml,
-                node.key,
-                event.target.value
-              )
-            )
-          }
+          value={label}
+          onChange={handleLabelChange}
         />
       </label>
       <label className={styles.field}>
@@ -47,7 +75,7 @@ export function WorkflowNodeStructuredEditor({
         <input
           aria-label="能力"
           className={styles.fieldInput}
-          value={node.capability}
+          value={capability}
           readOnly
         />
       </label>
@@ -56,17 +84,9 @@ export function WorkflowNodeStructuredEditor({
         <textarea
           aria-label="输入产物，每行一个"
           className={styles.fieldInput}
-          value={formatLines(node.inputs)}
-          onChange={(event) =>
-            onDefinitionYamlChange(
-              patchWorkflowNodeInputs(
-                definitionYaml,
-                node.key,
-                parseLines(event.target.value)
-              )
-            )
-          }
-          rows={Math.max(2, node.inputs.length)}
+          value={formatLines(inputs)}
+          onChange={handleInputsChange}
+          rows={Math.max(2, inputs.length)}
         />
       </label>
       <label className={styles.field}>
@@ -74,17 +94,9 @@ export function WorkflowNodeStructuredEditor({
         <textarea
           aria-label="输出产物，每行一个"
           className={styles.fieldInput}
-          value={formatLines(node.outputs)}
-          onChange={(event) =>
-            onDefinitionYamlChange(
-              patchWorkflowNodeOutputs(
-                definitionYaml,
-                node.key,
-                parseLines(event.target.value)
-              )
-            )
-          }
-          rows={Math.max(2, node.outputs.length)}
+          value={formatLines(outputs)}
+          onChange={handleOutputsChange}
+          rows={Math.max(2, outputs.length)}
         />
       </label>
       <label className={styles.field}>
@@ -92,16 +104,8 @@ export function WorkflowNodeStructuredEditor({
         <input
           aria-label="Terminal Outcome"
           className={styles.fieldInput}
-          value={node.terminal?.outcome ?? ''}
-          onChange={(event) =>
-            onDefinitionYamlChange(
-              patchWorkflowNodeTerminalOutcome(
-                definitionYaml,
-                node.key,
-                event.target.value
-              )
-            )
-          }
+          value={terminalOutcome}
+          onChange={handleTerminalChange}
         />
       </label>
     </section>
