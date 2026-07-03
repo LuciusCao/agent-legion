@@ -6,11 +6,11 @@ export function WorkflowDefinitionEditor({ value, onChange }: Props) {
   return (
     <>
       <label className={styles.editorLabel} htmlFor="workflow-definition">
-        Workflow definition
+        高级 YAML 编辑器
       </label>
       <textarea
         id="workflow-definition"
-        aria-label="Workflow definition"
+        aria-label="高级 YAML 编辑器"
         className={styles.yamlEditor}
         value={value}
         onChange={(event) => onChange(event.target.value)}

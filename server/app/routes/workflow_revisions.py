@@ -5,6 +5,7 @@ from fastapi import APIRouter, HTTPException
 import server.app.routes.workflow_contracts as workflow_contracts
 from server.app.jobs import JobQueries
 from server.app.routes.job_http import require_workflows_enabled
+from server.app.routes.workflow_draft_compare import create_workflow_draft_compare_router
 from server.app.routes.workflow_revisions_contracts import (
     ActiveWorkflowRevisionResponse,
     WorkflowDraftRequest,
@@ -42,9 +43,7 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         "/workspaces/{workspace_id}/workflow-revisions/active",
         response_model=ActiveWorkflowRevisionResponse,
     )
-    def get_active_workflow_revision(
-        workspace_id: str,
-    ) -> ActiveWorkflowRevisionResponse:
+    def get_active_workflow_revision(workspace_id: str) -> ActiveWorkflowRevisionResponse:
         require_workflows_enabled(settings)
         workspace = job_db.get_workspace(workspace_id)
         if workspace is None:
@@ -91,4 +90,5 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
         )
         return WorkflowDraftValidationResponse(valid=valid, errors=errors)
 
+    router.include_router(create_workflow_draft_compare_router(job_db, settings))
     return router

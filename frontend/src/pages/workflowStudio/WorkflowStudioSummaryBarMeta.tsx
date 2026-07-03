@@ -1,25 +1,29 @@
-import { Chip } from '@mui/material'
-import type { WorkflowRevisionSummary } from '../../types'
+import { WorkflowSummaryChangeChips } from './components/WorkflowSummaryChangeChips'
+import { computeSummaryBarMeta } from './workflowStudioSummaryBarMeta.helpers'
+import { WorkflowStudioSummaryBarMetaStatus } from './WorkflowStudioSummaryBarMetaStatus'
+import type { StudioSummaryBarMetaProps } from './workflowStudioSummaryBarMetaProps'
 import styles from './WorkflowStudioSummaryBar.module.css'
 
-type Props = { revision: WorkflowRevisionSummary | null; dirty: boolean }
-
-export function WorkflowStudioSummaryBarMeta({ revision, dirty }: Props) {
-  const hash = revision?.definition_hash?.slice(0, 8) ?? '--------'
+export function WorkflowStudioSummaryBarMeta({
+  revision,
+  dirty,
+  compareSummary,
+  compareState,
+}: StudioSummaryBarMetaProps) {
+  const { hash, status } = computeSummaryBarMeta(
+    revision,
+    dirty,
+    compareSummary,
+    compareState
+  )
   return (
     <div className={styles.meta}>
-      <Chip
-        label={revision ? `v${revision.version}` : '无 active revision'}
-        size="small"
-        variant="outlined"
+      <WorkflowStudioSummaryBarMetaStatus
+        revision={revision}
+        hash={hash}
+        status={status}
       />
-      <Chip label={hash} size="small" variant="outlined" />
-      <Chip
-        label={dirty ? '有未保存修改' : '已同步'}
-        size="small"
-        color={dirty ? 'warning' : 'success'}
-        variant={dirty ? 'filled' : 'outlined'}
-      />
+      <WorkflowSummaryChangeChips summary={compareSummary} />
     </div>
   )
 }

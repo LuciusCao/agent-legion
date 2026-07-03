@@ -5,8 +5,11 @@ type WorkflowConditionResponse =
 type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
 
 export type ValidationGroups = {
-  structural: string[]
+  yaml: string[]
+  schema: string[]
+  structure: string[]
   executor: string[]
+  revision: string[]
 }
 
 export type SelectedWorkflowNodeDetails = {
@@ -22,23 +25,7 @@ export function conditionLabel(
   return `${condition.path} == ${JSON.stringify(condition.equals)}`
 }
 
-export function groupValidationErrors(errors: string[]): ValidationGroups {
-  return errors.reduce<ValidationGroups>(
-    (groups, error) => {
-      if (
-        error.includes('executor binding') ||
-        error.includes('not allocated') ||
-        error.includes('does not support capability')
-      ) {
-        groups.executor.push(error)
-      } else {
-        groups.structural.push(error)
-      }
-      return groups
-    },
-    { structural: [], executor: [] }
-  )
-}
+export { groupValidationErrors } from './workflowStudioValidationGroups'
 
 export function isDefinitionDirty(
   originalDefinition: string,

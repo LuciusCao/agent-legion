@@ -1,76 +1,55 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import {
-  fetchActiveWorkflowRevision,
-  fetchWorkflowRevisions,
-  publishWorkflowDraft,
-  validateWorkflowDraft,
-} from '../../api'
-import type {
-  WorkflowDefinitionRecord,
-  WorkflowRevisionSummary,
-} from '../../types'
+import { useEffect, useMemo, useState } from 'react'
+import { publishWorkflowDraft, validateWorkflowDraft } from '../../api'
 import { buildDagEdges, buildDagNodes } from './workflowStudioDag'
 import { isDefinitionDirty } from './workflowStudioModel'
+import { useWorkflowDraftCompare } from './useWorkflowDraftCompare'
+import { useWorkflowStudioData } from './useWorkflowStudioData'
 
-type LoadState = 'loading' | 'ready' | 'empty' | 'error'
 type ActionState = 'idle' | 'validating' | 'publishing'
-type StudioData = {
-  workflow: WorkflowDefinitionRecord | null
-  revision: WorkflowRevisionSummary | null
-  revisions: WorkflowRevisionSummary[]
-  definition_yaml: string
-}
 
 export function useWorkflowStudio(workspaceId: string | undefined) {
-  const [loadState, setLoadState] = useState<LoadState>('loading')
   const [actionState, setActionState] = useState<ActionState>('idle')
-  const [workflow, setWorkflow] = useState<WorkflowDefinitionRecord | null>(
-    null
-  )
-  const [revision, setRevision] = useState<WorkflowRevisionSummary | null>(null)
-  const [revisions, setRevisions] = useState<WorkflowRevisionSummary[]>([])
-  const [originalYaml, setOriginalYaml] = useState('')
   const [definitionYaml, setDefinitionYaml] = useState('')
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
   const [validationErrors, setValidationErrors] = useState<string[]>([])
   const [validationMessage, setValidationMessage] = useState('')
+  const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
 
-  const applyData = useCallback((data: StudioData) => {
-    setWorkflow(data.workflow)
-    setRevision(data.revision)
-    setRevisions(data.revisions)
-    setOriginalYaml(data.definition_yaml)
-    setDefinitionYaml(data.definition_yaml)
-    setValidationErrors([])
-    setValidationMessage('')
-  }, [])
-
-  const reload = useCallback(async () => {
-    if (!workspaceId) return
-    setLoadState('loading')
-    try {
-      const active = await fetchActiveWorkflowRevision(workspaceId)
-      const history = await fetchWorkflowRevisions(workspaceId)
-      applyData({ ...active, revisions: history.revisions })
-      setLoadState('ready')
-    } catch {
-      setLoadState('error')
-    }
-  }, [applyData, workspaceId])
+  const { loadState, workflow, revision, revisions, originalYaml, reload } =
+    useWorkflowStudioData(workspaceId)
 
   useEffect(() => {
-    if (!workspaceId) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setLoadState('empty')
-      return
-    }
-    void reload()
-  }, [reload, workspaceId])
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset draft to loaded original when it changes
+    setDefinitionYaml(originalYaml)
+  }, [originalYaml])
 
   const dirty = isDefinitionDirty(originalYaml, definitionYaml)
   const canSubmit = Boolean(workspaceId && definitionYaml.trim() && dirty)
   const nodes = useMemo(() => buildDagNodes(workflow), [workflow])
   const edges = useMemo(() => buildDagEdges(workflow), [workflow])
+
+  const { compareState, compareErrors, compareSummary } =
+    useWorkflowDraftCompare(workspaceId, definitionYaml, dirty)
+
+  const hasCompareChanges = Boolean(
+    compareSummary &&
+    (compareSummary.nodeChanges.length > 0 ||
+      compareSummary.edgeChanges.length > 0 ||
+      compareSummary.intakeChanges.length > 0 ||
+      compareSummary.riskFlags.length > 0)
+  )
+  const hasBlockingCompareError = Boolean(
+    compareErrors &&
+    compareErrors.length > 0 &&
+    compareErrors.some(
+      (error) => error.category === 'yaml' || error.category === 'schema'
+    )
+  )
+  const canPublish =
+    canSubmit &&
+    compareState !== 'loading' &&
+    !hasBlockingCompareError &&
+    hasCompareChanges
 
   async function validateDraft() {
     if (!workspaceId) return
@@ -101,6 +80,11 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     }
   }
 
+  function requestPublish() {
+    if (!canPublish) return
+    setReviewDialogOpen(true)
+  }
+
   return {
     loadState,
     actionState,
@@ -115,10 +99,17 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     validationMessage,
     dirty,
     canSubmit,
+    canPublish,
     validateDraft,
     publishDraft,
+    requestPublish,
     resetDefinition: () => setDefinitionYaml(originalYaml),
     nodes,
     edges,
+    compareState,
+    compareErrors,
+    compareSummary,
+    reviewDialogOpen,
+    closeReviewDialog: () => setReviewDialogOpen(false),
   }
 }
