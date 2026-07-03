@@ -2,7 +2,11 @@ import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
 import { conditionLabel } from './workflowStudioModel'
 import styles from './WorkflowNodeInspector.module.css'
 
-type Props = { details: SelectedWorkflowNodeDetails }
+type Props = {
+  details: SelectedWorkflowNodeDetails
+  definitionYaml: string
+  onDefinitionYamlChange: (nextYaml: string) => void
+}
 
 function ItemList({ items }: { items: string[] }) {
   if (items.length === 0) return <span className={styles.empty}>无</span>
@@ -46,7 +50,11 @@ function EdgeList({
   )
 }
 
-export function WorkflowNodeInspectorBody({ details }: Props) {
+export function WorkflowNodeInspectorBody({
+  details,
+  definitionYaml,
+  onDefinitionYamlChange,
+}: Props) {
   const { node, incoming, outgoing } = details
   return (
     <section aria-label="Workflow inspector" className={styles.panel}>

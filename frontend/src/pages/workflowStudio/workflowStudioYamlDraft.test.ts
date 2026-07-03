@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  patchWorkflowLabel,
   patchWorkflowNodeInputs,
   patchWorkflowNodeLabel,
   patchWorkflowNodeOutputs,
@@ -59,5 +60,9 @@ describe('workflowStudioYamlDraft node patches', () => {
 
     const cleared = patchWorkflowNodeTerminalOutcome(changed, 'done', '')
     expect(cleared).not.toContain('terminal:')
+  })
+
+  it('patches workflow label', () => {
+    expect(patchWorkflowLabel(yaml, 'Demo v2')).toContain('label: Demo v2')
   })
 })

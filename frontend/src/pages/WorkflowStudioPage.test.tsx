@@ -96,6 +96,7 @@ vi.mock('../api', () => {
         ],
         edge_changes: [],
         intake_changes: [],
+        metadata_changes: [],
         risk_flags: [],
       },
       errors: [],

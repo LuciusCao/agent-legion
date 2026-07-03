@@ -99,3 +99,9 @@ export function patchWorkflowNodeTerminalOutcome(
     node.terminal = { outcome: outcome.trim() }
   })
 }
+
+export function patchWorkflowLabel(rawYaml: string, label: string): string {
+  const draft = parseWorkflowYaml(rawYaml)
+  draft.label = label
+  return dumpWorkflowYaml(draft)
+}
