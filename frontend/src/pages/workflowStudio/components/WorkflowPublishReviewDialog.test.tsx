@@ -97,6 +97,7 @@ describe('WorkflowPublishReviewDialog', () => {
           ],
           edge_changes: [],
           intake_changes: [],
+          metadata_changes: [],
           risk_flags: [],
         },
       })
@@ -138,6 +139,7 @@ describe('WorkflowPublishReviewDialog', () => {
           ],
           edge_changes: [],
           intake_changes: [],
+          metadata_changes: [],
           risk_flags: [
             {
               code: 'node_removed',
@@ -185,6 +187,7 @@ describe('WorkflowPublishReviewDialog', () => {
           ],
           edge_changes: [],
           intake_changes: [],
+          metadata_changes: [],
           risk_flags: [
             {
               code: 'node_removed',
@@ -214,5 +217,82 @@ describe('WorkflowPublishReviewDialog', () => {
     await userEvent.click(screen.getByRole('button', { name: '确认发布' }))
 
     expect(onConfirm).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows metadata changes in the review dialog', () => {
+    const summary = buildChangeSummary(
+      makeSummaryResponse({
+        summary: {
+          risk_level: 'info',
+          node_changes: [],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [
+            {
+              type: 'modified',
+              field: 'label',
+              before_value: 'Old',
+              after_value: 'New',
+              risk: 'info',
+            },
+          ],
+          risk_flags: [],
+        },
+      })
+    )
+
+    render(
+      <WorkflowPublishReviewDialog
+        open
+        workflowKey="demo"
+        activeRevision={revision}
+        nextVersion={2}
+        definitionHash="abcdef1234567890"
+        summary={summary}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText('元数据变更: 1')).toBeInTheDocument()
+    expect(screen.getByText('Workflow 名称: Old → New')).toBeInTheDocument()
+  })
+
+  it('shows breaking chip for schema_version metadata change', () => {
+    const summary = buildChangeSummary(
+      makeSummaryResponse({
+        summary: {
+          risk_level: 'breaking',
+          node_changes: [],
+          edge_changes: [],
+          intake_changes: [],
+          metadata_changes: [
+            {
+              type: 'modified',
+              field: 'schema_version',
+              before_value: '2',
+              after_value: '3',
+              risk: 'breaking',
+            },
+          ],
+          risk_flags: [],
+        },
+      })
+    )
+
+    render(
+      <WorkflowPublishReviewDialog
+        open
+        workflowKey="demo"
+        activeRevision={revision}
+        nextVersion={2}
+        definitionHash="abcdef1234567890"
+        summary={summary}
+        onConfirm={vi.fn()}
+        onCancel={vi.fn()}
+      />
+    )
+
+    expect(screen.getAllByText('高风险').length).toBeGreaterThanOrEqual(1)
   })
 })

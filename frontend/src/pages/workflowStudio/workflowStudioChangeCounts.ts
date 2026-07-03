@@ -19,3 +19,8 @@ export function edgeChangeCounts(summary: ChangeSummaryViewModel | null) {
     ).length,
   }
 }
+
+export function metadataChangeCounts(summary: ChangeSummaryViewModel | null) {
+  if (!summary) return 0
+  return summary.metadataChanges.length
+}

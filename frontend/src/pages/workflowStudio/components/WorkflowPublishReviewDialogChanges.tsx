@@ -2,6 +2,7 @@ import type { ChangeSummaryViewModel } from '../workflowStudioChanges'
 import {
   formatEdgeChange,
   formatIntakeChange,
+  formatMetadataChange,
   formatNodeChange,
 } from '../workflowStudioChanges'
 import { WorkflowPublishReviewDialogChangeCount } from './WorkflowPublishReviewDialogChangeCount'
@@ -19,6 +20,7 @@ export function WorkflowPublishReviewDialogChanges({ summary }: Props) {
     (viewModel.nodeChanges.length > 0 ||
       viewModel.edgeChanges.length > 0 ||
       viewModel.intakeChanges.length > 0 ||
+      viewModel.metadataChanges.length > 0 ||
       viewModel.riskFlags.length > 0)
 
   if (!hasChanges) {
@@ -39,6 +41,10 @@ export function WorkflowPublishReviewDialogChanges({ summary }: Props) {
         <WorkflowPublishReviewDialogChangeCount
           count={viewModel.intakeChanges.length}
           label="Intake 变更"
+        />
+        <WorkflowPublishReviewDialogChangeCount
+          count={viewModel.metadataChanges.length}
+          label="元数据变更"
         />
         {viewModel.riskLevel !== 'none' && (
           <WorkflowPublishReviewDialogRiskChip
@@ -100,6 +106,24 @@ export function WorkflowPublishReviewDialogChanges({ summary }: Props) {
               >
                 <span className={styles.itemText}>
                   {formatIntakeChange(change)}
+                </span>
+                <WorkflowPublishReviewDialogRiskChip
+                  severity={change.severity as 'info' | 'warning' | 'breaking'}
+                />
+              </li>
+            ))}
+          </ul>
+        </section>
+      )}
+
+      {viewModel.metadataChanges.length > 0 && (
+        <section className={styles.group}>
+          <h3 className={styles.groupTitle}>元数据变更</h3>
+          <ul className={styles.list}>
+            {viewModel.metadataChanges.map((change) => (
+              <li key={`metadata-${change.field}`} className={styles.item}>
+                <span className={styles.itemText}>
+                  {formatMetadataChange(change)}
                 </span>
                 <WorkflowPublishReviewDialogRiskChip
                   severity={change.severity as 'info' | 'warning' | 'breaking'}

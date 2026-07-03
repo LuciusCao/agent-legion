@@ -2,6 +2,7 @@ import { Chip } from '@mui/material'
 import type { ChangeSummaryViewModel } from '../workflowStudioChanges'
 import {
   edgeChangeCounts,
+  metadataChangeCounts,
   nodeChangeCounts,
 } from '../workflowStudioChangeCounts'
 
@@ -12,6 +13,7 @@ type Props = {
 export function WorkflowSummaryChangeCountChips({ summary }: Props) {
   const nodes = nodeChangeCounts(summary)
   const edges = edgeChangeCounts(summary)
+  const metadata = metadataChangeCounts(summary)
   return (
     <>
       <Chip
@@ -24,6 +26,13 @@ export function WorkflowSummaryChangeCountChips({ summary }: Props) {
         size="small"
         variant="outlined"
       />
+      {metadata > 0 && (
+        <Chip
+          label={`元数据 ${metadata}`}
+          size="small"
+          variant="outlined"
+        />
+      )}
     </>
   )
 }

@@ -127,6 +127,7 @@ describe('WorkflowChangeSummaryPanel', () => {
         ],
         edge_changes: [],
         intake_changes: [],
+        metadata_changes: [],
         risk_flags: [
           {
             code: 'node_removed',
@@ -149,6 +150,39 @@ describe('WorkflowChangeSummaryPanel', () => {
     expect(screen.getByText('风险等级: 高风险')).toBeInTheDocument()
     expect(screen.getByText('删除节点会导致下游路径断开。')).toBeInTheDocument()
     expect(screen.getAllByText('高风险')).toHaveLength(2)
+  })
+
+  it('renders metadata changes', () => {
+    const response = makeSummaryResponse({
+      summary: {
+        risk_level: 'info',
+        node_changes: [],
+        edge_changes: [],
+        intake_changes: [],
+        metadata_changes: [
+          {
+            type: 'modified',
+            field: 'label',
+            before_value: 'Old',
+            after_value: 'New',
+            risk: 'info',
+          },
+        ],
+        risk_flags: [],
+      },
+    })
+    const summary = buildChangeSummary(response)
+
+    render(
+      <WorkflowChangeSummaryPanel
+        summary={summary}
+        loading={false}
+        errors={null}
+      />
+    )
+
+    expect(screen.getByText('元数据变更')).toBeInTheDocument()
+    expect(screen.getByText('Workflow 名称: Old → New')).toBeInTheDocument()
   })
 
   it('truncates long node keys and edge conditions', () => {
@@ -178,6 +212,7 @@ describe('WorkflowChangeSummaryPanel', () => {
           },
         ],
         intake_changes: [],
+        metadata_changes: [],
         risk_flags: [],
       },
     })
