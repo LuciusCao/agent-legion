@@ -2,10 +2,14 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from server.app.routes.workflow_draft_compare_metadata_contracts import (
+    WorkflowMetadataChange,
+)
+from server.app.routes.workflow_risk_level import WorkflowRiskLevel
+
 WorkflowChangeType = Literal["added", "removed", "modified"]
 WorkflowEdgeChangeType = Literal["added", "removed", "condition_changed", "label_changed"]
 WorkflowIntakeChangeType = Literal["mode_changed", "field_added", "field_removed"]
-WorkflowRiskLevel = Literal["none", "info", "warning", "breaking"]
 
 
 class WorkflowDraftCompareRequest(BaseModel):
@@ -70,6 +74,7 @@ class WorkflowCompareSummary(BaseModel):
     node_changes: list[WorkflowNodeChange]
     edge_changes: list[WorkflowEdgeChange]
     intake_changes: list[WorkflowIntakeChange]
+    metadata_changes: list[WorkflowMetadataChange] = []
     risk_flags: list[WorkflowRiskFlag]
 
 

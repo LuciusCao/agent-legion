@@ -307,3 +307,34 @@ def test_compare_aggregate_risk_breaking_wins(app_with_workspace):
     assert result["summary"]["risk_level"] == "breaking"
     assert any(c["risk"] == "info" for c in result["summary"]["node_changes"])
     assert any(c["risk"] == "breaking" for c in result["summary"]["node_changes"])
+
+
+def test_compare_workflow_label_changed_returns_info_metadata_change(app_with_workspace):
+    app, workspace_id = app_with_workspace
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    object.__setattr__(definition, "label", f"{definition.label} v2")
+    raw = definition_to_yaml(definition)
+
+    with TestClient(app) as client:
+        result = _compare(client, workspace_id, raw)
+
+    assert result["valid"] is True
+    change = result["summary"]["metadata_changes"][0]
+    assert change["field"] == "label"
+    assert change["risk"] == "info"
+    assert result["summary"]["risk_level"] == "info"
+
+
+def test_compare_schema_version_changed_returns_breaking_metadata_change(app_with_workspace):
+    app, workspace_id = app_with_workspace
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    raw = definition_to_yaml(definition).replace("schema_version: 2", "schema_version: 3")
+
+    with TestClient(app) as client:
+        result = _compare(client, workspace_id, raw)
+
+    assert result["valid"] is True
+    change = result["summary"]["metadata_changes"][0]
+    assert change["field"] == "schema_version"
+    assert change["risk"] == "breaking"
+    assert result["summary"]["risk_level"] == "breaking"

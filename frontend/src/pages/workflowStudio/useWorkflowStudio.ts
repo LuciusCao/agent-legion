@@ -36,6 +36,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     (compareSummary.nodeChanges.length > 0 ||
       compareSummary.edgeChanges.length > 0 ||
       compareSummary.intakeChanges.length > 0 ||
+      compareSummary.metadataChanges.length > 0 ||
       compareSummary.riskFlags.length > 0)
   )
   const hasBlockingCompareError = Boolean(

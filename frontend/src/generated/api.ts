@@ -1436,6 +1436,11 @@ export interface components {
       edge_changes: components['schemas']['WorkflowEdgeChange'][]
       /** Intake Changes */
       intake_changes: components['schemas']['WorkflowIntakeChange'][]
+      /**
+       * Metadata Changes
+       * @default []
+       */
+      metadata_changes: components['schemas']['WorkflowMetadataChange'][]
       /** Node Changes */
       node_changes: components['schemas']['WorkflowNodeChange'][]
       /** Risk Flags */
@@ -1586,6 +1591,25 @@ export interface components {
     WorkflowIntakeResponse: {
       /** Modes */
       modes: components['schemas']['WorkflowIntakeModeResponse'][]
+    }
+    /** WorkflowMetadataChange */
+    WorkflowMetadataChange: {
+      /** After Value */
+      after_value?: string | null
+      /** Before Value */
+      before_value?: string | null
+      /** Field */
+      field: string
+      /**
+       * Risk
+       * @enum {string}
+       */
+      risk: 'none' | 'info' | 'warning' | 'breaking'
+      /**
+       * Type
+       * @constant
+       */
+      type: 'modified'
     }
     /** WorkflowNodeChange */
     WorkflowNodeChange: {
