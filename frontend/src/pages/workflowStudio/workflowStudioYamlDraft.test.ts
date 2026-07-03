@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest'
 import {
+  patchWorkflowEdgeCondition,
   patchWorkflowLabel,
   patchWorkflowNodeInputs,
   patchWorkflowNodeLabel,
@@ -64,5 +65,50 @@ describe('workflowStudioYamlDraft node patches', () => {
 
   it('patches workflow label', () => {
     expect(patchWorkflowLabel(yaml, 'Demo v2')).toContain('label: Demo v2')
+  })
+})
+
+const yamlWithEdges = `key: demo
+label: Demo
+schema_version: 2
+intake:
+  modes: {}
+nodes:
+  branch:
+    label: Branch
+    capability: branch
+    after: []
+    inputs: []
+    outputs: []
+edges:
+  - source: branch
+    target: left
+    condition:
+      artifact: result.json
+      path: $.eligible
+      equals: true
+  - source: branch
+    target: right
+`
+
+describe('workflowStudioYamlDraft edge condition patches', () => {
+  it('patches an edge condition', () => {
+    const changed = patchWorkflowEdgeCondition(
+      yamlWithEdges,
+      'branch',
+      'left',
+      { artifact: 'result.json', path: '$.eligible', equals: false }
+    )
+    expect(changed).toContain('equals: false')
+  })
+
+  it('clears an edge condition', () => {
+    const changed = patchWorkflowEdgeCondition(
+      yamlWithEdges,
+      'branch',
+      'left',
+      null
+    )
+    expect(changed).not.toContain('condition:')
   })
 })
