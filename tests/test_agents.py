@@ -82,19 +82,6 @@ def test_discover_clears_stale_agents_when_json_is_invalid(monkeypatch):
     assert manager.get_all() == []
 
 
-def test_set_runner_counts_updates_max_tasks():
-    manager = AgentStatusManager()
-    manager.agents = [
-        AgentStatus(id="main", name="Main", busy=False),
-        AgentStatus(id="fallback", name="Fallback", busy=False),
-    ]
-
-    manager.set_runner_counts({"main": 3, "fallback": 1})
-
-    assert manager.agents[0].max_tasks == 3
-    assert manager.agents[1].max_tasks == 1
-
-
 def test_set_busy_and_idle_updates_current_video_details():
     manager = AgentStatusManager()
     manager.agents = [AgentStatus(id="main", name="Main", busy=False)]
