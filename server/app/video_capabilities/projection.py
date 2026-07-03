@@ -3,6 +3,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from server.app.pipeline.common import parse_srt_file
+from server.app.settings import Settings
+from server.app.video_capabilities._video_paths import resolve_video_url
 from server.app.video_capabilities.response_contracts import (
     VideoJobArtifactsResponse,
     VideoJobDetailResponse,
@@ -18,10 +20,8 @@ def _read_json(path: Path) -> Any | None:
 
 
 def _load_video_input(job_dir: Path) -> VideoJobInputResponse:
-    path = job_dir / "video_input.json"
-    if not path.exists():
+    if (data := _read_json(job_dir / "video_input.json")) is None:
         raise FileNotFoundError(f"video_input.json not found in {job_dir}")
-    data = json.loads(path.read_text(encoding="utf-8"))
     return VideoJobInputResponse(**data)
 
 
@@ -32,7 +32,10 @@ def _load_subtitles(job_dir: Path) -> list[VideoSubtitleResponse]:
 
 
 def project_video_job_detail(
-    job_dir: Path, *, local_video_url: str | None = None
+    job_dir: Path,
+    *,
+    settings: Settings,
+    local_video_url: str | None = None,
 ) -> VideoJobDetailResponse:
     video_input = _load_video_input(job_dir)
     subtitles = _load_subtitles(job_dir)
@@ -46,8 +49,6 @@ def project_video_job_detail(
     checklist = _read_json(job_dir / "checklist.json")
     upload_params = _read_json(job_dir / "upload_params.json")
 
-    video_url = local_video_url if (job_dir / "source.mp4").is_file() else video_input.source_url
-
     return VideoJobDetailResponse(
         input=video_input,
         artifacts=VideoJobArtifactsResponse(
@@ -58,6 +59,9 @@ def project_video_job_detail(
             review=review,
             checklist=checklist,
             upload_params=upload_params,
-            video_url=video_url or None,
+            video_url=resolve_video_url(
+                job_dir, video_input.model_dump(), settings, local_video_url
+            )
+            or None,
         ),
     )

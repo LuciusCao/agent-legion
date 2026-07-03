@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 from collections.abc import Mapping
 
-from server.app.executors._log_utils import copy_pi_logs
 from server.app.executors._pi_result import to_execution_result
 from server.app.executors._pi_skill import get_skill_version, prepare_execution, resolve_skill_dir
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
@@ -96,7 +95,6 @@ class PiExecutor:
                 skill_version=skill_version,
             )
 
-            copy_pi_logs(result.run_dir, context.log_path)
             return to_execution_result(result, context)
         finally:
             self.skill_manager.cleanup_execution(context.execution_id)

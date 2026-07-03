@@ -86,8 +86,10 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
     assert "fake_pi" in result.command[0]
     assert Path(result.run_dir).is_relative_to(job_dir / "runs" / "extract_keywords")
     assert Path(result.session_dir) == Path(result.run_dir) / "session"
-    assert ctx.log_path.is_file()
-    assert "event" in ctx.log_path.read_text(encoding="utf-8")
+    events_path = Path(result.run_dir) / "events.jsonl"
+    assert events_path.is_file()
+    assert "event" in events_path.read_text(encoding="utf-8")
+    assert not ctx.log_path.is_file()
     assert not (skill_manager.runs_dir / ctx.execution_id).exists()
 
     run_json_text = (Path(result.run_dir) / "run.json").read_text(encoding="utf-8")
