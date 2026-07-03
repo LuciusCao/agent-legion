@@ -163,6 +163,10 @@ contract checks (`scripts/check_architecture.py`), generated API type drift chec
 (`npm run api:check`), frontend Prettier + ESLint + typecheck + Vitest (without coverage),
 and the spec health check (`scripts/verify_specs.py --check`).
 
+`mypy` runs with unreachable-code warnings enabled. When it flags code behind
+dynamic JSON, database, or framework boundaries, first check whether the type
+annotation is too narrow before deleting the branch.
+
 To check frontend coverage explicitly, run `npm run test:coverage` in `frontend/`, or run the full gate.
 
 Architecture source budgets are governed by `config/architecture/architecture-budget-policy.yaml`
@@ -183,6 +187,11 @@ Full gate (before committing or handing off):
 ```
 
 Runs the quick gate, frontend tests with coverage (`npm run test:coverage`), and the frontend production build.
+
+Dead-code sweeps with tools such as Vulture are manual review aids, not daily
+gate failures. Treat framework declarations, Pydantic fields, FastAPI route
+parameters, and side-effect-only registration code as likely false positives
+unless a cross-reference search confirms they are unused.
 
 Run the full test suite:
 
