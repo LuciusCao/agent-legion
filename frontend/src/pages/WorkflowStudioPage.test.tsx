@@ -11,7 +11,8 @@ vi.mock('react-router-dom', () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
 }))
 
-const definitionYaml = vi.hoisted(() => `key: question_comprehension_info
+const definitionYaml = vi.hoisted(
+  () => `key: question_comprehension_info
 label: 题目审题信息生成 DAG
 schema_version: 2
 intake:
@@ -51,7 +52,8 @@ edges:
       artifact: result.json
       path: $.eligible
       equals: true
-`)
+`
+)
 
 vi.mock('../api', () => {
   const activeRevisionPayload = {

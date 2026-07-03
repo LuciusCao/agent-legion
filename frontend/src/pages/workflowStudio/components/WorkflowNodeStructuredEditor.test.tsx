@@ -59,13 +59,14 @@ describe('WorkflowNodeStructuredEditor', () => {
       target: { value: 'a.json\nb.json' },
     })
 
-    expect(onChange).toHaveBeenLastCalledWith(
-      expect.stringContaining('a.json')
-    )
+    expect(onChange).toHaveBeenLastCalledWith(expect.stringContaining('a.json'))
   })
 
   it('updates yaml when terminal outcome changes', () => {
-    const terminalNode: WorkflowNodeRecord = { ...node, terminal: { outcome: 'uploadable' } }
+    const terminalNode: WorkflowNodeRecord = {
+      ...node,
+      terminal: { outcome: 'uploadable' },
+    }
     const onChange = vi.fn()
     render(
       <WorkflowNodeStructuredEditor

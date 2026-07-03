@@ -8,7 +8,6 @@ import {
   formatIntakeChange,
   formatMetadataChange,
   formatNodeChange,
-  groupCompareErrors,
   IntakeChangeGroup,
   MetadataChangeGroup,
   NodeChangeGroup,
@@ -16,6 +15,7 @@ import {
   severityLabel,
   severityVariant,
 } from '../workflowStudioChanges'
+import { WorkflowChangeSummaryPanelErrors } from './WorkflowChangeSummaryPanelErrors'
 import styles from './WorkflowChangeSummaryPanel.module.css'
 
 type CompareError = components['schemas']['WorkflowDraftCompareError']
@@ -115,49 +115,6 @@ function RiskItem({ flag }: { flag: RiskFlagGroup }) {
   )
 }
 
-function ErrorGroups({
-  errors,
-  onSelectNode,
-}: {
-  errors: CompareError[]
-  onSelectNode?: (nodeKey: string) => void
-}) {
-  const groups = groupCompareErrors(errors)
-  return (
-    <>
-      {groups.map((group) => (
-        <div key={group.category} className={styles.errorGroup}>
-          <h4 className={styles.errorGroupTitle}>{group.categoryLabel}</h4>
-          <ul className={styles.list}>
-            {group.errors.map((error, index) => (
-              <li
-                key={`${group.category}-${index}`}
-                className={styles.errorItem}
-              >
-                <span className={styles.errorMessage}>{error.message}</span>
-                {error.node_key && onSelectNode && (
-                  <button
-                    type="button"
-                    className={styles.clickableNode}
-                    onClick={() => onSelectNode(error.node_key!)}
-                  >
-                    节点: {error.node_key}
-                  </button>
-                )}
-                {(error.line || error.column) && (
-                  <span className={styles.errorLocation}>
-                    位置: {error.line ?? '-'} 行 {error.column ?? '-'} 列
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ))}
-    </>
-  )
-}
-
 export function WorkflowChangeSummaryPanel({
   summary,
   loading,
@@ -189,7 +146,10 @@ export function WorkflowChangeSummaryPanel({
         >
           YAML 无法解析，请先修正错误
         </div>
-        <ErrorGroups errors={errors!} onSelectNode={onSelectNode} />
+        <WorkflowChangeSummaryPanelErrors
+          errors={errors!}
+          onSelectNode={onSelectNode}
+        />
       </section>
     )
   }

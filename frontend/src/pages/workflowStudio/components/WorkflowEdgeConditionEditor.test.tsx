@@ -1,7 +1,9 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { WorkflowEdgeConditionEditor } from './WorkflowEdgeConditionEditor'
-import type { WorkflowEdgeResponse } from '../../../types'
+import type { components } from '../../../generated/api'
+
+type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
 
 const edge: WorkflowEdgeResponse = {
   source: 'branch',

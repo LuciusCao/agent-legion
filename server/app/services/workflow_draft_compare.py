@@ -5,6 +5,15 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from server.app.services.workflow_draft_compare_conditions import (
+    condition_identity as _condition_identity,
+)
+from server.app.services.workflow_draft_compare_conditions import (
+    format_condition as _format_condition,
+)
+from server.app.services.workflow_draft_compare_metadata import (
+    diff_metadata as _diff_metadata,
+)
 from server.app.services.workflow_draft_compare_support import (
     compute_risk_level,
     higher_risk,
@@ -13,7 +22,6 @@ from server.app.services.workflow_draft_compare_support import (
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.schema import (
-    WorkflowCondition,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowIntakeMode,
@@ -22,29 +30,6 @@ from server.app.workflows.schema import (
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
-
-
-def _format_value(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
-
-
-def _format_condition(condition: WorkflowCondition | None) -> str:
-    if condition is None:
-        return ""
-    return f"{condition.path} == {_format_value(condition.equals)}"
-
-
-def _condition_identity(condition: WorkflowCondition | None) -> str:
-    if condition is None:
-        return ""
-    return json.dumps(
-        {"artifact": condition.artifact, "path": condition.path, "equals": condition.equals},
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
 
 
 def _edge_identity(edge: WorkflowEdge, use_full: bool) -> str:
@@ -336,51 +321,6 @@ def _mode_fields_changed(base: WorkflowIntakeMode, draft: WorkflowIntakeMode) ->
     if base.resource != draft.resource:
         fields.append("resource")
     return fields
-
-
-def _diff_metadata(
-    base: WorkflowDefinition,
-    draft: WorkflowDefinition,
-    metadata_changes: list[dict[str, Any]],
-    risk_flags: list[dict[str, Any]],
-) -> None:
-    if base.label != draft.label:
-        metadata_changes.append(
-            {
-                "type": "modified",
-                "field": "label",
-                "before_value": base.label,
-                "after_value": draft.label,
-                "risk": "info",
-            }
-        )
-        risk_flags.append(
-            {
-                "code": "workflow_label_changed",
-                "severity": "info",
-                "message": f"Workflow 显示名称从 {base.label} 改为 {draft.label}。",
-            }
-        )
-    if base.schema_version != draft.schema_version:
-        metadata_changes.append(
-            {
-                "type": "modified",
-                "field": "schema_version",
-                "before_value": str(base.schema_version),
-                "after_value": str(draft.schema_version),
-                "risk": "breaking",
-            }
-        )
-        risk_flags.append(
-            {
-                "code": "schema_version_changed",
-                "severity": "breaking",
-                "message": (
-                    f"Workflow schema_version 从 {base.schema_version} "
-                    f"改为 {draft.schema_version}。"
-                ),
-            }
-        )
 
 
 def _diff_intake(
