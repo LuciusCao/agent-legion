@@ -14,3 +14,7 @@ export function formatEquals(value: unknown): string {
   if (typeof value === 'string') return value
   return JSON.stringify(value)
 }
+
+export function coerceEquals(value: unknown): string | number | boolean | null {
+  return (value ?? '') as string | number | boolean | null
+}

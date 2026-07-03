@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import { WorkflowEdgeConditionEditor } from './WorkflowEdgeConditionEditor'
+import { parseWorkflowYaml } from '../workflowStudioYamlDraft.parse'
 import type { components } from '../../../generated/api'
 
 type WorkflowEdgeResponse = components['schemas']['WorkflowEdgeResponse']
@@ -116,5 +117,140 @@ describe('WorkflowEdgeConditionEditor', () => {
     expect(onChange).toHaveBeenLastCalledWith(
       expect.stringContaining('equals: false')
     )
+  })
+
+  it('edits the outgoing edge by its global YAML index, not local subset index', () => {
+    const multiYaml = `key: demo
+label: Demo
+nodes:
+  fetch:
+    label: Fetch
+    capability: fetch
+    after: []
+    inputs: []
+    outputs: []
+  branch:
+    label: Branch
+    capability: branch
+    after: []
+    inputs: []
+    outputs: []
+  left:
+    label: Left
+    capability: left
+    after: []
+    inputs: []
+    outputs: []
+edges:
+  - source: fetch
+    target: branch
+  - source: branch
+    target: left
+    condition:
+      artifact: result.json
+      path: $.eligible
+      equals: true
+`
+    const outgoingEdges: WorkflowEdgeResponse[] = [
+      { source: 'branch', target: 'left', condition: edge.condition },
+    ]
+    const onChange = vi.fn()
+    render(
+      <WorkflowEdgeConditionEditor
+        edges={outgoingEdges}
+        definitionYaml={multiYaml}
+        onDefinitionYamlChange={onChange}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText('条件 path'), {
+      target: { value: '$.ready' },
+    })
+
+    const calls = onChange.mock.calls
+    const patchedYaml = calls[calls.length - 1]?.[0] as string
+    const draft = parseWorkflowYaml(patchedYaml)
+    expect(draft.edges?.[0].condition).toBeUndefined()
+    expect(draft.edges?.[1].condition?.path).toBe('$.ready')
+  })
+
+  it('maps duplicate outgoing edges to correct global indices when preceded by other edges', () => {
+    const duplicateYaml = `key: demo
+label: Demo
+nodes:
+  fetch:
+    label: Fetch
+    capability: fetch
+    after: []
+    inputs: []
+    outputs: []
+  branch:
+    label: Branch
+    capability: branch
+    after: []
+    inputs: []
+    outputs: []
+  left:
+    label: Left
+    capability: left
+    after: []
+    inputs: []
+    outputs: []
+edges:
+  - source: fetch
+    target: branch
+  - source: branch
+    target: left
+    condition:
+      artifact: a.json
+      path: $.x
+      equals: true
+  - source: branch
+    target: left
+    condition:
+      artifact: b.json
+      path: $.y
+      equals: false
+`
+    const outgoingEdges: WorkflowEdgeResponse[] = [
+      {
+        source: 'branch',
+        target: 'left',
+        condition: {
+          artifact: 'a.json',
+          path: '$.x',
+          equals: true,
+        },
+      },
+      {
+        source: 'branch',
+        target: 'left',
+        condition: {
+          artifact: 'b.json',
+          path: '$.y',
+          equals: false,
+        },
+      },
+    ]
+    const onChange = vi.fn()
+    render(
+      <WorkflowEdgeConditionEditor
+        edges={outgoingEdges}
+        definitionYaml={duplicateYaml}
+        onDefinitionYamlChange={onChange}
+      />
+    )
+
+    const pathInputs = screen.getAllByLabelText('条件 path')
+    fireEvent.change(pathInputs[1], {
+      target: { value: '$.changed' },
+    })
+
+    const calls = onChange.mock.calls
+    const patchedYaml = calls[calls.length - 1]?.[0] as string
+    const draft = parseWorkflowYaml(patchedYaml)
+    expect(draft.edges?.[0].condition).toBeUndefined()
+    expect(draft.edges?.[1].condition?.path).toBe('$.x')
+    expect(draft.edges?.[2].condition?.path).toBe('$.changed')
   })
 })
