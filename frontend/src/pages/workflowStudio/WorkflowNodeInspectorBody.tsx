@@ -1,5 +1,6 @@
 import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
 import { conditionLabel } from './workflowStudioModel'
+import { WorkflowNodeStructuredEditor } from './components/WorkflowNodeStructuredEditor'
 import styles from './WorkflowNodeInspector.module.css'
 
 type Props = {
@@ -93,6 +94,11 @@ export function WorkflowNodeInspectorBody({
           <span className={styles.outcome}>{node.terminal.outcome}</span>
         </div>
       )}
+      <WorkflowNodeStructuredEditor
+        node={node}
+        definitionYaml={definitionYaml}
+        onDefinitionYamlChange={onDefinitionYamlChange}
+      />
     </section>
   )
 }
