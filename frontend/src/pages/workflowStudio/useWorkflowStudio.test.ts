@@ -216,4 +216,44 @@ describe('useWorkflowStudio', () => {
     )
     expect(result.current.compareSummary?.nodeChanges[0]?.nodeKey).toBe('b')
   })
+
+  it('enables publish when compare returns metadata changes', async () => {
+    mocks.compareWorkflowDraft.mockResolvedValue({
+      valid: true,
+      base_revision: null,
+      draft_workflow: null,
+      summary: {
+        risk_level: 'info',
+        node_changes: [],
+        edge_changes: [],
+        intake_changes: [],
+        metadata_changes: [
+          {
+            type: 'modified',
+            field: 'label',
+            before_value: 'Demo Workflow',
+            after_value: 'Demo Workflow v2',
+            risk: 'info',
+          },
+        ],
+        risk_flags: [],
+      },
+      errors: [],
+    })
+
+    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    act(() => {
+      result.current.setDefinitionYaml('key: demo\nlabel: Demo Workflow v2\n')
+    })
+
+    await act(async () => {
+      vi.advanceTimersByTime(450)
+    })
+
+    await waitFor(() => expect(result.current.compareState).toBe('ready'))
+    expect(result.current.compareSummary?.metadataChanges).toHaveLength(1)
+    expect(result.current.canPublish).toBe(true)
+  })
 })
