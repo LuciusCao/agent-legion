@@ -519,6 +519,7 @@
     "server/app/services/log_cleanup.py": 95,
     "server/app/services/manual_run.py": 321,
     "server/app/services/package_deletion.py": 59,
+    "server/app/services/pi_event_compression.py": 76,
     "server/app/services/run_dir_cleanup.py": 91,
     "server/app/services/transcription_providers.py": 57,
     "server/app/services/video_actions.py": 204,
