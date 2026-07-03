@@ -5,6 +5,15 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+from server.app.services.workflow_draft_compare_conditions import (
+    condition_identity as _condition_identity,
+)
+from server.app.services.workflow_draft_compare_conditions import (
+    format_condition as _format_condition,
+)
+from server.app.services.workflow_draft_compare_metadata import (
+    diff_metadata as _diff_metadata,
+)
 from server.app.services.workflow_draft_compare_support import (
     compute_risk_level,
     higher_risk,
@@ -13,7 +22,6 @@ from server.app.services.workflow_draft_compare_support import (
 from server.app.services.workflow_drafts import workflow_definition_from_yaml_string
 from server.app.workflows.definition import workflow_definition_from_dict
 from server.app.workflows.schema import (
-    WorkflowCondition,
     WorkflowDefinition,
     WorkflowEdge,
     WorkflowIntakeMode,
@@ -22,29 +30,6 @@ from server.app.workflows.schema import (
 
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
-
-
-def _format_value(value: Any) -> str:
-    if isinstance(value, bool):
-        return "true" if value else "false"
-    return str(value)
-
-
-def _format_condition(condition: WorkflowCondition | None) -> str:
-    if condition is None:
-        return ""
-    return f"{condition.path} == {_format_value(condition.equals)}"
-
-
-def _condition_identity(condition: WorkflowCondition | None) -> str:
-    if condition is None:
-        return ""
-    return json.dumps(
-        {"artifact": condition.artifact, "path": condition.path, "equals": condition.equals},
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-    )
 
 
 def _edge_identity(edge: WorkflowEdge, use_full: bool) -> str:
@@ -499,13 +484,17 @@ def compare_workflow_draft(
     node_changes: list[dict[str, Any]] = []
     edge_changes: list[dict[str, Any]] = []
     intake_changes: list[dict[str, Any]] = []
+    metadata_changes: list[dict[str, Any]] = []
     risk_flags: list[dict[str, Any]] = []
 
     _diff_nodes(base, draft, node_changes, risk_flags)
     _diff_edges(base, draft, edge_changes, risk_flags)
     _diff_intake(base, draft, intake_changes, risk_flags)
+    _diff_metadata(base, draft, metadata_changes, risk_flags)
 
-    risk_level = compute_risk_level(node_changes, edge_changes, intake_changes, risk_flags)
+    risk_level = compute_risk_level(
+        node_changes, edge_changes, intake_changes, risk_flags, metadata_changes
+    )
 
     return {
         "valid": True,
@@ -525,6 +514,7 @@ def compare_workflow_draft(
             "node_changes": node_changes,
             "edge_changes": edge_changes,
             "intake_changes": intake_changes,
+            "metadata_changes": metadata_changes,
             "risk_flags": risk_flags,
         },
         "errors": [],

@@ -1,14 +1,59 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, fireEvent } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioPage } from './WorkflowStudioPage'
+import { compareWorkflowDraft } from '../api'
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ workspaceId: 'ws1' }),
   useNavigate: () => vi.fn(),
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
 }))
+
+const definitionYaml = vi.hoisted(
+  () => `key: question_comprehension_info
+label: 题目审题信息生成 DAG
+schema_version: 2
+intake:
+  modes: {}
+nodes:
+  fetch_questions:
+    label: 获取题目
+    capability: fetch_questions
+    after: []
+    inputs: []
+    outputs:
+      - questions.json
+  classify_comprehension_eligibility:
+    label: 判断是否适合审题
+    capability: classify_comprehension_eligibility
+    after:
+      - fetch_questions
+    inputs:
+      - questions.json
+    outputs: []
+  generate_key_info:
+    label: 生成关键信息
+    capability: generate_key_info
+    after:
+      - classify_comprehension_eligibility
+    inputs:
+      - questions.json
+    outputs:
+      - key_info.json
+edges:
+  - source: fetch_questions
+    target: classify_comprehension_eligibility
+    condition: null
+  - source: classify_comprehension_eligibility
+    target: generate_key_info
+    condition:
+      artifact: result.json
+      path: $.eligible
+      equals: true
+`
+)
 
 vi.mock('../api', () => {
   const activeRevisionPayload = {
@@ -29,8 +74,17 @@ vi.mock('../api', () => {
       edges: [
         {
           source: 'fetch_questions',
-          target: 'clean_and_parse',
+          target: 'classify_comprehension_eligibility',
           condition: null,
+        },
+        {
+          source: 'classify_comprehension_eligibility',
+          target: 'generate_key_info',
+          condition: {
+            artifact: 'result.json',
+            path: '$.eligible',
+            equals: true,
+          },
         },
       ],
       nodes: [
@@ -43,17 +97,24 @@ vi.mock('../api', () => {
           outputs: ['questions.json'],
         },
         {
-          key: 'clean_and_parse',
-          label: '清洗与解析',
-          capability: 'clean_and_parse',
+          key: 'classify_comprehension_eligibility',
+          label: '判断是否适合审题',
+          capability: 'classify_comprehension_eligibility',
           after: ['fetch_questions'],
           inputs: ['questions.json'],
-          outputs: ['questions_parsed.json'],
+          outputs: [],
+        },
+        {
+          key: 'generate_key_info',
+          label: '生成关键信息',
+          capability: 'generate_key_info',
+          after: ['classify_comprehension_eligibility'],
+          inputs: ['questions.json'],
+          outputs: ['key_info.json'],
         },
       ],
     },
-    definition_yaml:
-      'key: question_comprehension_info\nlabel: 题目审题信息生成 DAG\n',
+    definition_yaml: definitionYaml,
   }
 
   return {
@@ -96,6 +157,7 @@ vi.mock('../api', () => {
         ],
         edge_changes: [],
         intake_changes: [],
+        metadata_changes: [],
         risk_flags: [],
       },
       errors: [],
@@ -173,5 +235,144 @@ describe('WorkflowStudioPage', () => {
     await user.click(screen.getByRole('button', { name: '确认发布' }))
 
     expect(await screen.findByText('发布成功')).toBeInTheDocument()
+  })
+
+  it('edits workflow label and shows metadata changes in publish review', async () => {
+    vi.mocked(compareWorkflowDraft).mockResolvedValue({
+      valid: true,
+      base_revision: null,
+      draft_workflow: null,
+      summary: {
+        risk_level: 'info',
+        node_changes: [],
+        edge_changes: [],
+        intake_changes: [],
+        metadata_changes: [
+          {
+            type: 'modified',
+            field: 'label',
+            before_value: '题目审题信息生成 DAG',
+            after_value: '题目审题信息生成 DAG v2',
+            risk: 'info',
+          },
+        ],
+        risk_flags: [],
+      },
+      errors: [],
+    })
+
+    render(<WorkflowStudioPage />)
+    await screen.findByText('Workflow Studio')
+
+    fireEvent.change(screen.getByLabelText('Workflow 名称'), {
+      target: { value: '题目审题信息生成 DAG v2' },
+    })
+
+    await screen.findByText('有未发布变更')
+    await userEvent.click(screen.getByRole('button', { name: '发布' }))
+
+    expect(
+      await screen.findByText('发布 workflow revision')
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('元数据变更').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('edits node label and reflects the change in YAML and outline', async () => {
+    vi.mocked(compareWorkflowDraft).mockResolvedValue({
+      valid: true,
+      base_revision: null,
+      draft_workflow: null,
+      summary: {
+        risk_level: 'info',
+        node_changes: [
+          {
+            type: 'modified',
+            node_key: 'fetch_questions',
+            label: '获取题目 v2',
+            fields: ['label'],
+            risk: 'info',
+          },
+        ],
+        edge_changes: [],
+        intake_changes: [],
+        metadata_changes: [],
+        risk_flags: [],
+      },
+      errors: [],
+    })
+
+    render(<WorkflowStudioPage />)
+    await screen.findByText('Workflow Studio')
+
+    await userEvent.click(screen.getAllByText('获取题目')[0])
+
+    fireEvent.change(screen.getByLabelText('节点名称'), {
+      target: { value: '获取题目 v2' },
+    })
+
+    await screen.findByText('有未发布变更')
+
+    expect(
+      (screen.getByLabelText('高级 YAML 编辑器') as HTMLTextAreaElement).value
+    ).toContain('label: 获取题目 v2')
+    expect(screen.getByText('改动')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: '发布' }))
+
+    expect(
+      await screen.findByText('发布 workflow revision')
+    ).toBeInTheDocument()
+    expect(screen.getAllByText('节点变更').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('edits branch condition and shows high risk', async () => {
+    vi.mocked(compareWorkflowDraft).mockResolvedValue({
+      valid: true,
+      base_revision: null,
+      draft_workflow: null,
+      summary: {
+        risk_level: 'breaking',
+        node_changes: [],
+        edge_changes: [
+          {
+            type: 'condition_changed',
+            source: 'classify_comprehension_eligibility',
+            target: 'generate_key_info',
+            before_condition: '$.eligible == true',
+            after_condition: '$.eligible == false',
+            risk: 'breaking',
+          },
+        ],
+        intake_changes: [],
+        metadata_changes: [],
+        risk_flags: [
+          {
+            code: 'edge_condition_changed',
+            severity: 'breaking',
+            message: '分支条件变化会改变运行路径。',
+          },
+        ],
+      },
+      errors: [],
+    })
+
+    render(<WorkflowStudioPage />)
+    await screen.findByText('Workflow Studio')
+
+    await userEvent.click(screen.getAllByText('判断是否适合审题')[0])
+
+    fireEvent.change(screen.getByLabelText('条件 equals'), {
+      target: { value: 'false' },
+    })
+
+    await screen.findByText('存在高风险变更')
+
+    expect(screen.getByText('风险等级: 高风险')).toBeInTheDocument()
+
+    await userEvent.click(screen.getByRole('button', { name: '发布' }))
+
+    expect(
+      await screen.findByText('发布 workflow revision')
+    ).toBeInTheDocument()
   })
 })

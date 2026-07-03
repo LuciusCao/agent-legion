@@ -1,10 +1,18 @@
 import type { components } from '../../generated/api'
+import {
+  categoryLabelForError,
+  formatEdgeChange,
+  formatIntakeChange,
+  formatMetadataChange,
+  formatNodeChange,
+} from './workflowStudioChangeFormatters'
 
 type CompareResponse = components['schemas']['WorkflowDraftCompareResponse']
 type CompareSummary = components['schemas']['WorkflowCompareSummary']
 type NodeChange = components['schemas']['WorkflowNodeChange']
 type EdgeChange = components['schemas']['WorkflowEdgeChange']
 type IntakeChange = components['schemas']['WorkflowIntakeChange']
+type MetadataChange = components['schemas']['WorkflowMetadataChange']
 type RiskFlag = components['schemas']['WorkflowRiskFlag']
 type CompareError = components['schemas']['WorkflowDraftCompareError']
 
@@ -34,6 +42,14 @@ export type IntakeChangeGroup = {
   severity: ChangeSeverity
 }
 
+export type MetadataChangeGroup = {
+  type: MetadataChange['type']
+  field: string
+  beforeValue: string | null
+  afterValue: string | null
+  severity: ChangeSeverity
+}
+
 export type RiskFlagGroup = {
   code: string
   message: string
@@ -46,6 +62,7 @@ export type ChangeSummaryViewModel = {
   nodeChanges: NodeChangeGroup[]
   edgeChanges: EdgeChangeGroup[]
   intakeChanges: IntakeChangeGroup[]
+  metadataChanges: MetadataChangeGroup[]
   riskFlags: RiskFlagGroup[]
   changedNodeKeys: Set<string>
 }
@@ -67,33 +84,6 @@ const SEVERITY_META: Record<
   breaking: { label: '高风险', variant: 'error' },
 }
 
-const TYPE_LABELS: Record<string, string> = {
-  added: '新增',
-  removed: '删除',
-  modified: '修改',
-  condition_changed: '条件变更',
-  label_changed: '标签变更',
-  mode_changed: '模式变更',
-  field_added: '新增字段',
-  field_removed: '删除字段',
-}
-
-const FIELD_LABELS: Record<string, string> = {
-  label: '标签',
-  capability: '能力',
-  inputs: '输入',
-  outputs: '输出',
-  terminal: '终点',
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  yaml: 'YAML解析',
-  schema: '结构校验',
-  structure: '结构',
-  executor: '执行器',
-  revision: '版本',
-}
-
 export function severityOrder(a: ChangeSeverity, b: ChangeSeverity): number {
   return SEVERITY_ORDER[b] - SEVERITY_ORDER[a]
 }
@@ -110,40 +100,13 @@ export function severityVariant(
   return SEVERITY_META[severity].variant
 }
 
-export function categoryLabelForError(category: string): string {
-  return CATEGORY_LABELS[category] ?? category
+export {
+  formatNodeChange,
+  formatEdgeChange,
+  formatIntakeChange,
+  formatMetadataChange,
+  categoryLabelForError,
 }
-
-export function formatNodeChange(change: NodeChangeGroup): string {
-  const typeLabel = TYPE_LABELS[change.type] ?? change.type
-  const fieldLabels = change.fields
-    .map((field) => FIELD_LABELS[field] ?? field)
-    .join('、')
-  if (change.type === 'added' || change.type === 'removed') {
-    return `${typeLabel}节点 ${change.label || change.nodeKey}`
-  }
-  return `${change.label || change.nodeKey}: ${fieldLabels}`
-}
-
-export function formatEdgeChange(change: EdgeChangeGroup): string {
-  const typeLabel = TYPE_LABELS[change.type] ?? change.type
-  const before = change.beforeCondition || ''
-  const after = change.afterCondition || ''
-  if (change.type === 'condition_changed') {
-    return `${change.source} → ${change.target}: ${before || '—'} → ${after || '—'}`
-  }
-  const condition = after || before || ''
-  return `${typeLabel}边 ${change.source} → ${change.target}${condition ? ` (${condition})` : ''}`
-}
-
-export function formatIntakeChange(change: IntakeChangeGroup): string {
-  const typeLabel = TYPE_LABELS[change.type] ?? change.type
-  if (change.fieldKey) {
-    return `${change.modeKey} / ${change.fieldKey}: ${typeLabel}`
-  }
-  return `${change.modeKey}: ${typeLabel}`
-}
-
 function normalizeNodeChange(change: NodeChange): NodeChangeGroup {
   return {
     type: change.type,
@@ -170,6 +133,16 @@ function normalizeIntakeChange(change: IntakeChange): IntakeChangeGroup {
     type: change.type,
     modeKey: change.mode_key,
     fieldKey: change.field_key ?? null,
+    severity: change.risk,
+  }
+}
+
+function normalizeMetadataChange(change: MetadataChange): MetadataChangeGroup {
+  return {
+    type: change.type,
+    field: change.field,
+    beforeValue: change.before_value ?? null,
+    afterValue: change.after_value ?? null,
     severity: change.risk,
   }
 }
@@ -207,6 +180,7 @@ export function buildChangeSummary(
       nodeChanges: [],
       edgeChanges: [],
       intakeChanges: [],
+      metadataChanges: [],
       riskFlags: [],
       changedNodeKeys: new Set(),
     }
@@ -216,6 +190,7 @@ export function buildChangeSummary(
   const nodeChanges = summary.node_changes.map(normalizeNodeChange)
   const edgeChanges = summary.edge_changes.map(normalizeEdgeChange)
   const intakeChanges = summary.intake_changes.map(normalizeIntakeChange)
+  const metadataChanges = summary.metadata_changes.map(normalizeMetadataChange)
   const riskFlags = summary.risk_flags
     .map(normalizeRiskFlag)
     .sort((a, b) => severityOrder(a.severity, b.severity))
@@ -226,6 +201,7 @@ export function buildChangeSummary(
     nodeChanges,
     edgeChanges,
     intakeChanges,
+    metadataChanges,
     riskFlags,
     changedNodeKeys: collectChangedNodeKeys(summary),
   }

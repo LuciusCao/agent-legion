@@ -16,9 +16,11 @@ def compute_risk_level(
     edge_changes: list[dict[str, Any]],
     intake_changes: list[dict[str, Any]],
     risk_flags: list[dict[str, Any]],
+    metadata_changes: list[dict[str, Any]] | None = None,
 ) -> str:
     risk = "none"
-    for change in node_changes + edge_changes + intake_changes:
+    all_changes = node_changes + edge_changes + intake_changes + (metadata_changes or [])
+    for change in all_changes:
         risk = higher_risk(risk, change["risk"])
     for flag in risk_flags:
         risk = higher_risk(risk, flag["severity"])

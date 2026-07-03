@@ -25,6 +25,7 @@ function makeResponse(
       node_changes: [],
       edge_changes: [],
       intake_changes: [],
+      metadata_changes: [],
       risk_flags: [],
     },
     errors: [],
@@ -101,6 +102,7 @@ describe('workflowStudioChanges', () => {
           }),
         ],
         intake_changes: [],
+        metadata_changes: [],
         risk_flags: [],
       },
     })
@@ -119,6 +121,7 @@ describe('workflowStudioChanges', () => {
         node_changes: [],
         edge_changes: [],
         intake_changes: [],
+        metadata_changes: [],
         risk_flags: [
           makeRiskFlag({ code: 'info_1', severity: 'info' }),
           makeRiskFlag({ code: 'warning_1', severity: 'warning' }),
@@ -145,6 +148,7 @@ describe('workflowStudioChanges', () => {
         node_changes: [],
         edge_changes: [],
         intake_changes: [],
+        metadata_changes: [],
         risk_flags: [
           makeRiskFlag({ code: 'first', severity: 'info' }),
           makeRiskFlag({ code: 'second', severity: 'info' }),
@@ -204,6 +208,7 @@ describe('workflowStudioChanges', () => {
               node_changes: [added],
               edge_changes: [],
               intake_changes: [],
+              metadata_changes: [],
               risk_flags: [],
             },
           })
@@ -220,6 +225,7 @@ describe('workflowStudioChanges', () => {
               node_changes: [modified],
               edge_changes: [],
               intake_changes: [],
+              metadata_changes: [],
               risk_flags: [],
             },
           })
@@ -236,6 +242,7 @@ describe('workflowStudioChanges', () => {
           node_changes: [],
           edge_changes: [makeEdgeChange()],
           intake_changes: [],
+          metadata_changes: [],
           risk_flags: [],
         },
       })
@@ -244,5 +251,37 @@ describe('workflowStudioChanges', () => {
     expect(formatEdgeChange(change)).toBe(
       'source_a → target_a: $.eligible == true → $.eligible === true'
     )
+  })
+
+  it('normalizes metadata changes', () => {
+    const response = makeResponse({
+      summary: {
+        risk_level: 'info',
+        node_changes: [],
+        edge_changes: [],
+        intake_changes: [],
+        metadata_changes: [
+          {
+            type: 'modified',
+            field: 'label',
+            before_value: 'Old',
+            after_value: 'New',
+            risk: 'info',
+          },
+        ],
+        risk_flags: [],
+      },
+    })
+
+    const summary = buildChangeSummary(response)
+
+    expect(summary.metadataChanges).toHaveLength(1)
+    expect(summary.metadataChanges[0]).toEqual({
+      type: 'modified',
+      field: 'label',
+      beforeValue: 'Old',
+      afterValue: 'New',
+      severity: 'info',
+    })
   })
 })
