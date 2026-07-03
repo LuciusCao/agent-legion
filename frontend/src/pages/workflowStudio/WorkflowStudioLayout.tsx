@@ -69,6 +69,8 @@ export function WorkflowStudioLayout(props: StudioLayoutProps) {
               <WorkflowNodeInspector
                 workflow={props.workflow}
                 selectedNodeKey={props.selectedNodeKey}
+                definitionYaml={props.definitionYaml}
+                onDefinitionYamlChange={props.setDefinitionYaml}
               />
               <WorkflowChangeSummaryPanel
                 summary={props.compareSummary}
