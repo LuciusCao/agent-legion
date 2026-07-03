@@ -8,12 +8,8 @@ import pytest
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
-from server.app.services.job_log_raw import (
-    MAX_RAW_LOG_BYTES,
-    PayloadTooLargeError,
-    resolve_job_log_path,
-    resolve_run_dir,
-)
+from server.app.services.job_log_paths import resolve_job_log_path, resolve_run_dir
+from server.app.services.job_log_raw import MAX_RAW_LOG_BYTES, PayloadTooLargeError
 from server.app.services.job_logs import JobLogService
 from server.app.settings import Settings
 from server.app.storage_paths import make_data_relative
@@ -505,6 +501,20 @@ def test_job_log_service_renders_pi_stderr(log_service):
 
     assert any(entry["type"] == "stderr" for entry in result["structured"])
     assert "warning line" in result["log"]
+
+
+def test_read_raw_log_falls_back_to_events_jsonl(log_service):
+    service, settings, job_db = log_service
+    job, run, run_dir = _create_pi_job(job_db, settings)
+    events_path = run_dir / "events.jsonl"
+    events_path.write_text(
+        json.dumps({"type": "agent_start"}, ensure_ascii=False),
+        encoding="utf-8",
+    )
+
+    raw = service.read_raw(job["id"], run["id"])
+
+    assert "agent_start" in raw
 
 
 def test_resolve_job_log_path_accepts_logs_dir(log_service):

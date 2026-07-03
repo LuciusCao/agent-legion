@@ -21,7 +21,9 @@ def create_video_job_detail_router(job_db: JobQueries, settings: Settings) -> AP
         job_dir = resolve_job_dir(job, settings.jobs_dir)
         try:
             return project_video_job_detail(
-                job_dir, local_video_url=f"/api/jobs/{job_id}/video/source"
+                job_dir,
+                settings=settings,
+                local_video_url=f"/api/jobs/{job_id}/video/source",
             )
         except FileNotFoundError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc

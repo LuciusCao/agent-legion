@@ -5,12 +5,12 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
-from server.app.services.job_log_raw import (
-    read_raw_log,
+from server.app.services.job_log_paths import (
     resolve_job_log_path,
     resolve_run_dir,
     resolve_run_dir_fallback,
 )
+from server.app.services.job_log_raw import read_raw_log
 from server.app.services.job_log_renderer import render_log
 from server.app.settings import Settings
 

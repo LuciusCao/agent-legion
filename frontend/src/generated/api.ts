@@ -2315,6 +2315,13 @@ export interface operations {
           'video/mp4': unknown
         }
       }
+      /** @description Redirect */
+      302: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
       /** @description Validation Error */
       422: {
         headers: {
