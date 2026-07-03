@@ -1,0 +1,13 @@
+.badges {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.badge {
+  font-size: 10px;
+  height: 18px;
+}
+.badge > span {
+  padding: 0 6px;
+}

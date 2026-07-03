@@ -4,6 +4,7 @@ import styles from './WorkflowStudioSummaryBar.module.css'
 type Props = {
   actionState: 'idle' | 'validating' | 'publishing'
   canSubmit: boolean
+  canPublish: boolean
   dirty: boolean
   onValidate: () => void
   onPublish: () => void
@@ -13,6 +14,7 @@ type Props = {
 export function WorkflowStudioSummaryBarActions({
   actionState,
   canSubmit,
+  canPublish,
   dirty,
   onValidate,
   onPublish,
@@ -33,7 +35,7 @@ export function WorkflowStudioSummaryBarActions({
         variant="contained"
         size="small"
         onClick={onPublish}
-        disabled={!canSubmit || busy}
+        disabled={!canPublish || busy}
       >
         {actionState === 'publishing' ? '发布中' : '发布'}
       </Button>

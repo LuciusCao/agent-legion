@@ -4,6 +4,8 @@ import type {
   WorkflowRevisionsResponse,
 } from '../types'
 
+export { compareWorkflowDraft } from './workflow_draft_compare'
+
 export async function fetchActiveWorkflowRevision(
   workspaceId: string
 ): Promise<ActiveWorkflowRevisionResponse> {

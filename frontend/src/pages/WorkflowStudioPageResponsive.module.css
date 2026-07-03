@@ -1,0 +1,18 @@
+@media (max-width: 900px) {
+  .layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    overflow: auto;
+  }
+  .sidePanel {
+    border-right: none;
+    border-left: none;
+    border-top: 1px solid #e0e0e0;
+    max-height: 320px;
+  }
+  .sidePanel:first-child {
+    border-right: none;
+    border-bottom: 1px solid #e0e0e0;
+    border-top: none;
+  }
+}
