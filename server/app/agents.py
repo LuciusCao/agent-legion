@@ -50,11 +50,6 @@ class AgentStatusManager:
             self.agents = agents
         return list(agents)
 
-    def set_runner_counts(self, runner_counts: dict[str, int]) -> None:
-        with self._lock:
-            for agent in self.agents:
-                agent.max_tasks = runner_counts.get(agent.id, 1)
-
     def set_workspace_assignment(
         self, workspace_id: str, agent_id: str, concurrency_limit: int = 1
     ) -> None:
@@ -116,10 +111,6 @@ class AgentStatusManager:
             removed = len(self.agents) != before
         if removed:
             self._broadcast()
-
-    def add_pi_agent(self, max_tasks: int = 1) -> None:
-        """Deprecated: use add_pi_agent_for_workspace."""
-        self.add_pi_agent_for_workspace("", max_tasks)
 
     def set_busy(
         self, agent_id: str, video: str | dict[str, Any], *, workspace_id: str = ""
