@@ -16,7 +16,7 @@ class LogEntry(TypedDict):
 
 
 def _extract_text(
-    content: list[dict[str, Any]] | dict[str, Any] | None,
+    content: list[Any] | dict[str, Any] | None,
 ) -> str:
     if isinstance(content, dict):
         content = [content]
