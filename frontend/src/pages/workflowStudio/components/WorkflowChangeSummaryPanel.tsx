@@ -6,9 +6,11 @@ import {
   EdgeChangeGroup,
   formatEdgeChange,
   formatIntakeChange,
+  formatMetadataChange,
   formatNodeChange,
   groupCompareErrors,
   IntakeChangeGroup,
+  MetadataChangeGroup,
   NodeChangeGroup,
   RiskFlagGroup,
   severityLabel,
@@ -80,6 +82,18 @@ function EdgeItem({ change }: { change: EdgeChangeGroup }) {
 
 function IntakeItem({ change }: { change: IntakeChangeGroup }) {
   const text = formatIntakeChange(change)
+  return (
+    <li className={styles.item}>
+      <span className={styles.itemText} title={text}>
+        {text}
+      </span>
+      <ChangeBadge severity={change.severity} />
+    </li>
+  )
+}
+
+function MetadataItem({ change }: { change: MetadataChangeGroup }) {
+  const text = formatMetadataChange(change)
   return (
     <li className={styles.item}>
       <span className={styles.itemText} title={text}>
@@ -184,6 +198,7 @@ export function WorkflowChangeSummaryPanel({
     viewModel.nodeChanges.length > 0 ||
     viewModel.edgeChanges.length > 0 ||
     viewModel.intakeChanges.length > 0 ||
+    viewModel.metadataChanges.length > 0 ||
     viewModel.riskFlags.length > 0
 
   return (
@@ -232,6 +247,19 @@ export function WorkflowChangeSummaryPanel({
                 {viewModel.intakeChanges.map((change) => (
                   <IntakeItem
                     key={`intake-${change.type}-${change.modeKey}-${change.fieldKey ?? ''}`}
+                    change={change}
+                  />
+                ))}
+              </ul>
+            </div>
+          )}
+          {viewModel.metadataChanges.length > 0 && (
+            <div className={styles.section}>
+              <h3 className={styles.sectionTitle}>元数据变更</h3>
+              <ul className={styles.list}>
+                {viewModel.metadataChanges.map((change) => (
+                  <MetadataItem
+                    key={`metadata-${change.field}`}
                     change={change}
                   />
                 ))}
