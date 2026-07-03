@@ -21,6 +21,7 @@ function makeSummaryResponse(
       node_changes: [],
       edge_changes: [],
       intake_changes: [],
+      metadata_changes: [],
       risk_flags: [],
     },
     errors: [],

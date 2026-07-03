@@ -338,6 +338,51 @@ def _mode_fields_changed(base: WorkflowIntakeMode, draft: WorkflowIntakeMode) ->
     return fields
 
 
+def _diff_metadata(
+    base: WorkflowDefinition,
+    draft: WorkflowDefinition,
+    metadata_changes: list[dict[str, Any]],
+    risk_flags: list[dict[str, Any]],
+) -> None:
+    if base.label != draft.label:
+        metadata_changes.append(
+            {
+                "type": "modified",
+                "field": "label",
+                "before_value": base.label,
+                "after_value": draft.label,
+                "risk": "info",
+            }
+        )
+        risk_flags.append(
+            {
+                "code": "workflow_label_changed",
+                "severity": "info",
+                "message": f"Workflow 显示名称从 {base.label} 改为 {draft.label}。",
+            }
+        )
+    if base.schema_version != draft.schema_version:
+        metadata_changes.append(
+            {
+                "type": "modified",
+                "field": "schema_version",
+                "before_value": str(base.schema_version),
+                "after_value": str(draft.schema_version),
+                "risk": "breaking",
+            }
+        )
+        risk_flags.append(
+            {
+                "code": "schema_version_changed",
+                "severity": "breaking",
+                "message": (
+                    f"Workflow schema_version 从 {base.schema_version} "
+                    f"改为 {draft.schema_version}。"
+                ),
+            }
+        )
+
+
 def _diff_intake(
     base: WorkflowDefinition,
     draft: WorkflowDefinition,
@@ -499,13 +544,17 @@ def compare_workflow_draft(
     node_changes: list[dict[str, Any]] = []
     edge_changes: list[dict[str, Any]] = []
     intake_changes: list[dict[str, Any]] = []
+    metadata_changes: list[dict[str, Any]] = []
     risk_flags: list[dict[str, Any]] = []
 
     _diff_nodes(base, draft, node_changes, risk_flags)
     _diff_edges(base, draft, edge_changes, risk_flags)
     _diff_intake(base, draft, intake_changes, risk_flags)
+    _diff_metadata(base, draft, metadata_changes, risk_flags)
 
-    risk_level = compute_risk_level(node_changes, edge_changes, intake_changes, risk_flags)
+    risk_level = compute_risk_level(
+        node_changes, edge_changes, intake_changes, risk_flags, metadata_changes
+    )
 
     return {
         "valid": True,
@@ -525,6 +574,7 @@ def compare_workflow_draft(
             "node_changes": node_changes,
             "edge_changes": edge_changes,
             "intake_changes": intake_changes,
+            "metadata_changes": metadata_changes,
             "risk_flags": risk_flags,
         },
         "errors": [],
