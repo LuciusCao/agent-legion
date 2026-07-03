@@ -1,48 +1,19 @@
-import yaml from 'js-yaml'
+import {
+  dumpWorkflowYaml,
+  parseWorkflowYaml,
+  type WorkflowYamlNode,
+} from './workflowStudioYamlDraft.parse'
 
-type WorkflowYamlObject = {
-  key?: string
-  label?: string
-  schema_version?: number
-  intake?: unknown
-  nodes?: Record<string, WorkflowYamlNode>
-  edges?: WorkflowYamlEdge[]
-}
-
-type WorkflowYamlNode = {
-  label?: string
-  capability?: string
-  after?: string[]
-  inputs?: string[]
-  outputs?: string[]
-  terminal?: { outcome?: string }
-}
-
-type WorkflowYamlEdge = {
-  source?: string
-  target?: string
-  condition?: {
-    artifact?: string
-    path?: string
-    equals?: string | number | boolean | null
-  }
-}
-
-function parseWorkflowYaml(rawYaml: string): WorkflowYamlObject {
-  const parsed = yaml.load(rawYaml)
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('Workflow YAML must be a mapping')
-  }
-  return parsed as WorkflowYamlObject
-}
-
-function dumpWorkflowYaml(value: WorkflowYamlObject): string {
-  return yaml.dump(value, {
-    lineWidth: 100,
-    noRefs: true,
-    sortKeys: false,
-  })
-}
+export {
+  parseWorkflowEdgeConditions,
+  parseWorkflowLabel,
+  parseWorkflowNode,
+} from './workflowStudioYamlDraft.parse'
+export type {
+  WorkflowYamlEdge,
+  WorkflowYamlNode,
+  WorkflowYamlObject,
+} from './workflowStudioYamlDraft.parse'
 
 function patchNode(
   rawYaml: string,
@@ -108,8 +79,7 @@ export function patchWorkflowLabel(rawYaml: string, label: string): string {
 
 export function patchWorkflowEdgeCondition(
   rawYaml: string,
-  source: string,
-  target: string,
+  index: number,
   condition: {
     artifact?: string
     path: string
@@ -117,10 +87,8 @@ export function patchWorkflowEdgeCondition(
   } | null
 ): string {
   const draft = parseWorkflowYaml(rawYaml)
-  const edge = draft.edges?.find(
-    (candidate) => candidate.source === source && candidate.target === target
-  )
-  if (!edge) throw new Error(`Edge ${source} -> ${target} not found`)
+  const edge = draft.edges?.[index]
+  if (!edge) throw new Error(`Edge at index ${index} not found`)
   if (!condition) {
     delete edge.condition
   } else {

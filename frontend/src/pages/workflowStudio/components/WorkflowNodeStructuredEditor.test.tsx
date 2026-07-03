@@ -84,4 +84,25 @@ describe('WorkflowNodeStructuredEditor', () => {
       expect.stringContaining('outcome: archived')
     )
   })
+
+  it('derives input values from definitionYaml draft', () => {
+    const { rerender } = render(
+      <WorkflowNodeStructuredEditor
+        node={node}
+        definitionYaml={yaml}
+        onDefinitionYamlChange={vi.fn()}
+      />
+    )
+    expect(screen.getByLabelText('节点名称')).toHaveValue('Fetch')
+
+    const updatedYaml = yaml.replace('label: Fetch', 'label: Fetch v2')
+    rerender(
+      <WorkflowNodeStructuredEditor
+        node={node}
+        definitionYaml={updatedYaml}
+        onDefinitionYamlChange={vi.fn()}
+      />
+    )
+    expect(screen.getByLabelText('节点名称')).toHaveValue('Fetch v2')
+  })
 })

@@ -7,6 +7,7 @@ export function parseEquals(raw: string): string | boolean | null {
 }
 
 export function formatEquals(value: unknown): string {
+  if (value === undefined) return ''
   if (value === true) return 'true'
   if (value === false) return 'false'
   if (value === null) return 'null'

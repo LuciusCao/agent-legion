@@ -92,23 +92,51 @@ edges:
 `
 
 describe('workflowStudioYamlDraft edge condition patches', () => {
-  it('patches an edge condition', () => {
-    const changed = patchWorkflowEdgeCondition(
-      yamlWithEdges,
-      'branch',
-      'left',
-      { artifact: 'result.json', path: '$.eligible', equals: false }
-    )
+  it('patches an edge condition by index', () => {
+    const changed = patchWorkflowEdgeCondition(yamlWithEdges, 0, {
+      artifact: 'result.json',
+      path: '$.eligible',
+      equals: false,
+    })
     expect(changed).toContain('equals: false')
   })
 
-  it('clears an edge condition', () => {
-    const changed = patchWorkflowEdgeCondition(
-      yamlWithEdges,
-      'branch',
-      'left',
-      null
-    )
+  it('clears an edge condition by index', () => {
+    const changed = patchWorkflowEdgeCondition(yamlWithEdges, 0, null)
     expect(changed).not.toContain('condition:')
+  })
+
+  it('patches the second edge when source and target repeat', () => {
+    const yamlWithDuplicateEdges = `key: demo
+label: Demo
+edges:
+  - source: branch
+    target: left
+    condition:
+      artifact: result.json
+      path: $.eligible
+      equals: true
+  - source: branch
+    target: left
+    condition:
+      artifact: result.json
+      path: $.eligible
+      equals: true
+`
+    const changed = patchWorkflowEdgeCondition(yamlWithDuplicateEdges, 1, {
+      artifact: 'result.json',
+      path: '$.eligible',
+      equals: false,
+    })
+    const lines = changed.split('\n')
+    const firstEqualsIndex = lines.findIndex((line) =>
+      line.includes('equals: true')
+    )
+    const secondEqualsIndex = lines
+      .map((line, idx) => ({ line, idx }))
+      .filter(({ line }) => line.includes('equals: false'))
+      .pop()?.idx
+    expect(firstEqualsIndex).toBeGreaterThan(-1)
+    expect(secondEqualsIndex).toBeGreaterThan(firstEqualsIndex)
   })
 })

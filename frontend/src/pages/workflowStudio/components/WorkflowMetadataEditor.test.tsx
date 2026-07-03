@@ -32,4 +32,24 @@ describe('WorkflowMetadataEditor', () => {
       expect.stringContaining('label: Demo v2')
     )
   })
+
+  it('derives input value from definitionYaml draft', () => {
+    const { rerender } = render(
+      <WorkflowMetadataEditor
+        workflow={workflow}
+        definitionYaml={yaml}
+        onDefinitionYamlChange={vi.fn()}
+      />
+    )
+    expect(screen.getByLabelText('Workflow 名称')).toHaveValue('Demo')
+
+    rerender(
+      <WorkflowMetadataEditor
+        workflow={workflow}
+        definitionYaml={`key: demo\nlabel: Demo v2\n`}
+        onDefinitionYamlChange={vi.fn()}
+      />
+    )
+    expect(screen.getByLabelText('Workflow 名称')).toHaveValue('Demo v2')
+  })
 })
