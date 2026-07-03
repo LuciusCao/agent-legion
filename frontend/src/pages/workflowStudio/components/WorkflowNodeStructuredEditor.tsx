@@ -5,23 +5,13 @@ import {
   patchWorkflowNodeOutputs,
   patchWorkflowNodeTerminalOutcome,
 } from '../workflowStudioYamlDraft'
-import styles from '../WorkflowNodeInspector.module.css'
+import { formatLines, parseLines } from './WorkflowNodeStructuredEditor.helpers'
+import styles from './WorkflowStructuredEditor.module.css'
 
 type Props = {
   node: WorkflowNodeRecord
   definitionYaml: string
   onDefinitionYamlChange: (nextYaml: string) => void
-}
-
-function parseLines(value: string): string[] {
-  return value
-    .split('\n')
-    .map((item) => item.trim())
-    .filter(Boolean)
-}
-
-function formatLines(items: string[]): string {
-  return items.join('\n')
 }
 
 export function WorkflowNodeStructuredEditor({
@@ -30,7 +20,10 @@ export function WorkflowNodeStructuredEditor({
   onDefinitionYamlChange,
 }: Props) {
   return (
-    <section aria-label="Workflow node structured editor" className={styles.structuredSection}>
+    <section
+      aria-label="Workflow node structured editor"
+      className={styles.structuredSection}
+    >
       <h3 className={styles.structuredTitle}>结构化编辑</h3>
       <label className={styles.field}>
         <span className={styles.fieldLabel}>节点名称</span>
@@ -40,7 +33,11 @@ export function WorkflowNodeStructuredEditor({
           value={node.label}
           onChange={(event) =>
             onDefinitionYamlChange(
-              patchWorkflowNodeLabel(definitionYaml, node.key, event.target.value)
+              patchWorkflowNodeLabel(
+                definitionYaml,
+                node.key,
+                event.target.value
+              )
             )
           }
         />

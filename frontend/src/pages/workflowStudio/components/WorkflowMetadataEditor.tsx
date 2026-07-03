@@ -1,6 +1,6 @@
 import type { WorkflowDefinitionRecord } from '../../../types'
 import { patchWorkflowLabel } from '../workflowStudioYamlDraft'
-import styles from '../WorkflowNodeInspector.module.css'
+import styles from './WorkflowStructuredEditor.module.css'
 
 type Props = {
   workflow: WorkflowDefinitionRecord
@@ -14,7 +14,10 @@ export function WorkflowMetadataEditor({
   onDefinitionYamlChange,
 }: Props) {
   return (
-    <section aria-label="Workflow metadata editor" className={styles.structuredSection}>
+    <section
+      aria-label="Workflow metadata editor"
+      className={styles.structuredSection}
+    >
       <h3 className={styles.structuredTitle}>结构化编辑</h3>
       <label className={styles.field}>
         <span className={styles.fieldLabel}>Workflow 名称</span>
@@ -30,7 +33,8 @@ export function WorkflowMetadataEditor({
         />
       </label>
       <p className={styles.fieldHint}>
-        Workflow Key 和 schema_version 暂不支持表单修改，请使用高级 YAML 编辑器。
+        Workflow Key 和 schema_version 暂不支持表单修改，请使用高级 YAML
+        编辑器。
       </p>
     </section>
   )

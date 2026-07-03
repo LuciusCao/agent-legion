@@ -1,27 +1,16 @@
-import type { WorkflowEdgeResponse } from '../../../types'
+import type { components } from '../../../generated/api'
 import { patchWorkflowEdgeCondition } from '../workflowStudioYamlDraft'
-import styles from '../WorkflowNodeInspector.module.css'
+
+import {
+  formatEquals,
+  parseEquals,
+} from './WorkflowEdgeConditionEditor.helpers'
+import styles from './WorkflowStructuredEditor.module.css'
 
 type Props = {
-  edges: WorkflowEdgeResponse[]
+  edges: components['schemas']['WorkflowEdgeResponse'][]
   definitionYaml: string
   onDefinitionYamlChange: (nextYaml: string) => void
-}
-
-function parseEquals(raw: string): string | boolean | null {
-  const trimmed = raw.trim()
-  if (trimmed === 'true') return true
-  if (trimmed === 'false') return false
-  if (trimmed === 'null') return null
-  return trimmed
-}
-
-function formatEquals(value: unknown): string {
-  if (value === true) return 'true'
-  if (value === false) return 'false'
-  if (value === null) return 'null'
-  if (typeof value === 'string') return value
-  return JSON.stringify(value)
 }
 
 export function WorkflowEdgeConditionEditor({
@@ -32,10 +21,16 @@ export function WorkflowEdgeConditionEditor({
   if (edges.length === 0) return null
 
   return (
-    <section aria-label="Workflow edge condition editor" className={styles.structuredSection}>
+    <section
+      aria-label="Workflow edge condition editor"
+      className={styles.structuredSection}
+    >
       <h3 className={styles.structuredTitle}>分支条件编辑</h3>
       {edges.map((edge) => (
-        <div key={`${edge.source}-${edge.target}`} className={styles.fieldGroup}>
+        <div
+          key={`${edge.source}-${edge.target}`}
+          className={styles.fieldGroup}
+        >
           <div className={styles.fieldGroupTitle}>
             {edge.source} → {edge.target}
           </div>
@@ -54,7 +49,11 @@ export function WorkflowEdgeConditionEditor({
                     {
                       artifact: event.target.value || undefined,
                       path: edge.condition?.path ?? '',
-                      equals: edge.condition?.equals ?? '',
+                      equals: (edge.condition?.equals ?? '') as
+                        | string
+                        | number
+                        | boolean
+                        | null,
                     }
                   )
                 )
@@ -76,7 +75,11 @@ export function WorkflowEdgeConditionEditor({
                     {
                       artifact: edge.condition?.artifact,
                       path: event.target.value,
-                      equals: edge.condition?.equals ?? '',
+                      equals: (edge.condition?.equals ?? '') as
+                        | string
+                        | number
+                        | boolean
+                        | null,
                     }
                   )
                 )
