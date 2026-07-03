@@ -105,3 +105,26 @@ export function patchWorkflowLabel(rawYaml: string, label: string): string {
   draft.label = label
   return dumpWorkflowYaml(draft)
 }
+
+export function patchWorkflowEdgeCondition(
+  rawYaml: string,
+  source: string,
+  target: string,
+  condition: {
+    artifact?: string
+    path: string
+    equals: string | number | boolean | null
+  } | null
+): string {
+  const draft = parseWorkflowYaml(rawYaml)
+  const edge = draft.edges?.find(
+    (candidate) => candidate.source === source && candidate.target === target
+  )
+  if (!edge) throw new Error(`Edge ${source} -> ${target} not found`)
+  if (!condition) {
+    delete edge.condition
+  } else {
+    edge.condition = condition
+  }
+  return dumpWorkflowYaml(draft)
+}

@@ -1,5 +1,6 @@
 import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
 import { conditionLabel } from './workflowStudioModel'
+import { WorkflowEdgeConditionEditor } from './components/WorkflowEdgeConditionEditor'
 import { WorkflowNodeStructuredEditor } from './components/WorkflowNodeStructuredEditor'
 import styles from './WorkflowNodeInspector.module.css'
 
@@ -96,6 +97,11 @@ export function WorkflowNodeInspectorBody({
       )}
       <WorkflowNodeStructuredEditor
         node={node}
+        definitionYaml={definitionYaml}
+        onDefinitionYamlChange={onDefinitionYamlChange}
+      />
+      <WorkflowEdgeConditionEditor
+        edges={outgoing}
         definitionYaml={definitionYaml}
         onDefinitionYamlChange={onDefinitionYamlChange}
       />
