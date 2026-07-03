@@ -37,9 +37,3 @@ class PhaseExecutorRegistry:
         if handler is None:
             raise ValueError(f"Unknown phase: {phase}")
         handler(ctx)
-
-    def has(self, phase: str) -> bool:
-        return phase in self._handlers
-
-    def handler_names(self) -> set[str]:
-        return set(self._handlers.keys())

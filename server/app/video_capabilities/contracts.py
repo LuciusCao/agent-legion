@@ -55,17 +55,3 @@ class VideoNodeContext:
     inputs: Mapping[str, ArtifactRef] = field(default_factory=dict)
     config: Mapping[str, Any] = field(default_factory=dict)
     resources: Mapping[str, Any] = field(default_factory=dict)
-
-
-@dataclass(frozen=True)
-class VideoNodeResult:
-    outputs: Mapping[str, ArtifactRef]
-    metadata: Mapping[str, Any] = field(default_factory=dict)
-
-
-class VideoCapabilityError(RuntimeError):
-    def __init__(self, category: str, user_message: str, diagnostic: str = "") -> None:
-        super().__init__(diagnostic or user_message)
-        self.category = category
-        self.user_message = user_message
-        self.diagnostic = diagnostic

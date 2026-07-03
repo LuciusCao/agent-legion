@@ -1,11 +1,10 @@
-from collections.abc import Mapping, Sequence
+from collections.abc import Mapping
 from typing import Any, cast
 
 from server.app.db import Database
 from server.app.pipeline.common import resolve_video_dir
 from server.app.services.interaction_stats import _backfill_interaction_stats, _enrich_video
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_data_path
 
 
 def project_video_storage_dir(video: Mapping[str, Any], settings: Settings) -> dict[str, Any]:
@@ -13,22 +12,6 @@ def project_video_storage_dir(video: Mapping[str, Any], settings: Settings) -> d
     projected = dict(video)
     projected["storage_dir"] = str(resolve_video_dir(projected, settings.videos_dir))
     return projected
-
-
-def project_phase_run_paths(
-    runs: Sequence[Mapping[str, Any]], settings: Settings
-) -> list[dict[str, Any]]:
-    """Return response copies with non-empty phase log paths resolved absolute."""
-    projected_runs: list[dict[str, Any]] = []
-    for run in runs:
-        projected = dict(run)
-        log_path = projected.get("log_path") or ""
-        if log_path:
-            projected["log_path"] = str(
-                resolve_data_path(log_path, settings.data_dir, allow_missing=True)
-            )
-        projected_runs.append(projected)
-    return projected_runs
 
 
 class VideoReadService:

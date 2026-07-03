@@ -246,15 +246,6 @@ class AtomicJobMutationsMixin:
             apply_run_to(conn, job_id, target_node_key, closure)
 
     @staticmethod
-    def apply_run_to_in_transaction(
-        conn: sqlite3.Connection,
-        job_id: str,
-        target_node_key: str,
-        closure: frozenset[str],
-    ) -> None:
-        apply_run_to(conn, job_id, target_node_key, closure)
-
-    @staticmethod
     def mark_nodes_for_rerun_in_transaction(
         conn: sqlite3.Connection,
         job_id: str,
@@ -274,7 +265,3 @@ class AtomicJobMutationsMixin:
     @staticmethod
     def delete_job_in_transaction(conn: sqlite3.Connection, job_id: str) -> None:
         delete_job(conn, job_id)
-
-    @staticmethod
-    def resume_job_in_transaction(conn: sqlite3.Connection, job_id: str) -> None:
-        resume_job(conn, job_id)
