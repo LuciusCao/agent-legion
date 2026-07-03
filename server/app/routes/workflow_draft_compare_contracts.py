@@ -65,11 +65,20 @@ class WorkflowRiskFlag(BaseModel):
     message: str
 
 
+class WorkflowMetadataChange(BaseModel):
+    type: Literal["modified"]
+    field: str
+    before_value: str | None = None
+    after_value: str | None = None
+    risk: WorkflowRiskLevel
+
+
 class WorkflowCompareSummary(BaseModel):
     risk_level: WorkflowRiskLevel
     node_changes: list[WorkflowNodeChange]
     edge_changes: list[WorkflowEdgeChange]
     intake_changes: list[WorkflowIntakeChange]
+    metadata_changes: list[WorkflowMetadataChange] = []
     risk_flags: list[WorkflowRiskFlag]
 
 

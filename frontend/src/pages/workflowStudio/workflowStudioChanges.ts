@@ -5,6 +5,7 @@ type CompareSummary = components['schemas']['WorkflowCompareSummary']
 type NodeChange = components['schemas']['WorkflowNodeChange']
 type EdgeChange = components['schemas']['WorkflowEdgeChange']
 type IntakeChange = components['schemas']['WorkflowIntakeChange']
+type MetadataChange = components['schemas']['WorkflowMetadataChange']
 type RiskFlag = components['schemas']['WorkflowRiskFlag']
 type CompareError = components['schemas']['WorkflowDraftCompareError']
 
@@ -34,6 +35,14 @@ export type IntakeChangeGroup = {
   severity: ChangeSeverity
 }
 
+export type MetadataChangeGroup = {
+  type: MetadataChange['type']
+  field: string
+  beforeValue: string | null
+  afterValue: string | null
+  severity: ChangeSeverity
+}
+
 export type RiskFlagGroup = {
   code: string
   message: string
@@ -46,6 +55,7 @@ export type ChangeSummaryViewModel = {
   nodeChanges: NodeChangeGroup[]
   edgeChanges: EdgeChangeGroup[]
   intakeChanges: IntakeChangeGroup[]
+  metadataChanges: MetadataChangeGroup[]
   riskFlags: RiskFlagGroup[]
   changedNodeKeys: Set<string>
 }
@@ -144,6 +154,13 @@ export function formatIntakeChange(change: IntakeChangeGroup): string {
   return `${change.modeKey}: ${typeLabel}`
 }
 
+export function formatMetadataChange(change: MetadataChangeGroup): string {
+  if (change.field === 'label') {
+    return `Workflow 名称: ${change.beforeValue ?? '-'} → ${change.afterValue ?? '-'}`
+  }
+  return `${change.field}: ${change.beforeValue ?? '-'} → ${change.afterValue ?? '-'}`
+}
+
 function normalizeNodeChange(change: NodeChange): NodeChangeGroup {
   return {
     type: change.type,
@@ -170,6 +187,16 @@ function normalizeIntakeChange(change: IntakeChange): IntakeChangeGroup {
     type: change.type,
     modeKey: change.mode_key,
     fieldKey: change.field_key ?? null,
+    severity: change.risk,
+  }
+}
+
+function normalizeMetadataChange(change: MetadataChange): MetadataChangeGroup {
+  return {
+    type: change.type,
+    field: change.field,
+    beforeValue: change.before_value ?? null,
+    afterValue: change.after_value ?? null,
     severity: change.risk,
   }
 }
@@ -207,6 +234,7 @@ export function buildChangeSummary(
       nodeChanges: [],
       edgeChanges: [],
       intakeChanges: [],
+      metadataChanges: [],
       riskFlags: [],
       changedNodeKeys: new Set(),
     }
@@ -216,6 +244,7 @@ export function buildChangeSummary(
   const nodeChanges = summary.node_changes.map(normalizeNodeChange)
   const edgeChanges = summary.edge_changes.map(normalizeEdgeChange)
   const intakeChanges = summary.intake_changes.map(normalizeIntakeChange)
+  const metadataChanges = summary.metadata_changes.map(normalizeMetadataChange)
   const riskFlags = summary.risk_flags
     .map(normalizeRiskFlag)
     .sort((a, b) => severityOrder(a.severity, b.severity))
@@ -226,6 +255,7 @@ export function buildChangeSummary(
     nodeChanges,
     edgeChanges,
     intakeChanges,
+    metadataChanges,
     riskFlags,
     changedNodeKeys: collectChangedNodeKeys(summary),
   }
