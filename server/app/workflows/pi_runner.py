@@ -14,6 +14,7 @@ from typing import Any
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.models import ExecutionStatus
 from server.app.jobs import JobQueries
+from server.app.services.pi_event_compression import compress_pi_events
 from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node
 from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
 from server.app.workflows.pi_command_builder import build_pi_command
@@ -205,15 +206,15 @@ class PiRunner:
         if job_db is not None and persist_run and run_record is not None:
             job_db.finish_node_run(run_record["id"], status, exit_code, error_message)
 
-        # This run is now the latest for this node; remove any older run dirs.
+        # Finalize the run: drop streaming deltas (only the final snapshots are
+        # needed for log rendering) and remove older run dirs for this node.
         if data_dir is not None and job_db is not None:
             try:
+                compress_pi_events(events_file)
                 with job_db.connect() as conn:
                     cleanup_extra_runs_for_node(conn, data_dir, job_dir, node_key)
             except Exception:
-                logger.exception(
-                    "Failed to clean up old run dirs for %s/%s", job_dir.name, node_key
-                )
+                logger.exception("Failed to finalize run for %s/%s", job_dir.name, node_key)
 
         return PiRunResult(
             status=status,
