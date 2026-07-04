@@ -24,7 +24,7 @@ export function JobWorkflowUpgradeButton({
       disabled={disabled}
       onClick={onUpgradeWorkflow}
     >
-      <MaterialIcon name="sync" />
+      <MaterialIcon name="upgrade" />
     </IconButton>
   )
 }
