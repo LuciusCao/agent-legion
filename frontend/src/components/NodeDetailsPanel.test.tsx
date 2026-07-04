@@ -81,6 +81,7 @@ describe('NodeDetailsPanel', () => {
   ] as const)(
     'renders %s status with icon %s and label %s',
     (status, icon, label) => {
+      void icon
       render(
         <NodeDetailsPanel
           nodeKey="generate_summary"
@@ -89,7 +90,7 @@ describe('NodeDetailsPanel', () => {
           onViewLogs={vi.fn()}
         />
       )
-      expect(screen.getByText(icon)).toBeInTheDocument()
+      expect(screen.getByTestId(`node-icon-${status}`)).toBeInTheDocument()
       expect(screen.getByText(label)).toBeInTheDocument()
     }
   )
