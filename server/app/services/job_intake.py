@@ -155,6 +155,7 @@ class JobIntakeService:
                     workspace_id=workspace_id,
                     stem=str(candidate.get("stem", "")),
                     workflow_revision_id=active_revision["id"],
+                    workflow_version=int(active_revision["version"]),
                     workflow_definition_hash=active_revision["definition_hash"],
                     workflow_definition_snapshot_json=active_revision["definition_json"],
                 )

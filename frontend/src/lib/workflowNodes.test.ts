@@ -8,7 +8,7 @@ import {
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 
 function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
-  return {
+  const job = {
     id: 'j1',
     workspace_id: 'ws1',
     workflow_key: 'p1',
@@ -25,11 +25,17 @@ function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
     completed_nodes: 0,
     total_nodes: 0,
     workflow_revision_id: '',
+    workflow_version: null,
     workflow_definition_hash: '',
     outcome: '',
     current_workflow_revision_id: '',
     current_workflow_revision_version: null,
+    is_workflow_outdated: false,
     ...overrides,
+  }
+  return {
+    ...job,
+    is_workflow_outdated: job.is_workflow_outdated ?? false,
   }
 }
 

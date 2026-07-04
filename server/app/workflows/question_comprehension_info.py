@@ -15,22 +15,19 @@ from server.app.workflows.comprehension_common import (
     _single_parsed_question,
 )
 from server.app.workflows.comprehension_eligibility import (
-    classify_comprehension_eligibility as _classify_comprehension_eligibility,
-)
-from server.app.workflows.comprehension_eligibility import (
-    finalize_non_uploadable as _finalize_non_uploadable,
+    classify_comprehension_eligibility,
+    finalize_non_uploadable,
 )
 from server.app.workflows.question_fingerprint import (
     compute_question_fingerprint,
     extract_cms_fingerprint,
 )
 from server.app.workflows.skill_version_collection import collect_skill_versions
+from server.app.workflows.workflow_manifest import workflow_manifest
+
+__all__ = ["classify_comprehension_eligibility", "finalize_non_uploadable"]
 
 logger = logging.getLogger(__name__)
-
-# Backwards-compatible re-exports for workflow executor dispatch.
-classify_comprehension_eligibility = _classify_comprehension_eligibility
-finalize_non_uploadable = _finalize_non_uploadable
 
 
 def fetch_questions(
@@ -189,6 +186,7 @@ def assemble_comprehension_info(
     manifest = {
         "question_id": source_id,
         "workflow_key": job.get("workflow_key", "question_comprehension_info"),
+        "workflow": workflow_manifest(job, "question_comprehension_info"),
         "source_type": job.get("source_type", "question"),
         "title": job.get("title", ""),
         "fingerprint": fingerprint,
@@ -196,7 +194,7 @@ def assemble_comprehension_info(
         "artifacts": {
             "comprehension_info.json": {"present": True},
         },
-        "skill_versions": collect_skill_versions(str(job.get("id", "")), context),
+        "skill_versions": collect_skill_versions(str(job.get("id", "")), context, job),
     }
 
     artifact_dir.mkdir(parents=True, exist_ok=True)

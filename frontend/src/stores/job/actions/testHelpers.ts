@@ -4,7 +4,6 @@ import type {
   JobSummary,
   WorkspacePackageResult,
 } from '../../../jobTypes'
-
 export function createJobSummary(
   partial: Partial<JobSummary> = {}
 ): JobSummary {
@@ -15,7 +14,6 @@ export function createJobSummary(
     created_at: '',
     error_message: '',
     error_summary: '',
-    execution_control: undefined,
     id: '',
     node_summaries: undefined,
     source_id: '',
@@ -28,10 +26,12 @@ export function createJobSummary(
     workflow_key: '',
     workspace_id: '',
     workflow_revision_id: '',
+    workflow_version: null,
     workflow_definition_hash: '',
     outcome: '',
     current_workflow_revision_id: '',
     current_workflow_revision_version: null,
+    is_workflow_outdated: false,
     ...partial,
   }
 }
