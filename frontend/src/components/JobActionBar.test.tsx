@@ -348,4 +348,80 @@ describe('JobActionBar', () => {
 
     expect(screen.queryByText('继续完整流程')).not.toBeInTheDocument()
   })
+
+  it('shows upgrade workflow button in batch mode', () => {
+    render(
+      <JobActionBar
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'completed',
+            is_workflow_outdated: true,
+          }),
+          makeJob({ id: 'j2', status: 'pending', is_workflow_outdated: true }),
+        ]}
+        mode="batch"
+        filters={[{ key: 'clear', label: '取消选择', onClick: vi.fn() }]}
+        onExitSelectMode={vi.fn()}
+        onRerun={vi.fn()}
+        onPackage={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    )
+    expect(screen.getByText('升级 workflow')).toBeInTheDocument()
+    expect(screen.getByText('升级 workflow')).not.toHaveAttribute('disabled')
+  })
+
+  it('disables upgrade workflow button when no job is upgradeable', () => {
+    render(
+      <JobActionBar
+        jobs={[
+          makeJob({ id: 'j1', status: 'running', is_workflow_outdated: true }),
+          makeJob({
+            id: 'j2',
+            status: 'completed',
+            is_workflow_outdated: false,
+          }),
+        ]}
+        mode="batch"
+        filters={[{ key: 'clear', label: '取消选择', onClick: vi.fn() }]}
+        onExitSelectMode={vi.fn()}
+        onRerun={vi.fn()}
+        onPackage={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    )
+    expect(screen.getByText('升级 workflow')).toHaveAttribute('disabled')
+  })
+
+  it('opens upgrade dialog and forwards upgradeable job ids', async () => {
+    const onUpgradeWorkflow = vi.fn().mockResolvedValue(undefined)
+    render(
+      <JobActionBar
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'completed',
+            is_workflow_outdated: true,
+          }),
+          makeJob({ id: 'j2', status: 'running', is_workflow_outdated: true }),
+        ]}
+        mode="batch"
+        filters={[{ key: 'clear', label: '取消选择', onClick: vi.fn() }]}
+        onExitSelectMode={vi.fn()}
+        onRerun={vi.fn()}
+        onPackage={vi.fn()}
+        onDelete={vi.fn()}
+        onUpgradeWorkflow={onUpgradeWorkflow}
+      />
+    )
+    await act(async () => {
+      screen.getByText('升级 workflow').click()
+    })
+    expect(screen.getByText('确认升级 workflow')).toBeInTheDocument()
+    await act(async () => {
+      screen.getByText('升级 1 个任务').click()
+    })
+    expect(onUpgradeWorkflow).toHaveBeenCalledWith(['j1'])
+  })
 })
