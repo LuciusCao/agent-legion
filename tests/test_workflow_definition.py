@@ -52,7 +52,7 @@ def test_load_question_comprehension_info_definition():
     assert definition.nodes["clean_and_parse"].after == ["fetch_questions"]
     assert definition.nodes["assemble_comprehension_info"].inputs == [
         "questions_parsed_lean.json",
-        "key_info_reviewed_lean.json",
+        "key_info_reviewed.json",
         "possible_errors_reviewed.json",
         "comprehension_difficulty.json",
     ]
