@@ -1,0 +1,40 @@
+.content {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.jobList {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.jobRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 12px;
+  border-radius: 8px;
+  background-color: #f5f5f5;
+}
+
+.jobRowDisabled {
+  opacity: 0.6;
+}
+
+.jobName {
+  font-weight: 500;
+}
+
+.jobHint {
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.summary {
+  font-size: 0.875rem;
+  color: #444;
+}
