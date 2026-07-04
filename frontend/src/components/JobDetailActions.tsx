@@ -6,6 +6,7 @@ import { JobRunToDialog } from './JobRunToDialog'
 import { JobDeleteDialog } from './JobDeleteDialog'
 import { MaterialIcon } from './MaterialIcon'
 import { canRerunJob, canPackageJob, canContinueJob } from './JobActionBar'
+import { JobWorkflowUpgradeButton } from './JobWorkflowUpgradeButton'
 import styles from './JobDetailActions.module.css'
 
 export type JobDetailActionsProps = {
@@ -19,6 +20,7 @@ export type JobDetailActionsProps = {
   onPackage: () => void | Promise<void>
   onDelete: () => void | Promise<void>
   onOpenArtifacts: () => void
+  onUpgradeWorkflow?: () => void | Promise<void>
 }
 
 export function JobDetailActions({
@@ -32,6 +34,7 @@ export function JobDetailActions({
   onPackage,
   onDelete,
   onOpenArtifacts,
+  onUpgradeWorkflow,
 }: JobDetailActionsProps) {
   const [rerunOpen, setRerunOpen] = useState(false)
   const [runToOpen, setRunToOpen] = useState(false)
@@ -57,21 +60,6 @@ export function JobDetailActions({
 
   const deleteDisabled = jobs.length === 0 || loading
 
-  const handleRerun = async (
-    nodeKey: string | null,
-    fromFailedNode?: boolean
-  ) => {
-    await onRerun(nodeKey, fromFailedNode)
-  }
-
-  const handleRunTo = async (targetKey: string, startKey?: string) => {
-    await onRunTo?.(targetKey, startKey)
-  }
-
-  const handleContinue = async () => {
-    await onContinue?.()
-  }
-
   const showContinue = jobs.some((job) => canContinueJob(job))
 
   return (
@@ -85,6 +73,13 @@ export function JobDetailActions({
         >
           <MaterialIcon name="restart_alt" />
         </IconButton>
+        {onUpgradeWorkflow && (
+          <JobWorkflowUpgradeButton
+            jobs={jobs}
+            loading={loading}
+            onUpgradeWorkflow={onUpgradeWorkflow}
+          />
+        )}
         <IconButton
           aria-label="运行到"
           title="运行到"
@@ -98,7 +93,7 @@ export function JobDetailActions({
             aria-label="继续完整流程"
             title="继续完整流程"
             disabled={continueDisabled}
-            onClick={handleContinue}
+            onClick={onContinue}
           >
             <MaterialIcon name="skip_next" />
           </IconButton>
@@ -136,7 +131,7 @@ export function JobDetailActions({
         workflowDefinition={workflowDefinition}
         workflowNodesByKey={workflowNodesByKey}
         onClose={() => setRerunOpen(false)}
-        onConfirm={handleRerun}
+        onConfirm={onRerun}
       />
       <JobRunToDialog
         open={runToOpen}
@@ -144,7 +139,7 @@ export function JobDetailActions({
         workflowDefinition={workflowDefinition}
         workflowNodesByKey={workflowNodesByKey}
         onClose={() => setRunToOpen(false)}
-        onConfirm={handleRunTo}
+        onConfirm={onRunTo ?? (async () => {})}
       />
       <JobDeleteDialog
         open={deleteOpen}

@@ -31,7 +31,6 @@ export function createMockUiState(partial: Partial<UiState> = {}): UiState {
     ...partial,
   }
 }
-
 export function makeVideo(overrides: Partial<VideoItem> = {}): VideoItem {
   return {
     id: 'v1',
@@ -51,7 +50,6 @@ export function makeVideo(overrides: Partial<VideoItem> = {}): VideoItem {
     ...overrides,
   }
 }
-
 export function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
   return {
     id: 'j1',
@@ -70,10 +68,12 @@ export function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
     completed_nodes: 0,
     total_nodes: 0,
     workflow_revision_id: '',
+    workflow_version: null,
     workflow_definition_hash: '',
     outcome: '',
     current_workflow_revision_id: '',
     current_workflow_revision_version: null,
+    is_workflow_outdated: false,
     ...overrides,
   }
 }

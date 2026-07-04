@@ -111,6 +111,7 @@ def init_db(path: Path) -> None:
                   execution_paused integer not null default 0 check(execution_paused in (0, 1)),
                   pause_reason text not null default '',
                   workflow_revision_id text not null default '',
+                  workflow_version integer,
                   workflow_definition_hash text not null default '',
                   workflow_definition_snapshot_json text not null default '',
                   outcome text not null default '',

@@ -42,6 +42,7 @@ function renderActions(
       onPackage={vi.fn()}
       onDelete={vi.fn()}
       onOpenArtifacts={vi.fn()}
+      onUpgradeWorkflow={vi.fn()}
       {...props}
     />
   )
@@ -59,6 +60,28 @@ describe('JobDetailActions', () => {
     expect(screen.getByLabelText('打包')).toBeInTheDocument()
     expect(screen.getByLabelText('删除')).toBeInTheDocument()
     expect(screen.getByLabelText('产物文件')).toBeInTheDocument()
+  })
+
+  it('calls onUpgradeWorkflow for an outdated job', async () => {
+    const onUpgradeWorkflow = vi.fn()
+    renderActions({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'completed',
+          is_workflow_outdated: true,
+          workflow_version: 1,
+          current_workflow_revision_version: 2,
+        }),
+      ],
+      onUpgradeWorkflow,
+    })
+
+    await act(async () => {
+      screen.getByLabelText('升级 workflow').click()
+    })
+
+    expect(onUpgradeWorkflow).toHaveBeenCalledTimes(1)
   })
 
   it('disables rerun and package for a running job', () => {

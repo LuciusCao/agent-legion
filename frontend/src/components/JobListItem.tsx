@@ -1,7 +1,8 @@
 import { useNavigate } from 'react-router-dom'
-import { JOB_STATUS_LABELS, JOB_SOURCE_TYPE_LABELS } from '../labels'
+import { JOB_STATUS_LABELS } from '../labels'
 import type { JobRecord } from '../types'
 import type { JobNodeSummary } from '../jobTypes'
+import { JobListItemDescription } from './JobListItemDescription'
 import { JobNodeStepper } from './JobNodeStepper'
 import styles from './JobListItem.module.css'
 
@@ -44,7 +45,6 @@ function progressText(job: JobRecord): string {
 function currentNodeSummary(job: JobRecord): JobNodeSummary | undefined {
   const summaries = job.node_summaries ?? []
 
-  // Empty summaries but workflow has nodes: show a pending placeholder
   if (summaries.length === 0 && (job.total_nodes ?? 0) > 0) {
     return {
       node_key: 'pending-start',
@@ -54,17 +54,14 @@ function currentNodeSummary(job: JobRecord): JobNodeSummary | undefined {
     }
   }
 
-  // Prefer explicitly active node
   if (job.active_node_key) {
     const found = summaries.find((n) => n.node_key === job.active_node_key)
     if (found) return found
   }
 
-  // Prefer running node
   const running = summaries.find((n) => n.status === 'running')
   if (running) return running
 
-  // Fall back based on overall job status
   if (job.status === 'failed') {
     return (
       summaries.find((n) => n.status === 'failed') ??
@@ -77,7 +74,6 @@ function currentNodeSummary(job: JobRecord): JobNodeSummary | undefined {
     return completed[completed.length - 1] ?? summaries[summaries.length - 1]
   }
 
-  // queued / pending / default: first pending or first node
   return (
     summaries.find((n) => n.status === 'pending') ??
     summaries.find((n) => n.status === 'stale') ??
@@ -139,18 +135,7 @@ export function JobListItem({
               : job.title
             : '未命名'}
         </div>
-        <div className={styles.description}>
-          {JOB_SOURCE_TYPE_LABELS[job.source_type] ?? job.source_type} ·{' '}
-          {job.source_id}
-          {job.error_summary ? (
-            <>
-              {' · '}
-              <span className={styles.errorText} title={job.error_summary}>
-                {job.error_summary}
-              </span>
-            </>
-          ) : null}
-        </div>
+        <JobListItemDescription job={job} />
       </div>
       <div className={styles.statusEnd}>
         <div className={styles.statusEndRow}>

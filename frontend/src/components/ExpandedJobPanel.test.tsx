@@ -22,10 +22,12 @@ const mockJob: JobRecord = {
   completed_nodes: 2,
   total_nodes: 5,
   workflow_revision_id: '',
+  workflow_version: null,
   workflow_definition_hash: '',
   outcome: '',
   current_workflow_revision_id: '',
   current_workflow_revision_version: null,
+  is_workflow_outdated: false,
 }
 
 function renderPanel(
