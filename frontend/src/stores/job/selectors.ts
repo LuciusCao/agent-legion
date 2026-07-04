@@ -2,10 +2,10 @@ import type { JobState } from './state'
 import { normalizeJobStatus } from './state'
 
 export function getVisibleJobs(state: JobState) {
-  const query = state.searchQuery.trim().toLowerCase()
+  const query = state.filterConfig.search.trim().toLowerCase()
   return state.jobs.filter((job) => {
-    if (state.statusFilter !== 'all') {
-      if (normalizeJobStatus(job.status) !== state.statusFilter) {
+    if (state.filterConfig.status !== 'all') {
+      if (normalizeJobStatus(job.status) !== state.filterConfig.status) {
         return false
       }
     }

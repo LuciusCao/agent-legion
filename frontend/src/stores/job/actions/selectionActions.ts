@@ -1,15 +1,14 @@
 import { getVisibleJobs } from '../selectors'
-import type { JobState, JobStatus, JobStoreSet } from '../state'
+import type { JobFilterConfig, JobState, JobStoreSet } from '../state'
 import { normalizeJobStatus } from '../state'
 
 export function selectionActions(set: JobStoreSet, get: () => JobState) {
   return {
-    setStatusFilter(filter: JobStatus | 'all') {
-      set({ statusFilter: filter, selectedIds: new Set() })
-    },
-
-    setSearchQuery(query: string) {
-      set({ searchQuery: query, selectedIds: new Set() })
+    setFilterConfig(config: Partial<JobFilterConfig>) {
+      set((state) => ({
+        filterConfig: { ...state.filterConfig, ...config },
+        selectedIds: new Set(),
+      }))
     },
 
     toggleSelectMode() {

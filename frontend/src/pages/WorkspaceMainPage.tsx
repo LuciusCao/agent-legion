@@ -31,10 +31,8 @@ export default function WorkspaceMainPage() {
   const {
     jobs,
     selectedIds,
-    statusFilter,
-    setStatusFilter,
-    searchQuery,
-    setSearchQuery,
+    filterConfig: { status: statusFilter, search: searchQuery },
+    setFilterConfig,
     selectAll,
     selectFailed,
     clearSelection,
@@ -85,7 +83,7 @@ export default function WorkspaceMainPage() {
     }
   }, [workspaceId, workspaceStats])
 
-  const debouncedSetSearchQuery = useDebouncedCallback(setSearchQuery, 250)
+  const debouncedSetFilterConfig = useDebouncedCallback(setFilterConfig, 250)
   const [searchInputValue, setSearchInputValue] = useState(searchQuery)
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
@@ -211,9 +209,14 @@ export default function WorkspaceMainPage() {
             counts={counts}
             activeFilter={statusFilter}
             onFilterChange={(filter) =>
-              setStatusFilter(
-                filter as 'all' | 'pending' | 'running' | 'completed' | 'failed'
-              )
+              setFilterConfig({
+                status: filter as
+                  | 'all'
+                  | 'pending'
+                  | 'running'
+                  | 'completed'
+                  | 'failed',
+              })
             }
           />
           <TextField
@@ -223,7 +226,7 @@ export default function WorkspaceMainPage() {
             onChange={(e) => {
               const value = e.target.value
               setSearchInputValue(value)
-              debouncedSetSearchQuery(value)
+              debouncedSetFilterConfig({ search: value })
             }}
             sx={{ width: 220, flexShrink: 0 }}
           />

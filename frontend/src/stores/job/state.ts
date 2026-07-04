@@ -7,6 +7,12 @@ import type {
 
 export type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
 
+export interface JobFilterConfig {
+  status: JobStatus | 'all'
+  search: string
+  workflowVersion: number | null
+  activeNodeKey: string | null
+}
 export interface JobState {
   jobs: JobSummary[]
   jobsWorkspaceId: string | null
@@ -14,8 +20,7 @@ export interface JobState {
   error: string | null
   selectedIds: Set<string>
   expandedId: string | null
-  statusFilter: JobStatus | 'all'
-  searchQuery: string
+  filterConfig: JobFilterConfig
   selectMode: boolean
   batchDeleteLoading: boolean
   batchPackageLoading: boolean
@@ -27,8 +32,7 @@ export interface JobState {
   resetForWorkspace: (workspaceId: string) => void
   setJobsAndFinishLoading: (jobs: JobSummary[]) => void
   failJobFetch: (workspaceId: string, message: string) => void
-  setStatusFilter: (filter: JobStatus | 'all') => void
-  setSearchQuery: (query: string) => void
+  setFilterConfig: (config: Partial<JobFilterConfig>) => void
   toggleSelectMode: () => void
   toggleSelect: (id: string) => void
   selectAll: () => void
@@ -62,7 +66,6 @@ export type JobStoreSet = (
     | ((state: JobState) => JobState | Partial<JobState>),
   replace?: boolean
 ) => void
-
 export type MutationCounts = {
   succeeded: number
   skipped: number
