@@ -27,6 +27,8 @@
     "frontend/src/components/BatchRerunDialog.tsx": 167,
     "frontend/src/components/BatchToolbar.module.css": 21,
     "frontend/src/components/BatchToolbar.tsx": 88,
+    "frontend/src/components/BatchUpgradeDialog.module.css": 45,
+    "frontend/src/components/BatchUpgradeDialog.tsx": 111,
     "frontend/src/components/ChapterPanel.tsx": 47,
     "frontend/src/components/ChapterStrip.module.css": 20,
     "frontend/src/components/ChapterStrip.tsx": 54,
