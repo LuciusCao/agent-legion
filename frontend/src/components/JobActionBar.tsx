@@ -3,6 +3,7 @@ import { Button } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
+import { JobActionBarUpgrade, canUpgradeJob } from './JobActionBarUpgrade'
 import styles from './JobActionBar.module.css'
 
 export type JobActionBarFilter = {
@@ -25,6 +26,7 @@ export type JobActionBarProps = {
   onContinue?: () => void | Promise<void>
   onPackage: () => void | Promise<void>
   onDelete: () => void | Promise<void>
+  onUpgradeWorkflow?: (jobIds: string[]) => void | Promise<void>
   itemLabel?: string
 }
 
@@ -47,6 +49,8 @@ export function canContinueJob(job: JobSummary): boolean {
   )
 }
 
+export { canUpgradeJob }
+
 export function JobActionBar({
   jobs,
   selectedCount,
@@ -61,6 +65,7 @@ export function JobActionBar({
   onContinue,
   onPackage,
   onDelete,
+  onUpgradeWorkflow,
   itemLabel = '任务',
 }: JobActionBarProps) {
   const [rerunOpen, setRerunOpen] = useState(false)
@@ -69,11 +74,6 @@ export function JobActionBar({
   const count = selectedCount ?? jobs.length
 
   const rerunDisabled =
-    jobs.length === 0 ||
-    loading ||
-    jobs.every((job) => !canRerunJob(job.status))
-
-  const runToDisabled =
     jobs.length === 0 ||
     loading ||
     jobs.every((job) => !canRerunJob(job.status))
@@ -87,21 +87,6 @@ export function JobActionBar({
     jobs.every((job) => !canPackageJob(job.status))
 
   const deleteDisabled = jobs.length === 0 || loading
-
-  const handleRerun = async (
-    nodeKey: string | null,
-    fromFailedNode?: boolean
-  ) => {
-    await onRerun(nodeKey, fromFailedNode)
-  }
-
-  const handleRunTo = async (targetKey: string, startKey?: string) => {
-    await onRunTo?.(targetKey, startKey)
-  }
-
-  const handleContinue = async () => {
-    await onContinue?.()
-  }
 
   return (
     <div className={styles.actionBar} data-testid="job-action-bar">
@@ -125,6 +110,13 @@ export function JobActionBar({
       )}
 
       <div className={styles.actions}>
+        {isBatch && (
+          <JobActionBarUpgrade
+            jobs={jobs}
+            itemLabel={itemLabel}
+            onUpgradeWorkflow={onUpgradeWorkflow}
+          />
+        )}
         <Button
           variant="outlined"
           onClick={() => setRerunOpen(true)}
@@ -135,14 +127,14 @@ export function JobActionBar({
         <Button
           variant="outlined"
           onClick={() => setRunToOpen(true)}
-          disabled={runToDisabled}
+          disabled={rerunDisabled}
         >
           运行到
         </Button>
         {!isBatch && jobs.some((job) => canContinueJob(job)) && (
           <Button
             variant="outlined"
-            onClick={handleContinue}
+            onClick={() => onContinue?.()}
             disabled={continueDisabled}
           >
             继续完整流程
@@ -178,7 +170,7 @@ export function JobActionBar({
         itemLabel={itemLabel}
         allowFailedNodeMode={mode === 'batch'}
         onClose={() => setRerunOpen(false)}
-        onConfirm={handleRerun}
+        onConfirm={onRerun}
       />
       <JobRunToDialog
         open={runToOpen}
@@ -187,7 +179,9 @@ export function JobActionBar({
         workflowNodesByKey={workflowNodesByKey}
         itemLabel={itemLabel}
         onClose={() => setRunToOpen(false)}
-        onConfirm={handleRunTo}
+        onConfirm={async (targetKey, startKey) => {
+          await onRunTo?.(targetKey, startKey)
+        }}
       />
     </div>
   )
