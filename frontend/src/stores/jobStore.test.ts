@@ -52,8 +52,12 @@ describe('jobStore', () => {
       error: null,
       selectedIds: new Set(),
       expandedId: null,
-      statusFilter: 'all',
-      searchQuery: '',
+      filterConfig: {
+        status: 'all',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
       batchRunToLoading: false,
       continueLoading: false,
     })
@@ -95,7 +99,7 @@ describe('jobStore', () => {
         makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
       ],
     })
-    useJobStore.getState().setStatusFilter('completed')
+    useJobStore.getState().setFilterConfig({ status: 'completed' })
     const filtered = useJobStore.getState().getFilteredJobs()
     expect(filtered).toHaveLength(1)
     expect(filtered[0].id).toBe('j2')
@@ -108,7 +112,7 @@ describe('jobStore', () => {
         makeJob({ id: 'j2', source_id: 'Q200', title: 'Geometry' }),
       ],
     })
-    useJobStore.getState().setSearchQuery('Q100')
+    useJobStore.getState().setFilterConfig({ search: 'Q100' })
     const filtered = useJobStore.getState().getFilteredJobs()
     expect(filtered).toHaveLength(1)
     expect(filtered[0].id).toBe('j1')
@@ -179,13 +183,13 @@ describe('jobStore', () => {
 
   it('clears selection when filter changes', () => {
     useJobStore.setState({ selectedIds: new Set(['j1', 'j2']) })
-    useJobStore.getState().setStatusFilter('completed')
+    useJobStore.getState().setFilterConfig({ status: 'completed' })
     expect(useJobStore.getState().selectedIds.size).toBe(0)
   })
 
   it('clears selection when search query changes', () => {
     useJobStore.setState({ selectedIds: new Set(['j1']) })
-    useJobStore.getState().setSearchQuery('foo')
+    useJobStore.getState().setFilterConfig({ search: 'foo' })
     expect(useJobStore.getState().selectedIds.size).toBe(0)
   })
 

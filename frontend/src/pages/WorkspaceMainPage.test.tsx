@@ -159,8 +159,12 @@ describe('WorkspaceMainPage', () => {
       error: null,
       selectedIds: new Set(),
       expandedId: null,
-      statusFilter: 'all',
-      searchQuery: '',
+      filterConfig: {
+        status: 'all',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
       batchRerunLoading: false,
       batchPackageLoading: false,
       batchDeleteLoading: false,
@@ -347,7 +351,7 @@ describe('WorkspaceMainPage', () => {
       vi.advanceTimersByTime(250)
     })
 
-    expect(useJobStore.getState().searchQuery).toBe('algebra')
+    expect(useJobStore.getState().filterConfig.search).toBe('algebra')
   })
 
   it('submits batch rerun with selected node key', async () => {
