@@ -46,6 +46,7 @@ import StreamIcon from '@mui/icons-material/Stream'
 import SubtitlesIcon from '@mui/icons-material/Subtitles'
 import SyncIcon from '@mui/icons-material/Sync'
 import TextFieldsIcon from '@mui/icons-material/TextFields'
+import UpgradeIcon from '@mui/icons-material/Upgrade'
 import TimerIcon from '@mui/icons-material/Timer'
 import ToggleOnIcon from '@mui/icons-material/ToggleOn'
 import WarningIcon from '@mui/icons-material/Warning'
@@ -99,6 +100,7 @@ export type MaterialIconName =
   | 'subtitles'
   | 'sync'
   | 'text_fields'
+  | 'upgrade'
   | 'timer'
   | 'toggle_on'
   | 'warning'
@@ -151,6 +153,7 @@ export const ICON_MAP: Record<MaterialIconName, FC<SvgIconProps>> = {
   subtitles: SubtitlesIcon,
   sync: SyncIcon,
   text_fields: TextFieldsIcon,
+  upgrade: UpgradeIcon,
   timer: TimerIcon,
   toggle_on: ToggleOnIcon,
   warning: WarningIcon,
