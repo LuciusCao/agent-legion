@@ -83,8 +83,8 @@ workflows:
   enabled: true
   pi:
     binary: pi
-    provider: kimi-coding
-    model: kimi-for-coding
+    provider: deepseek
+    model: your-model-b
     thinking: low
     timeout_seconds: 600
     environment:
