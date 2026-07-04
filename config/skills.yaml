@@ -1,19 +1,19 @@
 skills:
   question_comprehension_info/assess_comprehension_difficulty:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/assess_comprehension_difficulty
-    ref: v1.1.6
+    ref: v1.1.7
   question_comprehension_info/generate_key_info:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_key_info
     ref: v1.3.8
   question_comprehension_info/generate_possible_errors:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/generate_possible_errors
-    ref: v1.3.3
+    ref: v1.3.4
   question_comprehension_info/review_key_info:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_key_info
-    ref: v1.1.9
+    ref: v1.1.10
   question_comprehension_info/review_possible_errors:
     repo: file:///Users/user/.agents/skills/agent-legion/question_comprehension_info/review_possible_errors
-    ref: v1.3.3
+    ref: v1.3.4
   video_knowledge/generate_chapters:
     repo: file:///Users/user/.agents/skills/agent-legion/video_knowledge/generate_chapters
     ref: v1.0.0

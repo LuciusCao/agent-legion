@@ -143,7 +143,7 @@ def clean_and_parse(
 
 def _strip_analysis(parsed_questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Return a copy of parsed questions with the verbose analysis field removed."""
-    return [{**q, "analysis": []} for q in parsed_questions]
+    return [{k: v for k, v in q.items() if k != "analysis"} for q in parsed_questions]
 
 
 def assemble_comprehension_info(
