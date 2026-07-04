@@ -90,21 +90,8 @@ export function JobActionBar({
     jobs.every((job) => !canPackageJob(job.status))
 
   const deleteDisabled = jobs.length === 0 || loading
-
-  const handleRerun = async (
-    nodeKey: string | null,
-    fromFailedNode?: boolean
-  ) => {
-    await onRerun(nodeKey, fromFailedNode)
-  }
-
-  const handleRunTo = async (targetKey: string, startKey?: string) => {
-    await onRunTo?.(targetKey, startKey)
-  }
-
-  const handleContinue = async () => {
-    await onContinue?.()
-  }
+  const handleRunTo = (targetKey: string, startKey?: string) =>
+    onRunTo?.(targetKey, startKey)
 
   return (
     <div className={styles.actionBar} data-testid="job-action-bar">
@@ -153,7 +140,7 @@ export function JobActionBar({
         {!isBatch && jobs.some((job) => canContinueJob(job)) && (
           <Button
             variant="outlined"
-            onClick={handleContinue}
+            onClick={onContinue}
             disabled={continueDisabled}
           >
             继续完整流程
@@ -189,7 +176,7 @@ export function JobActionBar({
         itemLabel={itemLabel}
         allowFailedNodeMode={mode === 'batch'}
         onClose={() => setRerunOpen(false)}
-        onConfirm={handleRerun}
+        onConfirm={onRerun}
       />
       <JobRunToDialog
         open={runToOpen}
