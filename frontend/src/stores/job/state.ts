@@ -1,5 +1,6 @@
 import type {
   BatchJobMutationResult,
+  JobMutationResult,
   JobSummary,
   WorkspacePackageResult,
 } from '../../jobTypes'
@@ -21,7 +22,7 @@ export interface JobState {
   batchRerunLoading: boolean
   batchRunToLoading: boolean
   continueLoading: boolean
-
+  batchUpgradeWorkflowLoading: boolean
   fetchJobs: (workspaceId: string) => Promise<void>
   resetForWorkspace: (workspaceId: string) => void
   setJobsAndFinishLoading: (jobs: JobSummary[]) => void
@@ -47,14 +48,11 @@ export interface JobState {
     targetNodeKey: string,
     startNodeKey?: string
   ) => Promise<BatchJobMutationResult>
-  continueJob: (jobId: string) => Promise<{
-    job_id: string
-    operation: string
-    status: string
-    message?: string | null
-    node_key?: string | null
-    reason_code?: string | null
-  }>
+  continueJob: (jobId: string) => Promise<JobMutationResult>
+  batchUpgradeWorkflow: (
+    workspaceId: string,
+    jobIds: string[]
+  ) => Promise<BatchJobMutationResult>
 }
 
 export type JobStoreSet = (
