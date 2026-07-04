@@ -517,6 +517,41 @@ def test_read_raw_log_falls_back_to_events_jsonl(log_service):
     assert "agent_start" in raw
 
 
+def test_job_log_service_falls_back_to_events_jsonl_when_log_file_is_missing(
+    log_service,
+):
+    service, settings, job_db = log_service
+    job, run, run_dir = _create_pi_job(job_db, settings)
+    missing_log = settings.logs_dir / "jobs" / "missing-pi.log"
+    with job_db.connect() as conn:
+        conn.execute(
+            "update node_runs set log_path=? where id=?",
+            (make_data_relative(missing_log, settings.data_dir), run["id"]),
+        )
+    _write_events(
+        run_dir / "events.jsonl",
+        [
+            {"type": "agent_start"},
+            {"type": "turn_start"},
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "Agent result"}],
+                    "stopReason": "stop",
+                },
+            },
+        ],
+    )
+
+    result = service.read(job["id"], run["id"])
+
+    assert result["run_id"] == run["id"]
+    assert [entry["type"] for entry in result["structured"]] == ["session", "message"]
+    assert "Agent result" in result["log"]
+    assert result["raw_url"] == f"/api/jobs/{job['id']}/runs/{run['id']}/log?raw=1"
+
+
 def test_resolve_job_log_path_accepts_logs_dir(log_service):
     _, settings, _ = log_service
     log_path = str(make_data_relative(settings.logs_dir / "jobs" / "test.log", settings.data_dir))

@@ -31,8 +31,6 @@ class JobLogService:
             return empty
 
         path = resolve_job_log_path(log_path_str, self.settings)
-        if not path.exists() or not path.is_file():
-            return empty
 
         run_dir = resolve_run_dir(run.get("run_dir") or "", self.settings)
         if run_dir is None:
@@ -42,6 +40,10 @@ class JobLogService:
                 run.get("job_id") or "",
                 self.settings,
             )
+        if not path.is_file():
+            if run_dir is None or not (run_dir / "events.jsonl").is_file():
+                return empty
+            path = run_dir / "events.jsonl"
         rendered = render_log(
             path,
             run_dir,
