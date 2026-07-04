@@ -7,6 +7,7 @@ import {
   type DagNodeStatus,
 } from './dagNodeStatus'
 import { ChipList } from './DagNodeChips'
+import { MaterialIcon } from './MaterialIcon'
 import styles from './DagNode.module.css'
 
 export interface DagNodeData extends Record<string, unknown> {
@@ -42,7 +43,7 @@ export const DagNode = memo(function DagNode(props: NodeProps<DagNodeType>) {
       />
       <div className={styles.header}>
         <span className={[styles.icon, styles[`icon${data.status}`]].join(' ')}>
-          {icon}
+          <MaterialIcon name={icon} data-testid={`dag-icon-${data.status}`} />
         </span>
         <span className={styles.label} title={data.label}>
           {data.label}

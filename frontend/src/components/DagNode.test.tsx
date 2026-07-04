@@ -69,10 +69,11 @@ describe('DagNode', () => {
     ['failed', 'error'],
     ['stale', 'warning'],
   ] as const)('applies %s status and renders %s icon', (status, icon) => {
+    void icon
     renderWithProvider({ ...baseData, status })
     const card = screen.getByTestId('dag-node')
     expect(card).toHaveAttribute('data-status', status)
-    expect(screen.getByText(icon)).toBeInTheDocument()
+    expect(screen.getByTestId(`dag-icon-${status}`)).toBeInTheDocument()
   })
 
   it('renders not applicable node status', () => {

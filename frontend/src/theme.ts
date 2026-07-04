@@ -35,7 +35,7 @@ const themeOptions: ThemeOptions = {
   },
   typography: {
     fontFamily:
-      'Roboto, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+      '-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", "Hiragino Sans GB", Roboto, ui-sans-serif, system-ui, sans-serif',
     h1: { fontWeight: 500 },
     h2: { fontWeight: 500 },
     h3: { fontWeight: 500 },

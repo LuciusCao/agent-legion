@@ -1,5 +1,6 @@
 import type { components } from '../generated/api'
 import { formatDuration, STATUS_ICON, STATUS_LABEL } from './dagNodeStatus'
+import { MaterialIcon } from './MaterialIcon'
 import type { DagNodeData } from './DagNode'
 import styles from './NodeDetailsPanel.module.css'
 
@@ -30,7 +31,11 @@ export function NodeDetailsPanel({
       <div className={styles.section}>
         <div className={styles.sectionTitle}>状态</div>
         <div className={styles.statusRow}>
-          <span className={styles.icon}>{STATUS_ICON[data.status]}</span>
+          <MaterialIcon
+            name={STATUS_ICON[data.status]}
+            className={styles.icon}
+            data-testid={`node-icon-${data.status}`}
+          />
           <span>{STATUS_LABEL[data.status]}</span>
           <span className={styles.muted}>{durationText}</span>
         </div>
