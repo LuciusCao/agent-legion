@@ -1,10 +1,10 @@
-import { FC } from 'react'
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import AddIcon from '@mui/icons-material/Add'
 import AddTaskIcon from '@mui/icons-material/AddTask'
 import ArchiveIcon from '@mui/icons-material/Archive'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
 import ArrowForwardIcon from '@mui/icons-material/ArrowForward'
+import ArrowCircleUpIcon from '@mui/icons-material/ArrowCircleUp'
 import BlockIcon from '@mui/icons-material/Block'
 import BuildCircleIcon from '@mui/icons-material/BuildCircle'
 import CheckIcon from '@mui/icons-material/Check'
@@ -46,11 +46,9 @@ import StreamIcon from '@mui/icons-material/Stream'
 import SubtitlesIcon from '@mui/icons-material/Subtitles'
 import SyncIcon from '@mui/icons-material/Sync'
 import TextFieldsIcon from '@mui/icons-material/TextFields'
-import UpgradeIcon from '@mui/icons-material/Upgrade'
 import TimerIcon from '@mui/icons-material/Timer'
 import ToggleOnIcon from '@mui/icons-material/ToggleOn'
 import WarningIcon from '@mui/icons-material/Warning'
-import { SvgIconProps } from '@mui/material/SvgIcon'
 
 export type MaterialIconName =
   | 'account_tree'
@@ -59,6 +57,7 @@ export type MaterialIconName =
   | 'archive'
   | 'arrow_back'
   | 'arrow_forward'
+  | 'arrow_circle_up'
   | 'block'
   | 'build_circle'
   | 'check'
@@ -100,18 +99,18 @@ export type MaterialIconName =
   | 'subtitles'
   | 'sync'
   | 'text_fields'
-  | 'upgrade'
   | 'timer'
   | 'toggle_on'
   | 'warning'
 
-export const ICON_MAP: Record<MaterialIconName, FC<SvgIconProps>> = {
+export const ICON_MAP = {
   account_tree: AccountTreeIcon,
   add: AddIcon,
   add_task: AddTaskIcon,
   archive: ArchiveIcon,
   arrow_back: ArrowBackIcon,
   arrow_forward: ArrowForwardIcon,
+  arrow_circle_up: ArrowCircleUpIcon,
   block: BlockIcon,
   build_circle: BuildCircleIcon,
   check: CheckIcon,
@@ -153,7 +152,6 @@ export const ICON_MAP: Record<MaterialIconName, FC<SvgIconProps>> = {
   subtitles: SubtitlesIcon,
   sync: SyncIcon,
   text_fields: TextFieldsIcon,
-  upgrade: UpgradeIcon,
   timer: TimerIcon,
   toggle_on: ToggleOnIcon,
   warning: WarningIcon,

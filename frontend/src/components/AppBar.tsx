@@ -6,7 +6,7 @@ import styles from './AppBar.module.css'
 
 export interface AppBarProps {
   title: string
-  subtitle?: string | null
+  subtitle?: React.ReactNode | null
   home?: boolean
   backTo?: string
   scrolled?: boolean

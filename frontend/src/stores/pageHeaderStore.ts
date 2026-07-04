@@ -3,10 +3,10 @@ import type { ReactNode } from 'react'
 
 export interface PageHeaderState {
   pageTitle: string | null
-  pageSubtitle: string | null
+  pageSubtitle: ReactNode | null
   detailPageActions: ReactNode | null
   setPageTitle: (title: string | null) => void
-  setPageSubtitle: (subtitle: string | null) => void
+  setPageSubtitle: (subtitle: ReactNode | null) => void
   setDetailPageActions: (actions: ReactNode | null) => void
 }
 
