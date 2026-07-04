@@ -8,20 +8,14 @@ from ..settings import Settings
 from ..worker_control import WorkspaceWorkerControl
 from .agents import create_agents_router
 from .common import create_common_router
-from .job_artifacts import create_job_artifacts_router
-from .job_batches import create_job_batches_router
-from .job_invalid_paths import create_job_invalid_paths_router
-from .jobs import create_jobs_router
+from .job_route_group import include_job_routes
 from .packages import create_packages_router
-from .questions import create_questions_router
-from .video_jobs import create_video_jobs_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
 from .workflow_resource_providers import create_workflow_resource_providers_router
 from .workflow_revisions import create_workflow_revisions_router
 from .workspace_configuration import create_workspace_configuration_router
 from .workspace_executors import create_workspace_executors_router
-from .workspace_runs import create_workspace_runs_router
 from .workspace_settings import create_workspace_settings_router
 from .workspaces import create_workspaces_router
 
@@ -37,17 +31,8 @@ def create_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
-    from ..executors.leases import ExecutorLeaseRepository
     from ..services.executor_catalog import ExecutorCatalogService
-    from ..services.job_artifact_mutation import JobArtifactMutationService
-    from ..services.job_artifacts import JobArtifactService
-    from ..services.job_deletion import JobDeletionService
-    from ..services.job_execution import JobExecutionService
-    from ..services.job_intake import JobIntakeService
-    from ..services.job_logs import JobLogService
     from ..services.job_packages import JobPackageService
-    from ..services.job_queries import JobQueryService
-    from ..services.job_rerun import JobRerunService
     from ..services.package_deletion import PackageDeletionService
     from ..services.workflow_catalog import WorkflowCatalogService
     from ..services.workspace_configuration import WorkspaceConfigurationService
@@ -58,30 +43,6 @@ def create_router(
     workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db)
     workspace_configuration = WorkspaceConfigurationService(
         job_db, settings, agent_manager, workflow_catalog
-    )
-    job_intake = JobIntakeService(
-        job_db, settings, workflow_catalog, job_event_manager=job_event_manager
-    )
-    job_queries = JobQueryService(
-        job_db, settings, workflow_catalog, workspace_executor_configuration
-    )
-    job_artifacts = JobArtifactService(job_db)
-    job_logs = JobLogService(settings, job_db)
-    executor_leases = ExecutorLeaseRepository(
-        job_db.path, job_db=job_db, job_event_manager=job_event_manager
-    )
-    job_rerun = JobRerunService(
-        job_db, executor_leases, settings, workflow_catalog, job_event_manager=job_event_manager
-    )
-    job_execution = JobExecutionService(
-        job_db,
-        JobArtifactMutationService(settings.jobs_dir),
-        executor_leases,
-        workflow_catalog,
-        job_event_manager=job_event_manager,
-    )
-    job_deletion = JobDeletionService(
-        job_db, executor_leases, settings, job_event_manager=job_event_manager
     )
     package_deletion = PackageDeletionService(db, settings.packages_dir)
     job_packages = JobPackageService(job_db, settings)
@@ -109,17 +70,13 @@ def create_router(
             executor_catalog, workspace_executor_configuration, settings
         )
     )
-    router.include_router(create_job_batches_router(job_intake, settings))
-    router.include_router(
-        create_jobs_router(job_queries, job_rerun, job_deletion, job_execution, settings)
+    include_job_routes(
+        router,
+        job_db,
+        settings,
+        workflow_catalog,
+        workspace_executor_configuration,
+        job_event_manager,
     )
-    router.include_router(create_job_artifacts_router(job_artifacts, settings, job_logs))
-    router.include_router(create_video_jobs_router(job_db, settings))
-    # The invalid-paths router is a catch-all for `/jobs/{job_id}/...`. It MUST be
-    # registered after all other `/jobs/{job_id}/...` routers, otherwise it will
-    # shadow legitimate job endpoints.
-    router.include_router(create_job_invalid_paths_router(job_artifacts, settings))
-    router.include_router(create_workspace_runs_router(job_queries, settings))
-    router.include_router(create_questions_router(job_db, settings))
 
     return router

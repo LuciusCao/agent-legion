@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
+from server.app.workflows.workflow_manifest import workflow_manifest
 
 WORKSPACE_PACKAGE_FILES = [
     "result.json",
@@ -34,6 +35,7 @@ def create_workspace_package(
                 "id": job["id"],
                 "source_id": job.get("source_id", ""),
                 "workflow_key": job.get("workflow_key", ""),
+                "workflow": workflow_manifest(job),
                 "status": job.get("status", ""),
             }
             for job in jobs

@@ -25,6 +25,8 @@ const mockJob: JobRecord = {
   outcome: '',
   current_workflow_revision_id: '',
   current_workflow_revision_version: null,
+  workflow_version: null,
+  is_workflow_outdated: false,
   active_node_key: 'natural_language_reading',
   node_summaries: [
     {
@@ -70,6 +72,27 @@ describe('JobListItem', () => {
     expect(screen.getByText('Algebra Problem')).toBeInTheDocument()
     expect(screen.getByText(/题目 · Q100/)).toBeInTheDocument()
     expect(screen.getByText('运行中')).toBeInTheDocument()
+  })
+
+  it('renders workflow version and latest version for outdated jobs', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{
+            ...mockJob,
+            workflow_version: 2,
+            current_workflow_revision_version: 4,
+            is_workflow_outdated: true,
+          }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText(/Workflow v2/)).toBeInTheDocument()
+    expect(screen.getByText(/最新 v4/)).toBeInTheDocument()
   })
 
   it('shows "未命名" title when title is missing', () => {

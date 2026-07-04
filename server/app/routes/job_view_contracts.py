@@ -2,12 +2,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-
-class ExecutionControlSummaryResponse(BaseModel):
-    mode: Literal["full", "until_node"] = "full"
-    target_node_key: str | None = None
-    paused: bool = False
-    pause_reason: str = ""
+from server.app.routes.job_execution_control_contracts import ExecutionControlSummaryResponse
 
 
 class JobNodeSummaryResponse(BaseModel):
@@ -31,10 +26,12 @@ class JobSummaryResponse(BaseModel):
     created_at: str
     updated_at: str
     workflow_revision_id: str = ""
+    workflow_version: int | None = None
     workflow_definition_hash: str = ""
     outcome: str = ""
     current_workflow_revision_id: str = ""
     current_workflow_revision_version: int | None = None
+    is_workflow_outdated: bool = False
     node_summaries: list[JobNodeSummaryResponse] = Field(default_factory=list)
     completed_nodes: int = 0
     total_nodes: int = 0

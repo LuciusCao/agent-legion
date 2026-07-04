@@ -126,6 +126,9 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
         title="Question Q100",
         node_keys=["assemble_comprehension_info"],
         workspace_id=workspace["id"],
+        workflow_revision_id="test_ws:question_comprehension_info:v7",
+        workflow_version=7,
+        workflow_definition_hash="hash-v7",
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
     (artifact_dir / "questions_parsed_lean.json").write_text(
@@ -208,6 +211,12 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
 
     manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["question_id"] == "Q100"
+    assert manifest["workflow"] == {
+        "key": "question_comprehension_info",
+        "version": 7,
+        "revision_id": "test_ws:question_comprehension_info:v7",
+        "definition_hash": "hash-v7",
+    }
     assert manifest["fingerprint_missing"] is True
     assert manifest["artifacts"]["comprehension_info.json"]["present"] is True
 
@@ -303,11 +312,21 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
         job["id"], "generate_key_info", ["pi"], "", skill_version="v1.2.2@abc123"
     )
     queries.finish_node_run(run["id"], "completed", 0, "")
+    empty_run = queries.start_node_run(
+        job["id"], "clean_and_parse", ["local"], "", skill_version=""
+    )
+    queries.finish_node_run(empty_run["id"], "completed", 0, "")
 
     assemble_comprehension_info(job, artifact_dir, {"job_db": queries})
 
     manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["skill_versions"] == {"generate_key_info": "v1.2.2@abc123"}
+    assert manifest["skill_versions"] == {
+        "fetch_questions": "unavailable",
+        "clean_and_parse": "unavailable",
+        "generate_key_info": "v1.2.2@abc123",
+        "assemble_comprehension_info": "unavailable",
+    }
+    assert all(version for version in manifest["skill_versions"].values())
 
 
 def test_clean_and_parse_md5_is_deterministic(tmp_path):

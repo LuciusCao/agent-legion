@@ -25,6 +25,7 @@ export default function JobDetailPage() {
     handleRerun,
     handleRunTo,
     handleContinue,
+    handleUpgradeWorkflow,
     handlePackage,
     handleDelete,
   } = useJobDetail(workspaceId, jobId)
@@ -94,6 +95,7 @@ export default function JobDetailPage() {
         onRerun={handleRerun}
         onRunTo={handleRunTo}
         onContinue={handleContinue}
+        onUpgradeWorkflow={handleUpgradeWorkflow}
         onPackage={handlePackage}
         onDelete={handleDelete}
         onOpenArtifacts={() => setArtifactListOpen(true)}
@@ -108,6 +110,7 @@ export default function JobDetailPage() {
     handleRerun,
     handleRunTo,
     handleContinue,
+    handleUpgradeWorkflow,
     handlePackage,
     handleDelete,
   ])

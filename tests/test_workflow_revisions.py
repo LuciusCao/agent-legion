@@ -51,11 +51,13 @@ def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
         node_keys=list(definition.nodes),
         workspace_id=workspace["id"],
         workflow_revision_id=revision["id"],
+        workflow_version=revision["version"],
         workflow_definition_hash=revision["definition_hash"],
         workflow_definition_snapshot_json=revision["definition_json"],
     )
 
     assert job["workflow_revision_id"] == revision["id"]
+    assert job["workflow_version"] == revision["version"]
     assert job["workflow_definition_hash"] == revision["definition_hash"]
     assert "fetch_questions" in job["workflow_definition_snapshot_json"]
 

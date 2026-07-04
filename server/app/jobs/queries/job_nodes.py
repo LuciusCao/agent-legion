@@ -29,13 +29,13 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         workspace_id: str,
         stem: str = "",
         workflow_revision_id: str = "",
+        workflow_version: int | None = None,
         workflow_definition_hash: str = "",
         workflow_definition_snapshot_json: str = "",
     ) -> dict[str, Any]:
         job_id = _job_id(workspace_id, workflow_key, source_id)
         storage_dir = self.jobs_dir / workspace_id / job_id
         storage_dir.mkdir(parents=True, exist_ok=True)
-        data_dir = self.jobs_dir.parent
 
         with self.connect() as conn:
             existing = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
@@ -50,9 +50,9 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                 """
                 insert into jobs(
                   id, workspace_id, workflow_key, source_type, source_id, batch_id, title, storage_dir, stem,
-                  workflow_revision_id, workflow_definition_hash, workflow_definition_snapshot_json
+                  workflow_revision_id, workflow_version, workflow_definition_hash, workflow_definition_snapshot_json
                 )
-                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 on conflict(id) do update set
                   title=excluded.title,
                   stem=excluded.stem,
@@ -67,9 +67,10 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                     source_id,
                     batch_id,
                     title,
-                    make_data_relative(storage_dir, data_dir),
+                    make_data_relative(storage_dir, self.jobs_dir.parent),
                     stem,
                     workflow_revision_id,
+                    workflow_version,
                     workflow_definition_hash,
                     workflow_definition_snapshot_json,
                 ),
