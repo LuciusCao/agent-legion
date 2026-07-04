@@ -1,8 +1,9 @@
+import type { ReactNode } from 'react'
 import styles from './AppBarSubtitle.module.css'
 
 export interface AppBarSubtitleProps {
   title: string
-  subtitle?: string | null
+  subtitle?: ReactNode | null
 }
 
 export function AppBarSubtitle({ title, subtitle }: AppBarSubtitleProps) {

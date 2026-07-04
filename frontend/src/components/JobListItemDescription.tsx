@@ -1,22 +1,17 @@
 import { JOB_SOURCE_TYPE_LABELS } from '../labels'
 import type { JobRecord } from '../types'
-import { jobWorkflowVersionText } from '../lib/jobWorkflowVersion'
+import { WorkflowVersionChip } from './WorkflowVersionChip'
 import styles from './JobListItem.module.css'
 
 export function JobListItemDescription({ job }: { job: JobRecord }) {
-  const versionText = jobWorkflowVersionText(job)
   return (
     <div className={styles.description}>
       {JOB_SOURCE_TYPE_LABELS[job.source_type] ?? job.source_type} ·{' '}
       {job.source_id}
-      {versionText ? (
+      {job.workflow_version != null ? (
         <>
           {' · '}
-          <span
-            className={job.is_workflow_outdated ? styles.outdatedVersion : ''}
-          >
-            {versionText}
-          </span>
+          <WorkflowVersionChip job={job} />
         </>
       ) : null}
       {job.error_summary ? (

@@ -91,8 +91,8 @@ describe('JobListItem', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText(/Workflow v2/)).toBeInTheDocument()
-    expect(screen.getByText(/最新 v4/)).toBeInTheDocument()
+    expect(screen.getByText('v2')).toBeInTheDocument()
+    expect(screen.getByText('v4')).toBeInTheDocument()
   })
 
   it('shows "未命名" title when title is missing', () => {
