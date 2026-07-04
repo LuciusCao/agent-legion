@@ -3,6 +3,7 @@ import type { JobState } from './state'
 import { fetchActions } from './actions/fetchActions'
 import { selectionActions } from './actions/selectionActions'
 import { batchActions } from './actions/batchActions'
+import { upgradeActions } from './actions/upgradeActions'
 
 export const useJobStore = create<JobState>((set, get) => ({
   jobs: [],
@@ -24,4 +25,5 @@ export const useJobStore = create<JobState>((set, get) => ({
   ...fetchActions(set),
   ...selectionActions(set, get),
   ...batchActions(set, get),
+  ...upgradeActions(set, get),
 }))
