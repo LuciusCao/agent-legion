@@ -14,6 +14,7 @@ import {
   packageJobs,
   batchRunToJobs,
 } from '../jobApi'
+import { upgradeJobWorkflow } from '../jobWorkflowUpgradeApi'
 import { EventSourceMock } from '../testing/eventSourceMock'
 import type { WorkspaceStats } from '../workspaceTypes'
 import { makeJob } from '../testing/fixtures'
@@ -26,6 +27,7 @@ const mockBatchRerunJobs = vi.fn()
 const mockBatchDeleteJobs = vi.fn()
 const mockPackageJobs = vi.fn()
 const mockBatchRunToJobs = vi.fn()
+const mockUpgradeJobWorkflow = vi.fn()
 
 vi.mock('../api', () => ({
   api: (...args: Parameters<typeof api>) => mockApi(...args),
@@ -47,6 +49,11 @@ vi.mock('../jobApi', () => ({
     mockPackageJobs(...args),
   batchRunToJobs: (...args: Parameters<typeof batchRunToJobs>) =>
     mockBatchRunToJobs(...args),
+}))
+
+vi.mock('../jobWorkflowUpgradeApi', () => ({
+  upgradeJobWorkflow: (...args: Parameters<typeof upgradeJobWorkflow>) =>
+    mockUpgradeJobWorkflow(...args),
 }))
 
 function renderPage(workspaceId = 'ws1') {
@@ -140,6 +147,7 @@ describe('WorkspaceMainPage', () => {
     mockBatchDeleteJobs.mockReset()
     mockPackageJobs.mockReset()
     mockBatchRunToJobs.mockReset()
+    mockUpgradeJobWorkflow.mockReset()
 
     mockFetchJobs.mockResolvedValue({ jobs: [] })
     mockFetchWorkspaceStats.mockResolvedValue(baseStats)
@@ -165,6 +173,7 @@ describe('WorkspaceMainPage', () => {
       batchPackageLoading: false,
       batchDeleteLoading: false,
       batchRunToLoading: false,
+      batchUpgradeWorkflowLoading: false,
     })
     useWorkspaceStore.setState({
       workspaces: [],
@@ -648,6 +657,54 @@ describe('WorkspaceMainPage', () => {
 
     await waitFor(() => {
       expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+    })
+  })
+
+  it('submits batch workflow upgrade for outdated jobs', async () => {
+    mockUpgradeJobWorkflow.mockResolvedValueOnce({
+      job_id: 'j1',
+      operation: 'upgrade_workflow',
+      status: 'succeeded',
+    })
+    mockFetchJobs.mockResolvedValue({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'completed',
+          is_workflow_outdated: true,
+        }),
+      ],
+    })
+    useJobStore.setState({
+      jobs: [
+        makeJob({
+          id: 'j1',
+          status: 'completed',
+          is_workflow_outdated: true,
+        }),
+      ],
+      selectedIds: new Set(['j1']),
+      selectMode: true,
+    })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    await loadJobsViaSSE()
+
+    await act(async () => {
+      screen.getByText('升级 workflow').click()
+    })
+
+    expect(screen.getByText('确认升级 workflow')).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByText('升级 1 个任务').click()
+    })
+
+    await waitFor(() => {
+      expect(mockUpgradeJobWorkflow).toHaveBeenCalledWith('j1')
     })
   })
 

@@ -42,6 +42,7 @@ export default function WorkspaceMainPage() {
     batchPackage,
     batchRerun,
     batchRunTo,
+    batchUpgradeWorkflow,
     getFilteredJobs,
     selectMode,
     toggleSelectMode,
@@ -49,6 +50,7 @@ export default function WorkspaceMainPage() {
     batchPackageLoading,
     batchDeleteLoading,
     batchRunToLoading,
+    batchUpgradeWorkflowLoading,
   } = useJobStore()
 
   const [workflowDefinition, setWorkflowDefinition] =
@@ -138,8 +140,9 @@ export default function WorkspaceMainPage() {
     if (result.download_url) window.open(result.download_url, '_blank')
   }
 
-  const handleDelete = () => {
-    setDeleteDialogOpen(true)
+  const handleUpgradeWorkflow = async (jobIds: string[]) => {
+    if (!workspaceId) return
+    await batchUpgradeWorkflow(workspaceId, jobIds)
   }
 
   const handleDeleteConfirm = async () => {
@@ -183,14 +186,16 @@ export default function WorkspaceMainPage() {
               batchRerunLoading ||
               batchPackageLoading ||
               batchDeleteLoading ||
-              batchRunToLoading
+              batchRunToLoading ||
+              batchUpgradeWorkflowLoading
             }
             filters={filters}
             onExitSelectMode={toggleSelectMode}
             onRerun={handleRerun}
             onRunTo={handleRunTo}
             onPackage={handlePackage}
-            onDelete={handleDelete}
+            onDelete={() => setDeleteDialogOpen(true)}
+            onUpgradeWorkflow={handleUpgradeWorkflow}
           />
           <BatchDeleteDialog
             open={deleteDialogOpen}
