@@ -37,7 +37,7 @@ class HiddenContent(BaseModel):
     derived_text: str
     source_text: str
     position: Position
-    derivation: str
+    derivation: str | None = None
 
 
 class KeyInfoItem(BaseModel):
@@ -55,8 +55,8 @@ class KeyInfoItem(BaseModel):
             raise ValueError("type 'given' requires GivenContent with 'text' and 'position'")
         if self.type == "hidden" and not isinstance(self.content, HiddenContent):
             raise ValueError(
-                "type 'hidden' requires HiddenContent with 'derived_text', 'source_text', "
-                "'position' and 'derivation'"
+                "type 'hidden' requires HiddenContent with 'derived_text', 'source_text' "
+                "and 'position'"
             )
         return self
 
