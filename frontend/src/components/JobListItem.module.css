@@ -61,6 +61,11 @@
   color: #ba1a1a;
 }
 
+.outdatedVersion {
+  color: #8a4b00;
+  font-weight: 600;
+}
+
 .badge {
   font-size: 12px;
   padding: 4px 8px;

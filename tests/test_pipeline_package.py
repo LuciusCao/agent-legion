@@ -168,6 +168,12 @@ def test_create_workspace_package_includes_manifest_and_artifacts(tmp_path):
                 "id": "job_1",
                 "source_id": "S1",
                 "workflow_key": "test_pipeline",
+                "workflow": {
+                    "key": "test_pipeline",
+                    "version": None,
+                    "revision_id": "",
+                    "definition_hash": "",
+                },
                 "status": "completed",
             }
         ]

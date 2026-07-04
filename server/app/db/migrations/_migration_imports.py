@@ -1,5 +1,4 @@
 # ruff: noqa: F401
-
 from server.app.db.migrations.v001_executor_core import MIGRATION as V001_EXECUTOR_CORE
 from server.app.db.migrations.v002_executor_bootstrap_state import (
     MIGRATION as V002_EXECUTOR_BOOTSTRAP_STATE,
@@ -38,6 +37,7 @@ from server.app.db.migrations.v014_remove_question_content_default import (
 from server.app.db.migrations.v015_rename_pi_executor_id import (
     MIGRATION as V015_RENAME_PI_EXECUTOR_ID,
 )
-from server.app.db.migrations.v016_workflow_revisions import (
-    MIGRATION as V016_WORKFLOW_REVISIONS,
+from server.app.db.migrations.v016_workflow_revisions import MIGRATION as V016_WORKFLOW_REVISIONS
+from server.app.db.migrations.v017_job_workflow_version import (
+    MIGRATION as V017_JOB_WORKFLOW_VERSION,
 )

@@ -80,7 +80,7 @@ def finalize_non_uploadable(
         "artifacts": {
             "comprehension_info.json": {"present": False},
         },
-        "skill_versions": collect_skill_versions(str(job.get("id", "")), context),
+        "skill_versions": collect_skill_versions(str(job.get("id", "")), context, job),
     }
     artifact_dir.joinpath("manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2),

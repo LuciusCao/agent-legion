@@ -10,6 +10,7 @@ from server.app.services.job_query_presenters import (
     job_nodes_with_definition,
     node_summary,
 )
+from server.app.services.job_workflow_versions import is_workflow_outdated
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.services.workspace_dag import build_workspace_dag
@@ -77,20 +78,22 @@ class JobQueryService:
             if active_summary is not None:
                 error_summary = active_summary["error_message"][:240]
 
+        active = self.job_db.get_active_workflow_revision(
+            str(job["workspace_id"]), str(job["workflow_key"])
+        )
+        job_workflow_version = job.get("workflow_version")
+        is_outdated = is_workflow_outdated(job, active)
+
         job = resolve_record_paths(job, self.settings.data_dir, {"storage_dir"})
         return {
             **job,
             "workflow_revision_id": job.get("workflow_revision_id", ""),
+            "workflow_version": job_workflow_version,
             "workflow_definition_hash": job.get("workflow_definition_hash", ""),
             "outcome": job.get("outcome", ""),
-            "current_workflow_revision_id": str(active["id"])
-            if (
-                active := self.job_db.get_active_workflow_revision(
-                    str(job["workspace_id"]), str(job["workflow_key"])
-                )
-            )
-            else "",
+            "current_workflow_revision_id": str(active["id"]) if active else "",
             "current_workflow_revision_version": active["version"] if active else None,
+            "is_workflow_outdated": is_outdated,
             "node_summaries": summaries,
             "completed_nodes": completed_nodes,
             "total_nodes": total_nodes,

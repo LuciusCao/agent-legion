@@ -76,6 +76,44 @@ def test_list_jobs_returns_typed_node_summaries(query_service, job_db):
     }
 
 
+def test_list_jobs_exposes_job_workflow_version_and_outdated_status(query_service, job_db):
+    workspace = job_db.create_workspace(
+        "versioned", default_workflow_key="question_comprehension_info"
+    )
+    definition = WorkflowCatalogService(query_service.settings).definition(
+        "question_comprehension_info"
+    )
+    revision_service = WorkflowRevisionService(job_db)
+    original = revision_service.publish_workspace_revision(workspace["id"], definition)
+    current = revision_service.publish_workspace_revision(workspace["id"], definition)
+    batch = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["Q1"]},
+        workspace_id=workspace["id"],
+    )
+    job_db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="Q1",
+        batch_id=batch["id"],
+        title="Question 1",
+        node_keys=list(definition.nodes),
+        workspace_id=workspace["id"],
+        workflow_revision_id=original["id"],
+        workflow_version=original["version"],
+        workflow_definition_hash=original["definition_hash"],
+        workflow_definition_snapshot_json=original["definition_json"],
+    )
+
+    listed = query_service.list_jobs(workspace["id"])
+
+    assert listed[0]["workflow_version"] == 1
+    assert listed[0]["current_workflow_revision_id"] == current["id"]
+    assert listed[0]["current_workflow_revision_version"] == 2
+    assert listed[0]["is_workflow_outdated"] is True
+
+
 def test_list_jobs_orders_node_summaries_by_workflow_dag(query_service, job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="question_comprehension_info"

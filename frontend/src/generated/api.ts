@@ -175,6 +175,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/jobs/{job_id}/upgrade-workflow': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Upgrade Job Workflow */
+    post: operations['upgrade_job_workflow_api_jobs__job_id__upgrade_workflow_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/jobs/{job_id}/video': {
     parameters: {
       query?: never
@@ -1082,7 +1099,13 @@ export interface components {
        * Operation
        * @enum {string}
        */
-      operation: 'rerun' | 'run_to' | 'continue' | 'delete' | 'package'
+      operation:
+        | 'rerun'
+        | 'run_to'
+        | 'continue'
+        | 'delete'
+        | 'package'
+        | 'upgrade_workflow'
       /** Reason Code */
       reason_code?: string | null
       /**
@@ -1167,6 +1190,11 @@ export interface components {
       execution_control?: components['schemas']['ExecutionControlSummaryResponse']
       /** Id */
       id: string
+      /**
+       * Is Workflow Outdated
+       * @default false
+       */
+      is_workflow_outdated: boolean
       /** Node Summaries */
       node_summaries?: components['schemas']['JobNodeSummaryResponse'][]
       /**
@@ -1203,6 +1231,8 @@ export interface components {
        * @default
        */
       workflow_revision_id: string
+      /** Workflow Version */
+      workflow_version?: number | null
       /** Workspace Id */
       workspace_id: string
     }
@@ -2275,6 +2305,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobLogResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  upgrade_job_workflow_api_jobs__job_id__upgrade_workflow_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobMutationResultResponse']
         }
       }
       /** @description Validation Error */

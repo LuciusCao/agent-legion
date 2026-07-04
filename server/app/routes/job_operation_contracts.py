@@ -7,7 +7,7 @@ from pydantic import BaseModel, Field, model_validator
 
 class JobMutationResultResponse(BaseModel):
     job_id: str
-    operation: Literal["rerun", "run_to", "continue", "delete", "package"]
+    operation: Literal["rerun", "run_to", "continue", "delete", "package", "upgrade_workflow"]
     status: Literal["succeeded", "skipped", "failed"]
     node_key: str | None = None
     reason_code: str | None = None

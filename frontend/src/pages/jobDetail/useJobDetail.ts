@@ -3,9 +3,11 @@ import { useNavigate } from 'react-router-dom'
 import { fetchJobDetail, deleteJob } from '../../api'
 import { rerunJob, runToJob, packageJobs } from '../../jobApi'
 import { usePageHeaderStore } from '../../stores/pageHeaderStore'
-import { useJobStore } from '../../stores/jobStore'
 import type { JobDetailResponse } from '../../types'
+import { useContinueJobAction } from './useContinueJobAction'
+import { pageSubtitle } from './jobDetailTitle'
 import { POLLING_STATUSES } from './jobNodeHelpers'
+import { useUpgradeWorkflowAction } from './useUpgradeWorkflowAction'
 
 export function useJobDetail(
   workspaceId: string | undefined,
@@ -42,7 +44,6 @@ export function useJobDetail(
     [jobId]
   )
 
-  // Preserve the page's existing polling behavior for active jobs.
   useEffect(() => {
     if (!jobId) return
     const controller = new AbortController()
@@ -67,7 +68,7 @@ export function useJobDetail(
     refreshDetail({ signal: controller.signal }).then((data) => {
       if (controller.signal.aborted || !data) return
       setPageTitle(data.job.title || data.job.source_id || '任务详情')
-      setPageSubtitle(data.job.source_id || null)
+      setPageSubtitle(pageSubtitle(data.job))
     })
     return () => {
       controller.abort()
@@ -108,18 +109,19 @@ export function useJobDetail(
     [jobId, refreshDetail]
   )
 
-  const handleContinue = useCallback(async () => {
-    if (!jobId) return
-    setActionLoading(true)
-    try {
-      await useJobStore.getState().continueJob(jobId)
-      await refreshDetail()
-    } catch (err) {
-      setError(err instanceof Error ? err.message : String(err))
-    } finally {
-      setActionLoading(false)
-    }
-  }, [jobId, refreshDetail])
+  const handleContinue = useContinueJobAction(
+    jobId,
+    refreshDetail,
+    setActionLoading,
+    setError
+  )
+
+  const handleUpgradeWorkflow = useUpgradeWorkflowAction(
+    jobId,
+    refreshDetail,
+    setActionLoading,
+    setError
+  )
 
   const handlePackage = useCallback(async () => {
     if (!workspaceId || !jobId) return
@@ -158,6 +160,7 @@ export function useJobDetail(
     handleRerun,
     handleRunTo,
     handleContinue,
+    handleUpgradeWorkflow,
     handlePackage,
     handleDelete,
   }
