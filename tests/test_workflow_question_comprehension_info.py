@@ -180,7 +180,7 @@ def test_clean_and_parse_respects_cancellation(tmp_path):
 
 def _write_comprehension_inputs(artifact_dir: Path) -> None:
     artifact_dir.mkdir(parents=True, exist_ok=True)
-    (artifact_dir / "questions_parsed.json").write_text(
+    (artifact_dir / "questions_parsed_lean.json").write_text(
         __import__("json").dumps(
             {
                 "questions": [
@@ -191,7 +191,7 @@ def _write_comprehension_inputs(artifact_dir: Path) -> None:
         ),
         encoding="utf-8",
     )
-    (artifact_dir / "key_info_reviewed.json").write_text(
+    (artifact_dir / "key_info_reviewed_lean.json").write_text(
         __import__("json").dumps({"question_id": "q1", "key_info_list": []}, ensure_ascii=False),
         encoding="utf-8",
     )
@@ -283,8 +283,8 @@ def test_assemble_comprehension_info_missing_input(tmp_path):
 def test_assemble_comprehension_info_input_question_id_mismatch(tmp_path):
     artifact_dir = tmp_path / "artifacts"
     _write_comprehension_inputs(artifact_dir)
-    # Corrupt key_info_reviewed.json to have mismatched question_id
-    (artifact_dir / "key_info_reviewed.json").write_text(
+    # Corrupt key_info_reviewed_lean.json to have mismatched question_id
+    (artifact_dir / "key_info_reviewed_lean.json").write_text(
         __import__("json").dumps({"question_id": "q2", "key_info_list": []}, ensure_ascii=False),
         encoding="utf-8",
     )
@@ -296,8 +296,8 @@ def test_assemble_comprehension_info_input_question_id_mismatch(tmp_path):
 def test_assemble_comprehension_info_question_id_mismatch(tmp_path):
     artifact_dir = tmp_path / "artifacts"
     _write_comprehension_inputs(artifact_dir)
-    # Replace parsed question with mismatched id
-    (artifact_dir / "questions_parsed.json").write_text(
+    # Replace parsed lean question with mismatched id
+    (artifact_dir / "questions_parsed_lean.json").write_text(
         __import__("json").dumps(
             {"questions": [{"question_id": "q2", "fingerprint": "fp1"}]},
             ensure_ascii=False,
@@ -312,7 +312,7 @@ def test_assemble_comprehension_info_question_id_mismatch(tmp_path):
 def test_assemble_comprehension_info_invalid_fingerprint_type(tmp_path):
     artifact_dir = tmp_path / "artifacts"
     _write_comprehension_inputs(artifact_dir)
-    (artifact_dir / "questions_parsed.json").write_text(
+    (artifact_dir / "questions_parsed_lean.json").write_text(
         __import__("json").dumps(
             {"questions": [{"question_id": "q1", "fingerprint": 123}]},
             ensure_ascii=False,

@@ -154,8 +154,8 @@ def assemble_comprehension_info(
     context = context or {}
     source_id = str(job["source_id"])
     logger.info("assemble_comprehension_info: source_id=%s", source_id)
-    question = _single_parsed_question(artifact_dir, source_id)
-    key_info = _load_json_object(artifact_dir / "key_info_reviewed.json")
+    question = _single_parsed_question(artifact_dir, source_id, "questions_parsed_lean.json")
+    key_info = _load_json_object(artifact_dir / "key_info_reviewed_lean.json")
     possible_errors = _load_json_object(artifact_dir / "possible_errors_reviewed.json")
     difficulty = _load_json_object(artifact_dir / "comprehension_difficulty.json")
 

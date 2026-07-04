@@ -14,14 +14,16 @@ def _load_json_object(path: Path) -> dict[str, Any]:
     return content
 
 
-def _single_parsed_question(artifact_dir: Path, source_id: str) -> dict[str, Any]:
-    parsed = _load_json_object(artifact_dir / "questions_parsed.json")
+def _single_parsed_question(
+    artifact_dir: Path, source_id: str, filename: str = "questions_parsed.json"
+) -> dict[str, Any]:
+    parsed = _load_json_object(artifact_dir / filename)
     questions = parsed.get("questions")
     if not isinstance(questions, list) or len(questions) != 1:
-        raise ValueError("questions_parsed.json must contain exactly one question")
+        raise ValueError(f"{filename} must contain exactly one question")
     question = questions[0]
     if not isinstance(question, dict):
-        raise ValueError("questions_parsed.json contains an invalid question")
+        raise ValueError(f"{filename} contains an invalid question")
     if question.get("question_id") != source_id:
         raise ValueError(f"Expected question_id {source_id}, got {question.get('question_id')}")
     return question
