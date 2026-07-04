@@ -133,4 +133,25 @@ describe('BatchUpgradeDialog', () => {
     )
     expect(container.firstChild).toBeNull()
   })
+
+  it('shows loading state on confirm and disables buttons', () => {
+    render(
+      <BatchUpgradeDialog
+        open
+        loading
+        jobs={[
+          {
+            id: 'j1',
+            name: 'Job 1',
+            status: 'completed',
+            isWorkflowOutdated: true,
+          },
+        ]}
+        onClose={vi.fn()}
+        onConfirm={vi.fn().mockResolvedValue(undefined)}
+      />
+    )
+    expect(screen.getByText('升级中...')).toHaveAttribute('disabled')
+    expect(screen.getByText('取消')).toHaveAttribute('disabled')
+  })
 })
