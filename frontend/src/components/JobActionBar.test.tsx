@@ -245,6 +245,29 @@ describe('JobActionBar', () => {
     expect(screen.getByText('删除')).toHaveAttribute('disabled')
   })
 
+  it('disables upgrade workflow button when loading', () => {
+    render(
+      <JobActionBar
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'completed',
+            is_workflow_outdated: true,
+          }),
+        ]}
+        mode="batch"
+        loading
+        filters={[{ key: 'clear', label: '取消选择', onClick: vi.fn() }]}
+        onExitSelectMode={vi.fn()}
+        onRerun={vi.fn()}
+        onPackage={vi.fn()}
+        onDelete={vi.fn()}
+        onUpgradeWorkflow={vi.fn()}
+      />
+    )
+    expect(screen.getByText('升级 workflow')).toHaveAttribute('disabled')
+  })
+
   it('opens run-to dialog when the run-to button is clicked', async () => {
     const onRunTo = vi.fn()
     render(
@@ -366,10 +389,32 @@ describe('JobActionBar', () => {
         onRerun={vi.fn()}
         onPackage={vi.fn()}
         onDelete={vi.fn()}
+        onUpgradeWorkflow={vi.fn()}
       />
     )
     expect(screen.getByText('升级 workflow')).toBeInTheDocument()
     expect(screen.getByText('升级 workflow')).not.toHaveAttribute('disabled')
+  })
+
+  it('disables upgrade workflow button when handler is not provided', () => {
+    render(
+      <JobActionBar
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'completed',
+            is_workflow_outdated: true,
+          }),
+        ]}
+        mode="batch"
+        filters={[{ key: 'clear', label: '取消选择', onClick: vi.fn() }]}
+        onExitSelectMode={vi.fn()}
+        onRerun={vi.fn()}
+        onPackage={vi.fn()}
+        onDelete={vi.fn()}
+      />
+    )
+    expect(screen.getByText('升级 workflow')).toHaveAttribute('disabled')
   })
 
   it('disables upgrade workflow button when no job is upgradeable', () => {

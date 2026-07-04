@@ -3,7 +3,8 @@ import { Button } from '@mui/material'
 import type { JobSummary, WorkflowDefinitionRecord } from '../types'
 import { JobRerunDialog, type WorkflowNodesByKey } from './JobRerunDialog'
 import { JobRunToDialog } from './JobRunToDialog'
-import { JobActionBarUpgrade, canUpgradeJob } from './JobActionBarUpgrade'
+import { JobActionBarUpgrade } from './JobActionBarUpgrade'
+import { canUpgradeJob } from './canUpgradeJob'
 import styles from './JobActionBar.module.css'
 
 export type JobActionBarFilter = {
@@ -114,6 +115,7 @@ export function JobActionBar({
           <JobActionBarUpgrade
             jobs={jobs}
             itemLabel={itemLabel}
+            loading={loading}
             onUpgradeWorkflow={onUpgradeWorkflow}
           />
         )}

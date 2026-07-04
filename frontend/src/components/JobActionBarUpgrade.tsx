@@ -2,24 +2,27 @@ import { useState } from 'react'
 import { Button } from '@mui/material'
 import type { JobSummary } from '../types'
 import { BatchUpgradeDialog } from './BatchUpgradeDialog'
+import { canUpgradeJob } from './canUpgradeJob'
 
 export type JobActionBarUpgradeProps = {
   jobs: JobSummary[]
   itemLabel?: string
+  loading?: boolean
   onUpgradeWorkflow?: (jobIds: string[]) => void | Promise<void>
-}
-
-export function canUpgradeJob(job: JobSummary): boolean {
-  return job.is_workflow_outdated === true && job.status !== 'running'
 }
 
 export function JobActionBarUpgrade({
   jobs,
   itemLabel = '任务',
+  loading = false,
   onUpgradeWorkflow,
 }: JobActionBarUpgradeProps) {
   const [open, setOpen] = useState(false)
-  const disabled = jobs.length === 0 || !jobs.some((job) => canUpgradeJob(job))
+  const disabled =
+    jobs.length === 0 ||
+    loading ||
+    !onUpgradeWorkflow ||
+    !jobs.some(canUpgradeJob)
 
   return (
     <>
@@ -40,6 +43,7 @@ export function JobActionBarUpgrade({
             isWorkflowOutdated: job.is_workflow_outdated ?? false,
           }))}
           itemLabel={itemLabel}
+          loading={loading}
           onClose={() => setOpen(false)}
           onConfirm={async (jobIds) => {
             await onUpgradeWorkflow(jobIds)

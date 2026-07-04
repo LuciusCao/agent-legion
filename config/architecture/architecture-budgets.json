@@ -143,6 +143,7 @@
     "frontend/src/components/WorkspacePackageHistoryDialog.tsx": 24,
     "frontend/src/components/WorkspaceStatCards.module.css": 41,
     "frontend/src/components/WorkspaceStatCards.tsx": 46,
+    "frontend/src/components/canUpgradeJob.ts": 10,
     "frontend/src/components/dagNodeStatus.ts": 40,
     "frontend/src/components/jobProgressHelpers.ts": 49,
     "frontend/src/components/materialIconRegistry.ts": 162,
