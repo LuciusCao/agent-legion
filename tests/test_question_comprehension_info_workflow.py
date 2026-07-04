@@ -122,7 +122,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
         workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
-    (artifact_dir / "questions_parsed.json").write_text(
+    (artifact_dir / "questions_parsed_lean.json").write_text(
         json.dumps(
             {
                 "questions": [
@@ -131,7 +131,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
                         "stem": "小明参加了14场象棋比赛，胜5场，负5场，其余为平局。",
                         "options": [{"label": "A", "text": "4场"}],
                         "answer": "A",
-                        "analysis": "",
+                        "analysis": [],
                         "fingerprint": None,
                         "fingerprint_source": "missing",
                         "fingerprint_missing": True,
@@ -142,7 +142,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
         ),
         encoding="utf-8",
     )
-    (artifact_dir / "key_info_reviewed.json").write_text(
+    (artifact_dir / "key_info_reviewed_lean.json").write_text(
         json.dumps(
             {
                 "question_id": "Q100",
@@ -151,10 +151,6 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
                         "key_info_id": "ki_001",
                         "type": "given",
                         "content": {"text": "14场", "position": {"start": 6, "end": 9}},
-                        "question": {
-                            "text": "小明一共参加了多少场比赛？",
-                            "options": [{"label": "A", "text": "14场", "is_correct": True}],
-                        },
                         "question_comprehension_ability": "information_locating",
                     }
                 ],
@@ -227,7 +223,7 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
         workspace_id=workspace["id"],
     )
     artifact_dir = resolve_job_dir(job, tmp_path / "jobs")
-    (artifact_dir / "questions_parsed.json").write_text(
+    (artifact_dir / "questions_parsed_lean.json").write_text(
         json.dumps(
             {
                 "questions": [
@@ -236,7 +232,7 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
                         "stem": "小明参加了14场象棋比赛，胜5场，负5场，其余为平局。",
                         "options": [{"label": "A", "text": "4场"}],
                         "answer": "A",
-                        "analysis": "",
+                        "analysis": [],
                         "fingerprint": None,
                         "fingerprint_source": "missing",
                         "fingerprint_missing": True,
@@ -247,7 +243,7 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
         ),
         encoding="utf-8",
     )
-    (artifact_dir / "key_info_reviewed.json").write_text(
+    (artifact_dir / "key_info_reviewed_lean.json").write_text(
         json.dumps(
             {
                 "question_id": "Q100",
@@ -256,13 +252,6 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
                         "key_info_id": "ki_001",
                         "type": "given",
                         "content": {"text": "14场", "position": {"start": 6, "end": 9}},
-                        "question": {
-                            "text": "小明一共参加了多少场比赛？",
-                            "options": [
-                                {"label": "A", "text": "14场", "is_correct": True},
-                                {"label": "B", "text": "5场", "is_correct": False},
-                            ],
-                        },
                         "question_comprehension_ability": "information_locating",
                     }
                 ],
