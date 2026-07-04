@@ -15,7 +15,8 @@ from typing import Any
 
 _core_path = Path(__file__).with_name("_skill_cost_core.py")
 _spec = importlib.util.spec_from_file_location("_skill_cost_core", _core_path)
-assert _spec is not None and _spec.loader is not None
+if _spec is None or _spec.loader is None:
+    raise ImportError(f"Failed to load skill cost core from {_core_path}")
 _core = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(_core)
 

@@ -6,7 +6,7 @@ import fnmatch
 import json
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 DEFAULT_PRICING = {
     "model": "Doubao-Seed-2.1-turbo",
@@ -58,7 +58,7 @@ def _load_run_meta(run_dir: Path) -> dict[str, Any]:
     run_json = run_dir / "run.json"
     if run_json.is_file():
         try:
-            return json.loads(run_json.read_text(encoding="utf-8"))
+            return cast(dict[str, Any], json.loads(run_json.read_text(encoding="utf-8")))
         except json.JSONDecodeError:
             pass
     return {}
