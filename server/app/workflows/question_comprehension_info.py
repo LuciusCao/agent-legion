@@ -69,11 +69,9 @@ def fetch_questions(
         }
 
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    payload_obj = {"questions": [payload]}
     out_path = artifact_dir / "questions.json"
-    out_path.write_text(
-        json.dumps({"questions": [payload]}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    out_path.write_text(json.dumps(payload_obj, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("  wrote %s", out_path.name)
 
 
@@ -132,14 +130,20 @@ def clean_and_parse(
             "present" if fingerprint else "missing",
             source,
         )
-
     artifact_dir.mkdir(parents=True, exist_ok=True)
+    parsed = {"questions": parsed_questions}
     out_path = artifact_dir / "questions_parsed.json"
-    out_path.write_text(
-        json.dumps({"questions": parsed_questions}, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
+    out_path.write_text(json.dumps(parsed, ensure_ascii=False, indent=2), encoding="utf-8")
     logger.info("  wrote %s", out_path.name)
+    lean = {"questions": _strip_analysis(parsed_questions)}
+    lean_path = artifact_dir / "questions_parsed_lean.json"
+    lean_path.write_text(json.dumps(lean, ensure_ascii=False, indent=2), encoding="utf-8")
+    logger.info("  wrote %s", lean_path.name)
+
+
+def _strip_analysis(parsed_questions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return a copy of parsed questions with the verbose analysis field removed."""
+    return [{**q, "analysis": []} for q in parsed_questions]
 
 
 def assemble_comprehension_info(
