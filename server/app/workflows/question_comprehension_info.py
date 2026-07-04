@@ -161,7 +161,7 @@ def assemble_comprehension_info(
 
     logger.info("  validating input artifacts")
     for name, content in (
-        ("key_info_reviewed.json", key_info),
+        ("key_info_reviewed_lean.json", key_info),
         ("possible_errors_reviewed.json", possible_errors),
         ("comprehension_difficulty.json", difficulty),
     ):
