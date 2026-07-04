@@ -5,14 +5,15 @@ import {
   batchRunToJobs,
   continueJob as apiContinueJob,
 } from '../../../jobApi'
+import { upgradeJobWorkflow } from '../../../jobWorkflowUpgradeApi'
 import type { JobMutationResult } from '../../../jobTypes'
 import { useUiStore } from '../../uiStore'
+import { type JobState, type JobStoreSet } from '../state'
 import {
-  countMutationResults,
-  makeMutationToast,
-  type JobState,
-  type JobStoreSet,
-} from '../state'
+  deselectSucceeded,
+  showMutationToast,
+  succeededIdsFromResults,
+} from './batchMutationHelpers'
 
 export function batchActions(set: JobStoreSet, get: () => JobState) {
   return {
@@ -29,26 +30,8 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
           fromFailedNode,
         })
         const results = data.results ?? []
-        const succeededIds = new Set(
-          results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
-        )
-        set((state) => {
-          const nextSelected = new Set(state.selectedIds)
-          for (const id of succeededIds) {
-            nextSelected.delete(id)
-          }
-          return {
-            selectedIds: nextSelected,
-            selectMode: nextSelected.size === 0 ? false : state.selectMode,
-          }
-        })
-        const counts = countMutationResults(results)
-        useUiStore
-          .getState()
-          .showToast(
-            makeMutationToast('重跑', counts),
-            counts.failed > 0 ? 'error' : 'success'
-          )
+        deselectSucceeded(set, succeededIdsFromResults(results))
+        showMutationToast('重跑', results)
         await get().fetchJobs(workspaceId)
         return data
       } catch (err) {
@@ -86,13 +69,7 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
             selectMode: nextSelected.size === 0 ? false : state.selectMode,
           }
         })
-        const counts = countMutationResults(results)
-        useUiStore
-          .getState()
-          .showToast(
-            makeMutationToast('删除', counts),
-            counts.failed > 0 ? 'error' : 'success'
-          )
+        showMutationToast('删除', results)
         return data
       } catch (err) {
         const message =
@@ -113,19 +90,7 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
       try {
         const data = await packageJobs(workspaceId, ids)
         const results = data.results ?? []
-        const succeededIds = new Set(
-          results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
-        )
-        set((state) => {
-          const nextSelected = new Set(state.selectedIds)
-          for (const id of succeededIds) {
-            nextSelected.delete(id)
-          }
-          return {
-            selectedIds: nextSelected,
-            selectMode: nextSelected.size === 0 ? false : state.selectMode,
-          }
-        })
+        deselectSucceeded(set, succeededIdsFromResults(results))
         useUiStore
           .getState()
           .showToast(
@@ -161,26 +126,8 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
           startNodeKey
         )
         const results = data.results ?? []
-        const succeededIds = new Set(
-          results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
-        )
-        set((state) => {
-          const nextSelected = new Set(state.selectedIds)
-          for (const id of succeededIds) {
-            nextSelected.delete(id)
-          }
-          return {
-            selectedIds: nextSelected,
-            selectMode: nextSelected.size === 0 ? false : state.selectMode,
-          }
-        })
-        const counts = countMutationResults(results)
-        useUiStore
-          .getState()
-          .showToast(
-            makeMutationToast('运行到', counts),
-            counts.failed > 0 ? 'error' : 'success'
-          )
+        deselectSucceeded(set, succeededIdsFromResults(results))
+        showMutationToast('运行到', results)
         await get().fetchJobs(workspaceId)
         return data
       } catch (err) {
@@ -215,6 +162,39 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
         throw err
       } finally {
         set({ continueLoading: false })
+      }
+    },
+
+    async batchUpgradeWorkflow(workspaceId: string, jobIds: string[]) {
+      if (jobIds.length === 0) return { results: [] }
+      set({ batchUpgradeWorkflowLoading: true })
+      const results: JobMutationResult[] = []
+      try {
+        for (const jobId of jobIds) {
+          try {
+            const result = await upgradeJobWorkflow(jobId)
+            results.push(result)
+          } catch (err) {
+            results.push({
+              job_id: jobId,
+              operation: 'upgrade_workflow',
+              status: 'failed',
+              message: err instanceof Error ? err.message : String(err),
+            })
+          }
+        }
+        deselectSucceeded(set, succeededIdsFromResults(results))
+        showMutationToast('升级 workflow', results)
+        await get().fetchJobs(workspaceId)
+        return { results }
+      } catch (err) {
+        const message =
+          err instanceof Error ? err.message : 'Batch workflow upgrade failed'
+        set({ error: message })
+        useUiStore.getState().showToast(message, 'error')
+        throw err
+      } finally {
+        set({ batchUpgradeWorkflowLoading: false })
       }
     },
   }

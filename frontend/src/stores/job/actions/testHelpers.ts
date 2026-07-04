@@ -15,7 +15,6 @@ export function createJobSummary(
     error_message: '',
     error_summary: '',
     id: '',
-    node_summaries: undefined,
     source_id: '',
     source_type: '',
     status: '',
@@ -26,11 +25,9 @@ export function createJobSummary(
     workflow_key: '',
     workspace_id: '',
     workflow_revision_id: '',
-    workflow_version: null,
     workflow_definition_hash: '',
     outcome: '',
     current_workflow_revision_id: '',
-    current_workflow_revision_version: null,
     is_workflow_outdated: false,
     ...partial,
   }
@@ -51,6 +48,7 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     batchRerunLoading: false,
     batchRunToLoading: false,
     continueLoading: false,
+    batchUpgradeWorkflowLoading: false,
     fetchJobs: async () => {},
     setJobsAndFinishLoading: () => {},
     resetForWorkspace: () => {},
@@ -73,10 +71,12 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
         succeeded_count: 0,
       }) as WorkspacePackageResult,
     batchRunTo: async () => ({ results: [] }) as BatchJobMutationResult,
+    batchUpgradeWorkflow: async () =>
+      ({ results: [] }) as BatchJobMutationResult,
     continueJob: async () => ({
       job_id: '',
-      operation: '',
-      status: '',
+      operation: 'continue',
+      status: 'succeeded',
     }),
     ...partial,
   }

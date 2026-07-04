@@ -19,6 +19,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   batchRerunLoading: false,
   batchRunToLoading: false,
   continueLoading: false,
+  batchUpgradeWorkflowLoading: false,
 
   ...fetchActions(set),
   ...selectionActions(set, get),
