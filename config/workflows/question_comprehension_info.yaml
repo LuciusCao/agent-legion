@@ -63,7 +63,7 @@ nodes:
     after: [assess_comprehension_difficulty]
     inputs:
       - questions_parsed_lean.json
-      - key_info_reviewed_lean.json
+      - key_info_reviewed.json
       - possible_errors_reviewed.json
       - comprehension_difficulty.json
     outputs:

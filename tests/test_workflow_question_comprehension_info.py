@@ -191,8 +191,25 @@ def _write_comprehension_inputs(artifact_dir: Path) -> None:
         ),
         encoding="utf-8",
     )
-    (artifact_dir / "key_info_reviewed_lean.json").write_text(
-        __import__("json").dumps({"question_id": "q1", "key_info_list": []}, ensure_ascii=False),
+    (artifact_dir / "key_info_reviewed.json").write_text(
+        __import__("json").dumps(
+            {
+                "question_id": "q1",
+                "key_info_list": [
+                    {
+                        "key_info_id": "ki_001",
+                        "type": "given",
+                        "content": {"text": "题干中的关键信息", "position": {"start": 0, "end": 5}},
+                        "question": {
+                            "text": "关键问题是什么？",
+                            "options": [{"label": "A", "text": "正确选项", "is_correct": True}],
+                        },
+                        "question_comprehension_ability": "information_locating",
+                    }
+                ],
+            },
+            ensure_ascii=False,
+        ),
         encoding="utf-8",
     )
     (artifact_dir / "possible_errors_reviewed.json").write_text(
@@ -203,7 +220,7 @@ def _write_comprehension_inputs(artifact_dir: Path) -> None:
     )
     (artifact_dir / "comprehension_difficulty.json").write_text(
         __import__("json").dumps(
-            {"question_id": "q1", "comprehension_difficulty": {}}, ensure_ascii=False
+            {"question_id": "q1", "comprehension_difficulty": 50}, ensure_ascii=False
         ),
         encoding="utf-8",
     )
@@ -283,8 +300,8 @@ def test_assemble_comprehension_info_missing_input(tmp_path):
 def test_assemble_comprehension_info_input_question_id_mismatch(tmp_path):
     artifact_dir = tmp_path / "artifacts"
     _write_comprehension_inputs(artifact_dir)
-    # Corrupt key_info_reviewed_lean.json to have mismatched question_id
-    (artifact_dir / "key_info_reviewed_lean.json").write_text(
+    # Corrupt key_info_reviewed.json to have mismatched question_id
+    (artifact_dir / "key_info_reviewed.json").write_text(
         __import__("json").dumps({"question_id": "q2", "key_info_list": []}, ensure_ascii=False),
         encoding="utf-8",
     )
