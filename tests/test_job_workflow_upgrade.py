@@ -48,6 +48,39 @@ def test_upgrade_job_workflow_updates_revision_and_rebuilds_nodes(tmp_path: Path
     assert {node["status"] for node in queries.list_job_nodes(job["id"])} == {"pending"}
 
 
+def test_upgrade_job_workflow_updates_null_version_job(tmp_path: Path) -> None:
+    queries = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
+    revisions = WorkflowRevisionService(queries)
+    revisions.publish_workspace_revision(workspace["id"], definition)
+    current = revisions.publish_workspace_revision(workspace["id"], definition)
+    job = queries.create_job(
+        workflow_key=definition.key,
+        source_type="question",
+        source_id="Q1",
+        batch_id="batch1",
+        title="Question 1",
+        node_keys=["fetch_questions"],
+        workspace_id=workspace["id"],
+    )
+    queries.update_job_node(job["id"], "fetch_questions", status="completed")
+    queries.update_job_status(job["id"], "completed")
+    service = JobWorkflowUpgradeService(
+        queries,
+        ExecutorLeaseRepository(queries.path, job_db=queries),
+    )
+
+    result = service.upgrade(workspace["id"], job["id"])
+
+    upgraded = queries.get_job(job["id"])
+    assert result["status"] == "succeeded"
+    assert upgraded["workflow_revision_id"] == current["id"]
+    assert upgraded["workflow_version"] == current["version"]
+    assert upgraded["workflow_definition_hash"] == current["definition_hash"]
+    assert upgraded["status"] == "queued"
+
+
 def test_upgrade_job_workflow_skips_current_revision(tmp_path: Path) -> None:
     queries = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
