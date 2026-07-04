@@ -38,7 +38,7 @@ check-ci: ## 运行 CI 质量门
 # Skill 维护
 .PHONY: skills-lock
 skills-lock: ## 刷新 config/skills.lock
-	$(UV) run python server/app/skills/lock.py
+	PYTHONPATH=. $(UV) run python server/app/skills/lock.py
 
 # 架构预算与契约
 .PHONY: architecture-ratchet
