@@ -10,4 +10,6 @@ def is_workflow_outdated(job: dict[str, Any], active: dict[str, Any] | None) -> 
     if revision_id:
         return revision_id != str(active["id"])
     version = job.get("workflow_version")
-    return version is not None and int(version) != int(active["version"])
+    if version is None:
+        return True
+    return int(version) != int(active["version"])
