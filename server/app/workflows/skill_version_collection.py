@@ -2,11 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from server.app.workflows.skill_version_fallbacks import (
-    UNAVAILABLE_SKILL_VERSION,
-    configured_skill_fallbacks,
-    job_node_fallbacks,
-)
+from server.app.workflows.skill_version_fallbacks import configured_skill_fallbacks
 
 
 def collect_skill_versions(
@@ -14,15 +10,14 @@ def collect_skill_versions(
     context: dict[str, Any] | None,
     job: dict[str, Any] | None = None,
 ) -> dict[str, str]:
-    """Return node_key -> skill version, including fallback entries."""
+    """Return node_key -> skill version for skill-backed nodes only."""
     if context is None:
         return {}
     job_db = context.get("job_db")
     if job_db is None:
         return {}
 
-    versions = job_node_fallbacks(job_id, job_db)
-    versions.update(configured_skill_fallbacks(job, context))
+    versions = configured_skill_fallbacks(job, context)
     try:
         runs = job_db.list_node_runs(job_id)
     except Exception:
@@ -30,8 +25,7 @@ def collect_skill_versions(
 
     for run in runs:
         node_key = run.get("node_key")
-        if node_key:
-            versions[node_key] = run.get("skill_version") or versions.get(
-                node_key, UNAVAILABLE_SKILL_VERSION
-            )
+        skill_version = run.get("skill_version")
+        if node_key and skill_version:
+            versions[node_key] = skill_version
     return versions

@@ -11,6 +11,7 @@ def configured_skill_fallbacks(
     job: dict[str, Any] | None,
     context: dict[str, Any],
 ) -> dict[str, str]:
+    """Return configured skill-backed nodes, excluding local-only nodes."""
     definition = definition_from_job_snapshot(job or {})
     if definition is None:
         return {}
@@ -23,8 +24,9 @@ def configured_skill_fallbacks(
             if skill:
                 skill_by_capability.setdefault(capability, f"configured:{skill}")
     return {
-        node.key: skill_by_capability.get(node.capability, UNAVAILABLE_SKILL_VERSION)
+        node.key: skill_by_capability[node.capability]
         for node in definition.nodes.values()
+        if node.capability in skill_by_capability
     }
 
 

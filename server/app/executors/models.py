@@ -36,6 +36,7 @@ class ExecutionResult:
     run_dir: str = ""
     session_dir: str = ""
     session_reference: str = ""
+    skill_version: str = ""
     produced_artifacts: tuple[str, ...] = ()
 
 

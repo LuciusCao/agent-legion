@@ -26,6 +26,7 @@ def to_execution_result(result: PiRunResult, context: ExecutionContext) -> Execu
         log_path=str(context.log_path),
         run_dir=run_dir,
         session_dir=session_dir,
+        skill_version=result.skill_version,
         produced_artifacts=tuple(
             name for name in context.expected_outputs if (context.job_dir / name).is_file()
         ),

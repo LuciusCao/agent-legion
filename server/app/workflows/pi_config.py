@@ -61,3 +61,4 @@ class PiRunResult:
     run_dir: Path
     session_dir: Path
     error_message: str = ""
+    skill_version: str = ""
