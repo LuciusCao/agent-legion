@@ -1,4 +1,9 @@
-"""Safe ratchet for source-file architecture budgets: adds new, lowers stale, and removes obsolete entries; never raises an existing ceiling."""
+"""Safe ratchet for source-file architecture budgets.
+
+Default mode adds new, lowers stale, and removes obsolete entries without
+raising existing ceilings. The optional --rebase flag raises non-exempt
+ceilings to actual + buffer_lines when the file is within its current ceiling.
+"""
 
 # ruff: noqa: E402
 
