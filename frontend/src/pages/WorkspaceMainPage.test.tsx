@@ -296,6 +296,15 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    const source = EventSourceMock.instances[0]
+    await act(async () => {
+      source.onopen?.()
+    })
+
+    await waitFor(() => {
+      expect(useJobStore.getState().isLoading).toBe(false)
+    })
+
     expect(
       screen.getByRole('heading', {
         name: '开始使用 Workspace',
@@ -303,6 +312,19 @@ describe('WorkspaceMainPage', () => {
       })
     ).toBeInTheDocument()
     expect(screen.getByText('去配置')).toBeInTheDocument()
+  })
+
+  it('shows skeleton while loading jobs', async () => {
+    useJobStore.setState({ isLoading: true, jobs: [] })
+
+    await act(async () => {
+      renderPage()
+    })
+
+    expect(screen.getByTestId('job-list-skeleton')).toBeInTheDocument()
+    expect(
+      screen.queryByRole('heading', { name: '开始使用 Workspace' })
+    ).not.toBeInTheDocument()
   })
 
   it('batch toolbar appears when items selected', async () => {
