@@ -40,7 +40,7 @@ export function TokenUsageRunDetail({
     }
   }, [jobId, runId])
 
-  const usage = (response?.usage as RunUsage | undefined) ?? null
+  const usage = response?.usage ?? null
 
   const compactText = (() => {
     if (loading) return 'Token 用量...'

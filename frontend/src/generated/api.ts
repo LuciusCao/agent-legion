@@ -1412,6 +1412,49 @@ export interface components {
       /** Target Node Key */
       target_node_key: string
     }
+    /** RunUsage */
+    RunUsage: {
+      /** Cache Read Tokens */
+      cache_read_tokens: number
+      cost: components['schemas']['RunUsageCost']
+      /** Input Tokens */
+      input_tokens: number
+      /** Is Complete */
+      is_complete: boolean
+      /** Message Count */
+      message_count: number
+      /** Model */
+      model: string
+      /** Node Key */
+      node_key: string
+      /** Node Run Id */
+      node_run_id: number
+      /** Output Tokens */
+      output_tokens: number
+      /** Provider */
+      provider: string
+      /** Skill Version */
+      skill_version: string
+      /** Total Tokens */
+      total_tokens: number
+      /** Usage Source */
+      usage_source: string
+    }
+    /** RunUsageCost */
+    RunUsageCost: {
+      /** Cache Read */
+      cache_read: number
+      /** Currency */
+      currency: string
+      /** Input */
+      input: number
+      /** Output */
+      output: number
+      /** Pricing Missing */
+      pricing_missing: boolean
+      /** Total */
+      total: number
+    }
     /** TokenUsageJobResponse */
     TokenUsageJobResponse: {
       /** Currency */
@@ -1439,10 +1482,7 @@ export interface components {
       reason: string | null
       /** Run Id */
       run_id: number
-      /** Usage */
-      usage: {
-        [key: string]: unknown
-      } | null
+      usage: components['schemas']['RunUsage'] | null
     }
     /** TokenUsageWorkspaceGroup */
     TokenUsageWorkspaceGroup: {

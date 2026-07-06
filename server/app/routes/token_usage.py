@@ -4,9 +4,9 @@ from fastapi import APIRouter, HTTPException
 
 from server.app.routes.token_usage_contracts import (
     TokenUsageJobResponse,
-    TokenUsageRunResponse,
     TokenUsageWorkspaceResponse,
 )
+from server.app.routes.token_usage_run_contracts import TokenUsageRunResponse
 from server.app.services.token_usage import (
     build_job_usage_response,
     build_run_usage_response,
