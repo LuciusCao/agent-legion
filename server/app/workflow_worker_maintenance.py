@@ -7,6 +7,7 @@ from server.app.jobs import JobQueries
 from server.app.services.job_run_dir_backfill import backfill_node_run_dirs
 from server.app.services.job_skill_version_backfill import backfill_node_run_skill_versions
 from server.app.services.log_cleanup import CleanupConfig, cleanup_old_logs
+from server.app.services.token_usage import backfill_missing_token_usage
 from server.app.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,14 @@ class WorkflowMaintenance:
                 )
         except Exception:
             logger.exception("Failed to backfill node run skill versions")
+
+        try:
+            with self.job_db.connect() as conn:
+                persisted = backfill_missing_token_usage(conn, self.settings.data_dir)
+            if persisted:
+                logger.info("Backfilled %s missing token usage rows", persisted)
+        except Exception:
+            logger.exception("Failed to backfill token usage")
 
     def maybe_cleanup(self) -> None:
         now = time.monotonic()

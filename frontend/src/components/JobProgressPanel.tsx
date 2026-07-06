@@ -12,6 +12,7 @@ import {
   EXECUTOR_KIND_ICONS,
   EXECUTOR_KIND_LABELS,
 } from './jobProgressHelpers'
+import { TokenUsageRunDetail } from './TokenUsageRunDetail'
 import styles from './JobProgressPanel.module.css'
 
 const STATUS_ICONS: Record<string, string> = {
@@ -222,6 +223,12 @@ export function JobProgressPanel({
                   {isExpanded && hasError && (
                     <div className={styles.errorDetail}>
                       {run?.error_message || node.error_message}
+                    </div>
+                  )}
+
+                  {run && (
+                    <div className={styles.tokenUsageRow}>
+                      <TokenUsageRunDetail jobId={jobId} runId={run.id} />
                     </div>
                   )}
                 </div>

@@ -11,6 +11,7 @@ from server.app.routes.job_invalid_paths import create_job_invalid_paths_router
 from server.app.routes.job_workflow_upgrade import create_job_workflow_upgrade_router
 from server.app.routes.jobs import create_jobs_router
 from server.app.routes.questions import create_questions_router
+from server.app.routes.token_usage import create_token_usage_router
 from server.app.routes.video_jobs import create_video_jobs_router
 from server.app.routes.workspace_runs import create_workspace_runs_router
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
@@ -74,6 +75,7 @@ def include_job_routes(
     )
     router.include_router(create_job_artifacts_router(job_artifacts, settings, job_logs))
     router.include_router(create_video_jobs_router(job_db, settings))
+    router.include_router(create_token_usage_router(job_queries, settings))
     router.include_router(create_job_invalid_paths_router(job_artifacts, settings))
     router.include_router(create_workspace_runs_router(job_queries, settings))
     router.include_router(create_questions_router(job_db, settings))
