@@ -377,6 +377,8 @@
     "scripts/migrate-paths-to-relative.py": 288,
     "scripts/migrate-skills-to-external-repos.py": 321,
     "scripts/migrate-video-hive-to-agent-legion.py": 446,
+    "scripts/backfill-video-knowledge-packed.py": 142,
+    "scripts/migrate-legacy-video-packages.py": 190,
     "scripts/migrate_video_hive_to_agent_legion_core.py": 265,
     "scripts/ratchet_architecture_budgets.py": 130,
     "scripts/update_job_titles.py": 122,
