@@ -13,6 +13,7 @@ import type { JobSummary } from '../jobTypes'
 import type { WorkflowDefinitionRecord } from '../types'
 import { JOB_STATUS_LABELS } from '../labels'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
+import { WorkflowVersionFilter } from './WorkflowVersionFilter'
 import styles from './JobFilterBar.module.css'
 
 const STATUS_OPTIONS: JobFilterConfig['status'][] = [
@@ -44,16 +45,6 @@ export function JobFilterBar({
     250
   )
 
-  const versionOptions = useMemo(() => {
-    const versions = new Set<number>()
-    for (const job of jobs) {
-      if (job.workflow_version !== null && job.workflow_version !== undefined) {
-        versions.add(job.workflow_version)
-      }
-    }
-    return Array.from(versions).sort((a, b) => b - a)
-  }, [jobs])
-
   const nodeOptions = useMemo(() => {
     const defined = new Map<string, string>()
     for (const node of workflowDefinition?.nodes ?? []) {
@@ -83,7 +74,10 @@ export function JobFilterBar({
       onDelete: () => onChange({ status: 'all' }),
     },
     filterConfig.workflowVersion !== null && {
-      label: `版本: v${filterConfig.workflowVersion}`,
+      label:
+        filterConfig.workflowVersion === 'none'
+          ? '版本: 未指定版本'
+          : `版本: v${filterConfig.workflowVersion}`,
       onDelete: () => onChange({ workflowVersion: null }),
     },
     filterConfig.activeNodeKey !== null && {
@@ -118,35 +112,12 @@ export function JobFilterBar({
           </Select>
         </FormControl>
 
-        <FormControl size="small" className={styles.control}>
-          <InputLabel id="job-version-filter-label">Workflow 版本</InputLabel>
-          <Select
-            labelId="job-version-filter-label"
-            value={
-              filterConfig.workflowVersion === null
-                ? ''
-                : String(filterConfig.workflowVersion)
-            }
-            label="Workflow 版本"
-            onChange={(e) => {
-              const value = e.target.value
-              onChange({
-                workflowVersion: value === '' ? null : Number(value),
-              })
-            }}
-          >
-            <MenuItem value="">
-              全部版本 (
-              {Object.values(counts.workflowVersion).reduce((a, b) => a + b, 0)}
-              )
-            </MenuItem>
-            {versionOptions.map((version) => (
-              <MenuItem key={version} value={String(version)}>
-                v{version} ({counts.workflowVersion[String(version)] ?? 0})
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
+        <WorkflowVersionFilter
+          value={filterConfig.workflowVersion}
+          counts={counts.workflowVersion}
+          jobs={jobs}
+          onChange={(workflowVersion) => onChange({ workflowVersion })}
+        />
 
         <FormControl size="small" className={styles.control}>
           <InputLabel id="job-node-filter-label">当前运行节点</InputLabel>
@@ -161,8 +132,7 @@ export function JobFilterBar({
             }
           >
             <MenuItem value="">
-              全部节点 (
-              {Object.values(counts.activeNodeKey).reduce((a, b) => a + b, 0)})
+              全部节点 ({counts.activeNodeKey.all ?? 0})
             </MenuItem>
             {nodeOptions.map((node) => (
               <MenuItem key={node.key} value={node.key}>

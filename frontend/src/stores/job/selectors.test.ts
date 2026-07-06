@@ -51,6 +51,22 @@ describe('getVisibleJobs', () => {
     expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j2'])
   })
 
+  it('filters by missing workflow version', () => {
+    const state = createJobState({
+      jobs: [
+        createJobSummary({ id: 'j1', workflow_version: 3 }),
+        createJobSummary({ id: 'j2' }),
+      ],
+      filterConfig: {
+        status: 'all',
+        search: '',
+        workflowVersion: 'none',
+        activeNodeKey: null,
+      },
+    })
+    expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j2'])
+  })
+
   it('filters by active node key', () => {
     const state = createJobState({
       jobs: [
@@ -202,5 +218,38 @@ describe('getFilterCounts', () => {
     const counts = getFilterCounts(state)
     expect(counts.activeNodeKey.extract).toBe(1)
     expect(counts.activeNodeKey.review).toBe(1)
+  })
+
+  it('counts all options using total jobs matching other filters', () => {
+    const state = createJobState({
+      jobs: [
+        createJobSummary({ id: 'j1', status: 'running', workflow_version: 3 }),
+        createJobSummary({
+          id: 'j2',
+          status: 'completed',
+          workflow_version: 2,
+        }),
+        createJobSummary({ id: 'j3', status: 'failed' }),
+        createJobSummary({
+          id: 'j4',
+          status: 'pending',
+          active_node_key: 'extract',
+        }),
+      ],
+      filterConfig: {
+        status: 'all',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
+    })
+    const counts = getFilterCounts(state)
+    expect(counts.status.all).toBe(4)
+    expect(counts.workflowVersion.all).toBe(4)
+    expect(counts.workflowVersion['3']).toBe(1)
+    expect(counts.workflowVersion['2']).toBe(1)
+    expect(counts.workflowVersion.none).toBe(2)
+    expect(counts.activeNodeKey.all).toBe(4)
+    expect(counts.activeNodeKey.extract).toBe(1)
   })
 })

@@ -18,7 +18,7 @@ export type JobStatus =
 export interface JobFilterConfig {
   status: JobStatus | 'all'
   search: string
-  workflowVersion: number | null
+  workflowVersion: number | 'none' | null
   activeNodeKey: string | null
 }
 export interface JobState {

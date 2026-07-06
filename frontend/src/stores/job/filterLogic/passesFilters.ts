@@ -12,12 +12,12 @@ export function passesFilters(
   if (exclude !== 'status' && config.status !== 'all') {
     if (normalizeJobStatus(job.status) !== config.status) return false
   }
-  if (
-    exclude !== 'workflowVersion' &&
-    config.workflowVersion !== null &&
-    job.workflow_version !== config.workflowVersion
-  ) {
-    return false
+  if (exclude !== 'workflowVersion' && config.workflowVersion !== null) {
+    if (config.workflowVersion === 'none') {
+      if (job.workflow_version != null) return false
+    } else if (job.workflow_version !== config.workflowVersion) {
+      return false
+    }
   }
   if (
     exclude !== 'activeNodeKey' &&
