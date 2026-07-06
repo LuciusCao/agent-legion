@@ -342,3 +342,46 @@ def test_get_workspace_token_usage_filters_by_node_key(client, workspace_and_job
     assert body["groups"][0]["group_key"] == "node-a"
     assert body["summary"]["input_tokens"] == 100
     assert body["runs_without_usage"] == 0
+
+
+def test_get_workspace_token_usage_filter_excludes_other_provider_runs(client, workspace_and_job):
+    workspace_id, job_id = workspace_and_job
+    job_db = client.app.state.job_db
+    _insert_node_run(job_db, run_id=50, job_id=job_id, node_key="node-a")
+    _insert_node_run(job_db, run_id=51, job_id=job_id, node_key="node-b")
+    _insert_node_run(job_db, run_id=52, job_id=job_id, node_key="node-c")
+    _insert_token_usage(
+        job_db,
+        node_run_id=50,
+        job_id=job_id,
+        workspace_id=workspace_id,
+        node_key="node-a",
+        provider="gateway",
+        model="your-model-a",
+        skill_version="v1",
+        input_tokens=100,
+        output_tokens=50,
+        cache_read_tokens=10,
+    )
+    _insert_token_usage(
+        job_db,
+        node_run_id=51,
+        job_id=job_id,
+        workspace_id=workspace_id,
+        node_key="node-b",
+        provider="doubao",
+        model="Doubao-Seed-2.1-turbo",
+        skill_version="v1",
+        input_tokens=200,
+        output_tokens=100,
+        cache_read_tokens=20,
+    )
+
+    response = client.get(f"/api/workspaces/{workspace_id}/token-usage?provider=gateway")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runs_with_usage"] == 1
+    assert body["runs_without_usage"] == 1
+    assert body["groups"][0]["runs"] == 1
+    # coverage denominator excludes the run whose usage is under a different provider.
+    assert body["groups"][0]["coverage"] == 0.5
