@@ -16,6 +16,7 @@ from server.app.executors.models import ExecutionStatus
 from server.app.jobs import JobQueries
 from server.app.services.pi_event_compression import compress_pi_events
 from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node
+from server.app.services.token_usage_capture import capture_and_persist_token_usage
 from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
 from server.app.workflows.pi_command_builder import build_pi_command
 from server.app.workflows.pi_config import PiConfig, PiRunResult
@@ -206,6 +207,14 @@ class PiRunner:
         status: ExecutionStatus = "completed" if exit_code == 0 else "failed"
         if job_db is not None and persist_run and run_record is not None:
             job_db.finish_node_run(run_record["id"], status, exit_code, error_message)
+            try:
+                workspace_id = str(job.get("workspace_id", ""))
+                with job_db.connect() as conn:
+                    capture_and_persist_token_usage(conn, run_dir, run_record, workspace_id)
+            except Exception:
+                logger.debug(
+                    "Failed to capture token usage for run %s", run_record["id"], exc_info=True
+                )
 
         # Finalize the run: drop streaming deltas (only the final snapshots are
         # needed for log rendering) and remove older run dirs for this node.

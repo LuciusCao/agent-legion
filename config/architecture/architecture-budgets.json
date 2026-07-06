@@ -578,6 +578,7 @@
     "server/app/services/pi_event_compression.py": 81,
     "server/app/services/run_dir_cleanup.py": 96,
     "server/app/services/token_usage.py": 328,
+    "server/app/services/token_usage_capture.py": 50,
     "server/app/services/token_usage_contracts.py": 68,
     "server/app/services/transcription_providers.py": 62,
     "server/app/services/video_actions.py": 209,
