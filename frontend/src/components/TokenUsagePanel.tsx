@@ -105,9 +105,11 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
 
   const highestCostGroup = useMemo(() => {
     if (!data?.groups.length) return null
-    return data.groups.reduce((max, group) =>
-      group.total_cost > max.total_cost ? group : max
-    )
+    return data.groups.reduce((max, group) => {
+      if (group.total_cost == null) return max
+      if (max.total_cost == null) return group
+      return group.total_cost > max.total_cost ? group : max
+    })
   }, [data])
 
   const filterOptions = useMemo(() => {
