@@ -149,6 +149,7 @@ def _assert_job_summary(summary: JobSummaryResponse) -> None:
     assert isinstance(summary.total_nodes, int)
     assert summary.active_node_key is None or isinstance(summary.active_node_key, str)
     assert isinstance(summary.error_summary, str)
+    assert isinstance(summary.packed, int)
     assert isinstance(summary.execution_control, ExecutionControlSummaryResponse)
     assert isinstance(summary.node_summaries, list)
     for node_summary in summary.node_summaries:
