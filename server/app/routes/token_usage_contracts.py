@@ -3,13 +3,6 @@ from __future__ import annotations
 from pydantic import BaseModel
 
 
-class TokenUsageRunResponse(BaseModel):
-    job_id: str
-    run_id: int
-    usage: dict[str, object] | None
-    reason: str | None
-
-
 class TokenUsageJobResponse(BaseModel):
     job_id: str
     runs: list[dict[str, object]]
