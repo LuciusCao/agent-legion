@@ -41,3 +41,6 @@ from server.app.db.migrations.v016_workflow_revisions import MIGRATION as V016_W
 from server.app.db.migrations.v017_job_workflow_version import (
     MIGRATION as V017_JOB_WORKFLOW_VERSION,
 )
+from server.app.db.migrations.v018_node_run_token_usage import (
+    MIGRATION as V018_NODE_RUN_TOKEN_USAGE,
+)
