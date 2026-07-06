@@ -149,6 +149,24 @@ describe('getFilterCounts', () => {
     expect(counts.status.pending).toBe(1)
   })
 
+  it('counts all statuses when status filter is all', () => {
+    const state = createJobState({
+      jobs: [
+        createJobSummary({ id: 'j1', status: 'running' }),
+        createJobSummary({ id: 'j2', status: 'failed' }),
+        createJobSummary({ id: 'j3', status: 'failed' }),
+      ],
+      filterConfig: {
+        status: 'all',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
+    })
+    const counts = getFilterCounts(state)
+    expect(counts.status.all).toBe(3)
+  })
+
   it('counts versions excluding the version filter', () => {
     const state = createJobState({
       jobs: [
