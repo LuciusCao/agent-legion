@@ -115,6 +115,7 @@ class PiRunner:
                         run_dir=run_dir,
                         session_dir=session_dir,
                         error_message="node run not in a startable state",
+                        skill_version=skill_version,
                     )
 
             env = dict(os.environ)
@@ -223,6 +224,7 @@ class PiRunner:
             run_dir=run_dir,
             session_dir=session_dir,
             error_message=error_message,
+            skill_version=skill_version,
         )
 
     def _wait_for_process(

@@ -201,6 +201,7 @@ def test_finish_is_idempotent_and_updates_job_aggregate_status(
         log_path="logs/updated.log",
         run_dir=str(run_dir),
         session_dir=str(session_dir),
+        skill_version="v1.2.3@abc123",
     )
     assert repo_a.finish(claim.lease_id, result) is True
     assert repo_a.finish(claim.lease_id, result) is False
@@ -217,6 +218,7 @@ def test_finish_is_idempotent_and_updates_job_aggregate_status(
     assert run["log_path"] == "logs/updated.log"
     assert run["run_dir"] == run_dir.relative_to(data_dir).as_posix()
     assert run["session_dir"] == session_dir.relative_to(data_dir).as_posix()
+    assert run["skill_version"] == "v1.2.3@abc123"
     assert job["status"] == "completed"
 
 

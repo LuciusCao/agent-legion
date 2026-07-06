@@ -62,7 +62,8 @@ def finish_lease(
         """
         update node_runs
         set status=?, exit_code=?, error_message=?,
-            command_json=?, log_path=?, run_dir=?, session_dir=?, finished_at=?
+            command_json=?, log_path=?, run_dir=?, session_dir=?,
+            skill_version=?, finished_at=?
         where id=?
         """,
         (
@@ -73,6 +74,7 @@ def finish_lease(
             effective_log_path,
             run_dir,
             session_dir,
+            result.skill_version,
             now_str,
             lease["node_run_id"],
         ),

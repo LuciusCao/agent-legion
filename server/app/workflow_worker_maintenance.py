@@ -5,6 +5,7 @@ import time
 
 from server.app.jobs import JobQueries
 from server.app.services.job_run_dir_backfill import backfill_node_run_dirs
+from server.app.services.job_skill_version_backfill import backfill_node_run_skill_versions
 from server.app.services.log_cleanup import CleanupConfig, cleanup_old_logs
 from server.app.settings import Settings
 
@@ -33,6 +34,18 @@ class WorkflowMaintenance:
                 logger.info("Backfilled %s missing node run directories", updated)
         except Exception:
             logger.exception("Failed to backfill node run directories")
+
+        try:
+            with self.job_db.connect() as conn:
+                result = backfill_node_run_skill_versions(conn, self.settings.data_dir)
+            if result.node_runs_updated or result.manifests_updated:
+                logger.info(
+                    "Backfilled %s node run skill versions and refreshed %s manifests",
+                    result.node_runs_updated,
+                    result.manifests_updated,
+                )
+        except Exception:
+            logger.exception("Failed to backfill node run skill versions")
 
     def maybe_cleanup(self) -> None:
         now = time.monotonic()

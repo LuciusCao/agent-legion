@@ -321,10 +321,7 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
 
     manifest = json.loads((artifact_dir / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["skill_versions"] == {
-        "fetch_questions": "unavailable",
-        "clean_and_parse": "unavailable",
         "generate_key_info": "v1.2.2@abc123",
-        "assemble_comprehension_info": "unavailable",
     }
     assert all(version for version in manifest["skill_versions"].values())
 
