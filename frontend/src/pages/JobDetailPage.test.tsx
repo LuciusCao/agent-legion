@@ -197,6 +197,17 @@ function createFetchMock(
         }),
       })
     }
+    if (url === '/api/jobs/j1/runs/1/token-usage' && method === 'GET') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          job_id: 'j1',
+          run_id: 1,
+          usage: null,
+          reason: 'no token usage recorded for run',
+        }),
+      })
+    }
     return Promise.resolve({ ok: true, json: async () => ({}) })
   })
 }
@@ -251,12 +262,12 @@ describe('JobDetailPage', () => {
       expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
 
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it.each([['running'], ['queued']] as const)(
@@ -270,19 +281,19 @@ describe('JobDetailPage', () => {
         expect(screen.getByText('提取')).toBeInTheDocument()
       })
 
-      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledTimes(2)
 
       await act(async () => {
         vi.advanceTimersByTime(5000)
       })
-      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock).toHaveBeenCalledTimes(3)
 
       unmount()
 
       await act(async () => {
         vi.advanceTimersByTime(5000)
       })
-      expect(fetchMock).toHaveBeenCalledTimes(2)
+      expect(fetchMock).toHaveBeenCalledTimes(3)
     }
   )
 
@@ -362,12 +373,12 @@ describe('JobDetailPage', () => {
       expect(screen.getByText('提取')).toBeInTheDocument()
     })
 
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
 
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
-    expect(fetchMock).toHaveBeenCalledTimes(1)
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('disables rerun and package for a running job', async () => {

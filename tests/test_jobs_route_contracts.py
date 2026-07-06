@@ -48,6 +48,9 @@ EXPECTED_OPERATIONS = {
     ("post", "/api/jobs/{job_id}/continue"): "JobMutationResultResponse",
     ("get", "/api/jobs/{job_id}/artifacts/{artifact_name}"): "ArtifactResponse",
     ("get", "/api/jobs/{job_id}/runs/{run_id}/log"): "JobLogResponse",
+    ("get", "/api/jobs/{job_id}/runs/{run_id}/token-usage"): "TokenUsageRunResponse",
+    ("get", "/api/jobs/{job_id}/token-usage"): "TokenUsageJobResponse",
+    ("get", "/api/workspaces/{workspace_id}/token-usage"): "TokenUsageWorkspaceResponse",
     ("get", "/api/jobs/{job_id}/{invalid_path}"): "ArtifactResponse",
 }
 

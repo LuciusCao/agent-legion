@@ -160,6 +160,11 @@ import type {
   JobsResponse,
   JobBatchResponse,
 } from './jobTypes'
+import type {
+  TokenUsageRunResponse,
+  TokenUsageJobResponse,
+  TokenUsageWorkspaceResponse,
+} from './tokenUsageTypes'
 
 export type {
   JobNodeSummary,
@@ -168,6 +173,11 @@ export type {
   NodeRun,
   JobsResponse,
   JobBatchResponse,
+}
+export type {
+  TokenUsageRunResponse,
+  TokenUsageJobResponse,
+  TokenUsageWorkspaceResponse,
 }
 
 /** @deprecated use {@link JobSummary} directly */

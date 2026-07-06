@@ -19,5 +19,5 @@ export type WorkspacePackageResult =
 export type WorkspacePackageResultItem =
   components['schemas']['WorkspacePackageResultResponse']
 export type RunToRequest = components['schemas']['RunToRequest']
-export type ContinueJobRequest = components['schemas']['ContinueJobRequest']
 export type BatchRunToRequest = components['schemas']['BatchRunToRequest']
+export type ContinueJobRequest = components['schemas']['ContinueJobRequest']
