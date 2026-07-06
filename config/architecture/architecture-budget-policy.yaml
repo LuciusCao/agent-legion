@@ -9,7 +9,7 @@ production:
       extensions: [.py]
   exclude:
     - frontend/src/generated/**
-  buffer_lines: 5
+  buffer_lines: 10
 tests:
   roots:
     - path: tests
