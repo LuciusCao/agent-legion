@@ -48,6 +48,7 @@ export default function WorkspaceMainPage() {
     batchDeleteLoading,
     batchRunToLoading,
     batchUpgradeWorkflowLoading,
+    isLoading: jobsLoading,
   } = useJobStore()
 
   const [workflowDefinition, setWorkflowDefinition] =
@@ -61,8 +62,6 @@ export default function WorkspaceMainPage() {
       fetchWorkspaceStats(workspaceId)
     }
   }, [workspaceId, fetchWorkspaceStats])
-
-  // Jobs are loaded once by useWorkspaceEvents when the SSE connection opens.
 
   useEffect(() => {
     const workflowKey = workspaceId
@@ -202,7 +201,7 @@ export default function WorkspaceMainPage() {
         />
       </section>
 
-      {filteredJobs.length === 0 && totalJobs === 0 ? (
+      {filteredJobs.length === 0 && totalJobs === 0 && !jobsLoading ? (
         <section style={sectionStyle}>
           <EmptyStateGuide steps={emptyStateSteps} />
         </section>
