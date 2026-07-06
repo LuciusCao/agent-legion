@@ -1,0 +1,32 @@
+# Example configuration for the standalone comprehension uploader.
+# Copy this file and adjust the values for your environment.
+
+api_base_url: "https://addons-api-test.example.com/questionsource"
+
+# Authentication:
+#   The tool reads BASECMS_TOKEN from the environment (or .env) first.
+#   If BASECMS_TOKEN is not set, it generates a token using:
+#     BASECMS_APP_ID, BASECMS_NONCE, BASECMS_SECRET, BASECMS_TOKEN_URL
+#   You can also override the token generation parameters below.
+# token: "hardcoded-token-only-for-local-tests"
+# token_gen:
+#   app_id: "..."
+#   nonce: "..."
+#   secret: "..."
+#   url: "https://cms.example.com/openapi/token"
+
+db_path: "data/comprehension_uploader.db"
+
+question_source:
+  type: "json_file"
+  path: "data/question_snapshots.json"      # question_id -> {stem, options, ...}
+  # Or use an HTTP source:
+  # type: "http"
+  # url_template: "https://cms.example.com/api/question/{question_id}"
+  # headers:
+  #   Authorization: "Bearer {token}"
+  # response_path: "data.normalized"
+
+upload_on_duplicate: "update"   # "update" | "skip"
+request_timeout: 30
+max_retries: 3
