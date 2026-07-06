@@ -1,23 +1,23 @@
 .panel {
   background: #ffffff;
   border-radius: 8px;
-  padding: 16px;
+  padding: 18px;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
 }
 
 .row {
   display: flex;
-  gap: 12px;
+  gap: 16px;
   align-items: center;
   flex-wrap: wrap;
 }
 
 .control {
-  min-width: 180px;
+  min-width: 220px;
 }
 
 .search {
-  min-width: 220px;
+  min-width: 320px;
   margin-left: auto;
 }
 
