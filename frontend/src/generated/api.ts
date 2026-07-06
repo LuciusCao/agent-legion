@@ -175,6 +175,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/jobs/{job_id}/runs/{run_id}/token-usage': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Run Token Usage */
+    get: operations['get_run_token_usage_api_jobs__job_id__runs__run_id__token_usage_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/jobs/{job_id}/token-usage': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Job Token Usage */
+    get: operations['get_job_token_usage_api_jobs__job_id__token_usage_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/jobs/{job_id}/upgrade-workflow': {
     parameters: {
       query?: never
@@ -750,6 +784,23 @@ export interface paths {
     }
     /** Get Workspace Stats */
     get: operations['get_workspace_stats_api_workspaces__workspace_id__stats_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/token-usage': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workspace Token Usage */
+    get: operations['get_workspace_token_usage_api_workspaces__workspace_id__token_usage_get']
     put?: never
     post?: never
     delete?: never
@@ -1360,6 +1411,94 @@ export interface components {
       start_node_key?: string | null
       /** Target Node Key */
       target_node_key: string
+    }
+    /** TokenUsageJobResponse */
+    TokenUsageJobResponse: {
+      /** Currency */
+      currency: string
+      /** Job Id */
+      job_id: string
+      /** Runs */
+      runs: {
+        [key: string]: unknown
+      }[]
+      /** Runs With Usage */
+      runs_with_usage: number
+      /** Runs Without Usage */
+      runs_without_usage: number
+      /** Total */
+      total: {
+        [key: string]: unknown
+      }
+    }
+    /** TokenUsageRunResponse */
+    TokenUsageRunResponse: {
+      /** Job Id */
+      job_id: string
+      /** Reason */
+      reason: string | null
+      /** Run Id */
+      run_id: number
+      /** Usage */
+      usage: {
+        [key: string]: unknown
+      } | null
+    }
+    /** TokenUsageWorkspaceGroup */
+    TokenUsageWorkspaceGroup: {
+      /** Avg Cache Read Tokens */
+      avg_cache_read_tokens: number
+      /** Avg Cost */
+      avg_cost: number
+      /** Avg Input Tokens */
+      avg_input_tokens: number
+      /** Avg Output Tokens */
+      avg_output_tokens: number
+      /** Avg Total Tokens */
+      avg_total_tokens: number
+      /** Coverage */
+      coverage: number
+      /** Group Key */
+      group_key: string
+      /** Model */
+      model: string
+      /** Node Key */
+      node_key: string
+      /** Pricing Missing */
+      pricing_missing: boolean
+      /** Provider */
+      provider: string
+      /** Runs */
+      runs: number
+      /** Skill Version */
+      skill_version: string
+      /** Total Cache Read Tokens */
+      total_cache_read_tokens: number
+      /** Total Cost */
+      total_cost: number
+      /** Total Input Tokens */
+      total_input_tokens: number
+      /** Total Output Tokens */
+      total_output_tokens: number
+      /** Total Tokens */
+      total_tokens: number
+    }
+    /** TokenUsageWorkspaceResponse */
+    TokenUsageWorkspaceResponse: {
+      /** Currency */
+      currency: string
+      /** Groups */
+      groups: components['schemas']['TokenUsageWorkspaceGroup'][]
+      /** Runs With Usage */
+      runs_with_usage: number
+      /** Runs Without Usage */
+      runs_without_usage: number
+      /** Summary */
+      summary: {
+        [key: string]: unknown
+      }
+      /** Workspace Id */
+      workspace_id: string
     }
     /** ValidationError */
     ValidationError: {
@@ -2305,6 +2444,69 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['JobLogResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_run_token_usage_api_jobs__job_id__runs__run_id__token_usage_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        job_id: string
+        run_id: number
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TokenUsageRunResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_job_token_usage_api_jobs__job_id__token_usage_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        job_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TokenUsageJobResponse']
         }
       }
       /** @description Validation Error */
@@ -3541,6 +3743,45 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceStatsResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_workspace_token_usage_api_workspaces__workspace_id__token_usage_get: {
+    parameters: {
+      query?: {
+        node_key?: string | null
+        job_id?: string | null
+        provider?: string | null
+        model?: string | null
+        skill_version?: string | null
+        group_by?: string
+        limit?: number
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['TokenUsageWorkspaceResponse']
         }
       }
       /** @description Validation Error */
