@@ -61,7 +61,7 @@ def write_baseline(root: Path, files_dict: dict[str, int]) -> None:
     )
 
 
-def test_five_line_slack_allows_growth(tmp_path: Path) -> None:
+def test_buffer_slack_allows_growth(tmp_path: Path) -> None:
     root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
     write_baseline(root, {"server/app/example.py": 110})
     assert check_file_budgets(root, policy, ()) == []
