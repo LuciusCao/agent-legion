@@ -299,6 +299,17 @@ def test_rebase_is_idempotent(tmp_path):
     assert read_baseline(root) == {"server/app/example.py": 30}
 
 
+def test_rebase_still_fails_when_actual_exceeds_ceiling(tmp_path):
+    root = configured_repo(
+        tmp_path,
+        {"server/app/example.py": 100},
+        baseline={"server/app/example.py": 90},
+    )
+    result = ratchet_budgets(root, rebase=True)
+    assert "exceeds ceiling 90" in result.errors[0]
+    assert result.changed is False
+
+
 def test_rebase_still_respects_frozen_ceiling_when_actual_exceeds_it(tmp_path):
     root = configured_repo(
         tmp_path,
