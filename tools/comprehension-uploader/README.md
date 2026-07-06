@@ -56,6 +56,33 @@ make scan-comprehension CONFIG=config.prod.yaml OUTPUT=stale.json
 No extra `export` is needed as long as `BASECMS_APP_ID`, `BASECMS_NONCE`,
 `BASECMS_SECRET`, and `BASECMS_TOKEN_URL` are set in `.env`.
 
+### Work with a workspace package zip
+
+After packaging jobs in the workspace UI, download the generated zip. You can
+either produce an intermediate `package.jsonl` first, or upload directly.
+
+Build a `package.jsonl` from the zip:
+
+```bash
+uv run python tools/comprehension-uploader/run.py package \
+  --config config.prod.yaml \
+  --workspace-package workspace-jobs-20260706120000000000.zip \
+  --output package.jsonl
+```
+
+Upload directly without keeping the intermediate file:
+
+```bash
+make upload-workspace-package \
+  CONFIG=config.prod.yaml \
+  PACKAGE=workspace-jobs-20260706120000000000.zip \
+  WORKSPACE=ws-123
+```
+
+`WORKSPACE` is still used for the batch id and upload log grouping. The CLI
+extracts each job's `comprehension_info.json` from the zip, builds a temporary
+`package.jsonl`, and uploads it.
+
 ## Input format (`package.jsonl`)
 
 Each line is a JSON object:
