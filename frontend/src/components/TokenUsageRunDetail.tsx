@@ -4,10 +4,7 @@ import type { RunUsage, TokenUsageRunResponse } from '../tokenUsageTypes'
 import { MaterialIcon } from './MaterialIcon'
 import styles from './TokenUsageRunDetail.module.css'
 
-interface TokenUsageRunDetailProps {
-  jobId: string
-  runId: number
-}
+type TokenUsageRunDetailProps = { jobId: string; runId: number }
 
 function formatCost(value: number, currency: string): string {
   if (value === 0) return `${currency} 0.0000`
@@ -49,7 +46,7 @@ export function TokenUsageRunDetail({
     const costTotal = usage?.cost?.total
     const currency = usage?.cost?.currency
     const costText =
-      costTotal !== undefined && currency
+      typeof costTotal === 'number' && currency
         ? formatCost(costTotal, currency)
         : undefined
     return `Token: ${total.toLocaleString('zh-CN')}${costText ? ` · ${costText}` : ''}`
@@ -143,26 +140,34 @@ function TokenUsageBreakdown({ usage }: { usage: RunUsage | null }) {
         <TokenMetric label="Total" value={total_tokens} highlight />
       </div>
       <div className={styles.sectionTitle}>费用明细</div>
-      <div className={styles.grid}>
-        <CostMetric label="Input" value={cost.input} currency={cost.currency} />
-        <CostMetric
-          label="Output"
-          value={cost.output}
-          currency={cost.currency}
-        />
-        <CostMetric
-          label="Cache read"
-          value={cost.cache_read}
-          currency={cost.currency}
-        />
-        <CostMetric
-          label="Total"
-          value={cost.total}
-          currency={cost.currency}
-          highlight
-        />
-      </div>
-      {cost.pricing_missing && (
+      {cost ? (
+        <div className={styles.grid}>
+          <CostMetric
+            label="Input"
+            value={cost.input}
+            currency={cost.currency}
+          />
+          <CostMetric
+            label="Output"
+            value={cost.output}
+            currency={cost.currency}
+          />
+          <CostMetric
+            label="Cache read"
+            value={cost.cache_read}
+            currency={cost.currency}
+          />
+          <CostMetric
+            label="Total"
+            value={cost.total}
+            currency={cost.currency}
+            highlight
+          />
+        </div>
+      ) : (
+        <p className={styles.empty}>未配置价格</p>
+      )}
+      {usage.pricing_missing && (
         <div className={styles.pricingMissing}>缺少定价配置，费用为估算值</div>
       )}
     </div>
@@ -197,7 +202,7 @@ function CostMetric({
   highlight,
 }: {
   label: string
-  value: number
+  value: number | null | undefined
   currency: string
   highlight?: boolean
 }) {
@@ -206,7 +211,9 @@ function CostMetric({
       className={`${styles.metric} ${highlight ? styles.metricHighlight : ''}`}
     >
       <span className={styles.metricLabel}>{label}</span>
-      <span className={styles.metricValue}>{formatCost(value, currency)}</span>
+      <span className={styles.metricValue}>
+        {typeof value === 'number' ? formatCost(value, currency) : '-'}
+      </span>
     </div>
   )
 }

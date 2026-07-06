@@ -132,7 +132,7 @@ def test_get_run_token_usage_returns_usage_and_cost(client, workspace_and_job):
     assert usage["cache_read_tokens"] == 200000
     assert usage["total_tokens"] == 1700000
     assert usage["cost"]["currency"] == "CNY"
-    assert usage["cost"]["pricing_missing"] is False
+    assert usage["pricing_missing"] is False
     assert usage["cost"]["total"] == pytest.approx(3.0 + 7.5 + 0.12)
     assert body["reason"] is None
 
@@ -261,7 +261,7 @@ def test_get_workspace_token_usage_groups_by_node(client, workspace_and_job):
     assert groups["node-a"]["provider"] == ""
 
 
-def test_get_workspace_token_usage_groups_by_provider(client, workspace_and_job):
+def test_get_workspace_token_usage_groups_by_model(client, workspace_and_job):
     workspace_id, job_id = workspace_and_job
     job_db = client.app.state.job_db
     _insert_node_run(job_db, run_id=30, job_id=job_id, node_key="node-a")
@@ -293,14 +293,14 @@ def test_get_workspace_token_usage_groups_by_provider(client, workspace_and_job)
         cache_read_tokens=10,
     )
 
-    response = client.get(f"/api/workspaces/{workspace_id}/token-usage?group_by=provider")
+    response = client.get(f"/api/workspaces/{workspace_id}/token-usage?group_by=model")
     assert response.status_code == 200
     body = response.json()
     groups = {g["group_key"]: g for g in body["groups"]}
-    assert set(groups) == {"gateway", "doubao"}
-    assert groups["gateway"]["provider"] == "gateway"
-    assert groups["gateway"]["node_key"] == ""
-    assert groups["gateway"]["runs"] == 1
+    assert set(groups) == {"your-model-a", "Doubao-Seed-2.1-turbo"}
+    assert groups["your-model-a"]["model"] == "your-model-a"
+    assert groups["your-model-a"]["node_key"] == ""
+    assert groups["your-model-a"]["runs"] == 1
 
 
 def test_get_workspace_token_usage_filters_by_node_key(client, workspace_and_job):
@@ -443,3 +443,42 @@ def test_get_workspace_token_usage_groups_by_node_skill_version(client, workspac
     assert groups["node-a / v1"]["total_input_tokens"] == 100
     assert groups["node-a / v2"]["total_input_tokens"] == 200
     assert groups["node-b / v1"]["total_input_tokens"] == 300
+
+
+def test_get_run_token_usage_missing_pricing_returns_null_cost(client, workspace_and_job):
+    workspace_id, job_id = workspace_and_job
+    job_db = client.app.state.job_db
+    _insert_node_run(job_db, run_id=3, job_id=job_id, node_key="node-c")
+    _insert_token_usage(
+        job_db,
+        node_run_id=3,
+        job_id=job_id,
+        workspace_id=workspace_id,
+        node_key="node-c",
+        provider="unknown",
+        model="unknown-model",
+        skill_version="v1",
+        input_tokens=100,
+        output_tokens=50,
+        cache_read_tokens=10,
+    )
+
+    response = client.get(f"/api/jobs/{job_id}/runs/3/token-usage")
+    assert response.status_code == 200
+    body = response.json()
+    usage = body["usage"]
+    assert usage is not None
+    assert usage["cost"] is None
+    assert usage["pricing_missing"] is True
+
+
+def test_get_workspace_token_usage_rejects_invalid_group_by(client, workspace_and_job):
+    workspace_id, _job_id = workspace_and_job
+    response = client.get(f"/api/workspaces/{workspace_id}/token-usage?group_by=provider")
+    assert response.status_code == 422
+
+
+def test_get_workspace_token_usage_caps_limit(client, workspace_and_job):
+    workspace_id, _job_id = workspace_and_job
+    response = client.get(f"/api/workspaces/{workspace_id}/token-usage?limit=10000")
+    assert response.status_code == 422
