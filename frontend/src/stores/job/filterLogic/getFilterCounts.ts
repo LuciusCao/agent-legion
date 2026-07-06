@@ -35,5 +35,7 @@ export function getFilterCounts(source: {
     }
   }
 
+  counts.status.all = Object.values(counts.status).reduce((a, b) => a + b, 0)
+
   return counts
 }
