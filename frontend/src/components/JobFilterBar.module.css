@@ -13,10 +13,13 @@
 }
 
 .control {
+  flex: 0 0 220px;
   min-width: 220px;
+  width: 220px;
 }
 
 .search {
+  flex: 1 1 320px;
   min-width: 320px;
   margin-left: auto;
 }
