@@ -80,6 +80,7 @@ def _provider_model_from_run_json(run_json: dict[str, Any]) -> tuple[str, str]:
 def parse_run_usage(
     run_dir: Path,
     node_run: Mapping[str, Any],
+    workspace_id: str | None = None,
 ) -> TokenUsageSummary | None:
     """Parse token usage for a single node run.
 
@@ -152,7 +153,7 @@ def parse_run_usage(
     return TokenUsageSummary(
         node_run_id=node_run_id,
         job_id=str(node_run.get("job_id", "")),
-        workspace_id="",
+        workspace_id=str(workspace_id or node_run.get("workspace_id", "")),
         node_key=str(node_run.get("node_key", "")),
         provider=provider,
         model=model,
@@ -266,7 +267,7 @@ def calculate_cost(
     )
 
 
-def backfill_missing_token_usage(conn: sqlite3.Connection, data_dir: Path, limit: int = 100) -> int:
+def backfill_missing_token_usage(conn: sqlite3.Connection, data_dir: Path, limit: int = 500) -> int:
     """Backfill token usage for completed/failed node runs that lack a summary row.
 
     Returns the number of rows persisted. Missing run directories and missing
