@@ -20,6 +20,7 @@ from server.app.settings import Settings
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.definition import (
     WorkflowDefinition,
+    WorkflowEdge,
     WorkflowIntake,
     WorkflowNode,
 )
@@ -76,6 +77,26 @@ def test_ancestor_closure_for_branched_target() -> None:
     definition = _branched_definition()
     closure = ancestor_closure(definition, "target")
     assert closure == frozenset({"root", "left", "target"})
+
+
+def test_ancestor_closure_uses_edges_when_after_is_empty() -> None:
+    definition = WorkflowDefinition(
+        key="edge_only",
+        label="Edge Only",
+        intake=WorkflowIntake(),
+        nodes={
+            "root": WorkflowNode(key="root", label="Root", capability="root"),
+            "gate": WorkflowNode(key="gate", label="Gate", capability="gate"),
+            "target": WorkflowNode(key="target", label="Target", capability="target"),
+        },
+        edges=[
+            WorkflowEdge(source="root", target="gate"),
+            WorkflowEdge(source="gate", target="target"),
+        ],
+        schema_version=2,
+    )
+
+    assert ancestor_closure(definition, "target") == frozenset({"root", "gate", "target"})
 
 
 def test_ancestor_closure_unknown_target_raises() -> None:
