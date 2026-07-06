@@ -53,7 +53,7 @@ describe('jobStore', () => {
       selectedIds: new Set(),
       expandedId: null,
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: null,
         activeNodeKey: null,

@@ -34,7 +34,7 @@ function renderBar(props = {}) {
   const utils = render(
     <JobFilterBar
       filterConfig={{
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
@@ -161,7 +161,7 @@ describe('JobFilterBar', () => {
   it('renders missing version active filter chip', () => {
     renderBar({
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: 'none',
         activeNodeKey: null,
@@ -191,6 +191,6 @@ describe('JobFilterBar', () => {
     const deleteIcon = chip?.querySelector('[data-testid="CancelIcon"]')
     expect(deleteIcon).toBeTruthy()
     fireEvent.click(deleteIcon!)
-    expect(onChange).toHaveBeenCalledWith({ status: 'all' })
+    expect(onChange).toHaveBeenCalledWith({ status: null })
   })
 })

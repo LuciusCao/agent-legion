@@ -74,6 +74,7 @@ export function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
     current_workflow_revision_id: '',
     current_workflow_revision_version: null,
     is_workflow_outdated: false,
+    packed: 0,
     ...overrides,
   }
 }

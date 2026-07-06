@@ -1202,6 +1202,11 @@ export interface components {
        * @default
        */
       outcome: string
+      /**
+       * Packed
+       * @default 0
+       */
+      packed: number
       /** Source Id */
       source_id: string
       /** Source Type */

@@ -9,7 +9,7 @@ export function passesFilters(
   config: JobFilterConfig,
   exclude?: FilterDimension
 ): boolean {
-  if (exclude !== 'status' && config.status !== 'all') {
+  if (exclude !== 'status' && config.status !== null) {
     if (normalizeJobStatus(job.status) !== config.status) return false
   }
   if (exclude !== 'workflowVersion' && config.workflowVersion !== null) {

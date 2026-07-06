@@ -42,7 +42,7 @@ describe('getVisibleJobs', () => {
         createJobSummary({ id: 'j2', workflow_version: 2 }),
       ],
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: 2,
         activeNodeKey: null,
@@ -58,7 +58,7 @@ describe('getVisibleJobs', () => {
         createJobSummary({ id: 'j2' }),
       ],
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: 'none',
         activeNodeKey: null,
@@ -74,7 +74,7 @@ describe('getVisibleJobs', () => {
         createJobSummary({ id: 'j2', active_node_key: 'review' }),
       ],
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: null,
         activeNodeKey: 'review',
@@ -100,7 +100,7 @@ describe('getVisibleJobs', () => {
         }),
       ],
       filterConfig: {
-        status: 'all',
+        status: null,
         search: 'B2',
         workflowVersion: null,
         activeNodeKey: null,
@@ -154,7 +154,7 @@ describe('getFilterCounts', () => {
         createJobSummary({ id: 'j2', status: 'pending' }),
       ],
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
@@ -173,7 +173,7 @@ describe('getFilterCounts', () => {
         createJobSummary({ id: 'j3', status: 'failed' }),
       ],
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
@@ -191,7 +191,7 @@ describe('getFilterCounts', () => {
         createJobSummary({ id: 'j3', workflow_version: 2 }),
       ],
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: 2,
         activeNodeKey: null,
@@ -209,7 +209,7 @@ describe('getFilterCounts', () => {
         createJobSummary({ id: 'j2', active_node_key: 'review' }),
       ],
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: null,
         activeNodeKey: 'extract',
@@ -237,7 +237,7 @@ describe('getFilterCounts', () => {
         }),
       ],
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: null,
         activeNodeKey: null,

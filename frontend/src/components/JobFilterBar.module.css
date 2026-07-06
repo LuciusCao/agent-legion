@@ -13,15 +13,15 @@
 }
 
 .control {
-  flex: 0 0 220px;
-  min-width: 220px;
-  width: 220px;
+  flex: 0 0 180px;
+  min-width: 180px;
+  width: 180px;
 }
 
 .search {
-  flex: 1 1 320px;
-  min-width: 320px;
-  margin-left: auto;
+  flex: 0 0 280px;
+  min-width: 280px;
+  width: 280px;
 }
 
 .chips {
@@ -29,4 +29,29 @@
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+}
+
+.filterControl :global(.MuiInputBase-root) {
+  font-size: 0.8125rem;
+}
+
+.filterControl :global(.MuiInputLabel-root) {
+  font-size: 0.75rem;
+}
+
+.filterControl :global(.MuiInputLabel-shrink) {
+  transform: translate(12px, -7px) scale(1);
+}
+
+.filterMenu :global(.MuiMenuItem-root) {
+  font-size: 0.8125rem;
+}
+
+.filterPlaceholder,
+.filterPlaceholder input::placeholder {
+  color: #5d5f61;
+}
+
+.filterPlaceholder input::placeholder {
+  opacity: 1;
 }

@@ -39,6 +39,7 @@ const mockJobs: JobRecord[] = [
     current_workflow_revision_id: '',
     current_workflow_revision_version: null,
     is_workflow_outdated: false,
+    packed: 0,
   },
   {
     id: 'j2',
@@ -63,6 +64,7 @@ const mockJobs: JobRecord[] = [
     current_workflow_revision_id: '',
     current_workflow_revision_version: null,
     is_workflow_outdated: false,
+    packed: 0,
   },
 ]
 
@@ -76,7 +78,7 @@ describe('JobList', () => {
       selectedIds: new Set(),
       expandedId: null,
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: null,
         activeNodeKey: null,

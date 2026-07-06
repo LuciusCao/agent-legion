@@ -27,6 +27,7 @@ const mockJob: JobRecord = {
   current_workflow_revision_version: null,
   workflow_version: null,
   is_workflow_outdated: false,
+  packed: 0,
   active_node_key: 'natural_language_reading',
   node_summaries: [
     {
@@ -319,6 +320,36 @@ describe('JobListItem', () => {
     )
 
     expect(screen.getByText('打包组装')).toBeInTheDocument()
+  })
+
+  it('shows packed badge when job is packed', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{ ...mockJob, packed: 1 }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.getByText('已打包')).toBeInTheDocument()
+  })
+
+  it('does not show packed badge when job is not packed', () => {
+    render(
+      <MemoryRouter>
+        <JobListItem
+          job={{ ...mockJob, packed: 0 }}
+          selected={false}
+          selectMode={false}
+          onToggleSelect={vi.fn()}
+        />
+      </MemoryRouter>
+    )
+
+    expect(screen.queryByText('已打包')).not.toBeInTheDocument()
   })
 
   it('shows last completed node label for completed jobs', () => {
