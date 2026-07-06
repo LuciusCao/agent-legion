@@ -93,6 +93,8 @@ def parse_run_usage(
 
     run_json = _read_run_json(run_dir)
     provider, model = _provider_model_from_run_json(run_json)
+    provider_from_run_json = bool(provider)
+    model_from_run_json = bool(model)
 
     input_tokens = 0
     output_tokens = 0
@@ -122,13 +124,12 @@ def parse_run_usage(
                 message_count += 1
                 # Latest message_end wins for provider/model fallback.
                 message = event.get("message") or {}
-                if isinstance(message, dict) and not provider:
+                if isinstance(message, dict):
                     event_provider = str(message.get("provider", "")).strip()
-                    if event_provider:
+                    if event_provider and not provider_from_run_json:
                         provider = event_provider
-                if isinstance(message, dict) and not model:
                     event_model = str(message.get("model", "")).strip()
-                    if event_model:
+                    if event_model and not model_from_run_json:
                         model = event_model
     except OSError as exc:
         parse_errors.append(f"failed to read events.jsonl: {exc}")

@@ -101,6 +101,37 @@ def test_parse_run_json_takes_precedence_over_event_provider_model(tmp_path):
     assert summary.model == "your-model-a"
 
 
+def test_parse_latest_event_provider_model_wins_when_run_json_empty(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    (run_dir / "run.json").write_text(json.dumps({}))
+    events = [
+        {
+            "type": "message_end",
+            "message": {
+                "provider": "first-provider",
+                "model": "first-model",
+                "usage": {"input": 10, "output": 5, "cacheRead": 1},
+            },
+        },
+        {
+            "type": "message_end",
+            "message": {
+                "provider": "latest-provider",
+                "model": "latest-model",
+                "usage": {"input": 20, "output": 10, "cacheRead": 2},
+            },
+        },
+    ]
+    _write_events(run_dir, events)
+    summary = parse_run_usage(run_dir, {"id": 1})
+    assert summary is not None
+    assert summary.provider == "latest-provider"
+    assert summary.model == "latest-model"
+    assert summary.input_tokens == 30
+    assert summary.message_count == 2
+
+
 def test_parse_skill_version_falls_back_to_run_json(tmp_path):
     run_dir = tmp_path / "run"
     run_dir.mkdir()
