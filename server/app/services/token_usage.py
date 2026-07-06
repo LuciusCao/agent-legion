@@ -415,19 +415,17 @@ def _group_label(group_by: str, group_key: str) -> dict[str, str]:
     return labels
 
 
-def _query_workspace_usage_rows(
-    job_db: Any,
-    workspace_id: str,
+def _workspace_usage_filter_clauses(
     *,
     node_key: str | None,
     job_id: str | None,
     provider: str | None,
     model: str | None,
     skill_version: str | None,
-    limit: int,
-) -> Sequence[Mapping[str, Any]]:
-    clauses = ["workspace_id = ?"]
-    params: list[Any] = [workspace_id]
+) -> tuple[list[str], list[Any]]:
+    """Return (clauses, params) for node_run_token_usage filter queries."""
+    clauses: list[str] = []
+    params: list[Any] = []
     if node_key:
         clauses.append("node_key = ?")
         params.append(node_key)
@@ -443,11 +441,118 @@ def _query_workspace_usage_rows(
     if skill_version:
         clauses.append("skill_version = ?")
         params.append(skill_version)
-    params.append(max(1, limit))
+    return clauses, params
+
+
+def _query_workspace_usage_aggregates(
+    job_db: Any,
+    workspace_id: str,
+    *,
+    node_key: str | None,
+    job_id: str | None,
+    provider: str | None,
+    model: str | None,
+    skill_version: str | None,
+) -> dict[str, Any]:
+    """Aggregate token usage over the full filtered set (not limited)."""
+    filter_clauses, filter_params = _workspace_usage_filter_clauses(
+        node_key=node_key,
+        job_id=job_id,
+        provider=provider,
+        model=model,
+        skill_version=skill_version,
+    )
+    clauses = ["workspace_id = ?", *filter_clauses]
+    params: list[Any] = [workspace_id, *filter_params]
     where = " and ".join(clauses)
     with job_db.connect() as conn:
+        row = conn.execute(
+            f"""
+            select
+              coalesce(sum(message_count), 0) as message_count,
+              coalesce(sum(input_tokens), 0) as input_tokens,
+              coalesce(sum(output_tokens), 0) as output_tokens,
+              coalesce(sum(cache_read_tokens), 0) as cache_read_tokens,
+              coalesce(sum(total_tokens), 0) as total_tokens,
+              count(*) as runs_with_usage
+            from node_run_token_usage
+            where {where}
+            """,
+            params,
+        ).fetchone()
+    return (
+        dict(row)
+        if row
+        else {
+            "message_count": 0,
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "cache_read_tokens": 0,
+            "total_tokens": 0,
+            "runs_with_usage": 0,
+        }
+    )
+
+
+def _group_by_sql(group_by: str) -> tuple[str, list[str]]:
+    """Return (select/group_by expression, group columns) for SQL aggregation."""
+    if group_by == "node_skill_version":
+        return "node_key || ' / ' || skill_version", ["node_key", "skill_version"]
+    column = _group_column(group_by)
+    return column, [column]
+
+
+def _query_workspace_group_aggregates(
+    job_db: Any,
+    workspace_id: str,
+    *,
+    node_key: str | None,
+    job_id: str | None,
+    provider: str | None,
+    model: str | None,
+    skill_version: str | None,
+    group_by: str,
+    limit: int,
+) -> Sequence[Mapping[str, Any]]:
+    """Aggregate per group over the full filtered set, then apply limit."""
+    group_expr, group_columns = _group_by_sql(group_by)
+    filter_clauses, filter_params = _workspace_usage_filter_clauses(
+        node_key=node_key,
+        job_id=job_id,
+        provider=provider,
+        model=model,
+        skill_version=skill_version,
+    )
+    clauses = ["workspace_id = ?", *filter_clauses]
+    params: list[Any] = [workspace_id, *filter_params]
+    where = " and ".join(clauses)
+    group_by_sql = ", ".join(group_columns)
+    params.append(max(1, limit))
+    with job_db.connect() as conn:
         rows = conn.execute(
-            f"select * from node_run_token_usage where {where} order by node_run_id limit ?",
+            f"""
+            select
+              {group_expr} as group_key,
+              node_key,
+              provider,
+              model,
+              skill_version,
+              count(*) as runs,
+              sum(input_tokens) as total_input_tokens,
+              sum(output_tokens) as total_output_tokens,
+              sum(cache_read_tokens) as total_cache_read_tokens,
+              sum(total_tokens) as total_tokens,
+              sum(message_count) as message_count,
+              avg(input_tokens) as avg_input_tokens,
+              avg(output_tokens) as avg_output_tokens,
+              avg(cache_read_tokens) as avg_cache_read_tokens,
+              avg(total_tokens) as avg_total_tokens
+            from node_run_token_usage
+            where {where}
+            group by {group_by_sql}
+            order by total_tokens desc
+            limit ?
+            """,
             params,
         ).fetchall()
     return [dict(row) for row in rows]
@@ -507,6 +612,84 @@ def _count_workspace_runs(
     return int(row["count"]) if row else 0
 
 
+def _count_runs_per_node_group(
+    job_db: Any,
+    workspace_id: str,
+    *,
+    node_key: str | None,
+    job_id: str | None,
+    provider: str | None,
+    model: str | None,
+    skill_version: str | None,
+) -> dict[str, int]:
+    """Count total runs per node_key for coverage denominator."""
+    clauses = ["jobs.workspace_id = ?"]
+    params: list[Any] = [workspace_id]
+    if node_key:
+        clauses.append("node_runs.node_key = ?")
+        params.append(node_key)
+    if job_id:
+        clauses.append("node_runs.job_id = ?")
+        params.append(job_id)
+
+    usage_filter_clauses: list[str] = []
+    if provider is not None:
+        usage_filter_clauses.append("(u.provider != ? or u.provider is null)")
+        params.append(provider)
+    if model is not None:
+        usage_filter_clauses.append("(u.model != ? or u.model is null)")
+        params.append(model)
+    if skill_version is not None:
+        usage_filter_clauses.append("(u.skill_version != ? or u.skill_version is null)")
+        params.append(skill_version)
+
+    if usage_filter_clauses:
+        excluded = " or ".join(usage_filter_clauses)
+        clauses.append(
+            f"not exists (select 1 from node_run_token_usage u where u.node_run_id = node_runs.id and ({excluded}))"
+        )
+
+    where = " and ".join(clauses)
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            f"""
+            select node_runs.node_key as group_key, count(*) as count
+            from node_runs join jobs on jobs.id = node_runs.job_id
+            where {where}
+            group by node_runs.node_key
+            """,
+            params,
+        ).fetchall()
+    return {str(row["group_key"]): int(row["count"]) for row in rows}
+
+
+def _group_cost(
+    group_rows: Sequence[Mapping[str, Any]],
+    config: dict[str, Any],
+) -> tuple[float | None, bool]:
+    """Return (total_cost, pricing_missing) for a group.
+
+    ``total_cost`` is ``None`` when no row has a configured price.
+    """
+    total_cost: float | None = None
+    pricing_missing = False
+    for r in group_rows:
+        cost = calculate_cost(
+            int(r.get("total_tokens", 0)),
+            int(r.get("input_tokens", 0)),
+            int(r.get("output_tokens", 0)),
+            int(r.get("cache_read_tokens", 0)),
+            str(r.get("provider", "")),
+            str(r.get("model", "")),
+            config,
+        )
+        if cost is None:
+            pricing_missing = True
+            continue
+        total_cost = (total_cost or 0.0) + cost.total
+    return total_cost, pricing_missing
+
+
 def build_workspace_usage_response(
     job_db: Any,
     workspace_id: str,
@@ -520,7 +703,7 @@ def build_workspace_usage_response(
     group_by: str = "node",
     limit: int = 100,
 ) -> dict[str, Any]:
-    rows = _query_workspace_usage_rows(
+    aggregates = _query_workspace_usage_aggregates(
         job_db,
         workspace_id,
         node_key=node_key,
@@ -528,6 +711,16 @@ def build_workspace_usage_response(
         provider=provider,
         model=model,
         skill_version=skill_version,
+    )
+    group_rows = _query_workspace_group_aggregates(
+        job_db,
+        workspace_id,
+        node_key=node_key,
+        job_id=job_id,
+        provider=provider,
+        model=model,
+        skill_version=skill_version,
+        group_by=group_by,
         limit=limit,
     )
     total_runs = _count_workspace_runs(
@@ -539,52 +732,42 @@ def build_workspace_usage_response(
         model=model,
         skill_version=skill_version,
     )
-    group_column = _group_column(group_by)
-
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for row in rows:
-        key = (
-            f"{row['node_key']} / {row['skill_version']}"
-            if group_by == "node_skill_version"
-            else str(row[group_column])
+    node_group_totals: dict[str, int] = {}
+    if group_by == "node":
+        node_group_totals = _count_runs_per_node_group(
+            job_db,
+            workspace_id,
+            node_key=node_key,
+            job_id=job_id,
+            provider=provider,
+            model=model,
+            skill_version=skill_version,
         )
-        grouped.setdefault(key, []).append(dict(row))
 
-    summary_message_count = 0
-    summary_input = 0
-    summary_output = 0
-    summary_cache_read = 0
-    summary_tokens = 0
-    summary_cost = 0.0
+    summary_cost: float | None = None
     summary_pricing_missing = False
-
     groups: list[dict[str, Any]] = []
-    for group_key, group_rows in grouped.items():
-        runs = len(group_rows)
-        total_input = sum(int(r.get("input_tokens", 0)) for r in group_rows)
-        total_output = sum(int(r.get("output_tokens", 0)) for r in group_rows)
-        total_cache_read = sum(int(r.get("cache_read_tokens", 0)) for r in group_rows)
-        total_tokens = sum(int(r.get("total_tokens", 0)) for r in group_rows)
-        message_count = sum(int(r.get("message_count", 0)) for r in group_rows)
 
-        group_cost = 0.0
-        group_pricing_missing = False
-        for r in group_rows:
-            cost = calculate_cost(
-                int(r.get("total_tokens", 0)),
-                int(r.get("input_tokens", 0)),
-                int(r.get("output_tokens", 0)),
-                int(r.get("cache_read_tokens", 0)),
-                str(r.get("provider", "")),
-                str(r.get("model", "")),
-                config,
-            )
-            group_cost += cost.total
-            if cost.pricing_missing:
-                group_pricing_missing = True
+    for row in group_rows:
+        group_key = str(row["group_key"])
+        runs = int(row["runs"])
+        total_input = int(row["total_input_tokens"])
+        total_output = int(row["total_output_tokens"])
+        total_cache_read = int(row["total_cache_read_tokens"])
+        total_tokens = int(row["total_tokens"])
+        group_cost, group_pricing_missing = _group_cost([row], config)
+
+        if group_pricing_missing:
+            summary_pricing_missing = True
+        if group_cost is not None:
+            summary_cost = (summary_cost or 0.0) + group_cost
+
+        # Model/skill_version groups are defined only by usage rows, so the
+        # denominator is the number of usage rows in the group.
+        group_total_runs = node_group_totals.get(group_key, 0) if group_by == "node" else runs
+        coverage = runs / group_total_runs if group_total_runs > 0 else 0.0
 
         labels = _group_label(group_by, group_key)
-        coverage = runs / total_runs if total_runs > 0 else 0.0
         groups.append(
             {
                 "group_key": group_key,
@@ -593,41 +776,32 @@ def build_workspace_usage_response(
                 "model": labels["model"],
                 "skill_version": labels["skill_version"],
                 "runs": runs,
-                "avg_input_tokens": total_input / runs if runs else 0.0,
-                "avg_output_tokens": total_output / runs if runs else 0.0,
-                "avg_cache_read_tokens": total_cache_read / runs if runs else 0.0,
-                "avg_total_tokens": total_tokens / runs if runs else 0.0,
+                "avg_input_tokens": float(row["avg_input_tokens"] or 0),
+                "avg_output_tokens": float(row["avg_output_tokens"] or 0),
+                "avg_cache_read_tokens": float(row["avg_cache_read_tokens"] or 0),
+                "avg_total_tokens": float(row["avg_total_tokens"] or 0),
                 "total_input_tokens": total_input,
                 "total_output_tokens": total_output,
                 "total_cache_read_tokens": total_cache_read,
                 "total_tokens": total_tokens,
                 "total_cost": group_cost,
-                "avg_cost": group_cost / runs if runs else 0.0,
+                "avg_cost": group_cost / runs if group_cost is not None and runs else None,
                 "pricing_missing": group_pricing_missing,
                 "coverage": coverage,
             }
         )
 
-        summary_message_count += message_count
-        summary_input += total_input
-        summary_output += total_output
-        summary_cache_read += total_cache_read
-        summary_tokens += total_tokens
-        summary_cost += group_cost
-        if group_pricing_missing:
-            summary_pricing_missing = True
-
-    runs_with_usage = len(rows)
+    runs_with_usage = int(aggregates["runs_with_usage"])
     runs_without_usage = max(0, total_runs - runs_with_usage)
 
     summary_cost_obj = build_aggregate_cost(
-        summary_input,
-        summary_output,
-        summary_cache_read,
-        summary_tokens,
+        int(aggregates["input_tokens"]),
+        int(aggregates["output_tokens"]),
+        int(aggregates["cache_read_tokens"]),
+        int(aggregates["total_tokens"]),
         summary_cost,
         summary_pricing_missing,
-        rows,
+        group_rows,
         config,
     )
 
@@ -635,11 +809,11 @@ def build_workspace_usage_response(
         "workspace_id": workspace_id,
         "currency": _currency_from_config(config),
         "summary": {
-            "message_count": summary_message_count,
-            "input_tokens": summary_input,
-            "output_tokens": summary_output,
-            "cache_read_tokens": summary_cache_read,
-            "total_tokens": summary_tokens,
+            "message_count": int(aggregates["message_count"]),
+            "input_tokens": int(aggregates["input_tokens"]),
+            "output_tokens": int(aggregates["output_tokens"]),
+            "cache_read_tokens": int(aggregates["cache_read_tokens"]),
+            "total_tokens": int(aggregates["total_tokens"]),
             "cost": summary_cost_obj["cost"],
             "pricing_missing": summary_cost_obj["pricing_missing"],
         },

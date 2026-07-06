@@ -1541,7 +1541,7 @@ export interface components {
       /** Avg Cache Read Tokens */
       avg_cache_read_tokens: number
       /** Avg Cost */
-      avg_cost: number
+      avg_cost: number | null
       /** Avg Input Tokens */
       avg_input_tokens: number
       /** Avg Output Tokens */
@@ -1567,7 +1567,7 @@ export interface components {
       /** Total Cache Read Tokens */
       total_cache_read_tokens: number
       /** Total Cost */
-      total_cost: number
+      total_cost: number | null
       /** Total Input Tokens */
       total_input_tokens: number
       /** Total Output Tokens */

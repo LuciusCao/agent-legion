@@ -18,8 +18,8 @@ def _cost_breakdown(
     provider: str,
     model: str,
     config: dict[str, Any],
-) -> dict[str, Any]:
-    return calculate_cost(
+) -> dict[str, Any] | None:
+    cost = calculate_cost(
         total_tokens,
         input_tokens,
         output_tokens,
@@ -27,7 +27,8 @@ def _cost_breakdown(
         provider,
         model,
         config,
-    ).model_dump()
+    )
+    return cost.model_dump() if cost is not None else None
 
 
 def build_aggregate_cost(
@@ -35,7 +36,7 @@ def build_aggregate_cost(
     output_tokens: int,
     cache_read_tokens: int,
     total_tokens: int,
-    total_cost_value: float,
+    total_cost_value: float | None,
     pricing_missing: bool,
     usage_rows: Sequence[Mapping[str, Any]],
     config: dict[str, Any],
@@ -44,10 +45,13 @@ def build_aggregate_cost(
 
     When every row shares a single provider/model with a configured price, the
     full input/output/cache/total breakdown is returned. Otherwise only the
-    total is exposed. If pricing is missing for all rows, ``cost`` is ``None``.
+    total is exposed. If pricing is missing, ``cost`` is ``None``.
     """
     if not usage_rows:
         return {"cost": None, "pricing_missing": False}
+
+    if pricing_missing:
+        return {"cost": None, "pricing_missing": True}
 
     distinct = {
         (str(row.get("provider", "")), str(row.get("model", "")))
@@ -65,7 +69,7 @@ def build_aggregate_cost(
             model,
             config,
         )
-        if not cost["pricing_missing"]:
+        if cost is not None:
             return {
                 "cost": {
                     "currency": cost["currency"],
@@ -77,9 +81,6 @@ def build_aggregate_cost(
                 "pricing_missing": False,
             }
 
-    if pricing_missing and total_cost_value == 0.0:
-        return {"cost": None, "pricing_missing": True}
-
     return {
         "cost": {
             "currency": _currency_from_config(config),
@@ -88,7 +89,7 @@ def build_aggregate_cost(
             "cache_read": None,
             "total": total_cost_value,
         },
-        "pricing_missing": pricing_missing,
+        "pricing_missing": False,
     }
 
 
@@ -108,10 +109,9 @@ def usage_dict(row: Mapping[str, Any], config: dict[str, Any]) -> dict[str, Any]
         model,
         config,
     )
-    if cost["pricing_missing"]:
-        cost_obj: dict[str, Any] | None = None
-        pricing_missing = True
-    else:
+    pricing_missing = cost is None
+    cost_obj: dict[str, Any] | None = None
+    if cost is not None:
         cost_obj = {
             "currency": cost["currency"],
             "input": cost["input"],
@@ -119,7 +119,6 @@ def usage_dict(row: Mapping[str, Any], config: dict[str, Any]) -> dict[str, Any]
             "cache_read": cost["cache_read"],
             "total": cost["total"],
         }
-        pricing_missing = False
     return {
         "node_run_id": int(row["node_run_id"]),
         "node_key": str(row.get("node_key", "")),

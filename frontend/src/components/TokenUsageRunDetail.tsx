@@ -168,7 +168,7 @@ function TokenUsageBreakdown({ usage }: { usage: RunUsage | null }) {
         <p className={styles.empty}>未配置价格</p>
       )}
       {usage.pricing_missing && (
-        <div className={styles.pricingMissing}>缺少定价配置，费用为估算值</div>
+        <div className={styles.pricingMissing}>缺少定价配置</div>
       )}
     </div>
   )
