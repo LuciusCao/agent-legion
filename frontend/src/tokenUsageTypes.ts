@@ -6,6 +6,8 @@ export type TokenUsageJobResponse =
   components['schemas']['TokenUsageJobResponse']
 export type TokenUsageWorkspaceResponse =
   components['schemas']['TokenUsageWorkspaceResponse']
+export type TokenUsageWorkspaceGroup =
+  components['schemas']['TokenUsageWorkspaceGroup']
 
 export type RunUsage = NonNullable<TokenUsageRunResponse['usage']>
 export type RunUsageCost = RunUsage['cost']

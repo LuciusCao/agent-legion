@@ -385,3 +385,61 @@ def test_get_workspace_token_usage_filter_excludes_other_provider_runs(client, w
     assert body["groups"][0]["runs"] == 1
     # coverage denominator excludes the run whose usage is under a different provider.
     assert body["groups"][0]["coverage"] == 0.5
+
+
+def test_get_workspace_token_usage_groups_by_node_skill_version(client, workspace_and_job):
+    workspace_id, job_id = workspace_and_job
+    job_db = client.app.state.job_db
+    _insert_node_run(job_db, run_id=60, job_id=job_id, node_key="node-a")
+    _insert_node_run(job_db, run_id=61, job_id=job_id, node_key="node-a")
+    _insert_node_run(job_db, run_id=62, job_id=job_id, node_key="node-b")
+    _insert_token_usage(
+        job_db,
+        node_run_id=60,
+        job_id=job_id,
+        workspace_id=workspace_id,
+        node_key="node-a",
+        provider="gateway",
+        model="your-model-a",
+        skill_version="v1",
+        input_tokens=100,
+        output_tokens=50,
+        cache_read_tokens=10,
+    )
+    _insert_token_usage(
+        job_db,
+        node_run_id=61,
+        job_id=job_id,
+        workspace_id=workspace_id,
+        node_key="node-a",
+        provider="gateway",
+        model="your-model-a",
+        skill_version="v2",
+        input_tokens=200,
+        output_tokens=100,
+        cache_read_tokens=20,
+    )
+    _insert_token_usage(
+        job_db,
+        node_run_id=62,
+        job_id=job_id,
+        workspace_id=workspace_id,
+        node_key="node-b",
+        provider="gateway",
+        model="your-model-a",
+        skill_version="v1",
+        input_tokens=300,
+        output_tokens=150,
+        cache_read_tokens=30,
+    )
+
+    response = client.get(f"/api/workspaces/{workspace_id}/token-usage?group_by=node_skill_version")
+    assert response.status_code == 200
+    body = response.json()
+    groups = {g["group_key"]: g for g in body["groups"]}
+    assert set(groups) == {"node-a / v1", "node-a / v2", "node-b / v1"}
+    assert groups["node-a / v1"]["node_key"] == "node-a"
+    assert groups["node-a / v1"]["skill_version"] == "v1"
+    assert groups["node-a / v1"]["total_input_tokens"] == 100
+    assert groups["node-a / v2"]["total_input_tokens"] == 200
+    assert groups["node-b / v1"]["total_input_tokens"] == 300
