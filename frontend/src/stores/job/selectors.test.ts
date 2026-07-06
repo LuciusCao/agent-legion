@@ -19,6 +19,22 @@ describe('getVisibleJobs', () => {
     expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j2'])
   })
 
+  it('filters paused jobs separately from pending jobs', () => {
+    const state = createJobState({
+      jobs: [
+        createJobSummary({ id: 'j1', status: 'paused' }),
+        createJobSummary({ id: 'j2', status: 'pending' }),
+      ],
+      filterConfig: {
+        status: 'paused',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
+    })
+    expect(getVisibleJobs(state).map((j) => j.id)).toEqual(['j1'])
+  })
+
   it('filters by workflow version', () => {
     const state = createJobState({
       jobs: [
@@ -113,6 +129,24 @@ describe('getFilterCounts', () => {
     const counts = getFilterCounts(state)
     expect(counts.status.running).toBe(1)
     expect(counts.status.failed).toBe(2)
+  })
+
+  it('counts paused jobs separately from pending jobs', () => {
+    const state = createJobState({
+      jobs: [
+        createJobSummary({ id: 'j1', status: 'paused' }),
+        createJobSummary({ id: 'j2', status: 'pending' }),
+      ],
+      filterConfig: {
+        status: 'all',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
+    })
+    const counts = getFilterCounts(state)
+    expect(counts.status.paused).toBe(1)
+    expect(counts.status.pending).toBe(1)
   })
 
   it('counts versions excluding the version filter', () => {

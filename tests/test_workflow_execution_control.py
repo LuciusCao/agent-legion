@@ -169,10 +169,10 @@ def _setup_workspace(
     target_node_key: str | None = None,
     executor_id: str = "local-default",
 ) -> tuple[str, str]:
-    workspace = queries.create_workspace(name="control-ws", default_workflow_key="branched")
+    workspace = queries.create_workspace(name="control-ws", default_workflow_key=definition.key)
     workspace_id = workspace["id"]
     job = queries.create_job(
-        workflow_key="branched",
+        workflow_key=definition.key,
         source_type="question",
         source_id="Q1",
         batch_id="",
@@ -193,7 +193,7 @@ def _setup_workspace(
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   executor_id=excluded.executor_id
                 """,
-                (workspace_id, "branched", node.key, executor_id),
+                (workspace_id, definition.key, node.key, executor_id),
             )
         conn.execute(
             """
@@ -212,7 +212,7 @@ def _setup_workspace(
                 on conflict(workspace_id, workflow_key, node_key) do update set
                   concurrency_limit=excluded.concurrency_limit
                 """,
-                (workspace_id, "branched", node.key, 1),
+                (workspace_id, definition.key, node.key, 1),
             )
     return workspace_id, job_id
 
@@ -380,6 +380,64 @@ def test_target_completion_pauses_job_atomically(
     assert job["status"] == "paused"
     assert job["execution_paused"] == 1
     assert job["pause_reason"] == "target_reached"
+
+
+def test_terminal_target_completion_marks_job_completed(
+    queries: JobQueries,
+    repo: ExecutorLeaseRepository,
+) -> None:
+    definition = WorkflowDefinition(
+        key="linear",
+        label="Linear",
+        intake=WorkflowIntake(),
+        nodes={
+            "root": WorkflowNode(key="root", label="Root", capability="root"),
+            "target": WorkflowNode(
+                key="target", label="Target", capability="target", after=["root"]
+            ),
+        },
+    )
+    workspace_id, job_id = _setup_workspace(queries, definition, target_node_key="target")
+    allowed = allowed_nodes(
+        definition,
+        {"execution_mode": "until_node", "target_node_key": "target"},
+    )
+
+    root_claim = repo.try_claim(
+        _claim_request(
+            workspace_id,
+            job_id,
+            "root",
+            execution_mode="until_node",
+            target_node_key="target",
+            allowed_node_keys=tuple(sorted(allowed)),
+            capability="root",
+            workflow_key="linear",
+        )
+    )
+    assert isinstance(root_claim, ClaimedExecution)
+    repo.finish(root_claim.lease_id, ExecutionResult(status="completed", exit_code=0))
+
+    target_claim = repo.try_claim(
+        _claim_request(
+            workspace_id,
+            job_id,
+            "target",
+            execution_mode="until_node",
+            target_node_key="target",
+            allowed_node_keys=tuple(sorted(allowed)),
+            capability="target",
+            workflow_key="linear",
+        )
+    )
+    assert isinstance(target_claim, ClaimedExecution)
+    repo.finish(target_claim.lease_id, ExecutionResult(status="completed", exit_code=0))
+
+    job = queries.get_job(job_id)
+    assert job is not None
+    assert job["status"] == "completed"
+    assert job["execution_paused"] == 0
+    assert job["pause_reason"] == ""
 
 
 def _make_worker(

@@ -21,6 +21,7 @@ const STATUS_OPTIONS: JobFilterConfig['status'][] = [
   'running',
   'completed',
   'failed',
+  'paused',
 ]
 
 export interface JobFilterBarProps {
