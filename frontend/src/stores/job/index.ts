@@ -12,8 +12,12 @@ export const useJobStore = create<JobState>((set, get) => ({
   error: null,
   selectedIds: new Set(),
   expandedId: null,
-  statusFilter: 'all',
-  searchQuery: '',
+  filterConfig: {
+    status: 'all',
+    search: '',
+    workflowVersion: null,
+    activeNodeKey: null,
+  },
   selectMode: false,
   batchDeleteLoading: false,
   batchPackageLoading: false,
@@ -21,7 +25,6 @@ export const useJobStore = create<JobState>((set, get) => ({
   batchRunToLoading: false,
   continueLoading: false,
   batchUpgradeWorkflowLoading: false,
-
   ...fetchActions(set),
   ...selectionActions(set, get),
   ...batchActions(set, get),

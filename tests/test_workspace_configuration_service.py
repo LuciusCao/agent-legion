@@ -162,7 +162,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
     repo = ExecutorLeaseRepository(job_db.path)
     claim_specs = [
         ("local-default", "fetch", "fetch_questions", 16, None),
-        ("pi", "extract", "extract_keywords", 20, None),
+        ("pi", "extract", "extract_keywords", 12, None),
         ("openclaw-main", "review", "review", 8, None),
     ]
     for i, (executor_id, node_key, capability, global_capacity, local_limit) in enumerate(
@@ -195,7 +195,7 @@ def test_executor_stats_report_configured_capacity_and_leases(
     assert executors["local-default"]["available"] == 3
 
     assert executors["pi"]["kind"] == "pi"
-    assert executors["pi"]["global_capacity"] == 20
+    assert executors["pi"]["global_capacity"] == 12
     assert executors["pi"]["workspace_limit"] == 6
     assert executors["pi"]["running"] == 1
     assert executors["pi"]["available"] == 5

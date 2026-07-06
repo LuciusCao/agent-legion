@@ -1,12 +1,8 @@
 import type { JobState } from '../state'
-import type {
-  BatchJobMutationResult,
-  JobSummary,
-  WorkspacePackageResult,
-} from '../../../jobTypes'
+import type * as JobTypes from '../../../jobTypes'
 export function createJobSummary(
-  partial: Partial<JobSummary> = {}
-): JobSummary {
+  partial: Partial<JobTypes.JobSummary> = {}
+): JobTypes.JobSummary {
   return {
     active_node_key: null,
     batch_id: '',
@@ -43,8 +39,12 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     error: null,
     selectedIds: new Set(),
     expandedId: null,
-    statusFilter: 'all',
-    searchQuery: '',
+    filterConfig: {
+      status: 'all',
+      search: '',
+      workflowVersion: null,
+      activeNodeKey: null,
+    },
     selectMode: false,
     batchDeleteLoading: false,
     batchPackageLoading: false,
@@ -56,8 +56,7 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     setJobsAndFinishLoading: () => {},
     resetForWorkspace: () => {},
     failJobFetch: () => {},
-    setStatusFilter: () => {},
-    setSearchQuery: () => {},
+    setFilterConfig: () => {},
     toggleSelectMode: () => {},
     toggleSelect: () => {},
     selectAll: () => {},
@@ -65,17 +64,15 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     clearSelection: () => {},
     toggleExpand: () => {},
     getFilteredJobs: () => [],
-    batchRerun: async () => ({ results: [] }) as BatchJobMutationResult,
-    batchDelete: async () => ({ results: [] }) as BatchJobMutationResult,
-    batchPackage: async () =>
-      ({
-        failed_count: 0,
-        results: [],
-        succeeded_count: 0,
-      }) as WorkspacePackageResult,
-    batchRunTo: async () => ({ results: [] }) as BatchJobMutationResult,
-    batchUpgradeWorkflow: async () =>
-      ({ results: [] }) as BatchJobMutationResult,
+    batchRerun: async () => ({ results: [] }),
+    batchDelete: async () => ({ results: [] }),
+    batchPackage: async () => ({
+      failed_count: 0,
+      results: [],
+      succeeded_count: 0,
+    }),
+    batchRunTo: async () => ({ results: [] }),
+    batchUpgradeWorkflow: async () => ({ results: [] }),
     continueJob: async () => ({
       job_id: '',
       operation: '',

@@ -50,6 +50,9 @@ class WorkflowsRuntimeConfig(BaseModel):
 class ExecutorRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
+    heartbeat_interval_seconds: float = Field(default=10, gt=0)
+    lease_ttl_seconds: int = Field(default=90, ge=1)
+    heartbeat_failure_threshold: int = Field(default=3, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
     workflows: WorkflowsRuntimeConfig = Field(default_factory=WorkflowsRuntimeConfig)
     openclaw: OpenClawRuntimeConfig = Field(

@@ -167,8 +167,12 @@ describe('WorkspaceMainPage', () => {
       error: null,
       selectedIds: new Set(),
       expandedId: null,
-      statusFilter: 'all',
-      searchQuery: '',
+      filterConfig: {
+        status: 'all',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
       batchRerunLoading: false,
       batchPackageLoading: false,
       batchDeleteLoading: false,
@@ -248,7 +252,7 @@ describe('WorkspaceMainPage', () => {
     globalThis.EventSource = originalEventSource
   })
 
-  it('renders stat cards when jobs exist', async () => {
+  it('renders filter bar when jobs exist', async () => {
     useJobStore.setState({
       jobs: [
         makeJob({
@@ -264,7 +268,10 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
-    expect(screen.getByText('全部（7）')).toBeInTheDocument()
+    expect(screen.getByLabelText('状态')).toBeInTheDocument()
+    expect(
+      screen.getByPlaceholderText('搜索 ID / 标题 / 批次')
+    ).toBeInTheDocument()
   })
 
   it('shows empty message when no jobs', async () => {
@@ -344,7 +351,7 @@ describe('WorkspaceMainPage', () => {
     })
 
     const search = screen.getByPlaceholderText(
-      '搜索 ID 或标题'
+      '搜索 ID / 标题 / 批次'
     ) as HTMLInputElement
     expect(search).toBeInTheDocument()
 
@@ -356,7 +363,7 @@ describe('WorkspaceMainPage', () => {
       vi.advanceTimersByTime(250)
     })
 
-    expect(useJobStore.getState().searchQuery).toBe('algebra')
+    expect(useJobStore.getState().filterConfig.search).toBe('algebra')
   })
 
   it('submits batch rerun with selected node key', async () => {
