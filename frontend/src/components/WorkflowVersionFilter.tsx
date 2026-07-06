@@ -1,8 +1,8 @@
-import { useMemo } from 'react'
 import { Select, MenuItem, FormControl, InputLabel } from '@mui/material'
 import type { JobFilterConfig } from '../stores/job/state'
 import type { JobSummary } from '../jobTypes'
-import styles from './JobFilterBar.module.css'
+import filterStyles from './FilterControls.module.css'
+import { useWorkflowVersionOptions } from './useWorkflowVersionOptions'
 
 export interface WorkflowVersionFilterProps {
   value: JobFilterConfig['workflowVersion']
@@ -17,27 +17,10 @@ export function WorkflowVersionFilter({
   jobs,
   onChange,
 }: WorkflowVersionFilterProps) {
-  const { versionOptions, hasMissingVersion } = useMemo(() => {
-    const versions = new Set<number>()
-    let hasMissingVersion = false
-    for (const job of jobs) {
-      if (job.workflow_version !== null && job.workflow_version !== undefined) {
-        versions.add(job.workflow_version)
-      } else {
-        hasMissingVersion = true
-      }
-    }
-    return {
-      versionOptions: Array.from(versions).sort((a, b) => b - a),
-      hasMissingVersion,
-    }
-  }, [jobs])
+  const { versionOptions, hasMissingVersion } = useWorkflowVersionOptions(jobs)
 
   return (
-    <FormControl
-      size="small"
-      className={`${styles.control} ${styles.filterControl}`}
-    >
+    <FormControl size="small" className={filterStyles.filterControl}>
       <InputLabel id="job-version-filter-label">Workflow 版本</InputLabel>
       <Select
         labelId="job-version-filter-label"
@@ -53,12 +36,12 @@ export function WorkflowVersionFilter({
                 : Number(selected)
           )
         }}
-        MenuProps={{ PaperProps: { className: styles.filterMenu } }}
+        MenuProps={{ PaperProps: { className: filterStyles.filterMenu } }}
         renderValue={(selected) => {
           const key = selected as string
           if (key === '') {
             return (
-              <span className={styles.filterPlaceholder}>
+              <span className={filterStyles.filterPlaceholder}>
                 全部版本 ({counts.all ?? 0})
               </span>
             )
@@ -66,7 +49,11 @@ export function WorkflowVersionFilter({
           if (key === 'none') {
             return <span>未指定版本 ({counts.none ?? 0})</span>
           }
-          return <span>v{key} ({counts[key] ?? 0})</span>
+          return (
+            <span>
+              v{key} ({counts[key] ?? 0})
+            </span>
+          )
         }}
       >
         <MenuItem value="">全部版本 ({counts.all ?? 0})</MenuItem>

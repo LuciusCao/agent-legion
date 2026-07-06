@@ -152,9 +152,7 @@ export function JobListItem({
             activeNodeKey={currentSummary?.node_key}
             totalNodes={job.total_nodes ?? 0}
           />
-          {job.packed ? (
-            <span className={styles.packed}>已打包</span>
-          ) : null}
+          {job.packed ? <span className={styles.packed}>已打包</span> : null}
           <span className={`${styles.badge} ${statusClass(status)}`}>
             {JOB_STATUS_LABELS[job.status] || job.status}
           </span>

@@ -1,11 +1,9 @@
-import { useMemo } from 'react'
 import {
   TextField,
   Select,
   MenuItem,
   FormControl,
   InputLabel,
-  Chip,
 } from '@mui/material'
 import type { JobFilterConfig, JobStatus } from '../stores/job/state'
 import type { FilterCounts } from '../stores/job/selectors'
@@ -14,7 +12,11 @@ import type { WorkflowDefinitionRecord } from '../types'
 import { JOB_STATUS_LABELS } from '../labels'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 import { WorkflowVersionFilter } from './WorkflowVersionFilter'
+import { JobFilterBarChips } from './JobFilterBarChips'
+import { useJobFilterActiveFilters } from './useJobFilterActiveFilters'
+import { useJobFilterNodeOptions } from './useJobFilterNodeOptions'
 import styles from './JobFilterBar.module.css'
+import filterStyles from './FilterControls.module.css'
 
 const STATUS_OPTIONS: JobStatus[] = [
   'pending',
@@ -44,57 +46,20 @@ export function JobFilterBar({
     250
   )
 
-  const nodeOptions = useMemo(() => {
-    const defined = new Map<string, string>()
-    for (const node of workflowDefinition?.nodes ?? []) {
-      defined.set(node.key, node.label)
-    }
-    const seen = new Set<string>()
-    for (const job of jobs) {
-      if (job.active_node_key) seen.add(job.active_node_key)
-      for (const node of job.node_summaries ?? []) {
-        seen.add(node.node_key)
-      }
-    }
-    const options: { key: string; label: string }[] = []
-    for (const [key, label] of defined) {
-      options.push({ key, label })
-      seen.delete(key)
-    }
-    for (const key of seen) {
-      options.push({ key, label: key })
-    }
-    return options
-  }, [workflowDefinition, jobs])
+  const nodeOptions = useJobFilterNodeOptions(workflowDefinition, jobs)
 
-  const activeFilters = [
-    filterConfig.status !== null && {
-      label: `状态: ${JOB_STATUS_LABELS[filterConfig.status]}`,
-      onDelete: () => onChange({ status: null }),
-    },
-    filterConfig.workflowVersion !== null && {
-      label:
-        filterConfig.workflowVersion === 'none'
-          ? '版本: 未指定版本'
-          : `版本: v${filterConfig.workflowVersion}`,
-      onDelete: () => onChange({ workflowVersion: null }),
-    },
-    filterConfig.activeNodeKey !== null && {
-      label: `节点: ${nodeOptions.find((n) => n.key === filterConfig.activeNodeKey)?.label ?? filterConfig.activeNodeKey}`,
-      onDelete: () => onChange({ activeNodeKey: null }),
-    },
-    filterConfig.search && {
-      label: `搜索: "${filterConfig.search}"`,
-      onDelete: () => onChange({ search: '' }),
-    },
-  ].filter(Boolean) as { label: string; onDelete: () => void }[]
+  const activeFilters = useJobFilterActiveFilters(
+    filterConfig,
+    nodeOptions,
+    onChange
+  )
 
   return (
     <div className={styles.panel}>
       <div className={styles.row}>
         <FormControl
           size="small"
-          className={`${styles.control} ${styles.filterControl}`}
+          className={`${styles.control} ${filterStyles.filterControl}`}
         >
           <InputLabel id="job-status-filter-label">状态</InputLabel>
           <Select
@@ -104,15 +69,16 @@ export function JobFilterBar({
             onChange={(e) => {
               const value = e.target.value as string
               onChange({
-                status: value === '' ? null : (value as JobFilterConfig['status']),
+                status:
+                  value === '' ? null : (value as JobFilterConfig['status']),
               })
             }}
-            MenuProps={{ PaperProps: { className: styles.filterMenu } }}
+            MenuProps={{ PaperProps: { className: filterStyles.filterMenu } }}
             renderValue={(value) => {
               const status = value as string
               if (status === '') {
                 return (
-                  <span className={styles.filterPlaceholder}>
+                  <span className={filterStyles.filterPlaceholder}>
                     全部状态 ({counts.status.all ?? 0})
                   </span>
                 )
@@ -126,9 +92,7 @@ export function JobFilterBar({
               )
             }}
           >
-            <MenuItem value="">
-              全部状态 ({counts.status.all ?? 0})
-            </MenuItem>
+            <MenuItem value="">全部状态 ({counts.status.all ?? 0})</MenuItem>
             {STATUS_OPTIONS.map((status) => (
               <MenuItem key={status} value={status}>
                 {JOB_STATUS_LABELS[status]} ({counts.status[status] ?? 0})
@@ -146,7 +110,7 @@ export function JobFilterBar({
 
         <FormControl
           size="small"
-          className={`${styles.control} ${styles.filterControl}`}
+          className={`${styles.control} ${filterStyles.filterControl}`}
         >
           <InputLabel id="job-node-filter-label">当前运行节点</InputLabel>
           <Select
@@ -158,12 +122,12 @@ export function JobFilterBar({
                 activeNodeKey: e.target.value === '' ? null : e.target.value,
               })
             }
-            MenuProps={{ PaperProps: { className: styles.filterMenu } }}
+            MenuProps={{ PaperProps: { className: filterStyles.filterMenu } }}
             renderValue={(value) => {
               const key = value as string
               if (key === '') {
                 return (
-                  <span className={styles.filterPlaceholder}>
+                  <span className={filterStyles.filterPlaceholder}>
                     全部节点 ({counts.activeNodeKey.all ?? 0})
                   </span>
                 )
@@ -193,23 +157,12 @@ export function JobFilterBar({
           placeholder="搜索 ID / 标题 / 批次"
           defaultValue={filterConfig.search}
           onChange={(e) => debouncedSearch(e.target.value)}
-          className={`${styles.search} ${styles.filterControl}`}
-          InputProps={{ className: styles.filterPlaceholder }}
+          className={`${styles.search} ${filterStyles.filterControl}`}
+          InputProps={{ className: filterStyles.filterPlaceholder }}
         />
       </div>
 
-      {activeFilters.length > 0 && (
-        <div className={styles.chips}>
-          {activeFilters.map((filter) => (
-            <Chip
-              key={filter.label}
-              label={filter.label}
-              onDelete={filter.onDelete}
-              size="small"
-            />
-          ))}
-        </div>
-      )}
+      <JobFilterBarChips filters={activeFilters} />
     </div>
   )
 }
