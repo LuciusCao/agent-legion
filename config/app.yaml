@@ -14,3 +14,17 @@ cleanup:
   log_retention_days: 7
   run_dir_retention_days: 3
   interval_seconds: 3600
+
+token_usage:
+  currency: CNY
+  pricing:
+    - provider: gateway
+      model: your-model-a
+      input_per_1m: 3.0
+      output_per_1m: 15.0
+      cache_read_per_1m: 0.6
+    - provider: doubao
+      model: Doubao-Seed-2.1-turbo
+      input_per_1m: 3.0
+      output_per_1m: 15.0
+      cache_read_per_1m: 0.6
