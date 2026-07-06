@@ -33,7 +33,7 @@ def governed_repo(tmp_path: Path, rel_path: str, *, lines: int) -> tuple[Path, B
         "    - path: server/app\n"
         "      extensions: [.py]\n"
         "  exclude: []\n"
-        "  buffer_lines: 5\n"
+        "  buffer_lines: 10\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -45,7 +45,7 @@ def governed_repo(tmp_path: Path, rel_path: str, *, lines: int) -> tuple[Path, B
     policy = BudgetPolicy(
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=(),
-        buffer_lines=5,
+        buffer_lines=10,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
@@ -63,23 +63,23 @@ def write_baseline(root: Path, files_dict: dict[str, int]) -> None:
 
 def test_five_line_slack_allows_growth(tmp_path: Path) -> None:
     root, policy = governed_repo(tmp_path, "server/app/example.py", lines=100)
-    write_baseline(root, {"server/app/example.py": 105})
+    write_baseline(root, {"server/app/example.py": 110})
     assert check_file_budgets(root, policy, ()) == []
 
 
 def test_rejects_growth_above_ceiling(tmp_path: Path) -> None:
-    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=106)
-    write_baseline(root, {"server/app/example.py": 105})
+    root, policy = governed_repo(tmp_path, "server/app/example.py", lines=111)
+    write_baseline(root, {"server/app/example.py": 110})
     assert check_file_budgets(root, policy, ()) == [
-        "server/app/example.py: 106 lines exceeds ceiling 105; split the file or revert growth"
+        "server/app/example.py: 111 lines exceeds ceiling 110; split the file or revert growth"
     ]
 
 
 def test_rejects_stale_ceiling_after_shrink(tmp_path: Path) -> None:
     root, policy = governed_repo(tmp_path, "server/app/example.py", lines=90)
-    write_baseline(root, {"server/app/example.py": 105})
+    write_baseline(root, {"server/app/example.py": 110})
     assert check_file_budgets(root, policy, ()) == [
-        "server/app/example.py: ceiling 105 is stale for 90 lines; "
+        "server/app/example.py: ceiling 110 is stale for 90 lines; "
         "run scripts/ratchet_architecture_budgets.py"
     ]
 
@@ -112,7 +112,7 @@ def test_stale_baseline_entry_for_excluded_file_fails(tmp_path: Path) -> None:
         "      extensions: [.py]\n"
         "  exclude:\n"
         "    - server/app/generated.py\n"
-        "  buffer_lines: 5\n"
+        "  buffer_lines: 10\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -123,7 +123,7 @@ def test_stale_baseline_entry_for_excluded_file_fails(tmp_path: Path) -> None:
     policy = BudgetPolicy(
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=("server/app/generated.py",),
-        buffer_lines=5,
+        buffer_lines=10,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
@@ -209,7 +209,7 @@ def test_test_file_at_limit_passes(tmp_path: Path) -> None:
         "    - path: server/app\n"
         "      extensions: [.py]\n"
         "  exclude: []\n"
-        "  buffer_lines: 5\n"
+        "  buffer_lines: 10\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -220,7 +220,7 @@ def test_test_file_at_limit_passes(tmp_path: Path) -> None:
     policy = BudgetPolicy(
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=(),
-        buffer_lines=5,
+        buffer_lines=10,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
@@ -244,7 +244,7 @@ def test_test_file_over_limit_fails(tmp_path: Path) -> None:
         "    - path: server/app\n"
         "      extensions: [.py]\n"
         "  exclude: []\n"
-        "  buffer_lines: 5\n"
+        "  buffer_lines: 10\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -255,7 +255,7 @@ def test_test_file_over_limit_fails(tmp_path: Path) -> None:
     policy = BudgetPolicy(
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=(),
-        buffer_lines=5,
+        buffer_lines=10,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
@@ -285,7 +285,7 @@ def test_generated_code_excluded_not_required_in_baseline(tmp_path: Path) -> Non
         "      extensions: [.py]\n"
         "  exclude:\n"
         "    - server/app/generated/**\n"
-        "  buffer_lines: 5\n"
+        "  buffer_lines: 10\n"
         "tests:\n"
         "  roots:\n"
         "    - path: tests\n"
@@ -296,7 +296,7 @@ def test_generated_code_excluded_not_required_in_baseline(tmp_path: Path) -> Non
     policy = BudgetPolicy(
         production_roots=(ProductionRoot(path="server/app", extensions=(".py",)),),
         production_exclude=("server/app/generated/**",),
-        buffer_lines=5,
+        buffer_lines=10,
         test_roots=(TestRoot(path="tests", patterns=("**/*.py",)),),
         test_max_lines=1000,
     )
