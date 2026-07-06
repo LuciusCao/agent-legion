@@ -197,6 +197,20 @@ def test_executor_runtime_config_from_full_config():
     assert config.openclaw.skill_safety.repos[0]["ref"] == "v1.0.0"
 
 
+def test_executor_runtime_config_parses_lease_heartbeat_settings():
+    config = ExecutorRuntimeConfig.model_validate(
+        {
+            "heartbeat_interval_seconds": 7,
+            "lease_ttl_seconds": 90,
+            "heartbeat_failure_threshold": 3,
+            "openclaw": {"command_template": ["openclaw"]},
+        }
+    )
+    assert config.heartbeat_interval_seconds == 7
+    assert config.lease_ttl_seconds == 90
+    assert config.heartbeat_failure_threshold == 3
+
+
 def test_executor_runtime_config_rejects_missing_command_template():
     raw = {"workflows": {"enabled": True}, "openclaw": {"cwd": "."}}
     with pytest.raises(ValidationError) as exc_info:

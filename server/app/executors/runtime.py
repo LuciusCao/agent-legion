@@ -11,28 +11,35 @@ from server.app.executors.protocol import Executor, ExecutorResolver, LeaseRepos
 logger = logging.getLogger(__name__)
 
 
-class ExecutionRuntime:
-    """Coordinates heartbeat lease renewal with executor adapter execution."""
+def _failed_result(context: ExecutionContext, message: str) -> ExecutionResult:
+    return ExecutionResult(
+        status="failed",
+        exit_code=1,
+        error_message=message,
+        log_path=str(context.log_path),
+    )
 
+
+class ExecutionRuntime:
     def __init__(
         self,
         leases: LeaseRepository,
         registry: ExecutorResolver,
         heartbeat_interval_seconds: float = 10,
-        lease_ttl_seconds: int = 30,
+        lease_ttl_seconds: int = 90,
+        heartbeat_failure_threshold: int = 3,
         cancellation_grace_seconds: float = 5,
     ) -> None:
-        """Store lease, registry, heartbeat interval, TTL, and cancellation dependencies."""
         self.leases = leases
         self.registry = registry
         self.heartbeat_interval_seconds = heartbeat_interval_seconds
         self.lease_ttl_seconds = lease_ttl_seconds
+        self.heartbeat_failure_threshold = heartbeat_failure_threshold
         self.cancellation_grace_seconds = cancellation_grace_seconds
         self._active: dict[str, CancellationToken] = {}
         self._lock = threading.Lock()
 
     def run(self, claim: ClaimedExecution, context: ExecutionContext) -> ExecutionResult:
-        """Heartbeat and execute one claimed Node, then persist its final result."""
         executor = self.registry.require(claim.executor_id, claim.capability)
         token = CancellationToken()
         with self._lock:
@@ -57,12 +64,7 @@ class ExecutionRuntime:
                 claim.executor_id,
                 claim.execution_id,
             )
-            result = ExecutionResult(
-                status="failed",
-                exit_code=1,
-                error_message=str(exc),
-                log_path=str(context.log_path),
-            )
+            result = _failed_result(context, str(exc))
         finally:
             done_event.set()
             heartbeat_thread.join(timeout=self.heartbeat_interval_seconds + 5)
@@ -70,18 +72,12 @@ class ExecutionRuntime:
                 self._active.pop(claim.execution_id, None)
 
         if lease_lost_event.is_set():
-            result = ExecutionResult(
-                status="failed",
-                exit_code=1,
-                error_message="lease was lost during execution",
-                log_path=str(context.log_path),
-            )
+            result = _failed_result(context, "lease was lost during execution")
 
         self.leases.finish(claim.lease_id, result)
         return result
 
     def cancel(self, execution_id: str) -> None:
-        """Cancel the token for an active execution, if any."""
         with self._lock:
             token = self._active.get(execution_id)
         if token is not None:
@@ -94,33 +90,38 @@ class ExecutionRuntime:
         done_event: threading.Event,
         lease_lost_event: threading.Event,
     ) -> None:
-        """Renew the lease periodically until execution finishes or the lease is lost."""
+        missed_heartbeats = 0
         while not done_event.is_set():
             if done_event.wait(self.heartbeat_interval_seconds):
                 break
             try:
                 active = self.leases.heartbeat(claim.lease_id, self.lease_ttl_seconds)
             except Exception:
-                logger.exception(
-                    "Heartbeat failed for lease %s execution %s",
-                    claim.lease_id,
-                    claim.execution_id,
-                )
+                logger.exception("Heartbeat failed for lease %s", claim.lease_id)
                 active = False
 
             if done_event.is_set():
                 break
 
-            if not active:
+            if active:
+                missed_heartbeats = 0
+                continue
+
+            missed_heartbeats += 1
+            if missed_heartbeats < self.heartbeat_failure_threshold:
                 logger.warning(
-                    "Lease %s no longer active for execution %s; cancelling",
+                    "Heartbeat miss %s/%s for lease %s",
+                    missed_heartbeats,
+                    self.heartbeat_failure_threshold,
                     claim.lease_id,
-                    claim.execution_id,
                 )
-                try:
-                    self.cancel(claim.execution_id)
-                    executor.cancel(claim.execution_id)
-                except Exception:
-                    logger.exception("Cancel request failed for execution %s", claim.execution_id)
-                lease_lost_event.set()
-                break
+                continue
+
+            logger.warning("Lease %s no longer active; cancelling", claim.lease_id)
+            try:
+                self.cancel(claim.execution_id)
+                executor.cancel(claim.execution_id)
+            except Exception:
+                logger.exception("Cancel request failed for execution %s", claim.execution_id)
+            lease_lost_event.set()
+            break

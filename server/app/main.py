@@ -18,7 +18,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.local import LocalHandler
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
-from server.app.executors.runtime import ExecutionRuntime
+from server.app.executors.runtime_factory import build_execution_runtime
 from server.app.jobs import JobQueries
 from server.app.routes import create_router
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
@@ -141,7 +141,9 @@ def create_app(
                 executor_leases = ExecutorLeaseRepository(
                     job_db.path, job_db=job_db, job_event_manager=job_event_manager
                 )
-                execution_runtime = ExecutionRuntime(executor_leases, executor_registry)
+                execution_runtime = build_execution_runtime(
+                    executor_leases, executor_registry, settings.executor_runtime
+                )
                 workflow_worker_thread = WorkflowWorkerThread(
                     job_db=job_db,
                     leases=executor_leases,

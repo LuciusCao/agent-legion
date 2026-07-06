@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { TextField } from '@mui/material'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
-import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
-import { WorkspaceStatCards } from '../components/WorkspaceStatCards'
+import { JobFilterBar } from '../components/JobFilterBar'
 import { JobList } from '../components/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
 import {
@@ -15,6 +13,7 @@ import {
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
 import { WorkspacePackageHistoryDialog } from '../components/WorkspacePackageHistoryDialog'
 import { fetchWorkflowDefinition } from '../api'
+import { getFilterCounts } from '../stores/job/selectors'
 import type { WorkflowDefinitionRecord } from '../types'
 import styles from './WorkspaceMainPage.module.css'
 
@@ -31,7 +30,7 @@ export default function WorkspaceMainPage() {
   const {
     jobs,
     selectedIds,
-    filterConfig: { status: statusFilter, search: searchQuery },
+    filterConfig,
     setFilterConfig,
     selectAll,
     selectFailed,
@@ -83,29 +82,14 @@ export default function WorkspaceMainPage() {
     }
   }, [workspaceId, workspaceStats])
 
-  const debouncedSetFilterConfig = useDebouncedCallback(setFilterConfig, 250)
-  const [searchInputValue, setSearchInputValue] = useState(searchQuery)
-
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
-  const currentStats = workspaceId ? workspaceStats[workspaceId] : undefined
-  const counts = useMemo(() => {
-    const jobStats = currentStats?.job_stats || {}
-    const pending = jobStats.pending ?? 0
-    const running = jobStats.running ?? 0
-    const completed = jobStats.completed ?? 0
-    const failed = jobStats.failed ?? 0
-    return {
-      all: pending + running + completed + failed,
-      pending,
-      running,
-      completed,
-      failed,
-    }
-  }, [currentStats])
-
+  const filterCounts = useMemo(
+    () => getFilterCounts({ jobs, filterConfig }),
+    [jobs, filterConfig]
+  )
   const filteredJobs = getFilteredJobs()
-  const totalJobs = counts.all
+  const totalJobs = jobs.length
   const selectedJobs = jobs.filter((j) => selectedIds.has(j.id))
 
   const workflowNodesByKey = useMemo(() => {
@@ -203,34 +187,14 @@ export default function WorkspaceMainPage() {
         <p className={styles.error}>工作流定义加载失败：{workflowError}</p>
       )}
 
-      <section style={sectionStyle}>
-        <div className={styles.filterRow}>
-          <WorkspaceStatCards
-            counts={counts}
-            activeFilter={statusFilter}
-            onFilterChange={(filter) =>
-              setFilterConfig({
-                status: filter as
-                  | 'all'
-                  | 'pending'
-                  | 'running'
-                  | 'completed'
-                  | 'failed',
-              })
-            }
-          />
-          <TextField
-            type="search"
-            placeholder="搜索 ID 或标题"
-            value={searchInputValue}
-            onChange={(e) => {
-              const value = e.target.value
-              setSearchInputValue(value)
-              debouncedSetFilterConfig({ search: value })
-            }}
-            sx={{ width: 220, flexShrink: 0 }}
-          />
-        </div>
+      <section>
+        <JobFilterBar
+          filterConfig={filterConfig}
+          counts={filterCounts}
+          workflowDefinition={workflowDefinition}
+          jobs={jobs}
+          onChange={setFilterConfig}
+        />
       </section>
 
       {filteredJobs.length === 0 && totalJobs === 0 ? (

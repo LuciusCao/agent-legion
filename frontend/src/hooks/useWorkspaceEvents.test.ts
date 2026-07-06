@@ -30,6 +30,7 @@ describe('useWorkspaceEvents', () => {
 
   afterEach(() => {
     globalThis.EventSource = originalEventSource
+    vi.useRealTimers()
   })
 
   it('connects to workspace SSE endpoint', async () => {
@@ -57,6 +58,7 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('receiving a non-heartbeat message triggers refresh', async () => {
+    vi.useFakeTimers()
     renderHook(() => useWorkspaceEvents('ws1'))
     const source = EventSourceMock.instances[0]
 
@@ -72,10 +74,41 @@ describe('useWorkspaceEvents', () => {
       )
     })
 
-    await waitFor(() => {
-      expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
-      expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
     })
+
+    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+    expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
+  })
+
+  it('coalesces rapid job update messages into one jobs refresh', async () => {
+    vi.useFakeTimers()
+    renderHook(() => useWorkspaceEvents('ws1'))
+    const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      for (const jobId of ['job1', 'job2', 'job3']) {
+        source.onmessage?.(
+          new MessageEvent('message', {
+            data: JSON.stringify({
+              type: 'job_updated',
+              workspace_id: 'ws1',
+              job_id: jobId,
+            }),
+          })
+        )
+      }
+    })
+
+    expect(mockFetchJobs).not.toHaveBeenCalled()
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
+    })
+
+    expect(mockFetchJobs).toHaveBeenCalledTimes(1)
+    expect(mockFetchWorkspaceStats).toHaveBeenCalledTimes(1)
   })
 
   it('closes the EventSource on cleanup', () => {
@@ -146,6 +179,7 @@ describe('useWorkspaceEvents', () => {
   })
 
   it('statsOnly fetches workspace stats but not jobs on refresh', async () => {
+    vi.useFakeTimers()
     renderHook(() => useWorkspaceEvents('ws1', true, true))
     const source = EventSourceMock.instances[0]
 
@@ -161,9 +195,11 @@ describe('useWorkspaceEvents', () => {
       )
     })
 
-    await waitFor(() => {
-      expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(750)
     })
+
+    expect(mockFetchWorkspaceStats).toHaveBeenCalledWith('ws1')
     expect(mockFetchJobs).not.toHaveBeenCalled()
   })
 

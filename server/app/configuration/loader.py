@@ -8,19 +8,8 @@ from typing import Any
 
 import yaml
 
-CONFIG_FILE_KEYS: dict[str, frozenset[str]] = {
-    "app.yaml": frozenset({"data_dir", "server", "worker", "cleanup"}),
-    "video_hive.yaml": frozenset(
-        {
-            "asr",
-            "cms",
-            "resource_providers",
-            "cleanup_video_after_assemble",
-            "openclaw",
-        }
-    ),
-    "workflow.yaml": frozenset({"executors", "workflows"}),
-}
+from server.app.configuration.owned_keys import CONFIG_FILE_KEYS
+
 SPLIT_FILE_NAMES = tuple(CONFIG_FILE_KEYS)
 
 
