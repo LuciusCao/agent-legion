@@ -33,8 +33,8 @@ class RatchetResult:
     errors: tuple[str, ...]
 
 
-def ratchet_budgets(root: Path) -> RatchetResult:
-    """Add new, lower stale, and delete obsolete entries; never raise."""
+def ratchet_budgets(root: Path, *, rebase: bool = False) -> RatchetResult:
+    """Add new, lower stale, and delete obsolete entries; never raise unless --rebase."""
     errors: list[str] = []
 
     policy_path = root / "config/architecture/architecture-budget-policy.yaml"
@@ -64,18 +64,19 @@ def ratchet_budgets(root: Path) -> RatchetResult:
         actual = count_source_lines(root / path)
         desired = actual + policy.buffer_lines
         existing = old_map.get(path)
+        frozen = frozen_ceilings.get(path)
+        effective_ceiling = frozen if frozen is not None else existing
+
+        if effective_ceiling is not None and actual > effective_ceiling:
+            errors.append(f"{path}: {actual} lines exceeds ceiling {effective_ceiling}; split the file or revert growth")  # fmt: skip
+            continue
+
         if existing is None:
             new_map[path] = desired
-        elif actual > frozen_ceilings.get(path, existing):
-            effective_ceiling = frozen_ceilings.get(path, existing)
-            errors.append(
-                f"{path}: {actual} lines exceeds ceiling {effective_ceiling}; "
-                "split the file or revert growth"
-            )
-        elif existing > desired:
-            new_map[path] = desired
+        elif rebase and frozen is None:
+            new_map[path] = desired if existing != desired else existing
         else:
-            new_map[path] = existing
+            new_map[path] = min(existing, desired)
 
     if errors:
         return RatchetResult(changed=False, errors=tuple(errors))
@@ -88,11 +89,7 @@ def ratchet_budgets(root: Path) -> RatchetResult:
 
     baseline_path.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.NamedTemporaryFile(
-        mode="w",
-        encoding="utf-8",
-        dir=baseline_path.parent,
-        suffix=".tmp",
-        delete=False,
+        "w", encoding="utf-8", dir=baseline_path.parent, suffix=".tmp", delete=False
     ) as f:
         f.write(text)
         f.flush()
@@ -106,8 +103,9 @@ def ratchet_budgets(root: Path) -> RatchetResult:
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
+    parser.add_argument("--rebase", action="store_true", help="Raise existing baseline ceilings to actual + buffer_lines (one-time use).")  # fmt: skip
     args = parser.parse_args(argv)
-    result = ratchet_budgets(args.root.resolve())
+    result = ratchet_budgets(args.root.resolve(), rebase=args.rebase)
     for error in result.errors:
         print(f"ERROR: {error}")
     return 1 if result.errors else 0
