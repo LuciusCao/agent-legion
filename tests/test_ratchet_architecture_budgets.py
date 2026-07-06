@@ -14,7 +14,7 @@ def _write_policy(root: Path, exclude: list[str] | None = None) -> None:
         "production": {
             "roots": [{"path": "server/app", "extensions": [".py"]}],
             "exclude": exclude if exclude is not None else [],
-            "buffer_lines": 5,
+            "buffer_lines": 10,
         },
         "tests": {
             "roots": [{"path": "tests", "patterns": ["test_*.py"]}],
@@ -95,7 +95,7 @@ def test_adds_new_file_at_actual_plus_buffer(tmp_path):
     result = ratchet_budgets(root)
     assert result.errors == ()
     assert result.changed is True
-    assert read_baseline(root) == {"server/app/new.py": 25}
+    assert read_baseline(root) == {"server/app/new.py": 30}
 
 
 def test_refuses_to_raise_existing_ceiling(tmp_path):
@@ -124,7 +124,7 @@ def test_preserves_tighter_valid_ceiling_while_adding_new_file(tmp_path):
     assert result.changed is True
     assert read_baseline(root) == {
         "server/app/example.py": 103,
-        "server/app/new.py": 10,
+        "server/app/new.py": 15,
     }
 
 
@@ -142,7 +142,7 @@ def test_respects_frozen_exemption_while_adding_new_file(tmp_path):
     assert result.changed is True
     assert read_baseline(root) == {
         "server/app/exempt.py": 50,
-        "server/app/new.py": 10,
+        "server/app/new.py": 15,
     }
 
 
@@ -155,7 +155,7 @@ def test_lowers_stale_ceiling(tmp_path):
     result = ratchet_budgets(root)
     assert result.errors == ()
     assert result.changed is True
-    assert read_baseline(root) == {"server/app/example.py": 15}
+    assert read_baseline(root) == {"server/app/example.py": 20}
 
 
 def test_deletes_obsolete_entries_for_removed_file(tmp_path):
@@ -237,7 +237,7 @@ def test_unmatched_exclusion_does_not_modify_baseline(tmp_path):
         "production": {
             "roots": [{"path": "server/app", "extensions": [".py"]}],
             "exclude": ["server/app/does_not_exist.py"],
-            "buffer_lines": 5,
+            "buffer_lines": 10,
         },
         "tests": {
             "roots": [{"path": "tests", "patterns": ["test_*.py"]}],
@@ -258,7 +258,7 @@ def test_unmatched_exclusion_does_not_modify_baseline(tmp_path):
 def test_cli_returns_zero_on_success(tmp_path):
     root = configured_repo(tmp_path, {"server/app/example.py": 10}, baseline={})
     assert main(["--root", str(root)]) == 0
-    assert read_baseline(root) == {"server/app/example.py": 15}
+    assert read_baseline(root) == {"server/app/example.py": 20}
 
 
 def test_cli_returns_one_on_error(tmp_path):
@@ -279,7 +279,7 @@ def test_rebase_raises_existing_ceiling(tmp_path):
     result = ratchet_budgets(root, rebase=True)
     assert result.errors == ()
     assert result.changed is True
-    assert read_baseline(root) == {"server/app/example.py": 26}
+    assert read_baseline(root) == {"server/app/example.py": 31}
 
 
 def test_rebase_does_not_raise_frozen_exemption(tmp_path):
@@ -297,7 +297,7 @@ def test_rebase_does_not_raise_frozen_exemption(tmp_path):
     # Frozen exemption keeps its baseline entry even under rebase.
     assert read_baseline(root) == {
         "server/app/exempt.py": 50,
-        "server/app/new.py": 10,
+        "server/app/new.py": 15,
     }
 
 
@@ -308,7 +308,7 @@ def test_cli_rebase_flag(tmp_path):
         baseline={"server/app/example.py": 25},
     )
     assert main(["--root", str(root), "--rebase"]) == 0
-    assert read_baseline(root) == {"server/app/example.py": 26}
+    assert read_baseline(root) == {"server/app/example.py": 31}
 
 
 def test_rebase_still_lowers_stale_ceiling(tmp_path):
@@ -320,4 +320,4 @@ def test_rebase_still_lowers_stale_ceiling(tmp_path):
     result = ratchet_budgets(root, rebase=True)
     assert result.errors == ()
     assert result.changed is True
-    assert read_baseline(root) == {"server/app/example.py": 15}
+    assert read_baseline(root) == {"server/app/example.py": 20}
