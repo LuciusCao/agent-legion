@@ -4,9 +4,13 @@ import { JobProgressPanel } from './JobProgressPanel'
 import * as jobApi from '../jobApi'
 import type { JobNode, NodeRun } from '../jobTypes'
 
-vi.mock('../jobApi')
+vi.mock('../jobApi', () => ({
+  fetchJobLog: vi.fn(),
+  fetchRunTokenUsage: vi.fn(),
+}))
 
 const mockFetchJobLog = vi.mocked(jobApi.fetchJobLog)
+const mockFetchRunTokenUsage = vi.mocked(jobApi.fetchRunTokenUsage)
 
 const mockNodes: JobNode[] = [
   {
@@ -66,6 +70,9 @@ const mockRuns: NodeRun[] = [
 describe('JobProgressPanel', () => {
   beforeEach(() => {
     mockFetchJobLog.mockReset()
+    mockFetchRunTokenUsage
+      .mockReset()
+      .mockImplementation(() => new Promise(() => {}))
   })
 
   it('renders node labels and statuses', () => {
@@ -270,5 +277,130 @@ describe('JobProgressPanel', () => {
     )
     expect(screen.queryByText('错误详情')).not.toBeInTheDocument()
     expect(screen.queryByText('查看日志')).not.toBeInTheDocument()
+  })
+
+  it('shows compact token summary for each run after loading', async () => {
+    mockFetchRunTokenUsage.mockResolvedValue({
+      job_id: 'j1',
+      run_id: 1,
+      usage: {
+        node_run_id: 1,
+        node_key: 'extract',
+        provider: 'openai',
+        model: 'gpt-4o',
+        skill_version: 'v1.2.3',
+        message_count: 3,
+        input_tokens: 1000,
+        output_tokens: 200,
+        cache_read_tokens: 50,
+        total_tokens: 1250,
+        cost: {
+          input: 0.005,
+          output: 0.003,
+          cache_read: 0.0001,
+          total: 0.0081,
+          currency: 'USD',
+          pricing_missing: false,
+        },
+        is_complete: true,
+        usage_source: 'events_jsonl',
+      },
+      reason: null,
+    })
+
+    render(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={mockNodes}
+        runs={mockRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    await waitFor(() => {
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+    })
+
+    expect(screen.getByText(/Token: 1,250/)).toBeInTheDocument()
+    expect(screen.getByText(/USD 0.0081/)).toBeInTheDocument()
+  })
+
+  it('expands token usage details when compact summary is clicked', async () => {
+    mockFetchRunTokenUsage.mockResolvedValue({
+      job_id: 'j1',
+      run_id: 1,
+      usage: {
+        node_run_id: 1,
+        node_key: 'extract',
+        provider: 'openai',
+        model: 'gpt-4o',
+        skill_version: 'v1.2.3',
+        message_count: 3,
+        input_tokens: 1000,
+        output_tokens: 200,
+        cache_read_tokens: 50,
+        total_tokens: 1250,
+        cost: {
+          input: 0.005,
+          output: 0.003,
+          cache_read: 0.0001,
+          total: 0.0081,
+          currency: 'USD',
+          pricing_missing: false,
+        },
+        is_complete: true,
+        usage_source: 'events_jsonl',
+      },
+      reason: null,
+    })
+
+    render(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={mockNodes}
+        runs={mockRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    await waitFor(() => {
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+    })
+
+    fireEvent.click(screen.getByLabelText('Token 用量'))
+
+    expect(screen.getByText('openai / gpt-4o')).toBeInTheDocument()
+    expect(screen.getByText('v1.2.3')).toBeInTheDocument()
+    expect(screen.getByText('Token 明细')).toBeInTheDocument()
+    expect(screen.getByText('费用明细')).toBeInTheDocument()
+  })
+
+  it('does not block log button when token usage is missing', async () => {
+    mockFetchJobLog.mockResolvedValue({
+      run_id: 1,
+      log: 'log content',
+      truncated: false,
+    })
+    mockFetchRunTokenUsage.mockResolvedValue({
+      job_id: 'j1',
+      run_id: 1,
+      usage: null,
+      reason: 'no token usage recorded for run',
+    })
+
+    render(
+      <JobProgressPanel
+        jobId="j1"
+        nodes={mockNodes}
+        runs={mockRuns}
+        onOpenDagDialog={vi.fn()}
+      />
+    )
+    await waitFor(() => {
+      expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
+    })
+
+    fireEvent.click(screen.getByText('查看日志'))
+    await waitFor(() => {
+      expect(screen.getByText('log content')).toBeInTheDocument()
+    })
   })
 })

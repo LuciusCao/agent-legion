@@ -10,6 +10,7 @@ import type {
   RunToRequest,
   WorkspacePackageResult,
 } from './jobTypes'
+import type { TokenUsageRunResponse } from './tokenUsageTypes'
 
 export async function fetchJobLog(
   jobId: string,
@@ -17,6 +18,15 @@ export async function fetchJobLog(
 ): Promise<JobLogResponse> {
   return api<JobLogResponse>(
     `/api/jobs/${encodeURIComponent(jobId)}/runs/${encodeURIComponent(runId)}/log`
+  )
+}
+
+export async function fetchRunTokenUsage(
+  jobId: string,
+  runId: number
+): Promise<TokenUsageRunResponse> {
+  return api<TokenUsageRunResponse>(
+    `/api/jobs/${encodeURIComponent(jobId)}/runs/${encodeURIComponent(runId)}/token-usage`
   )
 }
 
