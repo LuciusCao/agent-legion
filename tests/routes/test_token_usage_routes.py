@@ -5,23 +5,20 @@ import pytest
 
 @pytest.fixture
 def workspace_and_job(client):
-    ws_response = client.post(
-        "/api/workspaces",
-        json={"name": "token_ws", "default_workflow_key": "question_comprehension_info"},
-    )
-    assert ws_response.status_code == 200
-    workspace_id = ws_response.json()["workspace"]["id"]
-    response = client.post(
-        f"/api/workspaces/{workspace_id}/job-batches",
-        json={
-            "workflow_key": "question_comprehension_info",
-            "source_kind": "batch_by_ids",
-            "question_ids": ["Q001"],
-            "knowledge_codes": [],
-        },
-    )
-    assert response.status_code == 200
-    job_id = response.json()["jobs"][0]["id"]
+    """Seed workspace and job directly through job_db to avoid CMS calls."""
+    job_db = client.app.state.job_db
+    workspace_id = "token_ws"
+    job_id = "token_job_1"
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert or ignore into workspaces(id, name, default_workflow_key) values (?, ?, ?)",
+            (workspace_id, "token_ws", "question_comprehension_info"),
+        )
+        conn.execute(
+            "insert or ignore into jobs(id, workspace_id, workflow_key, source_type, source_id) "
+            "values (?, ?, ?, ?, ?)",
+            (job_id, workspace_id, "question_comprehension_info", "batch_by_ids", "Q001"),
+        )
     return workspace_id, job_id
 
 
@@ -383,8 +380,8 @@ def test_get_workspace_token_usage_filter_excludes_other_provider_runs(client, w
     assert body["runs_with_usage"] == 1
     assert body["runs_without_usage"] == 1
     assert body["groups"][0]["runs"] == 1
-    # coverage denominator excludes the run whose usage is under a different provider.
-    assert body["groups"][0]["coverage"] == 0.5
+    # coverage is per-group: node-a has one run and it has usage.
+    assert body["groups"][0]["coverage"] == 1.0
 
 
 def test_get_workspace_token_usage_groups_by_node_skill_version(client, workspace_and_job):
@@ -482,3 +479,60 @@ def test_get_workspace_token_usage_caps_limit(client, workspace_and_job):
     workspace_id, _job_id = workspace_and_job
     response = client.get(f"/api/workspaces/{workspace_id}/token-usage?limit=10000")
     assert response.status_code == 422
+
+
+def test_get_workspace_token_usage_limit_does_not_cap_totals(client, workspace_and_job):
+    """Summary totals must aggregate the full filtered set, not just limited rows."""
+    workspace_id, job_id = workspace_and_job
+    job_db = client.app.state.job_db
+    for i in range(5):
+        _insert_node_run(job_db, run_id=100 + i, job_id=job_id, node_key="node-a")
+        _insert_token_usage(
+            job_db,
+            node_run_id=100 + i,
+            job_id=job_id,
+            workspace_id=workspace_id,
+            node_key="node-a",
+            provider="gateway",
+            model="your-model-a",
+            skill_version="v1",
+            input_tokens=100,
+            output_tokens=50,
+            cache_read_tokens=10,
+        )
+
+    response = client.get(f"/api/workspaces/{workspace_id}/token-usage?limit=2")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["runs_with_usage"] == 5
+    assert body["summary"]["input_tokens"] == 500
+    assert body["summary"]["total_tokens"] == 800
+    assert len(body["groups"]) == 1
+
+
+def test_get_workspace_token_usage_coverage_uses_per_group_denominator(client, workspace_and_job):
+    """A node with usage for all its own runs should show 100% coverage."""
+    workspace_id, job_id = workspace_and_job
+    job_db = client.app.state.job_db
+    _insert_node_run(job_db, run_id=200, job_id=job_id, node_key="node-a")
+    _insert_node_run(job_db, run_id=201, job_id=job_id, node_key="node-b")
+    _insert_token_usage(
+        job_db,
+        node_run_id=200,
+        job_id=job_id,
+        workspace_id=workspace_id,
+        node_key="node-a",
+        provider="gateway",
+        model="your-model-a",
+        skill_version="v1",
+        input_tokens=100,
+        output_tokens=50,
+        cache_read_tokens=10,
+    )
+
+    response = client.get(f"/api/workspaces/{workspace_id}/token-usage")
+    assert response.status_code == 200
+    body = response.json()
+    groups = {g["group_key"]: g for g in body["groups"]}
+    assert groups["node-a"]["coverage"] == 1.0
+    assert body["runs_without_usage"] == 1

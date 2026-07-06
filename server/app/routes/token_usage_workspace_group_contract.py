@@ -18,7 +18,7 @@ class TokenUsageWorkspaceGroup(BaseModel):
     total_output_tokens: int
     total_cache_read_tokens: int
     total_tokens: int
-    total_cost: float
-    avg_cost: float
+    total_cost: float | None
+    avg_cost: float | None
     pricing_missing: bool
     coverage: float

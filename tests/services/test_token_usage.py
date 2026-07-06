@@ -279,8 +279,7 @@ def test_cost_for_known_model():
 def test_cost_for_unknown_model():
     config = {"token_usage": {"currency": "CNY", "pricing": []}}
     cost = calculate_cost(100, 50, 30, 20, "unknown", "model", config)
-    assert cost.pricing_missing is True
-    assert cost.total == 0.0
+    assert cost is None
 
 
 def test_backfill_persists_rows_for_existing_run_dirs(tmp_path):

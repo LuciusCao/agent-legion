@@ -27,21 +27,18 @@ def calculate_cost(
     provider: str,
     model: str,
     pricing_config: dict[str, Any],
-) -> CostBreakdown:
-    """Return a cost breakdown for the given usage and provider/model."""
+) -> CostBreakdown | None:
+    """Return a cost breakdown for the given usage and provider/model.
+
+    Returns ``None`` when no pricing is configured for the provider/model,
+    so callers can distinguish "unknown cost" from a zero cost.
+    """
     pricing = load_pricing_config(pricing_config)
     rates = pricing.get((provider.strip(), model.strip()))
     currency = str(pricing_config.get("token_usage", {}).get("currency", "")).strip()
 
     if rates is None:
-        return CostBreakdown(
-            currency=currency,
-            input=0.0,
-            output=0.0,
-            cache_read=0.0,
-            total=0.0,
-            pricing_missing=True,
-        )
+        return None
 
     input_cost = input_tokens * rates["input_per_1m"] / 1_000_000
     output_cost = output_tokens * rates["output_per_1m"] / 1_000_000

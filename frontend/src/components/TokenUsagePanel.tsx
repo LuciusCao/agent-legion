@@ -470,7 +470,7 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
                               </div>
                               {group.pricing_missing && (
                                 <div className={styles.pricingMissing}>
-                                  缺少定价配置，费用为估算值
+                                  缺少定价配置
                                 </div>
                               )}
                             </div>
