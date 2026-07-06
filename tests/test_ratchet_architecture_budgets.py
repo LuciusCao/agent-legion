@@ -270,23 +270,51 @@ def test_cli_returns_one_on_error(tmp_path):
     assert main(["--root", str(root)]) == 1
 
 
-def test_rebase_raises_existing_ceiling(tmp_path):
+def test_rebase_raises_existing_ceiling_to_desired(tmp_path):
     root = configured_repo(
         tmp_path,
-        {"server/app/example.py": 21},
+        {"server/app/example.py": 20},
         baseline={"server/app/example.py": 25},
     )
     result = ratchet_budgets(root, rebase=True)
     assert result.errors == ()
     assert result.changed is True
-    assert read_baseline(root) == {"server/app/example.py": 31}
+    assert read_baseline(root) == {"server/app/example.py": 30}
 
 
-def test_rebase_does_not_raise_frozen_exemption(tmp_path):
+def test_rebase_is_idempotent(tmp_path):
+    root = configured_repo(
+        tmp_path,
+        {"server/app/example.py": 20},
+        baseline={"server/app/example.py": 25},
+    )
+    first = ratchet_budgets(root, rebase=True)
+    assert first.errors == ()
+    assert first.changed is True
+    assert read_baseline(root) == {"server/app/example.py": 30}
+
+    second = ratchet_budgets(root, rebase=True)
+    assert second.errors == ()
+    assert second.changed is False
+    assert read_baseline(root) == {"server/app/example.py": 30}
+
+
+def test_rebase_still_fails_when_actual_exceeds_ceiling(tmp_path):
+    root = configured_repo(
+        tmp_path,
+        {"server/app/example.py": 26},
+        baseline={"server/app/example.py": 25},
+    )
+    result = ratchet_budgets(root, rebase=True)
+    assert "exceeds ceiling 25" in result.errors[0]
+    assert result.changed is False
+
+
+def test_rebase_does_not_affect_frozen_exemption(tmp_path):
     root = configured_repo(
         tmp_path,
         {"server/app/exempt.py": 100, "server/app/new.py": 5},
-        baseline={"server/app/exempt.py": 50, "server/app/new.py": 20},
+        baseline={"server/app/exempt.py": 50},
     )
     _write_file_budget_exemption(root, "server/app/exempt.py", 100)
 
@@ -294,21 +322,20 @@ def test_rebase_does_not_raise_frozen_exemption(tmp_path):
 
     assert result.errors == ()
     assert result.changed is True
-    # Frozen exemption keeps its baseline entry even under rebase.
     assert read_baseline(root) == {
         "server/app/exempt.py": 50,
         "server/app/new.py": 15,
     }
 
 
-def test_cli_rebase_flag(tmp_path):
+def test_cli_rebase_flag_passes_through(tmp_path):
     root = configured_repo(
         tmp_path,
-        {"server/app/example.py": 21},
+        {"server/app/example.py": 20},
         baseline={"server/app/example.py": 25},
     )
     assert main(["--root", str(root), "--rebase"]) == 0
-    assert read_baseline(root) == {"server/app/example.py": 31}
+    assert read_baseline(root) == {"server/app/example.py": 30}
 
 
 def test_rebase_still_lowers_stale_ceiling(tmp_path):
