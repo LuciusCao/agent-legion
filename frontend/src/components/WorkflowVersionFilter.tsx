@@ -34,7 +34,10 @@ export function WorkflowVersionFilter({
   }, [jobs])
 
   return (
-    <FormControl size="small" className={styles.control}>
+    <FormControl
+      size="small"
+      className={`${styles.control} ${styles.filterControl}`}
+    >
       <InputLabel id="job-version-filter-label">Workflow 版本</InputLabel>
       <Select
         labelId="job-version-filter-label"
@@ -49,6 +52,21 @@ export function WorkflowVersionFilter({
                 ? 'none'
                 : Number(selected)
           )
+        }}
+        MenuProps={{ PaperProps: { className: styles.filterMenu } }}
+        renderValue={(selected) => {
+          const key = selected as string
+          if (key === '') {
+            return (
+              <span className={styles.filterPlaceholder}>
+                全部版本 ({counts.all ?? 0})
+              </span>
+            )
+          }
+          if (key === 'none') {
+            return <span>未指定版本 ({counts.none ?? 0})</span>
+          }
+          return <span>v{key} ({counts[key] ?? 0})</span>
         }}
       >
         <MenuItem value="">全部版本 ({counts.all ?? 0})</MenuItem>

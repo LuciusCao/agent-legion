@@ -28,6 +28,7 @@ export function createJobSummary(
     current_workflow_revision_id: '',
     current_workflow_revision_version: null,
     is_workflow_outdated: false,
+    packed: 0,
     ...partial,
   }
 }
@@ -40,7 +41,7 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     selectedIds: new Set(),
     expandedId: null,
     filterConfig: {
-      status: 'all',
+      status: null,
       search: '',
       workflowVersion: null,
       activeNodeKey: null,
@@ -61,6 +62,7 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     toggleSelect: () => {},
     selectAll: () => {},
     selectFailed: () => {},
+    selectUnpacked: () => {},
     clearSelection: () => {},
     toggleExpand: () => {},
     getFilteredJobs: () => [],

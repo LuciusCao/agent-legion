@@ -34,8 +34,8 @@ export function canRerunJob(status: string): boolean {
   return status !== 'running'
 }
 
-export function canPackageJob(status: string): boolean {
-  return status === 'completed'
+export function canPackageJob(job: JobSummary): boolean {
+  return job.status === 'completed' && !job.packed
 }
 
 export function canDeleteJob(): boolean {
@@ -87,7 +87,7 @@ export function JobActionBar({
   const packageDisabled =
     jobs.length === 0 ||
     loading ||
-    jobs.every((job) => !canPackageJob(job.status))
+    jobs.every((job) => !canPackageJob(job))
 
   const deleteDisabled = jobs.length === 0 || loading
   const handleRunTo = (targetKey: string, startKey?: string) =>

@@ -16,7 +16,7 @@ export type JobStatus =
   | 'failed'
   | 'paused'
 export interface JobFilterConfig {
-  status: JobStatus | 'all'
+  status: JobStatus | null
   search: string
   workflowVersion: number | 'none' | null
   activeNodeKey: string | null
@@ -45,6 +45,7 @@ export interface JobState {
   toggleSelect: (id: string) => void
   selectAll: () => void
   selectFailed: () => void
+  selectUnpacked: () => void
   clearSelection: () => void
   toggleExpand: (id: string) => void
   getFilteredJobs: () => JobSummary[]

@@ -10,14 +10,12 @@ export function selectionActions(set: JobStoreSet, get: () => JobState) {
         selectedIds: new Set(),
       }))
     },
-
     toggleSelectMode() {
       set((state) => ({
         selectMode: !state.selectMode,
         selectedIds: new Set(),
       }))
     },
-
     toggleSelect(id: string) {
       set((state) => {
         const next = new Set(state.selectedIds)
@@ -26,14 +24,12 @@ export function selectionActions(set: JobStoreSet, get: () => JobState) {
         return { selectedIds: next }
       })
     },
-
     selectAll() {
       set((state) => {
         const visible = getVisibleJobs(state)
         return { selectedIds: new Set(visible.map((j) => j.id)) }
       })
     },
-
     selectFailed() {
       set((state) => {
         const failedIds = state.jobs
@@ -42,15 +38,23 @@ export function selectionActions(set: JobStoreSet, get: () => JobState) {
         return { selectedIds: new Set(failedIds) }
       })
     },
-
+    selectUnpacked() {
+      set((state) => {
+        const visible = getVisibleJobs(state)
+        const unpackedIds = visible
+          .filter(
+            (j) => normalizeJobStatus(j.status) === 'completed' && !j.packed
+          )
+          .map((j) => j.id)
+        return { selectedIds: new Set(unpackedIds) }
+      })
+    },
     clearSelection() {
       set({ selectedIds: new Set() })
     },
-
     toggleExpand(id: string) {
       set((state) => ({ expandedId: state.expandedId === id ? null : id }))
     },
-
     getFilteredJobs() {
       return getVisibleJobs(get())
     },

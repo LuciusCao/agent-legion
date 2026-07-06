@@ -56,7 +56,7 @@ export function JobDetailActions({
   const packageDisabled =
     jobs.length === 0 ||
     loading ||
-    jobs.every((job) => !canPackageJob(job.status))
+    jobs.every((job) => !canPackageJob(job))
 
   const deleteDisabled = jobs.length === 0 || loading
 

@@ -34,6 +34,7 @@ export default function WorkspaceMainPage() {
     setFilterConfig,
     selectAll,
     selectFailed,
+    selectUnpacked,
     clearSelection,
     batchDelete,
     batchPackage,
@@ -100,6 +101,7 @@ export default function WorkspaceMainPage() {
 
   const filters: JobActionBarFilter[] = [
     { key: 'all', label: '全选', onClick: selectAll },
+    { key: 'unpacked', label: '仅未打包', onClick: selectUnpacked },
     { key: 'failed', label: '仅失败', onClick: selectFailed },
     { key: 'clear', label: '取消选择', onClick: clearSelection },
   ]

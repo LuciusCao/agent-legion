@@ -168,7 +168,7 @@ describe('WorkspaceMainPage', () => {
       selectedIds: new Set(),
       expandedId: null,
       filterConfig: {
-        status: 'all',
+        status: null,
         search: '',
         workflowVersion: null,
         activeNodeKey: null,
@@ -346,6 +346,7 @@ describe('WorkspaceMainPage', () => {
     expect(screen.getByText('打包')).toBeInTheDocument()
     expect(screen.getByText('删除')).toBeInTheDocument()
     expect(screen.getByText('全选')).toBeInTheDocument()
+    expect(screen.getByText('仅未打包')).toBeInTheDocument()
     expect(screen.getByText('仅失败')).toBeInTheDocument()
   })
 

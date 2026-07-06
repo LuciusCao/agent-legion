@@ -41,7 +41,7 @@ export const themeComponents: NonNullable<ThemeOptions['components']> = {
   MuiOutlinedInput: {
     styleOverrides: {
       root: {
-        borderRadius: 2,
+        borderRadius: 4,
       },
     },
   },
