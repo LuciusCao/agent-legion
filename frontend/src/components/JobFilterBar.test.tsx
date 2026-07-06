@@ -41,8 +41,8 @@ function renderBar(props = {}) {
       }}
       counts={{
         status: { all: 2, pending: 0, running: 1, completed: 1, failed: 0 },
-        workflowVersion: { '3': 2 },
-        activeNodeKey: { extract: 1, review: 1 },
+        workflowVersion: { all: 2, '3': 2 },
+        activeNodeKey: { all: 2, extract: 1, review: 1 },
       }}
       workflowDefinition={workflowDefinition}
       jobs={[
@@ -111,6 +111,38 @@ describe('JobFilterBar', () => {
     vi.useRealTimers()
   })
 
+  it('shows missing version option when some jobs have no version', () => {
+    renderBar({
+      jobs: [
+        createJobSummary({ id: 'j1', workflow_version: 3 }),
+        createJobSummary({ id: 'j2' }),
+      ],
+      counts: {
+        status: { all: 2, pending: 0, running: 1, completed: 1, failed: 0 },
+        workflowVersion: { all: 2, '3': 1, none: 1 },
+        activeNodeKey: { all: 2, extract: 1, review: 1 },
+      },
+    })
+    fireEvent.mouseDown(screen.getByLabelText('Workflow 版本'))
+    expect(
+      screen.getByRole('option', { name: '未指定版本 (1)' })
+    ).toBeInTheDocument()
+  })
+
+  it('calls onChange with none when missing version is selected', () => {
+    const { onChange } = renderBar({
+      jobs: [createJobSummary({ id: 'j1' })],
+      counts: {
+        status: { all: 1, pending: 1, running: 0, completed: 0, failed: 0 },
+        workflowVersion: { all: 1, none: 1 },
+        activeNodeKey: { all: 1 },
+      },
+    })
+    fireEvent.mouseDown(screen.getByLabelText('Workflow 版本'))
+    fireEvent.click(screen.getByText('未指定版本 (1)'))
+    expect(onChange).toHaveBeenCalledWith({ workflowVersion: 'none' })
+  })
+
   it('renders active filter chips', () => {
     renderBar({
       filterConfig: {
@@ -124,6 +156,24 @@ describe('JobFilterBar', () => {
     expect(screen.getByText('版本: v3')).toBeInTheDocument()
     expect(screen.getByText('节点: 审核')).toBeInTheDocument()
     expect(screen.getByText('搜索: "boom"')).toBeInTheDocument()
+  })
+
+  it('renders missing version active filter chip', () => {
+    renderBar({
+      filterConfig: {
+        status: 'all',
+        search: '',
+        workflowVersion: 'none',
+        activeNodeKey: null,
+      },
+      jobs: [createJobSummary({ id: 'j1' })],
+      counts: {
+        status: { all: 1, pending: 1, running: 0, completed: 0, failed: 0 },
+        workflowVersion: { all: 1, none: 1 },
+        activeNodeKey: { all: 1 },
+      },
+    })
+    expect(screen.getByText('版本: 未指定版本')).toBeInTheDocument()
   })
 
   it('clears a filter when chip delete is clicked', () => {
