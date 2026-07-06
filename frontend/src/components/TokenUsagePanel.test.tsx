@@ -77,7 +77,9 @@ describe('TokenUsagePanel', () => {
     render(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
-    expect(within(table).getByText('generate_key_info')).toBeInTheDocument()
+    expect(
+      await within(table).findByText('generate_key_info')
+    ).toBeInTheDocument()
     expect(screen.getByTestId('coverage-summary')).toHaveTextContent('50%')
     expect(screen.getByTestId('total-tokens-summary')).toHaveTextContent('250')
     expect(screen.getByTestId('total-cost-summary')).toHaveTextContent(
@@ -91,7 +93,9 @@ describe('TokenUsagePanel', () => {
     render(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
-    expect(within(table).getByText('generate_key_info')).toBeInTheDocument()
+    expect(
+      await within(table).findByText('generate_key_info')
+    ).toBeInTheDocument()
 
     await user.click(screen.getByRole('tab', { name: '按模型' }))
 
@@ -104,7 +108,9 @@ describe('TokenUsagePanel', () => {
     render(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
-    expect(within(table).getByText('generate_key_info')).toBeInTheDocument()
+    expect(
+      await within(table).findByText('generate_key_info')
+    ).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('button', { name: '展开' }))
 
@@ -121,7 +127,9 @@ describe('TokenUsagePanel', () => {
     render(<TokenUsagePanel workspaceId="ws1" />)
 
     const table = await screen.findByRole('table')
-    expect(within(table).getByText('generate_key_info')).toBeInTheDocument()
+    expect(
+      await within(table).findByText('generate_key_info')
+    ).toBeInTheDocument()
 
     const nodeFilter = screen.getByLabelText('节点')
     await user.click(nodeFilter)
