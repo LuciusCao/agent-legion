@@ -4,6 +4,7 @@ import argparse
 import json
 import logging
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -18,7 +19,10 @@ from comprehension_uploader.package_parser import (
     parse_package,
     validate_package,
 )
-from comprehension_uploader.packager import package_comprehension_info
+from comprehension_uploader.packager import (
+    package_comprehension_info,
+    package_comprehension_info_from_workspace_zip,
+)
 from comprehension_uploader.question_source import build_question_source
 from comprehension_uploader.scanner import Scanner
 from comprehension_uploader.uploader import Uploader
@@ -56,11 +60,34 @@ def cmd_upload(args: argparse.Namespace) -> int:
         print("Either --workspace or --batch-id is required", file=sys.stderr)
         return 2
 
-    try:
-        records = list(parse_package(Path(args.package)))
-    except PackageParseError as exc:
-        print(f"Parse error: {exc}", file=sys.stderr)
+    if not args.workspace_package and not args.package:
+        print("Either a package.jsonl path or --workspace-package is required", file=sys.stderr)
         return 2
+
+    if args.workspace_package:
+        source = build_question_source(config)
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".jsonl", delete=False, encoding="utf-8"
+        ) as tmp:
+            tmp_path = Path(tmp.name)
+        try:
+            package_comprehension_info_from_workspace_zip(
+                package_path=Path(args.workspace_package),
+                output_path=tmp_path,
+                question_source=source,
+            )
+            records = list(parse_package(tmp_path))
+        except PackageParseError as exc:
+            print(f"Parse error: {exc}", file=sys.stderr)
+            return 2
+        finally:
+            tmp_path.unlink(missing_ok=True)
+    else:
+        try:
+            records = list(parse_package(Path(args.package)))
+        except PackageParseError as exc:
+            print(f"Parse error: {exc}", file=sys.stderr)
+            return 2
 
     uploader.upload_batch(records, batch_id, workspace_id=workspace_id)
     print(f"Uploaded batch {batch_id} ({len(records)} records)")
@@ -94,11 +121,21 @@ def cmd_status(args: argparse.Namespace) -> int:
 def cmd_package(args: argparse.Namespace) -> int:
     config = _load_config(args.config)
     source = build_question_source(config)
-    summary = package_comprehension_info(
-        input_dir=Path(args.input_dir),
-        output_path=Path(args.output),
-        question_source=source,
-    )
+    if args.workspace_package:
+        summary = package_comprehension_info_from_workspace_zip(
+            package_path=Path(args.workspace_package),
+            output_path=Path(args.output),
+            question_source=source,
+        )
+    elif args.input_dir:
+        summary = package_comprehension_info(
+            input_dir=Path(args.input_dir),
+            output_path=Path(args.output),
+            question_source=source,
+        )
+    else:
+        print("Either --input-dir or --workspace-package is required", file=sys.stderr)
+        return 2
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
@@ -129,7 +166,11 @@ def main(argv: list[str] | None = None) -> int:
     upload_parser.add_argument(
         "--batch-id", help="Batch identifier (defaults to workspace-<timestamp>)"
     )
-    upload_parser.add_argument("package", help="Path to package.jsonl")
+    upload_parser.add_argument(
+        "--workspace-package",
+        help="Path to a workspace-generated zip; extracts and uploads comprehension_info.json files",
+    )
+    upload_parser.add_argument("package", nargs="?", help="Path to package.jsonl")
     upload_parser.set_defaults(func=cmd_upload)
 
     scan_parser = sub.add_parser("scan", help="Scan for stale questions")
@@ -147,7 +188,11 @@ def main(argv: list[str] | None = None) -> int:
     )
     package_parser_cmd.add_argument("--config", required=True, help="Path to YAML config")
     package_parser_cmd.add_argument(
-        "--input-dir", required=True, help="Directory containing comprehension_info.json files"
+        "--input-dir", help="Directory containing comprehension_info.json files"
+    )
+    package_parser_cmd.add_argument(
+        "--workspace-package",
+        help="Path to a workspace-generated zip containing job comprehension_info.json files",
     )
     package_parser_cmd.add_argument("--output", required=True, help="Path to write package.jsonl")
     package_parser_cmd.set_defaults(func=cmd_package)

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import tempfile
+import zipfile
 from pathlib import Path
 from typing import Any
 
@@ -112,4 +114,44 @@ def package_comprehension_info(
         output_path,
         skipped,
     )
+    return summary
+
+
+def package_comprehension_info_from_workspace_zip(
+    package_path: Path,
+    output_path: Path,
+    question_source: QuestionSource,
+) -> dict[str, Any]:
+    """Build a package.jsonl from a workspace-generated zip of job artifacts.
+
+    The zip is expected to contain a root ``manifest.json`` and one directory
+    per job. Each job directory may contain a ``comprehension_info.json`` file,
+    which is extracted to a temporary directory and then passed through the
+    normal ``package_comprehension_info`` flow.
+    """
+    package_path = Path(package_path)
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    info_count = 0
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        temp_root = Path(tmp_dir)
+        with zipfile.ZipFile(package_path, "r") as zf:
+            for member in zf.namelist():
+                parts = Path(member).parts
+                if len(parts) == 2 and parts[1] == "comprehension_info.json":
+                    target = temp_root / parts[0] / "comprehension_info.json"
+                    target.parent.mkdir(parents=True, exist_ok=True)
+                    with zf.open(member) as src, target.open("wb") as dst:
+                        dst.write(src.read())
+                    info_count += 1
+
+        summary = package_comprehension_info(
+            input_dir=temp_root,
+            output_path=output_path,
+            question_source=question_source,
+        )
+
+    summary["workspace_package"] = str(package_path)
+    summary["comprehension_info_files"] = info_count
     return summary
