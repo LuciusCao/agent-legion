@@ -277,18 +277,20 @@ def backfill_missing_token_usage(conn: sqlite3.Connection, data_dir: Path, limit
     rows = conn.execute(
         """
         select
-          node_runs.id as node_run_id,
-          node_runs.job_id,
-          node_runs.node_key,
-          node_runs.run_dir,
-          node_runs.skill_version,
-          jobs.workspace_id
-        from node_runs
-        left join node_run_token_usage on node_run_token_usage.node_run_id = node_runs.id
-        join jobs on jobs.id = node_runs.job_id
-        where node_run_token_usage.id is null
-          and node_runs.status in ('completed', 'failed')
-        order by node_runs.id
+          nr.id as node_run_id,
+          nr.job_id,
+          nr.node_key,
+          nr.run_dir,
+          nr.skill_version,
+          j.workspace_id
+        from node_runs as nr
+        join jobs as j on j.id = nr.job_id
+        where not exists (
+          select 1 from node_run_token_usage where node_run_id = nr.id
+        )
+          and nr.status in ('completed', 'failed')
+          and nr.run_dir != ''
+        order by nr.id
         limit ?
         """,
         (max(1, limit),),
@@ -296,11 +298,8 @@ def backfill_missing_token_usage(conn: sqlite3.Connection, data_dir: Path, limit
 
     persisted = 0
     for row in rows:
-        run_dir_value = row["run_dir"]
-        if not run_dir_value:
-            continue
         try:
-            run_dir = resolve_data_path(run_dir_value, data_dir, allow_missing=False)
+            run_dir = resolve_data_path(row["run_dir"], data_dir, allow_missing=False)
         except (ManagedPathError, FileNotFoundError):
             continue
 
