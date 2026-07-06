@@ -558,6 +558,95 @@ def _query_workspace_group_aggregates(
     return [dict(row) for row in rows]
 
 
+def _query_workspace_group_cost_rows(
+    job_db: Any,
+    workspace_id: str,
+    *,
+    node_key: str | None,
+    job_id: str | None,
+    provider: str | None,
+    model: str | None,
+    skill_version: str | None,
+    group_by: str,
+) -> Sequence[Mapping[str, Any]]:
+    """Aggregate token and cost inputs per (group_key, provider, model).
+
+    This is separate from the displayed group aggregates because a single
+    displayed group (e.g. one node) may contain runs under different
+    provider/model pairs, and each pair must be priced independently.
+    """
+    group_expr, group_columns = _group_by_sql(group_by)
+    filter_clauses, filter_params = _workspace_usage_filter_clauses(
+        node_key=node_key,
+        job_id=job_id,
+        provider=provider,
+        model=model,
+        skill_version=skill_version,
+    )
+    clauses = ["workspace_id = ?", *filter_clauses]
+    params: list[Any] = [workspace_id, *filter_params]
+    where = " and ".join(clauses)
+    group_by_sql = ", ".join([*group_columns, "provider", "model"])
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            f"""
+            select
+              {group_expr} as group_key,
+              provider,
+              model,
+              sum(input_tokens) as total_input_tokens,
+              sum(output_tokens) as total_output_tokens,
+              sum(cache_read_tokens) as total_cache_read_tokens,
+              sum(total_tokens) as total_tokens
+            from node_run_token_usage
+            where {where}
+            group by {group_by_sql}
+            """,
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _query_workspace_summary_cost_rows(
+    job_db: Any,
+    workspace_id: str,
+    *,
+    node_key: str | None,
+    job_id: str | None,
+    provider: str | None,
+    model: str | None,
+    skill_version: str | None,
+) -> Sequence[Mapping[str, Any]]:
+    """Aggregate token and cost inputs per (provider, model) over the full set."""
+    filter_clauses, filter_params = _workspace_usage_filter_clauses(
+        node_key=node_key,
+        job_id=job_id,
+        provider=provider,
+        model=model,
+        skill_version=skill_version,
+    )
+    clauses = ["workspace_id = ?", *filter_clauses]
+    params: list[Any] = [workspace_id, *filter_params]
+    where = " and ".join(clauses)
+    with job_db.connect() as conn:
+        rows = conn.execute(
+            f"""
+            select
+              provider,
+              model,
+              sum(input_tokens) as total_input_tokens,
+              sum(output_tokens) as total_output_tokens,
+              sum(cache_read_tokens) as total_cache_read_tokens,
+              sum(total_tokens) as total_tokens
+            from node_run_token_usage
+            where {where}
+            group by provider, model
+            """,
+            params,
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 def _count_workspace_runs(
     job_db: Any,
     workspace_id: str,
@@ -663,22 +752,24 @@ def _count_runs_per_node_group(
     return {str(row["group_key"]): int(row["count"]) for row in rows}
 
 
-def _group_cost(
-    group_rows: Sequence[Mapping[str, Any]],
+def _sum_cost_rows(
+    rows: Sequence[Mapping[str, Any]],
     config: dict[str, Any],
 ) -> tuple[float | None, bool]:
-    """Return (total_cost, pricing_missing) for a group.
+    """Return (total_cost, pricing_missing) by pricing each row's provider/model.
 
-    ``total_cost`` is ``None`` when no row has a configured price.
+    Rows are expected to carry aggregate columns ``total_input_tokens``,
+    ``total_output_tokens``, ``total_cache_read_tokens`` and ``total_tokens``.
+    ``total_cost`` is ``None`` when every row lacks configured pricing.
     """
     total_cost: float | None = None
     pricing_missing = False
-    for r in group_rows:
+    for r in rows:
         cost = calculate_cost(
             int(r.get("total_tokens", 0)),
-            int(r.get("input_tokens", 0)),
-            int(r.get("output_tokens", 0)),
-            int(r.get("cache_read_tokens", 0)),
+            int(r.get("total_input_tokens", 0)),
+            int(r.get("total_output_tokens", 0)),
+            int(r.get("total_cache_read_tokens", 0)),
             str(r.get("provider", "")),
             str(r.get("model", "")),
             config,
@@ -723,6 +814,25 @@ def build_workspace_usage_response(
         group_by=group_by,
         limit=limit,
     )
+    group_cost_rows = _query_workspace_group_cost_rows(
+        job_db,
+        workspace_id,
+        node_key=node_key,
+        job_id=job_id,
+        provider=provider,
+        model=model,
+        skill_version=skill_version,
+        group_by=group_by,
+    )
+    summary_cost_rows = _query_workspace_summary_cost_rows(
+        job_db,
+        workspace_id,
+        node_key=node_key,
+        job_id=job_id,
+        provider=provider,
+        model=model,
+        skill_version=skill_version,
+    )
     total_runs = _count_workspace_runs(
         job_db,
         workspace_id,
@@ -744,8 +854,10 @@ def build_workspace_usage_response(
             skill_version=skill_version,
         )
 
-    summary_cost: float | None = None
-    summary_pricing_missing = False
+    group_cost_by_key: dict[str, list[dict[str, Any]]] = {}
+    for r in group_cost_rows:
+        group_cost_by_key.setdefault(str(r["group_key"]), []).append(dict(r))
+
     groups: list[dict[str, Any]] = []
 
     for row in group_rows:
@@ -755,12 +867,9 @@ def build_workspace_usage_response(
         total_output = int(row["total_output_tokens"])
         total_cache_read = int(row["total_cache_read_tokens"])
         total_tokens = int(row["total_tokens"])
-        group_cost, group_pricing_missing = _group_cost([row], config)
-
-        if group_pricing_missing:
-            summary_pricing_missing = True
-        if group_cost is not None:
-            summary_cost = (summary_cost or 0.0) + group_cost
+        group_cost, group_pricing_missing = _sum_cost_rows(
+            group_cost_by_key.get(group_key, []), config
+        )
 
         # Model/skill_version groups are defined only by usage rows, so the
         # denominator is the number of usage rows in the group.
@@ -794,6 +903,7 @@ def build_workspace_usage_response(
     runs_with_usage = int(aggregates["runs_with_usage"])
     runs_without_usage = max(0, total_runs - runs_with_usage)
 
+    summary_cost, summary_pricing_missing = _sum_cost_rows(summary_cost_rows, config)
     summary_cost_obj = build_aggregate_cost(
         int(aggregates["input_tokens"]),
         int(aggregates["output_tokens"]),
@@ -801,7 +911,7 @@ def build_workspace_usage_response(
         int(aggregates["total_tokens"]),
         summary_cost,
         summary_pricing_missing,
-        group_rows,
+        summary_cost_rows,
         config,
     )
 

@@ -536,3 +536,76 @@ def test_get_workspace_token_usage_coverage_uses_per_group_denominator(client, w
     groups = {g["group_key"]: g for g in body["groups"]}
     assert groups["node-a"]["coverage"] == 1.0
     assert body["runs_without_usage"] == 1
+
+
+def test_get_workspace_token_usage_mixed_model_group_cost_is_summed(client, workspace_and_job):
+    """A node group with runs under different provider/model pairs prices each pair separately."""
+    workspace_id, job_id = workspace_and_job
+    job_db = client.app.state.job_db
+    _insert_node_run(job_db, run_id=300, job_id=job_id, node_key="node-a")
+    _insert_node_run(job_db, run_id=301, job_id=job_id, node_key="node-a")
+    _insert_token_usage(
+        job_db,
+        node_run_id=300,
+        job_id=job_id,
+        workspace_id=workspace_id,
+        node_key="node-a",
+        provider="gateway",
+        model="your-model-a",
+        skill_version="v1",
+        input_tokens=1_000_000,
+        output_tokens=500_000,
+        cache_read_tokens=200_000,
+    )
+    _insert_token_usage(
+        job_db,
+        node_run_id=301,
+        job_id=job_id,
+        workspace_id=workspace_id,
+        node_key="node-a",
+        provider="doubao",
+        model="Doubao-Seed-2.1-turbo",
+        skill_version="v1",
+        input_tokens=1_000_000,
+        output_tokens=500_000,
+        cache_read_tokens=200_000,
+    )
+
+    response = client.get(f"/api/workspaces/{workspace_id}/token-usage")
+    assert response.status_code == 200
+    body = response.json()
+    groups = {g["group_key"]: g for g in body["groups"]}
+    assert len(groups) == 1
+    # Both pricing configs use 3.0 / 15.0 / 0.6 per 1M.
+    expected = (1_000_000 * 3.0 + 500_000 * 15.0 + 200_000 * 0.6) / 1_000_000
+    assert groups["node-a"]["total_cost"] == pytest.approx(expected * 2)
+    assert groups["node-a"]["avg_cost"] == pytest.approx(expected)
+
+
+def test_get_workspace_token_usage_summary_cost_not_capped_by_limit(client, workspace_and_job):
+    """Summary cost aggregates the full filtered set, not only the displayed groups."""
+    workspace_id, job_id = workspace_and_job
+    job_db = client.app.state.job_db
+    for i in range(3):
+        _insert_node_run(job_db, run_id=400 + i, job_id=job_id, node_key=f"node-{i}")
+        _insert_token_usage(
+            job_db,
+            node_run_id=400 + i,
+            job_id=job_id,
+            workspace_id=workspace_id,
+            node_key=f"node-{i}",
+            provider="gateway",
+            model="your-model-a",
+            skill_version="v1",
+            input_tokens=1_000_000,
+            output_tokens=500_000,
+            cache_read_tokens=200_000,
+        )
+
+    response = client.get(f"/api/workspaces/{workspace_id}/token-usage?limit=1")
+    assert response.status_code == 200
+    body = response.json()
+    # Only one group is returned due to limit, but summary cost covers all 3 runs.
+    assert len(body["groups"]) == 1
+    expected_run_cost = (1_000_000 * 3.0 + 500_000 * 15.0 + 200_000 * 0.6) / 1_000_000
+    assert body["summary"]["cost"]["total"] == pytest.approx(expected_run_cost * 3)
