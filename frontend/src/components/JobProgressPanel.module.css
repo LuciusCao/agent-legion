@@ -255,3 +255,7 @@
   font-size: 13px;
   color: #6b7280;
 }
+
+.tokenUsageRow {
+  margin-top: 2px;
+}
