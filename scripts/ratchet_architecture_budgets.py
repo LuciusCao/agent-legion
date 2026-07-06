@@ -65,9 +65,11 @@ def ratchet_budgets(root: Path, *, rebase: bool = False) -> RatchetResult:
         desired = actual + policy.buffer_lines
         existing = old_map.get(path)
         frozen = frozen_ceilings.get(path)
-        # Rebase is not a pass to exceed the current ceiling: non-exempt
-        # files are still checked against their existing baseline, and
-        # exempt files against their frozen ceiling.
+        # Rebase is not a free pass to exceed the current ceiling.
+        # Non-exempt files are still checked against their existing baseline.
+        # Exempt files are still checked against their frozen ceiling.
+        # Only when the file is not currently over its ceiling may rebase
+        # raise that ceiling up to actual + buffer_lines.
         effective_ceiling = frozen if frozen is not None else existing
 
         if effective_ceiling is not None and actual > effective_ceiling:
