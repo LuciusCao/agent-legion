@@ -81,3 +81,11 @@ package-comprehension: ## 从 comprehension_info.json 生成 package.jsonl (INPU
 		$(if $(INPUT_DIR),--input-dir $(INPUT_DIR)) \
 		$(if $(CONFIG),--config $(CONFIG)) \
 		$(if $(OUTPUT),--output $(OUTPUT))
+
+.PHONY: upload-workspace-package
+upload-workspace-package: ## 从 workspace zip 直接上传审题信息 (CONFIG/PACKAGE/WORKSPACE/BATCH)
+	$(UV) run python tools/content-uploader/run.py upload \
+		$(if $(CONFIG),--config $(CONFIG)) \
+		$(if $(WORKSPACE),--workspace $(WORKSPACE)) \
+		$(if $(BATCH),--batch-id $(BATCH)) \
+		$(if $(PACKAGE),--workspace-package $(PACKAGE))
