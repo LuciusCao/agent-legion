@@ -1,7 +1,9 @@
 import { useEffect, useRef } from 'react'
 import { useJobStore } from '../stores/jobStore'
-import { useWorkspaceStore } from '../stores/workspaceStore'
-import { fetchJobs, fetchWorkspaceStats } from '../api'
+import {
+  mergeWorkspaceEventStats,
+  refreshWorkspaceEvents,
+} from './workspaceEventRefresh'
 
 interface WorkspaceEventPayload {
   type: string
@@ -16,6 +18,7 @@ export function useWorkspaceEvents(
   statsOnly = false
 ) {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => {
     if (workspaceId) useJobStore.getState().resetForWorkspace(workspaceId)
@@ -27,27 +30,24 @@ export function useWorkspaceEvents(
     let source: EventSource | null = null
     let reconnectDelay = 1000
     const maxReconnectDelay = 30000
+    const jobUpdateRefreshDelay = 750
     let closed = false
     let stale = false
 
-    const refresh = async (includeJobs: boolean) => {
-      try {
-        const stats = await fetchWorkspaceStats(workspaceId)
-        if (stale || closed) return
-        useWorkspaceStore.getState().setWorkspaceStats(workspaceId, stats)
-        if (includeJobs && !statsOnly) {
-          const jobsData = await fetchJobs(workspaceId)
-          if (stale || closed) return
-          useJobStore.getState().setJobsAndFinishLoading(jobsData.jobs)
-        }
-      } catch (err) {
-        useJobStore
-          .getState()
-          .failJobFetch(
-            workspaceId,
-            err instanceof Error ? err.message : 'Failed to refresh jobs'
-          )
-      }
+    const refresh = (includeJobs: boolean) =>
+      refreshWorkspaceEvents(
+        workspaceId,
+        includeJobs,
+        statsOnly,
+        () => stale || closed
+      )
+
+    const scheduleJobRefresh = () => {
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      refreshTimerRef.current = setTimeout(() => {
+        refreshTimerRef.current = null
+        void refresh(true)
+      }, jobUpdateRefreshDelay)
     }
 
     const connect = () => {
@@ -55,24 +55,23 @@ export function useWorkspaceEvents(
       source = new EventSource(
         `/api/workspaces/${encodeURIComponent(workspaceId)}/events`
       )
-
       source.onopen = () => {
         reconnectDelay = 1000
         refresh(true)
       }
-
       source.onmessage = (event) => {
         if (!event.data || event.data.startsWith(':heartbeat')) return
         try {
           const payload = JSON.parse(event.data) as WorkspaceEventPayload
           if (payload.workspace_id !== workspaceId) return
           if (payload.stats) {
-            useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
-              ...useWorkspaceStore.getState().workspaceStats[workspaceId],
-              job_stats: payload.stats,
-            })
+            mergeWorkspaceEventStats(workspaceId, payload.stats)
           }
-          refresh(true)
+          if (payload.type === 'job_updated') {
+            scheduleJobRefresh()
+            return
+          }
+          void refresh(true)
         } catch {
           // ignore invalid payloads
         }
@@ -95,8 +94,11 @@ export function useWorkspaceEvents(
     return () => {
       stale = true
       closed = true
-      if (reconnectTimerRef.current) {
-        clearTimeout(reconnectTimerRef.current)
+      for (const timer of [
+        reconnectTimerRef.current,
+        refreshTimerRef.current,
+      ]) {
+        if (timer) clearTimeout(timer)
       }
       if (source) {
         source.close()

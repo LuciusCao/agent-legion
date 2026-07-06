@@ -75,8 +75,12 @@ describe('JobList', () => {
       error: null,
       selectedIds: new Set(),
       expandedId: null,
-      statusFilter: 'all',
-      searchQuery: '',
+      filterConfig: {
+        status: 'all',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
     })
   })
 

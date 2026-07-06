@@ -1,0 +1,146 @@
+import { describe, it, expect, vi } from 'vitest'
+import { render, screen, fireEvent, act } from '@testing-library/react'
+import { JobFilterBar } from './JobFilterBar'
+import { createJobSummary } from '../stores/job/actions/testHelpers'
+import type { WorkflowDefinitionRecord } from '../types'
+
+const workflowDefinition: WorkflowDefinitionRecord = {
+  key: 'question_content',
+  label: 'Question Content',
+  nodes: [
+    {
+      key: 'extract',
+      label: '提取',
+      after: [],
+      capability: 'extract',
+      inputs: [],
+      outputs: [],
+    },
+    {
+      key: 'review',
+      label: '审核',
+      after: ['extract'],
+      capability: 'review',
+      inputs: [],
+      outputs: [],
+    },
+  ],
+  edges: [],
+  intake: { modes: [] },
+}
+
+function renderBar(props = {}) {
+  const onChange = vi.fn()
+  const utils = render(
+    <JobFilterBar
+      filterConfig={{
+        status: 'all',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      }}
+      counts={{
+        status: { all: 2, pending: 0, running: 1, completed: 1, failed: 0 },
+        workflowVersion: { '3': 2 },
+        activeNodeKey: { extract: 1, review: 1 },
+      }}
+      workflowDefinition={workflowDefinition}
+      jobs={[
+        createJobSummary({
+          id: 'j1',
+          status: 'running',
+          active_node_key: 'extract',
+          workflow_version: 3,
+        }),
+        createJobSummary({
+          id: 'j2',
+          status: 'completed',
+          active_node_key: 'review',
+          workflow_version: 3,
+        }),
+      ]}
+      onChange={onChange}
+      {...props}
+    />
+  )
+  return { ...utils, onChange }
+}
+
+describe('JobFilterBar', () => {
+  it('renders all filter controls', () => {
+    renderBar()
+    expect(screen.getByLabelText('状态')).toBeInTheDocument()
+    expect(screen.getByLabelText('Workflow 版本')).toBeInTheDocument()
+    expect(screen.getByLabelText('当前运行节点')).toBeInTheDocument()
+    expect(
+      screen.getByPlaceholderText('搜索 ID / 标题 / 批次')
+    ).toBeInTheDocument()
+  })
+
+  it('shows cascade counts in status options', () => {
+    renderBar()
+    fireEvent.mouseDown(screen.getByLabelText('状态'))
+    expect(
+      screen.getByRole('option', { name: '全部状态 (2)' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('option', { name: '运行中 (1)' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('option', { name: '已完成 (1)' })
+    ).toBeInTheDocument()
+  })
+
+  it('calls onChange when status changes', () => {
+    const { onChange } = renderBar()
+    fireEvent.mouseDown(screen.getByLabelText('状态'))
+    fireEvent.click(screen.getByText('失败 (0)'))
+    expect(onChange).toHaveBeenCalledWith({ status: 'failed' })
+  })
+
+  it('calls onChange with debounce when searching', () => {
+    vi.useFakeTimers()
+    const { onChange } = renderBar()
+    const input = screen.getByPlaceholderText('搜索 ID / 标题 / 批次')
+    fireEvent.change(input, { target: { value: 'algebra' } })
+    expect(onChange).not.toHaveBeenCalled()
+    act(() => {
+      vi.advanceTimersByTime(250)
+    })
+    expect(onChange).toHaveBeenCalledWith({ search: 'algebra' })
+    vi.useRealTimers()
+  })
+
+  it('renders active filter chips', () => {
+    renderBar({
+      filterConfig: {
+        status: 'failed',
+        search: 'boom',
+        workflowVersion: 3,
+        activeNodeKey: 'review',
+      },
+    })
+    expect(screen.getByText('状态: 失败')).toBeInTheDocument()
+    expect(screen.getByText('版本: v3')).toBeInTheDocument()
+    expect(screen.getByText('节点: 审核')).toBeInTheDocument()
+    expect(screen.getByText('搜索: "boom"')).toBeInTheDocument()
+  })
+
+  it('clears a filter when chip delete is clicked', () => {
+    const onChange = vi.fn()
+    renderBar({
+      filterConfig: {
+        status: 'failed',
+        search: '',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
+      onChange,
+    })
+    const chip = screen.getByText('状态: 失败').closest('.MuiChip-root')
+    const deleteIcon = chip?.querySelector('[data-testid="CancelIcon"]')
+    expect(deleteIcon).toBeTruthy()
+    fireEvent.click(deleteIcon!)
+    expect(onChange).toHaveBeenCalledWith({ status: 'all' })
+  })
+})
