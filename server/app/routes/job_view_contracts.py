@@ -37,6 +37,7 @@ class JobSummaryResponse(BaseModel):
     total_nodes: int = 0
     active_node_key: str | None = None
     error_summary: str = ""
+    packed: int = 0
     execution_control: ExecutionControlSummaryResponse = Field(
         default_factory=ExecutionControlSummaryResponse
     )
