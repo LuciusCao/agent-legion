@@ -17,7 +17,6 @@ export function countMutationResults(
     { succeeded: 0, skipped: 0, failed: 0 }
   )
 }
-
 export function makeMutationToast(
   action: string,
   counts: MutationCounts
@@ -33,12 +32,13 @@ export function makeMutationToast(
 
 export function normalizeJobStatus(
   status: string
-): 'pending' | 'running' | 'completed' | 'failed' {
+): 'pending' | 'running' | 'completed' | 'failed' | 'paused' {
   switch (status) {
     case 'pending':
     case 'running':
     case 'completed':
     case 'failed':
+    case 'paused':
       return status
     default:
       return 'pending'

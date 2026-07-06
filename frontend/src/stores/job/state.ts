@@ -9,9 +9,12 @@ export {
   normalizeJobStatus,
   type MutationCounts,
 } from './mutationHelpers'
-
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed'
-
+export type JobStatus =
+  | 'pending'
+  | 'running'
+  | 'completed'
+  | 'failed'
+  | 'paused'
 export interface JobFilterConfig {
   status: JobStatus | 'all'
   search: string
@@ -70,7 +73,6 @@ export interface JobState {
     jobIds: string[]
   ) => Promise<BatchJobMutationResult>
 }
-
 export type JobStoreSet = (
   partial:
     | JobState

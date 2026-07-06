@@ -113,7 +113,7 @@ def _pause_job_on_target_completion(
 ) -> None:
     job = conn.execute(
         """
-        select execution_mode, target_node_key
+        select execution_mode, target_node_key, status
         from jobs
         where id=?
         """,
@@ -123,6 +123,7 @@ def _pause_job_on_target_completion(
         job is not None
         and job["execution_mode"] == "until_node"
         and job["target_node_key"] == completed_node_key
+        and job["status"] != "completed"
     ):
         conn.execute(
             """
