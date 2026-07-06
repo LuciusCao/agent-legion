@@ -452,7 +452,7 @@ def build_job_usage_response(
 
 
 def _group_column(group_by: str) -> str:
-    if group_by in {"node", "node_key"}:
+    if group_by in {"node", "node_key", "node_skill_version"}:
         return "node_key"
     if group_by in {"provider", "model", "skill_version"}:
         return group_by
@@ -460,6 +460,9 @@ def _group_column(group_by: str) -> str:
 
 
 def _group_label(group_by: str, group_key: str) -> dict[str, str]:
+    if group_by == "node_skill_version":
+        node_key, _, skill_version = group_key.partition(" / ")
+        return {"node_key": node_key, "provider": "", "model": "", "skill_version": skill_version}
     column = _group_column(group_by)
     labels = {"node_key": "", "provider": "", "model": "", "skill_version": ""}
     labels[column] = group_key
@@ -594,7 +597,11 @@ def build_workspace_usage_response(
 
     grouped: dict[str, list[dict[str, Any]]] = {}
     for row in rows:
-        key = str(row[group_column])
+        key = (
+            f"{row['node_key']} / {row['skill_version']}"
+            if group_by == "node_skill_version"
+            else str(row[group_column])
+        )
         grouped.setdefault(key, []).append(dict(row))
 
     summary_message_count = 0

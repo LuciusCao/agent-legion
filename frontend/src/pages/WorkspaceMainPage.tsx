@@ -12,6 +12,7 @@ import {
 } from '../components/JobActionBar'
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
 import { WorkspacePackageHistoryDialog } from '../components/WorkspacePackageHistoryDialog'
+import { TokenUsagePanel } from '../components/TokenUsagePanel'
 import { fetchWorkflowDefinition } from '../api'
 import { getFilterCounts } from '../stores/job/selectors'
 import type { WorkflowDefinitionRecord } from '../types'
@@ -191,6 +192,8 @@ export default function WorkspaceMainPage() {
       {workflowError && (
         <p className={styles.error}>工作流定义加载失败：{workflowError}</p>
       )}
+
+      {workspaceId && <TokenUsagePanel workspaceId={workspaceId} />}
 
       <section>
         <JobFilterBar
