@@ -1416,7 +1416,7 @@ export interface components {
     RunUsage: {
       /** Cache Read Tokens */
       cache_read_tokens: number
-      cost: components['schemas']['RunUsageCost']
+      cost: components['schemas']['RunUsageCost'] | null
       /** Input Tokens */
       input_tokens: number
       /** Is Complete */
@@ -1431,6 +1431,8 @@ export interface components {
       node_run_id: number
       /** Output Tokens */
       output_tokens: number
+      /** Pricing Missing */
+      pricing_missing: boolean
       /** Provider */
       provider: string
       /** Skill Version */
@@ -1443,17 +1445,28 @@ export interface components {
     /** RunUsageCost */
     RunUsageCost: {
       /** Cache Read */
-      cache_read: number
+      cache_read: number | null
       /** Currency */
       currency: string
       /** Input */
-      input: number
+      input: number | null
       /** Output */
-      output: number
-      /** Pricing Missing */
-      pricing_missing: boolean
+      output: number | null
       /** Total */
-      total: number
+      total: number | null
+    }
+    /** TokenUsageCostBreakdown */
+    TokenUsageCostBreakdown: {
+      /** Cache Read */
+      cache_read: number | null
+      /** Currency */
+      currency: string
+      /** Input */
+      input: number | null
+      /** Output */
+      output: number | null
+      /** Total */
+      total: number | null
     }
     /** TokenUsageJobResponse */
     TokenUsageJobResponse: {
@@ -1462,17 +1475,24 @@ export interface components {
       /** Job Id */
       job_id: string
       /** Runs */
-      runs: {
-        [key: string]: unknown
-      }[]
+      runs: components['schemas']['TokenUsageRunItem'][]
       /** Runs With Usage */
       runs_with_usage: number
       /** Runs Without Usage */
       runs_without_usage: number
-      /** Total */
-      total: {
-        [key: string]: unknown
-      }
+      total: components['schemas']['TokenUsageTotal']
+    }
+    /** TokenUsageRunItem */
+    TokenUsageRunItem: {
+      /** Node Key */
+      node_key: string
+      /** Reason */
+      reason: string | null
+      /** Run Id */
+      run_id: number
+      /** Status */
+      status: string
+      usage: components['schemas']['RunUsage'] | null
     }
     /** TokenUsageRunResponse */
     TokenUsageRunResponse: {
@@ -1483,6 +1503,38 @@ export interface components {
       /** Run Id */
       run_id: number
       usage: components['schemas']['RunUsage'] | null
+    }
+    /** TokenUsageSummary */
+    TokenUsageSummary: {
+      /** Cache Read Tokens */
+      cache_read_tokens: number
+      cost: components['schemas']['TokenUsageCostBreakdown'] | null
+      /** Input Tokens */
+      input_tokens: number
+      /** Message Count */
+      message_count: number
+      /** Output Tokens */
+      output_tokens: number
+      /** Pricing Missing */
+      pricing_missing: boolean
+      /** Total Tokens */
+      total_tokens: number
+    }
+    /** TokenUsageTotal */
+    TokenUsageTotal: {
+      /** Cache Read Tokens */
+      cache_read_tokens: number
+      cost: components['schemas']['TokenUsageCostBreakdown'] | null
+      /** Input Tokens */
+      input_tokens: number
+      /** Message Count */
+      message_count: number
+      /** Output Tokens */
+      output_tokens: number
+      /** Pricing Missing */
+      pricing_missing: boolean
+      /** Total Tokens */
+      total_tokens: number
     }
     /** TokenUsageWorkspaceGroup */
     TokenUsageWorkspaceGroup: {
@@ -1533,10 +1585,7 @@ export interface components {
       runs_with_usage: number
       /** Runs Without Usage */
       runs_without_usage: number
-      /** Summary */
-      summary: {
-        [key: string]: unknown
-      }
+      summary: components['schemas']['TokenUsageSummary']
       /** Workspace Id */
       workspace_id: string
     }
@@ -3804,7 +3853,7 @@ export interface operations {
         provider?: string | null
         model?: string | null
         skill_version?: string | null
-        group_by?: string
+        group_by?: 'node' | 'model' | 'skill_version' | 'node_skill_version'
         limit?: number
       }
       header?: never

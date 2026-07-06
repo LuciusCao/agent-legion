@@ -85,19 +85,7 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
     }
   }, [workspaceId, groupBy, filters])
 
-  const summary = data?.summary as
-    | {
-        total_tokens?: number
-        input_tokens?: number
-        output_tokens?: number
-        cache_read_tokens?: number
-        cost?: {
-          total?: number | null
-          currency?: string
-          pricing_missing?: boolean
-        }
-      }
-    | undefined
+  const summary = data?.summary
 
   const totalRuns = useMemo(() => {
     return (data?.runs_with_usage ?? 0) + (data?.runs_without_usage ?? 0)
@@ -217,7 +205,7 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
             {money(data?.currency ?? 'CNY', summary?.cost?.total ?? undefined)}
           </div>
           <div className={styles.metricMeta}>
-            {summary?.cost?.pricing_missing ? '缺少定价配置' : '按配置单价计算'}
+            {summary?.pricing_missing ? '缺少定价配置' : '按配置单价计算'}
           </div>
         </div>
         <div className={styles.metric}>

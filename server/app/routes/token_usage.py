@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException
+from typing import Annotated, Literal
+
+from fastapi import APIRouter, HTTPException, Query
 
 from server.app.routes.token_usage_contracts import (
     TokenUsageJobResponse,
@@ -49,8 +51,10 @@ def create_token_usage_router(job_queries, settings: Settings) -> APIRouter:
         provider: str | None = None,
         model: str | None = None,
         skill_version: str | None = None,
-        group_by: str = "node",
-        limit: int = 100,
+        group_by: Annotated[
+            Literal["node", "model", "skill_version", "node_skill_version"], Query()
+        ] = "node",
+        limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     ) -> TokenUsageWorkspaceResponse:
         workspace = job_queries.job_db.get_workspace(workspace_id)
         if workspace is None:

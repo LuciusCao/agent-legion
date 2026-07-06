@@ -9,6 +9,11 @@ from pathlib import Path
 from typing import Any
 
 from server.app.services.token_usage_pricing import calculate_cost, load_pricing_config
+from server.app.services.token_usage_response import (
+    _currency_from_config,
+    build_aggregate_cost,
+    usage_dict,
+)
 from server.app.storage_paths import ManagedPathError, resolve_data_path
 
 logger = logging.getLogger(__name__)
@@ -271,62 +276,6 @@ def backfill_missing_token_usage(conn: sqlite3.Connection, data_dir: Path, limit
 _NO_USAGE_REASON = "no token usage recorded for run"
 
 
-def _currency_from_config(config: dict[str, Any]) -> str:
-    return str(config.get("token_usage", {}).get("currency", "")).strip()
-
-
-def _cost_breakdown(
-    input_tokens: int,
-    output_tokens: int,
-    cache_read_tokens: int,
-    total_tokens: int,
-    provider: str,
-    model: str,
-    config: dict[str, Any],
-) -> dict[str, Any]:
-    return calculate_cost(
-        total_tokens,
-        input_tokens,
-        output_tokens,
-        cache_read_tokens,
-        provider,
-        model,
-        config,
-    ).model_dump()
-
-
-def _usage_dict(row: Mapping[str, Any], config: dict[str, Any]) -> dict[str, Any]:
-    provider = str(row.get("provider", ""))
-    model = str(row.get("model", ""))
-    input_tokens = int(row.get("input_tokens", 0))
-    output_tokens = int(row.get("output_tokens", 0))
-    cache_read_tokens = int(row.get("cache_read_tokens", 0))
-    total_tokens = int(row.get("total_tokens", 0))
-    return {
-        "node_run_id": int(row["node_run_id"]),
-        "node_key": str(row.get("node_key", "")),
-        "provider": provider,
-        "model": model,
-        "skill_version": str(row.get("skill_version", "")),
-        "message_count": int(row.get("message_count", 0)),
-        "input_tokens": input_tokens,
-        "output_tokens": output_tokens,
-        "cache_read_tokens": cache_read_tokens,
-        "total_tokens": total_tokens,
-        "cost": _cost_breakdown(
-            input_tokens,
-            output_tokens,
-            cache_read_tokens,
-            total_tokens,
-            provider,
-            model,
-            config,
-        ),
-        "is_complete": bool(row.get("is_complete", 1)),
-        "usage_source": str(row.get("usage_source", "events_jsonl")),
-    }
-
-
 def build_run_usage_response(
     job_db: Any,
     run: Mapping[str, Any],
@@ -349,7 +298,7 @@ def build_run_usage_response(
     return {
         "job_id": job_id,
         "run_id": run_id,
-        "usage": _usage_dict(dict(row), config),
+        "usage": usage_dict(dict(row), config),
         "reason": None,
     }
 
@@ -397,7 +346,7 @@ def build_job_usage_response(
             continue
 
         usage_row = usage_by_run[run_id]
-        usage = _usage_dict(usage_row, config)
+        usage = usage_dict(usage_row, config)
         run_items.append(
             {
                 "run_id": run_id,
@@ -414,25 +363,21 @@ def build_job_usage_response(
         total_cache_read += int(usage_row.get("cache_read_tokens", 0))
         total_tokens += int(usage_row.get("total_tokens", 0))
         cost = usage["cost"]
-        total_cost_value += float(cost["total"])
-        if cost.get("pricing_missing"):
+        if cost is not None:
+            total_cost_value += float(cost["total"])
+        if usage["pricing_missing"]:
             total_pricing_missing = True
 
-    total_cost = _cost_breakdown(
+    total_cost_obj = build_aggregate_cost(
         total_input,
         total_output,
         total_cache_read,
         total_tokens,
-        "",
-        "",
+        total_cost_value,
+        total_pricing_missing,
+        list(usage_by_run.values()) if runs_with_usage > 0 else [],
         config,
     )
-    if runs_with_usage > 0:
-        total_cost = {
-            **total_cost,
-            "total": total_cost_value,
-            "pricing_missing": total_pricing_missing,
-        }
 
     return {
         "job_id": job_id,
@@ -443,7 +388,8 @@ def build_job_usage_response(
             "output_tokens": total_output,
             "cache_read_tokens": total_cache_read,
             "total_tokens": total_tokens,
-            "cost": total_cost,
+            "cost": total_cost_obj["cost"],
+            "pricing_missing": total_cost_obj["pricing_missing"],
         },
         "runs_with_usage": runs_with_usage,
         "runs_without_usage": runs_without_usage,
@@ -674,21 +620,16 @@ def build_workspace_usage_response(
     runs_with_usage = len(rows)
     runs_without_usage = max(0, total_runs - runs_with_usage)
 
-    summary_cost_breakdown = _cost_breakdown(
+    summary_cost_obj = build_aggregate_cost(
         summary_input,
         summary_output,
         summary_cache_read,
         summary_tokens,
-        "",
-        "",
+        summary_cost,
+        summary_pricing_missing,
+        rows,
         config,
     )
-    if runs_with_usage > 0:
-        summary_cost_breakdown = {
-            **summary_cost_breakdown,
-            "total": summary_cost,
-            "pricing_missing": summary_pricing_missing,
-        }
 
     return {
         "workspace_id": workspace_id,
@@ -699,7 +640,8 @@ def build_workspace_usage_response(
             "output_tokens": summary_output,
             "cache_read_tokens": summary_cache_read,
             "total_tokens": summary_tokens,
-            "cost": summary_cost_breakdown,
+            "cost": summary_cost_obj["cost"],
+            "pricing_missing": summary_cost_obj["pricing_missing"],
         },
         "groups": groups,
         "runs_with_usage": runs_with_usage,

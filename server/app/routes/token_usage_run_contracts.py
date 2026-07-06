@@ -4,12 +4,11 @@ from pydantic import BaseModel
 
 
 class RunUsageCost(BaseModel):
-    input: float
-    output: float
-    cache_read: float
-    total: float
     currency: str
-    pricing_missing: bool
+    input: float | None
+    output: float | None
+    cache_read: float | None
+    total: float | None
 
 
 class RunUsage(BaseModel):
@@ -23,9 +22,18 @@ class RunUsage(BaseModel):
     output_tokens: int
     cache_read_tokens: int
     total_tokens: int
-    cost: RunUsageCost
+    cost: RunUsageCost | None
+    pricing_missing: bool
     is_complete: bool
     usage_source: str
+
+
+class TokenUsageCostBreakdown(BaseModel):
+    currency: str
+    input: float | None
+    output: float | None
+    cache_read: float | None
+    total: float | None
 
 
 class TokenUsageRunResponse(BaseModel):
