@@ -1,17 +1,19 @@
 .layout {
   composes: layout from '../WorkflowStudioPage.module.css';
 }
-
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
     grid-template-rows: minmax(0, 1fr);
   }
-
   .layout > [data-mobile-panel]:not(.activePanel) {
     display: none;
   }
-
+  .activePanel {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
+  }
   .sidePanel {
     width: 100%;
     max-height: none;
