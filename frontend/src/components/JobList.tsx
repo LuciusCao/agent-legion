@@ -5,13 +5,15 @@ import { JobListSkeleton } from './JobListSkeleton'
 import styles from './JobList.module.css'
 
 export function JobList({ workspaceId }: { workspaceId: string }) {
-  const jobs = useJobStore((state) => state.getFilteredJobs())
+  const jobIds = useJobStore((state) =>
+    state.getFilteredJobs().map((job) => job.id)
+  )
   const selectedIds = useJobStore((state) => state.selectedIds)
   const toggleSelect = useJobStore((state) => state.toggleSelect)
   const selectMode = useJobStore((state) => state.selectMode)
   const isLoading = useJobStore((state) => state.isLoading)
   if (isLoading) return <JobListSkeleton />
-  if (jobs.length === 0) {
+  if (jobIds.length === 0) {
     return (
       <div className={styles.empty}>
         <MaterialIcon
@@ -25,7 +27,7 @@ export function JobList({ workspaceId }: { workspaceId: string }) {
 
   return (
     <JobListVirtualized
-      jobs={jobs}
+      jobIds={jobIds}
       selectedIds={selectedIds}
       selectMode={selectMode}
       workspaceId={workspaceId}

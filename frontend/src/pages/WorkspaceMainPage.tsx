@@ -21,30 +21,32 @@ export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const { fetchWorkspaceStats, workspaceStats } = useWorkspaceStore()
-  const {
-    jobs,
-    selectedIds,
-    filterConfig,
-    setFilterConfig,
-    selectAll,
-    selectFailed,
-    selectUnpacked,
-    clearSelection,
-    batchDelete,
-    batchPackage,
-    batchRerun,
-    batchRunTo,
-    batchUpgradeWorkflow,
-    getFilteredJobs,
-    selectMode,
-    toggleSelectMode,
-    batchRerunLoading,
-    batchPackageLoading,
-    batchDeleteLoading,
-    batchRunToLoading,
-    batchUpgradeWorkflowLoading,
-    isLoading: jobsLoading,
-  } = useJobStore()
+  const jobs = useJobStore((state) => state.jobs)
+  const selectedIds = useJobStore((state) => state.selectedIds)
+  const filterConfig = useJobStore((state) => state.filterConfig)
+  const setFilterConfig = useJobStore((state) => state.setFilterConfig)
+  const selectAll = useJobStore((state) => state.selectAll)
+  const selectFailed = useJobStore((state) => state.selectFailed)
+  const selectUnpacked = useJobStore((state) => state.selectUnpacked)
+  const clearSelection = useJobStore((state) => state.clearSelection)
+  const batchDelete = useJobStore((state) => state.batchDelete)
+  const batchPackage = useJobStore((state) => state.batchPackage)
+  const batchRerun = useJobStore((state) => state.batchRerun)
+  const batchRunTo = useJobStore((state) => state.batchRunTo)
+  const batchUpgradeWorkflow = useJobStore(
+    (state) => state.batchUpgradeWorkflow
+  )
+  const getFilteredJobs = useJobStore((state) => state.getFilteredJobs)
+  const selectMode = useJobStore((state) => state.selectMode)
+  const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
+  const batchRerunLoading = useJobStore((state) => state.batchRerunLoading)
+  const batchPackageLoading = useJobStore((state) => state.batchPackageLoading)
+  const batchDeleteLoading = useJobStore((state) => state.batchDeleteLoading)
+  const batchRunToLoading = useJobStore((state) => state.batchRunToLoading)
+  const batchUpgradeWorkflowLoading = useJobStore(
+    (state) => state.batchUpgradeWorkflowLoading
+  )
+  const jobsLoading = useJobStore((state) => state.isLoading)
 
   const [workflowDefinition, setWorkflowDefinition] =
     useState<WorkflowDefinitionRecord | null>(null)

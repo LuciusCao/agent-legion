@@ -17,10 +17,12 @@ import {
 import { upgradeJobWorkflow } from '../jobWorkflowUpgradeApi'
 import { EventSourceMock } from '../testing/eventSourceMock'
 import type { WorkspaceStats } from '../workspaceTypes'
+import type { JobSummary } from '../types'
 import { makeJob } from '../testing/fixtures'
 
 const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
+const mockFetchJobsSnapshot = vi.fn()
 const mockFetchWorkspaceStats = vi.fn()
 const mockFetchWorkflowDefinition = vi.fn()
 const mockBatchRerunJobs = vi.fn()
@@ -32,6 +34,9 @@ const mockUpgradeJobWorkflow = vi.fn()
 vi.mock('../api', () => ({
   api: (...args: Parameters<typeof api>) => mockApi(...args),
   fetchJobs: (...args: Parameters<typeof fetchJobs>) => mockFetchJobs(...args),
+  fetchJobsSnapshot: (
+    ...args: Parameters<typeof import('../api').fetchJobsSnapshot>
+  ) => mockFetchJobsSnapshot(...args),
   fetchWorkspaceStats: (
     ...args: Parameters<typeof import('../api').fetchWorkspaceStats>
   ) => mockFetchWorkspaceStats(...args),
@@ -75,7 +80,17 @@ async function loadJobsViaSSE() {
     source.onopen?.()
   })
   await waitFor(() => {
-    expect(useJobStore.getState().jobs.length).toBeGreaterThan(0)
+    expect(useJobStore.getState().isLoading).toBe(false)
+  })
+}
+
+function seedJobs(jobs: JobSummary[]) {
+  act(() => {
+    useJobStore.setState({
+      jobs,
+      jobsById: Object.fromEntries(jobs.map((job) => [job.id, job])),
+      jobIds: jobs.map((job) => job.id),
+    })
   })
 }
 
@@ -141,6 +156,7 @@ describe('WorkspaceMainPage', () => {
 
     mockApi.mockReset()
     mockFetchJobs.mockReset()
+    mockFetchJobsSnapshot.mockReset()
     mockFetchWorkspaceStats.mockReset()
     mockFetchWorkflowDefinition.mockReset()
     mockBatchRerunJobs.mockReset()
@@ -150,6 +166,15 @@ describe('WorkspaceMainPage', () => {
     mockUpgradeJobWorkflow.mockReset()
 
     mockFetchJobs.mockResolvedValue({ jobs: [] })
+    mockFetchJobsSnapshot.mockImplementation(() =>
+      Promise.resolve({
+        workspace_id: 'ws1',
+        revision: 1,
+        stats: baseStats.job_stats,
+        jobs: useJobStore.getState().jobs,
+        next_cursor: null,
+      })
+    )
     mockFetchWorkspaceStats.mockResolvedValue(baseStats)
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: workflowDefinition,
@@ -163,6 +188,10 @@ describe('WorkspaceMainPage', () => {
 
     useJobStore.setState({
       jobs: [],
+      jobsById: {},
+      jobIds: [],
+      revision: 0,
+      jobsWorkspaceId: 'ws1',
       isLoading: false,
       error: null,
       selectedIds: new Set(),
@@ -351,7 +380,7 @@ describe('WorkspaceMainPage', () => {
     expect(screen.getByText('仅失败')).toBeInTheDocument()
   })
 
-  it('fetches jobs once on mount via SSE without polling', async () => {
+  it('loads jobs snapshot once on mount via SSE without polling', async () => {
     await act(async () => {
       renderPage()
     })
@@ -362,9 +391,9 @@ describe('WorkspaceMainPage', () => {
     })
 
     await waitFor(() => {
-      expect(mockFetchJobs).toHaveBeenCalledTimes(1)
+      expect(mockFetchJobsSnapshot).toHaveBeenCalledTimes(1)
     })
-    expect(mockFetchJobs).toHaveBeenCalledWith('ws1')
+    expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1')
   })
 
   it('search input updates query after debounce', async () => {
@@ -394,23 +423,16 @@ describe('WorkspaceMainPage', () => {
     mockBatchRerunJobs.mockResolvedValueOnce({
       results: [{ job_id: 'j1', operation: 'rerun', status: 'succeeded' }],
     })
-    mockFetchJobs.mockResolvedValue({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'failed',
-          workflow_key: 'question_content',
-        }),
-      ],
-    })
+    const seed = [
+      makeJob({
+        id: 'j1',
+        status: 'failed',
+        workflow_key: 'question_content',
+      }),
+    ]
+    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'failed',
-          workflow_key: 'question_content',
-        }),
-      ],
+      jobs: seed,
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -419,6 +441,7 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    seedJobs(seed)
     await loadJobsViaSSE()
 
     await waitFor(() =>
@@ -451,11 +474,10 @@ describe('WorkspaceMainPage', () => {
       results: [{ job_id: 'j1', status: 'succeeded' }],
     })
     const openSpy = vi.spyOn(window, 'open').mockImplementation(() => null)
-    mockFetchJobs.mockResolvedValue({
-      jobs: [makeJob({ id: 'j1', status: 'completed' })],
-    })
+    const seed = [makeJob({ id: 'j1', status: 'completed' })]
+    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
-      jobs: [makeJob({ id: 'j1', status: 'completed' })],
+      jobs: seed,
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -464,6 +486,7 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    seedJobs(seed)
     await loadJobsViaSSE()
 
     await act(async () => {
@@ -482,11 +505,10 @@ describe('WorkspaceMainPage', () => {
     mockBatchDeleteJobs.mockResolvedValueOnce({
       results: [{ job_id: 'j1', operation: 'delete', status: 'succeeded' }],
     })
-    mockFetchJobs.mockResolvedValue({
-      jobs: [makeJob({ id: 'j1', status: 'failed' })],
-    })
+    const seed = [makeJob({ id: 'j1', status: 'failed' })]
+    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
-      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      jobs: seed,
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -495,6 +517,7 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    seedJobs(seed)
     await loadJobsViaSSE()
 
     await act(async () => {
@@ -515,23 +538,16 @@ describe('WorkspaceMainPage', () => {
     mockBatchRunToJobs.mockResolvedValueOnce({
       results: [{ job_id: 'j1', operation: 'run_to', status: 'succeeded' }],
     })
-    mockFetchJobs.mockResolvedValue({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'failed',
-          workflow_key: 'question_content',
-        }),
-      ],
-    })
+    const seed = [
+      makeJob({
+        id: 'j1',
+        status: 'failed',
+        workflow_key: 'question_content',
+      }),
+    ]
+    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'failed',
-          workflow_key: 'question_content',
-        }),
-      ],
+      jobs: seed,
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -540,6 +556,7 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    seedJobs(seed)
     await loadJobsViaSSE()
 
     await waitFor(() =>
@@ -580,35 +597,22 @@ describe('WorkspaceMainPage', () => {
         { job_id: 'j2', operation: 'run_to', status: 'skipped' },
       ],
     })
-    mockFetchJobs.mockResolvedValue({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'failed',
-          workflow_key: 'question_content',
-        }),
-        makeJob({
-          id: 'j2',
-          status: 'failed',
-          source_id: 'Q2',
-          workflow_key: 'question_content',
-        }),
-      ],
-    })
+    const seed = [
+      makeJob({
+        id: 'j1',
+        status: 'failed',
+        workflow_key: 'question_content',
+      }),
+      makeJob({
+        id: 'j2',
+        status: 'failed',
+        source_id: 'Q2',
+        workflow_key: 'question_content',
+      }),
+    ]
+    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'failed',
-          workflow_key: 'question_content',
-        }),
-        makeJob({
-          id: 'j2',
-          status: 'failed',
-          source_id: 'Q2',
-          workflow_key: 'question_content',
-        }),
-      ],
+      jobs: seed,
       selectedIds: new Set(['j1', 'j2']),
       selectMode: true,
     })
@@ -617,6 +621,7 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    seedJobs(seed)
     await loadJobsViaSSE()
 
     await act(async () => {
@@ -644,23 +649,16 @@ describe('WorkspaceMainPage', () => {
     mockBatchRunToJobs.mockResolvedValueOnce({
       results: [{ job_id: 'j1', operation: 'run_to', status: 'succeeded' }],
     })
-    mockFetchJobs.mockResolvedValue({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'failed',
-          workflow_key: 'question_content',
-        }),
-      ],
-    })
+    const seed = [
+      makeJob({
+        id: 'j1',
+        status: 'failed',
+        workflow_key: 'question_content',
+      }),
+    ]
+    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'failed',
-          workflow_key: 'question_content',
-        }),
-      ],
+      jobs: seed,
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -669,6 +667,7 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    seedJobs(seed)
     await loadJobsViaSSE()
 
     await act(async () => {
@@ -697,23 +696,16 @@ describe('WorkspaceMainPage', () => {
       operation: 'upgrade_workflow',
       status: 'succeeded',
     })
-    mockFetchJobs.mockResolvedValue({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'completed',
-          is_workflow_outdated: true,
-        }),
-      ],
-    })
+    const seed = [
+      makeJob({
+        id: 'j1',
+        status: 'completed',
+        is_workflow_outdated: true,
+      }),
+    ]
+    mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
-      jobs: [
-        makeJob({
-          id: 'j1',
-          status: 'completed',
-          is_workflow_outdated: true,
-        }),
-      ],
+      jobs: seed,
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -722,6 +714,7 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
+    seedJobs(seed)
     await loadJobsViaSSE()
 
     await act(async () => {
