@@ -1,5 +1,6 @@
 import AccountTreeIcon from '@mui/icons-material/AccountTree'
 import AddIcon from '@mui/icons-material/Add'
+import AnalyticsIcon from '@mui/icons-material/Analytics'
 import AddTaskIcon from '@mui/icons-material/AddTask'
 import ArchiveIcon from '@mui/icons-material/Archive'
 import ArrowBackIcon from '@mui/icons-material/ArrowBack'
@@ -53,6 +54,7 @@ import WarningIcon from '@mui/icons-material/Warning'
 export type MaterialIconName =
   | 'account_tree'
   | 'add'
+  | 'analytics'
   | 'add_task'
   | 'archive'
   | 'arrow_back'
@@ -106,6 +108,7 @@ export type MaterialIconName =
 export const ICON_MAP = {
   account_tree: AccountTreeIcon,
   add: AddIcon,
+  analytics: AnalyticsIcon,
   add_task: AddTaskIcon,
   archive: ArchiveIcon,
   arrow_back: ArrowBackIcon,

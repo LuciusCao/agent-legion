@@ -30,6 +30,7 @@ export default function WorkspaceLayout() {
     addDialogContext,
     addDialogWorkspaceId,
     setWorkspacePackageDialogOpen,
+    setTokenUsageDialogOpen,
   } = useUiStore()
   const { pageTitle, pageSubtitle, detailPageActions } = usePageHeaderStore()
   const selectMode = useJobStore((state) => state.selectMode)
@@ -128,6 +129,13 @@ export default function WorkspaceLayout() {
                   }}
                 >
                   <MaterialIcon name="inventory_2" />
+                </IconButton>
+                <IconButton
+                  size="small"
+                  aria-label="Token 使用分析"
+                  onClick={() => workspaceId && setTokenUsageDialogOpen(true)}
+                >
+                  <MaterialIcon name="analytics" />
                 </IconButton>
                 <IconButton
                   size="small"
