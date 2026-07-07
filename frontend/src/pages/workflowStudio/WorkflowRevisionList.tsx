@@ -1,6 +1,6 @@
 import type { WorkflowRevisionSummary } from '../../types'
 import { WorkflowRevisionListContent } from './WorkflowRevisionListContent'
-import styles from './WorkflowRevisionList.module.css'
+import containerStyles from './WorkflowRevisionListContainer.module.css'
 
 type Props = {
   revisions: WorkflowRevisionSummary[]
@@ -11,8 +11,11 @@ type Props = {
 
 export function WorkflowRevisionList(props: Props) {
   return (
-    <section aria-label="Workflow revisions" className={styles.section}>
-      <h2 className={styles.title}>版本</h2>
+    <section
+      aria-label="Workflow revisions"
+      className={containerStyles.section}
+    >
+      <h2 className={containerStyles.title}>版本</h2>
       <WorkflowRevisionListContent {...props} />
     </section>
   )
