@@ -12,7 +12,28 @@ const workflow = {
 
 describe('WorkflowStudioRightPanel', () => {
   it('switches between overview, changes, yaml, and validation modes', () => {
-    render(
+    const { rerender } = render(
+      <WorkflowStudioRightPanel
+        workflow={workflow}
+        selectedNodeKey={null}
+        readOnly={false}
+        definitionYaml="key: video_knowledge\n"
+        setDefinitionYaml={vi.fn()}
+        compareSummary={null}
+        compareState="idle"
+        compareErrors={null}
+        validationMessage=""
+        validationErrors={[]}
+        onSelectNode={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+
+    rerender(
       <WorkflowStudioRightPanel
         workflow={workflow}
         selectedNodeKey={null}
@@ -28,10 +49,11 @@ describe('WorkflowStudioRightPanel', () => {
       />
     )
 
-    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute(
+    expect(screen.getByRole('tab', { name: 'Validation' })).toHaveAttribute(
       'aria-selected',
       'true'
     )
+    expect(screen.getByText('校验通过')).toBeInTheDocument()
 
     fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
     expect(screen.getByLabelText('高级 YAML 编辑器')).toBeInTheDocument()

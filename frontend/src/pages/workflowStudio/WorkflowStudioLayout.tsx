@@ -38,7 +38,10 @@ export function WorkflowStudioLayout(props: StudioLayoutProps) {
               />
             </aside>
             <main className={canvasStyles.canvas}>
-              <div className={canvasToolbarStyles.canvasToolbar}>
+              <div
+                data-canvas-toolbar
+                className={canvasToolbarStyles.canvasToolbar}
+              >
                 <WorkflowDagFullscreenButton
                   onClick={() => props.setDagFullscreenOpen(true)}
                 />
