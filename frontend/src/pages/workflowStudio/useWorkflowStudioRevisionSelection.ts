@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import type {
   WorkflowRevisionDetailResponse,
   WorkflowRevisionSummary,
@@ -26,12 +26,14 @@ export function useWorkflowStudioRevisionSelection(
   const [revisionLoadError, setRevisionLoadError] = useState<string | null>(
     null
   )
+  const latestRevisionIdRef = useRef<string | null>(null)
 
   const clearRevisionLoadError = useCallback(() => {
     setRevisionLoadError(null)
   }, [])
 
   async function selectRevision(revisionId: string) {
+    latestRevisionIdRef.current = revisionId
     clearRevisionLoadError()
     if (revisionId === activeRevision?.id) {
       setIsLoadingRevision(false)
@@ -44,6 +46,7 @@ export function useWorkflowStudioRevisionSelection(
     setIsLoadingRevision(true)
     try {
       const detail = await fetchRevisionDetail(revisionId)
+      if (latestRevisionIdRef.current !== revisionId) return
       setViewState({
         mode: 'revision',
         selectedRevisionId: detail.revision.id,
@@ -55,11 +58,12 @@ export function useWorkflowStudioRevisionSelection(
         },
         hasPreservedDraft: isDefinitionDirty(originalYaml, draftYaml),
       })
+      setIsLoadingRevision(false)
     } catch (error) {
+      if (latestRevisionIdRef.current !== revisionId) return
       setRevisionLoadError(
         error instanceof Error ? error.message : '加载版本详情失败'
       )
-    } finally {
       setIsLoadingRevision(false)
     }
   }

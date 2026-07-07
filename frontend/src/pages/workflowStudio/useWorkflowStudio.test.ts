@@ -290,6 +290,69 @@ describe('useWorkflowStudio', () => {
     expect(result.current.dirty).toBe(true)
   })
 
+  it('ignores stale revision detail when a newer revision is requested', async () => {
+    const slowPayload = {
+      revision: {
+        id: 'rev-slow',
+        workspace_id: 'ws1',
+        workflow_key: 'wf',
+        version: 1,
+        status: 'archived',
+        definition_hash: 'slowhash',
+        created_at: '2026-07-05T10:00:00Z',
+        published_at: '2026-07-05T10:05:00Z',
+      },
+      workflow: activeRevisionPayload.workflow,
+      definition_yaml: 'key: wf\nlabel: Slow\n',
+    }
+    const fastPayload = {
+      revision: {
+        id: 'rev-fast',
+        workspace_id: 'ws1',
+        workflow_key: 'wf',
+        version: 2,
+        status: 'archived',
+        definition_hash: 'fasthash',
+        created_at: '2026-07-05T11:00:00Z',
+        published_at: '2026-07-05T11:05:00Z',
+      },
+      workflow: activeRevisionPayload.workflow,
+      definition_yaml: 'key: wf\nlabel: Fast\n',
+    }
+
+    let resolveSlow: (value: typeof slowPayload) => void = () => {}
+    let resolveFast: (value: typeof fastPayload) => void = () => {}
+
+    mocks.fetchWorkflowRevisionDetail.mockImplementation(
+      (revisionId: string) => {
+        if (revisionId === 'rev-slow') {
+          return new Promise<typeof slowPayload>((resolve) => {
+            resolveSlow = resolve
+          })
+        }
+        return new Promise<typeof fastPayload>((resolve) => {
+          resolveFast = resolve
+        })
+      }
+    )
+
+    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    act(() => {
+      result.current.selectRevision('rev-slow')
+      result.current.selectRevision('rev-fast')
+    })
+
+    act(() => resolveFast(fastPayload))
+    await waitFor(() => expect(result.current.definitionYaml).toContain('Fast'))
+    expect(result.current.selectedRevisionId).toBe('rev-fast')
+
+    act(() => resolveSlow(slowPayload))
+    await waitFor(() => expect(result.current.definitionYaml).toContain('Fast'))
+    expect(result.current.selectedRevisionId).toBe('rev-fast')
+  })
+
   it('exposes revision load error and keeps previous view on failure', async () => {
     mocks.fetchWorkflowRevisionDetail.mockRejectedValue(
       new Error('network error')

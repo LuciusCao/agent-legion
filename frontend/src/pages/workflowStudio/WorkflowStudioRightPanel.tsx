@@ -39,20 +39,20 @@ export function WorkflowStudioRightPanel(props: Props) {
   const [mode, setMode] = useState<PanelMode>('overview')
 
   useEffect(() => {
-    if (props.forcedMode) {
+    if (props.validationErrors.length > 0 || props.validationMessage) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMode('validation')
+    } else if (props.forcedMode) {
       setMode(props.forcedMode)
     } else if (props.selectedNodeKey) {
       setMode('node')
     }
-  }, [props.forcedMode, props.selectedNodeKey])
-
-  useEffect(() => {
-    if (props.validationErrors.length > 0 || props.validationMessage) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMode('validation')
-    }
-  }, [props.validationErrors.length, props.validationMessage])
+  }, [
+    props.forcedMode,
+    props.selectedNodeKey,
+    props.validationErrors.length,
+    props.validationMessage,
+  ])
 
   return (
     <section className={styles.panel} aria-label="Workflow inspector modes">
