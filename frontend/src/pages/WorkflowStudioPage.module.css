@@ -8,7 +8,7 @@
 }
 .layout {
   display: grid;
-  grid-template-columns: 240px minmax(420px, 1fr) 360px;
+  grid-template-columns: 240px minmax(0, 1fr) 360px;
   flex: 1 1 auto;
   min-height: 0;
   overflow: hidden;
