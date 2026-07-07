@@ -1,11 +1,11 @@
 import { Tab, Tabs } from '@mui/material'
-import { useEffect, useState } from 'react'
 import type { WorkflowDefinitionRecord } from '../../types'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import { WorkflowChangeSummaryPanel } from './components/WorkflowChangeSummaryPanel'
 import { WorkflowDefinitionEditor } from './WorkflowDefinitionEditor'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import { WorkflowValidationPanel } from './WorkflowValidationPanel'
+import { useWorkflowStudioRightPanelMode } from './useWorkflowStudioRightPanelMode'
 import styles from './WorkflowStudioRightPanel.module.css'
 
 type PanelMode = 'overview' | 'node' | 'changes' | 'yaml' | 'validation'
@@ -36,29 +36,18 @@ function workflowEdgeCount(workflow: WorkflowDefinitionRecord | null): number {
 }
 
 export function WorkflowStudioRightPanel(props: Props) {
-  const [mode, setMode] = useState<PanelMode>('overview')
-
-  useEffect(() => {
-    if (props.validationErrors.length > 0 || props.validationMessage) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMode('validation')
-    } else if (props.forcedMode) {
-      setMode(props.forcedMode)
-    } else if (props.selectedNodeKey) {
-      setMode('node')
-    }
-  }, [
-    props.forcedMode,
-    props.selectedNodeKey,
-    props.validationErrors.length,
-    props.validationMessage,
-  ])
+  const { mode, onTabChange } = useWorkflowStudioRightPanelMode({
+    selectedNodeKey: props.selectedNodeKey,
+    forcedMode: props.forcedMode,
+    validationMessage: props.validationMessage,
+    validationErrors: props.validationErrors,
+  })
 
   return (
     <section className={styles.panel} aria-label="Workflow inspector modes">
       <Tabs
         value={mode}
-        onChange={(_, value: PanelMode) => setMode(value)}
+        onChange={(_, value: PanelMode) => onTabChange(value)}
         variant="scrollable"
         scrollButtons="auto"
         className={styles.tabs}
