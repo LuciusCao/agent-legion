@@ -132,6 +132,11 @@ def create_app(
 
     workflow_worker_thread: WorkflowWorkerThread | None = None
 
+    async def flush_agent_status_loop() -> None:
+        while True:
+            agent_manager.flush_pending_broadcast()
+            await asyncio.sleep(0.5)
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal workflow_worker_thread
@@ -167,10 +172,14 @@ def create_app(
         app.state.workspace_event_aggregator_task = asyncio.create_task(
             workspace_event_aggregator.run(interval_seconds=0.5)
         )
+        app.state.agent_status_flush_task = asyncio.create_task(flush_agent_status_loop())
         yield
         task = getattr(app.state, "workspace_event_aggregator_task", None)
         if task is not None:
             task.cancel()
+        flush_task = getattr(app.state, "agent_status_flush_task", None)
+        if flush_task is not None:
+            flush_task.cancel()
         if workflow_worker_thread is not None:
             workflow_worker_thread.stop()
 
