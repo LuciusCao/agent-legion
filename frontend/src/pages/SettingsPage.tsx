@@ -164,8 +164,6 @@ export function SettingsPage() {
             onDescriptionChange={setWorkspaceDescription}
           />
 
-          <DangerZone workspaceId={workspaceId} workspaceName={workspaceName} />
-
           <IntakeConfigSection
             settings={settings}
             workflowDefinition={workflowDefinition}
@@ -200,6 +198,8 @@ export function SettingsPage() {
               <LocalNodeLimitSection />
             </section>
           )}
+
+          <DangerZone workspaceId={workspaceId} workspaceName={workspaceName} />
         </div>
       </div>
     </AppShell>
