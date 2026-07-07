@@ -36,6 +36,7 @@ const activeRevisionPayload = {
 const mocks = {
   fetchActiveWorkflowRevision: vi.fn(),
   fetchWorkflowRevisions: vi.fn(),
+  fetchWorkflowRevisionDetail: vi.fn(),
   compareWorkflowDraft: vi.fn(),
   publishWorkflowDraft: vi.fn(),
   validateWorkflowDraft: vi.fn(),
@@ -46,6 +47,8 @@ vi.mock('../../api', () => ({
     mocks.fetchActiveWorkflowRevision(...args),
   fetchWorkflowRevisions: (...args: unknown[]) =>
     mocks.fetchWorkflowRevisions(...args),
+  fetchWorkflowRevisionDetail: (...args: unknown[]) =>
+    mocks.fetchWorkflowRevisionDetail(...args),
   compareWorkflowDraft: (...args: unknown[]) =>
     mocks.compareWorkflowDraft(...args),
   publishWorkflowDraft: (...args: unknown[]) =>
@@ -212,5 +215,78 @@ describe('useWorkflowStudio', () => {
       })
     )
     expect(result.current.compareSummary?.nodeChanges[0]?.nodeKey).toBe('b')
+  })
+
+  it('loads a historical revision without replacing a dirty draft', async () => {
+    mocks.fetchWorkflowRevisionDetail.mockResolvedValue({
+      revision: {
+        id: 'rev-old',
+        workspace_id: 'ws1',
+        workflow_key: 'wf',
+        version: 1,
+        status: 'archived',
+        definition_hash: 'oldhash',
+        created_at: '2026-07-05T10:00:00Z',
+        published_at: '2026-07-05T10:05:00Z',
+      },
+      workflow: {
+        ...activeRevisionPayload.workflow,
+        label: 'Old Workflow',
+      },
+      definition_yaml:
+        'key: wf\nlabel: Old Workflow\nschema_version: 2\nnodes: {}\nedges: []\n',
+    })
+    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    act(() =>
+      result.current.setDefinitionYaml(
+        `${result.current.definitionYaml}\n# draft`
+      )
+    )
+    await act(async () => {
+      await result.current.selectRevision('rev-old')
+    })
+
+    expect(result.current.viewMode).toBe('revision')
+    expect(result.current.readOnly).toBe(true)
+    expect(result.current.hasPreservedDraft).toBe(true)
+    expect(result.current.definitionYaml).toContain('Old Workflow')
+    expect(result.current.canPublish).toBe(false)
+
+    act(() => result.current.backToDraft())
+
+    expect(result.current.viewMode).toBe('draft')
+    expect(result.current.definitionYaml).toContain('# draft')
+  })
+
+  it('uses a historical revision as a new draft', async () => {
+    mocks.fetchWorkflowRevisionDetail.mockResolvedValue({
+      revision: {
+        id: 'rev-old',
+        workspace_id: 'ws1',
+        workflow_key: 'wf',
+        version: 1,
+        status: 'archived',
+        definition_hash: 'oldhash',
+        created_at: '2026-07-05T10:00:00Z',
+        published_at: '2026-07-05T10:05:00Z',
+      },
+      workflow: activeRevisionPayload.workflow,
+      definition_yaml:
+        'key: wf\nlabel: Restored\nschema_version: 2\nnodes: {}\nedges: []\n',
+    })
+    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    await act(async () => {
+      await result.current.selectRevision('rev-old')
+    })
+    act(() => result.current.useViewedRevisionAsDraft())
+
+    expect(result.current.viewMode).toBe('draft')
+    expect(result.current.readOnly).toBe(false)
+    expect(result.current.definitionYaml).toContain('Restored')
+    expect(result.current.dirty).toBe(true)
   })
 })
