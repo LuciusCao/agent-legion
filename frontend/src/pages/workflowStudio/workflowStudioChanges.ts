@@ -187,11 +187,15 @@ export function buildChangeSummary(
   }
 
   const summary = response.summary
-  const nodeChanges = summary.node_changes.map(normalizeNodeChange)
-  const edgeChanges = summary.edge_changes.map(normalizeEdgeChange)
-  const intakeChanges = summary.intake_changes.map(normalizeIntakeChange)
-  const metadataChanges = summary.metadata_changes.map(normalizeMetadataChange)
-  const riskFlags = summary.risk_flags
+  const nodeChanges = (summary.node_changes ?? []).map(normalizeNodeChange)
+  const edgeChanges = (summary.edge_changes ?? []).map(normalizeEdgeChange)
+  const intakeChanges = (summary.intake_changes ?? []).map(
+    normalizeIntakeChange
+  )
+  const metadataChanges = (summary.metadata_changes ?? []).map(
+    normalizeMetadataChange
+  )
+  const riskFlags = (summary.risk_flags ?? [])
     .map(normalizeRiskFlag)
     .sort((a, b) => severityOrder(a.severity, b.severity))
 

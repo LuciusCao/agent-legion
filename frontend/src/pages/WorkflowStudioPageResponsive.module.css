@@ -1,18 +1,23 @@
+.layout {
+  composes: layout from './WorkflowStudioPage.module.css';
+}
 @media (max-width: 900px) {
   .layout {
-    grid-template-columns: 1fr;
-    grid-template-rows: auto minmax(0, 1fr) auto;
-    overflow: auto;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+  }
+  .layout > [data-mobile-panel]:not(.activePanel) {
+    display: none;
+  }
+  .activePanel {
+    display: flex;
+    min-width: 0;
+    min-height: 0;
   }
   .sidePanel {
+    width: 100%;
+    max-height: none;
     border-right: none;
     border-left: none;
-    border-top: 1px solid #e0e0e0;
-    max-height: 320px;
-  }
-  .sidePanel:first-child {
-    border-right: none;
-    border-bottom: 1px solid #e0e0e0;
-    border-top: none;
   }
 }

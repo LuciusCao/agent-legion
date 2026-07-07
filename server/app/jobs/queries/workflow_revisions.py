@@ -65,6 +65,23 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
             ).fetchone()
         return dict(row) if row else None
 
+    def get_workflow_revision(
+        self,
+        workspace_id: str,
+        workflow_key: str,
+        revision_id: str,
+    ) -> dict[str, Any] | None:
+        with self._connect_read() as conn:
+            row = conn.execute(
+                """
+                select * from workflow_revisions
+                where id=? and workspace_id=? and workflow_key=?
+                limit 1
+                """,
+                (revision_id, workspace_id, workflow_key),
+            ).fetchone()
+        return dict(row) if row else None
+
     def next_workflow_revision_version(self, workspace_id: str, workflow_key: str) -> int:
         with self._connect_read() as conn:
             row = conn.execute(

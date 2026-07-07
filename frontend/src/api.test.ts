@@ -8,6 +8,7 @@ import {
   fetchActiveWorkflowRevision,
   fetchJobArtifact,
   fetchJobDetail,
+  fetchWorkflowRevisionDetail,
   fetchWorkflowRevisions,
   updateWorkspace,
 } from './api'
@@ -399,5 +400,44 @@ describe('workflow revisions api', () => {
       expect.any(Object)
     )
     expect(result.revisions[0].status).toBe('active')
+  })
+
+  it('fetches a workspace workflow revision detail', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () =>
+        Promise.resolve({
+          revision: {
+            id: 'rev-1',
+            workspace_id: 'ws1',
+            workflow_key: 'video_knowledge',
+            version: 1,
+            status: 'archived',
+            definition_hash: '17d8077e',
+            created_at: '2026-07-06T10:00:00Z',
+            published_at: '2026-07-06T10:05:00Z',
+          },
+          workflow: {
+            key: 'video_knowledge',
+            label: '知识视频 DAG',
+            schema_version: 2,
+            intake: { modes: {} },
+            nodes: [],
+            edges: [],
+          },
+          definition_yaml: 'key: video_knowledge\nlabel: 知识视频 DAG\n',
+        }),
+    } as Response)
+    global.fetch = fetchMock
+
+    const result = await fetchWorkflowRevisionDetail('ws1', 'rev-1')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/workspaces/ws1/workflow-revisions/rev-1',
+      expect.any(Object)
+    )
+    expect(result.revision.id).toBe('rev-1')
+    expect(result.workflow.key).toBe('video_knowledge')
+    expect(result.definition_yaml).toContain('key: video_knowledge')
   })
 })

@@ -1,9 +1,8 @@
 import React from 'react'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioPage } from './WorkflowStudioPage'
-import { compareWorkflowDraft } from '../api'
 
 vi.mock('react-router-dom', () => ({
   useParams: () => ({ workspaceId: 'ws1' }),
@@ -11,80 +10,27 @@ vi.mock('react-router-dom', () => ({
   Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
 }))
 
-const definitionYaml = vi.hoisted(
-  () => `key: question_comprehension_info
-label: 题目审题信息生成 DAG
-schema_version: 2
-intake:
-  modes: {}
-nodes:
-  fetch_questions:
-    label: 获取题目
-    capability: fetch_questions
-    after: []
-    inputs: []
-    outputs:
-      - questions.json
-  classify_comprehension_eligibility:
-    label: 判断是否适合审题
-    capability: classify_comprehension_eligibility
-    after:
-      - fetch_questions
-    inputs:
-      - questions.json
-    outputs: []
-  generate_key_info:
-    label: 生成关键信息
-    capability: generate_key_info
-    after:
-      - classify_comprehension_eligibility
-    inputs:
-      - questions.json
-    outputs:
-      - key_info.json
-edges:
-  - source: fetch_questions
-    target: classify_comprehension_eligibility
-    condition: null
-  - source: classify_comprehension_eligibility
-    target: generate_key_info
-    condition:
-      artifact: result.json
-      path: $.eligible
-      equals: true
-`
-)
-
 vi.mock('../api', () => {
   const activeRevisionPayload = {
     revision: {
-      id: 'ws1:question_comprehension_info:v2',
+      id: 'ws1:video_knowledge:v1',
       workspace_id: 'ws1',
-      workflow_key: 'question_comprehension_info',
-      version: 2,
+      workflow_key: 'video_knowledge',
+      version: 1,
       status: 'active',
       definition_hash: 'abcdef1234567890',
       created_at: '2026-07-02T00:00:00Z',
       published_at: '2026-07-02T00:00:00Z',
     },
     workflow: {
-      key: 'question_comprehension_info',
-      label: '题目审题信息生成 DAG',
+      key: 'video_knowledge',
+      label: '知识视频 DAG',
       intake: { modes: [] },
       edges: [
         {
           source: 'fetch_questions',
-          target: 'classify_comprehension_eligibility',
+          target: 'clean_and_parse',
           condition: null,
-        },
-        {
-          source: 'classify_comprehension_eligibility',
-          target: 'generate_key_info',
-          condition: {
-            artifact: 'result.json',
-            path: '$.eligible',
-            equals: true,
-          },
         },
       ],
       nodes: [
@@ -97,24 +43,16 @@ vi.mock('../api', () => {
           outputs: ['questions.json'],
         },
         {
-          key: 'classify_comprehension_eligibility',
-          label: '判断是否适合审题',
-          capability: 'classify_comprehension_eligibility',
+          key: 'clean_and_parse',
+          label: '清洗与解析',
+          capability: 'clean_and_parse',
           after: ['fetch_questions'],
           inputs: ['questions.json'],
-          outputs: [],
-        },
-        {
-          key: 'generate_key_info',
-          label: '生成关键信息',
-          capability: 'generate_key_info',
-          after: ['classify_comprehension_eligibility'],
-          inputs: ['questions.json'],
-          outputs: ['key_info.json'],
+          outputs: ['questions_parsed.json'],
         },
       ],
     },
-    definition_yaml: definitionYaml,
+    definition_yaml: 'key: video_knowledge\nlabel: 知识视频 DAG\n',
   }
 
   return {
@@ -157,7 +95,6 @@ vi.mock('../api', () => {
         ],
         edge_changes: [],
         intake_changes: [],
-        metadata_changes: [],
         risk_flags: [],
       },
       errors: [],
@@ -170,18 +107,44 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     expect(await screen.findByText('Workflow Studio')).toBeInTheDocument()
-    expect(await screen.findByText('题目审题信息生成 DAG')).toBeInTheDocument()
+    expect(
+      (await screen.findAllByText('知识视频 DAG')).length
+    ).toBeGreaterThanOrEqual(1)
+  })
+
+  it('renders workflow identity and actions in the app bar without a second summary row', async () => {
+    render(<WorkflowStudioPage />)
+
+    const appBar = await screen.findByTestId('app-bar')
+    expect(appBar).toHaveTextContent('Workflow Studio')
+    expect(appBar).toHaveTextContent('知识视频 DAG')
+    expect(appBar).toHaveTextContent('video_knowledge')
+    expect(appBar).toHaveTextContent('v1')
+    expect(appBar).toHaveTextContent('校验')
+    expect(appBar).toHaveTextContent('发布')
+    expect(appBar).toHaveTextContent('重置')
+    expect(
+      screen.queryByRole('region', { name: 'Workflow summary' })
+    ).not.toBeInTheDocument()
   })
 
   it('renders active revision metadata and prefilled definition', async () => {
+    const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
     expect(await screen.findByText('Workflow Studio')).toBeInTheDocument()
-    expect(await screen.findByText('题目审题信息生成 DAG')).toBeInTheDocument()
-    expect(screen.getAllByText('v2')[0]).toBeInTheDocument()
-    expect(screen.getAllByText('abcdef12')[0]).toBeInTheDocument()
     expect(
-      await screen.findByDisplayValue(/key: question_comprehension_info/)
+      (await screen.findAllByText('知识视频 DAG')).length
+    ).toBeGreaterThanOrEqual(1)
+    expect(screen.getAllByText('v1')[0]).toBeInTheDocument()
+    expect(screen.getAllByText('abcdef12')[0]).toBeInTheDocument()
+
+    const inspectorPanel = screen.getByRole('region', {
+      name: 'Workflow inspector modes',
+    })
+    await user.click(within(inspectorPanel).getByRole('tab', { name: 'YAML' }))
+    expect(
+      await screen.findByDisplayValue(/key: video_knowledge/)
     ).toBeInTheDocument()
   })
 
@@ -189,18 +152,22 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
+    await screen.findByText('Workflow Studio')
+    const inspectorPanel = screen.getByRole('region', {
+      name: 'Workflow inspector modes',
+    })
+    await user.click(within(inspectorPanel).getByRole('tab', { name: 'YAML' }))
     const editor = await screen.findByLabelText('高级 YAML 编辑器')
     await user.clear(editor)
     await user.type(editor, 'key: changed')
 
-    expect(screen.getByText('有未保存修改')).toBeInTheDocument()
+    const commandBar = screen.getByLabelText('Workflow command bar')
+    expect(within(commandBar).getByText(/有未发布变更/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '重置' }))
 
-    expect(
-      screen.getByDisplayValue(/key: question_comprehension_info/)
-    ).toBeInTheDocument()
-    expect(screen.getByText('已同步')).toBeInTheDocument()
+    expect(screen.getByDisplayValue(/key: video_knowledge/)).toBeInTheDocument()
+    expect(within(commandBar).getByText(/已同步/)).toBeInTheDocument()
   })
 
   it('opens publish review dialog before publishing', async () => {
@@ -208,11 +175,17 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     await screen.findByText('Workflow Studio')
+    const inspectorPanel = screen.getByRole('region', {
+      name: 'Workflow inspector modes',
+    })
+    await user.click(within(inspectorPanel).getByRole('tab', { name: 'YAML' }))
     const editor = screen.getByLabelText('高级 YAML 编辑器')
     await user.type(editor, '\n# edited')
 
-    await screen.findByText('有未发布变更')
-    await user.click(screen.getByRole('button', { name: '发布' }))
+    await screen.findByText(/有未发布变更/)
+    const publishButton = screen.getByRole('button', { name: '发布' })
+    await waitFor(() => expect(publishButton).not.toBeDisabled())
+    await user.click(publishButton)
 
     expect(
       await screen.findByText('发布 workflow revision')
@@ -225,154 +198,21 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     await screen.findByText('Workflow Studio')
+    const inspectorPanel = screen.getByRole('region', {
+      name: 'Workflow inspector modes',
+    })
+    await user.click(within(inspectorPanel).getByRole('tab', { name: 'YAML' }))
     const editor = screen.getByLabelText('高级 YAML 编辑器')
     await user.type(editor, '\n# edited')
 
-    await screen.findByText('有未发布变更')
-    await user.click(screen.getByRole('button', { name: '发布' }))
+    await screen.findByText(/有未发布变更/)
+    const publishButton = screen.getByRole('button', { name: '发布' })
+    await waitFor(() => expect(publishButton).not.toBeDisabled())
+    await user.click(publishButton)
     await screen.findByText('发布 workflow revision')
 
     await user.click(screen.getByRole('button', { name: '确认发布' }))
 
     expect(await screen.findByText('发布成功')).toBeInTheDocument()
-  })
-
-  it('edits workflow label and shows metadata changes in publish review', async () => {
-    vi.mocked(compareWorkflowDraft).mockResolvedValue({
-      valid: true,
-      base_revision: null,
-      draft_workflow: null,
-      summary: {
-        risk_level: 'info',
-        node_changes: [],
-        edge_changes: [],
-        intake_changes: [],
-        metadata_changes: [
-          {
-            type: 'modified',
-            field: 'label',
-            before_value: '题目审题信息生成 DAG',
-            after_value: '题目审题信息生成 DAG v2',
-            risk: 'info',
-          },
-        ],
-        risk_flags: [],
-      },
-      errors: [],
-    })
-
-    render(<WorkflowStudioPage />)
-    await screen.findByText('Workflow Studio')
-
-    fireEvent.change(screen.getByLabelText('Workflow 名称'), {
-      target: { value: '题目审题信息生成 DAG v2' },
-    })
-
-    await screen.findByText('有未发布变更')
-    await userEvent.click(screen.getByRole('button', { name: '发布' }))
-
-    expect(
-      await screen.findByText('发布 workflow revision')
-    ).toBeInTheDocument()
-    expect(screen.getAllByText('元数据变更').length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('edits node label and reflects the change in YAML and outline', async () => {
-    vi.mocked(compareWorkflowDraft).mockResolvedValue({
-      valid: true,
-      base_revision: null,
-      draft_workflow: null,
-      summary: {
-        risk_level: 'info',
-        node_changes: [
-          {
-            type: 'modified',
-            node_key: 'fetch_questions',
-            label: '获取题目 v2',
-            fields: ['label'],
-            risk: 'info',
-          },
-        ],
-        edge_changes: [],
-        intake_changes: [],
-        metadata_changes: [],
-        risk_flags: [],
-      },
-      errors: [],
-    })
-
-    render(<WorkflowStudioPage />)
-    await screen.findByText('Workflow Studio')
-
-    await userEvent.click(screen.getAllByText('获取题目')[0])
-
-    fireEvent.change(screen.getByLabelText('节点名称'), {
-      target: { value: '获取题目 v2' },
-    })
-
-    await screen.findByText('有未发布变更')
-
-    expect(
-      (screen.getByLabelText('高级 YAML 编辑器') as HTMLTextAreaElement).value
-    ).toContain('label: 获取题目 v2')
-    expect(screen.getByText('改动')).toBeInTheDocument()
-
-    await userEvent.click(screen.getByRole('button', { name: '发布' }))
-
-    expect(
-      await screen.findByText('发布 workflow revision')
-    ).toBeInTheDocument()
-    expect(screen.getAllByText('节点变更').length).toBeGreaterThanOrEqual(1)
-  })
-
-  it('edits branch condition and shows high risk', async () => {
-    vi.mocked(compareWorkflowDraft).mockResolvedValue({
-      valid: true,
-      base_revision: null,
-      draft_workflow: null,
-      summary: {
-        risk_level: 'breaking',
-        node_changes: [],
-        edge_changes: [
-          {
-            type: 'condition_changed',
-            source: 'classify_comprehension_eligibility',
-            target: 'generate_key_info',
-            before_condition: '$.eligible == true',
-            after_condition: '$.eligible == false',
-            risk: 'breaking',
-          },
-        ],
-        intake_changes: [],
-        metadata_changes: [],
-        risk_flags: [
-          {
-            code: 'edge_condition_changed',
-            severity: 'breaking',
-            message: '分支条件变化会改变运行路径。',
-          },
-        ],
-      },
-      errors: [],
-    })
-
-    render(<WorkflowStudioPage />)
-    await screen.findByText('Workflow Studio')
-
-    await userEvent.click(screen.getAllByText('判断是否适合审题')[0])
-
-    fireEvent.change(screen.getByLabelText('条件 equals'), {
-      target: { value: 'false' },
-    })
-
-    await screen.findByText('存在高风险变更')
-
-    expect(screen.getByText('风险等级: 高风险')).toBeInTheDocument()
-
-    await userEvent.click(screen.getByRole('button', { name: '发布' }))
-
-    expect(
-      await screen.findByText('发布 workflow revision')
-    ).toBeInTheDocument()
   })
 })

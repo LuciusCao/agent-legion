@@ -222,7 +222,8 @@ export type WorkflowRevisionSummary = ApiSchemas['WorkflowRevisionSummary']
 export type ActiveWorkflowRevisionResponse =
   ApiSchemas['ActiveWorkflowRevisionResponse']
 export type WorkflowRevisionsResponse = ApiSchemas['WorkflowRevisionsResponse']
-
+export type WorkflowRevisionDetailResponse =
+  ApiSchemas['WorkflowRevisionDetailResponse']
 export type ArtifactResponse = ApiSchemas['ArtifactResponse']
 
 export type CreateJobBatchInput = {

@@ -1,20 +1,25 @@
 import styles from './WorkflowDefinitionEditor.module.css'
+import type { WorkflowDefinitionEditorProps as Props } from './WorkflowDefinitionEditor.types'
 
-type Props = { value: string; onChange: (value: string) => void }
-
-export function WorkflowDefinitionEditor({ value, onChange }: Props) {
+export function WorkflowDefinitionEditor({
+  value,
+  onChange,
+  readOnly = false,
+  label = '高级 YAML 编辑器',
+}: Props) {
   return (
     <>
       <label className={styles.editorLabel} htmlFor="workflow-definition">
-        高级 YAML 编辑器
+        {label}
       </label>
       <textarea
         id="workflow-definition"
-        aria-label="高级 YAML 编辑器"
+        aria-label={label}
         className={styles.yamlEditor}
         value={value}
-        onChange={(event) => onChange(event.target.value)}
+        readOnly={readOnly}
         rows={20}
+        onChange={(event) => onChange(event.target.value)}
       />
     </>
   )
