@@ -36,6 +36,25 @@ describe('WorkflowDagFullscreenDialog', () => {
     expect(onOpen).toHaveBeenCalledTimes(1)
   })
 
+  it('labels fullscreen dialog and close button for focus mode', () => {
+    render(
+      <WorkflowDagFullscreenDialog
+        open
+        workflow={workflow}
+        selectedNode={null}
+        onSelectedNodeChange={vi.fn()}
+        onClose={vi.fn()}
+      />
+    )
+
+    expect(
+      screen.getByRole('dialog', { name: 'Workflow DAG focus mode' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: 'close fullscreen DAG' })
+    ).toBeInTheDocument()
+  })
+
   it('closes dialog and preserves selected node state', async () => {
     const onSelectedNodeChange = vi.fn()
     const onClose = vi.fn()
