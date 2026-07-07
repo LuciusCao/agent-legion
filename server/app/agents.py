@@ -32,6 +32,7 @@ class AgentStatusManager:
         self._agent_video_ids: dict[tuple[str, str], list[str]] = {}
         self._workspace_assignments: dict[str, dict[str, int]] = {}
         self._lock = threading.Lock()
+        self._broadcast_pending = False
 
     def discover(self) -> list[AgentStatus]:
         try:
@@ -112,6 +113,21 @@ class AgentStatusManager:
         if removed:
             self._broadcast()
 
+    def has_pending_broadcast(self) -> bool:
+        with self._lock:
+            return self._broadcast_pending
+
+    def flush_pending_broadcast(self) -> None:
+        with self._lock:
+            pending = self._broadcast_pending
+            self._broadcast_pending = False
+        if pending:
+            self._broadcast()
+
+    def _mark_broadcast_pending(self) -> None:
+        with self._lock:
+            self._broadcast_pending = True
+
     def set_busy(
         self, agent_id: str, video: str | dict[str, Any], *, workspace_id: str = ""
     ) -> None:
@@ -132,7 +148,7 @@ class AgentStatusManager:
                         agent.current_external_id = str(video.get("external_id", ""))
                         agent.current_phase = str(video.get("current_phase", ""))
                     break
-        self._broadcast()
+        self._mark_broadcast_pending()
 
     def set_idle(self, agent_id: str, *, workspace_id: str = "") -> None:
         with self._lock:
@@ -158,7 +174,7 @@ class AgentStatusManager:
                     elif video_ids:
                         agent.current_video_id = video_ids[-1]
                     break
-        self._broadcast()
+        self._mark_broadcast_pending()
 
     def is_video_busy(self, video_id: str) -> bool:
         with self._lock:
