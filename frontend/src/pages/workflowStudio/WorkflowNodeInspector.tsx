@@ -6,9 +6,14 @@ import styles from './WorkflowNodeInspector.module.css'
 type Props = {
   workflow: WorkflowDefinitionRecord | null
   selectedNodeKey: string | null
+  readOnly?: boolean
 }
 
-export function WorkflowNodeInspector({ workflow, selectedNodeKey }: Props) {
+export function WorkflowNodeInspector({
+  workflow,
+  selectedNodeKey,
+  readOnly = false,
+}: Props) {
   const details = selectedNodeDetails(workflow, selectedNodeKey)
   if (!workflow)
     return <section aria-label="Workflow inspector">未加载 workflow</section>
@@ -31,5 +36,5 @@ export function WorkflowNodeInspector({ workflow, selectedNodeKey }: Props) {
       </section>
     )
   }
-  return <WorkflowNodeInspectorBody details={details} />
+  return <WorkflowNodeInspectorBody details={details} readOnly={readOnly} />
 }

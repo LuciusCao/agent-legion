@@ -107,7 +107,9 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     expect(await screen.findByText('Workflow Studio')).toBeInTheDocument()
-    expect(await screen.findByText('知识视频 DAG')).toBeInTheDocument()
+    expect(
+      (await screen.findAllByText('知识视频 DAG')).length
+    ).toBeGreaterThanOrEqual(1)
   })
 
   it('renders workflow identity and actions in the app bar without a second summary row', async () => {
@@ -127,12 +129,17 @@ describe('WorkflowStudioPage', () => {
   })
 
   it('renders active revision metadata and prefilled definition', async () => {
+    const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
     expect(await screen.findByText('Workflow Studio')).toBeInTheDocument()
-    expect(await screen.findByText('知识视频 DAG')).toBeInTheDocument()
+    expect(
+      (await screen.findAllByText('知识视频 DAG')).length
+    ).toBeGreaterThanOrEqual(1)
     expect(screen.getAllByText('v1')[0]).toBeInTheDocument()
     expect(screen.getAllByText('abcdef12')[0]).toBeInTheDocument()
+
+    await user.click(screen.getByRole('tab', { name: 'YAML' }))
     expect(
       await screen.findByDisplayValue(/key: video_knowledge/)
     ).toBeInTheDocument()
@@ -142,6 +149,8 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
+    await screen.findByText('Workflow Studio')
+    await user.click(screen.getByRole('tab', { name: 'YAML' }))
     const editor = await screen.findByLabelText('高级 YAML 编辑器')
     await user.clear(editor)
     await user.type(editor, 'key: changed')
@@ -160,6 +169,7 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     await screen.findByText('Workflow Studio')
+    await user.click(screen.getByRole('tab', { name: 'YAML' }))
     const editor = screen.getByLabelText('高级 YAML 编辑器')
     await user.type(editor, '\n# edited')
 
@@ -179,6 +189,7 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     await screen.findByText('Workflow Studio')
+    await user.click(screen.getByRole('tab', { name: 'YAML' }))
     const editor = screen.getByLabelText('高级 YAML 编辑器')
     await user.type(editor, '\n# edited')
 

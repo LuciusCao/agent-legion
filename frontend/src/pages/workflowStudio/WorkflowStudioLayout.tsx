@@ -1,14 +1,12 @@
 import { DagGraph } from '../../components/DagGraph'
-import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import { WorkflowNodeOutline } from './WorkflowNodeOutline'
 import { WorkflowRevisionList } from './WorkflowRevisionList'
-import { WorkflowDefinitionEditor } from './WorkflowDefinitionEditor'
-import { WorkflowValidationPanel } from './WorkflowValidationPanel'
-import { WorkflowChangeSummaryPanel } from './components/WorkflowChangeSummaryPanel'
 import { WorkflowDagFullscreenButton } from './components/WorkflowDagFullscreenDialog'
 import { WorkflowStudioLayoutDialogs } from './WorkflowStudioLayoutDialogs'
+import { WorkflowStudioRightPanel } from './WorkflowStudioRightPanel'
 import type { StudioLayoutProps } from './workflowStudioLayoutProps'
 import canvasStyles from '../WorkflowStudioPageCanvas.module.css'
+import canvasToolbarStyles from '../WorkflowStudioPageCanvasToolbar.module.css'
 import pageStyles from '../WorkflowStudioPage.module.css'
 import '../WorkflowStudioPageResponsive.module.css'
 import sidePanelStyles from '../WorkflowStudioPageSidePanel.module.css'
@@ -40,7 +38,7 @@ export function WorkflowStudioLayout(props: StudioLayoutProps) {
               />
             </aside>
             <main className={canvasStyles.canvas}>
-              <div className={canvasStyles.canvasToolbar}>
+              <div className={canvasToolbarStyles.canvasToolbar}>
                 <WorkflowDagFullscreenButton
                   onClick={() => props.setDagFullscreenOpen(true)}
                 />
@@ -56,24 +54,17 @@ export function WorkflowStudioLayout(props: StudioLayoutProps) {
               )}
             </main>
             <aside className={sidePanelStyles.sidePanel}>
-              <WorkflowNodeInspector
+              <WorkflowStudioRightPanel
                 workflow={props.workflow}
                 selectedNodeKey={props.selectedNodeKey}
-              />
-              <WorkflowChangeSummaryPanel
-                summary={props.compareSummary}
-                loading={props.compareState === 'loading'}
-                errors={props.compareErrors}
-                onSelectNode={props.setSelectedNodeKey}
-              />
-              <WorkflowDefinitionEditor
-                value={props.definitionYaml}
-                onChange={props.setDefinitionYaml}
-              />
-              <WorkflowValidationPanel
-                message={props.validationMessage}
-                errors={props.validationErrors}
-                compareErrors={props.compareErrors ?? undefined}
+                readOnly={props.readOnly}
+                definitionYaml={props.definitionYaml}
+                setDefinitionYaml={props.setDefinitionYaml}
+                compareSummary={props.compareSummary}
+                compareState={props.compareState}
+                compareErrors={props.compareErrors}
+                validationMessage={props.validationMessage}
+                validationErrors={props.validationErrors}
                 onSelectNode={props.setSelectedNodeKey}
               />
             </aside>

@@ -2,7 +2,7 @@ import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
 import { conditionLabel } from './workflowStudioModel'
 import styles from './WorkflowNodeInspector.module.css'
 
-type Props = { details: SelectedWorkflowNodeDetails }
+type Props = { details: SelectedWorkflowNodeDetails; readOnly?: boolean }
 
 function ItemList({ items }: { items: string[] }) {
   if (items.length === 0) return <span className={styles.empty}>无</span>
