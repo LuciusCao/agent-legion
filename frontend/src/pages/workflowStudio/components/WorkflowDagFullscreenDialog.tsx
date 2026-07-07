@@ -28,11 +28,16 @@ export function WorkflowDagFullscreenDialog({
       open={open}
       onClose={onClose}
       fullScreen
-      aria-label="Workflow DAG focus mode"
+      aria-labelledby="workflow-dag-focus-title"
     >
       <Toolbar className={styles.toolbar}>
-        <Typography variant="h6" component="div" className={styles.title}>
-          Workflow 图谱
+        <Typography
+          id="workflow-dag-focus-title"
+          variant="h6"
+          component="div"
+          className={styles.title}
+        >
+          Workflow DAG focus mode
         </Typography>
         <Tooltip title="关闭">
           <IconButton
