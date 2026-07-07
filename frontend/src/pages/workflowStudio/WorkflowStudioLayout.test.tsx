@@ -54,6 +54,8 @@ const baseProps = {
   selectedRevisionId: revision.id,
   readOnly: false,
   hasPreservedDraft: false,
+  isLoadingRevision: false,
+  revisionLoadError: null,
   selectRevision: vi.fn(),
   backToDraft: vi.fn(),
   useViewedRevisionAsDraft: vi.fn(),

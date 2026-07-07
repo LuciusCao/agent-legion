@@ -5,6 +5,7 @@ import type {
   WorkflowRevisionSummary,
 } from '../../types'
 import { isDefinitionDirty } from './workflowStudioModel'
+import { useWorkflowStudioRevisionSelection } from './useWorkflowStudioRevisionSelection'
 import {
   createDraftViewState,
   isRevisionReadOnly,
@@ -23,6 +24,8 @@ export type UseWorkflowStudioDraftResult = {
   viewMode: 'draft' | 'revision'
   selectedRevisionId: string | null
   hasPreservedDraft: boolean
+  isLoadingRevision: boolean
+  revisionLoadError: string | null
   selectRevision: (revisionId: string) => Promise<void>
   backToDraft: () => void
   useViewedRevisionAsDraft: () => void
@@ -41,12 +44,25 @@ export function useWorkflowStudioDraft(
   const [viewState, setViewState] = useState<WorkflowStudioViewState>(
     createDraftViewState(null)
   )
+  const {
+    isLoadingRevision,
+    revisionLoadError,
+    selectRevision,
+    clearRevisionLoadError,
+  } = useWorkflowStudioRevisionSelection(
+    activeRevision,
+    originalYaml,
+    draftYaml,
+    setViewState,
+    fetchRevisionDetail
+  )
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- reset draft to loaded original when it changes
     setDraftYaml(originalYaml)
     setViewState(createDraftViewState(activeRevision?.id ?? null))
-  }, [originalYaml, activeRevision?.id])
+    clearRevisionLoadError()
+  }, [originalYaml, activeRevision?.id, clearRevisionLoadError])
 
   const readOnly = isRevisionReadOnly(viewState)
   const definitionYaml =
@@ -68,35 +84,15 @@ export function useWorkflowStudioDraft(
     workspaceId && draftYaml.trim() && dirty && !readOnly
   )
 
-  async function selectRevision(revisionId: string) {
-    if (revisionId === activeRevision?.id) {
-      setViewState((current) => ({
-        ...createDraftViewState(activeRevision?.id ?? null),
-        hasPreservedDraft: current.hasPreservedDraft,
-      }))
-      return
-    }
-    const detail = await fetchRevisionDetail(revisionId)
-    setViewState({
-      mode: 'revision',
-      selectedRevisionId: detail.revision.id,
-      draftBaseRevisionId: activeRevision?.id ?? null,
-      viewedRevision: {
-        revision: detail.revision,
-        workflow: detail.workflow,
-        definitionYaml: detail.definition_yaml,
-      },
-      hasPreservedDraft: isDefinitionDirty(originalYaml, draftYaml),
-    })
-  }
-
   function backToDraft() {
+    clearRevisionLoadError()
     setViewState(createDraftViewState(activeRevision?.id ?? null))
   }
 
   function useViewedRevisionAsDraft() {
     if (!viewState.viewedRevision) return
     setDraftYaml(viewState.viewedRevision.definitionYaml)
+    clearRevisionLoadError()
     setViewState(createDraftViewState(activeRevision?.id ?? null))
   }
 
@@ -112,6 +108,8 @@ export function useWorkflowStudioDraft(
     viewMode: viewState.mode,
     selectedRevisionId: viewState.selectedRevisionId,
     hasPreservedDraft: viewState.hasPreservedDraft,
+    isLoadingRevision,
+    revisionLoadError,
     selectRevision,
     backToDraft,
     useViewedRevisionAsDraft,

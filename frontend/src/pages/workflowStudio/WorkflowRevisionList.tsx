@@ -6,6 +6,8 @@ type Props = {
   revisions: WorkflowRevisionSummary[]
   activeRevisionId?: string
   selectedRevisionId?: string | null
+  isLoadingRevision?: boolean
+  revisionLoadError?: string | null
   onSelectRevision: (revisionId: string) => void
 }
 
