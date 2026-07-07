@@ -7,6 +7,9 @@ import { upgradeActions } from './actions/upgradeActions'
 
 export const useJobStore = create<JobState>((set, get) => ({
   jobs: [],
+  jobsById: {},
+  jobIds: [],
+  revision: 0,
   jobsWorkspaceId: null,
   isLoading: false,
   error: null,
