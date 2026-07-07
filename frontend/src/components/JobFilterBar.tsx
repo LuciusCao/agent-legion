@@ -80,12 +80,14 @@ export function JobFilterBar({
       </div>
 
       <div className={styles.row}>
-        <WorkflowVersionFilter
-          value={filterConfig.workflowVersion}
-          counts={counts.workflowVersion}
-          jobs={jobs}
-          onChange={(workflowVersion) => onChange({ workflowVersion })}
-        />
+        <div className={styles.workflowVersionControl}>
+          <WorkflowVersionFilter
+            value={filterConfig.workflowVersion}
+            counts={counts.workflowVersion}
+            jobs={jobs}
+            onChange={(workflowVersion) => onChange({ workflowVersion })}
+          />
+        </div>
 
         <FormControl
           size="small"
