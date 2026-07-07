@@ -19,12 +19,6 @@ import { getFilterCounts } from '../stores/job/selectors'
 import type { WorkflowDefinitionRecord } from '../types'
 import styles from './WorkspaceMainPage.module.css'
 
-const sectionStyle = {
-  padding: 16,
-  borderRadius: 12,
-  background: '#ffffff',
-} as React.CSSProperties
-
 export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
@@ -214,11 +208,11 @@ export default function WorkspaceMainPage() {
       </section>
 
       {filteredJobs.length === 0 && totalJobs === 0 && !jobsLoading ? (
-        <section style={sectionStyle}>
+        <section className={styles.section}>
           <EmptyStateGuide steps={emptyStateSteps} />
         </section>
       ) : (
-        <section style={{ ...sectionStyle, flex: 1, padding: 0 }}>
+        <section className={styles.sectionFill}>
           {workspaceId ? <JobList workspaceId={workspaceId} /> : null}
         </section>
       )}
