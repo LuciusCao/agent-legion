@@ -17,3 +17,8 @@
   flex-direction: column;
   gap: 4px;
 }
+.error {
+  color: #d32f2f;
+  font-size: 13px;
+  margin: 0 4px 8px;
+}

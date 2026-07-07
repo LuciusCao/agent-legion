@@ -49,6 +49,8 @@ export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
             revisions={props.revisions}
             activeRevisionId={props.activeRevision?.id ?? props.revision?.id}
             selectedRevisionId={props.selectedRevisionId}
+            isLoadingRevision={props.isLoadingRevision}
+            revisionLoadError={props.revisionLoadError}
             onSelectRevision={props.selectRevision}
           />
           <WorkflowNodeOutline

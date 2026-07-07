@@ -5,6 +5,7 @@ type Props = {
   revision: WorkflowRevisionSummary
   active: boolean
   selected: boolean
+  disabled?: boolean
   onSelect: (revisionId: string) => void
 }
 
@@ -12,6 +13,7 @@ export function WorkflowRevisionListItem({
   revision,
   active,
   selected,
+  disabled,
   onSelect,
 }: Props) {
   return (
@@ -20,6 +22,7 @@ export function WorkflowRevisionListItem({
       className={`${styles.item} ${selected ? styles.selected : ''}`}
       aria-pressed={selected}
       aria-current={active ? 'true' : undefined}
+      disabled={disabled}
       onClick={() => onSelect(revision.id)}
     >
       <span className={styles.version}>v{revision.version}</span>

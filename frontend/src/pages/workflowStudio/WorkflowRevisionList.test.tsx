@@ -45,4 +45,35 @@ describe('WorkflowRevisionList', () => {
 
     expect(onSelectRevision).toHaveBeenCalledWith('rev-active')
   })
+
+  it('disables revision items while loading', () => {
+    render(
+      <WorkflowRevisionList
+        revisions={revisions}
+        activeRevisionId="rev-active"
+        selectedRevisionId="rev-old"
+        isLoadingRevision
+        onSelectRevision={vi.fn()}
+      />
+    )
+
+    expect(screen.getByRole('button', { name: /v1/ })).toBeDisabled()
+    expect(screen.getByRole('button', { name: /v2/ })).toBeDisabled()
+  })
+
+  it('shows an inline error when revision loading fails', () => {
+    render(
+      <WorkflowRevisionList
+        revisions={revisions}
+        activeRevisionId="rev-active"
+        selectedRevisionId="rev-old"
+        revisionLoadError="network error"
+        onSelectRevision={vi.fn()}
+      />
+    )
+
+    expect(screen.getByText(/加载版本失败/)).toHaveTextContent(
+      '加载版本失败：network error'
+    )
+  })
 })

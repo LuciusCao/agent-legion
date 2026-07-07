@@ -289,4 +289,22 @@ describe('useWorkflowStudio', () => {
     expect(result.current.definitionYaml).toContain('Restored')
     expect(result.current.dirty).toBe(true)
   })
+
+  it('exposes revision load error and keeps previous view on failure', async () => {
+    mocks.fetchWorkflowRevisionDetail.mockRejectedValue(
+      new Error('network error')
+    )
+    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+    const previousDefinitionYaml = result.current.definitionYaml
+
+    await act(async () => {
+      await result.current.selectRevision('rev-old')
+    })
+
+    expect(result.current.isLoadingRevision).toBe(false)
+    expect(result.current.revisionLoadError).toBe('network error')
+    expect(result.current.viewMode).toBe('draft')
+    expect(result.current.definitionYaml).toBe(previousDefinitionYaml)
+  })
 })

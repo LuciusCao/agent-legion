@@ -29,14 +29,12 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     draft.dirty
   )
   const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
-  const nodes = useMemo(
-    () => buildDagNodes(draft.visibleWorkflow),
-    [draft.visibleWorkflow]
-  )
-  const edges = useMemo(
-    () => buildDagEdges(draft.visibleWorkflow),
-    [draft.visibleWorkflow]
-  )
+  const { nodes, edges } = useMemo(() => {
+    return {
+      nodes: buildDagNodes(draft.visibleWorkflow),
+      edges: buildDagEdges(draft.visibleWorkflow),
+    }
+  }, [draft.visibleWorkflow])
   async function selectRevision(revisionId: string) {
     await draft.selectRevision(revisionId)
     setSelectedNodeKey(null)
@@ -82,6 +80,8 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     selectedRevisionId: draft.selectedRevisionId,
     readOnly: draft.readOnly,
     hasPreservedDraft: draft.hasPreservedDraft,
+    isLoadingRevision: draft.isLoadingRevision,
+    revisionLoadError: draft.revisionLoadError,
     selectRevision,
     backToDraft,
     useViewedRevisionAsDraft,
