@@ -69,33 +69,11 @@ function renderBar(props = {}) {
 describe('JobFilterBar', () => {
   it('renders all filter controls', () => {
     renderBar()
-    expect(screen.getByLabelText('状态')).toBeInTheDocument()
     expect(screen.getByLabelText('Workflow 版本')).toBeInTheDocument()
     expect(screen.getByLabelText('当前运行节点')).toBeInTheDocument()
     expect(
       screen.getByPlaceholderText('搜索 ID / 标题 / 批次')
     ).toBeInTheDocument()
-  })
-
-  it('shows cascade counts in status options', () => {
-    renderBar()
-    fireEvent.mouseDown(screen.getByLabelText('状态'))
-    expect(
-      screen.getByRole('option', { name: '全部状态 (2)' })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('option', { name: '运行中 (1)' })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('option', { name: '已完成 (1)' })
-    ).toBeInTheDocument()
-  })
-
-  it('calls onChange when status changes', () => {
-    const { onChange } = renderBar()
-    fireEvent.mouseDown(screen.getByLabelText('状态'))
-    fireEvent.click(screen.getByText('失败 (0)'))
-    expect(onChange).toHaveBeenCalledWith({ status: 'failed' })
   })
 
   it('calls onChange with debounce when searching', () => {
@@ -146,13 +124,12 @@ describe('JobFilterBar', () => {
   it('renders active filter chips', () => {
     renderBar({
       filterConfig: {
-        status: 'failed',
+        status: null,
         search: 'boom',
         workflowVersion: 3,
         activeNodeKey: 'review',
       },
     })
-    expect(screen.getByText('状态: 失败')).toBeInTheDocument()
     expect(screen.getByText('版本: v3')).toBeInTheDocument()
     expect(screen.getByText('节点: 审核')).toBeInTheDocument()
     expect(screen.getByText('搜索: "boom"')).toBeInTheDocument()
@@ -180,17 +157,17 @@ describe('JobFilterBar', () => {
     const onChange = vi.fn()
     renderBar({
       filterConfig: {
-        status: 'failed',
+        status: null,
         search: '',
-        workflowVersion: null,
+        workflowVersion: 3,
         activeNodeKey: null,
       },
       onChange,
     })
-    const chip = screen.getByText('状态: 失败').closest('.MuiChip-root')
+    const chip = screen.getByText('版本: v3').closest('.MuiChip-root')
     const deleteIcon = chip?.querySelector('[data-testid="CancelIcon"]')
     expect(deleteIcon).toBeTruthy()
     fireEvent.click(deleteIcon!)
-    expect(onChange).toHaveBeenCalledWith({ status: null })
+    expect(onChange).toHaveBeenCalledWith({ workflowVersion: null })
   })
 })

@@ -4,6 +4,7 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
 import { JobFilterBar } from '../components/JobFilterBar'
+import { JobStatusFilterPanel } from '../components/JobStatusFilterPanel'
 import { JobList } from '../components/JobList'
 import { EmptyStateGuide } from '../components/EmptyStateGuide'
 import {
@@ -201,6 +202,14 @@ export default function WorkspaceMainPage() {
           workflowDefinition={workflowDefinition}
           jobs={jobs}
           onChange={setFilterConfig}
+        />
+      </section>
+
+      <section>
+        <JobStatusFilterPanel
+          value={filterConfig.status}
+          counts={filterCounts.status}
+          onChange={(status) => setFilterConfig({ status })}
         />
       </section>
 

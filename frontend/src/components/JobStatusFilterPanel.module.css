@@ -1,0 +1,45 @@
+.panel {
+  background: #ffffff;
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.option {
+  appearance: none;
+  border: 1px solid #e0e0e0;
+  background: #ffffff;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: 14px;
+  line-height: 20px;
+  color: #616161;
+  cursor: pointer;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.option:hover {
+  border-color: #bdbdbd;
+  background: #fafafa;
+}
+
+.option.active {
+  border-color: #1976d2;
+  background: #1976d2;
+  color: #ffffff;
+}
+
+.count {
+  font-size: 12px;
+  opacity: 0.9;
+}
