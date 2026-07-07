@@ -69,11 +69,20 @@ function renderBar(props = {}) {
 describe('JobFilterBar', () => {
   it('renders all filter controls', () => {
     renderBar()
+    expect(screen.getByRole('button', { name: '全部 (2)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '运行中 (1)' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '已完成 (1)' })).toBeInTheDocument()
     expect(screen.getByLabelText('Workflow 版本')).toBeInTheDocument()
     expect(screen.getByLabelText('当前运行节点')).toBeInTheDocument()
     expect(
       screen.getByPlaceholderText('搜索 ID / 标题 / 批次')
     ).toBeInTheDocument()
+  })
+
+  it('calls onChange when a status chip is clicked', () => {
+    const { onChange } = renderBar()
+    fireEvent.click(screen.getByRole('button', { name: '失败 (0)' }))
+    expect(onChange).toHaveBeenCalledWith({ status: 'failed' })
   })
 
   it('calls onChange with debounce when searching', () => {
@@ -124,12 +133,13 @@ describe('JobFilterBar', () => {
   it('renders active filter chips', () => {
     renderBar({
       filterConfig: {
-        status: null,
+        status: 'failed',
         search: 'boom',
         workflowVersion: 3,
         activeNodeKey: 'review',
       },
     })
+    expect(screen.getByText('状态: 失败')).toBeInTheDocument()
     expect(screen.getByText('版本: v3')).toBeInTheDocument()
     expect(screen.getByText('节点: 审核')).toBeInTheDocument()
     expect(screen.getByText('搜索: "boom"')).toBeInTheDocument()
@@ -157,17 +167,17 @@ describe('JobFilterBar', () => {
     const onChange = vi.fn()
     renderBar({
       filterConfig: {
-        status: null,
+        status: 'failed',
         search: '',
-        workflowVersion: 3,
+        workflowVersion: null,
         activeNodeKey: null,
       },
       onChange,
     })
-    const chip = screen.getByText('版本: v3').closest('.MuiChip-root')
+    const chip = screen.getByText('状态: 失败').closest('.MuiChip-root')
     const deleteIcon = chip?.querySelector('[data-testid="CancelIcon"]')
     expect(deleteIcon).toBeTruthy()
     fireEvent.click(deleteIcon!)
-    expect(onChange).toHaveBeenCalledWith({ workflowVersion: null })
+    expect(onChange).toHaveBeenCalledWith({ status: null })
   })
 })
