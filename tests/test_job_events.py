@@ -633,3 +633,47 @@ def test_record_job_update_uses_event_buffer(fake_job_db):
     record_job_update(fake_job_db, buffer, "job1")
 
     assert buffer.updated == [("ws1", "job1")]
+
+
+def test_job_query_service_lists_patch_summaries_by_ids(job_query_service, job_db):
+    job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    batch1 = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["q1"]},
+        workspace_id="ws1",
+    )
+    job1 = job_db.create_job(
+        workspace_id="ws1",
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="q1",
+        batch_id=batch1["id"],
+        title="Question 1",
+        node_keys=["question_understanding"],
+    )
+    batch2 = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["q2"]},
+        workspace_id="ws1",
+    )
+    job2 = job_db.create_job(
+        workspace_id="ws1",
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="q2",
+        batch_id=batch2["id"],
+        title="Question 2",
+        node_keys=["question_understanding"],
+    )
+
+    summaries = job_query_service.list_patch_summaries("ws1", [job1["id"]])
+
+    assert [summary["id"] for summary in summaries] == [job1["id"]]
+    assert summaries[0]["workspace_id"] == "ws1"
+    assert "status" in summaries[0]
+    assert "active_node_key" in summaries[0]
+    assert "completed_nodes" in summaries[0]
+    assert "total_nodes" in summaries[0]
+    assert job2["id"] not in [summary["id"] for summary in summaries]
