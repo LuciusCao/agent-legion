@@ -10,6 +10,7 @@ from server.app.routes.workflow_revisions_contracts import (
     ActiveWorkflowRevisionResponse,
     WorkflowDraftRequest,
     WorkflowDraftValidationResponse,
+    WorkflowRevisionDetailResponse,
     WorkflowRevisionsResponse,
     WorkflowRevisionSummary,
 )
@@ -54,6 +55,31 @@ def create_workflow_revisions_router(job_db: JobQueries, settings: Settings) -> 
             raise HTTPException(status_code=404, detail="No active workflow revision")
         definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
         return ActiveWorkflowRevisionResponse(
+            revision=WorkflowRevisionSummary.model_validate(revision),
+            workflow=workflow_contracts.WorkflowDefinitionResponse.model_validate(
+                workflow_definition_to_response_payload(definition)
+            ),
+            definition_yaml=definition_to_yaml(definition),
+        )
+
+    @router.get(
+        "/workspaces/{workspace_id}/workflow-revisions/{revision_id}",
+        response_model=WorkflowRevisionDetailResponse,
+    )
+    def get_workflow_revision_detail(
+        workspace_id: str,
+        revision_id: str,
+    ) -> WorkflowRevisionDetailResponse:
+        require_workflows_enabled(settings)
+        workspace = job_db.get_workspace(workspace_id)
+        if workspace is None:
+            raise HTTPException(status_code=404, detail="Workspace not found")
+        workflow_key = str(workspace.get("default_workflow_key") or "")
+        revision = job_db.get_workflow_revision(workspace_id, workflow_key, revision_id)
+        if revision is None:
+            raise HTTPException(status_code=404, detail="Workflow revision not found")
+        definition = workflow_definition_from_dict(json.loads(str(revision["definition_json"])))
+        return WorkflowRevisionDetailResponse(
             revision=WorkflowRevisionSummary.model_validate(revision),
             workflow=workflow_contracts.WorkflowDefinitionResponse.model_validate(
                 workflow_definition_to_response_payload(definition)

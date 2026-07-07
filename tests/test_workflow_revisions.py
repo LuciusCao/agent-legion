@@ -144,6 +144,76 @@ def test_get_active_workflow_revision_returns_definition_and_yaml(tmp_path: Path
     assert definition.edges
 
 
+def test_get_workflow_revision_detail_returns_definition_and_yaml(tmp_path: Path) -> None:
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as client:
+        response = client.post(
+            "/api/workspaces",
+            json={"name": "Studio", "default_workflow_key": "question_comprehension_info"},
+        )
+        assert response.status_code == 200
+        workspace_id = response.json()["workspace"]["id"]
+
+        active = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/active")
+        assert active.status_code == 200
+        revision_id = active.json()["revision"]["id"]
+
+        detail = client.get(f"/api/workspaces/{workspace_id}/workflow-revisions/{revision_id}")
+
+    assert detail.status_code == 200
+    payload = detail.json()
+    assert payload["revision"]["id"] == revision_id
+    assert payload["revision"]["status"] == "active"
+    assert payload["workflow"]["key"] == "question_comprehension_info"
+    assert payload["workflow"]["nodes"]
+    assert "key: question_comprehension_info" in payload["definition_yaml"]
+
+
+def test_get_workflow_revision_detail_returns_404_for_unknown_revision(
+    tmp_path: Path,
+) -> None:
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    workspace = app.state.job_db.create_workspace(
+        "Studio",
+        default_workflow_key="question_comprehension_info",
+    )
+    with TestClient(app) as client:
+        response = client.get(f"/api/workspaces/{workspace['id']}/workflow-revisions/missing-rev")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Workflow revision not found"
+
+
+def test_get_workflow_revision_detail_rejects_other_workspace_revision(
+    tmp_path: Path,
+) -> None:
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as client:
+        first = client.post(
+            "/api/workspaces",
+            json={"name": "First", "default_workflow_key": "question_comprehension_info"},
+        )
+        second = client.post(
+            "/api/workspaces",
+            json={"name": "Second", "default_workflow_key": "question_comprehension_info"},
+        )
+        assert first.status_code == 200
+        assert second.status_code == 200
+        first_id = first.json()["workspace"]["id"]
+        second_id = second.json()["workspace"]["id"]
+        active = client.get(f"/api/workspaces/{first_id}/workflow-revisions/active")
+        assert active.status_code == 200
+        first_revision_id = active.json()["revision"]["id"]
+
+        response = client.get(f"/api/workspaces/{second_id}/workflow-revisions/{first_revision_id}")
+
+    assert response.status_code == 404
+    assert response.json()["detail"] == "Workflow revision not found"
+
+
 def test_get_active_workflow_revision_returns_404_for_workspace_without_revision(
     tmp_path: Path,
 ) -> None:

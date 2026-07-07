@@ -31,3 +31,9 @@ class ActiveWorkflowRevisionResponse(BaseModel):
     revision: WorkflowRevisionSummary
     workflow: workflow_contracts.WorkflowDefinitionResponse
     definition_yaml: str
+
+
+class WorkflowRevisionDetailResponse(BaseModel):
+    revision: WorkflowRevisionSummary
+    workflow: workflow_contracts.WorkflowDefinitionResponse
+    definition_yaml: str
