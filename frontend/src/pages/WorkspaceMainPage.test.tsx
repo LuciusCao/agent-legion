@@ -268,7 +268,9 @@ describe('WorkspaceMainPage', () => {
       renderPage()
     })
 
-    expect(screen.getByLabelText('状态')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: /全部/ })
+    ).toBeInTheDocument()
     expect(
       screen.getByPlaceholderText('搜索 ID / 标题 / 批次')
     ).toBeInTheDocument()
