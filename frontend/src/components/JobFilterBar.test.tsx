@@ -69,13 +69,7 @@ function renderBar(props = {}) {
 describe('JobFilterBar', () => {
   it('renders all filter controls', () => {
     renderBar()
-    expect(screen.getByRole('button', { name: '全部 (2)' })).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: '运行中 (1)' })
-    ).toBeInTheDocument()
-    expect(
-      screen.getByRole('button', { name: '已完成 (1)' })
-    ).toBeInTheDocument()
+    expect(screen.getByLabelText('状态')).toBeInTheDocument()
     expect(screen.getByLabelText('Workflow 版本')).toBeInTheDocument()
     expect(screen.getByLabelText('当前运行节点')).toBeInTheDocument()
     expect(
@@ -83,9 +77,24 @@ describe('JobFilterBar', () => {
     ).toBeInTheDocument()
   })
 
-  it('calls onChange when a status chip is clicked', () => {
+  it('shows cascade counts in status options', () => {
+    renderBar()
+    fireEvent.mouseDown(screen.getByLabelText('状态'))
+    expect(
+      screen.getByRole('option', { name: '全部状态 (2)' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('option', { name: '运行中 (1)' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('option', { name: '已完成 (1)' })
+    ).toBeInTheDocument()
+  })
+
+  it('calls onChange when status changes', () => {
     const { onChange } = renderBar()
-    fireEvent.click(screen.getByRole('button', { name: '失败 (0)' }))
+    fireEvent.mouseDown(screen.getByLabelText('状态'))
+    fireEvent.click(screen.getByText('失败 (0)'))
     expect(onChange).toHaveBeenCalledWith({ status: 'failed' })
   })
 
