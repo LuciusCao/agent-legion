@@ -30,42 +30,36 @@ export default function WorkspaceLayout() {
     addDialogContext,
     addDialogWorkspaceId,
     setWorkspacePackageDialogOpen,
+    tokenUsageDialogOpen,
     setTokenUsageDialogOpen,
   } = useUiStore()
   const { pageTitle, pageSubtitle, detailPageActions } = usePageHeaderStore()
   const selectMode = useJobStore((state) => state.selectMode)
   const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
-
   const isDetailPage =
     workspaceId &&
     location.pathname.startsWith(`/workspaces/${workspaceId}/jobs/`)
-
   useEffect(() => {
     if (workspaces.length === 0) {
       fetchWorkspaces()
     }
   }, [workspaces.length, fetchWorkspaces])
-
   useEffect(() => {
     const ws = workspaces.find((w) => w.id === workspaceId)
     setCurrentWorkspace(ws || null)
   }, [workspaceId, workspaces, setCurrentWorkspace])
-
   const lastFetchedId = useRef<string | null>(null)
-
   const refreshStats = useCallback(() => {
     if (workspaceId) {
       lastFetchedId.current = workspaceId
       fetchWorkspaceStats(workspaceId)
     }
   }, [workspaceId, fetchWorkspaceStats])
-
   useEffect(() => {
     if (workspaceId && workspaceId !== lastFetchedId.current) {
       refreshStats()
     }
   }, [workspaceId, refreshStats])
-
   useEffect(() => {
     const handleVisibility = () => {
       if (!document.hidden && workspaceId) {
@@ -76,13 +70,16 @@ export default function WorkspaceLayout() {
     return () =>
       document.removeEventListener('visibilitychange', handleVisibility)
   }, [workspaceId, refreshStats])
-
   useEffect(() => {
     if (workspaceId) {
       fetchWorkerStatus(workspaceId)
     }
   }, [fetchWorkerStatus, workspaceId])
-
+  useEffect(() => {
+    if (tokenUsageDialogOpen) {
+      setTokenUsageDialogOpen(false)
+    }
+  }, [location.pathname, tokenUsageDialogOpen, setTokenUsageDialogOpen])
   const title = pageTitle || currentWorkspace?.name || workspaceId || ''
 
   return (
