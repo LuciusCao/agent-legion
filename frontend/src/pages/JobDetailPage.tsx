@@ -8,6 +8,7 @@ import styles from './JobDetailPage.module.css'
 import { ArtifactListDialog } from '../components/ArtifactListDialog'
 import { ArtifactPreviewDialog } from '../components/ArtifactPreviewDialog'
 import { DagFullscreenDialog } from '../components/DagFullscreenDialog'
+import { TokenUsageDialog } from '../components/TokenUsageDialog'
 import { JobDetailActions } from '../components/JobDetailActions'
 import { useJobDetail } from './jobDetail/useJobDetail'
 import { EntityPanel } from './jobDetail/EntityPanel'
@@ -178,6 +179,7 @@ export default function JobDetailPage() {
         runs={detail?.runs}
         onClose={() => setDagDialogOpen(false)}
       />
+      {jobId && <TokenUsageDialog scope="job" jobId={jobId} />}
     </div>
   )
 }
