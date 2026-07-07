@@ -81,7 +81,15 @@ export default function WorkspaceLayout() {
     }
   }, [location.pathname, tokenUsageDialogOpen, setTokenUsageDialogOpen])
   const title = pageTitle || currentWorkspace?.name || workspaceId || ''
-
+  const tokenAnalysisButton = (
+    <IconButton
+      size="small"
+      aria-label="Token 使用分析"
+      onClick={() => workspaceId && setTokenUsageDialogOpen(true)}
+    >
+      <MaterialIcon name="analytics" />
+    </IconButton>
+  )
   return (
     <AppShell
       appBar={({ scrolled }) => (
@@ -127,13 +135,7 @@ export default function WorkspaceLayout() {
                 >
                   <MaterialIcon name="inventory_2" />
                 </IconButton>
-                <IconButton
-                  size="small"
-                  aria-label="Token 使用分析"
-                  onClick={() => workspaceId && setTokenUsageDialogOpen(true)}
-                >
-                  <MaterialIcon name="analytics" />
-                </IconButton>
+                {tokenAnalysisButton}
                 <IconButton
                   size="small"
                   aria-label="Workflow Studio"
@@ -154,7 +156,10 @@ export default function WorkspaceLayout() {
                 </IconButton>
               </>
             ) : (
-              detailPageActions
+              <>
+                {tokenAnalysisButton}
+                {detailPageActions}
+              </>
             )
           }
         />
