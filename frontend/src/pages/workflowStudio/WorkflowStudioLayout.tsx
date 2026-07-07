@@ -26,7 +26,11 @@ export function WorkflowStudioLayout(props: StudioLayoutProps) {
             <aside className={sidePanelStyles.sidePanel}>
               <WorkflowRevisionList
                 revisions={props.revisions}
-                activeRevisionId={props.activeRevision?.id}
+                activeRevisionId={
+                  props.activeRevision?.id ?? props.revision?.id
+                }
+                selectedRevisionId={props.selectedRevisionId}
+                onSelectRevision={props.selectRevision}
               />
               <WorkflowNodeOutline
                 workflow={props.workflow}
