@@ -11,6 +11,74 @@ const workflow = {
 }
 
 describe('WorkflowStudioRightPanel', () => {
+  it('gives validation autoswitch higher priority than forcedMode', () => {
+    const { rerender } = render(
+      <WorkflowStudioRightPanel
+        workflow={workflow}
+        selectedNodeKey={null}
+        readOnly={false}
+        definitionYaml="key: video_knowledge\n"
+        setDefinitionYaml={vi.fn()}
+        compareSummary={null}
+        compareState="idle"
+        compareErrors={null}
+        validationMessage=""
+        validationErrors={[]}
+        onSelectNode={vi.fn()}
+        forcedMode="changes"
+      />
+    )
+
+    expect(screen.getByRole('tab', { name: 'Changes' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+
+    rerender(
+      <WorkflowStudioRightPanel
+        workflow={workflow}
+        selectedNodeKey={null}
+        readOnly={false}
+        definitionYaml="key: video_knowledge\n"
+        setDefinitionYaml={vi.fn()}
+        compareSummary={null}
+        compareState="idle"
+        compareErrors={null}
+        validationMessage="validation message"
+        validationErrors={[]}
+        onSelectNode={vi.fn()}
+        forcedMode="changes"
+      />
+    )
+
+    expect(screen.getByRole('tab', { name: 'Validation' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+
+    rerender(
+      <WorkflowStudioRightPanel
+        workflow={workflow}
+        selectedNodeKey={null}
+        readOnly={false}
+        definitionYaml="key: video_knowledge\n"
+        setDefinitionYaml={vi.fn()}
+        compareSummary={null}
+        compareState="idle"
+        compareErrors={null}
+        validationMessage=""
+        validationErrors={[]}
+        onSelectNode={vi.fn()}
+        forcedMode="changes"
+      />
+    )
+
+    expect(screen.getByRole('tab', { name: 'Changes' })).toHaveAttribute(
+      'aria-selected',
+      'true'
+    )
+  })
+
   it('switches between overview, changes, yaml, and validation modes', () => {
     const { rerender } = render(
       <WorkflowStudioRightPanel

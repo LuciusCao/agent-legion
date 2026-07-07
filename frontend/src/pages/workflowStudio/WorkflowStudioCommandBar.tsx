@@ -26,16 +26,6 @@ type Props = {
   useViewedRevisionAsDraft: () => void
 }
 
-function riskLabel(
-  compareSummary: ChangeSummaryViewModel | null
-): string | null {
-  if (!compareSummary) return null
-  if (compareSummary.riskLevel === 'breaking') return '风险：高'
-  if (compareSummary.riskLevel === 'warning') return '风险：中'
-  if (compareSummary.riskLevel === 'info') return '风险：低'
-  return null
-}
-
 export function WorkflowStudioCommandBar({
   workflow,
   revision,
@@ -60,7 +50,14 @@ export function WorkflowStudioCommandBar({
     viewMode === 'revision'
       ? `viewing v${revision?.version ?? '-'} · ${hash} · read-only`
       : `${workflow?.key ?? 'workflow'} · draft from v${activeRevision?.version ?? '-'} · ${dirty ? '有未发布变更' : '已同步'}`
-  const risk = riskLabel(compareSummary)
+  const risk =
+    compareSummary?.riskLevel === 'breaking'
+      ? '风险：高'
+      : compareSummary?.riskLevel === 'warning'
+        ? '风险：中'
+        : compareSummary?.riskLevel === 'info'
+          ? '风险：低'
+          : null
 
   return (
     <div className={styles.commandBar} aria-label="Workflow command bar">
@@ -76,12 +73,18 @@ export function WorkflowStudioCommandBar({
       <div className={styles.actions}>
         {readOnly ? (
           <>
-            <Button size="small" variant="outlined" onClick={backToDraft}>
+            <Button
+              size="small"
+              variant="outlined"
+              disabled={actionState !== 'idle'}
+              onClick={backToDraft}
+            >
               Back to draft
             </Button>
             <Button
               size="small"
               variant="contained"
+              disabled={actionState !== 'idle'}
               onClick={useViewedRevisionAsDraft}
             >
               Use as draft
