@@ -1,5 +1,5 @@
 import { Tab, Tabs } from '@mui/material'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { WorkflowDefinitionRecord } from '../../types'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import { WorkflowChangeSummaryPanel } from './components/WorkflowChangeSummaryPanel'
@@ -44,19 +44,12 @@ export function WorkflowStudioRightPanel(props: Props) {
     }
   }, [props.selectedNodeKey])
 
-  const previousValidationMessage = useRef(props.validationMessage)
   useEffect(() => {
-    if (props.validationErrors.length > 0) {
+    if (props.validationMessage) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMode('validation')
-    } else if (
-      props.validationMessage &&
-      previousValidationMessage.current === ''
-    ) {
-      setMode('validation')
     }
-    previousValidationMessage.current = props.validationMessage
-  }, [props.validationErrors.length, props.validationMessage])
+  }, [props.validationMessage])
 
   return (
     <section className={styles.panel} aria-label="Workflow inspector modes">

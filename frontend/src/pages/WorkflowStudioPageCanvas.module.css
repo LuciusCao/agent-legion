@@ -7,7 +7,7 @@
   display: flex;
 }
 .canvas > :global(.DagGraph),
-.canvas > div:not(.canvasToolbar) {
+.canvas > div:not([data-canvas-toolbar]) {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 0;

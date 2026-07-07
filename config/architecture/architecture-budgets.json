@@ -222,7 +222,7 @@
     "frontend/src/pages/workflowStudio/WorkflowStudioLayout.tsx": 82,
     "frontend/src/pages/workflowStudio/WorkflowStudioLayoutDialogs.tsx": 35,
     "frontend/src/pages/workflowStudio/WorkflowStudioRightPanel.module.css": 42,
-    "frontend/src/pages/workflowStudio/WorkflowStudioRightPanel.tsx": 135,
+    "frontend/src/pages/workflowStudio/WorkflowStudioRightPanel.tsx": 128,
     "frontend/src/pages/workflowStudio/WorkflowStudioSummaryBar.module.css": 43,
     "frontend/src/pages/workflowStudio/WorkflowStudioSummaryBar.tsx": 40,
     "frontend/src/pages/workflowStudio/WorkflowStudioSummaryBarActions.tsx": 55,
