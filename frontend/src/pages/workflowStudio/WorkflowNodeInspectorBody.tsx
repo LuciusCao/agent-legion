@@ -2,11 +2,11 @@ import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
 import { conditionLabel } from './workflowStudioModel'
 import styles from './WorkflowNodeInspector.module.css'
 
-type Props = { details: SelectedWorkflowNodeDetails }
+type Props = { details: SelectedWorkflowNodeDetails; readOnly?: boolean }
 
-// WorkflowNodeInspectorBody is display-only: it lists node metadata and
-// edges. There are no editable inputs here, so no readOnly/disabled wiring
-// is required at this level.
+// WorkflowNodeInspectorBody is currently display-only: it lists node metadata
+// and edges. readOnly is accepted and forwarded so future structured edit
+// inputs can be wired with disabled={readOnly} / readOnly={readOnly}.
 function ItemList({ items }: { items: string[] }) {
   if (items.length === 0) return <span className={styles.empty}>无</span>
   return (
@@ -49,7 +49,8 @@ function EdgeList({
   )
 }
 
-export function WorkflowNodeInspectorBody({ details }: Props) {
+export function WorkflowNodeInspectorBody(props: Props) {
+  const { details } = props
   const { node, incoming, outgoing } = details
   return (
     <section aria-label="Workflow inspector" className={styles.panel}>
