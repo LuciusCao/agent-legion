@@ -5,49 +5,6 @@
   box-shadow: 0 6px 24px rgba(0, 0, 0, 0.1);
 }
 
-.statusRow {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  align-items: center;
-  margin-bottom: 16px;
-}
-
-.statusOption {
-  appearance: none;
-  border: 1px solid #e0e0e0;
-  background: #ffffff;
-  border-radius: 999px;
-  padding: 6px 14px;
-  font-size: 14px;
-  line-height: 20px;
-  color: #616161;
-  cursor: pointer;
-  transition:
-    background-color 0.15s ease,
-    border-color 0.15s ease,
-    color 0.15s ease;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.statusOption:hover {
-  border-color: #bdbdbd;
-  background: #fafafa;
-}
-
-.statusOption.active {
-  border-color: #1976d2;
-  background: #1976d2;
-  color: #ffffff;
-}
-
-.count {
-  font-size: 12px;
-  opacity: 0.9;
-}
-
 .row {
   display: flex;
   gap: 16px;
