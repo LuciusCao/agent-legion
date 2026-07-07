@@ -1,8 +1,8 @@
-import { Dialog, DialogContent, DialogTitle, IconButton } from '@mui/material'
+import CloseIcon from '@mui/icons-material/Close'
+import { Fade, IconButton, Slide } from '@mui/material'
+import { useAppBarBottom } from '../hooks/useAppBarBottom'
 import { useUiStore } from '../stores/uiStore'
-import { TokenUsagePanel } from './TokenUsagePanel'
-import { TokenUsageJobPanel } from './TokenUsageJobPanel'
-import { MaterialIcon } from './MaterialIcon'
+import { TokenUsageDialogContent } from './TokenUsageDialogContent'
 import styles from './TokenUsageDialog.module.css'
 
 interface TokenUsageDialogProps {
@@ -16,36 +16,43 @@ export function TokenUsageDialog({
   workspaceId,
   jobId,
 }: TokenUsageDialogProps) {
-  const { tokenUsageDialogOpen, setTokenUsageDialogOpen } = useUiStore()
-
+  const { tokenUsageDialogOpen: open, setTokenUsageDialogOpen: setOpen } =
+    useUiStore()
+  const appBarBottom = useAppBarBottom()
   const title =
     scope === 'workspace' ? 'Workspace Token 使用分析' : 'Job Token 使用分析'
+  const close = () => setOpen(false)
 
   return (
-    <Dialog
-      open={tokenUsageDialogOpen}
-      onClose={() => setTokenUsageDialogOpen(false)}
-      fullWidth
-      maxWidth={false}
-      classes={{ paper: styles.paper }}
-      aria-labelledby="token-usage-dialog-title"
-    >
-      <DialogTitle id="token-usage-dialog-title" className={styles.title}>
-        {title}
-        <IconButton
-          size="small"
-          aria-label="关闭"
-          onClick={() => setTokenUsageDialogOpen(false)}
+    <>
+      <Fade in={open} mountOnEnter unmountOnExit>
+        <div
+          className={styles.backdrop}
+          style={{ top: appBarBottom }}
+          onClick={close}
+        />
+      </Fade>
+      <Slide direction="down" in={open} mountOnEnter unmountOnExit>
+        <div
+          className={styles.panel}
+          style={{ top: appBarBottom }}
+          aria-label={title}
         >
-          <MaterialIcon name="close" />
-        </IconButton>
-      </DialogTitle>
-      <DialogContent className={styles.content}>
-        {scope === 'workspace' && workspaceId && (
-          <TokenUsagePanel workspaceId={workspaceId} />
-        )}
-        {scope === 'job' && jobId && <TokenUsageJobPanel jobId={jobId} />}
-      </DialogContent>
-    </Dialog>
+          <div className={styles.header}>
+            {title}
+            <IconButton size="small" onClick={close}>
+              <CloseIcon />
+            </IconButton>
+          </div>
+          <div className={styles.content}>
+            <TokenUsageDialogContent
+              scope={scope}
+              workspaceId={workspaceId}
+              jobId={jobId}
+            />
+          </div>
+        </div>
+      </Slide>
+    </>
   )
 }

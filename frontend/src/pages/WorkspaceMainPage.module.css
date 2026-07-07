@@ -9,14 +9,12 @@
   background: #ffffff;
   flex-wrap: wrap;
 }
-
 .batchActions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex-wrap: wrap;
 }
-
 .filterRow {
   display: flex;
   align-items: center;
@@ -24,9 +22,18 @@
   gap: 12px;
   flex-wrap: wrap;
 }
-
 .error {
   color: #ba1a1a;
   font-size: 14px;
   margin: 0;
+}
+.section {
+  padding: 16px;
+  border-radius: 12px;
+  background: #ffffff;
+}
+.sectionFill {
+  composes: section;
+  flex: 1;
+  padding: 0;
 }

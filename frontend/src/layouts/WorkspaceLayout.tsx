@@ -10,6 +10,7 @@ import { AppBar } from '../components/AppBar'
 import { AddDialog } from '../components/AddDialog'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 import { MaterialIcon } from '../components/MaterialIcon'
+import { useCloseTokenUsageDialogOnRouteChange } from './useCloseTokenUsageDialogOnRouteChange'
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
@@ -75,11 +76,10 @@ export default function WorkspaceLayout() {
       fetchWorkerStatus(workspaceId)
     }
   }, [fetchWorkerStatus, workspaceId])
-  useEffect(() => {
-    if (tokenUsageDialogOpen) {
-      setTokenUsageDialogOpen(false)
-    }
-  }, [location.pathname, tokenUsageDialogOpen, setTokenUsageDialogOpen])
+  useCloseTokenUsageDialogOnRouteChange(
+    tokenUsageDialogOpen,
+    setTokenUsageDialogOpen
+  )
   const title = pageTitle || currentWorkspace?.name || workspaceId || ''
   const tokenAnalysisButton = (
     <IconButton
