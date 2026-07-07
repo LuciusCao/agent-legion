@@ -164,6 +164,26 @@ class JobQueryService:
     def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
         return self.job_db.count_jobs_by_status(workspace_id)
 
+    def snapshot(
+        self,
+        workspace_id: str,
+        limit: int = 200,
+        cursor: str | None = None,
+    ) -> dict[str, Any]:
+        jobs = self.list_jobs(workspace_id)
+        bounded = jobs[:limit]
+        next_cursor = None
+        if len(jobs) > limit and bounded:
+            last = bounded[-1]
+            next_cursor = f"{last.get('created_at', '')}:{last['id']}"
+        return {
+            "workspace_id": workspace_id,
+            "revision": 0,
+            "stats": self.job_db.count_jobs_by_status(workspace_id),
+            "jobs": bounded,
+            "next_cursor": next_cursor,
+        }
+
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
         definition = self._definition_for_job(job)
