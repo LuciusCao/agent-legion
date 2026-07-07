@@ -369,6 +369,24 @@ class JobEventManager:
         )
 
 
+def record_job_update(
+    job_db: JobQueries | None,
+    job_event_buffer: Any | None,
+    job_id: str,
+) -> None:
+    try:
+        if job_event_buffer is None or job_db is None:
+            return
+        job = job_db.get_job(job_id)
+        if job is None:
+            return
+        workspace_id = str(job.get("workspace_id", ""))
+        if workspace_id:
+            job_event_buffer.record_job_updated(workspace_id, job_id)
+    except Exception:
+        logger.exception("Failed to record job update for %s", job_id)
+
+
 def broadcast_job_update(
     job_db: JobQueries | None,
     job_event_manager: JobEventManager | None,

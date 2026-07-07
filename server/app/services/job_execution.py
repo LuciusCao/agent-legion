@@ -5,7 +5,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from server.app.events import JobEventManager, broadcast_job_update
+from server.app.events import JobEventManager, broadcast_job_update, record_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
@@ -31,6 +31,7 @@ class JobExecutionService:
         workflows: WorkflowCatalogService,
         clock: Callable[[], float] | None = None,
         job_event_manager: JobEventManager | None = None,
+        job_event_buffer: Any | None = None,
     ) -> None:
         self.job_db = job_db
         self.artifact_mutation = artifact_mutation
@@ -38,6 +39,7 @@ class JobExecutionService:
         self.workflows = workflows
         self.clock = clock
         self.job_event_manager = job_event_manager
+        self.job_event_buffer = job_event_buffer
 
     def _now(self) -> datetime:
         if self.clock is not None:
@@ -172,7 +174,10 @@ class JobExecutionService:
                 job_id, "run_to", "failed", target_node_key, "node_not_found", str(exc)
             )
 
-        broadcast_job_update(self.job_db, self.job_event_manager, job_id)
+        if self.job_event_buffer is not None:
+            record_job_update(self.job_db, self.job_event_buffer, job_id)
+        elif self.job_event_manager is not None:
+            broadcast_job_update(self.job_db, self.job_event_manager, job_id)
         return self._result(job_id, "run_to", "succeeded", target_node_key)
 
     def _run_to_with_start(
@@ -245,7 +250,10 @@ class JobExecutionService:
             )
 
         commit_staged_outputs(staged, job_id, "run-to")
-        broadcast_job_update(self.job_db, self.job_event_manager, job_id)
+        if self.job_event_buffer is not None:
+            record_job_update(self.job_db, self.job_event_buffer, job_id)
+        elif self.job_event_manager is not None:
+            broadcast_job_update(self.job_db, self.job_event_manager, job_id)
         return self._result(job_id, "run_to", "succeeded", target_node_key)
 
     def continue_job(self, workspace_id: str, job_id: str) -> dict[str, Any]:
@@ -283,7 +291,10 @@ class JobExecutionService:
                 str(exc),
             )
 
-        broadcast_job_update(self.job_db, self.job_event_manager, job_id)
+        if self.job_event_buffer is not None:
+            record_job_update(self.job_db, self.job_event_buffer, job_id)
+        elif self.job_event_manager is not None:
+            broadcast_job_update(self.job_db, self.job_event_manager, job_id)
         return self._result(job_id, "continue", "succeeded")
 
     def batch_run_to(

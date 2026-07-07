@@ -3,10 +3,11 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.schema import init_db
-from server.app.events import JobEventManager
+from server.app.events import JobEventManager, record_job_update
 from server.app.executors._lease_claims import claim_lease
 from server.app.executors._lease_control import _sync_job_status, active_lease_counts
 from server.app.executors._lease_lifecycle import (
@@ -36,16 +37,23 @@ class ExecutorLeaseRepository:
         job_db: JobQueries | None = None,
         job_event_manager: JobEventManager | None = None,
         data_dir: Path | None = None,
+        job_event_buffer: Any | None = None,
     ):
         self.path = path
         self.job_db = job_db
         self.job_event_manager = job_event_manager
         self.data_dir = data_dir or path.parent
+        self.job_event_buffer = job_event_buffer
         init_db(path)
 
     def _broadcast_job_update(self, job_id: str) -> None:
         try:
-            if self.job_event_manager is None or self.job_db is None:
+            if self.job_db is None:
+                return
+            if self.job_event_buffer is not None:
+                record_job_update(self.job_db, self.job_event_buffer, job_id)
+                return
+            if self.job_event_manager is None:
                 return
             job = self.job_db.get_job(job_id)
             if job is None:

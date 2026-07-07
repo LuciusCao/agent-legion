@@ -143,7 +143,10 @@ def create_app(
             sync_workspace_pi_agents(job_db, settings, agent_manager)
             if WorkflowWorkerThread.is_enabled(settings):
                 executor_leases = ExecutorLeaseRepository(
-                    job_db.path, job_db=job_db, job_event_manager=job_event_manager
+                    job_db.path,
+                    job_db=job_db,
+                    job_event_manager=job_event_manager,
+                    job_event_buffer=job_event_buffer,
                 )
                 execution_runtime = build_execution_runtime(
                     executor_leases, executor_registry, settings.executor_runtime
@@ -191,6 +194,7 @@ def create_app(
             video_event_manager,
             workspace_worker_control,
             job_event_manager=job_event_manager,
+            job_event_buffer=job_event_buffer,
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")
