@@ -843,6 +843,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/workflow-revisions/{revision_id}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workflow Revision Detail */
+    get: operations['get_workflow_revision_detail_api_workspaces__workspace_id__workflow_revisions__revision_id__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
 }
 export type webhooks = Record<string, never>
 export interface components {
@@ -1641,6 +1658,13 @@ export interface components {
     }
     /** WorkflowResponse */
     WorkflowResponse: {
+      workflow: components['schemas']['WorkflowDefinitionResponse']
+    }
+    /** WorkflowRevisionDetailResponse */
+    WorkflowRevisionDetailResponse: {
+      /** Definition Yaml */
+      definition_yaml: string
+      revision: components['schemas']['WorkflowRevisionSummary']
       workflow: components['schemas']['WorkflowDefinitionResponse']
     }
     /** WorkflowRevisionSummary */
@@ -3655,6 +3679,38 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ActiveWorkflowRevisionResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_workflow_revision_detail_api_workspaces__workspace_id__workflow_revisions__revision_id__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+        revision_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkflowRevisionDetailResponse']
         }
       }
       /** @description Validation Error */
