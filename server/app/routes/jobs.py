@@ -20,7 +20,6 @@ from server.app.routes.job_operation_contracts import (
 from server.app.routes.job_view_contracts import (
     JobDetailResponse,
     JobsResponse,
-    JobsSnapshotResponse,
     JobSummaryResponse,
 )
 from server.app.services.job_deletion import JobDeletionService
@@ -39,24 +38,6 @@ def create_jobs_router(
     settings: Settings,
 ) -> APIRouter:
     router = APIRouter()
-
-    @router.get(
-        "/workspaces/{workspace_id}/jobs/snapshot",
-        response_model=JobsSnapshotResponse,
-    )
-    def snapshot_workspace_jobs(
-        workspace_id: str,
-        limit: int = 200,
-        cursor: str | None = None,
-    ) -> JobsSnapshotResponse:
-        require_workflows_enabled(settings)
-        try:
-            safe_limit = max(1, min(limit, 500))
-            return JobsSnapshotResponse(
-                **job_queries.snapshot(workspace_id, limit=safe_limit, cursor=cursor)
-            )
-        except JobServiceError as exc:
-            raise_job_http_error(exc)
 
     @router.get("/workspaces/{workspace_id}/jobs", response_model=JobsResponse)
     def list_workspace_jobs(

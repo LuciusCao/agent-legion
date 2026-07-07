@@ -9,12 +9,7 @@ export {
   normalizeJobStatus,
   type MutationCounts,
 } from './mutationHelpers'
-export type JobStatus =
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'paused'
+export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused'
 export interface JobFilterConfig {
   status: JobStatus | null
   search: string
@@ -43,11 +38,7 @@ export interface JobState {
   resetForWorkspace: (workspaceId: string) => void
   setJobsAndFinishLoading: (jobs: JobSummary[]) => void
   failJobFetch: (workspaceId: string, message: string) => void
-  setJobsSnapshot: (
-    workspaceId: string,
-    revision: number,
-    jobs: JobSummary[]
-  ) => void
+  setJobsSnapshot: (workspaceId: string, revision: number, jobs: JobSummary[]) => void
   applyJobPatchBatch: (
     workspaceId: string,
     revision: number,

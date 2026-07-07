@@ -1,3 +1,5 @@
+import json
+
 from server.app.job_events import JobEventBuffer, WorkspaceJobEventAggregator
 
 
@@ -57,11 +59,20 @@ class FakeEventManager:
         self.patch_batches = []
         self.resyncs = []
 
-    def broadcast_job_patch_batch(self, workspace_id, revision, stats, jobs, deleted_job_ids):
-        self.patch_batches.append((workspace_id, revision, stats, jobs, deleted_job_ids))
-
-    def broadcast_resync_required(self, workspace_id, latest_revision, reason):
-        self.resyncs.append((workspace_id, latest_revision, reason))
+    def _broadcast(self, workspace_id: str, payload: str) -> None:
+        data = json.loads(payload)
+        if data["type"] == "job_patch_batch":
+            self.patch_batches.append(
+                (
+                    workspace_id,
+                    data["revision"],
+                    data["stats"],
+                    data["jobs"],
+                    data["deleted_job_ids"],
+                )
+            )
+        elif data["type"] == "resync_required":
+            self.resyncs.append((workspace_id, data["latest_revision"], data["reason"]))
 
 
 def test_aggregator_flushes_compacted_patch_batch():
