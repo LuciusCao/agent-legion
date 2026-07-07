@@ -1,15 +1,26 @@
 import { useEffect, useRef } from 'react'
+import { fetchJobsSnapshot } from '../api'
 import { useJobStore } from '../stores/jobStore'
+import { useWorkspaceStore } from '../stores/workspaceStore'
+import type { JobSummary } from '../types'
 import {
   mergeWorkspaceEventStats,
   refreshWorkspaceEvents,
 } from './workspaceEventRefresh'
 
-interface WorkspaceEventPayload {
+interface BaseEventPayload {
   type: string
   workspace_id: string
-  job_id?: string
   stats?: Record<string, number>
+}
+
+interface JobPatchBatchPayload {
+  type: 'job_patch_batch'
+  workspace_id: string
+  revision: number
+  stats?: Record<string, number>
+  jobs: JobSummary[]
+  deleted_job_ids: string[]
 }
 
 export function useWorkspaceEvents(
@@ -50,6 +61,18 @@ export function useWorkspaceEvents(
       }, jobUpdateRefreshDelay)
     }
 
+    const loadSnapshot = async () => {
+      const snapshot = await fetchJobsSnapshot(workspaceId)
+      if (stale || closed) return
+      useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
+        ...useWorkspaceStore.getState().workspaceStats[workspaceId],
+        job_stats: snapshot.stats,
+      })
+      useJobStore
+        .getState()
+        .setJobsSnapshot(workspaceId, snapshot.revision, snapshot.jobs)
+    }
+
     const connect = () => {
       if (source || closed || stale) return
       source = new EventSource(
@@ -57,21 +80,45 @@ export function useWorkspaceEvents(
       )
       source.onopen = () => {
         reconnectDelay = 1000
-        refresh(true)
+        if (statsOnly) {
+          void refresh(false)
+        } else {
+          void loadSnapshot()
+        }
       }
       source.onmessage = (event) => {
         if (!event.data || event.data.startsWith(':heartbeat')) return
         try {
-          const payload = JSON.parse(event.data) as WorkspaceEventPayload
+          const payload = JSON.parse(event.data) as BaseEventPayload
           if (payload.workspace_id !== workspaceId) return
           if (payload.stats) {
             mergeWorkspaceEventStats(workspaceId, payload.stats)
+          }
+          if (payload.type === 'job_patch_batch') {
+            if (statsOnly) return
+            const patch = JSON.parse(event.data) as JobPatchBatchPayload
+            useJobStore
+              .getState()
+              .applyJobPatchBatch(
+                workspaceId,
+                patch.revision,
+                patch.jobs,
+                patch.deleted_job_ids || []
+              )
+            return
+          }
+          if (payload.type === 'resync_required') {
+            if (statsOnly) {
+              void refresh(false)
+            } else {
+              void loadSnapshot()
+            }
+            return
           }
           if (payload.type === 'job_updated') {
             scheduleJobRefresh()
             return
           }
-          void refresh(true)
         } catch {
           // ignore invalid payloads
         }
