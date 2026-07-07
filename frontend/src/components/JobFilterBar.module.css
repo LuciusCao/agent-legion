@@ -1,4 +1,9 @@
 .panel {
+  position: sticky;
+  top: 16px;
+  z-index: 10;
+  margin-top: 16px;
+  margin-bottom: 8px;
   background: #ffffff;
   border-radius: 16px;
   padding: 18px;
