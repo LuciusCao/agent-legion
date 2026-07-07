@@ -73,6 +73,8 @@ describe('JobList', () => {
     mockFetchJobs.mockReset()
     useJobStore.setState({
       jobs: mockJobs,
+      jobsById: Object.fromEntries(mockJobs.map((job) => [job.id, job])),
+      jobIds: mockJobs.map((job) => job.id),
       isLoading: false,
       error: null,
       selectedIds: new Set(),
@@ -106,7 +108,7 @@ describe('JobList', () => {
   })
 
   it('empty state shows 暂无任务', () => {
-    useJobStore.setState({ jobs: [] })
+    useJobStore.setState({ jobs: [], jobsById: {}, jobIds: [] })
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
