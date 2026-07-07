@@ -3,7 +3,6 @@ import { useNavigate } from 'react-router-dom'
 import { Button } from '@mui/material'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
 import DeleteWorkspaceDialog from '../DeleteWorkspaceDialog'
-import pageStyles from '../../pages/SettingsPage.module.css'
 import styles from './DangerZone.module.css'
 
 interface Props {
@@ -25,8 +24,8 @@ export function DangerZone({ workspaceId, workspaceName }: Props) {
   return (
     <>
       <section className={styles.dangerZone}>
-        <h2 className={pageStyles.sectionTitle}>危险操作</h2>
-        <hr className={pageStyles.sectionDivider} />
+        <h2 className={styles.sectionTitle}>危险操作</h2>
+        <hr className={styles.sectionDivider} />
         <div className={styles.dangerRow}>
           <div>
             <div className={styles.dangerTitle}>删除 Workspace</div>
