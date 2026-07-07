@@ -45,11 +45,11 @@ export function WorkflowStudioRightPanel(props: Props) {
   }, [props.selectedNodeKey])
 
   useEffect(() => {
-    if (props.validationMessage) {
+    if (props.validationErrors.length > 0 || props.validationMessage) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setMode('validation')
     }
-  }, [props.validationMessage])
+  }, [props.validationErrors.length, props.validationMessage])
 
   return (
     <section className={styles.panel} aria-label="Workflow inspector modes">

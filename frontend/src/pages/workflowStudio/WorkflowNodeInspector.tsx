@@ -10,7 +10,7 @@ type Props = {
 }
 
 export function WorkflowNodeInspector(props: Props) {
-  const { workflow, selectedNodeKey } = props
+  const { workflow, selectedNodeKey, readOnly } = props
   const details = selectedNodeDetails(workflow, selectedNodeKey)
   if (!workflow)
     return <section aria-label="Workflow inspector">未加载 workflow</section>
@@ -33,5 +33,5 @@ export function WorkflowNodeInspector(props: Props) {
       </section>
     )
   }
-  return <WorkflowNodeInspectorBody details={details} />
+  return <WorkflowNodeInspectorBody details={details} readOnly={readOnly} />
 }
