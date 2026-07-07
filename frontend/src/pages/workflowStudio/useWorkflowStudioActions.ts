@@ -16,7 +16,6 @@ export type UseWorkflowStudioActionsResult = {
   requestPublish: () => void
   closeReviewDialog: () => void
 }
-
 export function useWorkflowStudioActions(
   workspaceId: string | undefined,
   draft: UseWorkflowStudioDraftResult,
@@ -44,7 +43,6 @@ export function useWorkflowStudioActions(
     compareState !== 'loading' &&
     !hasBlockingCompareError &&
     hasCompareChanges
-
   async function validateDraft() {
     if (!workspaceId) return
     setActionState('validating')
@@ -55,14 +53,15 @@ export function useWorkflowStudioActions(
       )
       setValidationErrors(result.errors)
       setValidationMessage(result.valid ? '校验通过' : '校验失败')
-    } catch {
+    } catch (e) {
       setValidationErrors([])
-      setValidationMessage('校验失败：网络错误')
+      setValidationMessage(
+        `校验失败：${(e instanceof Error && e.message) || '网络错误'}`
+      )
     } finally {
       setActionState('idle')
     }
   }
-
   async function publishDraft() {
     if (!workspaceId) return
     setActionState('publishing')
@@ -78,14 +77,15 @@ export function useWorkflowStudioActions(
       } else {
         setValidationMessage('发布失败')
       }
-    } catch {
+    } catch (e) {
       setValidationErrors([])
-      setValidationMessage('发布失败：网络错误')
+      setValidationMessage(
+        `发布失败：${(e instanceof Error && e.message) || '网络错误'}`
+      )
     } finally {
       setActionState('idle')
     }
   }
-
   return {
     actionState,
     validationErrors,

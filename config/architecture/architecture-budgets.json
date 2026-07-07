@@ -154,6 +154,7 @@
     "frontend/src/global.d.ts": 9,
     "frontend/src/helpers.ts": 36,
     "frontend/src/hooks/comprehensionInfoExtraction.ts": 87,
+    "frontend/src/hooks/useArtifactPopover.ts": 25,
     "frontend/src/hooks/useDebouncedCallback.ts": 27,
     "frontend/src/hooks/useDetailPage.ts": 340,
     "frontend/src/hooks/useJobComprehensionInfo.ts": 104,
