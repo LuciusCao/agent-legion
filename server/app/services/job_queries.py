@@ -134,6 +134,33 @@ class JobQueryService:
             for job in jobs
         ]
 
+    def list_patch_summaries(
+        self,
+        workspace_id: str,
+        job_ids: list[str],
+    ) -> list[dict[str, Any]]:
+        if not job_ids:
+            return []
+        jobs = [
+            job
+            for job_id in job_ids
+            if (job := self.job_db.get_job(job_id)) is not None
+            and str(job.get("workspace_id", "")) == workspace_id
+        ]
+        nodes_by_job = self.job_db.list_job_nodes_for_jobs([str(job["id"]) for job in jobs])
+        definitions: dict[tuple[str, str], WorkflowDefinition] = {}
+
+        def _definition(job: dict[str, Any]) -> WorkflowDefinition:
+            key = (str(job["workflow_key"]), str(job.get("workflow_definition_hash") or ""))
+            if key not in definitions:
+                definitions[key] = self._definition_for_job(job)
+            return definitions[key]
+
+        return [
+            self._job_summary(job, nodes_by_job.get(str(job["id"]), []), _definition(job))
+            for job in jobs
+        ]
+
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
         definition = self._definition_for_job(job)
