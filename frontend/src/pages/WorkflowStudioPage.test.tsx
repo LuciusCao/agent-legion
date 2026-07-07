@@ -139,7 +139,10 @@ describe('WorkflowStudioPage', () => {
     expect(screen.getAllByText('v1')[0]).toBeInTheDocument()
     expect(screen.getAllByText('abcdef12')[0]).toBeInTheDocument()
 
-    await user.click(screen.getByRole('tab', { name: 'YAML' }))
+    const inspectorPanel = screen.getByRole('region', {
+      name: 'Workflow inspector modes',
+    })
+    await user.click(within(inspectorPanel).getByRole('tab', { name: 'YAML' }))
     expect(
       await screen.findByDisplayValue(/key: video_knowledge/)
     ).toBeInTheDocument()
@@ -150,7 +153,10 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     await screen.findByText('Workflow Studio')
-    await user.click(screen.getByRole('tab', { name: 'YAML' }))
+    const inspectorPanel = screen.getByRole('region', {
+      name: 'Workflow inspector modes',
+    })
+    await user.click(within(inspectorPanel).getByRole('tab', { name: 'YAML' }))
     const editor = await screen.findByLabelText('高级 YAML 编辑器')
     await user.clear(editor)
     await user.type(editor, 'key: changed')
@@ -169,7 +175,10 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     await screen.findByText('Workflow Studio')
-    await user.click(screen.getByRole('tab', { name: 'YAML' }))
+    const inspectorPanel = screen.getByRole('region', {
+      name: 'Workflow inspector modes',
+    })
+    await user.click(within(inspectorPanel).getByRole('tab', { name: 'YAML' }))
     const editor = screen.getByLabelText('高级 YAML 编辑器')
     await user.type(editor, '\n# edited')
 
@@ -189,7 +198,10 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     await screen.findByText('Workflow Studio')
-    await user.click(screen.getByRole('tab', { name: 'YAML' }))
+    const inspectorPanel = screen.getByRole('region', {
+      name: 'Workflow inspector modes',
+    })
+    await user.click(within(inspectorPanel).getByRole('tab', { name: 'YAML' }))
     const editor = screen.getByLabelText('高级 YAML 编辑器')
     await user.type(editor, '\n# edited')
 

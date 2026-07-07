@@ -24,6 +24,7 @@ type Props = {
   validationMessage: string
   validationErrors: string[]
   onSelectNode: (nodeKey: string | null) => void
+  forcedMode?: 'changes' | 'yaml'
 }
 
 function workflowNodeCount(workflow: WorkflowDefinitionRecord | null): number {
@@ -38,11 +39,13 @@ export function WorkflowStudioRightPanel(props: Props) {
   const [mode, setMode] = useState<PanelMode>('overview')
 
   useEffect(() => {
-    if (props.selectedNodeKey) {
+    if (props.forcedMode) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
+      setMode(props.forcedMode)
+    } else if (props.selectedNodeKey) {
       setMode('node')
     }
-  }, [props.selectedNodeKey])
+  }, [props.forcedMode, props.selectedNodeKey])
 
   useEffect(() => {
     if (props.validationErrors.length > 0 || props.validationMessage) {
