@@ -62,7 +62,7 @@ describe('useWorkflowStudioActions', () => {
     })
 
     expect(result.current.actionState).toBe('idle')
-    expect(result.current.validationMessage).toBe('校验失败：网络错误')
+    expect(result.current.validationMessage).toBe('校验失败：network error')
     expect(result.current.validationErrors).toEqual([])
   })
 
@@ -77,7 +77,7 @@ describe('useWorkflowStudioActions', () => {
     })
 
     expect(result.current.actionState).toBe('idle')
-    expect(result.current.validationMessage).toBe('发布失败：网络错误')
+    expect(result.current.validationMessage).toBe('发布失败：network error')
     expect(result.current.validationErrors).toEqual([])
   })
 

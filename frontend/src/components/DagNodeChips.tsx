@@ -47,8 +47,7 @@ export function ChipList({ title, items, variant }: ChipListProps) {
       {openArtifactList && (
         <ArtifactPopover
           items={items}
-          onClose={(event) => {
-            event.stopPropagation()
+          onClose={() => {
             setOpenArtifactList(false)
           }}
         />

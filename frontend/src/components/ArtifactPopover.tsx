@@ -1,20 +1,25 @@
-import React from 'react'
-import styles from './ArtifactPopover.module.css'
+import { useArtifactPopover } from '../hooks/useArtifactPopover'
+import s from './ArtifactPopover.module.css'
 
 export function ArtifactPopover({
   items,
   onClose,
 }: {
   items: string[]
-  onClose: (event: React.MouseEvent<HTMLButtonElement>) => void
+  onClose: () => void
 }) {
+  const ref = useArtifactPopover(onClose)
   return (
     <div
-      className={styles.artifactPopover}
+      ref={ref}
+      className={s.artifactPopover}
       role="dialog"
-      aria-label="完整产物列表"
+      aria-label="产物列表"
     >
-      <button type="button" className={styles.popoverClose} onClick={onClose}>
+      <button
+        className={s.popoverClose}
+        onClick={(e) => (e.stopPropagation(), onClose())}
+      >
         关闭
       </button>
       <ul>
