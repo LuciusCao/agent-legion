@@ -160,6 +160,8 @@
     "frontend/src/components/nodePanelHelpers.ts": 53,
     "frontend/src/components/settings/BasicInfoSection.tsx": 53,
     "frontend/src/components/settings/ConnectionTestStatus.tsx": 36,
+    "frontend/src/components/settings/DangerZone.module.css": 36,
+    "frontend/src/components/settings/DangerZone.tsx": 67,
     "frontend/src/components/settings/IntakeConfigSection.tsx": 227,
     "frontend/src/components/settings/ResourceProviderCard.tsx": 50,
     "frontend/src/components/settings/WorkflowSection.tsx": 59,
