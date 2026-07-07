@@ -55,10 +55,15 @@
   flex-wrap: wrap;
 }
 
-.control {
+.control,
+.workflowVersionControl {
   flex: 0 0 180px;
   min-width: 180px;
   width: 180px;
+}
+
+.workflowVersionControl > :global(.MuiFormControl-root) {
+  width: 100%;
 }
 
 .search {
