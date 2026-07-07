@@ -203,6 +203,7 @@ describe('WorkspaceMainPage', () => {
       rerunDialogOpen: false,
       deleteDialogOpen: false,
       workspacePackageDialogOpen: false,
+      tokenUsageDialogOpen: false,
       workerPausedByWorkspace: {},
       toast: null,
     })
@@ -770,5 +771,13 @@ describe('WorkspaceMainPage', () => {
       expect(screen.getByText('包历史')).toBeInTheDocument()
     })
     expect(screen.getByText('批次 1')).toBeInTheDocument()
+  })
+
+  it('renders token usage dialog when open', async () => {
+    useUiStore.setState({ tokenUsageDialogOpen: true })
+    await act(async () => {
+      renderPage()
+    })
+    expect(screen.getByText('Workspace Token 使用分析')).toBeInTheDocument()
   })
 })
