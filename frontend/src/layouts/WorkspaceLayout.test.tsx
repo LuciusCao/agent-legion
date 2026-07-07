@@ -51,6 +51,7 @@ vi.mock('../stores/workspaceStore', () => ({
 const setWorkerPausedMock = vi.fn()
 const fetchWorkerStatusMock = vi.fn()
 const setWorkspacePackageDialogOpenMock = vi.fn()
+const setTokenUsageDialogOpenMock = vi.fn()
 
 vi.mock('../stores/uiStore', () => ({
   useUiStore: (
@@ -60,6 +61,7 @@ vi.mock('../stores/uiStore', () => ({
       fetchWorkerStatus: fetchWorkerStatusMock,
       setWorkerPaused: setWorkerPausedMock,
       setWorkspacePackageDialogOpen: setWorkspacePackageDialogOpenMock,
+      setTokenUsageDialogOpen: setTokenUsageDialogOpenMock,
     })
     return selector ? selector(state) : state
   },
@@ -71,6 +73,7 @@ describe('WorkspaceLayout', () => {
     setWorkerPausedMock.mockClear()
     fetchWorkerStatusMock.mockClear()
     setWorkspacePackageDialogOpenMock.mockClear()
+    setTokenUsageDialogOpenMock.mockClear()
     fetchWorkerStatusMock.mockResolvedValue(undefined)
   })
 
@@ -227,6 +230,39 @@ describe('WorkspaceLayout', () => {
     )
     fireEvent.click(screen.getByLabelText('包历史'))
     expect(setWorkspacePackageDialogOpenMock).toHaveBeenCalledWith(true)
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it('opens token usage dialog when token analysis button is clicked', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    fireEvent.click(screen.getByLabelText('Token 使用分析'))
+    expect(setTokenUsageDialogOpenMock).toHaveBeenCalledWith(true)
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
+
+  it('renders token analysis button on the job detail page', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1/jobs/j1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    expect(screen.getByLabelText('Token 使用分析')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Token 使用分析'))
+    expect(setTokenUsageDialogOpenMock).toHaveBeenCalledWith(true)
     expect(mockNavigate).not.toHaveBeenCalled()
   })
 })
