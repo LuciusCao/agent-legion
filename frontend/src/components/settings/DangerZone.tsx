@@ -38,6 +38,7 @@ export function DangerZone({ workspaceId, workspaceName }: Props) {
               variant="outlined"
               color="error"
               onClick={() => setDeleteDialogOpen(true)}
+              disabled={workspaceName.trim() === ''}
             >
               删除 Workspace
             </Button>

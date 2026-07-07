@@ -835,6 +835,15 @@ describe('SettingsPage', () => {
     ).not.toBeInTheDocument()
   })
 
+  it('disables delete workspace button while workspace name is not loaded', async () => {
+    useSettingStore.setState({ workspaceName: '' })
+    renderPage()
+    await act(async () => {})
+    expect(
+      screen.getByRole('button', { name: '删除 Workspace' })
+    ).toBeDisabled()
+  })
+
   it('opens delete dialog and deletes workspace on confirm', async () => {
     const deleteWorkspace = vi.fn().mockResolvedValue(undefined)
     useWorkspaceStore.setState({ deleteWorkspace })

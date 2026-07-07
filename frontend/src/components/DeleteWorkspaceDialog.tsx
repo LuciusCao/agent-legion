@@ -34,7 +34,8 @@ export default function DeleteWorkspaceDialog({
     onClose()
   }
 
-  const confirmed = inputValue.trim() === workspaceName.trim()
+  const confirmed =
+    workspaceName.trim() !== '' && inputValue.trim() === workspaceName.trim()
 
   async function handleConfirm() {
     if (!confirmed) return
