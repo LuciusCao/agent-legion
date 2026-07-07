@@ -19,6 +19,7 @@ from server.app.executors.legacy_migration import finalize_legacy_executor_schem
 from server.app.executors.local import LocalHandler
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.runtime_factory import build_execution_runtime
+from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
 from server.app.routes import create_router
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
@@ -102,6 +103,9 @@ def create_app(
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
     executor_registry = build_executor_registry(settings, job_db)
 
+    job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
+        job_db, settings, job_event_manager
+    )
     definitions = list_registered_workflows(settings.root_dir)
     with job_db.connect() as conn:
         try:
@@ -157,7 +161,13 @@ def create_app(
                     workflow_worker_thread.start()
                 except Exception:
                     logging.getLogger(__name__).exception("workflow worker failed to start")
+        app.state.workspace_event_aggregator_task = asyncio.create_task(
+            workspace_event_aggregator.run(interval_seconds=0.5)
+        )
         yield
+        task = getattr(app.state, "workspace_event_aggregator_task", None)
+        if task is not None:
+            task.cancel()
         if workflow_worker_thread is not None:
             workflow_worker_thread.stop()
 
@@ -170,7 +180,8 @@ def create_app(
     app.state.workspace_worker_control = workspace_worker_control
     app.state.video_event_manager = video_event_manager
     app.state.job_event_manager = job_event_manager
-
+    app.state.job_event_buffer = job_event_buffer
+    app.state.workspace_event_aggregator = workspace_event_aggregator
     app.include_router(
         create_router(
             db,
@@ -182,7 +193,6 @@ def create_app(
             job_event_manager=job_event_manager,
         )
     )
-
     mount_spa(app, settings.root_dir / "frontend" / "dist")
 
     return app

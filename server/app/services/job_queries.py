@@ -161,6 +161,9 @@ class JobQueryService:
             for job in jobs
         ]
 
+    def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
+        return self.job_db.count_jobs_by_status(workspace_id)
+
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
         definition = self._definition_for_job(job)
