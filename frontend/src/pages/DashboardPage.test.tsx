@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { DashboardPage } from './DashboardPage'
+import { EventSourceMock } from '../testing/eventSourceMock'
 
 const fetchWorkspaces = vi.fn()
 const fetchWorkspaceStats = vi.fn()
@@ -18,6 +19,7 @@ const mockWorkspaceStore = {
   fetchWorkspaces,
   fetchWorkspaceStats,
   createWorkspace,
+  getState: () => mockWorkspaceStore,
 }
 
 vi.mock('react-router-dom', async () => {
@@ -46,6 +48,7 @@ describe('DashboardPage', () => {
     fetchWorkspaceStats.mockClear()
     createWorkspace.mockClear()
     navigate.mockClear()
+    EventSourceMock.reset()
   })
 
   it('renders Agent Legion title', () => {
@@ -169,5 +172,23 @@ describe('DashboardPage', () => {
     )
     fireEvent.click(screen.getByText('Test Workspace'))
     expect(navigate).toHaveBeenCalledWith('/workspaces/ws-1')
+  })
+
+  it('opens one dashboard event stream instead of one per workspace', async () => {
+    mockWorkspaceStore.workspaces = [
+      { id: 'ws1', name: 'One', default_workflow_key: 'wf' },
+      { id: 'ws2', name: 'Two', default_workflow_key: 'wf' },
+    ]
+
+    render(
+      <MemoryRouter>
+        <DashboardPage />
+      </MemoryRouter>
+    )
+
+    await waitFor(() => {
+      expect(EventSourceMock.instances.length).toBe(1)
+    })
+    expect(EventSourceMock.instances[0].url).toBe('/api/dashboard/events')
   })
 })
