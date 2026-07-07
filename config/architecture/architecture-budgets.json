@@ -6,6 +6,7 @@
     "frontend/src/api.ts": 213,
     "frontend/src/api/core.ts": 26,
     "frontend/src/api/workflow_draft_compare.ts": 17,
+    "frontend/src/api/workflow_revision_detail.ts": 16,
     "frontend/src/api/workflow_revisions.ts": 26,
     "frontend/src/api/workflows.ts": 43,
     "frontend/src/components/AddDialog.module.css": 43,
