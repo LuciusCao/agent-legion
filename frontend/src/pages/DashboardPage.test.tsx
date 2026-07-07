@@ -6,7 +6,6 @@ import { DashboardPage } from './DashboardPage'
 const fetchWorkspaces = vi.fn()
 const fetchWorkspaceStats = vi.fn()
 const createWorkspace = vi.fn()
-const deleteWorkspace = vi.fn()
 const navigate = vi.fn()
 
 const mockWorkspaceStore = {
@@ -19,7 +18,6 @@ const mockWorkspaceStore = {
   fetchWorkspaces,
   fetchWorkspaceStats,
   createWorkspace,
-  deleteWorkspace,
 }
 
 vi.mock('react-router-dom', async () => {
