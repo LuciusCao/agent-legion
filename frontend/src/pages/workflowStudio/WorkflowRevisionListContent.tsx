@@ -1,6 +1,7 @@
 import type { WorkflowRevisionSummary } from '../../types'
 import { WorkflowRevisionListItem } from './WorkflowRevisionListItem'
-import styles from './WorkflowRevisionList.module.css'
+import containerStyles from './WorkflowRevisionListContainer.module.css'
+import listStyles from './WorkflowRevisionList.module.css'
 
 type Props = {
   revisions: WorkflowRevisionSummary[]
@@ -17,11 +18,11 @@ export function WorkflowRevisionListContent({
 }: Props) {
   if (revisions.length === 0) {
     return (
-      <p className={styles.hash}>当前 workspace 还没有 workflow revision</p>
+      <p className={listStyles.hash}>当前 workspace 还没有 workflow revision</p>
     )
   }
   return (
-    <ul className={styles.list}>
+    <ul className={containerStyles.list}>
       {revisions.map((revision) => (
         <li key={revision.id}>
           <WorkflowRevisionListItem

@@ -1,6 +1,5 @@
 import type { WorkflowRevisionSummary } from '../../types'
-import listStyles from './WorkflowRevisionList.module.css'
-import itemStyles from './WorkflowRevisionListItem.module.css'
+import styles from './WorkflowRevisionList.module.css'
 
 type Props = {
   revision: WorkflowRevisionSummary
@@ -18,16 +17,16 @@ export function WorkflowRevisionListItem({
   return (
     <button
       type="button"
-      className={`${itemStyles.item} ${selected ? itemStyles.selected : ''}`}
+      className={`${styles.item} ${selected ? styles.selected : ''}`}
       aria-pressed={selected}
       aria-current={active ? 'true' : undefined}
       onClick={() => onSelect(revision.id)}
     >
-      <span className={listStyles.version}>v{revision.version}</span>
-      <span className={listStyles.status}>
+      <span className={styles.version}>v{revision.version}</span>
+      <span className={styles.status}>
         {active ? 'active' : revision.status}
       </span>
-      <span className={listStyles.hash}>
+      <span className={styles.hash}>
         {revision.definition_hash.slice(0, 8)}
       </span>
     </button>
