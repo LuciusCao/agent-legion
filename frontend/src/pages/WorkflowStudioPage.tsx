@@ -1,7 +1,7 @@
 import { useParams } from 'react-router-dom'
 import { useState } from 'react'
 import { AppShell } from '../layouts/AppShell'
-import { AppBar } from '../components/AppBar'
+import { WorkflowStudioAppBar } from './workflowStudio/WorkflowStudioAppBar'
 import { WorkflowStudioLayout } from './workflowStudio/WorkflowStudioLayout'
 import { useWorkflowStudio } from './workflowStudio/useWorkflowStudio'
 
@@ -13,9 +13,9 @@ export function WorkflowStudioPage() {
   return (
     <AppShell
       appBar={({ scrolled }) => (
-        <AppBar
-          title="Workflow Studio"
-          backTo={workspaceId ? `/workspaces/${workspaceId}` : '/'}
+        <WorkflowStudioAppBar
+          workspaceId={workspaceId}
+          studio={studio}
           scrolled={scrolled}
         />
       )}

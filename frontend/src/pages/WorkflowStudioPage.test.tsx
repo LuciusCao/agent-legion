@@ -1,5 +1,5 @@
 import React from 'react'
-import { render, screen } from '@testing-library/react'
+import { render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioPage } from './WorkflowStudioPage'
@@ -13,18 +13,18 @@ vi.mock('react-router-dom', () => ({
 vi.mock('../api', () => {
   const activeRevisionPayload = {
     revision: {
-      id: 'ws1:question_comprehension_info:v2',
+      id: 'ws1:video_knowledge:v1',
       workspace_id: 'ws1',
-      workflow_key: 'question_comprehension_info',
-      version: 2,
+      workflow_key: 'video_knowledge',
+      version: 1,
       status: 'active',
       definition_hash: 'abcdef1234567890',
       created_at: '2026-07-02T00:00:00Z',
       published_at: '2026-07-02T00:00:00Z',
     },
     workflow: {
-      key: 'question_comprehension_info',
-      label: '题目审题信息生成 DAG',
+      key: 'video_knowledge',
+      label: '知识视频 DAG',
       intake: { modes: [] },
       edges: [
         {
@@ -52,8 +52,7 @@ vi.mock('../api', () => {
         },
       ],
     },
-    definition_yaml:
-      'key: question_comprehension_info\nlabel: 题目审题信息生成 DAG\n',
+    definition_yaml: 'key: video_knowledge\nlabel: 知识视频 DAG\n',
   }
 
   return {
@@ -108,18 +107,34 @@ describe('WorkflowStudioPage', () => {
     render(<WorkflowStudioPage />)
 
     expect(await screen.findByText('Workflow Studio')).toBeInTheDocument()
-    expect(await screen.findByText('题目审题信息生成 DAG')).toBeInTheDocument()
+    expect(await screen.findByText('知识视频 DAG')).toBeInTheDocument()
+  })
+
+  it('renders workflow identity and actions in the app bar without a second summary row', async () => {
+    render(<WorkflowStudioPage />)
+
+    const appBar = await screen.findByTestId('app-bar')
+    expect(appBar).toHaveTextContent('Workflow Studio')
+    expect(appBar).toHaveTextContent('知识视频 DAG')
+    expect(appBar).toHaveTextContent('video_knowledge')
+    expect(appBar).toHaveTextContent('v1')
+    expect(appBar).toHaveTextContent('校验')
+    expect(appBar).toHaveTextContent('发布')
+    expect(appBar).toHaveTextContent('重置')
+    expect(
+      screen.queryByRole('region', { name: 'Workflow summary' })
+    ).not.toBeInTheDocument()
   })
 
   it('renders active revision metadata and prefilled definition', async () => {
     render(<WorkflowStudioPage />)
 
     expect(await screen.findByText('Workflow Studio')).toBeInTheDocument()
-    expect(await screen.findByText('题目审题信息生成 DAG')).toBeInTheDocument()
-    expect(screen.getAllByText('v2')[0]).toBeInTheDocument()
+    expect(await screen.findByText('知识视频 DAG')).toBeInTheDocument()
+    expect(screen.getAllByText('v1')[0]).toBeInTheDocument()
     expect(screen.getAllByText('abcdef12')[0]).toBeInTheDocument()
     expect(
-      await screen.findByDisplayValue(/key: question_comprehension_info/)
+      await screen.findByDisplayValue(/key: video_knowledge/)
     ).toBeInTheDocument()
   })
 
@@ -131,14 +146,13 @@ describe('WorkflowStudioPage', () => {
     await user.clear(editor)
     await user.type(editor, 'key: changed')
 
-    expect(screen.getByText('有未保存修改')).toBeInTheDocument()
+    const commandBar = screen.getByLabelText('Workflow command bar')
+    expect(within(commandBar).getByText(/有未发布变更/)).toBeInTheDocument()
 
     await user.click(screen.getByRole('button', { name: '重置' }))
 
-    expect(
-      screen.getByDisplayValue(/key: question_comprehension_info/)
-    ).toBeInTheDocument()
-    expect(screen.getByText('已同步')).toBeInTheDocument()
+    expect(screen.getByDisplayValue(/key: video_knowledge/)).toBeInTheDocument()
+    expect(within(commandBar).getByText(/已同步/)).toBeInTheDocument()
   })
 
   it('opens publish review dialog before publishing', async () => {
@@ -149,8 +163,10 @@ describe('WorkflowStudioPage', () => {
     const editor = screen.getByLabelText('高级 YAML 编辑器')
     await user.type(editor, '\n# edited')
 
-    await screen.findByText('有未发布变更')
-    await user.click(screen.getByRole('button', { name: '发布' }))
+    await screen.findByText(/有未发布变更/)
+    const publishButton = screen.getByRole('button', { name: '发布' })
+    await waitFor(() => expect(publishButton).not.toBeDisabled())
+    await user.click(publishButton)
 
     expect(
       await screen.findByText('发布 workflow revision')
@@ -166,8 +182,10 @@ describe('WorkflowStudioPage', () => {
     const editor = screen.getByLabelText('高级 YAML 编辑器')
     await user.type(editor, '\n# edited')
 
-    await screen.findByText('有未发布变更')
-    await user.click(screen.getByRole('button', { name: '发布' }))
+    await screen.findByText(/有未发布变更/)
+    const publishButton = screen.getByRole('button', { name: '发布' })
+    await waitFor(() => expect(publishButton).not.toBeDisabled())
+    await user.click(publishButton)
     await screen.findByText('发布 workflow revision')
 
     await user.click(screen.getByRole('button', { name: '确认发布' }))

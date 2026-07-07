@@ -2,7 +2,6 @@ import { DagGraph } from '../../components/DagGraph'
 import { WorkflowNodeInspector } from './WorkflowNodeInspector'
 import { WorkflowNodeOutline } from './WorkflowNodeOutline'
 import { WorkflowRevisionList } from './WorkflowRevisionList'
-import { WorkflowStudioSummaryBar } from './WorkflowStudioSummaryBar'
 import { WorkflowDefinitionEditor } from './WorkflowDefinitionEditor'
 import { WorkflowValidationPanel } from './WorkflowValidationPanel'
 import { WorkflowChangeSummaryPanel } from './components/WorkflowChangeSummaryPanel'
@@ -18,19 +17,6 @@ export function WorkflowStudioLayout(props: StudioLayoutProps) {
   return (
     <>
       <div className={pageStyles.page}>
-        <WorkflowStudioSummaryBar
-          workflow={props.workflow}
-          revision={props.revision}
-          compareSummary={props.compareSummary}
-          compareState={props.compareState}
-          dirty={props.dirty}
-          actionState={props.actionState}
-          canSubmit={props.canSubmit}
-          canPublish={props.canPublish}
-          onValidate={props.onValidate}
-          onPublish={props.onPublish}
-          onReset={props.onReset}
-        />
         {props.loadState === 'loading' && <p>正在加载 workflow</p>}
         {props.loadState === 'error' && (
           <p>无法加载 active workflow revision</p>
@@ -40,7 +26,7 @@ export function WorkflowStudioLayout(props: StudioLayoutProps) {
             <aside className={sidePanelStyles.sidePanel}>
               <WorkflowRevisionList
                 revisions={props.revisions}
-                activeRevisionId={props.revision?.id}
+                activeRevisionId={props.activeRevision?.id}
               />
               <WorkflowNodeOutline
                 workflow={props.workflow}
