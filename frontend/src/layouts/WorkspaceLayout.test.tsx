@@ -248,4 +248,21 @@ describe('WorkspaceLayout', () => {
     expect(setTokenUsageDialogOpenMock).toHaveBeenCalledWith(true)
     expect(mockNavigate).not.toHaveBeenCalled()
   })
+
+  it('renders token analysis button on the job detail page', () => {
+    render(
+      <MemoryRouter initialEntries={['/workspaces/ws1/jobs/j1']}>
+        <Routes>
+          <Route
+            path="/workspaces/:workspaceId/*"
+            element={<WorkspaceLayout />}
+          />
+        </Routes>
+      </MemoryRouter>
+    )
+    expect(screen.getByLabelText('Token 使用分析')).toBeInTheDocument()
+    fireEvent.click(screen.getByLabelText('Token 使用分析'))
+    expect(setTokenUsageDialogOpenMock).toHaveBeenCalledWith(true)
+    expect(mockNavigate).not.toHaveBeenCalled()
+  })
 })
