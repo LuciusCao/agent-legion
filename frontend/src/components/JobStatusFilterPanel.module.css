@@ -19,7 +19,10 @@
   line-height: 20px;
   color: #616161;
   cursor: pointer;
-  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+  transition:
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    color 0.15s ease;
   display: inline-flex;
   align-items: center;
   gap: 6px;
