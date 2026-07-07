@@ -35,6 +35,9 @@ export function createJobSummary(
 export function createJobState(partial: Partial<JobState> = {}): JobState {
   return {
     jobs: [],
+    jobsById: {},
+    jobIds: [],
+    revision: 0,
     jobsWorkspaceId: null,
     isLoading: false,
     error: null,
@@ -57,6 +60,8 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     setJobsAndFinishLoading: () => {},
     resetForWorkspace: () => {},
     failJobFetch: () => {},
+    setJobsSnapshot: () => {},
+    applyJobPatchBatch: () => {},
     setFilterConfig: () => {},
     toggleSelectMode: () => {},
     toggleSelect: () => {},

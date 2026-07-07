@@ -23,6 +23,9 @@ export interface JobFilterConfig {
 }
 export interface JobState {
   jobs: JobSummary[]
+  jobsById: Record<string, JobSummary>
+  jobIds: string[]
+  revision: number
   jobsWorkspaceId: string | null
   isLoading: boolean
   error: string | null
@@ -40,6 +43,17 @@ export interface JobState {
   resetForWorkspace: (workspaceId: string) => void
   setJobsAndFinishLoading: (jobs: JobSummary[]) => void
   failJobFetch: (workspaceId: string, message: string) => void
+  setJobsSnapshot: (
+    workspaceId: string,
+    revision: number,
+    jobs: JobSummary[]
+  ) => void
+  applyJobPatchBatch: (
+    workspaceId: string,
+    revision: number,
+    jobs: JobSummary[],
+    deletedJobIds: string[]
+  ) => void
   setFilterConfig: (config: Partial<JobFilterConfig>) => void
   toggleSelectMode: () => void
   toggleSelect: (id: string) => void
