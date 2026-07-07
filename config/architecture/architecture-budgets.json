@@ -223,6 +223,7 @@
     "frontend/src/pages/JobDetailPage.tsx": 193,
     "frontend/src/pages/SettingsPage.module.css": 108,
     "frontend/src/pages/SettingsPage.tsx": 214,
+    "frontend/src/pages/TokenUsagePage.tsx": 38,
     "frontend/src/pages/WorkflowStudioPage.module.css": 23,
     "frontend/src/pages/WorkflowStudioPage.tsx": 43,
     "frontend/src/pages/WorkflowStudioPageCanvas.module.css": 23,

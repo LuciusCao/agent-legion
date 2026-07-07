@@ -1,21 +1,9 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import { Routes, Route, useNavigate } from 'react-router-dom'
+import { Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceLayout from './WorkspaceLayout'
 import { useUiStore } from '../stores/uiStore'
-
-function LayoutWithNavigator() {
-  const navigate = useNavigate()
-  return (
-    <>
-      <button data-testid="navigate-job" onClick={() => navigate('jobs/j1')}>
-        Go to job
-      </button>
-      <WorkspaceLayout />
-    </>
-  )
-}
 
 vi.mock('../stores/workspaceStore', () => ({
   useWorkspaceStore: () => ({
@@ -54,48 +42,36 @@ vi.mock('../components/AgentStatusIndicator', () => ({
   AgentStatusIndicator: () => <div data-testid="agent-status">Agent</div>,
 }))
 
-describe('WorkspaceLayout token usage dialog (real uiStore)', () => {
+describe('WorkspaceLayout token usage navigation', () => {
   beforeEach(() => {
     useUiStore.setState({
-      tokenUsageDialogOpen: false,
-      fetchWorkerStatus: vi.fn(),
+      fetchWorkerStatus: vi.fn().mockResolvedValue(undefined),
     })
   })
 
-  it('keeps the token usage dialog open after the analytics button is clicked', () => {
+  it('navigates to token-usage page when analytics button is clicked', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
           <Route
             path="/workspaces/:workspaceId/*"
             element={<WorkspaceLayout />}
-          />
-        </Routes>
-      </MemoryRouter>
-    )
-
-    fireEvent.click(screen.getByLabelText('Token 使用分析'))
-
-    expect(useUiStore.getState().tokenUsageDialogOpen).toBe(true)
-  })
-
-  it('closes the token usage dialog when the route changes', () => {
-    render(
-      <MemoryRouter initialEntries={['/workspaces/ws1']}>
-        <Routes>
+          >
+            <Route
+              index
+              element={<div data-testid="workspace-main">Main</div>}
+            />
+          </Route>
           <Route
-            path="/workspaces/:workspaceId/*"
-            element={<LayoutWithNavigator />}
+            path="/workspaces/:workspaceId/token-usage"
+            element={<div data-testid="token-usage-page">Token Usage</div>}
           />
         </Routes>
       </MemoryRouter>
     )
 
     fireEvent.click(screen.getByLabelText('Token 使用分析'))
-    expect(useUiStore.getState().tokenUsageDialogOpen).toBe(true)
 
-    fireEvent.click(screen.getByTestId('navigate-job'))
-
-    expect(useUiStore.getState().tokenUsageDialogOpen).toBe(false)
+    expect(screen.getByTestId('token-usage-page')).toBeInTheDocument()
   })
 })
