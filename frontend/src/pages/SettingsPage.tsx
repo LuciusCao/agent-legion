@@ -9,6 +9,7 @@ import { ExecutorBindingSection } from '../components/ExecutorBindingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
 import { BasicInfoSection } from '../components/settings/BasicInfoSection'
+import { DangerZone } from '../components/settings/DangerZone'
 import { WorkflowSection } from '../components/settings/WorkflowSection'
 import { IntakeConfigSection } from '../components/settings/IntakeConfigSection'
 import styles from './SettingsPage.module.css'
@@ -162,6 +163,8 @@ export function SettingsPage() {
             onNameChange={setWorkspaceName}
             onDescriptionChange={setWorkspaceDescription}
           />
+
+          <DangerZone workspaceId={workspaceId} workspaceName={workspaceName} />
 
           <IntakeConfigSection
             settings={settings}

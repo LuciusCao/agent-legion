@@ -1,5 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
+import {
+  render,
+  screen,
+  fireEvent,
+  waitFor,
+  act,
+  within,
+} from '@testing-library/react'
 import { Route, Routes } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { SettingsPage } from './SettingsPage'
@@ -104,6 +111,7 @@ function renderPage(initialEntries = ['/workspaces/ws1/settings']) {
           path="/workspaces/:workspaceId"
           element={<div>Workspace main</div>}
         />
+        <Route path="/" element={<div>Dashboard</div>} />
       </Routes>
     </MemoryRouter>
   )
@@ -127,6 +135,7 @@ describe('SettingsPage', () => {
       workspaceStats: {},
       loading: false,
       error: null,
+      deleteWorkspace: vi.fn().mockResolvedValue(undefined),
     })
     mockApi.mockReset()
     mockApi.mockResolvedValue({})
@@ -134,7 +143,7 @@ describe('SettingsPage', () => {
     mockFetchWorkflows.mockResolvedValue({ workflows: [] })
   })
 
-  it('renders all six sections in order', async () => {
+  it('renders all seven sections in order', async () => {
     useSettingStore.setState({
       workflowDefinition: {
         key: 'question_content',
@@ -194,6 +203,7 @@ describe('SettingsPage', () => {
     const headings = screen.getAllByRole('heading', { level: 2 })
     expect(headings.map((h) => h.textContent)).toEqual([
       '基本信息',
+      '危险操作',
       '接入与资源',
       '工作流',
       '执行器分配',
@@ -806,6 +816,73 @@ describe('SettingsPage', () => {
         []
       )
       expect(useSettingStore.getState().pendingAllocationRemoval).toBeNull()
+    })
+  })
+
+  it('shows delete workspace button for non-default workspace', async () => {
+    renderPage()
+    await act(async () => {})
+    expect(
+      screen.getByRole('button', { name: '删除 Workspace' })
+    ).toBeInTheDocument()
+  })
+
+  it('hides delete workspace button for default workspace', async () => {
+    renderPage(['/workspaces/default/settings'])
+    await act(async () => {})
+    expect(
+      screen.queryByRole('button', { name: '删除 Workspace' })
+    ).not.toBeInTheDocument()
+  })
+
+  it('opens delete dialog and deletes workspace on confirm', async () => {
+    const deleteWorkspace = vi.fn().mockResolvedValue(undefined)
+    useWorkspaceStore.setState({ deleteWorkspace })
+
+    renderPage()
+    await act(async () => {})
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 Workspace' }))
+    const dialog = screen.getByRole('dialog')
+    expect(dialog).toBeInTheDocument()
+
+    const input = within(dialog).getByLabelText('Workspace 名称')
+    await act(async () => {
+      ;(input as HTMLInputElement).value = '测试空间'
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+
+    fireEvent.click(within(dialog).getByText('确认删除'))
+    await waitFor(() => {
+      expect(deleteWorkspace).toHaveBeenCalledWith('ws1')
+    })
+    await waitFor(() => {
+      expect(screen.getByText('Dashboard')).toBeInTheDocument()
+    })
+  })
+
+  it('shows error when delete workspace fails', async () => {
+    const deleteWorkspace = vi
+      .fn()
+      .mockRejectedValue(new Error('Cannot delete workspace with running jobs'))
+    useWorkspaceStore.setState({ deleteWorkspace })
+
+    renderPage()
+    await act(async () => {})
+
+    fireEvent.click(screen.getByRole('button', { name: '删除 Workspace' }))
+    const dialog = screen.getByRole('dialog')
+    const input = within(dialog).getByLabelText('Workspace 名称')
+    await act(async () => {
+      ;(input as HTMLInputElement).value = '测试空间'
+      input.dispatchEvent(new InputEvent('input', { bubbles: true }))
+    })
+
+    fireEvent.click(within(dialog).getByText('确认删除'))
+    await waitFor(() => {
+      expect(
+        within(dialog).getByText('Cannot delete workspace with running jobs')
+      ).toBeInTheDocument()
     })
   })
 
