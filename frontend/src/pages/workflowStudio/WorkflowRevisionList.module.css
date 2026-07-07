@@ -17,20 +17,6 @@
   flex-direction: column;
   gap: 4px;
 }
-.item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 10px;
-  border-radius: 8px;
-  font-size: 12px;
-  background: #fafafa;
-  border: 1px solid transparent;
-}
-.item[aria-current='true'] {
-  background: #ffffff;
-  border-color: #000000;
-}
 .version {
   font-weight: 500;
   min-width: 32px;
