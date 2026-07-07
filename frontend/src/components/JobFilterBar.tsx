@@ -5,10 +5,11 @@ import {
   FormControl,
   InputLabel,
 } from '@mui/material'
-import type { JobFilterConfig } from '../stores/job/state'
+import type { JobFilterConfig, JobStatus } from '../stores/job/state'
 import type { FilterCounts } from '../stores/job/selectors'
 import type { JobSummary } from '../jobTypes'
 import type { WorkflowDefinitionRecord } from '../types'
+import { JOB_STATUS_LABELS } from '../labels'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 import { WorkflowVersionFilter } from './WorkflowVersionFilter'
 import { JobFilterBarChips } from './JobFilterBarChips'
@@ -16,6 +17,14 @@ import { useJobFilterActiveFilters } from './useJobFilterActiveFilters'
 import { useJobFilterNodeOptions } from './useJobFilterNodeOptions'
 import styles from './JobFilterBar.module.css'
 import filterStyles from './FilterControls.module.css'
+
+const STATUS_OPTIONS: JobStatus[] = [
+  'pending',
+  'running',
+  'completed',
+  'failed',
+  'paused',
+]
 
 export interface JobFilterBarProps {
   filterConfig: JobFilterConfig
@@ -47,6 +56,29 @@ export function JobFilterBar({
 
   return (
     <div className={styles.panel}>
+      <div className={styles.statusRow}>
+        <button
+          type="button"
+          className={`${styles.statusOption} ${filterConfig.status === null ? styles.active : ''}`}
+          onClick={() => onChange({ status: null })}
+          aria-pressed={filterConfig.status === null}
+        >
+          全部 <span className={styles.count}>({counts.status.all ?? 0})</span>
+        </button>
+        {STATUS_OPTIONS.map((status) => (
+          <button
+            key={status}
+            type="button"
+            className={`${styles.statusOption} ${filterConfig.status === status ? styles.active : ''}`}
+            onClick={() => onChange({ status })}
+            aria-pressed={filterConfig.status === status}
+          >
+            {JOB_STATUS_LABELS[status]}{' '}
+            <span className={styles.count}>({counts.status[status] ?? 0})</span>
+          </button>
+        ))}
+      </div>
+
       <div className={styles.row}>
         <WorkflowVersionFilter
           value={filterConfig.workflowVersion}
