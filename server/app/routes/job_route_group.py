@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Any
+
 from fastapi import APIRouter
 
 from server.app.events import JobEventManager
@@ -37,12 +39,20 @@ def include_job_routes(
     workflow_catalog: WorkflowCatalogService,
     workspace_executor_configuration: WorkspaceExecutorConfigurationService,
     job_event_manager: JobEventManager | None,
+    job_event_buffer: Any | None = None,
 ) -> None:
     executor_leases = ExecutorLeaseRepository(
-        job_db.path, job_db=job_db, job_event_manager=job_event_manager
+        job_db.path,
+        job_db=job_db,
+        job_event_manager=job_event_manager,
+        job_event_buffer=job_event_buffer,
     )
     job_intake = JobIntakeService(
-        job_db, settings, workflow_catalog, job_event_manager=job_event_manager
+        job_db,
+        settings,
+        workflow_catalog,
+        job_event_manager=job_event_manager,
+        job_event_buffer=job_event_buffer,
     )
     job_queries = JobQueryService(
         job_db, settings, workflow_catalog, workspace_executor_configuration
@@ -50,10 +60,18 @@ def include_job_routes(
     job_artifacts = JobArtifactService(job_db)
     job_logs = JobLogService(settings, job_db)
     job_rerun = JobRerunService(
-        job_db, executor_leases, settings, workflow_catalog, job_event_manager=job_event_manager
+        job_db,
+        executor_leases,
+        settings,
+        workflow_catalog,
+        job_event_manager=job_event_manager,
+        job_event_buffer=job_event_buffer,
     )
     job_workflow_upgrade = JobWorkflowUpgradeService(
-        job_db, executor_leases, job_event_manager=job_event_manager
+        job_db,
+        executor_leases,
+        job_event_manager=job_event_manager,
+        job_event_buffer=job_event_buffer,
     )
     job_execution = JobExecutionService(
         job_db,
@@ -61,9 +79,14 @@ def include_job_routes(
         executor_leases,
         workflow_catalog,
         job_event_manager=job_event_manager,
+        job_event_buffer=job_event_buffer,
     )
     job_deletion = JobDeletionService(
-        job_db, executor_leases, settings, job_event_manager=job_event_manager
+        job_db,
+        executor_leases,
+        settings,
+        job_event_manager=job_event_manager,
+        job_event_buffer=job_event_buffer,
     )
 
     router.include_router(create_job_batches_router(job_intake, settings))

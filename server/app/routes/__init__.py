@@ -1,3 +1,5 @@
+from typing import Any
+
 from fastapi import APIRouter
 
 from ..agents import AgentStatusManager
@@ -28,6 +30,7 @@ def create_router(
     video_event_manager: VideoEventManager,
     workspace_worker_control: WorkspaceWorkerControl | None = None,
     job_event_manager: JobEventManager | None = None,
+    job_event_buffer: Any | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -77,6 +80,7 @@ def create_router(
         workflow_catalog,
         workspace_executor_configuration,
         job_event_manager,
+        job_event_buffer,
     )
 
     return router
