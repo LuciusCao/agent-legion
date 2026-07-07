@@ -1,15 +1,10 @@
 .sidePanel {
-  min-width: 0;
-  overflow-y: auto;
+  min-height: 0;
+  overflow: auto;
   background: #ffffff;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 16px 12px;
-}
-.sidePanel:first-child {
   border-right: 1px solid #e0e0e0;
 }
 .sidePanel:last-child {
+  border-right: none;
   border-left: 1px solid #e0e0e0;
 }
