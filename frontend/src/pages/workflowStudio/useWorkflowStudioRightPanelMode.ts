@@ -21,21 +21,18 @@ export function useWorkflowStudioRightPanelMode(props: UsePanelModeProps) {
       prevValidationRef.current.errorsLength > 0 ||
       prevValidationRef.current.message !== ''
 
-    /* eslint-disable react-hooks/set-state-in-effect --
-       Mode is derived from props and user actions; this effect only reconciles
-       mode when validation appears/disappears or context (selection/forcedMode)
-       changes, avoiding autoswitch loops while validation persists. */
+    /* eslint-disable react-hooks/set-state-in-effect -- derived state reconciliation */
     if (hasValidation && !hadValidation) {
-      // Validation just appeared: autoswitch once, but remember any manual choice
-      // so it can be restored when validation clears.
       setMode('validation')
     } else if (!hasValidation && hadValidation) {
-      // Validation just cleared: restore context-driven or manual mode.
       if (props.forcedMode) {
         setMode(props.forcedMode)
       } else if (props.selectedNodeKey) {
         setMode('node')
-      } else if (manualMode) {
+      } else if (
+        manualMode &&
+        (manualMode !== 'node' || props.selectedNodeKey)
+      ) {
         setMode(manualMode)
       } else {
         setMode('overview')
@@ -50,6 +47,10 @@ export function useWorkflowStudioRightPanelMode(props: UsePanelModeProps) {
       }
     }
     /* eslint-enable react-hooks/set-state-in-effect */
+
+    if (manualMode === 'node' && !props.selectedNodeKey) {
+      setManualMode(null)
+    }
 
     prevValidationRef.current = {
       message: props.validationMessage,
