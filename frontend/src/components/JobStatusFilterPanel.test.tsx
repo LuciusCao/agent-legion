@@ -28,12 +28,22 @@ function renderPanel(props = {}) {
 describe('JobStatusFilterPanel', () => {
   it('renders all status options including all', () => {
     renderPanel()
-    expect(screen.getByRole('button', { name: '全部 (10)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '等待中 (2)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '运行中 (3)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '已完成 (4)' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '全部 (10)' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '等待中 (2)' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '运行中 (3)' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '已完成 (4)' })
+    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '失败 (1)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '已暂停 (0)' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '已暂停 (0)' })
+    ).toBeInTheDocument()
   })
 
   it('marks the selected status as active', () => {
@@ -56,6 +66,8 @@ describe('JobStatusFilterPanel', () => {
 
   it('falls back to 0 when a count is missing', () => {
     renderPanel({ counts: { all: 1 } })
-    expect(screen.getByRole('button', { name: '等待中 (0)' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '等待中 (0)' })
+    ).toBeInTheDocument()
   })
 })
