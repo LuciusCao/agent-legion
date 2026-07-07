@@ -36,6 +36,7 @@ const activeRevisionPayload = {
 const mocks = {
   fetchActiveWorkflowRevision: vi.fn(),
   fetchWorkflowRevisions: vi.fn(),
+  fetchWorkflowRevisionDetail: vi.fn(),
   compareWorkflowDraft: vi.fn(),
   publishWorkflowDraft: vi.fn(),
   validateWorkflowDraft: vi.fn(),
@@ -46,6 +47,8 @@ vi.mock('../../api', () => ({
     mocks.fetchActiveWorkflowRevision(...args),
   fetchWorkflowRevisions: (...args: unknown[]) =>
     mocks.fetchWorkflowRevisions(...args),
+  fetchWorkflowRevisionDetail: (...args: unknown[]) =>
+    mocks.fetchWorkflowRevisionDetail(...args),
   compareWorkflowDraft: (...args: unknown[]) =>
     mocks.compareWorkflowDraft(...args),
   publishWorkflowDraft: (...args: unknown[]) =>
@@ -75,7 +78,6 @@ describe('useWorkflowStudio', () => {
         node_changes: [],
         edge_changes: [],
         intake_changes: [],
-        metadata_changes: [],
         risk_flags: [],
       },
       errors: [],
@@ -115,7 +117,6 @@ describe('useWorkflowStudio', () => {
         ],
         edge_changes: [],
         intake_changes: [],
-        metadata_changes: [],
         risk_flags: [],
       },
       errors: [],
@@ -188,7 +189,6 @@ describe('useWorkflowStudio', () => {
         ],
         edge_changes: [],
         intake_changes: [],
-        metadata_changes: [],
         risk_flags: [],
       },
       errors: [],
@@ -217,43 +217,157 @@ describe('useWorkflowStudio', () => {
     expect(result.current.compareSummary?.nodeChanges[0]?.nodeKey).toBe('b')
   })
 
-  it('enables publish when compare returns metadata changes', async () => {
-    mocks.compareWorkflowDraft.mockResolvedValue({
-      valid: true,
-      base_revision: null,
-      draft_workflow: null,
-      summary: {
-        risk_level: 'info',
-        node_changes: [],
-        edge_changes: [],
-        intake_changes: [],
-        metadata_changes: [
-          {
-            type: 'modified',
-            field: 'label',
-            before_value: 'Demo Workflow',
-            after_value: 'Demo Workflow v2',
-            risk: 'info',
-          },
-        ],
-        risk_flags: [],
+  it('loads a historical revision without replacing a dirty draft', async () => {
+    mocks.fetchWorkflowRevisionDetail.mockResolvedValue({
+      revision: {
+        id: 'rev-old',
+        workspace_id: 'ws1',
+        workflow_key: 'wf',
+        version: 1,
+        status: 'archived',
+        definition_hash: 'oldhash',
+        created_at: '2026-07-05T10:00:00Z',
+        published_at: '2026-07-05T10:05:00Z',
       },
-      errors: [],
+      workflow: {
+        ...activeRevisionPayload.workflow,
+        label: 'Old Workflow',
+      },
+      definition_yaml:
+        'key: wf\nlabel: Old Workflow\nschema_version: 2\nnodes: {}\nedges: []\n',
     })
+    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    act(() =>
+      result.current.setDefinitionYaml(
+        `${result.current.definitionYaml}\n# draft`
+      )
+    )
+    await act(async () => {
+      await result.current.selectRevision('rev-old')
+    })
+
+    expect(result.current.viewMode).toBe('revision')
+    expect(result.current.readOnly).toBe(true)
+    expect(result.current.hasPreservedDraft).toBe(true)
+    expect(result.current.definitionYaml).toContain('Old Workflow')
+    expect(result.current.canPublish).toBe(false)
+
+    act(() => result.current.backToDraft())
+
+    expect(result.current.viewMode).toBe('draft')
+    expect(result.current.definitionYaml).toContain('# draft')
+  })
+
+  it('uses a historical revision as a new draft', async () => {
+    mocks.fetchWorkflowRevisionDetail.mockResolvedValue({
+      revision: {
+        id: 'rev-old',
+        workspace_id: 'ws1',
+        workflow_key: 'wf',
+        version: 1,
+        status: 'archived',
+        definition_hash: 'oldhash',
+        created_at: '2026-07-05T10:00:00Z',
+        published_at: '2026-07-05T10:05:00Z',
+      },
+      workflow: activeRevisionPayload.workflow,
+      definition_yaml:
+        'key: wf\nlabel: Restored\nschema_version: 2\nnodes: {}\nedges: []\n',
+    })
+    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+
+    await act(async () => {
+      await result.current.selectRevision('rev-old')
+    })
+    act(() => result.current.useViewedRevisionAsDraft())
+
+    expect(result.current.viewMode).toBe('draft')
+    expect(result.current.readOnly).toBe(false)
+    expect(result.current.definitionYaml).toContain('Restored')
+    expect(result.current.dirty).toBe(true)
+  })
+
+  it('ignores stale revision detail when a newer revision is requested', async () => {
+    const slowPayload = {
+      revision: {
+        id: 'rev-slow',
+        workspace_id: 'ws1',
+        workflow_key: 'wf',
+        version: 1,
+        status: 'archived',
+        definition_hash: 'slowhash',
+        created_at: '2026-07-05T10:00:00Z',
+        published_at: '2026-07-05T10:05:00Z',
+      },
+      workflow: activeRevisionPayload.workflow,
+      definition_yaml: 'key: wf\nlabel: Slow\n',
+    }
+    const fastPayload = {
+      revision: {
+        id: 'rev-fast',
+        workspace_id: 'ws1',
+        workflow_key: 'wf',
+        version: 2,
+        status: 'archived',
+        definition_hash: 'fasthash',
+        created_at: '2026-07-05T11:00:00Z',
+        published_at: '2026-07-05T11:05:00Z',
+      },
+      workflow: activeRevisionPayload.workflow,
+      definition_yaml: 'key: wf\nlabel: Fast\n',
+    }
+
+    let resolveSlow: (value: typeof slowPayload) => void = () => {}
+    let resolveFast: (value: typeof fastPayload) => void = () => {}
+
+    mocks.fetchWorkflowRevisionDetail.mockImplementation(
+      (revisionId: string) => {
+        if (revisionId === 'rev-slow') {
+          return new Promise<typeof slowPayload>((resolve) => {
+            resolveSlow = resolve
+          })
+        }
+        return new Promise<typeof fastPayload>((resolve) => {
+          resolveFast = resolve
+        })
+      }
+    )
 
     const { result } = renderHook(() => useWorkflowStudio('ws1'))
     await waitFor(() => expect(result.current.loadState).toBe('ready'))
 
     act(() => {
-      result.current.setDefinitionYaml('key: demo\nlabel: Demo Workflow v2\n')
+      result.current.selectRevision('rev-slow')
+      result.current.selectRevision('rev-fast')
     })
+
+    act(() => resolveFast(fastPayload))
+    await waitFor(() => expect(result.current.definitionYaml).toContain('Fast'))
+    expect(result.current.selectedRevisionId).toBe('rev-fast')
+
+    act(() => resolveSlow(slowPayload))
+    await waitFor(() => expect(result.current.definitionYaml).toContain('Fast'))
+    expect(result.current.selectedRevisionId).toBe('rev-fast')
+  })
+
+  it('exposes revision load error and keeps previous view on failure', async () => {
+    mocks.fetchWorkflowRevisionDetail.mockRejectedValue(
+      new Error('network error')
+    )
+    const { result } = renderHook(() => useWorkflowStudio('ws1'))
+    await waitFor(() => expect(result.current.loadState).toBe('ready'))
+    const previousDefinitionYaml = result.current.definitionYaml
 
     await act(async () => {
-      vi.advanceTimersByTime(450)
+      await result.current.selectRevision('rev-old')
     })
 
-    await waitFor(() => expect(result.current.compareState).toBe('ready'))
-    expect(result.current.compareSummary?.metadataChanges).toHaveLength(1)
-    expect(result.current.canPublish).toBe(true)
+    expect(result.current.isLoadingRevision).toBe(false)
+    expect(result.current.revisionLoadError).toBe('network error')
+    expect(result.current.viewMode).toBe('draft')
+    expect(result.current.definitionYaml).toBe(previousDefinitionYaml)
   })
 })

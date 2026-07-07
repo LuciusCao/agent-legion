@@ -61,6 +61,15 @@ describe('DagGraph', () => {
     expect(onViewLogs).toHaveBeenCalledWith('a')
   })
 
+  it('passes padded fit view options to React Flow', () => {
+    render(<DagGraph nodes={nodes} edges={edges} hideNodeDetails />)
+
+    expect(screen.getByTestId('dag-flow-wrapper')).toHaveAttribute(
+      'data-fit-view-padding',
+      '0.18'
+    )
+  })
+
   it('reflects controlled selected node and calls onSelectedNodeChange when a different node is clicked', () => {
     const onSelectedNodeChange = vi.fn()
     render(

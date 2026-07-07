@@ -4,8 +4,10 @@ import type {
 } from '../../types'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import type { DagGraphEdge, DagGraphNode } from '../../components/DagGraph'
+import type { components } from '../../generated/api'
+import type { WorkflowStudioRevisionProps } from './workflowStudioRevisionProps'
 
-export type StudioLayoutProps = {
+export type StudioLayoutProps = WorkflowStudioRevisionProps & {
   loadState: 'loading' | 'ready' | 'empty' | 'error'
   actionState: 'idle' | 'validating' | 'publishing'
   workflow: WorkflowDefinitionRecord | null
@@ -17,9 +19,7 @@ export type StudioLayoutProps = {
   setSelectedNodeKey: (key: string | null) => void
   validationErrors: string[]
   validationMessage: string
-  compareErrors:
-    | import('../../generated/api').components['schemas']['WorkflowDraftCompareError'][]
-    | null
+  compareErrors: components['schemas']['WorkflowDraftCompareError'][] | null
   compareSummary: ChangeSummaryViewModel | null
   compareState: 'idle' | 'loading' | 'ready' | 'error'
   dirty: boolean

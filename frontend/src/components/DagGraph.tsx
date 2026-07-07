@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   Background,
   Controls,
-  Edge,
   MarkerType,
   MiniMap,
   Node,
@@ -18,6 +17,11 @@ import type { DagNodeData } from './DagNode'
 import type { DagNodeStatus } from './dagNodeStatus'
 import { NodeDetailsPanel } from './NodeDetailsPanel'
 import { filterRelevantRuns } from '../helpers'
+import {
+  buildRelationMaps,
+  collectAncestors,
+  collectDescendants,
+} from './dagGraphRelations'
 import styles from './DagGraph.module.css'
 
 export interface DagGraphNode {
@@ -62,6 +66,7 @@ interface DagGraphProps {
 }
 
 const NODE_WIDTH = 240
+const FIT_VIEW_OPTIONS = { padding: 0.18, minZoom: 0.35, maxZoom: 1.2 }
 const nodeTypes = { dagNode: DagNodeComponent }
 
 const BASE_HEIGHT = 66
@@ -130,44 +135,6 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
   })
 
   return { rfNodes, rfEdges: buildRfEdges(edges) }
-}
-
-function buildRelationMaps(rfEdges: Edge[]) {
-  const edgeBySource: Record<string, Edge[]> = {}
-  const edgeByTarget: Record<string, Edge[]> = {}
-  for (const edge of rfEdges) {
-    edgeBySource[edge.source] = edgeBySource[edge.source] || []
-    edgeBySource[edge.source].push(edge)
-    edgeByTarget[edge.target] = edgeByTarget[edge.target] || []
-    edgeByTarget[edge.target].push(edge)
-  }
-  return { edgeBySource, edgeByTarget }
-}
-
-function collectAncestors(
-  nodeId: string,
-  edgeByTarget: Record<string, Edge[]>,
-  ancestors: Set<string>
-) {
-  for (const edge of edgeByTarget[nodeId] || []) {
-    if (!ancestors.has(edge.source)) {
-      ancestors.add(edge.source)
-      collectAncestors(edge.source, edgeByTarget, ancestors)
-    }
-  }
-}
-
-function collectDescendants(
-  nodeId: string,
-  edgeBySource: Record<string, Edge[]>,
-  descendants: Set<string>
-) {
-  for (const edge of edgeBySource[nodeId] || []) {
-    if (!descendants.has(edge.target)) {
-      descendants.add(edge.target)
-      collectDescendants(edge.target, edgeBySource, descendants)
-    }
-  }
 }
 
 export function DagGraph({
@@ -268,13 +235,21 @@ export function DagGraph({
       }
     })
 
-    const highlightedNodes = rfNodes.map((node) => ({
-      ...node,
-      style: {
-        ...node.style,
-        opacity: node.id === activeNode ? 1 : 0.5,
-      },
-    }))
+    const highlightedNodes = rfNodes.map((node) => {
+      const active = node.id === activeNode
+      return {
+        ...node,
+        selected: active,
+        className: active ? styles.selectedFlowNode : undefined,
+        style: {
+          ...node.style,
+          opacity:
+            active || ancestors.has(node.id) || descendants.has(node.id)
+              ? 1
+              : 0.45,
+        },
+      }
+    })
 
     return { highlightedEdges, highlightedNodes }
   }, [rfEdges, rfNodes, selectedNode, hoveredNode])
@@ -305,7 +280,11 @@ export function DagGraph({
 
   return (
     <div className={styles.graphContainer}>
-      <div className={styles.flowWrapper}>
+      <div
+        className={styles.flowWrapper}
+        data-testid="dag-flow-wrapper"
+        data-fit-view-padding={FIT_VIEW_OPTIONS.padding}
+      >
         <ReactFlow
           nodes={highlightedNodes}
           edges={highlightedEdges}
@@ -317,6 +296,7 @@ export function DagGraph({
           onNodeMouseEnter={onNodeMouseEnter}
           onNodeMouseLeave={onNodeMouseLeave}
           fitView
+          fitViewOptions={FIT_VIEW_OPTIONS}
           attributionPosition="bottom-left"
         >
           <Background gap={16} />

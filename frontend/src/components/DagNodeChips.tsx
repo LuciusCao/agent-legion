@@ -1,20 +1,17 @@
 import { useState } from 'react'
+import { ArtifactPopover } from './ArtifactPopover'
 import styles from './DagNodeChips.module.css'
 
 const CHIP_LIMIT = 3
-
-export function ChipList({
-  title,
-  items,
-  variant,
-}: {
+type ChipListProps = {
   title: string
   items: string[]
   variant: 'in' | 'out'
-}) {
-  const [expanded, setExpanded] = useState(false)
-  const visible = expanded ? items : items.slice(0, CHIP_LIMIT)
-  const hidden = items.length - visible.length
+}
+export function ChipList({ title, items, variant }: ChipListProps) {
+  const [openArtifactList, setOpenArtifactList] = useState(false)
+  const visible = items.slice(0, CHIP_LIMIT)
+  const hidden = Math.max(items.length - visible.length, 0)
 
   if (items.length === 0) return null
 
@@ -27,27 +24,34 @@ export function ChipList({
         {visible.map((item) => (
           <span
             key={item}
-            className={[
-              styles.chip,
-              variant === 'out' ? styles.chipOut : '',
-            ].join(' ')}
+            className={`${styles.chip} ${variant === 'out' ? styles.chipOut : ''}`}
             title={item}
           >
             {item.length > 18 ? item.slice(0, 17) + '…' : item}
           </span>
         ))}
-        {hidden > 0 && !expanded && (
+        {hidden > 0 && (
           <button
+            type="button"
             className={styles.moreButton}
-            onClick={(e) => {
-              e.stopPropagation()
-              setExpanded(true)
+            aria-label={`显示其余 ${hidden} 个${title}产物`}
+            onClick={(event) => {
+              event.stopPropagation()
+              setOpenArtifactList(true)
             }}
           >
             +{hidden}
           </button>
         )}
       </div>
+      {openArtifactList && (
+        <ArtifactPopover
+          items={items}
+          onClose={() => {
+            setOpenArtifactList(false)
+          }}
+        />
+      )}
     </div>
   )
 }

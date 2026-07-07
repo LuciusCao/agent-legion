@@ -1,0 +1,37 @@
+.panel {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.tabs {
+  flex: 0 0 auto;
+  border-bottom: 1px solid #e0e0e0;
+}
+.body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px;
+}
+.overview h2 {
+  margin: 0 0 12px;
+  font-size: 16px;
+}
+.overview dl {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+}
+.overview div {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+.overview dt {
+  color: #616161;
+}
+.overview dd {
+  margin: 0;
+  font-weight: 600;
+}

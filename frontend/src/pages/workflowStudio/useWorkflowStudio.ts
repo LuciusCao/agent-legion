@@ -1,116 +1,89 @@
-import { useEffect, useMemo, useState } from 'react'
-import { publishWorkflowDraft, validateWorkflowDraft } from '../../api'
+import { useMemo, useState } from 'react'
 import { buildDagEdges, buildDagNodes } from './workflowStudioDag'
-import { isDefinitionDirty } from './workflowStudioModel'
 import { useWorkflowDraftCompare } from './useWorkflowDraftCompare'
+import { useWorkflowStudioActions } from './useWorkflowStudioActions'
 import { useWorkflowStudioData } from './useWorkflowStudioData'
-
-type ActionState = 'idle' | 'validating' | 'publishing'
+import { useWorkflowStudioDraft } from './useWorkflowStudioDraft'
 
 export function useWorkflowStudio(workspaceId: string | undefined) {
-  const [actionState, setActionState] = useState<ActionState>('idle')
-  const [definitionYaml, setDefinitionYaml] = useState('')
   const [selectedNodeKey, setSelectedNodeKey] = useState<string | null>(null)
-  const [validationErrors, setValidationErrors] = useState<string[]>([])
-  const [validationMessage, setValidationMessage] = useState('')
-  const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
-
-  const { loadState, workflow, revision, revisions, originalYaml, reload } =
-    useWorkflowStudioData(workspaceId)
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect -- reset draft to loaded original when it changes
-    setDefinitionYaml(originalYaml)
-  }, [originalYaml])
-
-  const dirty = isDefinitionDirty(originalYaml, definitionYaml)
-  const canSubmit = Boolean(workspaceId && definitionYaml.trim() && dirty)
-  const nodes = useMemo(() => buildDagNodes(workflow), [workflow])
-  const edges = useMemo(() => buildDagEdges(workflow), [workflow])
-
-  const { compareState, compareErrors, compareSummary } =
-    useWorkflowDraftCompare(workspaceId, definitionYaml, dirty)
-
-  const hasCompareChanges = Boolean(
-    compareSummary &&
-    (compareSummary.nodeChanges.length > 0 ||
-      compareSummary.edgeChanges.length > 0 ||
-      compareSummary.intakeChanges.length > 0 ||
-      compareSummary.metadataChanges.length > 0 ||
-      compareSummary.riskFlags.length > 0)
-  )
-  const hasBlockingCompareError = Boolean(
-    compareErrors &&
-    compareErrors.length > 0 &&
-    compareErrors.some(
-      (error) => error.category === 'yaml' || error.category === 'schema'
-    )
-  )
-  const canPublish =
-    canSubmit &&
-    compareState !== 'loading' &&
-    !hasBlockingCompareError &&
-    hasCompareChanges
-
-  async function validateDraft() {
-    if (!workspaceId) return
-    setActionState('validating')
-    try {
-      const result = await validateWorkflowDraft(workspaceId, definitionYaml)
-      setValidationErrors(result.errors)
-      setValidationMessage(result.valid ? '校验通过' : '校验失败')
-    } finally {
-      setActionState('idle')
-    }
-  }
-
-  async function publishDraft() {
-    if (!workspaceId) return
-    setActionState('publishing')
-    try {
-      const result = await publishWorkflowDraft(workspaceId, definitionYaml)
-      setValidationErrors(result.errors)
-      if (result.valid) {
-        await reload()
-        setValidationMessage('发布成功')
-      } else {
-        setValidationMessage('发布失败')
-      }
-    } finally {
-      setActionState('idle')
-    }
-  }
-
-  function requestPublish() {
-    if (!canPublish) return
-    setReviewDialogOpen(true)
-  }
-
-  return {
+  const {
     loadState,
-    actionState,
     workflow,
     revision,
     revisions,
-    definitionYaml,
-    setDefinitionYaml,
+    originalYaml,
+    reload,
+    fetchRevisionDetail,
+  } = useWorkflowStudioData(workspaceId)
+  const draft = useWorkflowStudioDraft(
+    workspaceId,
+    originalYaml,
+    workflow,
+    revision,
+    fetchRevisionDetail
+  )
+  const compare = useWorkflowDraftCompare(
+    workspaceId,
+    draft.draftYaml,
+    draft.dirty
+  )
+  const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
+  const { nodes, edges } = useMemo(() => {
+    return {
+      nodes: buildDagNodes(draft.visibleWorkflow),
+      edges: buildDagEdges(draft.visibleWorkflow),
+    }
+  }, [draft.visibleWorkflow])
+  async function selectRevision(revisionId: string) {
+    await draft.selectRevision(revisionId)
+    setSelectedNodeKey(null)
+  }
+
+  function backToDraft() {
+    draft.backToDraft()
+    setSelectedNodeKey(null)
+  }
+
+  function useViewedRevisionAsDraft() {
+    draft.useViewedRevisionAsDraft()
+    setSelectedNodeKey(null)
+  }
+  return {
+    loadState,
+    actionState: actions.actionState,
+    workflow: draft.visibleWorkflow,
+    revision: draft.visibleRevision,
+    activeRevision: revision,
+    revisions,
+    definitionYaml: draft.definitionYaml,
+    setDefinitionYaml: draft.setDraftYaml,
     selectedNodeKey,
     setSelectedNodeKey,
-    validationErrors,
-    validationMessage,
-    dirty,
-    canSubmit,
-    canPublish,
-    validateDraft,
-    publishDraft,
-    requestPublish,
-    resetDefinition: () => setDefinitionYaml(originalYaml),
+    validationErrors: actions.validationErrors,
+    validationMessage: actions.validationMessage,
+    dirty: draft.dirty,
+    canSubmit: draft.canSubmit,
+    canPublish: actions.canPublish,
+    validateDraft: actions.validateDraft,
+    publishDraft: actions.publishDraft,
+    requestPublish: actions.requestPublish,
+    resetDefinition: () => draft.setDraftYaml(originalYaml),
     nodes,
     edges,
-    compareState,
-    compareErrors,
-    compareSummary,
-    reviewDialogOpen,
-    closeReviewDialog: () => setReviewDialogOpen(false),
+    compareState: compare.compareState,
+    compareErrors: compare.compareErrors,
+    compareSummary: compare.compareSummary,
+    reviewDialogOpen: actions.reviewDialogOpen,
+    closeReviewDialog: actions.closeReviewDialog,
+    viewMode: draft.viewMode,
+    selectedRevisionId: draft.selectedRevisionId,
+    readOnly: draft.readOnly,
+    hasPreservedDraft: draft.hasPreservedDraft,
+    isLoadingRevision: draft.isLoadingRevision,
+    revisionLoadError: draft.revisionLoadError,
+    selectRevision,
+    backToDraft,
+    useViewedRevisionAsDraft,
   }
 }
