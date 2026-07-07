@@ -1,6 +1,5 @@
 import { useMemo } from 'react'
 import type { JobFilterConfig } from '../stores/job/state'
-import { JOB_STATUS_LABELS } from '../labels'
 import type { JobFilterNodeOption } from './useJobFilterNodeOptions'
 
 export interface JobFilterActiveFilter {
@@ -16,10 +15,6 @@ export function useJobFilterActiveFilters(
   return useMemo(
     () =>
       [
-        filterConfig.status !== null && {
-          label: `状态: ${JOB_STATUS_LABELS[filterConfig.status]}`,
-          onDelete: () => onChange({ status: null }),
-        },
         filterConfig.workflowVersion !== null && {
           label:
             filterConfig.workflowVersion === 'none'

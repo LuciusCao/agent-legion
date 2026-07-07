@@ -5,11 +5,10 @@ import {
   FormControl,
   InputLabel,
 } from '@mui/material'
-import type { JobFilterConfig, JobStatus } from '../stores/job/state'
+import type { JobFilterConfig } from '../stores/job/state'
 import type { FilterCounts } from '../stores/job/selectors'
 import type { JobSummary } from '../jobTypes'
 import type { WorkflowDefinitionRecord } from '../types'
-import { JOB_STATUS_LABELS } from '../labels'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
 import { WorkflowVersionFilter } from './WorkflowVersionFilter'
 import { JobFilterBarChips } from './JobFilterBarChips'
@@ -17,14 +16,6 @@ import { useJobFilterActiveFilters } from './useJobFilterActiveFilters'
 import { useJobFilterNodeOptions } from './useJobFilterNodeOptions'
 import styles from './JobFilterBar.module.css'
 import filterStyles from './FilterControls.module.css'
-
-const STATUS_OPTIONS: JobStatus[] = [
-  'pending',
-  'running',
-  'completed',
-  'failed',
-  'paused',
-]
 
 export interface JobFilterBarProps {
   filterConfig: JobFilterConfig
@@ -57,50 +48,6 @@ export function JobFilterBar({
   return (
     <div className={styles.panel}>
       <div className={styles.row}>
-        <FormControl
-          size="small"
-          className={`${styles.control} ${filterStyles.filterControl}`}
-        >
-          <InputLabel id="job-status-filter-label">状态</InputLabel>
-          <Select
-            labelId="job-status-filter-label"
-            value={filterConfig.status ?? ''}
-            label="状态"
-            onChange={(e) => {
-              const value = e.target.value as string
-              onChange({
-                status:
-                  value === '' ? null : (value as JobFilterConfig['status']),
-              })
-            }}
-            MenuProps={{ PaperProps: { className: filterStyles.filterMenu } }}
-            renderValue={(value) => {
-              const status = value as string
-              if (status === '') {
-                return (
-                  <span className={filterStyles.filterPlaceholder}>
-                    全部状态 ({counts.status.all ?? 0})
-                  </span>
-                )
-              }
-              const statusKey = status as JobStatus
-              const count = counts.status[statusKey] ?? 0
-              return (
-                <span>
-                  {JOB_STATUS_LABELS[statusKey]} ({count})
-                </span>
-              )
-            }}
-          >
-            <MenuItem value="">全部状态 ({counts.status.all ?? 0})</MenuItem>
-            {STATUS_OPTIONS.map((status) => (
-              <MenuItem key={status} value={status}>
-                {JOB_STATUS_LABELS[status]} ({counts.status[status] ?? 0})
-              </MenuItem>
-            ))}
-          </Select>
-        </FormControl>
-
         <WorkflowVersionFilter
           value={filterConfig.workflowVersion}
           counts={counts.workflowVersion}
