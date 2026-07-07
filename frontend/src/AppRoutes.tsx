@@ -15,6 +15,9 @@ const WorkflowStudioPage = lazy(() =>
   }))
 )
 const WorkspaceMainPage = lazy(() => import('./pages/WorkspaceMainPage'))
+const TokenUsagePage = lazy(() =>
+  import('./pages/TokenUsagePage').then((m) => ({ default: m.TokenUsagePage }))
+)
 
 export default function AppRoutes() {
   return (
@@ -28,6 +31,10 @@ export default function AppRoutes() {
       <Route
         path="/workspaces/:workspaceId/settings"
         element={<SettingsPage />}
+      />
+      <Route
+        path="/workspaces/:workspaceId/token-usage"
+        element={<TokenUsagePage />}
       />
       <Route
         path="/workspaces/:workspaceId/workflow-studio"

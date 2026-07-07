@@ -12,7 +12,6 @@ import {
 } from '../components/JobActionBar'
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
 import { WorkspacePackageHistoryDialog } from '../components/WorkspacePackageHistoryDialog'
-import { TokenUsageDialog } from '../components/TokenUsageDialog'
 import { fetchWorkflowDefinition } from '../api'
 import { getFilterCounts } from '../stores/job/selectors'
 import type { WorkflowDefinitionRecord } from '../types'
@@ -206,10 +205,6 @@ export default function WorkspaceMainPage() {
         <section className={styles.sectionFill}>
           {workspaceId ? <JobList workspaceId={workspaceId} /> : null}
         </section>
-      )}
-
-      {workspaceId && (
-        <TokenUsageDialog scope="workspace" workspaceId={workspaceId} />
       )}
 
       {workspaceId && (
