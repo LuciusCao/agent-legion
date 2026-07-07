@@ -300,6 +300,74 @@ class JobEventManager:
             self._build_payload("job_deleted", workspace_id, stats, job_id=job_id),
         )
 
+    def build_job_patch_batch(
+        self,
+        workspace_id: str,
+        revision: int,
+        stats: dict[str, int],
+        jobs: list[dict[str, Any]],
+        deleted_job_ids: list[str],
+    ) -> str:
+        return json.dumps(
+            {
+                "type": "job_patch_batch",
+                "workspace_id": workspace_id,
+                "revision": revision,
+                "stats": stats,
+                "jobs": jobs,
+                "deleted_job_ids": deleted_job_ids,
+            }
+        )
+
+    def build_resync_required(
+        self,
+        workspace_id: str,
+        latest_revision: int,
+        reason: str,
+    ) -> str:
+        return json.dumps(
+            {
+                "type": "resync_required",
+                "workspace_id": workspace_id,
+                "latest_revision": latest_revision,
+                "reason": reason,
+            }
+        )
+
+    def broadcast_job_patch_batch(
+        self,
+        workspace_id: str,
+        revision: int,
+        stats: dict[str, int],
+        jobs: list[dict[str, Any]],
+        deleted_job_ids: list[str],
+    ) -> None:
+        self._broadcast(
+            workspace_id,
+            self.build_job_patch_batch(
+                workspace_id=workspace_id,
+                revision=revision,
+                stats=stats,
+                jobs=jobs,
+                deleted_job_ids=deleted_job_ids,
+            ),
+        )
+
+    def broadcast_resync_required(
+        self,
+        workspace_id: str,
+        latest_revision: int,
+        reason: str,
+    ) -> None:
+        self._broadcast(
+            workspace_id,
+            self.build_resync_required(
+                workspace_id=workspace_id,
+                latest_revision=latest_revision,
+                reason=reason,
+            ),
+        )
+
 
 def broadcast_job_update(
     job_db: JobQueries | None,

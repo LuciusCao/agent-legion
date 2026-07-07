@@ -541,3 +541,41 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
     assert result["status"] == "skipped"
     assert result["reason_code"] == "conflict"
     assert queue.empty()
+
+
+def test_job_event_manager_builds_patch_batch_payload():
+    manager = JobEventManager()
+
+    payload = manager.build_job_patch_batch(
+        workspace_id="ws1",
+        revision=42,
+        stats={"running": 2},
+        jobs=[{"id": "job1", "status": "running"}],
+        deleted_job_ids=["job2"],
+    )
+
+    data = json.loads(payload)
+    assert data["type"] == "job_patch_batch"
+    assert data["workspace_id"] == "ws1"
+    assert data["revision"] == 42
+    assert data["stats"] == {"running": 2}
+    assert data["jobs"] == [{"id": "job1", "status": "running"}]
+    assert data["deleted_job_ids"] == ["job2"]
+
+
+def test_job_event_manager_builds_resync_payload():
+    manager = JobEventManager()
+
+    payload = manager.build_resync_required(
+        workspace_id="ws1",
+        latest_revision=99,
+        reason="revision_too_old",
+    )
+
+    data = json.loads(payload)
+    assert data == {
+        "type": "resync_required",
+        "workspace_id": "ws1",
+        "latest_revision": 99,
+        "reason": "revision_too_old",
+    }
