@@ -10,7 +10,6 @@ import { AppBar } from '../components/AppBar'
 import { AddDialog } from '../components/AddDialog'
 import { AgentStatusIndicator } from '../components/AgentStatusIndicator'
 import { MaterialIcon } from '../components/MaterialIcon'
-import { useCloseTokenUsageDialogOnRouteChange } from './useCloseTokenUsageDialogOnRouteChange'
 export default function WorkspaceLayout() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
@@ -31,7 +30,6 @@ export default function WorkspaceLayout() {
     addDialogContext,
     addDialogWorkspaceId,
     setWorkspacePackageDialogOpen,
-    tokenUsageDialogOpen,
     setTokenUsageDialogOpen,
   } = useUiStore()
   const { pageTitle, pageSubtitle, detailPageActions } = usePageHeaderStore()
@@ -76,16 +74,17 @@ export default function WorkspaceLayout() {
       fetchWorkerStatus(workspaceId)
     }
   }, [fetchWorkerStatus, workspaceId])
-  useCloseTokenUsageDialogOnRouteChange(
-    tokenUsageDialogOpen,
-    setTokenUsageDialogOpen
-  )
   const title = pageTitle || currentWorkspace?.name || workspaceId || ''
   const tokenAnalysisButton = (
     <IconButton
       size="small"
       aria-label="Token 使用分析"
-      onClick={() => workspaceId && setTokenUsageDialogOpen(true)}
+      onClick={() =>
+        workspaceId &&
+        (isDetailPage
+          ? setTokenUsageDialogOpen(true)
+          : navigate(`/workspaces/${workspaceId}/token-usage`))
+      }
     >
       <MaterialIcon name="analytics" />
     </IconButton>
