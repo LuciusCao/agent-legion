@@ -85,4 +85,26 @@ describe('WorkflowStudioLayout', () => {
       within(mobileNav).getByRole('tab', { name: 'YAML' })
     ).toBeInTheDocument()
   })
+
+  it('switches mobile panel to inspector when validation appears', () => {
+    const { rerender } = render(<WorkflowStudioLayout {...baseProps} />)
+
+    const mobileNav = screen.getByRole('tablist', {
+      name: 'Workflow studio panels',
+    })
+    expect(
+      within(mobileNav).getByRole('tab', { name: 'Graph' })
+    ).toHaveAttribute('aria-selected', 'true')
+
+    rerender(
+      <WorkflowStudioLayout
+        {...baseProps}
+        validationMessage="validation failed"
+      />
+    )
+
+    expect(
+      within(mobileNav).getByRole('tab', { name: 'Inspector' })
+    ).toHaveAttribute('aria-selected', 'true')
+  })
 })

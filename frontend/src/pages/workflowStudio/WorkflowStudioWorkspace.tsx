@@ -1,3 +1,4 @@
+import { useEffect } from 'react'
 import { DagGraph } from '../../components/DagGraph'
 import { WorkflowNodeOutline } from './WorkflowNodeOutline'
 import { WorkflowRevisionList } from './WorkflowRevisionList'
@@ -11,17 +12,16 @@ import canvasToolbarStyles from '../WorkflowStudioPageCanvasToolbar.module.css'
 import pageStyles from '../WorkflowStudioPageResponsive.module.css'
 import sidePanelStyles from '../WorkflowStudioPageSidePanel.module.css'
 
-function activeClass(
-  pageStyles: Record<string, string>,
-  isActive: boolean
-): string {
-  return isActive ? ` ${pageStyles.activePanel}` : ''
-}
-
 export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
   const { mobilePanel, setMobilePanel } = useWorkflowStudioMobilePanel(
     props.selectedNodeKey
   )
+
+  useEffect(() => {
+    const hasValidation =
+      props.validationErrors.length > 0 || props.validationMessage !== ''
+    if (hasValidation) setMobilePanel('inspector')
+  }, [props.validationErrors.length, props.validationMessage, setMobilePanel])
 
   const forcedMode =
     mobilePanel === 'changes'
@@ -42,7 +42,7 @@ export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
       <WorkflowStudioMobileNav value={mobilePanel} onChange={setMobilePanel} />
       <div className={pageStyles.layout}>
         <aside
-          className={`${sidePanelStyles.sidePanel} ${pageStyles.sidePanel}${activeClass(pageStyles, versionsActive)}`}
+          className={`${sidePanelStyles.sidePanel} ${pageStyles.sidePanel}${versionsActive ? ` ${pageStyles.activePanel}` : ''}`}
           data-mobile-panel="versions"
         >
           <WorkflowRevisionList
@@ -61,7 +61,7 @@ export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
           />
         </aside>
         <main
-          className={`${canvasStyles.canvas}${activeClass(pageStyles, graphActive)}`}
+          className={`${canvasStyles.canvas}${graphActive ? ` ${pageStyles.activePanel}` : ''}`}
           data-mobile-panel="graph"
         >
           <div
@@ -83,7 +83,7 @@ export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
           )}
         </main>
         <aside
-          className={`${sidePanelStyles.sidePanel} ${pageStyles.sidePanel}${activeClass(pageStyles, inspectorActive)}`}
+          className={`${sidePanelStyles.sidePanel} ${pageStyles.sidePanel}${inspectorActive ? ` ${pageStyles.activePanel}` : ''}`}
           data-mobile-panel="inspector"
         >
           <WorkflowStudioRightPanel

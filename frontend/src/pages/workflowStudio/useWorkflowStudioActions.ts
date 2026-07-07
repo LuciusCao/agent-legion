@@ -29,16 +29,13 @@ export function useWorkflowStudioActions(
   const [reviewDialogOpen, setReviewDialogOpen] = useState(false)
   const { compareState, compareErrors, compareSummary } = compare
   const hasCompareChanges = Boolean(
-    compareSummary &&
-    (compareSummary.nodeChanges.length > 0 ||
-      compareSummary.edgeChanges.length > 0 ||
-      compareSummary.intakeChanges.length > 0 ||
-      compareSummary.riskFlags.length > 0)
+    compareSummary?.nodeChanges.length ||
+    compareSummary?.edgeChanges.length ||
+    compareSummary?.intakeChanges.length ||
+    compareSummary?.riskFlags.length
   )
   const hasBlockingCompareError = Boolean(
-    compareErrors &&
-    compareErrors.length > 0 &&
-    compareErrors.some(
+    compareErrors?.some(
       (error) => error.category === 'yaml' || error.category === 'schema'
     )
   )
@@ -58,6 +55,9 @@ export function useWorkflowStudioActions(
       )
       setValidationErrors(result.errors)
       setValidationMessage(result.valid ? '校验通过' : '校验失败')
+    } catch {
+      setValidationErrors([])
+      setValidationMessage('校验失败：网络错误')
     } finally {
       setActionState('idle')
     }
@@ -78,14 +78,12 @@ export function useWorkflowStudioActions(
       } else {
         setValidationMessage('发布失败')
       }
+    } catch {
+      setValidationErrors([])
+      setValidationMessage('发布失败：网络错误')
     } finally {
       setActionState('idle')
     }
-  }
-
-  function requestPublish() {
-    if (!canPublish) return
-    setReviewDialogOpen(true)
   }
 
   return {
@@ -96,7 +94,9 @@ export function useWorkflowStudioActions(
     canPublish,
     validateDraft,
     publishDraft,
-    requestPublish,
+    requestPublish: () => {
+      if (canPublish) setReviewDialogOpen(true)
+    },
     closeReviewDialog: () => setReviewDialogOpen(false),
   }
 }
