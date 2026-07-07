@@ -11,6 +11,7 @@ import { Route, Routes } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import JobDetailPage from './JobDetailPage'
 import { usePageHeaderStore } from '../stores/pageHeaderStore'
+import { useUiStore } from '../stores/uiStore'
 
 const mockDetail = {
   job: {
@@ -208,6 +209,33 @@ function createFetchMock(
         }),
       })
     }
+    if (url === '/api/jobs/j1/token-usage' && method === 'GET') {
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          job_id: 'j1',
+          currency: 'CNY',
+          runs: [],
+          total: {
+            message_count: 0,
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            total_tokens: 0,
+            cost: {
+              input: 0,
+              output: 0,
+              cache_read: 0,
+              total: 0,
+              currency: 'CNY',
+            },
+            pricing_missing: false,
+          },
+          runs_with_usage: 0,
+          runs_without_usage: 0,
+        }),
+      })
+    }
     return Promise.resolve({ ok: true, json: async () => ({}) })
   })
 }
@@ -215,6 +243,7 @@ function createFetchMock(
 describe('JobDetailPage', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
+    useUiStore.setState({ tokenUsageDialogOpen: false })
   })
 
   afterEach(() => {
@@ -723,5 +752,14 @@ describe('JobDetailPage', () => {
       expect(screen.getByTestId('video-content-panel')).toBeInTheDocument()
     })
     expect(screen.getByTestId('video-player-wrap')).toBeInTheDocument()
+  })
+
+  it('renders job token usage dialog when open', async () => {
+    useUiStore.setState({ tokenUsageDialogOpen: true })
+    vi.stubGlobal('fetch', createFetchMock())
+
+    renderPage()
+
+    expect(await screen.findByText('Job Token 使用分析')).toBeInTheDocument()
   })
 })
