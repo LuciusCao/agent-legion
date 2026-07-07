@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Literal
+from typing import Any, Literal, Protocol
 
 JobEventKind = Literal["updated", "created", "deleted"]
 
@@ -91,3 +92,101 @@ class JobEventBuffer:
             deleted_job_ids_by_workspace=deleted,
             resync_workspace_ids=resync_workspace_ids,
         )
+
+
+class _JobQueries(Protocol):
+    def list_patch_summaries(
+        self, workspace_id: str, job_ids: list[str]
+    ) -> list[dict[str, Any]]: ...
+
+    def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]: ...
+
+
+class _JobEventManager(Protocol):
+    def broadcast_job_patch_batch(
+        self,
+        workspace_id: str,
+        revision: int,
+        stats: dict[str, int],
+        jobs: list[dict[str, Any]],
+        deleted_job_ids: list[str],
+    ) -> None: ...
+
+    def broadcast_resync_required(
+        self, workspace_id: str, latest_revision: int, reason: str
+    ) -> None: ...
+
+
+class WorkspaceJobEventAggregator:
+    def __init__(
+        self,
+        buffer: JobEventBuffer,
+        job_queries: _JobQueries,
+        job_event_manager: _JobEventManager,
+    ) -> None:
+        self.buffer = buffer
+        self.job_queries = job_queries
+        self.job_event_manager = job_event_manager
+
+    def flush_once(self) -> None:
+        compacted = self.buffer.drain_compacted()
+        workspace_ids = (
+            set(compacted.updated_job_ids_by_workspace)
+            | set(compacted.created_job_ids_by_workspace)
+            | set(compacted.deleted_job_ids_by_workspace)
+            | compacted.resync_workspace_ids
+        )
+        for workspace_id in sorted(workspace_ids):
+            if workspace_id in compacted.resync_workspace_ids:
+                self.job_event_manager.broadcast_resync_required(
+                    workspace_id,
+                    compacted.latest_revision,
+                    "event_buffer_overflow",
+                )
+                continue
+            changed_ids = sorted(
+                compacted.created_job_ids_by_workspace.get(workspace_id, set())
+                | compacted.updated_job_ids_by_workspace.get(workspace_id, set())
+            )
+            deleted_ids = sorted(compacted.deleted_job_ids_by_workspace.get(workspace_id, set()))
+            if not changed_ids and not deleted_ids:
+                continue
+            jobs = self.job_queries.list_patch_summaries(workspace_id, changed_ids)
+            stats = self.job_queries.count_jobs_by_status(workspace_id)
+            self.job_event_manager.broadcast_job_patch_batch(
+                workspace_id=workspace_id,
+                revision=compacted.latest_revision,
+                stats=stats,
+                jobs=jobs,
+                deleted_job_ids=deleted_ids,
+            )
+
+    async def run(self, interval_seconds: float = 0.5) -> None:
+        while True:
+            self.flush_once()
+            await asyncio.sleep(interval_seconds)
+
+
+def build_workspace_event_aggregator(
+    job_db: Any,
+    settings: Any,
+    job_event_manager: _JobEventManager,
+) -> tuple[JobEventBuffer, WorkspaceJobEventAggregator]:
+    from server.app.services.job_queries import JobQueryService
+    from server.app.services.workflow_catalog import WorkflowCatalogService
+    from server.app.services.workspace_executor_configuration import (
+        WorkspaceExecutorConfigurationService,
+    )
+
+    workflow_catalog = WorkflowCatalogService(settings)
+    workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db)
+    job_query_service = JobQueryService(
+        job_db, settings, workflow_catalog, workspace_executor_configuration
+    )
+    buffer = JobEventBuffer()
+    aggregator = WorkspaceJobEventAggregator(
+        buffer,
+        job_query_service,
+        job_event_manager,
+    )
+    return buffer, aggregator
