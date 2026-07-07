@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import json
+import logging
 from collections import deque
 from dataclasses import dataclass, field
 from threading import Lock
-from typing import Any, Literal, Protocol
+from typing import TYPE_CHECKING, Any, Literal, Protocol
+
+if TYPE_CHECKING:
+    from server.app.jobs import JobQueries
 
 JobEventKind = Literal["updated", "created", "deleted"]
 
@@ -103,18 +108,7 @@ class _JobQueries(Protocol):
 
 
 class _JobEventManager(Protocol):
-    def broadcast_job_patch_batch(
-        self,
-        workspace_id: str,
-        revision: int,
-        stats: dict[str, int],
-        jobs: list[dict[str, Any]],
-        deleted_job_ids: list[str],
-    ) -> None: ...
-
-    def broadcast_resync_required(
-        self, workspace_id: str, latest_revision: int, reason: str
-    ) -> None: ...
+    def _broadcast(self, workspace_id: str, payload: str) -> None: ...
 
 
 class WorkspaceJobEventAggregator:
@@ -138,10 +132,13 @@ class WorkspaceJobEventAggregator:
         )
         for workspace_id in sorted(workspace_ids):
             if workspace_id in compacted.resync_workspace_ids:
-                self.job_event_manager.broadcast_resync_required(
+                self.job_event_manager._broadcast(
                     workspace_id,
-                    compacted.latest_revision,
-                    "event_buffer_overflow",
+                    build_resync_required_payload(
+                        workspace_id,
+                        compacted.latest_revision,
+                        "event_buffer_overflow",
+                    ),
                 )
                 continue
             changed_ids = sorted(
@@ -153,12 +150,15 @@ class WorkspaceJobEventAggregator:
                 continue
             jobs = self.job_queries.list_patch_summaries(workspace_id, changed_ids)
             stats = self.job_queries.count_jobs_by_status(workspace_id)
-            self.job_event_manager.broadcast_job_patch_batch(
-                workspace_id=workspace_id,
-                revision=compacted.latest_revision,
-                stats=stats,
-                jobs=jobs,
-                deleted_job_ids=deleted_ids,
+            self.job_event_manager._broadcast(
+                workspace_id,
+                build_job_patch_batch_payload(
+                    workspace_id=workspace_id,
+                    revision=compacted.latest_revision,
+                    stats=stats,
+                    jobs=jobs,
+                    deleted_job_ids=deleted_ids,
+                ),
             )
 
     async def run(self, interval_seconds: float = 0.5) -> None:
@@ -172,21 +172,85 @@ def build_workspace_event_aggregator(
     settings: Any,
     job_event_manager: _JobEventManager,
 ) -> tuple[JobEventBuffer, WorkspaceJobEventAggregator]:
-    from server.app.services.job_queries import JobQueryService
-    from server.app.services.workflow_catalog import WorkflowCatalogService
-    from server.app.services.workspace_executor_configuration import (
-        WorkspaceExecutorConfigurationService,
-    )
+    from server.app.services.job_patch_queries import JobPatchQueryService
 
-    workflow_catalog = WorkflowCatalogService(settings)
-    workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db)
-    job_query_service = JobQueryService(
-        job_db, settings, workflow_catalog, workspace_executor_configuration
-    )
+    query_service = JobPatchQueryService(job_db, settings)
     buffer = JobEventBuffer()
     aggregator = WorkspaceJobEventAggregator(
         buffer,
-        job_query_service,
+        query_service,
         job_event_manager,
     )
     return buffer, aggregator
+
+
+def build_job_patch_batch_payload(
+    workspace_id: str,
+    revision: int,
+    stats: dict[str, int],
+    jobs: list[dict[str, Any]],
+    deleted_job_ids: list[str],
+) -> str:
+    return json.dumps(
+        {
+            "type": "job_patch_batch",
+            "workspace_id": workspace_id,
+            "revision": revision,
+            "stats": stats,
+            "jobs": jobs,
+            "deleted_job_ids": deleted_job_ids,
+        }
+    )
+
+
+def build_resync_required_payload(
+    workspace_id: str,
+    latest_revision: int,
+    reason: str,
+) -> str:
+    return json.dumps(
+        {
+            "type": "resync_required",
+            "workspace_id": workspace_id,
+            "latest_revision": latest_revision,
+            "reason": reason,
+        }
+    )
+
+
+def record_job_update(
+    job_db: JobQueries | None,
+    job_event_buffer: Any | None,
+    job_id: str,
+) -> None:
+    try:
+        if job_event_buffer is None or job_db is None:
+            return
+        job = job_db.get_job(job_id)
+        if job is None:
+            return
+        workspace_id = str(job.get("workspace_id", ""))
+        if workspace_id:
+            job_event_buffer.record_job_updated(workspace_id, job_id)
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to record job update for %s", job_id)
+
+
+def broadcast_job_update(
+    job_db: JobQueries | None,
+    job_event_manager: Any | None,
+    job_id: str,
+) -> None:
+    try:
+        if job_event_manager is None or job_db is None:
+            return
+        job = job_db.get_job(job_id)
+        if job is None:
+            return
+        workspace_id = str(job.get("workspace_id", ""))
+        if not workspace_id:
+            return
+        stats = job_db.count_jobs_by_status(workspace_id)
+        job_event_manager.broadcast_job_updated(workspace_id, job_id, stats)
+    except Exception:
+        logging.getLogger(__name__).exception("Failed to broadcast job update for %s", job_id)

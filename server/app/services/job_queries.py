@@ -134,56 +134,6 @@ class JobQueryService:
             for job in jobs
         ]
 
-    def list_patch_summaries(
-        self,
-        workspace_id: str,
-        job_ids: list[str],
-    ) -> list[dict[str, Any]]:
-        if not job_ids:
-            return []
-        jobs = [
-            job
-            for job_id in job_ids
-            if (job := self.job_db.get_job(job_id)) is not None
-            and str(job.get("workspace_id", "")) == workspace_id
-        ]
-        nodes_by_job = self.job_db.list_job_nodes_for_jobs([str(job["id"]) for job in jobs])
-        definitions: dict[tuple[str, str], WorkflowDefinition] = {}
-
-        def _definition(job: dict[str, Any]) -> WorkflowDefinition:
-            key = (str(job["workflow_key"]), str(job.get("workflow_definition_hash") or ""))
-            if key not in definitions:
-                definitions[key] = self._definition_for_job(job)
-            return definitions[key]
-
-        return [
-            self._job_summary(job, nodes_by_job.get(str(job["id"]), []), _definition(job))
-            for job in jobs
-        ]
-
-    def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
-        return self.job_db.count_jobs_by_status(workspace_id)
-
-    def snapshot(
-        self,
-        workspace_id: str,
-        limit: int = 200,
-        cursor: str | None = None,
-    ) -> dict[str, Any]:
-        jobs = self.list_jobs(workspace_id)
-        bounded = jobs[:limit]
-        next_cursor = None
-        if len(jobs) > limit and bounded:
-            last = bounded[-1]
-            next_cursor = f"{last.get('created_at', '')}:{last['id']}"
-        return {
-            "workspace_id": workspace_id,
-            "revision": 0,
-            "stats": self.job_db.count_jobs_by_status(workspace_id),
-            "jobs": bounded,
-            "next_cursor": next_cursor,
-        }
-
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)
         definition = self._definition_for_job(job)

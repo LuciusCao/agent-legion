@@ -6,7 +6,9 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
-from server.app.jobs import JobQueries
+# Backwards-compatible re-exports that now live in server.app.job_events.
+from server.app.job_events import broadcast_job_update as broadcast_job_update
+from server.app.job_events import record_job_update as record_job_update
 
 logger = logging.getLogger(__name__)
 
@@ -299,109 +301,3 @@ class JobEventManager:
             workspace_id,
             self._build_payload("job_deleted", workspace_id, stats, job_id=job_id),
         )
-
-    def build_job_patch_batch(
-        self,
-        workspace_id: str,
-        revision: int,
-        stats: dict[str, int],
-        jobs: list[dict[str, Any]],
-        deleted_job_ids: list[str],
-    ) -> str:
-        return json.dumps(
-            {
-                "type": "job_patch_batch",
-                "workspace_id": workspace_id,
-                "revision": revision,
-                "stats": stats,
-                "jobs": jobs,
-                "deleted_job_ids": deleted_job_ids,
-            }
-        )
-
-    def build_resync_required(
-        self,
-        workspace_id: str,
-        latest_revision: int,
-        reason: str,
-    ) -> str:
-        return json.dumps(
-            {
-                "type": "resync_required",
-                "workspace_id": workspace_id,
-                "latest_revision": latest_revision,
-                "reason": reason,
-            }
-        )
-
-    def broadcast_job_patch_batch(
-        self,
-        workspace_id: str,
-        revision: int,
-        stats: dict[str, int],
-        jobs: list[dict[str, Any]],
-        deleted_job_ids: list[str],
-    ) -> None:
-        self._broadcast(
-            workspace_id,
-            self.build_job_patch_batch(
-                workspace_id=workspace_id,
-                revision=revision,
-                stats=stats,
-                jobs=jobs,
-                deleted_job_ids=deleted_job_ids,
-            ),
-        )
-
-    def broadcast_resync_required(
-        self,
-        workspace_id: str,
-        latest_revision: int,
-        reason: str,
-    ) -> None:
-        self._broadcast(
-            workspace_id,
-            self.build_resync_required(
-                workspace_id=workspace_id,
-                latest_revision=latest_revision,
-                reason=reason,
-            ),
-        )
-
-
-def record_job_update(
-    job_db: JobQueries | None,
-    job_event_buffer: Any | None,
-    job_id: str,
-) -> None:
-    try:
-        if job_event_buffer is None or job_db is None:
-            return
-        job = job_db.get_job(job_id)
-        if job is None:
-            return
-        workspace_id = str(job.get("workspace_id", ""))
-        if workspace_id:
-            job_event_buffer.record_job_updated(workspace_id, job_id)
-    except Exception:
-        logger.exception("Failed to record job update for %s", job_id)
-
-
-def broadcast_job_update(
-    job_db: JobQueries | None,
-    job_event_manager: JobEventManager | None,
-    job_id: str,
-) -> None:
-    try:
-        if job_event_manager is None or job_db is None:
-            return
-        job = job_db.get_job(job_id)
-        if job is None:
-            return
-        workspace_id = str(job.get("workspace_id", ""))
-        if not workspace_id:
-            return
-        stats = job_db.count_jobs_by_status(workspace_id)
-        job_event_manager.broadcast_job_updated(workspace_id, job_id, stats)
-    except Exception:
-        logger.exception("Failed to broadcast job update for %s", job_id)

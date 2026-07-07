@@ -11,7 +11,12 @@ from fastapi import Request
 from server.app.events import JobEventManager, record_job_update
 from server.app.executors.leases import ExecutorLeaseRepository, _sqlite_timestamp
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
+from server.app.job_events import (
+    build_job_patch_batch_payload,
+    build_resync_required_payload,
+)
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_patch_queries import JobPatchQueryService
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
@@ -74,6 +79,16 @@ def manager():
 @pytest.fixture
 def job_query_service(job_db, settings):
     return JobQueryService(
+        job_db,
+        settings,
+        WorkflowCatalogService(settings),
+        WorkspaceExecutorConfigurationService(job_db),
+    )
+
+
+@pytest.fixture
+def job_patch_query_service(job_db, settings):
+    return JobPatchQueryService(
         job_db,
         settings,
         WorkflowCatalogService(settings),
@@ -558,9 +573,7 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
 
 
 def test_job_event_manager_builds_patch_batch_payload():
-    manager = JobEventManager()
-
-    payload = manager.build_job_patch_batch(
+    payload = build_job_patch_batch_payload(
         workspace_id="ws1",
         revision=42,
         stats={"running": 2},
@@ -578,9 +591,7 @@ def test_job_event_manager_builds_patch_batch_payload():
 
 
 def test_job_event_manager_builds_resync_payload():
-    manager = JobEventManager()
-
-    payload = manager.build_resync_required(
+    payload = build_resync_required_payload(
         workspace_id="ws1",
         latest_revision=99,
         reason="revision_too_old",
@@ -635,7 +646,7 @@ def test_record_job_update_uses_event_buffer(fake_job_db):
     assert buffer.updated == [("ws1", "job1")]
 
 
-def test_job_query_service_lists_patch_summaries_by_ids(job_query_service, job_db):
+def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service, job_db):
     job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
     batch1 = job_db.create_batch(
         "question_comprehension_info",
@@ -668,7 +679,7 @@ def test_job_query_service_lists_patch_summaries_by_ids(job_query_service, job_d
         node_keys=["question_understanding"],
     )
 
-    summaries = job_query_service.list_patch_summaries("ws1", [job1["id"]])
+    summaries = job_patch_query_service.list_patch_summaries("ws1", [job1["id"]])
 
     assert [summary["id"] for summary in summaries] == [job1["id"]]
     assert summaries[0]["workspace_id"] == "ws1"

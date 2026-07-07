@@ -26,6 +26,7 @@ from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
 from server.app.skills.manager import SkillManager
 from server.app.spa import mount_spa
+from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.registry import list_registered_workflows
@@ -129,13 +130,11 @@ def create_app(
                 f"Workspace executor finalization blocked: {exc.report.to_json()}. "
                 f"Run `{check_cmd}` for details."
             ) from exc
-
     workflow_worker_thread: WorkflowWorkerThread | None = None
-
-    async def flush_agent_status_loop() -> None:
-        while True:
-            agent_manager.flush_pending_broadcast()
-            await asyncio.sleep(0.5)
+    background_tasks = BackgroundTasks(
+        workspace_event_aggregator=workspace_event_aggregator,
+        agent_broadcast_controller=agent_manager._broadcast_controller,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -169,17 +168,9 @@ def create_app(
                     workflow_worker_thread.start()
                 except Exception:
                     logging.getLogger(__name__).exception("workflow worker failed to start")
-        app.state.workspace_event_aggregator_task = asyncio.create_task(
-            workspace_event_aggregator.run(interval_seconds=0.5)
-        )
-        app.state.agent_status_flush_task = asyncio.create_task(flush_agent_status_loop())
+        background_tasks.start(app)
         yield
-        task = getattr(app.state, "workspace_event_aggregator_task", None)
-        if task is not None:
-            task.cancel()
-        flush_task = getattr(app.state, "agent_status_flush_task", None)
-        if flush_task is not None:
-            flush_task.cancel()
+        background_tasks.stop(app)
         if workflow_worker_thread is not None:
             workflow_worker_thread.stop()
 
@@ -207,7 +198,6 @@ def create_app(
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")
-
     return app
 
 
