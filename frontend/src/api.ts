@@ -11,11 +11,7 @@ import type {
 import type { WorkspaceStats } from './workspaceTypes'
 
 export { api } from './api/core'
-export {
-  compareWorkflowDraft,
-  fetchActiveWorkflowRevision,
-  fetchWorkflowRevisions,
-} from './api/workflow_revisions'
+export * from './api/workflow_revisions'
 export {
   fetchWorkflowDefinition,
   fetchWorkflows,

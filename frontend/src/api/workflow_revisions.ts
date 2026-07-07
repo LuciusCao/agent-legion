@@ -5,6 +5,7 @@ import type {
 } from '../types'
 
 export { compareWorkflowDraft } from './workflow_draft_compare'
+export { fetchWorkflowRevisionDetail } from './workflow_revision_detail'
 
 export async function fetchActiveWorkflowRevision(
   workspaceId: string
