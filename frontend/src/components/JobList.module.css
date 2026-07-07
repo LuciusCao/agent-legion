@@ -16,7 +16,7 @@
 
 .list {
   contain: strict;
-  height: min(72vh, 760px);
+  height: 100%;
   min-height: 320px;
   overflow: auto;
 }

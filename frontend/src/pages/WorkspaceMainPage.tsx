@@ -149,6 +149,7 @@ export default function WorkspaceMainPage() {
         display: 'flex',
         flexDirection: 'column',
         gap: 16,
+        height: '100%',
       }}
     >
       {selectMode && (
