@@ -233,7 +233,7 @@ describe('WorkspaceLayout', () => {
     expect(mockNavigate).not.toHaveBeenCalled()
   })
 
-  it('opens token usage dialog when token analysis button is clicked', () => {
+  it('navigates to token usage page when token analysis button is clicked', () => {
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
@@ -245,8 +245,8 @@ describe('WorkspaceLayout', () => {
       </MemoryRouter>
     )
     fireEvent.click(screen.getByLabelText('Token 使用分析'))
-    expect(setTokenUsageDialogOpenMock).toHaveBeenCalledWith(true)
-    expect(mockNavigate).not.toHaveBeenCalled()
+    expect(mockNavigate).toHaveBeenCalledWith('/workspaces/ws1/token-usage')
+    expect(setTokenUsageDialogOpenMock).not.toHaveBeenCalled()
   })
 
   it('renders token analysis button on the job detail page', () => {
