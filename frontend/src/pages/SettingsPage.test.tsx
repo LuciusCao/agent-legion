@@ -203,12 +203,12 @@ describe('SettingsPage', () => {
     const headings = screen.getAllByRole('heading', { level: 2 })
     expect(headings.map((h) => h.textContent)).toEqual([
       '基本信息',
-      '危险操作',
       '接入与资源',
       '工作流',
       '执行器分配',
       '节点绑定',
       '本地节点并发',
+      '危险操作',
     ])
   })
 
