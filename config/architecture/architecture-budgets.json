@@ -135,6 +135,8 @@
     "frontend/src/components/TimelineStrip.tsx": 107,
     "frontend/src/components/Toast.module.css": 46,
     "frontend/src/components/Toast.tsx": 37,
+    "frontend/src/components/TokenUsageDialog.module.css": 39,
+    "frontend/src/components/TokenUsageDialog.tsx": 61,
     "frontend/src/components/TokenUsageJobPanel.module.css": 121,
     "frontend/src/components/TokenUsageJobPanel.tsx": 143,
     "frontend/src/components/TokenUsagePanel.module.css": 352,
