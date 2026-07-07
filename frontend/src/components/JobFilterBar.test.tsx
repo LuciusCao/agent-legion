@@ -70,8 +70,12 @@ describe('JobFilterBar', () => {
   it('renders all filter controls', () => {
     renderBar()
     expect(screen.getByRole('button', { name: '全部 (2)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '运行中 (1)' })).toBeInTheDocument()
-    expect(screen.getByRole('button', { name: '已完成 (1)' })).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '运行中 (1)' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '已完成 (1)' })
+    ).toBeInTheDocument()
     expect(screen.getByLabelText('Workflow 版本')).toBeInTheDocument()
     expect(screen.getByLabelText('当前运行节点')).toBeInTheDocument()
     expect(
