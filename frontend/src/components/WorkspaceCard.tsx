@@ -1,26 +1,21 @@
-import { IconButton, Button } from '@mui/material'
-import { MaterialIcon } from '../components/MaterialIcon'
+import { Button } from '@mui/material'
 import { WORKSPACE_LABELS } from '../labels'
 import type { ExecutorRuntimeStatus } from '../workspaceTypes'
 
 type WorkspaceCardProps = {
   name: string
   workflowLabel: string
-  isSystem?: boolean
   jobStats: Record<string, number>
   executorStatus: ExecutorRuntimeStatus[]
   onClick: () => void
-  onDelete?: () => void
 }
 
 export default function WorkspaceCard({
   name,
   workflowLabel,
-  isSystem,
   jobStats,
   executorStatus,
   onClick,
-  onDelete,
 }: WorkspaceCardProps) {
   const total = Object.values(jobStats).reduce((a, b) => a + b, 0)
   const running = jobStats['running'] || 0
@@ -62,39 +57,19 @@ export default function WorkspaceCard({
         e.currentTarget.style.boxShadow = 'none'
       }}
     >
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'flex-start',
-        }}
-      >
-        <div>
-          <h3 style={{ margin: '0 0 4px', fontSize: 20 }}>{name}</h3>
-          <span
-            style={{
-              fontSize: 12,
-              color: '#616161',
-              background: '#eeeeee',
-              padding: '2px 8px',
-              borderRadius: 12,
-            }}
-          >
-            {workflowLabel}
-          </span>
-        </div>
-        {!isSystem && onDelete && (
-          <IconButton
-            size="small"
-            aria-label="删除"
-            onClick={(e) => {
-              e.stopPropagation()
-              onDelete()
-            }}
-          >
-            <MaterialIcon name="delete" />
-          </IconButton>
-        )}
+      <div>
+        <h3 style={{ margin: '0 0 4px', fontSize: 20 }}>{name}</h3>
+        <span
+          style={{
+            fontSize: 12,
+            color: '#616161',
+            background: '#eeeeee',
+            padding: '2px 8px',
+            borderRadius: 12,
+          }}
+        >
+          {workflowLabel}
+        </span>
       </div>
 
       <div style={{ marginTop: 16, display: 'flex', gap: 16, fontSize: 13 }}>

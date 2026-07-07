@@ -137,25 +137,6 @@ describe('DashboardPage', () => {
     })
   })
 
-  it('opens delete dialog for non-default workspace', () => {
-    mockWorkspaceStore.workspaces = [
-      {
-        id: 'ws-1',
-        name: 'Deletable Workspace',
-        default_workflow_key: 'question_comprehension_info',
-      },
-    ]
-
-    render(
-      <MemoryRouter>
-        <DashboardPage />
-      </MemoryRouter>
-    )
-
-    fireEvent.click(screen.getByLabelText('删除'))
-    expect(screen.getByRole('dialog')).toBeInTheDocument()
-  })
-
   it('navigates to video knowledge workspace when it is returned by the API', () => {
     mockWorkspaceStore.workspaces = [
       {

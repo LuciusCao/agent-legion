@@ -5,7 +5,6 @@ import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
 import WorkspaceCard from '../components/WorkspaceCard'
 import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
-import DeleteWorkspaceDialog from '../components/DeleteWorkspaceDialog'
 
 function WorkspaceEventSubscriber({ workspaceId }: { workspaceId: string }) {
   useWorkspaceEvents(workspaceId, true, true)
@@ -14,19 +13,9 @@ function WorkspaceEventSubscriber({ workspaceId }: { workspaceId: string }) {
 
 export function DashboardPage() {
   const navigate = useNavigate()
-  const {
-    workspaces,
-    fetchWorkspaces,
-    workspaceStats,
-    fetchWorkspaceStats,
-    deleteWorkspace,
-  } = useWorkspaceStore()
+  const { workspaces, fetchWorkspaces, workspaceStats, fetchWorkspaceStats } =
+    useWorkspaceStore()
   const [dialogOpen, setDialogOpen] = useState(false)
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
-  const [deletingWorkspace, setDeletingWorkspace] = useState<{
-    id: string
-    name: string
-  } | null>(null)
 
   useEffect(() => {
     fetchWorkspaces()
@@ -39,21 +28,6 @@ export function DashboardPage() {
       }
     })
   }, [workspaces, workspaceStats, fetchWorkspaceStats])
-
-  function openDeleteDialog(id: string, name: string) {
-    setDeletingWorkspace({ id, name })
-    setDeleteDialogOpen(true)
-  }
-
-  function closeDeleteDialog() {
-    setDeleteDialogOpen(false)
-    setDeletingWorkspace(null)
-  }
-
-  async function handleDelete() {
-    if (!deletingWorkspace) return
-    await deleteWorkspace(deletingWorkspace.id)
-  }
 
   return (
     <div style={{ padding: 24 }}>
@@ -96,11 +70,6 @@ export function DashboardPage() {
                 workspaceStats[w.id]?.executor_status?.executors || []
               }
               onClick={() => navigate(`/workspaces/${w.id}`)}
-              onDelete={
-                w.id === 'default'
-                  ? undefined
-                  : () => openDeleteDialog(w.id, w.name)
-              }
             />
           </div>
         ))}
@@ -110,16 +79,6 @@ export function DashboardPage() {
         open={dialogOpen}
         onClose={() => setDialogOpen(false)}
       />
-
-      {deletingWorkspace && (
-        <DeleteWorkspaceDialog
-          open={deleteDialogOpen}
-          workspaceName={deletingWorkspace.name}
-          workspaceId={deletingWorkspace.id}
-          onClose={closeDeleteDialog}
-          onConfirm={handleDelete}
-        />
-      )}
     </div>
   )
 }

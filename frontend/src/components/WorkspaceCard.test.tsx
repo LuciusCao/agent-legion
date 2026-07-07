@@ -73,45 +73,4 @@ describe('WorkspaceCard', () => {
     fireEvent.keyDown(card, { key: ' ' })
     expect(props.onClick).toHaveBeenCalledTimes(1)
   })
-
-  it('shows delete button for non-system workspaces', () => {
-    const onDelete = vi.fn()
-    render(<WorkspaceCard {...createProps({ isSystem: false, onDelete })} />)
-    expect(screen.getByLabelText('删除')).toBeInTheDocument()
-  })
-
-  it('hides delete button for system workspaces', () => {
-    const onDelete = vi.fn()
-    render(<WorkspaceCard {...createProps({ isSystem: true, onDelete })} />)
-    expect(screen.queryByLabelText('删除')).not.toBeInTheDocument()
-  })
-
-  it('hides delete button when onDelete is not provided', () => {
-    render(
-      <WorkspaceCard
-        {...createProps({ isSystem: false, onDelete: undefined })}
-      />
-    )
-    expect(screen.queryByLabelText('删除')).not.toBeInTheDocument()
-  })
-
-  it('calls onDelete when delete button is clicked', () => {
-    const onDelete = vi.fn()
-    render(<WorkspaceCard {...createProps({ isSystem: false, onDelete })} />)
-    const deleteBtn = screen.getByLabelText('删除')
-    fireEvent.click(deleteBtn)
-    expect(onDelete).toHaveBeenCalledTimes(1)
-  })
-
-  it('does not call onClick when delete button is clicked', () => {
-    const onClick = vi.fn()
-    const onDelete = vi.fn()
-    render(
-      <WorkspaceCard {...createProps({ onClick, isSystem: false, onDelete })} />
-    )
-    const deleteBtn = screen.getByLabelText('删除')
-    fireEvent.click(deleteBtn)
-    expect(onClick).not.toHaveBeenCalled()
-    expect(onDelete).toHaveBeenCalledTimes(1)
-  })
 })
