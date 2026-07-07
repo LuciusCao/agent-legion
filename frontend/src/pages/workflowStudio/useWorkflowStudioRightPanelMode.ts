@@ -8,60 +8,61 @@ type UsePanelModeProps = {
   validationMessage: string
   validationErrors: string[]
 }
-
 export function useWorkflowStudioRightPanelMode(props: UsePanelModeProps) {
   const [mode, setMode] = useState<PanelMode>('overview')
   const [manualMode, setManualMode] = useState<PanelMode | null>(null)
-  const prevValidationRef = useRef({ message: '', errorsLength: 0 })
-
+  const prevRef = useRef({
+    selectedNodeKey: null as string | null,
+    forcedMode: undefined as 'changes' | 'yaml' | undefined,
+    validationMessage: '',
+    validationErrorsLength: 0,
+  })
   useEffect(() => {
+    const prev = prevRef.current
     const hasValidation =
       props.validationErrors.length > 0 || props.validationMessage !== ''
     const hadValidation =
-      prevValidationRef.current.errorsLength > 0 ||
-      prevValidationRef.current.message !== ''
+      prev.validationErrorsLength > 0 || prev.validationMessage !== ''
 
     /* eslint-disable react-hooks/set-state-in-effect -- derived state reconciliation */
+    let nextMode: PanelMode | null = null
     if (hasValidation && !hadValidation) {
-      setMode('validation')
+      nextMode = 'validation'
     } else if (!hasValidation && hadValidation) {
-      if (props.forcedMode) {
-        setMode(props.forcedMode)
-      } else if (props.selectedNodeKey) {
-        setMode('node')
-      } else if (
-        manualMode &&
-        (manualMode !== 'node' || props.selectedNodeKey)
-      ) {
-        setMode(manualMode)
-      } else {
-        setMode('overview')
-      }
+      if (props.forcedMode) nextMode = props.forcedMode
+      else if (props.selectedNodeKey) nextMode = 'node'
+      else if (manualMode && manualMode !== 'node') nextMode = manualMode
+      else nextMode = 'overview'
     } else if (!hasValidation) {
-      if (props.forcedMode) {
-        setMode(props.forcedMode)
-      } else if (props.selectedNodeKey) {
-        setMode('node')
-      } else if (!props.selectedNodeKey && mode === 'node') {
-        setMode('overview')
+      if (prev.forcedMode != null && props.forcedMode == null) {
+        if (manualMode === prev.forcedMode) setManualMode(null)
+        nextMode = props.selectedNodeKey ? 'node' : 'overview'
+      }
+      // prettier-ignore
+      if (nextMode === null && props.forcedMode && props.forcedMode !== prev.forcedMode) {
+        nextMode = props.forcedMode
+      }
+      // prettier-ignore
+      if (nextMode === null && props.selectedNodeKey && props.selectedNodeKey !== prev.selectedNodeKey) {
+        nextMode = 'node'
+      }
+      // prettier-ignore
+      if (nextMode === null && prev.selectedNodeKey != null && props.selectedNodeKey == null && !props.forcedMode && (!manualMode || manualMode === 'node')) {
+        nextMode = 'overview'
       }
     }
+
+    if (manualMode === 'node' && !props.selectedNodeKey) setManualMode(null)
+    if (nextMode !== null) setMode(nextMode)
     /* eslint-enable react-hooks/set-state-in-effect */
 
-    if (manualMode === 'node' && !props.selectedNodeKey) {
-      setManualMode(null)
-    }
-
-    prevValidationRef.current = {
-      message: props.validationMessage,
-      errorsLength: props.validationErrors.length,
-    }
+    // prettier-ignore
+    prevRef.current = { selectedNodeKey: props.selectedNodeKey, forcedMode: props.forcedMode, validationMessage: props.validationMessage, validationErrorsLength: props.validationErrors.length }
   }, [
     props.forcedMode,
     props.selectedNodeKey,
     props.validationErrors.length,
     props.validationMessage,
-    mode,
     manualMode,
   ])
 
