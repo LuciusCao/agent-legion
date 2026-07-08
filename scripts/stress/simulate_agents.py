@@ -18,14 +18,13 @@ import argparse
 import asyncio
 import json
 import logging
+import queue
 import random
 import sys
 import time
 import tracemalloc
 import uuid
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 # Allow importing `server` when the script is executed directly.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -35,6 +34,7 @@ if str(PROJECT_ROOT) not in sys.path:
 import requests  # noqa: E402
 
 from scripts.stress._stress_http_events import StressHttpEventRecorder  # noqa: E402
+from scripts.stress._stress_metrics import StressMetrics  # noqa: E402
 from server.app.jobs import JobQueries  # noqa: E402
 from server.app.services.workflow_revision_format import (  # noqa: E402
     definition_hash,
@@ -70,46 +70,6 @@ def _stress_workflow_definition() -> WorkflowDefinition:
     )
 
 
-@dataclass
-class StressMetrics:
-    started_at: str = ""
-    finished_at: str = ""
-    duration_seconds: float = 0.0
-    agents: int = 0
-    jobs_target: int = 0
-    jobs_created: int = 0
-    events_recorded: int = 0
-    raw_events_per_second: float = 0.0
-    sse_messages_received: int = 0
-    sse_messages_per_second: float = 0.0
-    patch_batch_sizes: list[int] = field(default_factory=list)
-    flush_latencies_ms: list[float] = field(default_factory=list)
-    stats_query_latencies_ms: list[float] = field(default_factory=list)
-    memory_high_water_mb: float = 0.0
-    resync_count: int = 0
-    errors: list[str] = field(default_factory=list)
-
-    def summary(self) -> dict[str, Any]:
-        data = asdict(self)
-        sizes = self.patch_batch_sizes
-        latencies = self.flush_latencies_ms
-        data["patch_batch_size_p50"] = _percentile(sizes, 0.5) if sizes else 0
-        data["patch_batch_size_p95"] = _percentile(sizes, 0.95) if sizes else 0
-        data["patch_batch_size_p99"] = _percentile(sizes, 0.99) if sizes else 0
-        data["flush_latency_p50_ms"] = _percentile(latencies, 0.5) if latencies else 0
-        data["flush_latency_p95_ms"] = _percentile(latencies, 0.95) if latencies else 0
-        data["flush_latency_p99_ms"] = _percentile(latencies, 0.99) if latencies else 0
-        return data
-
-
-def _percentile(values: list[int] | list[float], q: float) -> float:
-    if not values:
-        return 0.0
-    sorted_values = sorted(values)
-    idx = max(0, min(len(sorted_values) - 1, int(len(sorted_values) * q)))
-    return float(sorted_values[idx])
-
-
 class StressSimulator:
     def __init__(
         self,
@@ -136,6 +96,7 @@ class StressSimulator:
         self._start_monotonic = time.monotonic()
         self._stop_event = asyncio.Event()
         self._job_ids: list[str] = []
+        self._pending_flush_times: queue.Queue[float] = queue.Queue()
 
     def _setup_db(self) -> JobQueries:
         settings = load_settings()
@@ -247,6 +208,13 @@ class StressSimulator:
                 if msg_type == "job_patch_batch":
                     self.metrics.sse_messages_received += 1
                     self.metrics.patch_batch_sizes.append(len(data.get("jobs", [])))
+                    now = time.monotonic()
+                    while not self._pending_flush_times.empty():
+                        try:
+                            recorded_at = self._pending_flush_times.get_nowait()
+                        except queue.Empty:
+                            break
+                        self.metrics.flush_latencies_ms.append((now - recorded_at) * 1000)
                 elif msg_type == "resync_required":
                     self.metrics.resync_count += 1
         except Exception as exc:  # noqa: BLE001
@@ -258,7 +226,7 @@ class StressSimulator:
             return
 
         recorder = StressHttpEventRecorder(self.base_url, self.workspace_id)
-        interval = 1.0 / max(1, self.event_rate)
+        interval = self.agents / max(1, self.event_rate)
         end_time = time.monotonic() + self.duration
         events_issued = 0
         while time.monotonic() < end_time and not self._stop_event.is_set():
@@ -275,9 +243,10 @@ class StressSimulator:
                     events.append((job_id, "updated"))
 
             if events:
-                recorded, latency_s = recorder.record_batch(events)
+                recorded, recorded_at = recorder.record_batch(events)
                 events_issued += recorded
-                self.metrics.flush_latencies_ms.append(latency_s * 1000)
+                if recorded_at is not None:
+                    self._pending_flush_times.put_nowait(recorded_at)
 
             elapsed = time.monotonic() - batch_start
             sleep_for = max(0.0, interval - elapsed)
@@ -384,7 +353,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--workspace", default="ws-stress", help="Workspace id/name")
     parser.add_argument("--agents", type=int, default=100, help="Concurrent synthetic agents")
     parser.add_argument("--jobs", type=int, default=5000, help="Target number of jobs")
-    parser.add_argument("--event-rate", type=int, default=500, help="Raw events per second")
+    parser.add_argument(
+        "--event-rate",
+        type=int,
+        default=500,
+        help="Total raw events per second across all agents",
+    )
     parser.add_argument("--duration", type=int, default=600, help="Run duration in seconds")
     parser.add_argument("--base-url", default=None, help="Backend base URL for SSE listening")
     parser.add_argument(

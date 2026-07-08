@@ -22,24 +22,24 @@ export async function loadWorkspaceJobsSnapshot(
   workspaceId: string,
   isStale: () => boolean
 ): Promise<void> {
-  const allJobs: JobSummary[] = []
-  let cursor: string | undefined
-  let revision = 0
-  while (true) {
+  const first = await fetchJobsSnapshot(workspaceId, 200, undefined)
+  if (isStale()) return
+  useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
+    ...useWorkspaceStore.getState().workspaceStats[workspaceId],
+    job_stats: first.stats,
+  })
+  useJobStore
+    .getState()
+    .setJobsSnapshot(workspaceId, first.revision, first.jobs)
+
+  let cursor = first.next_cursor
+  while (cursor) {
     const snapshot = await fetchJobsSnapshot(workspaceId, 200, cursor)
     if (isStale()) return
-    if (!cursor) {
-      revision = snapshot.revision
-      useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
-        ...useWorkspaceStore.getState().workspaceStats[workspaceId],
-        job_stats: snapshot.stats,
-      })
-    }
-    allJobs.push(...snapshot.jobs)
+    useJobStore.getState().appendJobsSnapshot(workspaceId, snapshot.jobs)
     if (!snapshot.next_cursor) break
     cursor = snapshot.next_cursor
   }
-  useJobStore.getState().setJobsSnapshot(workspaceId, revision, allJobs)
 }
 
 export function handleWorkspaceEvent(
