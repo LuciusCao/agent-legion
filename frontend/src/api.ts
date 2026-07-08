@@ -11,6 +11,7 @@ import type {
 import type { WorkspaceStats } from './workspaceTypes'
 
 export { api } from './api/core'
+export { fetchJobsSnapshot } from './api/jobSnapshot'
 // prettier-ignore
 export { compareWorkflowDraft, fetchActiveWorkflowRevision, fetchWorkflowRevisionDetail, fetchWorkflowRevisions } from './api/workflow_revisions'
 export {

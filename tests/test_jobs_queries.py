@@ -321,3 +321,53 @@ def test_execution_control_mutations_raise_for_unknown_job(tmp_path: Path) -> No
 
     with pytest.raises(ValueError):
         db.clear_job_execution_target("missing-job")
+
+
+def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = db.create_workspace(
+        "List By Ids Workspace", default_workflow_key="question_comprehension_info"
+    )
+    other_workspace = db.create_workspace(
+        "Other Workspace", default_workflow_key="question_comprehension_info"
+    )
+    job1 = db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question_id",
+        source_id="Q1",
+        batch_id="",
+        title="Job 1",
+        node_keys=["fetch_question_context"],
+        workspace_id=workspace["id"],
+    )
+    job2 = db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question_id",
+        source_id="Q2",
+        batch_id="",
+        title="Job 2",
+        node_keys=["fetch_question_context"],
+        workspace_id=workspace["id"],
+    )
+    other_job = db.create_job(
+        workflow_key="question_comprehension_info",
+        source_type="question_id",
+        source_id="Q-OTHER",
+        batch_id="",
+        title="Other Job",
+        node_keys=["fetch_question_context"],
+        workspace_id=other_workspace["id"],
+    )
+
+    results = db.list_jobs_by_ids(workspace["id"], [job1["id"], job2["id"], other_job["id"]])
+    ids = {job["id"] for job in results}
+
+    assert ids == {job1["id"], job2["id"]}
+
+
+def test_list_jobs_by_ids_returns_empty_for_empty_input(tmp_path: Path) -> None:
+    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    workspace = db.create_workspace(
+        "Empty List Workspace", default_workflow_key="question_comprehension_info"
+    )
+    assert db.list_jobs_by_ids(workspace["id"], []) == []

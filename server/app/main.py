@@ -1,5 +1,4 @@
 import asyncio
-import importlib
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,47 +12,22 @@ from server.app.db.migrations.report import MigrationBlockedError
 from server.app.db.notifications import NotificationHub
 from server.app.events import JobEventManager, VideoEventManager
 from server.app.executors.backup import legacy_backup_path
-from server.app.executors.config import LocalExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
-from server.app.executors.local import LocalHandler
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.runtime_factory import build_execution_runtime
+from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
+from server.app.local_handler_loader import build_local_handlers
 from server.app.routes import create_router
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
 from server.app.skills.manager import SkillManager
 from server.app.spa import mount_spa
+from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.registry import list_registered_workflows
-
-
-def _build_local_handlers(settings: Settings) -> dict[str, LocalHandler]:
-    """Resolve local handler references from executor definitions into callables."""
-    handlers: dict[str, LocalHandler] = {}
-    for config in settings.executor_definitions.values():
-        if not isinstance(config, LocalExecutorConfig):
-            continue
-        for capability_config in config.capabilities.values():
-            handler_key = capability_config.handler
-            if handler_key in handlers or "." not in handler_key:
-                continue
-            module_name, func_name = handler_key.rsplit(".", 1)
-            full_module_name = f"server.app.workflows.{module_name}"
-            try:
-                module = importlib.import_module(full_module_name)
-                func = getattr(module, func_name)
-                if callable(func):
-                    handlers[handler_key] = func
-                else:
-                    logging.getLogger(__name__).warning(
-                        "Local handler %s is not callable", handler_key
-                    )
-            except Exception:
-                logging.getLogger(__name__).warning("Could not load local handler %s", handler_key)
-    return handlers
 
 
 def build_executor_registry(
@@ -72,7 +46,7 @@ def build_executor_registry(
         base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
     )
     runtime = RuntimeDependencies(
-        local_handlers=_build_local_handlers(settings),
+        local_handlers=build_local_handlers(settings),
         pi_runtime=settings.executor_runtime.workflows.pi,
         skill_manager=skill_manager,
         openclaw_runtime=settings.executor_runtime.openclaw,
@@ -86,7 +60,6 @@ def build_executor_registry(
 def create_app(
     data_dir: Path | None = None,
     start_worker: bool = False,
-    max_workers: int | None = None,
 ) -> FastAPI:
     settings = load_settings(data_dir=data_dir)
 
@@ -102,6 +75,9 @@ def create_app(
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
     executor_registry = build_executor_registry(settings, job_db)
 
+    job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
+        job_db, settings, job_event_manager
+    )
     definitions = list_registered_workflows(settings.root_dir)
     with job_db.connect() as conn:
         try:
@@ -125,8 +101,11 @@ def create_app(
                 f"Workspace executor finalization blocked: {exc.report.to_json()}. "
                 f"Run `{check_cmd}` for details."
             ) from exc
-
     workflow_worker_thread: WorkflowWorkerThread | None = None
+    background_tasks = BackgroundTasks(
+        workspace_event_aggregator=workspace_event_aggregator,
+        agent_broadcast_controller=agent_manager._broadcast_controller,
+    )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -139,7 +118,10 @@ def create_app(
             sync_workspace_pi_agents(job_db, settings, agent_manager)
             if WorkflowWorkerThread.is_enabled(settings):
                 executor_leases = ExecutorLeaseRepository(
-                    job_db.path, job_db=job_db, job_event_manager=job_event_manager
+                    job_db.path,
+                    job_db=job_db,
+                    job_event_manager=job_event_manager,
+                    job_event_buffer=job_event_buffer,
                 )
                 execution_runtime = build_execution_runtime(
                     executor_leases, executor_registry, settings.executor_runtime
@@ -157,7 +139,9 @@ def create_app(
                     workflow_worker_thread.start()
                 except Exception:
                     logging.getLogger(__name__).exception("workflow worker failed to start")
+        background_tasks.start(app)
         yield
+        background_tasks.stop(app)
         if workflow_worker_thread is not None:
             workflow_worker_thread.stop()
 
@@ -170,7 +154,8 @@ def create_app(
     app.state.workspace_worker_control = workspace_worker_control
     app.state.video_event_manager = video_event_manager
     app.state.job_event_manager = job_event_manager
-
+    app.state.job_event_buffer = job_event_buffer
+    app.state.workspace_event_aggregator = workspace_event_aggregator
     app.include_router(
         create_router(
             db,
@@ -180,11 +165,10 @@ def create_app(
             video_event_manager,
             workspace_worker_control,
             job_event_manager=job_event_manager,
+            job_event_buffer=job_event_buffer,
         )
     )
-
     mount_spa(app, settings.root_dir / "frontend" / "dist")
-
     return app
 
 

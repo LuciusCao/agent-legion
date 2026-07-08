@@ -47,6 +47,14 @@ class JobsResponse(BaseModel):
     jobs: list[JobSummaryResponse]
 
 
+class JobsSnapshotResponse(BaseModel):
+    workspace_id: str
+    revision: int
+    stats: dict[str, int]
+    jobs: list[JobSummaryResponse]
+    next_cursor: str | None = None
+
+
 class JobNodeResponse(BaseModel):
     id: int
     job_id: str

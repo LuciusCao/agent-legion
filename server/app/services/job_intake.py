@@ -35,11 +35,13 @@ class JobIntakeService:
         settings: Settings,
         workflows: WorkflowCatalogService,
         job_event_manager: JobEventManager | None = None,
+        job_event_buffer: Any | None = None,
     ):
         self.job_db = job_db
         self.settings = settings
         self.workflows = workflows
         self.job_event_manager = job_event_manager
+        self.job_event_buffer = job_event_buffer
 
     def create_batch(self, workspace_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         workspace = get_workspace(self.job_db, workspace_id)
@@ -173,7 +175,10 @@ class JobIntakeService:
         jobs = resolved_jobs
 
         batch["created_count"] = len(jobs)
-        if self.job_event_manager is not None:
+        if self.job_event_buffer is not None:
+            for job in jobs:
+                self.job_event_buffer.record_job_created(workspace_id, str(job["id"]))
+        elif self.job_event_manager is not None:
             stats = self.job_db.count_jobs_by_status(workspace_id)
             self.job_event_manager.broadcast_jobs_created(workspace_id, jobs, stats)
         return {"batch": batch, "created_count": len(jobs), "jobs": jobs}

@@ -8,11 +8,20 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import Request
 
-from server.app.events import JobEventManager
+from server.app.events import JobEventManager, record_job_update
 from server.app.executors.leases import ExecutorLeaseRepository, _sqlite_timestamp
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
+from server.app.job_events import (
+    build_job_patch_batch_payload,
+    build_resync_required_payload,
+)
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
+from server.app.services.job_patch_queries import JobPatchQueryService
+from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workspace_executor_configuration import (
+    WorkspaceExecutorConfigurationService,
+)
 from server.app.settings import Settings
 
 
@@ -65,6 +74,26 @@ def manager():
     m = JobEventManager()
     m._loop = asyncio.new_event_loop()
     return m
+
+
+@pytest.fixture
+def job_query_service(job_db, settings):
+    return JobQueryService(
+        job_db,
+        settings,
+        WorkflowCatalogService(settings),
+        WorkspaceExecutorConfigurationService(job_db),
+    )
+
+
+@pytest.fixture
+def job_patch_query_service(job_db, settings):
+    return JobPatchQueryService(
+        job_db,
+        settings,
+        WorkflowCatalogService(settings),
+        WorkspaceExecutorConfigurationService(job_db),
+    )
 
 
 def _insert_workspace_job(conn):
@@ -541,3 +570,121 @@ def test_rerun_conflict_does_not_broadcast(manager, tmp_path, monkeypatch):
     assert result["status"] == "skipped"
     assert result["reason_code"] == "conflict"
     assert queue.empty()
+
+
+def test_job_event_manager_builds_patch_batch_payload():
+    payload = build_job_patch_batch_payload(
+        workspace_id="ws1",
+        revision=42,
+        stats={"running": 2},
+        jobs=[{"id": "job1", "status": "running"}],
+        deleted_job_ids=["job2"],
+    )
+
+    data = json.loads(payload)
+    assert data["type"] == "job_patch_batch"
+    assert data["workspace_id"] == "ws1"
+    assert data["revision"] == 42
+    assert data["stats"] == {"running": 2}
+    assert data["jobs"] == [{"id": "job1", "status": "running"}]
+    assert data["deleted_job_ids"] == ["job2"]
+
+
+def test_job_event_manager_builds_resync_payload():
+    payload = build_resync_required_payload(
+        workspace_id="ws1",
+        latest_revision=99,
+        reason="revision_too_old",
+    )
+
+    data = json.loads(payload)
+    assert data == {
+        "type": "resync_required",
+        "workspace_id": "ws1",
+        "latest_revision": 99,
+        "reason": "revision_too_old",
+    }
+
+
+@pytest.fixture
+def fake_job_db():
+    class _FakeJobDB:
+        def __init__(self):
+            self.jobs = {}
+
+        def get_job(self, job_id):
+            return self.jobs.get(job_id)
+
+    return _FakeJobDB()
+
+
+class FakeJobEventBuffer:
+    def __init__(self):
+        self.updated = []
+        self.created = []
+        self.deleted = []
+
+    def record_job_updated(self, workspace_id, job_id):
+        self.updated.append((workspace_id, job_id))
+        return 1
+
+    def record_job_created(self, workspace_id, job_id):
+        self.created.append((workspace_id, job_id))
+        return 1
+
+    def record_job_deleted(self, workspace_id, job_id):
+        self.deleted.append((workspace_id, job_id))
+        return 1
+
+
+def test_record_job_update_uses_event_buffer(fake_job_db):
+    buffer = FakeJobEventBuffer()
+    fake_job_db.jobs["job1"] = {"id": "job1", "workspace_id": "ws1"}
+
+    record_job_update(fake_job_db, buffer, "job1")
+
+    assert buffer.updated == [("ws1", "job1")]
+
+
+def test_job_query_service_lists_patch_summaries_by_ids(job_patch_query_service, job_db):
+    job_db.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    batch1 = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["q1"]},
+        workspace_id="ws1",
+    )
+    job1 = job_db.create_job(
+        workspace_id="ws1",
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="q1",
+        batch_id=batch1["id"],
+        title="Question 1",
+        node_keys=["question_understanding"],
+    )
+    batch2 = job_db.create_batch(
+        "question_comprehension_info",
+        "batch_by_ids",
+        {"question_ids": ["q2"]},
+        workspace_id="ws1",
+    )
+    job2 = job_db.create_job(
+        workspace_id="ws1",
+        workflow_key="question_comprehension_info",
+        source_type="question",
+        source_id="q2",
+        batch_id=batch2["id"],
+        title="Question 2",
+        node_keys=["question_understanding"],
+    )
+
+    summaries = job_patch_query_service.list_patch_summaries("ws1", [job1["id"]])
+
+    assert [summary["id"] for summary in summaries] == [job1["id"]]
+    assert summaries[0]["workspace_id"] == "ws1"
+    assert "status" in summaries[0]
+    assert "active_node_key" in summaries[0]
+    assert "completed_nodes" in summaries[0]
+    assert "total_nodes" in summaries[0]
+    assert job2["id"] not in [summary["id"] for summary in summaries]

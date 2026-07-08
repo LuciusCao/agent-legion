@@ -1,11 +1,10 @@
 import { useRef } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
-import type { JobRecord } from '../types'
-import { JobListVirtualRow } from './JobListVirtualRow'
+import { JobListVirtualRowById } from './JobListVirtualRowById'
 import styles from './JobList.module.css'
 
 interface JobListVirtualizedProps {
-  jobs: JobRecord[]
+  jobIds: string[]
   selectedIds: Set<string>
   selectMode: boolean
   workspaceId: string
@@ -13,7 +12,7 @@ interface JobListVirtualizedProps {
 }
 
 export function JobListVirtualized({
-  jobs,
+  jobIds,
   selectedIds,
   selectMode,
   workspaceId,
@@ -22,7 +21,7 @@ export function JobListVirtualized({
   const parentRef = useRef<HTMLDivElement>(null)
   // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual is known to be safe here
   const rowVirtualizer = useVirtualizer({
-    count: jobs.length,
+    count: jobIds.length,
     estimateSize: () => 76,
     getScrollElement: () => parentRef.current,
     overscan: 8,
@@ -37,17 +36,17 @@ export function JobListVirtualized({
         }}
       >
         {rowVirtualizer.getVirtualItems().map((virtualRow) => {
-          const job = jobs[virtualRow.index]
-          if (!job) return null
+          const jobId = jobIds[virtualRow.index]
+          if (!jobId) return null
           return (
-            <JobListVirtualRow
-              key={job.id}
-              job={job}
-              selected={selectedIds.has(job.id)}
+            <JobListVirtualRowById
+              key={jobId}
+              jobId={jobId}
+              selected={selectedIds.has(jobId)}
               selectMode={selectMode}
               virtualRow={virtualRow}
               workspaceId={workspaceId}
-              onToggleSelect={() => onToggleSelect(job.id)}
+              onToggleSelect={() => onToggleSelect(jobId)}
             />
           )
         })}

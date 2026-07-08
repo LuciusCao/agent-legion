@@ -1,17 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { useJobStore } from '../stores/jobStore'
+import { handleWorkspaceEvent } from './workspaceEventHandlers'
+import { refreshWorkspaceEvents } from './workspaceEventRefresh'
 import {
-  mergeWorkspaceEventStats,
-  refreshWorkspaceEvents,
-} from './workspaceEventRefresh'
-
-interface WorkspaceEventPayload {
-  type: string
-  workspace_id: string
-  job_id?: string
-  stats?: Record<string, number>
-}
-
+  createLoadSnapshot,
+  enqueuePendingEvent,
+} from './workspaceSnapshotLoader'
 export function useWorkspaceEvents(
   workspaceId: string | undefined,
   enabled = true,
@@ -19,11 +13,11 @@ export function useWorkspaceEvents(
 ) {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
+  const snapshotLoadingRef = useRef(!statsOnly)
+  const pendingEventsRef = useRef<MessageEvent[]>([])
   useEffect(() => {
     if (workspaceId) useJobStore.getState().resetForWorkspace(workspaceId)
   }, [workspaceId])
-
   useEffect(() => {
     if (!enabled || !workspaceId || typeof EventSource === 'undefined') return
 
@@ -31,9 +25,9 @@ export function useWorkspaceEvents(
     let reconnectDelay = 1000
     const maxReconnectDelay = 30000
     const jobUpdateRefreshDelay = 750
+    const maxPendingEvents = 1000
     let closed = false
     let stale = false
-
     const refresh = (includeJobs: boolean) =>
       refreshWorkspaceEvents(
         workspaceId,
@@ -50,6 +44,25 @@ export function useWorkspaceEvents(
       }, jobUpdateRefreshDelay)
     }
 
+    const processEvent = (event: MessageEvent) => {
+      handleWorkspaceEvent(
+        event,
+        workspaceId,
+        statsOnly,
+        scheduleJobRefresh,
+        loadSnapshot,
+        () => void refresh(false)
+      )
+    }
+
+    const loadSnapshot = createLoadSnapshot(
+      workspaceId,
+      snapshotLoadingRef,
+      pendingEventsRef,
+      processEvent,
+      () => stale || closed
+    )
+
     const connect = () => {
       if (source || closed || stale) return
       source = new EventSource(
@@ -57,31 +70,23 @@ export function useWorkspaceEvents(
       )
       source.onopen = () => {
         reconnectDelay = 1000
-        refresh(true)
+        if (statsOnly) {
+          snapshotLoadingRef.current = false
+          void refresh(false)
+        } else {
+          void loadSnapshot()
+        }
       }
       source.onmessage = (event) => {
-        if (!event.data || event.data.startsWith(':heartbeat')) return
-        try {
-          const payload = JSON.parse(event.data) as WorkspaceEventPayload
-          if (payload.workspace_id !== workspaceId) return
-          if (payload.stats) {
-            mergeWorkspaceEventStats(workspaceId, payload.stats)
-          }
-          if (payload.type === 'job_updated') {
-            scheduleJobRefresh()
-            return
-          }
-          void refresh(true)
-        } catch {
-          // ignore invalid payloads
+        if (snapshotLoadingRef.current) {
+          enqueuePendingEvent(pendingEventsRef, event, maxPendingEvents)
+        } else {
+          processEvent(event)
         }
       }
-
       source.onerror = () => {
-        if (source) {
-          source.close()
-          source = null
-        }
+        source?.close()
+        source = null
         if (closed || stale) return
         reconnectTimerRef.current = setTimeout(() => {
           reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay)

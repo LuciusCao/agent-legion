@@ -1,14 +1,12 @@
 import { getVisibleJobs } from '../selectors'
 import type { JobFilterConfig, JobState, JobStoreSet } from '../state'
 import { normalizeJobStatus } from '../state'
+import { updateFilterConfig } from './filterSelectionState'
 
 export function selectionActions(set: JobStoreSet, get: () => JobState) {
   return {
     setFilterConfig(config: Partial<JobFilterConfig>) {
-      set((state) => ({
-        filterConfig: { ...state.filterConfig, ...config },
-        selectedIds: new Set(),
-      }))
+      set((state) => updateFilterConfig(state, config))
     },
     toggleSelectMode() {
       set((state) => ({
@@ -32,9 +30,12 @@ export function selectionActions(set: JobStoreSet, get: () => JobState) {
     },
     selectFailed() {
       set((state) => {
-        const failedIds = state.jobs
-          .filter((j) => normalizeJobStatus(j.status) === 'failed')
-          .map((j) => j.id)
+        const failedIds: string[] = []
+        for (const id of state.jobIds) {
+          const job = state.jobsById[id]
+          if (job && normalizeJobStatus(job.status) === 'failed')
+            failedIds.push(job.id)
+        }
         return { selectedIds: new Set(failedIds) }
       })
     },

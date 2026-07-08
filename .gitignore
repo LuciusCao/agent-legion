@@ -18,3 +18,4 @@ coverage/
 .DS_Store
 config/workflow.yaml.bak-*
 tools/content-uploader/config.dev.yaml
+stress-results/

@@ -6,7 +6,9 @@ from typing import Any
 from fastapi import Request
 from fastapi.responses import StreamingResponse
 
-from server.app.jobs import JobQueries
+# Backwards-compatible re-exports that now live in server.app.job_events.
+from server.app.job_events import broadcast_job_update as broadcast_job_update
+from server.app.job_events import record_job_update as record_job_update
 
 logger = logging.getLogger(__name__)
 
@@ -299,23 +301,3 @@ class JobEventManager:
             workspace_id,
             self._build_payload("job_deleted", workspace_id, stats, job_id=job_id),
         )
-
-
-def broadcast_job_update(
-    job_db: JobQueries | None,
-    job_event_manager: JobEventManager | None,
-    job_id: str,
-) -> None:
-    try:
-        if job_event_manager is None or job_db is None:
-            return
-        job = job_db.get_job(job_id)
-        if job is None:
-            return
-        workspace_id = str(job.get("workspace_id", ""))
-        if not workspace_id:
-            return
-        stats = job_db.count_jobs_by_status(workspace_id)
-        job_event_manager.broadcast_job_updated(workspace_id, job_id, stats)
-    except Exception:
-        logger.exception("Failed to broadcast job update for %s", job_id)

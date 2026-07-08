@@ -2,20 +2,17 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Button } from '@mui/material'
 import { useWorkspaceStore } from '../stores/workspaceStore'
-import { useWorkspaceEvents } from '../hooks/useWorkspaceEvents'
+import { useDashboardEvents } from '../hooks/useDashboardEvents'
 import WorkspaceCard from '../components/WorkspaceCard'
 import CreateWorkspaceDialog from '../components/CreateWorkspaceDialog'
-
-function WorkspaceEventSubscriber({ workspaceId }: { workspaceId: string }) {
-  useWorkspaceEvents(workspaceId, true, true)
-  return null
-}
 
 export function DashboardPage() {
   const navigate = useNavigate()
   const { workspaces, fetchWorkspaces, workspaceStats, fetchWorkspaceStats } =
     useWorkspaceStore()
   const [dialogOpen, setDialogOpen] = useState(false)
+
+  useDashboardEvents()
 
   useEffect(() => {
     fetchWorkspaces()
@@ -53,25 +50,20 @@ export function DashboardPage() {
         }}
       >
         {workspaces.map((w) => (
-          <div key={w.id} style={{ display: 'contents' }}>
-            <WorkspaceEventSubscriber
-              key={`events-${w.id}`}
-              workspaceId={w.id}
-            />
-            <WorkspaceCard
-              name={w.name}
-              workflowLabel={
-                workspaceStats[w.id]?.workflow_label ||
-                w.default_workflow_key ||
-                ''
-              }
-              jobStats={workspaceStats[w.id]?.job_stats || {}}
-              executorStatus={
-                workspaceStats[w.id]?.executor_status?.executors || []
-              }
-              onClick={() => navigate(`/workspaces/${w.id}`)}
-            />
-          </div>
+          <WorkspaceCard
+            key={w.id}
+            name={w.name}
+            workflowLabel={
+              workspaceStats[w.id]?.workflow_label ||
+              w.default_workflow_key ||
+              ''
+            }
+            jobStats={workspaceStats[w.id]?.job_stats || {}}
+            executorStatus={
+              workspaceStats[w.id]?.executor_status?.executors || []
+            }
+            onClick={() => navigate(`/workspaces/${w.id}`)}
+          />
         ))}
       </div>
 

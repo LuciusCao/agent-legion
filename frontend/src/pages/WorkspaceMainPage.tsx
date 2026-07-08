@@ -13,7 +13,10 @@ import {
 import { BatchDeleteDialog } from '../components/BatchDeleteDialog'
 import { WorkspacePackageHistoryDialog } from '../components/WorkspacePackageHistoryDialog'
 import { fetchWorkflowDefinition } from '../api'
-import { getFilterCounts } from '../stores/job/selectors'
+import {
+  selectFilterCounts,
+  selectFilteredJobIds,
+} from '../stores/job/selectors'
 import type { WorkflowDefinitionRecord } from '../types'
 import styles from './WorkspaceMainPage.module.css'
 
@@ -21,30 +24,33 @@ export default function WorkspaceMainPage() {
   const { workspaceId } = useParams<{ workspaceId: string }>()
   const navigate = useNavigate()
   const { fetchWorkspaceStats, workspaceStats } = useWorkspaceStore()
-  const {
-    jobs,
-    selectedIds,
-    filterConfig,
-    setFilterConfig,
-    selectAll,
-    selectFailed,
-    selectUnpacked,
-    clearSelection,
-    batchDelete,
-    batchPackage,
-    batchRerun,
-    batchRunTo,
-    batchUpgradeWorkflow,
-    getFilteredJobs,
-    selectMode,
-    toggleSelectMode,
-    batchRerunLoading,
-    batchPackageLoading,
-    batchDeleteLoading,
-    batchRunToLoading,
-    batchUpgradeWorkflowLoading,
-    isLoading: jobsLoading,
-  } = useJobStore()
+  const jobsById = useJobStore((state) => state.jobsById)
+  const jobIds = useJobStore((state) => state.jobIds)
+  const selectedIds = useJobStore((state) => state.selectedIds)
+  const filterConfig = useJobStore((state) => state.filterConfig)
+  const setFilterConfig = useJobStore((state) => state.setFilterConfig)
+  const selectAll = useJobStore((state) => state.selectAll)
+  const selectFailed = useJobStore((state) => state.selectFailed)
+  const selectUnpacked = useJobStore((state) => state.selectUnpacked)
+  const clearSelection = useJobStore((state) => state.clearSelection)
+  const batchDelete = useJobStore((state) => state.batchDelete)
+  const batchPackage = useJobStore((state) => state.batchPackage)
+  const batchRerun = useJobStore((state) => state.batchRerun)
+  const batchRunTo = useJobStore((state) => state.batchRunTo)
+  const batchUpgradeWorkflow = useJobStore(
+    (state) => state.batchUpgradeWorkflow
+  )
+  const filteredJobIds = useJobStore(selectFilteredJobIds)
+  const selectMode = useJobStore((state) => state.selectMode)
+  const toggleSelectMode = useJobStore((state) => state.toggleSelectMode)
+  const batchRerunLoading = useJobStore((state) => state.batchRerunLoading)
+  const batchPackageLoading = useJobStore((state) => state.batchPackageLoading)
+  const batchDeleteLoading = useJobStore((state) => state.batchDeleteLoading)
+  const batchRunToLoading = useJobStore((state) => state.batchRunToLoading)
+  const batchUpgradeWorkflowLoading = useJobStore(
+    (state) => state.batchUpgradeWorkflowLoading
+  )
+  const jobsLoading = useJobStore((state) => state.isLoading)
 
   const [workflowDefinition, setWorkflowDefinition] =
     useState<WorkflowDefinitionRecord | null>(null)
@@ -80,13 +86,15 @@ export default function WorkspaceMainPage() {
 
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
 
-  const filterCounts = useMemo(
-    () => getFilterCounts({ jobs, filterConfig }),
-    [jobs, filterConfig]
+  const filterCounts = useJobStore(selectFilterCounts)
+  const totalJobs = jobIds.length
+  const selectedJobs = useMemo(
+    () =>
+      Array.from(selectedIds)
+        .map((id) => jobsById[id])
+        .filter((job): job is NonNullable<typeof job> => job !== undefined),
+    [selectedIds, jobsById]
   )
-  const filteredJobs = getFilteredJobs()
-  const totalJobs = jobs.length
-  const selectedJobs = jobs.filter((j) => selectedIds.has(j.id))
 
   const workflowNodesByKey = useMemo(() => {
     if (!workflowDefinition) return {}
@@ -193,12 +201,11 @@ export default function WorkspaceMainPage() {
           filterConfig={filterConfig}
           counts={filterCounts}
           workflowDefinition={workflowDefinition}
-          jobs={jobs}
           onChange={setFilterConfig}
         />
       </section>
 
-      {filteredJobs.length === 0 && totalJobs === 0 && !jobsLoading ? (
+      {filteredJobIds.length === 0 && totalJobs === 0 && !jobsLoading ? (
         <section className={styles.section}>
           <EmptyStateGuide steps={emptyStateSteps} />
         </section>

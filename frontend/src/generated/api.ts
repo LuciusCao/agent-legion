@@ -21,6 +21,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/dashboard/events': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Dashboard Events */
+    get: operations['dashboard_events_api_dashboard_events_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/executors': {
     parameters: {
       query?: never
@@ -632,6 +649,23 @@ export interface paths {
     put?: never
     /** Package Workspace Jobs */
     post: operations['package_workspace_jobs_api_workspaces__workspace_id__jobs_package_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/workspaces/{workspace_id}/jobs/snapshot': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Snapshot Workspace Jobs */
+    get: operations['snapshot_workspace_jobs_api_workspaces__workspace_id__jobs_snapshot_get']
+    put?: never
+    post?: never
     delete?: never
     options?: never
     head?: never
@@ -1313,6 +1347,21 @@ export interface components {
     JobsResponse: {
       /** Jobs */
       jobs: components['schemas']['JobSummaryResponse'][]
+    }
+    /** JobsSnapshotResponse */
+    JobsSnapshotResponse: {
+      /** Jobs */
+      jobs: components['schemas']['JobSummaryResponse'][]
+      /** Next Cursor */
+      next_cursor?: string | null
+      /** Revision */
+      revision: number
+      /** Stats */
+      stats: {
+        [key: string]: number
+      }
+      /** Workspace Id */
+      workspace_id: string
     }
     /** LogEventResponse */
     LogEventResponse: {
@@ -2281,6 +2330,26 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentsResponse']
+        }
+      }
+    }
+  }
+  dashboard_events_api_dashboard_events_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'text/event-stream': unknown
         }
       }
     }
@@ -3531,6 +3600,40 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspacePackageResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  snapshot_workspace_jobs_api_workspaces__workspace_id__jobs_snapshot_get: {
+    parameters: {
+      query?: {
+        limit?: number
+        cursor?: string | null
+      }
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['JobsSnapshotResponse']
         }
       }
       /** @description Validation Error */
