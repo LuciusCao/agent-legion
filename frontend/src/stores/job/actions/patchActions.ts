@@ -3,16 +3,6 @@ import type { JobStoreSet } from '../state'
 
 export function patchActions(set: JobStoreSet) {
   return {
-    setJobsSnapshot: (workspaceId: string, revision: number, jobs: JobSummary[]) =>
-      set({
-        jobs,
-        jobsById: Object.fromEntries(jobs.map((job) => [job.id, job])),
-        jobIds: jobs.map((job) => job.id),
-        jobsWorkspaceId: workspaceId,
-        revision,
-        isLoading: false,
-        error: null,
-      }),
     applyJobPatchBatch: (
       workspaceId: string,
       revision: number,
@@ -20,7 +10,8 @@ export function patchActions(set: JobStoreSet) {
       deletedJobIds: string[]
     ) =>
       set((state) => {
-        if (state.jobsWorkspaceId !== workspaceId) return {}
+        if (state.jobsWorkspaceId !== workspaceId || revision <= state.revision)
+          return {}
         const deleted = new Set(deletedJobIds)
         const jobsById = { ...state.jobsById }
         for (const id of deleted) delete jobsById[id]

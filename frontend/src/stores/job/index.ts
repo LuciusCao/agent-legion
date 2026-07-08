@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import type { JobState } from './state'
 import { fetchActions } from './actions/fetchActions'
+import { snapshotActions } from './actions/snapshotActions'
 import { patchActions } from './actions/patchActions'
 import { selectionActions } from './actions/selectionActions'
 import { batchActions } from './actions/batchActions'
@@ -30,6 +31,7 @@ export const useJobStore = create<JobState>((set, get) => ({
   continueLoading: false,
   batchUpgradeWorkflowLoading: false,
   ...fetchActions(set),
+  ...snapshotActions(set),
   ...patchActions(set),
   ...selectionActions(set, get),
   ...batchActions(set, get),

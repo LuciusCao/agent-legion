@@ -9,13 +9,7 @@ export {
   normalizeJobStatus,
   type MutationCounts,
 } from './mutationHelpers'
-export type JobStatus = 'pending' | 'running' | 'completed' | 'failed' | 'paused'
-export interface JobFilterConfig {
-  status: JobStatus | null
-  search: string
-  workflowVersion: number | 'none' | null
-  activeNodeKey: string | null
-}
+export type { JobFilterConfig, JobStatus } from './filterConfig'
 export interface JobState {
   jobs: JobSummary[]
   jobsById: Record<string, JobSummary>
@@ -26,7 +20,7 @@ export interface JobState {
   error: string | null
   selectedIds: Set<string>
   expandedId: string | null
-  filterConfig: JobFilterConfig
+  filterConfig: import('./filterConfig').JobFilterConfig
   selectMode: boolean
   batchDeleteLoading: boolean
   batchPackageLoading: boolean
@@ -38,14 +32,20 @@ export interface JobState {
   resetForWorkspace: (workspaceId: string) => void
   setJobsAndFinishLoading: (jobs: JobSummary[]) => void
   failJobFetch: (workspaceId: string, message: string) => void
-  setJobsSnapshot: (workspaceId: string, revision: number, jobs: JobSummary[]) => void
+  setJobsSnapshot: (
+    workspaceId: string,
+    revision: number,
+    jobs: JobSummary[]
+  ) => void
   applyJobPatchBatch: (
     workspaceId: string,
     revision: number,
     jobs: JobSummary[],
     deletedJobIds: string[]
   ) => void
-  setFilterConfig: (config: Partial<JobFilterConfig>) => void
+  setFilterConfig: (
+    config: Partial<import('./filterConfig').JobFilterConfig>
+  ) => void
   toggleSelectMode: () => void
   toggleSelect: (id: string) => void
   selectAll: () => void

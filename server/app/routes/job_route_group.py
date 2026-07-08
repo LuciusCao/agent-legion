@@ -10,6 +10,7 @@ from server.app.routes.job_artifacts import create_job_artifacts_router
 from server.app.routes.job_batches import create_job_batches_router
 from server.app.routes.job_invalid_paths import create_job_invalid_paths_router
 from server.app.routes.job_snapshot import create_job_snapshot_router
+from server.app.routes.job_stress_events import create_job_stress_events_router
 from server.app.routes.job_workflow_upgrade import create_job_workflow_upgrade_router
 from server.app.routes.jobs import create_jobs_router
 from server.app.routes.questions import create_questions_router
@@ -53,6 +54,9 @@ def include_job_routes(
         )
     )
     router.include_router(create_job_snapshot_router(services.patch_queries, settings))
+    stress_router = create_job_stress_events_router(settings, job_event_buffer)
+    if stress_router is not None:
+        router.include_router(stress_router)
     router.include_router(
         create_job_workflow_upgrade_router(services.queries, services.workflow_upgrade, settings)
     )

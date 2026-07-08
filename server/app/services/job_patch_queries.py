@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any
 
 from server.app.jobs import JobQueries
+from server.app.jobs.queries.job_pagination import list_jobs_paginated
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
@@ -21,12 +22,14 @@ class JobPatchQueryService(JobQueryService):
         settings: Settings,
         workflows: WorkflowCatalogService | None = None,
         workspace_executor_config: WorkspaceExecutorConfigurationService | None = None,
+        job_event_buffer: Any | None = None,
     ):
         workflows = workflows or WorkflowCatalogService(settings)
         workspace_executor_config = (
             workspace_executor_config or WorkspaceExecutorConfigurationService(job_db)
         )
         super().__init__(job_db, settings, workflows, workspace_executor_config)
+        self._job_event_buffer = job_event_buffer
 
     def list_patch_summaries(
         self,
@@ -64,17 +67,12 @@ class JobPatchQueryService(JobQueryService):
         limit: int = 200,
         cursor: str | None = None,
     ) -> dict[str, Any]:
-        del cursor  # reserved for future pagination
-        jobs = self.list_jobs(workspace_id)
-        bounded = jobs[:limit]
-        next_cursor = None
-        if len(jobs) > limit and bounded:
-            last = bounded[-1]
-            next_cursor = f"{last.get('created_at', '')}:{last['id']}"
+        jobs, next_cursor = list_jobs_paginated(self.job_db, workspace_id, limit, cursor)
+        revision = getattr(self._job_event_buffer, "_revision", 0) if self._job_event_buffer else 0
         return {
             "workspace_id": workspace_id,
-            "revision": 0,
+            "revision": revision,
             "stats": self.job_db.count_jobs_by_status(workspace_id),
-            "jobs": bounded,
+            "jobs": jobs,
             "next_cursor": next_cursor,
         }

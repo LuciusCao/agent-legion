@@ -76,7 +76,7 @@ describe('useWorkspaceEvents', () => {
     })
 
     await waitFor(() => {
-      expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1')
+      expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1', 200, undefined)
       expect(useJobStore.getState().jobsById.j1?.status).toBe('running')
     })
     expect(mockFetchJobs).not.toHaveBeenCalled()
@@ -86,6 +86,11 @@ describe('useWorkspaceEvents', () => {
     vi.useFakeTimers()
     renderHook(() => useWorkspaceEvents('ws1'))
     const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+      await vi.advanceTimersByTimeAsync(0)
+    })
 
     await act(async () => {
       source.onmessage?.(
@@ -111,6 +116,11 @@ describe('useWorkspaceEvents', () => {
     vi.useFakeTimers()
     renderHook(() => useWorkspaceEvents('ws1'))
     const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+      await vi.advanceTimersByTimeAsync(0)
+    })
 
     await act(async () => {
       for (const jobId of ['job1', 'job2', 'job3']) {
@@ -241,6 +251,13 @@ describe('useWorkspaceEvents', () => {
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
+      source.onopen?.()
+    })
+    await waitFor(() => {
+      expect(mockFetchJobsSnapshot).toHaveBeenCalled()
+    })
+
+    await act(async () => {
       source.onmessage?.(
         new MessageEvent('message', {
           data: JSON.stringify({
@@ -264,6 +281,13 @@ describe('useWorkspaceEvents', () => {
     const source = EventSourceMock.instances[0]
 
     await act(async () => {
+      source.onopen?.()
+    })
+    await waitFor(() => {
+      expect(mockFetchJobsSnapshot).toHaveBeenCalled()
+    })
+
+    await act(async () => {
       source.onmessage?.(
         new MessageEvent('message', {
           data: JSON.stringify({
@@ -282,6 +306,13 @@ describe('useWorkspaceEvents', () => {
   it('ignores heartbeat messages', async () => {
     renderHook(() => useWorkspaceEvents('ws1'))
     const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+    })
+    await waitFor(() => {
+      expect(mockFetchJobsSnapshot).toHaveBeenCalled()
+    })
 
     await act(async () => {
       source.onmessage?.(
@@ -316,6 +347,13 @@ describe('useWorkspaceEvents', () => {
     renderHook(() => useWorkspaceEvents('ws1'))
     const source = EventSourceMock.instances[0]
 
+    await act(async () => {
+      source.onopen?.()
+    })
+    await waitFor(() => {
+      expect(mockFetchJobsSnapshot).toHaveBeenCalled()
+    })
+
     source.emitMessage({
       type: 'job_patch_batch',
       workspace_id: 'ws1',
@@ -341,6 +379,13 @@ describe('useWorkspaceEvents', () => {
     })
     renderHook(() => useWorkspaceEvents('ws1'))
     const source = EventSourceMock.instances[0]
+
+    await act(async () => {
+      source.onopen?.()
+    })
+    await waitFor(() => {
+      expect(mockFetchJobsSnapshot).toHaveBeenCalled()
+    })
 
     source.emitMessage({
       type: 'resync_required',

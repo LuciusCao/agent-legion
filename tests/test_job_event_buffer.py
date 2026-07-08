@@ -58,6 +58,7 @@ class FakeEventManager:
     def __init__(self):
         self.patch_batches = []
         self.resyncs = []
+        self.dashboard_stats = []
 
     def _broadcast(self, workspace_id: str, payload: str) -> None:
         data = json.loads(payload)
@@ -73,6 +74,8 @@ class FakeEventManager:
             )
         elif data["type"] == "resync_required":
             self.resyncs.append((workspace_id, data["latest_revision"], data["reason"]))
+        elif data["type"] == "workspace_stats_batch":
+            self.dashboard_stats.append((workspace_id, data["latest_revision"], data["workspaces"]))
 
 
 def test_aggregator_flushes_compacted_patch_batch():
@@ -95,3 +98,8 @@ def test_aggregator_flushes_compacted_patch_batch():
             ["job2"],
         )
     ]
+    assert len(manager.dashboard_stats) == 1
+    dashboard_workspace_id, dashboard_revision, dashboard_workspaces = manager.dashboard_stats[0]
+    assert dashboard_workspace_id == "__dashboard__"
+    assert dashboard_revision == 3
+    assert [ws["id"] for ws in dashboard_workspaces] == ["ws1"]

@@ -9,7 +9,6 @@ export interface BaseEventPayload {
   workspace_id: string
   stats?: Record<string, number>
 }
-
 export interface JobPatchBatchPayload {
   type: 'job_patch_batch'
   workspace_id: string
@@ -23,13 +22,24 @@ export async function loadWorkspaceJobsSnapshot(
   workspaceId: string,
   isStale: () => boolean
 ): Promise<void> {
-  const snapshot = await fetchJobsSnapshot(workspaceId)
-  if (isStale()) return
-  useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
-    ...useWorkspaceStore.getState().workspaceStats[workspaceId],
-    job_stats: snapshot.stats,
-  })
-  useJobStore.getState().setJobsSnapshot(workspaceId, snapshot.revision, snapshot.jobs)
+  const allJobs: JobSummary[] = []
+  let cursor: string | undefined
+  let revision = 0
+  while (true) {
+    const snapshot = await fetchJobsSnapshot(workspaceId, 200, cursor)
+    if (isStale()) return
+    if (!cursor) {
+      revision = snapshot.revision
+      useWorkspaceStore.getState().setWorkspaceStats(workspaceId, {
+        ...useWorkspaceStore.getState().workspaceStats[workspaceId],
+        job_stats: snapshot.stats,
+      })
+    }
+    allJobs.push(...snapshot.jobs)
+    if (!snapshot.next_cursor) break
+    cursor = snapshot.next_cursor
+  }
+  useJobStore.getState().setJobsSnapshot(workspaceId, revision, allJobs)
 }
 
 export function handleWorkspaceEvent(

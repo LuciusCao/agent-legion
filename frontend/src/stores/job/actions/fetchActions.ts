@@ -18,7 +18,10 @@ export function fetchActions(set: JobStoreSet) {
     resetForWorkspace: (workspaceId: string) =>
       set(fetchState.resetForWorkspace(workspaceId)),
     setJobsAndFinishLoading: (jobs: JobSummary[]) =>
-      set({ jobs, isLoading: false, error: null }),
+      set((state) => ({
+        ...fetchState.finishJobFetch(state.jobsWorkspaceId || '', jobs)(state),
+        revision: state.revision,
+      })),
     failJobFetch: (workspaceId: string, message: string) =>
       set(fetchState.failJobFetch(workspaceId, message)),
   }

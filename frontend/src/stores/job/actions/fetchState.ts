@@ -1,30 +1,34 @@
 import type { JobSummary } from '../../../jobTypes'
 import type { JobState } from '../state'
+import { isCurrentWorkspace, normalizeJobs } from './fetchStateHelpers'
 
-function isCurrentWorkspace(state: JobState, workspaceId: string): boolean {
-  return (
-    state.jobsWorkspaceId === workspaceId ||
-    (state.jobs.length > 0 &&
-      state.jobs.every((job) => job.workspace_id === workspaceId))
-  )
-}
+const baseReset =
+  (ws: string, keepJobs: boolean) =>
+  (state: JobState): Partial<JobState> => ({
+    error: null,
+    isLoading: true,
+    ...normalizeJobs(
+      keepJobs && isCurrentWorkspace(state, ws) ? state.jobs : []
+    ),
+    jobsWorkspaceId: ws,
+    selectedIds: isCurrentWorkspace(state, ws)
+      ? state.selectedIds
+      : new Set<string>(),
+  })
 
-const baseReset = (ws: string, keepJobs: boolean) => (state: JobState) => ({
-  error: null,
-  isLoading: true,
-  jobs: keepJobs && isCurrentWorkspace(state, ws) ? state.jobs : [],
-  jobsWorkspaceId: ws,
-  selectedIds: isCurrentWorkspace(state, ws)
-    ? state.selectedIds
-    : new Set<string>(),
-})
-
-export const startJobFetch = (ws: string) => baseReset(ws, false)
 export const resetForWorkspace = (ws: string) => baseReset(ws, false)
+export const startJobFetch = resetForWorkspace
 
 export const finishJobFetch =
-  (ws: string, jobs: JobSummary[]) => (state: JobState) =>
-    state.jobsWorkspaceId === ws ? { jobs, error: null, isLoading: false } : {}
+  (ws: string, jobs: JobSummary[]) =>
+  (state: JobState): Partial<JobState> =>
+    state.jobsWorkspaceId === ws
+      ? { ...normalizeJobs(jobs), error: null, isLoading: false }
+      : {}
 
-export const failJobFetch = (ws: string, msg: string) => (state: JobState) =>
-  state.jobsWorkspaceId === ws ? { error: msg, isLoading: false, jobs: [] } : {}
+export const failJobFetch =
+  (ws: string, msg: string) =>
+  (state: JobState): Partial<JobState> =>
+    state.jobsWorkspaceId === ws
+      ? { error: msg, isLoading: false, ...normalizeJobs([]) }
+      : {}
