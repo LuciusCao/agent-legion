@@ -117,6 +117,16 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             row = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
         return dict(row) if row else None
 
+    def list_jobs_by_ids(self, workspace_id: str, job_ids: Sequence[str]) -> list[dict[str, Any]]:
+        if not job_ids:
+            return []
+        params = [workspace_id, *(str(job_id) for job_id in job_ids)]
+        sql = (
+            f"select * from jobs where workspace_id=? and id in ({','.join('?' for _ in job_ids)})"
+        )
+        with self._connect_read() as conn:
+            return [dict(row) for row in conn.execute(sql, params).fetchall()]
+
     def update_job_status(self, job_id: str, status: str, error_message: str = "") -> None:
         with self.connect() as conn:
             conn.execute(

@@ -1,10 +1,11 @@
 import { useEffect, useRef } from 'react'
 import { useJobStore } from '../stores/jobStore'
-import {
-  handleWorkspaceEvent,
-  loadWorkspaceJobsSnapshot,
-} from './workspaceEventHandlers'
+import { handleWorkspaceEvent } from './workspaceEventHandlers'
 import { refreshWorkspaceEvents } from './workspaceEventRefresh'
+import {
+  createLoadSnapshot,
+  enqueuePendingEvent,
+} from './workspaceSnapshotLoader'
 export function useWorkspaceEvents(
   workspaceId: string | undefined,
   enabled = true,
@@ -24,6 +25,7 @@ export function useWorkspaceEvents(
     let reconnectDelay = 1000
     const maxReconnectDelay = 30000
     const jobUpdateRefreshDelay = 750
+    const maxPendingEvents = 1000
     let closed = false
     let stale = false
     const refresh = (includeJobs: boolean) =>
@@ -53,14 +55,13 @@ export function useWorkspaceEvents(
       )
     }
 
-    const loadSnapshot = async () => {
-      snapshotLoadingRef.current = true
-      pendingEventsRef.current = []
-      await loadWorkspaceJobsSnapshot(workspaceId, () => stale || closed)
-      snapshotLoadingRef.current = false
-      pendingEventsRef.current.forEach(processEvent)
-      pendingEventsRef.current = []
-    }
+    const loadSnapshot = createLoadSnapshot(
+      workspaceId,
+      snapshotLoadingRef,
+      pendingEventsRef,
+      processEvent,
+      () => stale || closed
+    )
 
     const connect = () => {
       if (source || closed || stale) return
@@ -78,16 +79,14 @@ export function useWorkspaceEvents(
       }
       source.onmessage = (event) => {
         if (snapshotLoadingRef.current) {
-          pendingEventsRef.current.push(event)
+          enqueuePendingEvent(pendingEventsRef, event, maxPendingEvents)
         } else {
           processEvent(event)
         }
       }
       source.onerror = () => {
-        if (source) {
-          source.close()
-          source = null
-        }
+        source?.close()
+        source = null
         if (closed || stale) return
         reconnectTimerRef.current = setTimeout(() => {
           reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay)

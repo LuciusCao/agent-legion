@@ -11,18 +11,16 @@ Example:
 from __future__ import annotations
 
 import argparse
-import json
 import logging
 import os
+import shlex
 import shutil
 import signal
 import subprocess
 import sys
 import time
 import uuid
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
 
 # Allow importing `server` when the script is executed directly.
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -30,23 +28,11 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 FRONTEND_DIR = PROJECT_ROOT / "frontend"
 
+from scripts.stress._e2e_readiness import wait_for_server, wait_for_snapshot_readiness  # noqa: E402
+from scripts.stress._e2e_report import E2EStressReport, write_report  # noqa: E402
+
 logger = logging.getLogger(__name__)
 STRESS_RESULTS = PROJECT_ROOT / "stress-results"
-
-
-@dataclass
-class E2EStressReport:
-    run_id: str = ""
-    started_at: str = ""
-    finished_at: str = ""
-    backend_command: str = ""
-    frontend_command: str = ""
-    backend_metrics_path: str | None = None
-    frontend_metrics_path: str | None = None
-    errors: list[str] = field(default_factory=list)
-
-    def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
 
 
 def _iso_now() -> str:
@@ -68,37 +54,19 @@ def _find_free_port() -> int:
         return int(sock.getsockname()[1])
 
 
-def _wait_for_server(base_url: str, timeout: float = 60.0) -> bool:
-    import requests
-
-    deadline = time.monotonic() + timeout
-    while time.monotonic() < deadline:
-        try:
-            response = requests.get(f"{base_url}/api/workspaces", timeout=2)
-            if response.status_code < 500:
-                return True
-        except Exception:  # noqa: BLE001
-            pass
-        time.sleep(0.5)
-    return False
+def _backend_command(port: int) -> list[str]:
+    return (
+        f"{sys.executable} -m uvicorn server.app.main:app "
+        f"--host 127.0.0.1 --port {port} --log-level warning"
+    ).split()
 
 
-def _start_backend(port: int) -> subprocess.Popen:
-    env = os.environ.copy()
-    env["VIDEO_HIVE_DATA_DIR"] = str(PROJECT_ROOT / "data" / "stress")
-    env["AGENT_LEGION_ENABLE_STRESS_EVENTS"] = "1"
-    cmd = [
-        sys.executable,
-        "-m",
-        "uvicorn",
-        "server.app.main:app",
-        "--host",
-        "127.0.0.1",
-        "--port",
-        str(port),
-        "--log-level",
-        "warning",
-    ]
+def _start_backend(cmd: list[str]) -> subprocess.Popen:
+    env = {
+        **os.environ,
+        "VIDEO_HIVE_DATA_DIR": str(PROJECT_ROOT / "data" / "stress"),
+        "AGENT_LEGION_ENABLE_STRESS_EVENTS": "1",
+    }
     logger.info("Starting backend: %s", " ".join(cmd))
     return subprocess.Popen(
         cmd,
@@ -117,8 +85,9 @@ def _run_backend_stress(
     duration: int,
     event_rate: int,
     run_dir: Path,
-) -> Path:
+) -> tuple[subprocess.Popen, Path, list[str]]:
     backend_results = run_dir / "backend"
+    backend_results.mkdir(parents=True, exist_ok=True)
     env = os.environ.copy()
     env["VIDEO_HIVE_DATA_DIR"] = str(PROJECT_ROOT / "data" / "stress")
     env["AGENT_LEGION_ENABLE_STRESS_EVENTS"] = "1"
@@ -140,9 +109,15 @@ def _run_backend_stress(
         "--results-dir",
         str(backend_results),
     ]
-    logger.info("Running backend stress: %s", " ".join(cmd))
-    subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=True)
-    return backend_results / "backend-metrics.json"
+    logger.info("Starting backend stress: %s", " ".join(cmd))
+    proc = subprocess.Popen(
+        cmd,
+        cwd=PROJECT_ROOT,
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    return proc, backend_results / "backend-metrics.json", cmd
 
 
 def _run_frontend_stress(
@@ -151,14 +126,13 @@ def _run_frontend_stress(
     browser: str,
     duration: int,
     run_dir: Path,
-) -> Path | None:
+) -> tuple[Path | None, list[str], str | None]:
     frontend_results = run_dir / "frontend"
     frontend_results.mkdir(parents=True, exist_ok=True)
 
     npm = shutil.which("npm")
     if npm is None:
-        logger.warning("npm not found; skipping frontend stress")
-        return None
+        return None, [], "npm not found; frontend stress cannot run"
 
     env = os.environ.copy()
     env["STRESS_BASE_URL"] = base_url
@@ -172,11 +146,12 @@ def _run_frontend_stress(
     try:
         subprocess.run(cmd, cwd=FRONTEND_DIR, env=env, check=True)
     except subprocess.CalledProcessError as exc:
-        logger.warning("Frontend stress failed or is not configured: %s", exc)
-        return None
+        return None, cmd, str(exc)
+    except Exception as exc:  # noqa: BLE001
+        return None, cmd, str(exc)
 
     metrics_path = frontend_results / "frontend-metrics.json"
-    return metrics_path if metrics_path.exists() else None
+    return (metrics_path if metrics_path.exists() else None), cmd, None
 
 
 def _terminate_process(proc: subprocess.Popen) -> None:
@@ -198,6 +173,7 @@ def run(
     browser: str,
     workspace: str,
     keep_server: bool,
+    skip_frontend: bool,
 ) -> int:
     run_dir = _make_run_dir()
     report = E2EStressReport(
@@ -209,72 +185,66 @@ def run(
     backend_port = _find_free_port()
     base_url = f"http://127.0.0.1:{backend_port}"
     backend_proc: subprocess.Popen | None = None
+    stress_proc: subprocess.Popen | None = None
+
+    backend_cmd = _backend_command(backend_port)
+    report.backend_command = shlex.join(backend_cmd)
 
     try:
-        backend_proc = _start_backend(backend_port)
-        if not _wait_for_server(base_url):
+        backend_proc = _start_backend(backend_cmd)
+
+        if not wait_for_server(base_url):
             report.errors.append("Backend failed to start")
-            return 1
+        else:
+            # Start the backend simulator concurrently with the frontend stress so
+            # the browser experiences live SSE traffic instead of a quiet page.
+            stress_proc, backend_metrics_path, _ = _run_backend_stress(
+                base_url, workspace, agents, jobs, duration, event_rate, run_dir
+            )
+            report.backend_metrics_path = str(backend_metrics_path.relative_to(PROJECT_ROOT))
 
-        backend_metrics_path = _run_backend_stress(
-            base_url, workspace, agents, jobs, duration, event_rate, run_dir
-        )
-        report.backend_metrics_path = str(backend_metrics_path.relative_to(PROJECT_ROOT))
+            if not wait_for_snapshot_readiness(base_url, workspace, min_jobs=jobs):
+                report.errors.append(
+                    "Workspace snapshot did not become ready before frontend stress"
+                )
 
-        frontend_metrics_path = _run_frontend_stress(
-            base_url, workspace, browser, duration, run_dir
-        )
-        if frontend_metrics_path is not None:
-            report.frontend_metrics_path = str(frontend_metrics_path.relative_to(PROJECT_ROOT))
+            if not skip_frontend and not report.errors:
+                frontend_metrics_path, frontend_cmd, frontend_error = _run_frontend_stress(
+                    base_url, workspace, browser, duration, run_dir
+                )
+                report.frontend_command = shlex.join(frontend_cmd)
+                if frontend_error is not None:
+                    report.errors.append(f"Frontend stress failed: {frontend_error}")
+                elif frontend_metrics_path is not None:
+                    report.frontend_metrics_path = str(
+                        frontend_metrics_path.relative_to(PROJECT_ROOT)
+                    )
+
+            if stress_proc is not None:
+                logger.info("Waiting for backend stress to finish...")
+                try:
+                    returncode = stress_proc.wait(timeout=duration + 120)
+                    if returncode != 0:
+                        report.errors.append(f"Backend stress exited with code {returncode}")
+                except subprocess.TimeoutExpired:
+                    report.errors.append("Backend stress did not finish in time")
+                    _terminate_process(stress_proc)
     except subprocess.CalledProcessError as exc:
         report.errors.append(f"Stress step failed: {exc}")
-        return 1
     except Exception as exc:  # noqa: BLE001
         report.errors.append(f"Unexpected error: {exc}")
-        return 1
     finally:
+        if stress_proc is not None and stress_proc.poll() is None:
+            _terminate_process(stress_proc)
         if backend_proc is not None and not keep_server:
             _terminate_process(backend_proc)
 
-    report.finished_at = _iso_now()
-    report_path = run_dir / "report.md"
-    _write_report(report, run_dir, report_path)
-    logger.info("Wrote report to %s", report_path)
-    return 0
+        report.finished_at = _iso_now()
+        report_path = run_dir / "report.md"
+        write_report(report, report_path, PROJECT_ROOT)
+        logger.info("Wrote report to %s", report_path)
 
-
-def _write_report(report: E2EStressReport, run_dir: Path, report_path: Path) -> None:
-    backend_metrics: dict[str, Any] = {}
-    if report.backend_metrics_path:
-        backend_file = PROJECT_ROOT / report.backend_metrics_path
-        if backend_file.exists():
-            backend_metrics = json.loads(backend_file.read_text(encoding="utf-8"))
-
-    frontend_metrics: dict[str, Any] = {}
-    if report.frontend_metrics_path:
-        frontend_file = PROJECT_ROOT / report.frontend_metrics_path
-        if frontend_file.exists():
-            frontend_metrics = json.loads(frontend_file.read_text(encoding="utf-8"))
-
-    lines = [
-        "# Large Scale Agent Concurrency Stress Report\n",
-        f"**Run ID:** {report.run_id}\n",
-        f"**Started:** {report.started_at}\n",
-        f"**Finished:** {report.finished_at}\n",
-        "\n## Backend Metrics\n",
-        "```json\n",
-        json.dumps(backend_metrics, indent=2, default=str),
-        "\n```\n",
-        "\n## Frontend Metrics\n",
-        "```json\n",
-        json.dumps(frontend_metrics, indent=2, default=str),
-        "\n```\n",
-    ]
-    if report.errors:
-        lines.append("\n## Errors\n")
-        for error in report.errors:
-            lines.append(f"- {error}\n")
-    report_path.write_text("".join(lines), encoding="utf-8")
+    return 1 if report.errors else 0
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -297,6 +267,11 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Keep the backend server running after the run",
     )
+    parser.add_argument(
+        "--skip-frontend",
+        action="store_true",
+        help="Skip the Playwright frontend stress scenario",
+    )
     return parser.parse_args(argv)
 
 
@@ -314,6 +289,7 @@ def main(argv: list[str] | None = None) -> int:
         browser=args.browser,
         workspace=args.workspace,
         keep_server=args.keep_server,
+        skip_frontend=args.skip_frontend,
     )
 
 

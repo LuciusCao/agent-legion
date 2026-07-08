@@ -1,13 +1,12 @@
 import { useJobStore } from '../stores/jobStore'
+import { selectFilteredJobIds } from '../stores/job/selectors'
 import { MaterialIcon } from './MaterialIcon'
 import { JobListVirtualized } from './JobListVirtualized'
 import { JobListSkeleton } from './JobListSkeleton'
 import styles from './JobList.module.css'
 
 export function JobList({ workspaceId }: { workspaceId: string }) {
-  const jobIds = useJobStore((state) =>
-    state.getFilteredJobs().map((job) => job.id)
-  )
+  const jobIds = useJobStore(selectFilteredJobIds)
   const selectedIds = useJobStore((state) => state.selectedIds)
   const toggleSelect = useJobStore((state) => state.toggleSelect)
   const selectMode = useJobStore((state) => state.selectMode)

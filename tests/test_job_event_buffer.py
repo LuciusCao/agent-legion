@@ -1,3 +1,4 @@
+import asyncio
 import json
 
 from server.app.job_events import JobEventBuffer, WorkspaceJobEventAggregator
@@ -103,3 +104,19 @@ def test_aggregator_flushes_compacted_patch_batch():
     assert dashboard_workspace_id == "__dashboard__"
     assert dashboard_revision == 3
     assert [ws["id"] for ws in dashboard_workspaces] == ["ws1"]
+
+
+def test_aggregator_flush_runs_off_event_loop():
+    buffer = JobEventBuffer(max_events=10)
+    buffer.record_job_updated("ws1", "job1")
+    queries = FakeJobQueries()
+    manager = FakeEventManager()
+    aggregator = WorkspaceJobEventAggregator(buffer, queries, manager)
+
+    async def _flush() -> None:
+        await asyncio.to_thread(aggregator.flush_once)
+
+    asyncio.run(_flush())
+
+    assert len(manager.patch_batches) == 1
+    assert manager.patch_batches[0][0] == "ws1"

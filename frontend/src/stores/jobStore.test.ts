@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { useJobStore } from './jobStore'
 import { createMockUiState, makeJob } from '../testing/fixtures'
+import { normalizeJobs } from './job/actions/fetchStateHelpers'
 
 vi.mock('../api', () => ({
   fetchJobs: vi.fn(),
@@ -47,7 +48,7 @@ const mockGetState = vi.mocked(useUiStore.getState)
 describe('jobStore', () => {
   beforeEach(() => {
     useJobStore.setState({
-      jobs: [],
+      ...normalizeJobs([]),
       isLoading: false,
       error: null,
       selectedIds: new Set(),
@@ -82,23 +83,23 @@ describe('jobStore', () => {
   })
 
   it('selects all visible jobs', () => {
-    useJobStore.setState({
-      jobs: [
+    useJobStore.setState(
+      normalizeJobs([
         makeJob({ id: 'j1', status: 'pending' }),
         makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
-      ],
-    })
+      ])
+    )
     useJobStore.getState().selectAll()
     expect(useJobStore.getState().selectedIds.size).toBe(2)
   })
 
   it('filters by status', () => {
-    useJobStore.setState({
-      jobs: [
+    useJobStore.setState(
+      normalizeJobs([
         makeJob({ id: 'j1', status: 'pending' }),
         makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
-      ],
-    })
+      ])
+    )
     useJobStore.getState().setFilterConfig({ status: 'completed' })
     const filtered = useJobStore.getState().getFilteredJobs()
     expect(filtered).toHaveLength(1)
@@ -106,12 +107,12 @@ describe('jobStore', () => {
   })
 
   it('filters by search query', () => {
-    useJobStore.setState({
-      jobs: [
+    useJobStore.setState(
+      normalizeJobs([
         makeJob({ id: 'j1', source_id: 'Q100', title: 'Algebra' }),
         makeJob({ id: 'j2', source_id: 'Q200', title: 'Geometry' }),
-      ],
-    })
+      ])
+    )
     useJobStore.getState().setFilterConfig({ search: 'Q100' })
     const filtered = useJobStore.getState().getFilteredJobs()
     expect(filtered).toHaveLength(1)
@@ -140,9 +141,11 @@ describe('jobStore', () => {
   })
 
   it('clears stale jobs while fetching and after fetch failure', async () => {
-    useJobStore.setState({
-      jobs: [makeJob({ id: 'video-job', workspace_id: 'video_knowledge' })],
-    })
+    useJobStore.setState(
+      normalizeJobs([
+        makeJob({ id: 'video-job', workspace_id: 'video_knowledge' }),
+      ])
+    )
     mockFetchJobs.mockRejectedValueOnce(new Error('network down'))
 
     const promise = useJobStore.getState().fetchJobs('question_comprehension')
@@ -202,10 +205,10 @@ describe('jobStore', () => {
 
   it('calls batch rerun endpoint and clears succeeded jobs from selection', async () => {
     useJobStore.setState({
-      jobs: [
+      ...normalizeJobs([
         makeJob({ id: 'j1', status: 'failed' }),
         makeJob({ id: 'j2', status: 'failed' }),
-      ],
+      ]),
       selectedIds: new Set(['j1', 'j2']),
       selectMode: true,
     })
@@ -249,7 +252,7 @@ describe('jobStore', () => {
 
   it('shows accurate toast counts on batch rerun failure', async () => {
     useJobStore.setState({
-      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      ...normalizeJobs([makeJob({ id: 'j1', status: 'failed' })]),
       selectedIds: new Set(['j1']),
     })
     mockBatchRerunJobs.mockResolvedValueOnce({
@@ -266,11 +269,11 @@ describe('jobStore', () => {
 
   it('calls batch delete endpoint and removes only succeeded jobs', async () => {
     useJobStore.setState({
-      jobs: [
+      ...normalizeJobs([
         makeJob({ id: 'j1', status: 'completed' }),
         makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
         makeJob({ id: 'j3', status: 'completed', source_id: 'Q3' }),
-      ],
+      ]),
       selectedIds: new Set(['j1', 'j2', 'j3']),
       selectMode: true,
     })
@@ -312,10 +315,10 @@ describe('jobStore', () => {
 
   it('opens package download URL and clears succeeded jobs from selection', async () => {
     useJobStore.setState({
-      jobs: [
+      ...normalizeJobs([
         makeJob({ id: 'j1', status: 'completed' }),
         makeJob({ id: 'j2', status: 'completed', source_id: 'Q2' }),
-      ],
+      ]),
       selectedIds: new Set(['j1', 'j2']),
       selectMode: true,
     })
@@ -345,10 +348,10 @@ describe('jobStore', () => {
 
   it('sends every selected job to package eligibility evaluation', async () => {
     useJobStore.setState({
-      jobs: [
+      ...normalizeJobs([
         makeJob({ id: 'j1', status: 'completed' }),
         makeJob({ id: 'j2', status: 'running', source_id: 'Q2' }),
-      ],
+      ]),
       selectedIds: new Set(['j1', 'j2']),
       selectMode: true,
     })
@@ -383,7 +386,7 @@ describe('jobStore', () => {
 
   it('exits select mode when batch rerun succeeds for all selected jobs', async () => {
     useJobStore.setState({
-      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      ...normalizeJobs([makeJob({ id: 'j1', status: 'failed' })]),
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -399,7 +402,7 @@ describe('jobStore', () => {
 
   it('exits select mode when batch delete succeeds for all selected jobs', async () => {
     useJobStore.setState({
-      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      ...normalizeJobs([makeJob({ id: 'j1', status: 'failed' })]),
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -415,7 +418,7 @@ describe('jobStore', () => {
 
   it('exits select mode when batch package succeeds for all selected jobs', async () => {
     useJobStore.setState({
-      jobs: [makeJob({ id: 'j1', status: 'completed' })],
+      ...normalizeJobs([makeJob({ id: 'j1', status: 'completed' })]),
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -435,7 +438,7 @@ describe('jobStore', () => {
 
   it('calls batch run-to endpoint and clears succeeded jobs from selection', async () => {
     useJobStore.setState({
-      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      ...normalizeJobs([makeJob({ id: 'j1', status: 'failed' })]),
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -461,10 +464,10 @@ describe('jobStore', () => {
 
   it('preserves skipped selections after batch run-to', async () => {
     useJobStore.setState({
-      jobs: [
+      ...normalizeJobs([
         makeJob({ id: 'j1', status: 'failed' }),
         makeJob({ id: 'j2', status: 'failed', source_id: 'Q2' }),
-      ],
+      ]),
       selectedIds: new Set(['j1', 'j2']),
       selectMode: true,
     })
@@ -484,7 +487,7 @@ describe('jobStore', () => {
 
   it('shows accurate toast counts on batch run-to failure', async () => {
     useJobStore.setState({
-      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      ...normalizeJobs([makeJob({ id: 'j1', status: 'failed' })]),
       selectedIds: new Set(['j1']),
       selectMode: true,
     })
@@ -502,7 +505,7 @@ describe('jobStore', () => {
 
   it('refreshes jobs immediately after batch run-to', async () => {
     useJobStore.setState({
-      jobs: [makeJob({ id: 'j1', status: 'failed' })],
+      ...normalizeJobs([makeJob({ id: 'j1', status: 'failed' })]),
       selectedIds: new Set(['j1']),
       selectMode: true,
     })

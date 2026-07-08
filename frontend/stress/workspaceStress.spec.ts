@@ -93,17 +93,24 @@ test('workspace page remains responsive under high job concurrency', async ({ pa
     }
   })
 
-  // Listen to SSE traffic through the page.
-  let sseMessages = 0
-  page.on('response', async (response) => {
-    const headers = await response.allHeaders()
-    const contentType = headers['content-type'] || ''
-    if (contentType.includes('text/event-stream')) {
-      // We cannot easily stream the body in Playwright, so we approximate by
-      // counting successful SSE connection responses. The backend stress script
-      // records the actual message rate.
-      sseMessages += 1
+  // Count real SSE messages by monkey-patching EventSource before page scripts
+  // run. This gives an actual message throughput number rather than connection
+  // response count.
+  await page.evaluateOnNewDocument(() => {
+    if (typeof window === 'undefined' || !window.EventSource) return
+    const OriginalEventSource = window.EventSource
+    let messageCount = 0
+    class StressEventSource extends OriginalEventSource {
+      constructor(url: string | URL, eventSourceInitDict?: EventSourceInit) {
+        super(url, eventSourceInitDict)
+        this.addEventListener('message', () => {
+          messageCount += 1
+        })
+      }
     }
+    ;(window as unknown as Record<string, unknown>).EventSource = StressEventSource
+    ;(window as unknown as Record<string, unknown>).__stressGetSseMessageCount = () =>
+      messageCount
   })
 
   const url = `${baseUrl}/workspaces/${workspaceId}`
@@ -152,8 +159,14 @@ test('workspace page remains responsive under high job concurrency', async ({ pa
     await page.waitForTimeout(250)
   }
 
-  metrics.sseMessagesReceived = sseMessages
-  metrics.sseMessagesPerSecond = sseMessages / Math.max(1, durationSeconds)
+  const sseMessageCount = await page.evaluate(() => {
+    const getter = ((window as unknown as Record<string, unknown>).__stressGetSseMessageCount as
+      | (() => number)
+      | undefined)
+    return getter ? getter() : 0
+  })
+  metrics.sseMessagesReceived = sseMessageCount
+  metrics.sseMessagesPerSecond = sseMessageCount / Math.max(1, durationSeconds)
 
   fs.mkdirSync(resultsDir, { recursive: true })
   const metricsPath = path.join(resultsDir, 'frontend-metrics.json')

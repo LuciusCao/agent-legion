@@ -3,6 +3,7 @@ import type {
   JobSummary,
   WorkspacePackageResult,
 } from '../../jobTypes'
+import type { ContinueJobResult } from './stateTypes'
 export {
   countMutationResults,
   makeMutationToast,
@@ -10,11 +11,17 @@ export {
   type MutationCounts,
 } from './mutationHelpers'
 export type { JobFilterConfig, JobStatus } from './filterConfig'
+export type { JobFilterOptionAccumulator } from './filterLogic/optionAccumulator'
+export type { FilterCounts } from './filterLogic/types'
 export interface JobState {
   jobs: JobSummary[]
   jobsById: Record<string, JobSummary>
   jobIds: string[]
+  jobIndexById: Record<string, number>
   revision: number
+  filteredJobIds: string[]
+  filterCounts: import('./filterLogic/types').FilterCounts
+  optionAccumulator: import('./filterLogic/optionAccumulator').JobFilterOptionAccumulator
   jobsWorkspaceId: string | null
   isLoading: boolean
   error: string | null
@@ -67,14 +74,7 @@ export interface JobState {
     targetNodeKey: string,
     startNodeKey?: string
   ) => Promise<BatchJobMutationResult>
-  continueJob: (jobId: string) => Promise<{
-    job_id: string
-    operation: string
-    status: string
-    message?: string | null
-    node_key?: string | null
-    reason_code?: string | null
-  }>
+  continueJob: (jobId: string) => ContinueJobResult
   batchUpgradeWorkflow: (
     workspaceId: string,
     jobIds: string[]
