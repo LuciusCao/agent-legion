@@ -8,7 +8,9 @@
   flex-shrink: 0;
   background: #ffffff;
   position: relative;
-  z-index: 10;
+  /* Must stack above sticky main-content controls (e.g. JobFilterBar z-index: 10)
+     so that AppBar popovers such as AgentStatusIndicator are not obscured. */
+  z-index: 100;
   min-height: 56px;
 }
 
