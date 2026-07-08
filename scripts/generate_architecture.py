@@ -187,32 +187,10 @@ def extract_models(root: Path) -> str:
 
 
 def extract_frontend_routes(root: Path) -> str:
-    """Extract React Router routes from frontend/src/App.tsx."""
-    app_tsx = root / "frontend" / "src" / "App.tsx"
-    if not app_tsx.exists():
-        return "_No App.tsx found._\n"
+    """Extract React Router routes from frontend/src/AppRoutes.tsx."""
+    from scripts.generate_architecture_frontend import extract_frontend_routes as _extract
 
-    content = app_tsx.read_text(encoding="utf-8")
-    lines = ["| 路径 | 页面组件 |", "|------|----------|"]
-
-    # Match <Route path="..." element={<Component />} />
-    # or <Route index element={<Component />} />
-    pattern = re.compile(
-        r'<Route\s+(?:(path=["\']([^"\']+)["\'])|(index))\s+element=\{<([A-Za-z_][A-Za-z0-9_]*)'
-    )
-
-    found = False
-    for m in pattern.finditer(content):
-        path = m.group(2) if m.group(2) else "(index)"
-        component = m.group(4)
-        if component in ("Navigate",):
-            continue
-        lines.append(f"| `{path}` | {component} |")
-        found = True
-
-    if not found:
-        return "_No routes found._\n"
-    return "\n".join(lines) + "\n"
+    return _extract(root)
 
 
 # ---------------------------------------------------------------------------

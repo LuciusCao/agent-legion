@@ -1,7 +1,7 @@
 [project]
-name = "video-hive"
+name = "agent-legion"
 version = "0.1.0"
-description = "Local educational video processing queue and preview tool"
+description = "Local processing console for educational videos and Agent Legion workflows"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi",

@@ -5,7 +5,7 @@ Local processing console for educational videos. It queues knowledge videos and 
 ## Technology Stack
 
 - **Backend**: Python 3.11+ (project currently runs on Python 3.13), FastAPI, Uvicorn, SQLite, PyYAML, Requests
-- **Frontend**: React 18, TypeScript 5.8, Vite, React Router v6, Zustand, `@material/web` (Material 3 Web Components), `@mui/material` (MUI), `@xyflow/react` (React Flow), `dagre`, `katex`, `@tanstack/react-virtual`
+- **Frontend**: React 18, TypeScript 5.8, Vite, React Router v6, Zustand, `@mui/material` (MUI v6), `@xyflow/react` (React Flow), `dagre`, `katex`, `@tanstack/react-virtual`
 - **Package Management**: `uv` for Python; `npm` for the frontend
 - **Linting / Formatting**: Ruff (Python), ESLint + Prettier (TypeScript)
 - **Static Type Check**: mypy (Python)
@@ -39,6 +39,14 @@ UV_CACHE_DIR=.uv-cache uv sync
 > For architecture details, code style, and testing conventions, see [docs/architecture/](docs/architecture/).
 > For Agent-specific operating rules, see [AGENTS.md](AGENTS.md).
 
+Copy `.env.example` to `.env` and fill in secrets before running locally:
+
+```bash
+cp .env.example .env
+# also copy the frontend dev proxy config if you work on the UI
+cd frontend && cp .env.example .env
+```
+
 ## Makefile Shortcuts
 
 A `Makefile` is provided to simplify the most common commands. It automatically sets `UV_CACHE_DIR=.uv-cache`, so you can omit the prefix in restricted sandboxes.
@@ -50,26 +58,36 @@ make dev-backend       # 启动后端开发服务器
 make dev-frontend      # 启动前端开发服务器
 make check-quick       # 快速质量门
 make check             # 完整质量门（提交前）
+make check-ci          # CI 质量门
 make skills-lock       # 刷新 config/skills.lock
 make api-generate      # 重新生成前端 API 类型
+make install-hooks     # 安装可选的预提交钩子
+make architecture-ratchet   # 更新架构预算基线
+make architecture-check     # 检查架构契约
+make upload            # 上传审题信息包
+make scan-comprehension    # 扫描审题信息 fingerprint 变化
+make package-comprehension # 从 comprehension_info.json 生成 package.jsonl
+make upload-workspace-package # 从 workspace zip 直接上传审题信息
 ```
 
 ## Configuration
 
-Configuration is split by domain into three files under `config/`:
+Configuration is split by domain into files under `config/`:
 
-- `config/app.yaml`: application paths, HTTP settings, and worker concurrency.
+- `config/app.yaml`: application paths, HTTP settings, worker concurrency, log/run-dir cleanup, and token-usage pricing.
 - `config/video_hive.yaml`: ASR, CMS, resource providers, cleanup, and OpenClaw settings.
-- `config/workflow.yaml`: workspace executors and workflow runtime settings.
+- `config/workflow.yaml`: workspace executors, workflow runtime, and Pi agent settings.
+- `config/skills.yaml` / `config/skills.lock`: skill source declarations and resolved versions for Pi agent nodes.
 
 Edit `config/video_hive.yaml` for:
 
 - `asr.provider`: `auto`, `whisper`, or `sensevoice`.
 - `asr.whisper.binary`: local `whisper-cli`.
 - `asr.whisper.model`: local whisper medium model.
+- `asr.whisper.vad_model`: local VAD model for whisper.cpp.
 - `asr.sensevoice.script`: SenseVoice SRT script.
 - `asr.sensevoice.model_dir`: local `SenseVoiceSmall` model.
-- `openclaw.command_template`: command argument list. Supported placeholders: `{prompt_file}`, `{video_id}`, `{video_dir}`.
+- `openclaw.command_template`: command argument list. Supported placeholders: `{prompt_text}`, `{video_id}`, `{timestamp}`.
 - `openclaw.cwd`: working directory for openclaw.
 
 In `auto` ASR mode, Agent Legion tries whisper.cpp first and falls back to SenseVoice if the SRT is missing, empty, unparsable, too short for the video, or obviously repetitive.
@@ -84,8 +102,8 @@ Agent Legion treats knowledge videos and question explanation videos differently
 
 | Type | Required ID | URL | Pipeline |
 | --- | --- | --- | --- |
-| `knowledge` | knowledge code | optional at intake | download → transcribe → subtitle review → chapter generation → interaction generation → content review → assemble |
-| `question` | question ID | optional at intake | download → transcribe → subtitle review → chapter generation → assemble |
+| `knowledge` | knowledge code | optional at intake | download → transcribe → subtitle review → chapter generation → interaction generation → content review → assemble → package |
+| `question` | question ID | optional at intake | download → transcribe → subtitle review → chapter generation → assemble → package |
 
 If a knowledge code or question ID currently has no video URL, add it anyway with an empty URL. The record is stored with:
 
@@ -100,6 +118,33 @@ Compatibility with the existing `~/CatPuru/projects/cms-extensions/engineering/l
 - question rows: `question_uuid -> question_id`, `url -> source_url`
 
 Question explanation videos do not produce interactive nodes. Their assembled `metadata.json` keeps `nodes: []`, and the deterministic assemble path can create an empty `interactions.json`.
+
+## Workflows
+
+In addition to the video pipelines above, Agent Legion runs workspace-scoped DAG workflows defined in `config/workflows/`.
+
+### `question_comprehension_info`
+
+The `question_comprehension_info` workflow generates structured comprehension metadata for math word problems. It does not download or transcode video; it reads question data from CMS and produces `comprehension_info.json`.
+
+Intake modes (configured per workspace):
+
+- `batch_by_knowledge`: intake field `knowledge_codes`, fetch questions by knowledge code.
+- `batch_by_ids`: intake field `question_ids`, fetch questions by UUID list.
+
+Node DAG:
+
+1. `fetch_questions`: fetch raw question JSON from CMS.
+2. `clean_and_parse`: parse and clean question content; produce lean and full variants.
+3. `classify_comprehension_eligibility`: decide whether the questions are eligible for comprehension analysis.
+   - If `eligible = false`: terminal node `finalize_non_uploadable`.
+   - If `eligible = true`: continue to `generate_key_info`.
+4. `generate_key_info` → `review_key_info`: generate and review key information a student must read/infer.
+5. `review_key_info` → `generate_possible_errors` → `review_possible_errors`: generate and review plausible comprehension errors.
+6. `assess_comprehension_difficulty`: score comprehension difficulty independently from solution difficulty.
+7. `assemble_comprehension_info`: merge reviewed artifacts into `comprehension_info.json` and `manifest.json` (uploadable terminal).
+
+Agent nodes in this workflow execute through the Pi agent runner using external skills declared in `config/skills.yaml`.
 
 ## Run
 
@@ -158,10 +203,11 @@ Quick gate (for daily development):
 ./scripts/check-quick.sh
 ```
 
-Runs Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy, architecture
-contract checks (`scripts/check_architecture.py`), generated API type drift check
-(`npm run api:check`), frontend Prettier + ESLint + typecheck + Vitest (without coverage),
-and the spec health check (`scripts/verify_specs.py --check`).
+Runs Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy,
+architecture invariant checks (`scripts/check_invariants.py`), shared skill asset checks
+(`scripts/check-skills-shared.py`), architecture contract checks (`scripts/check_architecture.py`),
+generated API type drift check (`npm run api:check`), frontend Prettier + ESLint + typecheck +
+Vitest (without coverage), and the spec health check (`scripts/verify_specs.py --check`).
 
 `mypy` runs with unreachable-code warnings enabled. When it flags code behind
 dynamic JSON, database, or framework boundaries, first check whether the type
@@ -221,17 +267,18 @@ Common phases:
 2. `transcribe`: writes `subtitles.srt` and `transcription.json`.
 3. `subtitle_review`: real openclaw command writes reviewed subtitles and report.
 4. `chapter_generate`: real openclaw command writes chapters.
+5. `assemble`: writes `metadata.json` and `report.md`.
 
 Knowledge-only phases:
 
-5. `interaction_generate`: real openclaw command writes interactions.
-6. `content_review`: real openclaw command writes checklist and review result.
+6. `interaction_generate`: real openclaw command writes interactions.
+7. `content_review`: real openclaw command writes checklist and review result.
 
 Final phase:
 
-7. `assemble`: writes `metadata.json` and `report.md`.
+8. `package`: creates a zip with per-video JSON plus `manifest.json`. The manifest includes `content_type`, `external_id`, `knowledge_code`, and `question_id`.
 
-The package endpoint creates a zip with per-video JSON plus `manifest.json`. The manifest includes `content_type`, `external_id`, `knowledge_code`, and `question_id`.
+Question explanation videos skip `interaction_generate` and `content_review`.
 
 ## Pi Agent Runner
 
@@ -255,8 +302,8 @@ workflows:
   enabled: true
   pi:
     binary: pi
-    provider: ""        # empty = use Pi default
-    model: ""           # empty = use Pi default
+    provider: deepseek
+    model: your-model-b
     thinking: low
     timeout_seconds: 600
     environment:
@@ -264,7 +311,7 @@ workflows:
       PI_TELEMETRY: "0"
 ```
 
-- `provider` / `model`: leave empty to use Pi's configured default.
+- `provider` / `model`: Pi provider and model. The defaults above are shipped in `config/workflow.yaml`; override them if your Pi setup uses a different default.
 - `timeout_seconds`: per-node timeout. Pi is terminated if it exceeds this.
 - `environment`: merged into Pi's subprocess environment.
 
@@ -316,9 +363,9 @@ Previous runs are preserved. Rerunning a node deletes that node's and all downst
 
 Do not pass API keys on the command line. Pi inherits authentication from its environment or existing login store. Set provider credentials through Pi's standard environment variables if needed.
 
-## Phase 5 Workspace Executor Migration
+## Phase 6 Workspace Executor Migration
 
-If you are upgrading from a pre-Phase-5 database that still contains Workspace Agent
+If you are upgrading from a pre-Phase-6 database that still contains Workspace Agent
 assignments or `pipeline_config_json`, run the one-time finalizer before starting the server:
 
 ```bash
