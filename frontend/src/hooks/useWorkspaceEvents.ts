@@ -4,10 +4,7 @@ import {
   handleWorkspaceEvent,
   loadWorkspaceJobsSnapshot,
 } from './workspaceEventHandlers'
-import {
-  refreshWorkspaceEvents,
-} from './workspaceEventRefresh'
-
+import { refreshWorkspaceEvents } from './workspaceEventRefresh'
 export function useWorkspaceEvents(
   workspaceId: string | undefined,
   enabled = true,
@@ -15,11 +12,11 @@ export function useWorkspaceEvents(
 ) {
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-
+  const snapshotLoadingRef = useRef(!statsOnly)
+  const pendingEventsRef = useRef<MessageEvent[]>([])
   useEffect(() => {
     if (workspaceId) useJobStore.getState().resetForWorkspace(workspaceId)
   }, [workspaceId])
-
   useEffect(() => {
     if (!enabled || !workspaceId || typeof EventSource === 'undefined') return
 
@@ -29,7 +26,6 @@ export function useWorkspaceEvents(
     const jobUpdateRefreshDelay = 750
     let closed = false
     let stale = false
-
     const refresh = (includeJobs: boolean) =>
       refreshWorkspaceEvents(
         workspaceId,
@@ -46,8 +42,24 @@ export function useWorkspaceEvents(
       }, jobUpdateRefreshDelay)
     }
 
-    const loadSnapshot = () => {
-      void loadWorkspaceJobsSnapshot(workspaceId, () => stale || closed)
+    const processEvent = (event: MessageEvent) => {
+      handleWorkspaceEvent(
+        event,
+        workspaceId,
+        statsOnly,
+        scheduleJobRefresh,
+        loadSnapshot,
+        () => void refresh(false)
+      )
+    }
+
+    const loadSnapshot = async () => {
+      snapshotLoadingRef.current = true
+      pendingEventsRef.current = []
+      await loadWorkspaceJobsSnapshot(workspaceId, () => stale || closed)
+      snapshotLoadingRef.current = false
+      pendingEventsRef.current.forEach(processEvent)
+      pendingEventsRef.current = []
     }
 
     const connect = () => {
@@ -58,20 +70,18 @@ export function useWorkspaceEvents(
       source.onopen = () => {
         reconnectDelay = 1000
         if (statsOnly) {
+          snapshotLoadingRef.current = false
           void refresh(false)
         } else {
-          loadSnapshot()
+          void loadSnapshot()
         }
       }
       source.onmessage = (event) => {
-        handleWorkspaceEvent(
-          event,
-          workspaceId,
-          statsOnly,
-          scheduleJobRefresh,
-          loadSnapshot,
-          () => void refresh(false)
-        )
+        if (snapshotLoadingRef.current) {
+          pendingEventsRef.current.push(event)
+        } else {
+          processEvent(event)
+        }
       }
       source.onerror = () => {
         if (source) {

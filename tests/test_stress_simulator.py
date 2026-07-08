@@ -49,7 +49,7 @@ def test_stress_workflow_definition_has_nodes():
     assert set(definition.nodes.keys()) == {"step_1", "step_2", "step_3"}
 
 
-def test_stress_simulator_builds_event_pipeline(tmp_path):
+def test_stress_simulator_skips_http_events_without_base_url(tmp_path):
     simulator = StressSimulator(
         workspace_id="ws-smoke",
         agents=2,
@@ -60,7 +60,13 @@ def test_stress_simulator_builds_event_pipeline(tmp_path):
         results_dir=tmp_path,
     )
 
-    buffer, aggregator = simulator._build_event_pipeline()
+    simulator._job_ids = ["job1", "job2"]
 
-    assert buffer is not None
-    assert aggregator is not None
+    async def _run_generate():
+        await simulator._generate_events()
+
+    import asyncio
+
+    asyncio.run(_run_generate())
+
+    assert simulator.metrics.events_recorded == 0

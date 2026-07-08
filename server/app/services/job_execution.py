@@ -93,7 +93,6 @@ class JobExecutionService:
                 "wrong_workspace",
                 f"Job does not belong to workspace {workspace_id}",
             )
-
         definition = self._definition(job)
         if target_node_key not in definition.nodes:
             return self._result(

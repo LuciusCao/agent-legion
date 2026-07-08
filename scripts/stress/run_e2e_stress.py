@@ -86,6 +86,7 @@ def _wait_for_server(base_url: str, timeout: float = 60.0) -> bool:
 def _start_backend(port: int) -> subprocess.Popen:
     env = os.environ.copy()
     env["VIDEO_HIVE_DATA_DIR"] = str(PROJECT_ROOT / "data" / "stress")
+    env["AGENT_LEGION_ENABLE_STRESS_EVENTS"] = "1"
     cmd = [
         sys.executable,
         "-m",

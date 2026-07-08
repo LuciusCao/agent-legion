@@ -8,6 +8,8 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from server.app.job_dashboard_events import broadcast_workspace_stats_batch
+
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
 
@@ -130,7 +132,10 @@ class WorkspaceJobEventAggregator:
             | set(compacted.deleted_job_ids_by_workspace)
             | compacted.resync_workspace_ids
         )
+        workspace_stats: list[dict[str, Any]] = []
         for workspace_id in sorted(workspace_ids):
+            stats = self.job_queries.count_jobs_by_status(workspace_id)
+            workspace_stats.append({"id": workspace_id, "job_stats": stats})
             if workspace_id in compacted.resync_workspace_ids:
                 self.job_event_manager._broadcast(
                     workspace_id,
@@ -146,20 +151,23 @@ class WorkspaceJobEventAggregator:
                 | compacted.updated_job_ids_by_workspace.get(workspace_id, set())
             )
             deleted_ids = sorted(compacted.deleted_job_ids_by_workspace.get(workspace_id, set()))
-            if not changed_ids and not deleted_ids:
-                continue
-            jobs = self.job_queries.list_patch_summaries(workspace_id, changed_ids)
-            stats = self.job_queries.count_jobs_by_status(workspace_id)
-            self.job_event_manager._broadcast(
-                workspace_id,
-                build_job_patch_batch_payload(
-                    workspace_id=workspace_id,
-                    revision=compacted.latest_revision,
-                    stats=stats,
-                    jobs=jobs,
-                    deleted_job_ids=deleted_ids,
-                ),
-            )
+            if changed_ids or deleted_ids:
+                jobs = self.job_queries.list_patch_summaries(workspace_id, changed_ids)
+                self.job_event_manager._broadcast(
+                    workspace_id,
+                    build_job_patch_batch_payload(
+                        workspace_id=workspace_id,
+                        revision=compacted.latest_revision,
+                        stats=stats,
+                        jobs=jobs,
+                        deleted_job_ids=deleted_ids,
+                    ),
+                )
+        broadcast_workspace_stats_batch(
+            self.job_event_manager,
+            compacted.latest_revision,
+            workspace_stats,
+        )
 
     async def run(self, interval_seconds: float = 0.5) -> None:
         while True:

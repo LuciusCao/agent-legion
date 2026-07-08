@@ -1,5 +1,4 @@
 import asyncio
-import importlib
 import logging
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -13,14 +12,13 @@ from server.app.db.migrations.report import MigrationBlockedError
 from server.app.db.notifications import NotificationHub
 from server.app.events import JobEventManager, VideoEventManager
 from server.app.executors.backup import legacy_backup_path
-from server.app.executors.config import LocalExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
-from server.app.executors.local import LocalHandler
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.runtime_factory import build_execution_runtime
 from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
+from server.app.local_handler_loader import build_local_handlers
 from server.app.routes import create_router
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
@@ -30,32 +28,6 @@ from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.registry import list_registered_workflows
-
-
-def _build_local_handlers(settings: Settings) -> dict[str, LocalHandler]:
-    """Resolve local handler references from executor definitions into callables."""
-    handlers: dict[str, LocalHandler] = {}
-    for config in settings.executor_definitions.values():
-        if not isinstance(config, LocalExecutorConfig):
-            continue
-        for capability_config in config.capabilities.values():
-            handler_key = capability_config.handler
-            if handler_key in handlers or "." not in handler_key:
-                continue
-            module_name, func_name = handler_key.rsplit(".", 1)
-            full_module_name = f"server.app.workflows.{module_name}"
-            try:
-                module = importlib.import_module(full_module_name)
-                func = getattr(module, func_name)
-                if callable(func):
-                    handlers[handler_key] = func
-                else:
-                    logging.getLogger(__name__).warning(
-                        "Local handler %s is not callable", handler_key
-                    )
-            except Exception:
-                logging.getLogger(__name__).warning("Could not load local handler %s", handler_key)
-    return handlers
 
 
 def build_executor_registry(
@@ -74,7 +46,7 @@ def build_executor_registry(
         base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
     )
     runtime = RuntimeDependencies(
-        local_handlers=_build_local_handlers(settings),
+        local_handlers=build_local_handlers(settings),
         pi_runtime=settings.executor_runtime.workflows.pi,
         skill_manager=skill_manager,
         openclaw_runtime=settings.executor_runtime.openclaw,
@@ -88,7 +60,6 @@ def build_executor_registry(
 def create_app(
     data_dir: Path | None = None,
     start_worker: bool = False,
-    max_workers: int | None = None,
 ) -> FastAPI:
     settings = load_settings(data_dir=data_dir)
 

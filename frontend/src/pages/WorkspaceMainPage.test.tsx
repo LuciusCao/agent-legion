@@ -393,7 +393,7 @@ describe('WorkspaceMainPage', () => {
     await waitFor(() => {
       expect(mockFetchJobsSnapshot).toHaveBeenCalledTimes(1)
     })
-    expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1')
+    expect(mockFetchJobsSnapshot).toHaveBeenCalledWith('ws1', 200, undefined)
   })
 
   it('search input updates query after debounce', async () => {

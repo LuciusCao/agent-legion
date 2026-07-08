@@ -48,7 +48,9 @@ class JobServices:
         self.queries = JobQueryService(
             job_db, settings, workflow_catalog, workspace_executor_configuration
         )
-        self.patch_queries = JobPatchQueryService(job_db, settings)
+        self.patch_queries = JobPatchQueryService(
+            job_db, settings, job_event_buffer=job_event_buffer
+        )
         self.artifacts = JobArtifactService(job_db)
         self.logs = JobLogService(settings, job_db)
         self.rerun = JobRerunService(

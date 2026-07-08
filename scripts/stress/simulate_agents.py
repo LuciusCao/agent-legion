@@ -34,17 +34,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 import requests  # noqa: E402
 
-from server.app.events import JobEventManager  # noqa: E402
-from server.app.job_events import JobEventBuffer, WorkspaceJobEventAggregator  # noqa: E402
+from scripts.stress._stress_http_events import StressHttpEventRecorder  # noqa: E402
 from server.app.jobs import JobQueries  # noqa: E402
-from server.app.services.job_queries import JobQueryService  # noqa: E402
-from server.app.services.workflow_catalog import WorkflowCatalogService  # noqa: E402
 from server.app.services.workflow_revision_format import (  # noqa: E402
     definition_hash,
     serialize_definition,
-)
-from server.app.services.workspace_executor_configuration import (  # noqa: E402
-    WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import load_settings  # noqa: E402
 from server.app.workflows.definition import (  # noqa: E402
@@ -258,38 +252,32 @@ class StressSimulator:
         except Exception as exc:  # noqa: BLE001
             self.metrics.errors.append(f"SSE consume error: {exc}")
 
-    def _build_event_pipeline(self) -> tuple[JobEventBuffer, WorkspaceJobEventAggregator]:
-        job_db = self._setup_db()
-        settings = load_settings()
-        workflow_catalog = WorkflowCatalogService(settings)
-        workspace_executor_config = WorkspaceExecutorConfigurationService(job_db)
-        job_queries = JobQueryService(job_db, settings, workflow_catalog, workspace_executor_config)
-        buffer = JobEventBuffer()
-        manager = JobEventManager()
-        aggregator = WorkspaceJobEventAggregator(buffer, job_queries, manager)
-        return buffer, aggregator
-
-    async def _generate_events(self, buffer: JobEventBuffer) -> None:
+    async def _generate_events(self) -> None:
         job_ids = self._job_ids.copy()
-        if not job_ids:
+        if not job_ids or self.base_url is None:
             return
 
+        recorder = StressHttpEventRecorder(self.base_url, self.workspace_id)
         interval = 1.0 / max(1, self.event_rate)
         end_time = time.monotonic() + self.duration
         events_issued = 0
         while time.monotonic() < end_time and not self._stop_event.is_set():
             batch_start = time.monotonic()
+            events: list[tuple[str, str]] = []
             for _ in range(self.agents):
                 job_id = random.choice(job_ids)
-                # Occasionally record a create/delete to exercise all event kinds.
                 roll = random.random()
                 if roll < 0.01:
-                    buffer.record_job_created(self.workspace_id, job_id)
+                    events.append((job_id, "created"))
                 elif roll < 0.02:
-                    buffer.record_job_deleted(self.workspace_id, job_id)
+                    events.append((job_id, "deleted"))
                 else:
-                    buffer.record_job_updated(self.workspace_id, job_id)
-                events_issued += 1
+                    events.append((job_id, "updated"))
+
+            if events:
+                recorded, latency_s = recorder.record_batch(events)
+                events_issued += recorded
+                self.metrics.flush_latencies_ms.append(latency_s * 1000)
 
             elapsed = time.monotonic() - batch_start
             sleep_for = max(0.0, interval - elapsed)
@@ -328,15 +316,6 @@ class StressSimulator:
             if sleep_for > 0:
                 await asyncio.sleep(sleep_for)
 
-    async def _measure_aggregation(self, aggregator: WorkspaceJobEventAggregator) -> None:
-        end_time = time.monotonic() + self.duration
-        while time.monotonic() < end_time and not self._stop_event.is_set():
-            start = time.monotonic()
-            aggregator.flush_once()
-            latency_ms = (time.monotonic() - start) * 1000
-            self.metrics.flush_latencies_ms.append(latency_ms)
-            await asyncio.sleep(0.5)
-
     async def _sample_memory(self) -> None:
         end_time = time.monotonic() + self.duration
         while time.monotonic() < end_time and not self._stop_event.is_set():
@@ -361,12 +340,9 @@ class StressSimulator:
         self._ensure_workspace_and_revision(job_db)
         self._seed_jobs(job_db)
 
-        buffer, aggregator = self._build_event_pipeline()
-
         tasks = [
-            asyncio.create_task(self._generate_events(buffer)),
+            asyncio.create_task(self._generate_events()),
             asyncio.create_task(self._update_job_states()),
-            asyncio.create_task(self._measure_aggregation(aggregator)),
             asyncio.create_task(self._sample_memory()),
         ]
         if self.base_url:
@@ -374,11 +350,6 @@ class StressSimulator:
 
         await asyncio.gather(*tasks, return_exceptions=True)
         self._stop_event.set()
-
-        # Final flush.
-        final_start = time.monotonic()
-        aggregator.flush_once()
-        self.metrics.flush_latencies_ms.append((time.monotonic() - final_start) * 1000)
 
         tracemalloc.stop()
         self.metrics.finished_at = _iso_now()
