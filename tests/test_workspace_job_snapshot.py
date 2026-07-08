@@ -22,6 +22,12 @@ def test_workspace_jobs_snapshot_returns_jobs_stats_and_revision(client_factory)
     assert isinstance(data["revision"], int)
     assert "stats" in data
     assert len(data["jobs"]) == 1
+    job = data["jobs"][0]
+    assert "node_summaries" in job
+    assert "completed_nodes" in job
+    assert "total_nodes" in job
+    assert "active_node_key" in job
+    assert "is_workflow_outdated" in job
     assert data["next_cursor"] is None
 
 

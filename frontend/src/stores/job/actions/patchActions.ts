@@ -1,5 +1,6 @@
 import type { JobSummary } from '../../../jobTypes'
 import type { JobStoreSet } from '../state'
+import { applyJobPatchBatchUpdate } from './patchState'
 
 export function patchActions(set: JobStoreSet) {
   return {
@@ -9,28 +10,15 @@ export function patchActions(set: JobStoreSet) {
       patchJobs: JobSummary[],
       deletedJobIds: string[]
     ) =>
-      set((state) => {
-        if (state.jobsWorkspaceId !== workspaceId || revision <= state.revision)
-          return {}
-        const deleted = new Set(deletedJobIds)
-        const jobsById = { ...state.jobsById }
-        for (const id of deleted) delete jobsById[id]
-        for (const job of patchJobs) jobsById[job.id] = job
-        const existingIds = state.jobIds.filter((id) => !deleted.has(id))
-        const known = new Set(existingIds)
-        const appended = patchJobs
-          .map((job) => job.id)
-          .filter((id) => !known.has(id))
-        const jobIds = [...appended, ...existingIds]
-        const jobs = jobIds.map((id) => jobsById[id]).filter(Boolean)
-        return {
-          jobsById,
-          jobIds,
-          jobs,
-          revision,
-          isLoading: false,
-          error: null,
-        }
-      }),
+      set(
+        (state) =>
+          applyJobPatchBatchUpdate(
+            state,
+            workspaceId,
+            revision,
+            patchJobs,
+            deletedJobIds
+          ) ?? {}
+      ),
   }
 }

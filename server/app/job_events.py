@@ -171,7 +171,7 @@ class WorkspaceJobEventAggregator:
 
     async def run(self, interval_seconds: float = 0.5) -> None:
         while True:
-            self.flush_once()
+            await asyncio.to_thread(self.flush_once)
             await asyncio.sleep(interval_seconds)
 
 

@@ -1,6 +1,7 @@
 import { vi, describe, it, expect, beforeEach } from 'vitest'
 import { useJobStore } from './index'
 import { createJobSummary } from './actions/testHelpers'
+import { createOptionAccumulator } from './filterLogic/optionAccumulator'
 import { upgradeJobWorkflow } from '../../jobWorkflowUpgradeApi'
 
 vi.mock('../../jobWorkflowUpgradeApi', () => ({
@@ -19,6 +20,7 @@ describe('useJobStore', () => {
         jobsById: {},
         jobIds: [],
         revision: 0,
+        optionAccumulator: createOptionAccumulator([]),
         jobsWorkspaceId: null,
         isLoading: false,
         error: null,
@@ -82,6 +84,36 @@ describe('useJobStore', () => {
       expect(state.jobIds).toEqual(['j1', 'j2'])
       expect(state.revision).toBe(2)
     })
+
+    it('updates jobs immutably on update-only patches without rebuilding unchanged job objects', () => {
+      const store = useJobStore.getState()
+      store.setJobsSnapshot('ws1', 1, [
+        createJobSummary({ id: 'j1', workspace_id: 'ws1', status: 'pending' }),
+        createJobSummary({ id: 'j2', workspace_id: 'ws1', status: 'pending' }),
+      ])
+
+      const beforeJobs = useJobStore.getState().jobs
+      const beforeJ2 = useJobStore.getState().jobsById.j2
+
+      store.applyJobPatchBatch(
+        'ws1',
+        2,
+        [
+          createJobSummary({
+            id: 'j1',
+            workspace_id: 'ws1',
+            status: 'running',
+          }),
+        ],
+        []
+      )
+
+      const state = useJobStore.getState()
+      expect(state.jobs).not.toBe(beforeJobs)
+      expect(state.jobs[0].status).toBe('running')
+      expect(state.jobs[1]).toBe(beforeJ2)
+      expect(state.jobIndexById).toEqual({ j1: 0, j2: 1 })
+    })
   })
 
   it('resets state for a workspace', () => {
@@ -104,19 +136,21 @@ describe('useJobStore', () => {
 
 describe('useJobStore batchUpgradeWorkflow', () => {
   beforeEach(() => {
+    const jobs = [
+      createJobSummary({
+        id: 'j1',
+        status: 'completed',
+        is_workflow_outdated: true,
+      }),
+      createJobSummary({
+        id: 'j2',
+        status: 'pending',
+        is_workflow_outdated: true,
+      }),
+    ]
     useJobStore.setState({
-      jobs: [
-        createJobSummary({
-          id: 'j1',
-          status: 'completed',
-          is_workflow_outdated: true,
-        }),
-        createJobSummary({
-          id: 'j2',
-          status: 'pending',
-          is_workflow_outdated: true,
-        }),
-      ],
+      jobs,
+      optionAccumulator: createOptionAccumulator(jobs),
       selectedIds: new Set(['j1', 'j2']),
       jobsWorkspaceId: 'ws1',
     })

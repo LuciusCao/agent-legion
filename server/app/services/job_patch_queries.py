@@ -4,6 +4,7 @@ from typing import Any
 
 from server.app.jobs import JobQueries
 from server.app.jobs.queries.job_pagination import list_jobs_paginated
+from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
@@ -38,12 +39,7 @@ class JobPatchQueryService(JobQueryService):
     ) -> list[dict[str, Any]]:
         if not job_ids:
             return []
-        jobs = [
-            job
-            for job_id in job_ids
-            if (job := self.job_db.get_job(job_id)) is not None
-            and str(job.get("workspace_id", "")) == workspace_id
-        ]
+        jobs = self.job_db.list_jobs_by_ids(workspace_id, job_ids)
         nodes_by_job = self.job_db.list_job_nodes_for_jobs([str(job["id"]) for job in jobs])
         definitions: dict[tuple[str, str], WorkflowDefinition] = {}
 
@@ -68,6 +64,7 @@ class JobPatchQueryService(JobQueryService):
         cursor: str | None = None,
     ) -> dict[str, Any]:
         jobs, next_cursor = list_jobs_paginated(self.job_db, workspace_id, limit, cursor)
+        jobs = summarize_paginated_jobs(self, self.job_db, jobs)
         revision = getattr(self._job_event_buffer, "_revision", 0) if self._job_event_buffer else 0
         return {
             "workspace_id": workspace_id,

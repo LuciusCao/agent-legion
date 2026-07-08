@@ -1,15 +1,19 @@
+import { useMemo } from 'react'
 import { TextField } from '@mui/material'
+import { useJobStore } from '../stores/jobStore'
 import type { JobFilterConfig } from '../stores/job/state'
 import type { FilterCounts } from '../stores/job/selectors'
-import type { JobSummary } from '../jobTypes'
 import type { WorkflowDefinitionRecord } from '../types'
 import { useDebouncedCallback } from '../hooks/useDebouncedCallback'
+import {
+  makeSelectNodeOptions,
+  selectWorkflowVersionOptions,
+} from '../stores/job/selectors'
 import { WorkflowVersionFilter } from './WorkflowVersionFilter'
 import { JobFilterBarChips } from './JobFilterBarChips'
 import { JobStatusFilter } from './JobStatusFilter'
 import { JobNodeFilter } from './JobNodeFilter'
 import { useJobFilterActiveFilters } from './useJobFilterActiveFilters'
-import { useJobFilterNodeOptions } from './useJobFilterNodeOptions'
 import styles from './JobFilterBar.module.css'
 import filterStyles from './FilterControls.module.css'
 
@@ -17,7 +21,6 @@ export interface JobFilterBarProps {
   filterConfig: JobFilterConfig
   counts: FilterCounts
   workflowDefinition: WorkflowDefinitionRecord | null
-  jobs: JobSummary[]
   onChange: (config: Partial<JobFilterConfig>) => void
 }
 
@@ -25,7 +28,6 @@ export function JobFilterBar({
   filterConfig,
   counts,
   workflowDefinition,
-  jobs,
   onChange,
 }: JobFilterBarProps) {
   const debouncedSearch = useDebouncedCallback(
@@ -33,7 +35,12 @@ export function JobFilterBar({
     250
   )
 
-  const nodeOptions = useJobFilterNodeOptions(workflowDefinition, jobs)
+  const selectNodeOptions = useMemo(
+    () => makeSelectNodeOptions(workflowDefinition),
+    [workflowDefinition]
+  )
+  const nodeOptions = useJobStore(selectNodeOptions)
+  const versionOptions = useJobStore(selectWorkflowVersionOptions)
 
   const activeFilters = useJobFilterActiveFilters(
     filterConfig,
@@ -55,7 +62,7 @@ export function JobFilterBar({
           <WorkflowVersionFilter
             value={filterConfig.workflowVersion}
             counts={counts.workflowVersion}
-            jobs={jobs}
+            versionOptions={versionOptions}
             onChange={(workflowVersion) => onChange({ workflowVersion })}
           />
         </div>

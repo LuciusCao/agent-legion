@@ -1,4 +1,5 @@
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -8,13 +9,14 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "scripts" / "stress"))
 
+from _e2e_readiness import wait_for_server, wait_for_snapshot_readiness
 from run_e2e_stress import (
     E2EStressReport,
     _find_free_port,
     _iso_now,
     _make_run_dir,
     _parse_args,
-    _wait_for_server,
+    run,
 )
 
 
@@ -72,6 +74,55 @@ def test_make_run_dir_creates_directory(tmp_path, monkeypatch):
 
 def test_wait_for_server_returns_false_when_no_server():
     # Use a port that is very unlikely to be listening.
-    result = _wait_for_server("http://127.0.0.1:1", timeout=0.1)
+    result = wait_for_server("http://127.0.0.1:1", timeout=0.1)
 
     assert result is False
+
+
+def test_wait_for_snapshot_readiness_uses_stats_total_not_page_length():
+    # The first page may contain very few jobs, but the stats aggregate must
+    # drive readiness so large workspaces wait for the full seed count.
+    def fake_request_json(url: str, timeout: float):
+        return {
+            "jobs": [{"id": "job-1"}],
+            "stats": {"pending": 2500, "running": 2500},
+        }
+
+    with mock.patch("_e2e_readiness._request_json", side_effect=fake_request_json):
+        result = wait_for_snapshot_readiness(
+            "http://127.0.0.1:8000",
+            "ws-stress",
+            min_jobs=5000,
+            timeout=1.0,
+        )
+
+    assert result is True
+
+
+def test_run_writes_report_when_backend_start_fails(tmp_path, monkeypatch):
+    import run_e2e_stress as runner
+
+    monkeypatch.setattr(runner, "STRESS_RESULTS", tmp_path)
+
+    def _start_backend(cmd: list[str]):
+        raise RuntimeError("backend start boom")
+
+    monkeypatch.setattr(runner, "_start_backend", _start_backend)
+
+    result = run(
+        agents=1,
+        jobs=1,
+        duration=1,
+        event_rate=1,
+        browser="chromium",
+        workspace="ws-stress",
+        keep_server=False,
+        skip_frontend=True,
+    )
+
+    assert result == 1
+    report_files = list(tmp_path.rglob("report.md"))
+    assert len(report_files) == 1
+    content = report_files[0].read_text()
+    assert "backend start boom" in content
+    assert "## Backend Command" in content

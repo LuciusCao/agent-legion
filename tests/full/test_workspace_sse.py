@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 import time
 from contextlib import contextmanager
@@ -78,12 +79,32 @@ def test_workspace_sse_receives_jobs_created(tmp_path):
                 )
                 assert resp.status_code == 200
 
-                # Read until we see our event or timeout
+                # Read until we see a patch batch for the new job.
+                # In production the JobEventBuffer/aggregator emits
+                # job_patch_batch; the legacy jobs_created event is kept as a
+                # fallback for configurations without a buffer.
                 found = False
                 for chunk in stream.iter_text():
-                    if '"type": "jobs_created"' in chunk:
-                        found = True
+                    for line in chunk.splitlines():
+                        if not line.startswith("data: "):
+                            continue
+                        try:
+                            payload = json.loads(line[len("data: ") :])
+                        except json.JSONDecodeError:
+                            continue
+                        event_type = payload.get("type")
+                        if (
+                            event_type in ("jobs_created", "job_patch_batch")
+                            and payload.get("workspace_id") == workspace_id
+                        ):
+                            jobs = payload.get("jobs", [])
+                            if jobs:
+                                found = True
+                                break
+                    if found:
                         break
-                assert found
+                assert found, (
+                    "Expected jobs_created or job_patch_batch SSE event after creating jobs"
+                )
         finally:
             client.close()

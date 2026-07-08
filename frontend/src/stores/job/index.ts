@@ -7,24 +7,10 @@ import { patchActions } from './actions/patchActions'
 import { selectionActions } from './actions/selectionActions'
 import { batchActions } from './actions/batchActions'
 import { upgradeActions } from './actions/upgradeActions'
+import { initialJobDataState } from './initialState'
 
 export const useJobStore = create<JobState>((set, get) => ({
-  jobs: [],
-  jobsById: {},
-  jobIds: [],
-  revision: 0,
-  jobsWorkspaceId: null,
-  isLoading: false,
-  error: null,
-  selectedIds: new Set(),
-  expandedId: null,
-  filterConfig: {
-    status: null,
-    search: '',
-    workflowVersion: null,
-    activeNodeKey: null,
-  },
-  selectMode: false,
+  ...initialJobDataState,
   batchDeleteLoading: false,
   batchPackageLoading: false,
   batchRerunLoading: false,
