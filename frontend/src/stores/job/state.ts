@@ -3,32 +3,31 @@ import type {
   JobSummary,
   WorkspacePackageResult,
 } from '../../jobTypes'
+import type { ContinueJobResult } from './stateTypes'
 export {
   countMutationResults,
   makeMutationToast,
   normalizeJobStatus,
   type MutationCounts,
 } from './mutationHelpers'
-export type JobStatus =
-  | 'pending'
-  | 'running'
-  | 'completed'
-  | 'failed'
-  | 'paused'
-export interface JobFilterConfig {
-  status: JobStatus | null
-  search: string
-  workflowVersion: number | 'none' | null
-  activeNodeKey: string | null
-}
+export type { JobFilterConfig, JobStatus } from './filterConfig'
+export type { JobFilterOptionAccumulator } from './filterLogic/optionAccumulator'
+export type { FilterCounts } from './filterLogic/types'
 export interface JobState {
   jobs: JobSummary[]
+  jobsById: Record<string, JobSummary>
+  jobIds: string[]
+  jobIndexById: Record<string, number>
+  revision: number
+  filteredJobIds: string[]
+  filterCounts: import('./filterLogic/types').FilterCounts
+  optionAccumulator: import('./filterLogic/optionAccumulator').JobFilterOptionAccumulator
   jobsWorkspaceId: string | null
   isLoading: boolean
   error: string | null
   selectedIds: Set<string>
   expandedId: string | null
-  filterConfig: JobFilterConfig
+  filterConfig: import('./filterConfig').JobFilterConfig
   selectMode: boolean
   batchDeleteLoading: boolean
   batchPackageLoading: boolean
@@ -40,7 +39,21 @@ export interface JobState {
   resetForWorkspace: (workspaceId: string) => void
   setJobsAndFinishLoading: (jobs: JobSummary[]) => void
   failJobFetch: (workspaceId: string, message: string) => void
-  setFilterConfig: (config: Partial<JobFilterConfig>) => void
+  setJobsSnapshot: (
+    workspaceId: string,
+    revision: number,
+    jobs: JobSummary[]
+  ) => void
+  appendJobsSnapshot: (workspaceId: string, jobs: JobSummary[]) => void
+  applyJobPatchBatch: (
+    workspaceId: string,
+    revision: number,
+    jobs: JobSummary[],
+    deletedJobIds: string[]
+  ) => void
+  setFilterConfig: (
+    config: Partial<import('./filterConfig').JobFilterConfig>
+  ) => void
   toggleSelectMode: () => void
   toggleSelect: (id: string) => void
   selectAll: () => void
@@ -61,14 +74,7 @@ export interface JobState {
     targetNodeKey: string,
     startNodeKey?: string
   ) => Promise<BatchJobMutationResult>
-  continueJob: (jobId: string) => Promise<{
-    job_id: string
-    operation: string
-    status: string
-    message?: string | null
-    node_key?: string | null
-    reason_code?: string | null
-  }>
+  continueJob: (jobId: string) => ContinueJobResult
   batchUpgradeWorkflow: (
     workspaceId: string,
     jobIds: string[]

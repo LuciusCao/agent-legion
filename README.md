@@ -449,3 +449,23 @@ Generic Workspace Job code follows the boundary: UI reads persisted Node state, 
 services, and the scheduler claims Nodes through Executor leases. See [AGENTS.md](AGENTS.md) for
 Phase 6 architecture rules and wrong examples.
 
+## Large-scale agent stress testing
+
+Run backend synthetic event stress:
+
+```bash
+uv run python scripts/stress/simulate_agents.py --workspace ws-stress --agents 100 --jobs 5000 --event-rate 500 --duration 600
+```
+
+Run workspace UI stress:
+
+```bash
+cd frontend && STRESS_WORKSPACE_ID=ws-stress STRESS_DURATION_MS=300000 npm run stress:workspace
+```
+
+Run report generation:
+
+```bash
+uv run python scripts/stress/run_e2e_stress.py --agents 100 --jobs 5000 --duration 600 --browser chromium
+```
+

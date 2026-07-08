@@ -6,6 +6,7 @@ import {
   continueJob as apiContinueJob,
 } from '../../../jobApi'
 import { useUiStore } from '../../uiStore'
+import { deleteSucceededJobs } from './deleteState'
 import {
   countMutationResults,
   makeMutationToast,
@@ -70,21 +71,7 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
         const succeededIds = new Set(
           results.filter((r) => r.status === 'succeeded').map((r) => r.job_id)
         )
-        set((state) => {
-          const nextSelected = new Set(state.selectedIds)
-          const nextJobs = state.jobs.filter((j) => {
-            if (succeededIds.has(j.id)) {
-              nextSelected.delete(j.id)
-              return false
-            }
-            return true
-          })
-          return {
-            jobs: nextJobs,
-            selectedIds: nextSelected,
-            selectMode: nextSelected.size === 0 ? false : state.selectMode,
-          }
-        })
+        set((state) => deleteSucceededJobs(state, succeededIds))
         const counts = countMutationResults(results)
         useUiStore
           .getState()

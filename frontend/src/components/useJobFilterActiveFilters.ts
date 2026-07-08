@@ -1,7 +1,7 @@
 import { useMemo } from 'react'
 import type { JobFilterConfig } from '../stores/job/state'
 import { JOB_STATUS_LABELS } from '../labels'
-import type { JobFilterNodeOption } from './useJobFilterNodeOptions'
+import type { JobFilterNodeOption } from '../stores/job/filterLogic/types'
 
 export interface JobFilterActiveFilter {
   label: string

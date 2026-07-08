@@ -82,6 +82,16 @@ def test_discover_clears_stale_agents_when_json_is_invalid(monkeypatch):
     assert manager.get_all() == []
 
 
+def test_agent_status_manager_marks_broadcast_pending_once():
+    manager = AgentStatusManager()
+    manager.add_pi_agent_for_workspace("ws1", max_tasks=10)
+
+    manager.set_busy("pi", {"id": "job1"}, workspace_id="ws1")
+    manager.set_busy("pi", {"id": "job2"}, workspace_id="ws1")
+
+    assert manager.has_pending_broadcast() is True
+
+
 def test_set_busy_and_idle_updates_current_video_details():
     manager = AgentStatusManager()
     manager.agents = [AgentStatus(id="main", name="Main", busy=False)]

@@ -71,8 +71,19 @@ const mockJobs: JobRecord[] = [
 describe('JobList', () => {
   beforeEach(() => {
     mockFetchJobs.mockReset()
+    const jobIds = mockJobs.map((job) => job.id)
+    const jobsById = Object.fromEntries(mockJobs.map((job) => [job.id, job]))
     useJobStore.setState({
       jobs: mockJobs,
+      jobsById,
+      jobIds,
+      jobIndexById: Object.fromEntries(jobIds.map((id, index) => [id, index])),
+      filteredJobIds: jobIds,
+      filterCounts: {
+        status: { all: 2, pending: 1, running: 1 },
+        workflowVersion: { all: 2, none: 2 },
+        activeNodeKey: { all: 2 },
+      },
       isLoading: false,
       error: null,
       selectedIds: new Set(),
@@ -106,7 +117,13 @@ describe('JobList', () => {
   })
 
   it('empty state shows 暂无任务', () => {
-    useJobStore.setState({ jobs: [] })
+    useJobStore.setState({
+      jobs: [],
+      jobsById: {},
+      jobIds: [],
+      jobIndexById: {},
+      filteredJobIds: [],
+    })
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>
@@ -123,7 +140,7 @@ describe('JobList', () => {
   })
 
   it('renders skeleton while loading', () => {
-    useJobStore.setState({ jobs: [], isLoading: true })
+    useJobStore.setState({ jobs: [], filteredJobIds: [], isLoading: true })
     render(
       <MemoryRouter initialEntries={['/workspaces/ws1']}>
         <Routes>

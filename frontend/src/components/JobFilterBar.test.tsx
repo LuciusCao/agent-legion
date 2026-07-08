@@ -2,7 +2,10 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { JobFilterBar } from './JobFilterBar'
 import { createJobSummary } from '../stores/job/actions/testHelpers'
+import { useJobStore } from '../stores/jobStore'
+import { createOptionAccumulator } from '../stores/job/filterLogic/optionAccumulator'
 import type { WorkflowDefinitionRecord } from '../types'
+import type { JobSummary } from '../jobTypes'
 
 const workflowDefinition: WorkflowDefinitionRecord = {
   key: 'question_content',
@@ -29,8 +32,31 @@ const workflowDefinition: WorkflowDefinitionRecord = {
   intake: { modes: [] },
 }
 
-function renderBar(props = {}) {
+const defaultJobs: JobSummary[] = [
+  createJobSummary({
+    id: 'j1',
+    status: 'running',
+    active_node_key: 'extract',
+    workflow_version: 3,
+  }),
+  createJobSummary({
+    id: 'j2',
+    status: 'completed',
+    active_node_key: 'review',
+    workflow_version: 3,
+  }),
+]
+
+function renderBar(
+  options: { jobs?: JobSummary[] } & Record<string, unknown> = {}
+) {
+  const { jobs, ...props } = options
   const onChange = vi.fn()
+  const nextJobs = jobs ?? defaultJobs
+  useJobStore.setState({
+    jobs: nextJobs,
+    optionAccumulator: createOptionAccumulator(nextJobs),
+  })
   const utils = render(
     <JobFilterBar
       filterConfig={{
@@ -45,20 +71,6 @@ function renderBar(props = {}) {
         activeNodeKey: { all: 2, extract: 1, review: 1 },
       }}
       workflowDefinition={workflowDefinition}
-      jobs={[
-        createJobSummary({
-          id: 'j1',
-          status: 'running',
-          active_node_key: 'extract',
-          workflow_version: 3,
-        }),
-        createJobSummary({
-          id: 'j2',
-          status: 'completed',
-          active_node_key: 'review',
-          workflow_version: 3,
-        }),
-      ]}
       onChange={onChange}
       {...props}
     />

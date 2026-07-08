@@ -1,24 +1,16 @@
 import { create } from 'zustand'
 import type { JobState } from './state'
 import { fetchActions } from './actions/fetchActions'
+import { snapshotActions } from './actions/snapshotActions'
+import { appendActions } from './actions/appendActions'
+import { patchActions } from './actions/patchActions'
 import { selectionActions } from './actions/selectionActions'
 import { batchActions } from './actions/batchActions'
 import { upgradeActions } from './actions/upgradeActions'
+import { initialJobDataState } from './initialState'
 
 export const useJobStore = create<JobState>((set, get) => ({
-  jobs: [],
-  jobsWorkspaceId: null,
-  isLoading: false,
-  error: null,
-  selectedIds: new Set(),
-  expandedId: null,
-  filterConfig: {
-    status: null,
-    search: '',
-    workflowVersion: null,
-    activeNodeKey: null,
-  },
-  selectMode: false,
+  ...initialJobDataState,
   batchDeleteLoading: false,
   batchPackageLoading: false,
   batchRerunLoading: false,
@@ -26,6 +18,9 @@ export const useJobStore = create<JobState>((set, get) => ({
   continueLoading: false,
   batchUpgradeWorkflowLoading: false,
   ...fetchActions(set),
+  ...snapshotActions(set),
+  ...appendActions(set),
+  ...patchActions(set),
   ...selectionActions(set, get),
   ...batchActions(set, get),
   ...upgradeActions(set, get),

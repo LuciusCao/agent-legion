@@ -139,6 +139,10 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     _apply_env_overrides(config)
     _apply_basecms_env_overrides(config)
     _normalize_cms_config(config)
+    if data_dir is None:
+        env_data_dir = os.environ.get("VIDEO_HIVE_DATA_DIR")
+        if env_data_dir:
+            data_dir = Path(env_data_dir)
     resolved_data_dir = data_dir or root_dir / str(config.get("data_dir", "data"))
     videos_dir = resolved_data_dir / "videos"
     logs_dir = resolved_data_dir / "logs"

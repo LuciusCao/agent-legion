@@ -21,6 +21,7 @@ class JobRerunService:
         artifact_service: JobArtifactMutationService | None = None,
         clock: Callable[[], float] | None = None,
         job_event_manager: JobEventManager | None = None,
+        job_event_buffer: Any | None = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
@@ -29,6 +30,7 @@ class JobRerunService:
         self.artifact_service = artifact_service or JobArtifactMutationService(settings.jobs_dir)
         self.clock = clock
         self.job_event_manager = job_event_manager
+        self.job_event_buffer = job_event_buffer
 
     def _now(self) -> datetime:
         if self.clock is not None:

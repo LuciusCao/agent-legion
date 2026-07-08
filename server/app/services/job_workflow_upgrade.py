@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
-from server.app.events import JobEventManager, broadcast_job_update
+from server.app.events import JobEventManager, broadcast_job_update, record_job_update
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
@@ -18,10 +18,12 @@ class JobWorkflowUpgradeService:
         job_db: JobQueries,
         lease_repo: ExecutorLeaseRepository,
         job_event_manager: JobEventManager | None = None,
+        job_event_buffer: Any | None = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
         self.job_event_manager = job_event_manager
+        self.job_event_buffer = job_event_buffer
 
     def _result(
         self,
@@ -87,5 +89,8 @@ class JobWorkflowUpgradeService:
         except JobMutationConflict as exc:
             return self._result(job_id, "skipped", exc.reason_code, str(exc))
 
-        broadcast_job_update(self.job_db, self.job_event_manager, job_id)
+        if self.job_event_buffer is not None:
+            record_job_update(self.job_db, self.job_event_buffer, job_id)
+        elif self.job_event_manager is not None:
+            broadcast_job_update(self.job_db, self.job_event_manager, job_id)
         return self._result(job_id, "succeeded")

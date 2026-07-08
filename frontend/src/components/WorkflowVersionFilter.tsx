@@ -1,23 +1,22 @@
 import { Select, MenuItem, FormControl, InputLabel } from '@mui/material'
 import type { JobFilterConfig } from '../stores/job/state'
-import type { JobSummary } from '../jobTypes'
+import type { WorkflowVersionOptions } from '../stores/job/filterLogic/types'
 import filterStyles from './FilterControls.module.css'
-import { useWorkflowVersionOptions } from './useWorkflowVersionOptions'
 
 export interface WorkflowVersionFilterProps {
   value: JobFilterConfig['workflowVersion']
   counts: Record<string, number>
-  jobs: JobSummary[]
+  versionOptions: WorkflowVersionOptions
   onChange: (workflowVersion: JobFilterConfig['workflowVersion']) => void
 }
 
 export function WorkflowVersionFilter({
   value,
   counts,
-  jobs,
+  versionOptions,
   onChange,
 }: WorkflowVersionFilterProps) {
-  const { versionOptions, hasMissingVersion } = useWorkflowVersionOptions(jobs)
+  const { versionOptions: options, hasMissingVersion } = versionOptions
 
   return (
     <FormControl size="small" className={filterStyles.filterControl}>
@@ -60,7 +59,7 @@ export function WorkflowVersionFilter({
         {hasMissingVersion && (
           <MenuItem value="none">未指定版本 ({counts.none ?? 0})</MenuItem>
         )}
-        {versionOptions.map((version) => (
+        {options.map((version) => (
           <MenuItem key={version} value={String(version)}>
             v{version} ({counts[String(version)] ?? 0})
           </MenuItem>
