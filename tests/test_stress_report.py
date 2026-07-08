@@ -104,7 +104,7 @@ def test_run_writes_report_when_backend_start_fails(tmp_path, monkeypatch):
 
     monkeypatch.setattr(runner, "STRESS_RESULTS", tmp_path)
 
-    def _start_backend(cmd: list[str]):
+    def _start_backend(cmd: list[str], run_dir: Path):
         raise RuntimeError("backend start boom")
 
     monkeypatch.setattr(runner, "_start_backend", _start_backend)
