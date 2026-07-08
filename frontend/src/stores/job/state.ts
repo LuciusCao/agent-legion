@@ -37,6 +37,7 @@ export interface JobState {
     revision: number,
     jobs: JobSummary[]
   ) => void
+  appendJobsSnapshot: (workspaceId: string, jobs: JobSummary[]) => void
   applyJobPatchBatch: (
     workspaceId: string,
     revision: number,

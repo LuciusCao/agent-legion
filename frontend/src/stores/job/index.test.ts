@@ -41,6 +41,21 @@ describe('useJobStore', () => {
       expect(state.revision).toBe(7)
     })
 
+    it('appends later snapshot pages without replacing existing jobs', () => {
+      const store = useJobStore.getState()
+      store.setJobsSnapshot('ws1', 7, [
+        createJobSummary({ id: 'j1', workspace_id: 'ws1', status: 'pending' }),
+      ])
+      store.appendJobsSnapshot('ws1', [
+        createJobSummary({ id: 'j2', workspace_id: 'ws1', status: 'running' }),
+      ])
+
+      const state = useJobStore.getState()
+      expect(state.jobsById.j1.status).toBe('pending')
+      expect(state.jobsById.j2.status).toBe('running')
+      expect(state.jobIds).toEqual(['j1', 'j2'])
+    })
+
     it('merges patch jobs without replacing unchanged jobs', () => {
       const store = useJobStore.getState()
       store.setJobsSnapshot('ws1', 1, [

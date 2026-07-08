@@ -61,6 +61,7 @@ export function createJobState(partial: Partial<JobState> = {}): JobState {
     resetForWorkspace: () => {},
     failJobFetch: () => {},
     setJobsSnapshot: () => {},
+    appendJobsSnapshot: () => {},
     applyJobPatchBatch: () => {},
     setFilterConfig: () => {},
     toggleSelectMode: () => {},

@@ -119,6 +119,9 @@ def _run_backend_stress(
     run_dir: Path,
 ) -> Path:
     backend_results = run_dir / "backend"
+    env = os.environ.copy()
+    env["VIDEO_HIVE_DATA_DIR"] = str(PROJECT_ROOT / "data" / "stress")
+    env["AGENT_LEGION_ENABLE_STRESS_EVENTS"] = "1"
     cmd = [
         sys.executable,
         "scripts/stress/simulate_agents.py",
@@ -138,7 +141,7 @@ def _run_backend_stress(
         str(backend_results),
     ]
     logger.info("Running backend stress: %s", " ".join(cmd))
-    subprocess.run(cmd, cwd=PROJECT_ROOT, check=True)
+    subprocess.run(cmd, cwd=PROJECT_ROOT, env=env, check=True)
     return backend_results / "backend-metrics.json"
 
 
@@ -281,7 +284,12 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--agents", type=int, default=100, help="Synthetic agents")
     parser.add_argument("--jobs", type=int, default=10000, help="Target jobs")
     parser.add_argument("--duration", type=int, default=900, help="Duration in seconds")
-    parser.add_argument("--event-rate", type=int, default=500, help="Raw events per second")
+    parser.add_argument(
+        "--event-rate",
+        type=int,
+        default=500,
+        help="Total raw events per second across all agents",
+    )
     parser.add_argument("--browser", default="chromium", help="Playwright browser")
     parser.add_argument("--workspace", default="ws-stress", help="Stress workspace id")
     parser.add_argument(

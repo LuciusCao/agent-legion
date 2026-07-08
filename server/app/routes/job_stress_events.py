@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from typing import Any
 
 from fastapi import APIRouter, HTTPException
@@ -21,6 +22,7 @@ class StressEventBatchRequest(BaseModel):
 
 class StressEventBatchResponse(BaseModel):
     recorded: int
+    recorded_at: float
 
 
 def create_job_stress_events_router(
@@ -43,8 +45,12 @@ def create_job_stress_events_router(
         require_workflows_enabled(settings)
         if job_event_buffer is None:
             raise HTTPException(status_code=503, detail="Event buffer not available")
+        recorded_at = time.monotonic()
         for event in payload.events:
             job_event_buffer.record(workspace_id, event.job_id, event.kind)
-        return StressEventBatchResponse(recorded=len(payload.events))
+        return StressEventBatchResponse(
+            recorded=len(payload.events),
+            recorded_at=recorded_at,
+        )
 
     return router

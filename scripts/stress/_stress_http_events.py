@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import time
 from typing import Any
 
 import requests
@@ -22,20 +21,21 @@ class StressHttpEventRecorder:
         self.workspace_id = workspace_id
         self.session = session or requests.Session()
 
-    def record_batch(self, events: list[tuple[str, str]]) -> tuple[int, float]:
+    def record_batch(self, events: list[tuple[str, str]]) -> tuple[int, float | None]:
         if not events:
-            return 0, 0.0
+            return 0, None
         payload: dict[str, Any] = {
             "events": [{"job_id": job_id, "kind": kind} for job_id, kind in events]
         }
         url = f"{self.base_url}/api/workspaces/{self.workspace_id}/events/stress"
-        start = time.monotonic()
         try:
             response = self.session.post(url, json=payload, timeout=10)
             response.raise_for_status()
-            recorded = response.json().get("recorded", len(events))
+            data = response.json()
+            recorded = data.get("recorded", len(events))
+            recorded_at = data.get("recorded_at")
         except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to record stress events: %s", exc)
             recorded = 0
-        elapsed = time.monotonic() - start
-        return recorded, elapsed
+            recorded_at = None
+        return recorded, recorded_at
