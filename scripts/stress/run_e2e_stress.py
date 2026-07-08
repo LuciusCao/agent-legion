@@ -61,20 +61,75 @@ def _backend_command(port: int) -> list[str]:
     ).split()
 
 
-def _start_backend(cmd: list[str]) -> subprocess.Popen:
+def _frontend_command(port: int) -> list[str]:
+    npm = shutil.which("npm")
+    if npm is None:
+        raise RuntimeError("npm not found; frontend stress cannot run")
+    return [
+        npm,
+        "run",
+        "dev",
+        "--",
+        "--port",
+        str(port),
+        "--strictPort",
+    ]
+
+
+def _start_backend(cmd: list[str], run_dir: Path) -> subprocess.Popen:
     env = {
         **os.environ,
         "VIDEO_HIVE_DATA_DIR": str(PROJECT_ROOT / "data" / "stress"),
         "AGENT_LEGION_ENABLE_STRESS_EVENTS": "1",
     }
+    logs_dir = run_dir / "backend"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = logs_dir / "server-stdout.log"
+    stderr_path = logs_dir / "server-stderr.log"
     logger.info("Starting backend: %s", " ".join(cmd))
-    return subprocess.Popen(
-        cmd,
-        cwd=PROJECT_ROOT,
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+        return subprocess.Popen(
+            cmd,
+            cwd=PROJECT_ROOT,
+            env=env,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+
+def _start_frontend(cmd: list[str], backend_base_url: str, run_dir: Path) -> subprocess.Popen:
+    env = {
+        **os.environ,
+        "VITE_API_TARGET": backend_base_url,
+    }
+    logs_dir = run_dir / "frontend-server"
+    logs_dir.mkdir(parents=True, exist_ok=True)
+    stdout_path = logs_dir / "server-stdout.log"
+    stderr_path = logs_dir / "server-stderr.log"
+    logger.info("Starting frontend: %s", " ".join(cmd))
+    with stdout_path.open("wb") as stdout, stderr_path.open("wb") as stderr:
+        return subprocess.Popen(
+            cmd,
+            cwd=FRONTEND_DIR,
+            env=env,
+            stdout=stdout,
+            stderr=stderr,
+        )
+
+
+def _wait_for_frontend(frontend_base_url: str, timeout: float = 60.0) -> bool:
+    import requests
+
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            response = requests.get(frontend_base_url, timeout=2.0)
+            if response.status_code == 200:
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(0.5)
+    return False
 
 
 def _run_backend_stress(
@@ -183,34 +238,52 @@ def run(
     logger.info("E2E stress run: %s", run_dir.name)
 
     backend_port = _find_free_port()
-    base_url = f"http://127.0.0.1:{backend_port}"
+    frontend_port = _find_free_port()
+    backend_base_url = f"http://127.0.0.1:{backend_port}"
+    frontend_base_url = f"http://127.0.0.1:{frontend_port}"
     backend_proc: subprocess.Popen | None = None
+    frontend_proc: subprocess.Popen | None = None
     stress_proc: subprocess.Popen | None = None
 
     backend_cmd = _backend_command(backend_port)
+    frontend_cmd = _frontend_command(frontend_port)
     report.backend_command = shlex.join(backend_cmd)
 
     try:
-        backend_proc = _start_backend(backend_cmd)
+        backend_proc = _start_backend(backend_cmd, run_dir)
 
-        if not wait_for_server(base_url):
-            report.errors.append("Backend failed to start")
+        if not wait_for_server(backend_base_url):
+            report.errors.append(
+                "Backend failed to start; see "
+                f"{(run_dir / 'backend' / 'server-stdout.log').relative_to(PROJECT_ROOT)} "
+                "and "
+                f"{(run_dir / 'backend' / 'server-stderr.log').relative_to(PROJECT_ROOT)}"
+            )
         else:
+            frontend_proc = _start_frontend(frontend_cmd, backend_base_url, run_dir)
+            if not _wait_for_frontend(frontend_base_url):
+                report.errors.append(
+                    "Frontend failed to start; see "
+                    f"{(run_dir / 'frontend-server' / 'server-stdout.log').relative_to(PROJECT_ROOT)} "
+                    "and "
+                    f"{(run_dir / 'frontend-server' / 'server-stderr.log').relative_to(PROJECT_ROOT)}"
+                )
+
             # Start the backend simulator concurrently with the frontend stress so
             # the browser experiences live SSE traffic instead of a quiet page.
             stress_proc, backend_metrics_path, _ = _run_backend_stress(
-                base_url, workspace, agents, jobs, duration, event_rate, run_dir
+                backend_base_url, workspace, agents, jobs, duration, event_rate, run_dir
             )
             report.backend_metrics_path = str(backend_metrics_path.relative_to(PROJECT_ROOT))
 
-            if not wait_for_snapshot_readiness(base_url, workspace, min_jobs=jobs):
+            if not wait_for_snapshot_readiness(backend_base_url, workspace, min_jobs=jobs):
                 report.errors.append(
                     "Workspace snapshot did not become ready before frontend stress"
                 )
 
             if not skip_frontend and not report.errors:
                 frontend_metrics_path, frontend_cmd, frontend_error = _run_frontend_stress(
-                    base_url, workspace, browser, duration, run_dir
+                    frontend_base_url, workspace, browser, duration, run_dir
                 )
                 report.frontend_command = shlex.join(frontend_cmd)
                 if frontend_error is not None:
@@ -236,6 +309,8 @@ def run(
     finally:
         if stress_proc is not None and stress_proc.poll() is None:
             _terminate_process(stress_proc)
+        if frontend_proc is not None:
+            _terminate_process(frontend_proc)
         if backend_proc is not None and not keep_server:
             _terminate_process(backend_proc)
 
