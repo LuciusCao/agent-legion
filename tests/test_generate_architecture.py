@@ -109,15 +109,13 @@ class VideoRecord(TypedDict):
 def test_extract_frontend_routes(tmp_path: Path):
     src_dir = tmp_path / "frontend" / "src"
     src_dir.mkdir(parents=True)
-    (src_dir / "App.tsx").write_text("""
+    (src_dir / "AppRoutes.tsx").write_text("""
 <Route path="/" element={<ListPage />} />
-<Route index element={<DetailPage />} />
 <Route path="/about" element={<AboutPage />} />
 """)
 
     result = extract_frontend_routes(tmp_path)
     assert "ListPage" in result
-    assert "DetailPage" in result
     assert "AboutPage" in result
     assert "`/about`" in result
 

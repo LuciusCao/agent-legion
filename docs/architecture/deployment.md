@@ -48,13 +48,18 @@ scripts/
 ### 顶层配置项
 
 - `asr` — ASR 提供商配置（whisper / SenseVoice）
+- `cleanup`
 - `cleanup_video_after_assemble` — 打包后是否清理视频
 - `cms` — CMS 集成配置
 - `data_dir` — 数据目录
 - `executors` — Workspace 执行器定义
+- `heartbeat_failure_threshold`
+- `heartbeat_interval_seconds`
+- `lease_ttl_seconds`
 - `openclaw` — OpenClaw 命令模板与工作目录
 - `resource_providers` — 资源提供方路径映射
 - `server` — HTTP 服务监听地址与端口
+- `token_usage`
 - `worker` — 后台 worker 并发配置
 - `workflows` — Agent Legion DAG 工作流开关
 

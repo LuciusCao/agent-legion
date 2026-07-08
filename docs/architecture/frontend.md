@@ -2,49 +2,95 @@
 
 ## Overview
 
-Video Hive 前端是 React 18 + TypeScript SPA，使用 Vite 构建。UI 基于 `@material/web` Material 3 Web Components + 自定义 CSS。
+Agent Legion 前端是 React 18 + TypeScript SPA，使用 Vite 构建。UI 基于 `@mui/material` (MUI v6) + CSS Modules + 自定义 CSS。
+
+核心职责：
+
+- Workspace 列表与详情展示
+- Job 列表、Job Detail（含 DAG、产物、日志、视频播放器）
+- Workflow Studio（工作流可视化编辑）
+- Token Usage 用量统计
+- Settings（Workspace / 执行器 / 全局设置）
+- 通过 SSE 接收后端事件，通过 WebSocket 接收 Agent 状态
 
 ## Directory Structure
 
 ```
 frontend/src/
 ├── main.tsx                # React 入口
-├── App.tsx                 # 路由壳（React Router v6）
-├── api.ts                  # 后端 API 封装
-├── types.ts                # 共享类型定义
+├── App.tsx                 # 应用壳（ThemeProvider、Query 层）
+├── AppRoutes.tsx           # React Router v6 路由定义
+├── api.ts                  # 旧版集中式 API 封装（逐步迁移到 api/）
+├── api/                    # 按领域拆分的 API 层
+│   ├── core.ts             # 通用请求封装
+│   ├── workflows.ts
+│   ├── workflow_revisions.ts
+│   └── workflow_draft_compare.ts
+├── generated/
+│   └── api.ts              # OpenAPI 生成的传输类型
 ├── pages/                  # 路由级页面
-│   ├── ListPage.tsx        # 视频列表
-│   ├── DetailPage.tsx      # 视频详情
-│   ├── JobDetailPage.tsx   # Job 详情
-│   └── WorkspaceMainPage.tsx # Workspace 主页
+│   ├── DashboardPage.tsx
+│   ├── WorkspaceMainPage.tsx
+│   ├── JobDetailPage.tsx
+│   ├── SettingsPage.tsx
+│   ├── TokenUsagePage.tsx
+│   ├── WorkflowStudioPage.tsx
+│   └── jobDetail/          # Job Detail 子组件
+├── layouts/                # 布局组件
+│   ├── AppShell.tsx
+│   └── WorkspaceLayout.tsx
 ├── components/             # 可复用 UI 组件
+│   ├── AddDialog.tsx
+│   ├── JobList.tsx
+│   ├── JobListItem.tsx
+│   ├── DagGraph.tsx
+│   ├── DagStepper.tsx
+│   ├── ArtifactDrawer.tsx
 │   ├── VideoPlayer.tsx
-│   ├── SubtitlePanel.tsx
 │   ├── ChapterPanel.tsx
 │   └── ...
 ├── stores/                 # Zustand 状态管理
-│   ├── videoStore.ts
-│   ├── detailStore.ts
+│   ├── workspaceStore.ts
+│   ├── jobStore.ts
+│   ├── job/                # Job 领域子状态
+│   ├── setting/
+│   ├── artifactStore.ts
+│   ├── packageStore.ts
 │   └── ...
 ├── hooks/                  # React 自定义 Hooks
-└── helpers.ts              # 纯工具函数
+│   ├── useWorkspaceEvents.ts
+│   ├── useJobComprehensionInfo.ts
+│   ├── useVideoEvents.ts
+│   └── ...
+├── lib/                    # 纯工具函数
+│   ├── jobDag.ts
+│   ├── jobRuns.ts
+│   ├── workflowNodes.ts
+│   └── ...
+├── types/                  # 类型声明
+├── testing/                # 测试辅助（mock、fixture、TestMemoryRouter）
+└── styles.css              # 全局样式
 ```
 
 ## Data Flow
 
 ```
-用户交互 → Zustand Store → api.ts → FastAPI 后端
+用户交互 → Zustand Store → api/ 模块 → FastAPI 后端
               ↓
-         组件重新渲染 ← SSE 事件推送
+        组件重新渲染 ← SSE / WebSocket 事件推送
 ```
 
-前端通过 SSE 接收后端事件（视频状态变更、Agent 状态更新），实现准实时 UI 更新。
+- Workspace / Job 状态变更通过 SSE 推送。
+- Agent 状态通过 WebSocket (`/api/agents`) 推送。
+- 前端 `api/` 层负责按领域组织请求；新代码优先使用 `api/` 目录而非顶层 `api.ts`。
 
 ## Key Decisions
 
 - 使用 Zustand 而非 Redux，降低样板代码。
-- 状态按页面拆分（videoStore、detailStore、jobStore 等），避免单文件过大。
-- `@material/web` 组件通过 React ref 和事件监听集成。
+- 状态按领域拆分（`workspaceStore`、`jobStore`、`job/*`、`setting/*` 等），避免单文件过大。
+- 使用 MUI v6 组件库 + CSS Modules 管理局部样式。
+- 路由定义集中在 `AppRoutes.tsx`；`App.tsx` 只负责应用级 Provider。
+- 前端传输类型必须从 `frontend/src/generated/api.ts` 派生，禁止手写重复类型。
 
 ## API Surface / Interface
 
@@ -55,22 +101,20 @@ frontend/src/
 | 路径 | 页面组件 |
 |------|----------|
 | `/` | DashboardPage |
-| `/video-hive` | VideoHiveLayout |
-| `(index)` | ListPage |
-| `/video-hive/settings` | VideoHiveSettingsPage |
 | `/workspaces/:workspaceId` | WorkspaceLayout |
-| `(index)` | WorkspaceMainPage |
-| `jobs/:jobId` | JobDetailPage |
-| `packages` | WorkspacePackagesPage |
+| `/workspaces/:workspaceId` | WorkspaceMainPage |
+| `/workspaces/:workspaceId/jobs/:jobId` | JobDetailPage |
 | `/workspaces/:workspaceId/settings` | SettingsPage |
-| `/videos/:id` | DetailPage |
+| `/workspaces/:workspaceId/token-usage` | TokenUsagePage |
+| `/workspaces/:workspaceId/workflow-studio` | WorkflowStudioPage |
 
 <!-- END AUTO-GENERATED -->
 
 ## Related Specs
 
 - [前端状态管理](../superpowers/completed/2026-05-29-frontend-state-management-design.md)
-- [Material Design 3 前端改造](../superpowers/completed/2026-05-23-material-design-3-redesign-design.md)
+- [前端 React 反模式](../superpowers/completed/2026-05-29-frontend-react-anti-patterns-design.md)
+- [前端 Bundle 与列表渲染](../superpowers/completed/2026-05-29-frontend-bundle-and-list-rendering-design.md)
 
 ## Technology Stack
 
@@ -79,8 +123,7 @@ frontend/src/
 - Vite
 - React Router v6
 - Zustand
-- `@material/web` (Material 3 Web Components)
-- `@mui/material` (MUI)
+- `@mui/material` (MUI v6)
 - `@xyflow/react` (React Flow)
 - `dagre`
 - `katex`
@@ -91,18 +134,34 @@ frontend/src/
 - **Linter**: ESLint 10 + `typescript-eslint` + `eslint-plugin-react-hooks`
 - **Formatter**: Prettier（`semi: false`, `singleQuote: true`, `tabWidth: 2`）
 - 常用脚本：
+  - `npm run dev`
+  - `npm run build`
+  - `npm run typecheck`
+  - `npm run preview`
+  - `npm run api:generate`
+  - `npm run api:check`
+  - `npm run test`
+  - `npm run test:coverage`
   - `npm run lint`
   - `npm run lint:fix`
   - `npm run format`
   - `npm run format:check`
 
+## Testing Conventions
+
+- 测试框架：Vitest + `@testing-library/react` + jsdom。
+- 覆盖率阈值（`vite.config.ts`）：lines 86 / functions 80 / branches 72 / statements 82。
+- 测试辅助位于 `frontend/src/testing/`：
+  - `eventSourceMock.ts` — `EventSource` mock
+  - `TestMemoryRouter.tsx` — 测试用路由包装器
+  - `fixtures.ts` — 通用测试数据
+- 全局测试设置：`frontend/src/test-setup.ts`，包含 console-error 断言辅助、`ResizeObserver` / `IntersectionObserver` mock 等。
+
 ## UI Behavior Notes
 
-- 前端界面语言为中文（如“加入队列”、“重跑”、“打包完成项”）。
-- 视频播放器支持点击 subtitle / chapter / interaction 时间戳进行 seek。
-- 添加视频表单包含类型选择（知识点 / 题目解析）、`external_id` 字段与可选 `source_uuid`。
-- 批量输入支持每行 `external_id,source_uuid`（`source_uuid` 可选）。
-- 列表与详情头部展示 `content_type` 标签与 `external_id`。
-- Phase panel 与重跑下拉框会根据 `content_type` 自适应；`question` 视频隐藏 knowledge-only phases。
-- 全局 `Toast` 组件用于反馈（如“该资源正在被处理中”）。
-- 批量操作支持多选后批量重跑、批量删除、批量打包。
+- 前端界面语言为中文。
+- Workspace 列表展示 job 统计、最近活动和快速操作。
+- Job Detail 包含 DAG 图、Stepper、产物（Artifact）面板、日志、视频播放器（针对视频 Job）。
+- Workflow Studio 支持可视化编辑 workflow 节点、边与 intake modes，并与修订历史集成。
+- Token Usage 页面展示 workspace / job / run 级别的 token 用量与成本。
+- 全局 `Toast` 组件用于操作反馈。
