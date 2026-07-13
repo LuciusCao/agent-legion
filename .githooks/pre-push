@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(git rev-parse --show-toplevel)"
+gate="quick"
+has_update=0
+zero_sha="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+  _="$local_ref $remote_sha"
+  if [[ -z "$local_sha" || "$local_sha" == "$zero_sha" ]]; then
+    continue
+  fi
+  has_update=1
+  case "$remote_ref" in
+    refs/heads/develop|refs/heads/main|refs/heads/master|refs/heads/release/*|refs/tags/*)
+      gate="full"
+      ;;
+  esac
+done
+
+if [[ "$has_update" -eq 0 ]]; then
+  exit 0
+fi
+
+exec "$ROOT_DIR/scripts/run-local-gate.sh" "$gate"

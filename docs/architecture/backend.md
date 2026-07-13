@@ -30,6 +30,7 @@ server/app/
 │   └── __init__.py         # 路由组装
 ├── services/               # 业务逻辑服务层
 │   ├── job_*.py            # Job 查询、执行、重跑、删除、打包
+│   ├── question_detail.py  # Question CMS 集成与关联 Job 聚合
 │   ├── token_usage*.py     # Token 用量统计与定价
 │   ├── workflow_*.py       # 工作流草稿、修订、格式转换
 │   ├── workspace_*.py      # Workspace 配置与执行器配置
@@ -86,6 +87,9 @@ server/app/
 - Agent Legion DAG 是主要的执行模型；视频流水线作为 `video_knowledge` workflow 运行。
 - 所有文件 I/O 限制在 `data/` 目录内，由 `security.py` 做路径校验。
 - 路由、服务、执行器之间有明确的边界：Route 只做 HTTP 适配，Service 处理业务逻辑，Executor 通过租赁（lease）申请容量。详见 [AGENTS.md](../../AGENTS.md)。
+- CMS 客户端将网络、响应解析和鉴权失败统一为 `CmsClientError`；业务层只降级明确的
+  集成错误，不吞掉编程异常。
+- CORS 来源由 `config/app.yaml` 的 `server.cors` 显式配置；默认仅允许本机 Vite 开发源。
 
 ## API Surface / Interface
 
@@ -313,6 +317,8 @@ server/app/
   - 在 `config/workflow.yaml` 中 `workflows.enabled` 为 `true` 时轮询 Agent Legion DAG 任务。
   - 视频 Job 由 `video_knowledge` workflow 的 handler 节点（`download_video`、`transcribe_video`、Agent 阶段、`assemble_video_metadata`、`package_video_job`）处理。
 - worker 默认处于**暂停**状态；调用 `POST /api/worker/resume` 开始处理。
+- 旧视频 worker 使用 `worker.poll_batch_size` 限制单次数据库候选查询，并通过
+  `(created_at, id)` keyset 游标循环扫描，避免全表物化和固定首页造成的任务饥饿。
 - 每个视频 Job 有 `content_type`（`knowledge` 或 `question`），并走类型特定的 pipeline：
 
   **Knowledge videos (`knowledge`):**
@@ -421,6 +427,8 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 - `data_dir`: 数据根目录
 - `server.host` / `server.port`: HTTP 监听地址与端口（开发时通常由启动命令覆盖）
 - `worker.phase_concurrency`: 各视频 phase 的并发上限
+- `worker.poll_batch_size`: 旧视频 worker 单次候选查询上限
+- `server.cors`: 浏览器跨域来源和 credentials 策略
 - `cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`: 日志与运行目录清理策略
 - `token_usage.currency` / `token_usage.pricing`: Token 用量货币与模型单价
 

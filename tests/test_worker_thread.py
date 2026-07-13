@@ -122,7 +122,14 @@ def test_worker_thread_consumes_tick_signal():
 def test_worker_thread_executes_local_work():
     """Worker loop submits local work and cleans up on completion."""
     db = MagicMock()
-    db.list_videos.return_value = [{"id": "v1", "status": "queued", "current_phase": "download"}]
+    db.list_videos.return_value = [
+        {
+            "id": "v1",
+            "status": "queued",
+            "current_phase": "download",
+            "created_at": "2026-01-01 00:00:00",
+        }
+    ]
     settings = MagicMock()
     settings.config = {}
     runner_pool = MagicMock()
@@ -147,7 +154,12 @@ def test_worker_thread_executes_agent_work():
     """Worker loop submits agent work and cleans up on completion."""
     db = MagicMock()
     db.list_videos.return_value = [
-        {"id": "v1", "status": "queued", "current_phase": "subtitle_review"}
+        {
+            "id": "v1",
+            "status": "queued",
+            "current_phase": "subtitle_review",
+            "created_at": "2026-01-01 00:00:00",
+        }
     ]
     settings = MagicMock()
     settings.config = {}
@@ -169,3 +181,36 @@ def test_worker_thread_executes_agent_work():
 
     wt.stop(timeout=2)
     assert not wt._thread.is_alive()
+
+
+def test_worker_thread_releases_runner_when_candidate_cursor_wraps():
+    db = MagicMock()
+    pages = iter(
+        [
+            [
+                {
+                    "id": "v1",
+                    "status": "running",
+                    "current_phase": "subtitle_review",
+                    "created_at": "2026-01-01 00:00:00",
+                }
+            ],
+            [],
+        ]
+    )
+    db.list_videos.side_effect = lambda **_kwargs: next(pages, [])
+    settings = MagicMock()
+    settings.config = {"worker": {"poll_batch_size": 1}}
+    runner = MagicMock()
+    runner_pool = MagicMock()
+    runner_pool.size.return_value = 1
+    runner_pool.acquire.return_value = (0, runner)
+    worker_control = WorkerControl()
+    worker_control.resume()
+
+    wt = WorkerThread(db, settings, runner_pool, MagicMock(), worker_control)
+    wt.start()
+    wait_for_predicate(lambda: db.list_videos.call_count >= 2)
+    wt.stop(timeout=2)
+
+    assert runner_pool.release.call_count >= 2

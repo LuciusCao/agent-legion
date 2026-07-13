@@ -2,8 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
-import time
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import Future, ThreadPoolExecutor, wait
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -354,15 +353,17 @@ class WorkflowWorkerThread:
                 self.runtime.cancel(execution_id)
             except Exception:
                 logger.exception("failed to cancel execution %s during shutdown", execution_id)
-        deadline = time.monotonic() + min(timeout, grace)
-        for future in list(self._futures.values()):
-            remaining = deadline - time.monotonic()
-            if remaining <= 0:
-                break
+        futures = list(self._futures.values())
+        done, pending = wait(futures, timeout=max(timeout, grace))
+        for future in done:
             try:
-                future.result(timeout=remaining)
+                future.result()
             except Exception:
                 logger.exception("workflow future failed during shutdown")
+        if pending:
+            logger.warning(
+                "%s workflow future(s) still active after shutdown timeout", len(pending)
+            )
         self._futures.clear()
         for pool in self._pools.values():
             pool.shutdown(wait=False, cancel_futures=True)

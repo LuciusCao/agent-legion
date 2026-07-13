@@ -2,7 +2,13 @@ data_dir: data
 server:
   host: 127.0.0.1
   port: 8000
+  cors:
+    allow_origins:
+      - http://localhost:5173
+      - http://127.0.0.1:5173
+    allow_credentials: false
 worker:
+  poll_batch_size: 100
   phase_concurrency:
     download: 10
     transcribe: 1

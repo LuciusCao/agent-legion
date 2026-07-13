@@ -6,6 +6,7 @@ from typing import Any
 from urllib.parse import urlencode
 
 from server.app.configuration import load_application_config
+from server.app.configuration.cors import CorsSettings, load_cors_settings
 from server.app.executors.config import (
     ExecutorConfig,
     load_executor_definitions,
@@ -29,6 +30,7 @@ class Settings:
     packages_dir: Path
     jobs_dir: Path
     config: dict[str, Any]
+    cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
@@ -161,6 +163,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         packages_dir=packages_dir,
         jobs_dir=jobs_dir,
         config=config,
+        cors=load_cors_settings(config),
         executor_definitions=executor_definitions,
         executor_runtime=executor_runtime,
     )

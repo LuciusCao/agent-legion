@@ -233,6 +233,8 @@ class VideoQueriesMixin(VideoQueriesBase):
         status_filter: str | list[str] | None = None,
         limit: int | None = None,
         offset: int = 0,
+        after_created_at: str | None = None,
+        after_id: str | None = None,
     ) -> list[VideoRecord]:
         where_clauses: list[str] = []
         params: list[Any] = []
@@ -245,6 +247,14 @@ class VideoQueriesMixin(VideoQueriesBase):
                 placeholders = ",".join("?" * len(status_filter))
                 where_clauses.append(f"status in ({placeholders})")
                 params.extend(status_filter)
+
+        if after_created_at is not None:
+            if after_id is None:
+                raise ValueError("after_id is required with after_created_at")
+            where_clauses.append("(created_at < ? or (created_at = ? and id > ?))")
+            params.extend([after_created_at, after_created_at, after_id])
+        elif after_id is not None:
+            raise ValueError("after_created_at is required with after_id")
 
         sql = "select * from videos"
         if where_clauses:

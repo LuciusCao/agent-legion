@@ -6,6 +6,7 @@ from server.app.services.video_execution import (
     process_video_once,
 )
 from server.app.settings import Settings
+from server.app.worker_candidates import iter_candidate_pages
 
 from .worker_scheduler import (
     WorkerCapacity,  # noqa: F401
@@ -21,15 +22,16 @@ def process_next(
     settings: Settings,
     openclaw_runner: OpenClawRunner | None = None,
 ) -> bool:
-    for video in db.list_videos(status_filter=["queued", "missing_url", "running"]):
-        if (
-            openclaw_runner is None
-            and video["status"] == "queued"
-            and phase_requires_openclaw(video["current_phase"])
-        ):
-            continue
-        if video["status"] in {"queued", "missing_url"} and process_video_once(
-            db, settings, video["id"], openclaw_runner=openclaw_runner
-        ):
-            return True
+    for videos in iter_candidate_pages(db, settings):
+        for video in videos:
+            if (
+                openclaw_runner is None
+                and video["status"] == "queued"
+                and phase_requires_openclaw(video["current_phase"])
+            ):
+                continue
+            if video["status"] in {"queued", "missing_url"} and process_video_once(
+                db, settings, video["id"], openclaw_runner=openclaw_runner
+            ):
+                return True
     return False

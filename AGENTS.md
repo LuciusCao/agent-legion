@@ -27,6 +27,9 @@
 
 - 任何代码修改后先跑 `./scripts/check-quick.sh`。
 - 提交或交接前必须跑 `./scripts/check.sh`。
+- 运行 `make install-hooks` 启用版本化本地门禁：pre-commit 跑 fast gate，pre-push
+  对 feature 分支跑 quick gate、对 `develop` / release / tag 跑 full gate。
+- 不要使用 `git commit --no-verify` 或 `git push --no-verify` 绕过本地质量门。
 - 禁止在质量门未通过时声明完成。
 
 ## 5. Architecture Governance

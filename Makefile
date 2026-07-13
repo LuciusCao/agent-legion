@@ -56,7 +56,7 @@ api-generate: ## 重新生成前端 API 类型
 
 # 预提交钩子
 .PHONY: install-hooks
-install-hooks: ## 安装可选的预提交钩子
+install-hooks: ## 安装 worktree 兼容的本地质量门钩子
 	./scripts/install-git-hooks.sh
 
 # 审题信息上传工具

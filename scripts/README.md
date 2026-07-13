@@ -9,6 +9,7 @@
 | `check-quick.sh` | 日常快速质量门：Ruff、Python 测试、mypy、架构检查、API 漂移检查、前端 lint/typecheck/test、spec health。 |
 | `check.sh` | 完整质量门（提交前）：quick gate + 前端测试覆盖率 + 生产构建。 |
 | `check-ci.sh` | CI 质量门：完整 gate 的 CI 扩展版本。 |
+| `run-local-gate.sh` | 对精确 commit 执行 quick/full gate，并在 Git common directory 记录可复用的本地通过凭证。 |
 
 ## 架构治理
 
@@ -35,7 +36,7 @@
 | `migrate-video-hive-to-agent-legion.py` | 从旧 Video Hive 运行时迁移数据到 Agent Legion Workspace Jobs。 |
 | `generate-api-types.sh` | 导出后端 OpenAPI 并生成 `frontend/src/generated/api.ts`；`--check` 只做漂移检查。 |
 | `export_openapi.py` | 不启动 Worker 导出 OpenAPI 模式。 |
-| `install-git-hooks.sh` | 安装可选的预提交钩子。 |
+| `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
 | `check-pi.sh` | Pi CLI 环境 smoke 检查。 |
 
 ## 运行方式
@@ -45,6 +46,8 @@
 ```bash
 make check-quick
 make check
+make check-ci
+make install-hooks
 make skills-lock
 make api-generate
 make architecture-check

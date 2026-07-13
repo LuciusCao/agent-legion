@@ -1,7 +1,7 @@
 from collections.abc import Sequence
 from typing import Any, Protocol, cast
 
-from server.app.cms.client import get_token
+from server.app.cms.client import CmsClientError, get_token
 from server.app.cms.knowledge import lookup_knowledge_video
 from server.app.cms.question import lookup_question_video
 from server.app.db import Database
@@ -120,7 +120,7 @@ def add_video_items(
             result_status, url, title, message, cms_source_uuid = resolve_video_input(
                 item, settings
             )
-        except Exception as exc:
+        except CmsClientError as exc:
             results.append(
                 {
                     "external_id": external_id,

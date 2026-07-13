@@ -307,6 +307,23 @@ def test_list_videos_limit_and_offset(db):
     assert offset[1]["id"] == all_videos[3]["id"]
 
 
+def test_list_videos_keyset_cursor_handles_equal_timestamps(db):
+    for video_id in ("a", "b", "c"):
+        db.create_video(f"https://example.com/{video_id}.mp4", video_id.upper())
+    with db.connect() as conn:
+        conn.execute("update videos set created_at='2026-01-01 00:00:00'")
+
+    first_page = db.list_videos(limit=2)
+    second_page = db.list_videos(
+        limit=2,
+        after_created_at=first_page[-1]["created_at"],
+        after_id=first_page[-1]["id"],
+    )
+
+    assert [video["id"] for video in first_page] == ["a", "b"]
+    assert [video["id"] for video in second_page] == ["c"]
+
+
 def test_batch_get_videos_returns_matching_records(db):
     """Regression test for issue 012: batch get videos."""
     v1 = db.create_video("https://example.com/a.mp4", "A")
