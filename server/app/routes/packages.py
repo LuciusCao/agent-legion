@@ -1,10 +1,8 @@
 import json
 import zipfile
-from typing import Any
 
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
 
 from ..db import Database
 from ..events import VideoEventManager
@@ -27,26 +25,18 @@ from .package_contracts import (
     WorkspacePackageResponse,
     WorkspacePackageResultResponse,
 )
-
-
-class PackageUpdate(BaseModel):
-    name: str | None = None
-    locked: bool | None = None
-
-
-class WorkspacePackageUpdate(BaseModel):
-    name: str | None = None
-    locked: bool | None = None
-
-
-class WorkspacePackageDeleteResponse(BaseModel):
-    deleted: bool
-
-
-class WorkspacePackageUpdateResponse(BaseModel):
-    id: int
-    name: str | None = None
-    locked: bool | None = None
+from .package_history_contracts import (
+    PackageDeleteResponse,
+    PackageItemResponse,
+    PackagesResponse,
+    PackageUpdate,
+    PackageUpdateResponse,
+    WorkspacePackageDeleteResponse,
+    WorkspacePackageItemResponse,
+    WorkspacePackagesResponse,
+    WorkspacePackageUpdate,
+    WorkspacePackageUpdateResponse,
+)
 
 
 def create_packages_router(
@@ -61,11 +51,11 @@ def create_packages_router(
         job_packages = JobPackageService(job_db, settings)
     router = APIRouter(tags=["packages"])
 
-    @router.get("/packages")
-    def list_packages() -> dict[str, Any]:
+    @router.get("/packages", response_model=PackagesResponse)
+    def list_packages() -> PackagesResponse:
         packages = db.list_packages(limit=10)
         resolved_packages_dir = settings.packages_dir.resolve(strict=True)
-        result: list[dict[str, Any]] = []
+        result: list[PackageItemResponse] = []
         for pkg in packages:
             stored_path = pkg.get("path") or ""
             pkg_out = dict(pkg)
@@ -103,21 +93,25 @@ def create_packages_router(
                     except Exception:
                         pass
                 pkg_out["path"] = str(resolved_path)
-            result.append(pkg_out)
-        return {"packages": result}
+            result.append(PackageItemResponse.model_validate(pkg_out))
+        return PackagesResponse(packages=result)
 
-    @router.delete("/packages/{package_id:int}")
-    def delete_package(package_id: int) -> dict[str, bool]:
+    @router.delete("/packages/{package_id:int}", response_model=PackageDeleteResponse)
+    def delete_package(package_id: int) -> PackageDeleteResponse:
         try:
             package_deletion.delete(package_id)
         except (PackageNotFoundError, ManagedPathError):
             raise HTTPException(status_code=404, detail="Package not found") from None
         except PackageLockedError:
             raise HTTPException(status_code=400, detail="Package is locked") from None
-        return {"deleted": True}
+        return PackageDeleteResponse(deleted=True)
 
-    @router.patch("/packages/{package_id:int}")
-    def update_package(package_id: int, body: PackageUpdate) -> dict[str, Any]:
+    @router.patch(
+        "/packages/{package_id:int}",
+        response_model=PackageUpdateResponse,
+        response_model_exclude_none=True,
+    )
+    def update_package(package_id: int, body: PackageUpdate) -> PackageUpdateResponse:
         packages = db.list_packages(limit=1000)
         target = next((p for p in packages if p["id"] == package_id), None)
         if target is None:
@@ -126,12 +120,7 @@ def create_packages_router(
             db.update_package_name(package_id, body.name)
         if body.locked is not None:
             db.update_package_stats(package_id, locked=1 if body.locked else 0)
-        result: dict[str, Any] = {"id": package_id}
-        if body.name is not None:
-            result["name"] = body.name
-        if body.locked is not None:
-            result["locked"] = body.locked
-        return result
+        return PackageUpdateResponse(id=package_id, name=body.name, locked=body.locked)
 
     @router.get(
         "/packages/{filename:path}",
@@ -153,11 +142,11 @@ def create_packages_router(
             raise HTTPException(status_code=404, detail="Package not found")
         return FileResponse(resolved, media_type="application/zip", filename=filename)
 
-    @router.get("/workspaces/{workspace_id}/packages")
-    def list_workspace_packages(workspace_id: str) -> dict[str, Any]:
+    @router.get("/workspaces/{workspace_id}/packages", response_model=WorkspacePackagesResponse)
+    def list_workspace_packages(workspace_id: str) -> WorkspacePackagesResponse:
         packages = job_packages.list_workspace_packages(workspace_id, limit=10)
         workspace_packages_dir = settings.packages_dir / f"workspace-{workspace_id}"
-        result: list[dict[str, Any]] = []
+        result: list[WorkspacePackageItemResponse] = []
         for pkg in packages:
             stored_path = pkg.get("path") or ""
             pkg_out = dict(pkg)
@@ -173,8 +162,8 @@ def create_packages_router(
                 except ManagedPathError:
                     continue
                 pkg_out["path"] = str(resolved_path)
-            result.append(pkg_out)
-        return {"packages": result}
+            result.append(WorkspacePackageItemResponse.model_validate(pkg_out))
+        return WorkspacePackagesResponse(packages=result)
 
     @router.delete(
         "/workspaces/{workspace_id}/packages/{package_id:int}",

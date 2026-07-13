@@ -7,7 +7,12 @@ import { useJobStore } from '../stores/jobStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { useUiStore } from '../stores/uiStore'
 import { useSettingStore } from '../stores/settingStore'
-import { api, fetchJobs, fetchWorkflowDefinition } from '../api'
+import {
+  api,
+  fetchJobs,
+  fetchWorkflowDefinition,
+  fetchWorkspacePackages,
+} from '../api'
 import {
   batchRerunJobs,
   batchDeleteJobs,
@@ -24,6 +29,7 @@ const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
 const mockFetchJobsSnapshot = vi.fn()
 const mockFetchWorkspaceStats = vi.fn()
+const mockFetchWorkspacePackages = vi.fn()
 const mockFetchWorkflowDefinition = vi.fn()
 const mockBatchRerunJobs = vi.fn()
 const mockBatchDeleteJobs = vi.fn()
@@ -40,6 +46,9 @@ vi.mock('../api', () => ({
   fetchWorkspaceStats: (
     ...args: Parameters<typeof import('../api').fetchWorkspaceStats>
   ) => mockFetchWorkspaceStats(...args),
+  fetchWorkspacePackages: (
+    ...args: Parameters<typeof fetchWorkspacePackages>
+  ) => mockFetchWorkspacePackages(...args),
   fetchWorkflowDefinition: (
     ...args: Parameters<typeof fetchWorkflowDefinition>
   ) => mockFetchWorkflowDefinition(...args),
@@ -158,6 +167,7 @@ describe('WorkspaceMainPage', () => {
     mockFetchJobs.mockReset()
     mockFetchJobsSnapshot.mockReset()
     mockFetchWorkspaceStats.mockReset()
+    mockFetchWorkspacePackages.mockReset()
     mockFetchWorkflowDefinition.mockReset()
     mockBatchRerunJobs.mockReset()
     mockBatchDeleteJobs.mockReset()
@@ -176,6 +186,7 @@ describe('WorkspaceMainPage', () => {
       })
     )
     mockFetchWorkspaceStats.mockResolvedValue(baseStats)
+    mockFetchWorkspacePackages.mockResolvedValue({ packages: [] })
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: workflowDefinition,
     })
@@ -733,26 +744,19 @@ describe('WorkspaceMainPage', () => {
   })
 
   it('renders workspace package history dialog when open', async () => {
-    mockApi.mockImplementation((path: string) => {
-      if (path === '/api/workspaces/ws1/stats') {
-        return Promise.resolve(baseStats)
-      }
-      if (path === '/api/workspaces/ws1/packages') {
-        return Promise.resolve({
-          packages: [
-            {
-              id: 1,
-              name: '批次 1',
-              path: '/data/packages/ws1.zip',
-              video_count: 3,
-              size_bytes: 1024,
-              locked: 0,
-              created_at: new Date().toISOString(),
-            },
-          ],
-        })
-      }
-      return Promise.resolve({})
+    mockFetchWorkspacePackages.mockResolvedValue({
+      packages: [
+        {
+          id: 1,
+          workspace_id: 'ws1',
+          name: '批次 1',
+          path: '/data/packages/ws1.zip',
+          video_count: 3,
+          size_bytes: 1024,
+          locked: 0,
+          created_at: new Date().toISOString(),
+        },
+      ],
     })
     useUiStore.setState({ workspacePackageDialogOpen: true })
 
