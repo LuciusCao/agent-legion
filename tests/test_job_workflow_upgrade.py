@@ -1,3 +1,4 @@
+from contextlib import closing
 from pathlib import Path
 
 from server.app.db.connection import connect_sqlite
@@ -188,7 +189,7 @@ def test_upgrade_job_workflow_skips_active_lease(tmp_path: Path) -> None:
         workflow_definition_snapshot_json=original["definition_json"],
     )
     run = queries.start_node_run(job["id"], "fetch_questions", ["pi"], "")
-    with connect_sqlite(queries.path) as conn, conn:
+    with closing(connect_sqlite(queries.path)) as conn, conn:
         conn.execute(
             """
             insert into executor_leases(

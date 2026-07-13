@@ -9,6 +9,7 @@ import dataclasses
 import json
 import shutil
 import sys
+from contextlib import closing
 from pathlib import Path
 
 # Make the project root importable when the script is invoked directly.
@@ -67,7 +68,7 @@ def preflight(env: Environment) -> MigrationReport:
 
     queries = JobQueries(env.db_path, env.jobs_dir)
 
-    with connect_sqlite(env.db_path) as conn:
+    with closing(connect_sqlite(env.db_path)) as conn, conn:
         videos = _list_legacy_videos(conn)
 
     job_id_to_video_id: dict[str, str] = {}
@@ -194,7 +195,7 @@ def apply_migration(env: Environment) -> MigrationReport:
     mappings: list[VideoMapping] = []
     copied_job_dirs: list[Path] = []
 
-    with connect_sqlite(env.db_path) as conn:
+    with closing(connect_sqlite(env.db_path)) as conn, conn:
         videos = _list_legacy_videos(conn)
 
     try:
@@ -220,7 +221,7 @@ def apply_migration(env: Environment) -> MigrationReport:
             if status == "completed":
                 _write_package_manifest(job_dir)
 
-            with connect_sqlite(env.db_path) as conn:
+            with closing(connect_sqlite(env.db_path)) as conn, conn:
                 transcription_runs = _list_transcription_runs(conn, video_id)
             (job_dir / "transcription_runs.json").write_text(
                 json.dumps(transcription_runs, ensure_ascii=False, indent=2, default=str),

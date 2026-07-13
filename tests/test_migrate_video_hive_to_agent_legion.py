@@ -4,6 +4,7 @@ import importlib.util
 import json
 import shutil
 import sys
+from contextlib import closing
 from pathlib import Path
 from typing import Any
 
@@ -63,7 +64,7 @@ def create_legacy_db_with_video(
     knowledge_code = external_id if content_type == "knowledge" else ""
     question_id = external_id if content_type == "question" else ""
 
-    with connect_sqlite(env.db_path) as conn:
+    with closing(connect_sqlite(env.db_path)) as conn, conn:
         conn.execute(
             """
             insert into videos(
@@ -111,7 +112,7 @@ def create_legacy_db_with_video(
         (video_dir / "upload_params.json").write_text("{}", encoding="utf-8")
 
     if status in ("completed", "failed"):
-        with connect_sqlite(env.db_path) as conn:
+        with closing(connect_sqlite(env.db_path)) as conn, conn:
             conn.execute(
                 """
                 insert into phase_runs(video_id, phase_key, status, exit_code, error_message)
@@ -180,7 +181,7 @@ class TestPreflight:
     ) -> None:
         env = _make_environment(migration_module, tmp_path)
         init_db(env.db_path)
-        with connect_sqlite(env.db_path) as conn:
+        with closing(connect_sqlite(env.db_path)) as conn, conn:
             for video_id, external_id in (("legacy-one", "K/001"), ("legacy-two", "K 001")):
                 conn.execute(
                     """
@@ -210,7 +211,7 @@ class TestPreflight:
         custom_dir = env.videos_dir / "custom" / video_id
         custom_dir.parent.mkdir(parents=True)
         shutil.move(str(env.videos_dir / video_id), custom_dir)
-        with connect_sqlite(env.db_path) as conn:
+        with closing(connect_sqlite(env.db_path)) as conn, conn:
             conn.execute(
                 "update videos set storage_dir=? where id=?",
                 ("videos/custom/knowledge_K001", video_id),
@@ -273,7 +274,7 @@ class TestApply:
 
         migration_module.apply_migration(env)
 
-        with connect_sqlite(env.db_path) as conn:
+        with closing(connect_sqlite(env.db_path)) as conn, conn:
             row = conn.execute(
                 "select workspace_id from workspace_executor_bootstrap_state where workspace_id=?",
                 ("video_knowledge",),
@@ -288,7 +289,7 @@ class TestApply:
         custom_dir = env.videos_dir / "custom" / video_id
         custom_dir.parent.mkdir(parents=True)
         shutil.move(str(env.videos_dir / video_id), custom_dir)
-        with connect_sqlite(env.db_path) as conn:
+        with closing(connect_sqlite(env.db_path)) as conn, conn:
             conn.execute(
                 "update videos set storage_dir=? where id=?",
                 ("videos/custom/knowledge_K001", video_id),

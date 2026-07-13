@@ -15,6 +15,7 @@ import shutil
 import sqlite3
 import sys
 import zipfile
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -66,7 +67,7 @@ def backfill(dry_run: bool = False) -> int:
     backup_path = _backup_db(db_path)
     print(f"Backed up database to {backup_path}")
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT id, storage_dir FROM jobs WHERE workspace_id = ?",

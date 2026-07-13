@@ -1,3 +1,4 @@
+import ast
 import gc
 import sqlite3
 import warnings
@@ -11,6 +12,22 @@ from server.app.executors.backup import backup_sqlite_connection
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.jobs.queries import JobQueries
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _is_direct_sqlite_connection_context(expression: ast.expr) -> bool:
+    if not isinstance(expression, ast.Call):
+        return False
+    function = expression.func
+    if isinstance(function, ast.Name):
+        return function.id == "connect_sqlite"
+    return (
+        isinstance(function, ast.Attribute)
+        and function.attr == "connect"
+        and isinstance(function.value, ast.Name)
+        and function.value.id == "sqlite3"
+    )
 
 
 def _assert_no_resource_warning() -> None:
@@ -154,4 +171,25 @@ def test_bare_connect_sqlite_without_close_warns(tmp_path: Path) -> None:
     assert any(
         issubclass(w.category, ResourceWarning) and "database" in str(w.message).lower()
         for w in caught
+    )
+
+
+def test_sqlite_connections_are_not_used_as_bare_context_managers() -> None:
+    violations: list[str] = []
+    source_roots = (PROJECT_ROOT / "server", PROJECT_ROOT / "scripts", PROJECT_ROOT / "tests")
+
+    for source_root in source_roots:
+        for path in source_root.rglob("*.py"):
+            tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+            for node in ast.walk(tree):
+                if not isinstance(node, (ast.With, ast.AsyncWith)):
+                    continue
+                for item in node.items:
+                    if _is_direct_sqlite_connection_context(item.context_expr):
+                        relative_path = path.relative_to(PROJECT_ROOT)
+                        violations.append(f"{relative_path}:{item.context_expr.lineno}")
+
+    assert not violations, (
+        "SQLite connection context managers commit or roll back but do not close. "
+        "Wrap connections with contextlib.closing():\n" + "\n".join(violations)
     )

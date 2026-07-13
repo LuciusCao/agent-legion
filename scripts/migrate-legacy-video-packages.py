@@ -13,6 +13,7 @@ import argparse
 import shutil
 import sqlite3
 import sys
+from contextlib import closing
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -57,7 +58,7 @@ def migrate(dry_run: bool = False) -> list[dict[str, str]]:
 
     migrated: list[dict[str, str]] = []
 
-    with sqlite3.connect(db_path) as conn:
+    with closing(sqlite3.connect(db_path)) as conn, conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
             "SELECT id, name, path, video_count, size_bytes, created_at "

@@ -1,17 +1,5 @@
 exemptions:
 - check: architecture.route_response_model
-  path: server/app/routes/artifacts.py:artifacts
-  reason: Artifacts endpoint returns a dynamic JSON artifact map pending typed response
-    models.
-  owner: video-hive
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_response_model
-  path: server/app/routes/common.py:worker_tick
-  reason: Worker tick endpoint returns a small acceptance JSON map pending typed response
-    models.
-  owner: video-hive
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_response_model
   path: server/app/routes/packages.py:list_packages
   reason: Package list endpoint returns a dynamic JSON envelope pending typed response
     models.
@@ -34,18 +22,6 @@ exemptions:
   reason: Workspace package list endpoint returns a dynamic JSON envelope pending
     typed response models.
   owner: workspace-executor
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_annotation_any
-  path: server/app/routes/agents.py:list_agents
-  reason: Agents list endpoint returns a dynamic dict[str, Any] envelope pending typed
-    response models.
-  owner: video-hive
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_annotation_any
-  path: server/app/routes/artifacts.py:artifacts
-  reason: Artifacts endpoint returns a dynamic dict[str, Any] map pending typed response
-    models.
-  owner: video-hive
   remove_when: issues/open/036-P3-type-sync-automation.md
 - check: architecture.route_annotation_any
   path: server/app/routes/packages.py:list_packages
