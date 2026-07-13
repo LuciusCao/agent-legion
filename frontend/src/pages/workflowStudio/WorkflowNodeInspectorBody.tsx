@@ -1,10 +1,13 @@
+import type { ExecutorDefinition } from '../../executorTypes'
 import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
+import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
 import { WorkflowNodeEditorSection } from './WorkflowNodeEditorSection'
 import { EdgeList, ItemList } from './WorkflowNodeInspectorLists'
 import styles from './WorkflowNodeInspector.module.css'
 
 type Props = {
   details: SelectedWorkflowNodeDetails
+  executorCatalog: ExecutorDefinition[]
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
@@ -19,6 +22,12 @@ export function WorkflowNodeInspectorBody(props: Props) {
   return (
     <section aria-label="Workflow inspector" className={styles.panel}>
       <h2 className={styles.title}>{node.label}</h2>
+      <WorkflowNodeEditorSection
+        node={node}
+        definitionYaml={props.definitionYaml}
+        setDefinitionYaml={props.setDefinitionYaml}
+        readOnly={readOnly}
+      />
       <div className={styles.section}>
         <div className={styles.sectionTitle}>标识</div>
         <div className={styles.value}>{node.key}</div>
@@ -27,6 +36,10 @@ export function WorkflowNodeInspectorBody(props: Props) {
         <div className={styles.sectionTitle}>能力</div>
         <div className={styles.value}>{node.capability}</div>
       </div>
+      <WorkflowNodeExecutionSection
+        node={node}
+        executorCatalog={props.executorCatalog}
+      />
       <div className={styles.section}>
         <div className={styles.sectionTitle}>
           输入产物 ({node.inputs.length})
@@ -53,12 +66,6 @@ export function WorkflowNodeInspectorBody(props: Props) {
           <span className={styles.outcome}>{node.terminal.outcome}</span>
         </div>
       )}
-      <WorkflowNodeEditorSection
-        node={node}
-        definitionYaml={props.definitionYaml}
-        setDefinitionYaml={props.setDefinitionYaml}
-        readOnly={readOnly}
-      />
     </section>
   )
 }

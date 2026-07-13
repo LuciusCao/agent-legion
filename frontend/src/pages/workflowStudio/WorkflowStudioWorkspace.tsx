@@ -1,57 +1,32 @@
-import { useEffect, useState } from 'react'
 import { DagGraph } from '../../components/DagGraph'
-import { WorkflowDagFullscreenButton } from './components/WorkflowDagFullscreenDialog'
+import { WorkflowDagFullscreenButton } from './components/WorkflowDagFullscreenButton'
 import { WorkflowStudioMobileNav } from './WorkflowStudioMobileNav'
-import {
-  WorkflowStudioInspectorPanel,
-  WorkflowStudioLeftPanel,
-} from './WorkflowStudioSidePanels'
+import { WorkflowStudioInspectorPanel } from './WorkflowStudioSidePanels'
 import { useWorkflowStudioMobilePanel } from './useWorkflowStudioMobilePanel'
 import type { StudioLayoutProps } from './workflowStudioLayoutProps'
 import canvasStyles from '../WorkflowStudioPageCanvas.module.css'
 import canvasToolbarStyles from '../WorkflowStudioPageCanvasToolbar.module.css'
 import pageStyles from '../WorkflowStudioPageResponsive.module.css'
-import resizeStyles from './WorkflowStudioResizableLayout.module.css'
 
 export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
-  const [leftCollapsed, setLeftCollapsed] = useState(false)
-  const [rightCollapsed, setRightCollapsed] = useState(false)
   const { mobilePanel, setMobilePanel } = useWorkflowStudioMobilePanel(
     props.selectedNodeKey
   )
 
-  useEffect(() => {
-    const hasValidation =
-      props.validationErrors.length > 0 || props.validationMessage !== ''
-    if (hasValidation) setMobilePanel('inspector')
-  }, [props.validationErrors.length, props.validationMessage, setMobilePanel])
-
-  const forcedMode =
-    mobilePanel === 'changes'
-      ? 'changes'
-      : mobilePanel === 'yaml'
-        ? 'yaml'
-        : undefined
-
-  const versionsActive = mobilePanel === 'versions'
   const graphActive = mobilePanel === 'graph'
-  const inspectorActive =
-    mobilePanel === 'inspector' ||
-    mobilePanel === 'changes' ||
-    mobilePanel === 'yaml'
+  const inspectorActive = mobilePanel === 'editor'
+  const inspectorOpen = props.selectedNodeKey !== null
 
   return (
     <>
-      <WorkflowStudioMobileNav value={mobilePanel} onChange={setMobilePanel} />
+      <WorkflowStudioMobileNav
+        value={mobilePanel}
+        editorAvailable={inspectorOpen}
+        onChange={setMobilePanel}
+      />
       <div
-        className={`${pageStyles.layout}${leftCollapsed ? ` ${resizeStyles.leftCollapsed}` : ''}${rightCollapsed ? ` ${resizeStyles.rightCollapsed}` : ''}`}
+        className={`${pageStyles.layout}${inspectorOpen ? ` ${pageStyles.withInspector}` : ''}`}
       >
-        <WorkflowStudioLeftPanel
-          props={props}
-          collapsed={leftCollapsed}
-          active={versionsActive}
-          onToggle={() => setLeftCollapsed((value) => !value)}
-        />
         <main
           className={`${canvasStyles.canvas}${graphActive ? ` ${pageStyles.activePanel}` : ''}`}
           data-mobile-panel="graph"
@@ -74,13 +49,13 @@ export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
             />
           )}
         </main>
-        <WorkflowStudioInspectorPanel
-          props={props}
-          collapsed={rightCollapsed}
-          active={inspectorActive}
-          forcedMode={forcedMode}
-          onToggle={() => setRightCollapsed((value) => !value)}
-        />
+        {inspectorOpen && (
+          <WorkflowStudioInspectorPanel
+            props={props}
+            active={inspectorActive}
+            onClose={() => props.setSelectedNodeKey(null)}
+          />
+        )}
       </div>
     </>
   )

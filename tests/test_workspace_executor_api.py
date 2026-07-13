@@ -2,22 +2,27 @@ def test_list_executors_endpoint(client):
     response = client.get("/api/executors")
     assert response.status_code == 200
     data = response.json()
-    assert data["executors"][0] == {
-        "id": "local-default",
-        "kind": "local",
-        "global_capacity": 16,
-        "capabilities": [
-            "assemble_comprehension_info",
-            "assemble_video_metadata",
-            "classify_comprehension_eligibility",
-            "clean_and_parse",
-            "download_video",
-            "fetch_questions",
-            "finalize_non_uploadable",
-            "package_video_job",
-            "transcribe_video",
-        ],
-    }
+    executor = data["executors"][0]
+    assert executor["id"] == "local-default"
+    assert executor["kind"] == "local"
+    assert executor["global_capacity"] == 16
+    assert executor["capabilities"] == [
+        "assemble_comprehension_info",
+        "assemble_video_metadata",
+        "classify_comprehension_eligibility",
+        "clean_and_parse",
+        "download_video",
+        "fetch_questions",
+        "finalize_non_uploadable",
+        "package_video_job",
+        "transcribe_video",
+    ]
+    assert {
+        "name": "fetch_questions",
+        "handler": "question_comprehension_info.fetch_questions",
+        "skill": None,
+        "tools": [],
+    } in executor["capability_details"]
 
 
 def test_get_workspace_executor_configuration_reports_no_warnings_after_v005(client):

@@ -1067,6 +1067,17 @@ export interface components {
       /** Workspace Id */
       workspace_id: string
     }
+    /** ExecutorCapabilityResponse */
+    ExecutorCapabilityResponse: {
+      /** Handler */
+      handler?: string | null
+      /** Name */
+      name: string
+      /** Skill */
+      skill?: string | null
+      /** Tools */
+      tools?: string[]
+    }
     /** ExecutorCatalogResponse */
     ExecutorCatalogResponse: {
       /** Executors */
@@ -1076,6 +1087,8 @@ export interface components {
     ExecutorDefinitionResponse: {
       /** Capabilities */
       capabilities: string[]
+      /** Capability Details */
+      capability_details?: components['schemas']['ExecutorCapabilityResponse'][]
       /** Global Capacity */
       global_capacity: number
       /** Id */

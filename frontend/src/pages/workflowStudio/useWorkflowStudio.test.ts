@@ -40,6 +40,7 @@ const mocks = {
   compareWorkflowDraft: vi.fn(),
   publishWorkflowDraft: vi.fn(),
   validateWorkflowDraft: vi.fn(),
+  getExecutorCatalog: vi.fn(),
 }
 
 vi.mock('../../api', () => ({
@@ -57,6 +58,10 @@ vi.mock('../../api', () => ({
     mocks.validateWorkflowDraft(...args),
 }))
 
+vi.mock('../../executorApi', () => ({
+  getExecutorCatalog: (...args: unknown[]) => mocks.getExecutorCatalog(...args),
+}))
+
 describe('useWorkflowStudio', () => {
   beforeEach(() => {
     vi.useFakeTimers({ shouldAdvanceTime: true })
@@ -64,6 +69,7 @@ describe('useWorkflowStudio', () => {
     mocks.fetchWorkflowRevisions.mockResolvedValue({
       revisions: [activeRevisionPayload.revision],
     })
+    mocks.getExecutorCatalog.mockResolvedValue({ executors: [] })
     mocks.publishWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
     mocks.validateWorkflowDraft.mockResolvedValue({ valid: true, errors: [] })
   })

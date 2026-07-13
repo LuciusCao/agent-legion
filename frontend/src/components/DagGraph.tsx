@@ -17,6 +17,7 @@ import type { DagNodeData } from './DagNode'
 import type { DagNodeStatus } from './dagNodeStatus'
 import { NodeDetailsPanel } from './NodeDetailsPanel'
 import { filterRelevantRuns } from '../helpers'
+import { estimateDagNodeHeight } from './dagNodeHeight'
 import {
   buildRelationMaps,
   collectAncestors,
@@ -31,6 +32,8 @@ export interface DagGraphNode {
   created_at: string
   duration?: number
   executorKind?: 'local' | 'pi' | 'openclaw' | null
+  capability?: string
+  topologyBadges?: Array<'entry' | 'branch' | 'terminal'>
   terminalOutcome?: string
   inputs?: string[]
   outputs?: string[]
@@ -69,11 +72,6 @@ const NODE_WIDTH = 240
 const FIT_VIEW_OPTIONS = { padding: 0.18, minZoom: 0.35, maxZoom: 1.2 }
 const nodeTypes = { dagNode: DagNodeComponent }
 
-const BASE_HEIGHT = 66
-const SECTION_TITLE_HEIGHT = 14
-const CHIP_ROW_HEIGHT = 17
-const CHIPS_PER_ROW = 2
-
 type NormalizedExecutorKind = NonNullable<DagNodeData['executorKind']>
 
 function normalizeExecutorKind(
@@ -83,21 +81,6 @@ function normalizeExecutorKind(
   return kind as NormalizedExecutorKind
 }
 
-function estimateNodeHeight(node: DagGraphNode): number {
-  let height = BASE_HEIGHT
-  const inputCount = node.inputs?.length || 0
-  const outputCount = node.outputs?.length || 0
-  if (inputCount > 0) {
-    const inputRows = Math.ceil(Math.min(inputCount, 3) / CHIPS_PER_ROW)
-    height += SECTION_TITLE_HEIGHT + inputRows * CHIP_ROW_HEIGHT
-  }
-  if (outputCount > 0) {
-    const outputRows = Math.ceil(Math.min(outputCount, 3) / CHIPS_PER_ROW)
-    height += SECTION_TITLE_HEIGHT + outputRows * CHIP_ROW_HEIGHT
-  }
-  return height
-}
-
 function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
   const g = new dagre.graphlib.Graph()
   g.setGraph({ rankdir: 'LR', nodesep: 60, ranksep: 100 })
@@ -105,7 +88,7 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
 
   const heightMap = new Map<string, number>()
   for (const node of nodes) {
-    const height = estimateNodeHeight(node)
+    const height = estimateDagNodeHeight(node)
     heightMap.set(node.key, height)
     g.setNode(node.key, { width: NODE_WIDTH, height })
   }
@@ -127,6 +110,9 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
         status: node.status,
         duration: node.duration,
         executorKind: normalizeExecutorKind(node.executorKind),
+        nodeKey: node.capability ? node.key : undefined,
+        capability: node.capability,
+        topologyBadges: node.topologyBadges,
         terminalOutcome: node.terminalOutcome,
         inputs: node.inputs || [],
         outputs: node.outputs || [],

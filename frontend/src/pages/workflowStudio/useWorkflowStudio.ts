@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import { buildDagEdges, buildDagNodes } from './workflowStudioDag'
+import { useExecutorCatalog } from './useExecutorCatalog'
 import { useWorkflowDraftCompare } from './useWorkflowDraftCompare'
 import { useWorkflowStudioActions } from './useWorkflowStudioActions'
 import { useWorkflowStudioData } from './useWorkflowStudioData'
@@ -16,6 +17,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     reload,
     fetchRevisionDetail,
   } = useWorkflowStudioData(workspaceId)
+  const executorCatalog = useExecutorCatalog()
   const draft = useWorkflowStudioDraft(
     workspaceId,
     originalYaml,
@@ -31,24 +33,10 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
   const actions = useWorkflowStudioActions(workspaceId, draft, reload, compare)
   const { nodes, edges } = useMemo(() => {
     return {
-      nodes: buildDagNodes(draft.visibleWorkflow),
+      nodes: buildDagNodes(draft.visibleWorkflow, executorCatalog),
       edges: buildDagEdges(draft.visibleWorkflow),
     }
-  }, [draft.visibleWorkflow])
-  async function selectRevision(revisionId: string) {
-    await draft.selectRevision(revisionId)
-    setSelectedNodeKey(null)
-  }
-
-  function backToDraft() {
-    draft.backToDraft()
-    setSelectedNodeKey(null)
-  }
-
-  function useViewedRevisionAsDraft() {
-    draft.useViewedRevisionAsDraft()
-    setSelectedNodeKey(null)
-  }
+  }, [draft.visibleWorkflow, executorCatalog])
   return {
     loadState,
     actionState: actions.actionState,
@@ -56,6 +44,7 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     revision: draft.visibleRevision,
     activeRevision: revision,
     revisions,
+    executorCatalog,
     definitionYaml: draft.definitionYaml,
     setDefinitionYaml: draft.setDraftYaml,
     selectedNodeKey,
@@ -82,8 +71,17 @@ export function useWorkflowStudio(workspaceId: string | undefined) {
     hasPreservedDraft: draft.hasPreservedDraft,
     isLoadingRevision: draft.isLoadingRevision,
     revisionLoadError: draft.revisionLoadError,
-    selectRevision,
-    backToDraft,
-    useViewedRevisionAsDraft,
+    selectRevision: async (revisionId: string) => {
+      await draft.selectRevision(revisionId)
+      setSelectedNodeKey(null)
+    },
+    backToDraft: () => {
+      draft.backToDraft()
+      setSelectedNodeKey(null)
+    },
+    useViewedRevisionAsDraft: () => {
+      draft.useViewedRevisionAsDraft()
+      setSelectedNodeKey(null)
+    },
   }
 }

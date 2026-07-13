@@ -1,6 +1,6 @@
 import type { useFetchWorkflowRevisionDetail } from './useFetchWorkflowRevisionDetail'
 
-type LoadState = 'loading' | 'ready' | 'empty' | 'error'
+export type LoadState = 'loading' | 'ready' | 'empty' | 'error'
 
 export type UseWorkflowStudioDataResult = {
   loadState: LoadState

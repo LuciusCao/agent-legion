@@ -19,8 +19,13 @@ export function WorkflowStudioCommandBarActions(props: Props) {
   const idle = props.actionState === 'idle'
   const actions: Action[] = props.readOnly
     ? [
-        ['Back to draft', 'outlined', !idle, props.backToDraft],
-        ['Use as draft', 'contained', !idle, props.useViewedRevisionAsDraft],
+        ['返回当前草稿', 'outlined', !idle, props.backToDraft],
+        [
+          '用此版本替换草稿',
+          'contained',
+          !idle,
+          props.useViewedRevisionAsDraft,
+        ],
       ]
     : [
         ['校验', 'outlined', !props.canSubmit || !idle, props.onValidate],

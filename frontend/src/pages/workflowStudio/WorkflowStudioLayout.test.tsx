@@ -28,6 +28,7 @@ const baseProps = {
   revision,
   activeRevision: revision,
   revisions: [revision],
+  executorCatalog: [],
   definitionYaml: 'key: video_knowledge\nlabel: 知识视频 DAG\n',
   setDefinitionYaml: vi.fn(),
   selectedNodeKey: null,
@@ -49,6 +50,7 @@ const baseProps = {
   onValidate: vi.fn(),
   onPublish: vi.fn(),
   onReset: vi.fn(),
+  onShowChanges: vi.fn(),
   publishDraft: vi.fn(),
   viewMode: 'draft' as const,
   selectedRevisionId: revision.id,
@@ -70,41 +72,27 @@ describe('WorkflowStudioLayout', () => {
     })
     expect(mobileNav).toBeInTheDocument()
     expect(
-      within(mobileNav).getByRole('tab', { name: 'Outline' })
+      within(mobileNav).getByRole('tab', { name: '画布' })
     ).toBeInTheDocument()
     expect(
-      within(mobileNav).getByRole('tab', { name: 'Graph' })
-    ).toBeInTheDocument()
-    expect(
-      within(mobileNav).getByRole('tab', { name: 'Inspector' })
-    ).toBeInTheDocument()
-    expect(
-      within(mobileNav).getByRole('tab', { name: 'Changes' })
-    ).toBeInTheDocument()
-    expect(
-      within(mobileNav).getByRole('tab', { name: 'YAML' })
-    ).toBeInTheDocument()
+      within(mobileNav).getByRole('tab', { name: '编辑节点' })
+    ).toBeDisabled()
   })
 
-  it('switches mobile panel to inspector when validation appears', () => {
+  it('opens contextual node editing after a graph node is selected', () => {
     const { rerender } = render(<WorkflowStudioLayout {...baseProps} />)
 
     const mobileNav = screen.getByRole('tablist', {
       name: 'Workflow studio panels',
     })
     expect(
-      within(mobileNav).getByRole('tab', { name: 'Graph' })
+      within(mobileNav).getByRole('tab', { name: '画布' })
     ).toHaveAttribute('aria-selected', 'true')
 
-    rerender(
-      <WorkflowStudioLayout
-        {...baseProps}
-        validationMessage="validation failed"
-      />
-    )
+    rerender(<WorkflowStudioLayout {...baseProps} selectedNodeKey="node-a" />)
 
     expect(
-      within(mobileNav).getByRole('tab', { name: 'Inspector' })
+      within(mobileNav).getByRole('tab', { name: '编辑节点' })
     ).toHaveAttribute('aria-selected', 'true')
   })
 })

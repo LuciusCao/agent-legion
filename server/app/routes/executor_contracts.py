@@ -3,11 +3,19 @@ from typing import Any, Literal
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class ExecutorCapabilityResponse(BaseModel):
+    name: str
+    handler: str | None = None
+    skill: str | None = None
+    tools: list[str] = Field(default_factory=list)
+
+
 class ExecutorDefinitionResponse(BaseModel):
     id: str
     kind: Literal["local", "pi", "openclaw"]
     global_capacity: int = Field(ge=1)
     capabilities: list[str]
+    capability_details: list[ExecutorCapabilityResponse] = Field(default_factory=list)
 
 
 class ExecutorCatalogResponse(BaseModel):

@@ -30,6 +30,9 @@ const baseData: DagNodeData = {
   status: 'completed',
   duration: 12.4,
   executorKind: 'pi',
+  nodeKey: 'review_keywords',
+  capability: 'review_keywords',
+  topologyBadges: ['entry', 'branch'],
   inputs: ['transcription.json', 'chapters.json'],
   outputs: ['keywords.json'],
 }
@@ -37,8 +40,11 @@ const baseData: DagNodeData = {
 describe('DagNode', () => {
   it('renders label, status, duration and executor kind', () => {
     renderWithProvider(baseData)
-    expect(screen.getByText('review_keywords')).toBeInTheDocument()
+    expect(screen.getByText('Key · review_keywords')).toBeInTheDocument()
+    expect(screen.getByText('能力 · review_keywords')).toBeInTheDocument()
     expect(screen.getByText('pi')).toBeInTheDocument()
+    expect(screen.getByText('入口')).toBeInTheDocument()
+    expect(screen.getByText('分支')).toBeInTheDocument()
     expect(screen.getByText(/耗时 12.4s/)).toBeInTheDocument()
   })
 

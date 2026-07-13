@@ -8,7 +8,7 @@ describe('useWorkflowStudioMobilePanel', () => {
     expect(result.current.mobilePanel).toBe('graph')
   })
 
-  it('switches to inspector when a node is selected', () => {
+  it('switches to editor when a node is selected', () => {
     const { result, rerender } = renderHook(
       ({ selectedNodeKey }: { selectedNodeKey: string | null }) =>
         useWorkflowStudioMobilePanel(selectedNodeKey),
@@ -16,6 +16,9 @@ describe('useWorkflowStudioMobilePanel', () => {
     )
 
     rerender({ selectedNodeKey: 'node-a' })
-    expect(result.current.mobilePanel).toBe('inspector')
+    expect(result.current.mobilePanel).toBe('editor')
+
+    rerender({ selectedNodeKey: null })
+    expect(result.current.mobilePanel).toBe('graph')
   })
 })

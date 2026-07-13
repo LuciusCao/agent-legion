@@ -3,6 +3,7 @@ import type { WorkflowRevisionSummary } from '../../types'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
 import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
 import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
+import { WorkflowStudioGlobalActions } from './WorkflowStudioGlobalActions'
 import styles from './WorkflowStudioCommandBar.module.css'
 
 type Props = {
@@ -21,6 +22,8 @@ type Props = {
   selectedRevisionId?: string | null
   isLoadingRevision?: boolean
   revisionLoadError?: string | null
+  onOpenChanges: () => void
+  onOpenYaml: () => void
   onSelectRevision: (revisionId: string) => void
   onValidate: () => void
   onPublish: () => void
@@ -45,6 +48,8 @@ export function WorkflowStudioCommandBar({
   selectedRevisionId,
   isLoadingRevision,
   revisionLoadError,
+  onOpenChanges,
+  onOpenYaml,
   onSelectRevision,
   onValidate,
   onPublish,
@@ -55,8 +60,8 @@ export function WorkflowStudioCommandBar({
   const hash = revision?.definition_hash?.slice(0, 8) ?? '--------'
   const modeText =
     viewMode === 'revision'
-      ? `viewing v${revision?.version ?? '-'} · ${hash} · read-only`
-      : `draft from v${activeRevision?.version ?? '-'}`
+      ? `查看 v${revision?.version ?? '-'} · ${hash} · 只读`
+      : `基于 v${activeRevision?.version ?? '-'} 的草稿`
   const syncText = readOnly ? '只读' : dirty ? '有未发布变更' : '已同步'
   const risk =
     compareSummary?.riskLevel === 'breaking'
@@ -74,8 +79,12 @@ export function WorkflowStudioCommandBar({
         <Chip size="small" label={syncText} />
         {compareState === 'loading' && <Chip size="small" label="计算变更" />}
         {risk && <Chip size="small" color="warning" label={risk} />}
-        {hasPreservedDraft && <Chip size="small" label="Draft preserved" />}
+        {hasPreservedDraft && <Chip size="small" label="已保留当前草稿" />}
       </div>
+      <WorkflowStudioGlobalActions
+        onOpenChanges={onOpenChanges}
+        onOpenYaml={onOpenYaml}
+      />
       <WorkflowRevisionSelect
         revisions={revisions}
         activeRevisionId={activeRevision?.id}
