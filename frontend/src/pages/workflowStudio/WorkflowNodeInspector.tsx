@@ -1,10 +1,12 @@
 import type { WorkflowDefinitionRecord } from '../../types'
-import { WorkflowInspectorOverviewFallback } from './WorkflowInspectorOverviewFallback'
+import type { ExecutorDefinition } from '../../executorTypes'
+import { WorkflowInspectorEmptyState } from './WorkflowInspectorOverviewFallback'
 import { selectedNodeDetails } from './workflowStudioModel'
 import { WorkflowNodeInspectorBody } from './WorkflowNodeInspectorBody'
 
 type Props = {
   workflow: WorkflowDefinitionRecord | null
+  executorCatalog: ExecutorDefinition[]
   selectedNodeKey: string | null
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
@@ -16,10 +18,11 @@ export function WorkflowNodeInspector(props: Props) {
   const details = selectedNodeDetails(workflow, selectedNodeKey)
   if (!workflow)
     return <section aria-label="Workflow inspector">未加载 workflow</section>
-  if (!details) return <WorkflowInspectorOverviewFallback workflow={workflow} />
+  if (!details) return <WorkflowInspectorEmptyState />
   return (
     <WorkflowNodeInspectorBody
       details={details}
+      executorCatalog={props.executorCatalog}
       definitionYaml={props.definitionYaml}
       setDefinitionYaml={props.setDefinitionYaml}
       readOnly={props.readOnly}

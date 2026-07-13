@@ -1,10 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
-import {
-  WorkflowDagFullscreenButton,
-  WorkflowDagFullscreenDialog,
-} from './WorkflowDagFullscreenDialog'
+import { WorkflowDagFullscreenButton } from './WorkflowDagFullscreenButton'
+import { WorkflowDagFullscreenDialog } from './WorkflowDagFullscreenDialog'
 import type { WorkflowDefinitionRecord } from '../../../types'
 
 const workflow: WorkflowDefinitionRecord = {
@@ -24,6 +22,15 @@ const workflow: WorkflowDefinitionRecord = {
   edges: [],
 }
 
+const executorCatalog = [
+  {
+    id: 'local-default',
+    kind: 'local' as const,
+    global_capacity: 4,
+    capabilities: ['cap_a'],
+  },
+]
+
 describe('WorkflowDagFullscreenDialog', () => {
   it('opens fullscreen dialog when button is clicked', async () => {
     const onOpen = vi.fn()
@@ -41,6 +48,7 @@ describe('WorkflowDagFullscreenDialog', () => {
       <WorkflowDagFullscreenDialog
         open
         workflow={workflow}
+        executorCatalog={executorCatalog}
         selectedNode={null}
         onSelectedNodeChange={vi.fn()}
         onClose={vi.fn()}
@@ -53,6 +61,7 @@ describe('WorkflowDagFullscreenDialog', () => {
     expect(
       screen.getByRole('button', { name: 'close fullscreen DAG' })
     ).toBeInTheDocument()
+    expect(screen.getByText('local')).toBeInTheDocument()
   })
 
   it('closes dialog and preserves selected node state', async () => {
@@ -63,6 +72,7 @@ describe('WorkflowDagFullscreenDialog', () => {
       <WorkflowDagFullscreenDialog
         open
         workflow={workflow}
+        executorCatalog={executorCatalog}
         selectedNode="a"
         onSelectedNodeChange={onSelectedNodeChange}
         onClose={onClose}
@@ -85,6 +95,7 @@ describe('WorkflowDagFullscreenDialog', () => {
       <WorkflowDagFullscreenDialog
         open={false}
         workflow={workflow}
+        executorCatalog={executorCatalog}
         selectedNode={null}
         onSelectedNodeChange={vi.fn()}
         onClose={vi.fn()}

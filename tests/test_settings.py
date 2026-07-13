@@ -23,6 +23,7 @@ def _clear_video_hive_env(monkeypatch):
         "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR",
         "VIDEO_HIVE_PI_BINARY",
         "VIDEO_HIVE_OPENCLAW_CWD",
+        "VIDEO_HIVE_SKIP_DOTENV",
     ):
         monkeypatch.delenv(key, raising=False)
 
@@ -127,6 +128,28 @@ def _write_split_config(root: Path) -> None:
         "workflows:\n  enabled: false\n  pi:\n    binary: yaml-pi\nexecutors: {}\n",
         encoding="utf-8",
     )
+
+
+def test_load_settings_reads_project_dotenv_by_default(tmp_path, monkeypatch):
+    _write_split_config(tmp_path)
+    (tmp_path / ".env").write_text("VIDEO_HIVE_CMS_TOKEN=dotenv-token\n", encoding="utf-8")
+    monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+    monkeypatch.delenv("VIDEO_HIVE_SKIP_DOTENV", raising=False)
+
+    settings = load_settings()
+
+    assert settings.config["cms"]["token"] == "dotenv-token"
+
+
+def test_load_settings_can_skip_project_dotenv(tmp_path, monkeypatch):
+    _write_split_config(tmp_path)
+    (tmp_path / ".env").write_text("VIDEO_HIVE_CMS_TOKEN=dotenv-token\n", encoding="utf-8")
+    monkeypatch.setattr("server.app.settings.PROJECT_ROOT", tmp_path)
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
+
+    settings = load_settings()
+
+    assert settings.config["cms"]["token"] == "yaml-token"
 
 
 def test_default_split_layout_builds_effective_settings(tmp_path, monkeypatch):

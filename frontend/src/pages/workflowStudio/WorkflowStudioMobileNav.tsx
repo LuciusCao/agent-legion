@@ -1,19 +1,19 @@
 import { Tab, Tabs } from '@mui/material'
 import styles from './WorkflowStudioMobileNav.module.css'
 
-export type StudioMobilePanel =
-  | 'versions'
-  | 'graph'
-  | 'inspector'
-  | 'changes'
-  | 'yaml'
+export type StudioMobilePanel = 'graph' | 'editor'
 
 type Props = {
   value: StudioMobilePanel
+  editorAvailable: boolean
   onChange: (value: StudioMobilePanel) => void
 }
 
-export function WorkflowStudioMobileNav({ value, onChange }: Props) {
+export function WorkflowStudioMobileNav({
+  value,
+  editorAvailable,
+  onChange,
+}: Props) {
   return (
     <Tabs
       value={value}
@@ -23,11 +23,8 @@ export function WorkflowStudioMobileNav({ value, onChange }: Props) {
       scrollButtons="auto"
       className={styles.nav}
     >
-      <Tab value="versions" label="Outline" />
-      <Tab value="graph" label="Graph" />
-      <Tab value="inspector" label="Inspector" />
-      <Tab value="changes" label="Changes" />
-      <Tab value="yaml" label="YAML" />
+      <Tab value="graph" label="画布" />
+      <Tab value="editor" label="编辑节点" disabled={!editorAvailable} />
     </Tabs>
   )
 }

@@ -65,7 +65,7 @@ export function WorkflowNodeStructuredEditor({
       aria-label="Workflow node structured editor"
       className={styles.structuredSection}
     >
-      <h3 className={styles.structuredTitle}>结构化编辑</h3>
+      <h3 className={styles.structuredTitle}>编辑节点配置</h3>
       <label className={styles.field}>
         <span className={styles.fieldLabel}>节点名称</span>
         <input
@@ -76,7 +76,7 @@ export function WorkflowNodeStructuredEditor({
         />
       </label>
       <label className={styles.field}>
-        <span className={styles.fieldLabel}>能力</span>
+        <span className={styles.fieldLabel}>能力 Key</span>
         <input
           aria-label="能力"
           className={styles.fieldInput}

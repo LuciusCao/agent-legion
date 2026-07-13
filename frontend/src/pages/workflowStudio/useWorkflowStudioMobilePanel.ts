@@ -10,7 +10,9 @@ export function useWorkflowStudioMobilePanel(selectedNodeKey: string | null): {
   useEffect(() => {
     if (selectedNodeKey) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setMobilePanel('inspector')
+      setMobilePanel('editor')
+    } else {
+      setMobilePanel('graph')
     }
   }, [selectedNodeKey])
 

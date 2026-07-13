@@ -133,7 +133,8 @@ def _normalize_cms_config(config: dict[str, Any]) -> None:
 
 def load_settings(data_dir: Path | None = None, config_path: Path | None = None) -> Settings:
     root_dir = PROJECT_ROOT
-    load_env_file(root_dir / ".env")
+    if os.environ.get("VIDEO_HIVE_SKIP_DOTENV") != "1":
+        load_env_file(root_dir / ".env")
     loaded = load_application_config(root_dir, config_path=config_path)
     config = loaded.config
     _apply_env_overrides(config)

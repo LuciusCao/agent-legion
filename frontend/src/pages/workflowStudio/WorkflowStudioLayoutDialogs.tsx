@@ -12,15 +12,17 @@ export function WorkflowStudioLayoutDialogs(props: StudioLayoutProps) {
         nextVersion={(props.revision?.version ?? 0) + 1}
         definitionHash={props.revision?.definition_hash ?? null}
         summary={props.compareSummary}
-        onConfirm={() => {
+        onConfirm={async () => {
           props.closeReviewDialog()
-          void props.publishDraft()
+          await props.publishDraft()
+          props.onShowChanges()
         }}
         onCancel={props.closeReviewDialog}
       />
       <WorkflowDagFullscreenDialog
         open={props.dagFullscreenOpen}
         workflow={props.workflow}
+        executorCatalog={props.executorCatalog}
         selectedNode={props.selectedNodeKey}
         onSelectedNodeChange={props.setSelectedNodeKey}
         onClose={() => props.setDagFullscreenOpen(false)}

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { WorkflowStudioRightPanel } from './WorkflowStudioRightPanel'
 
@@ -6,221 +6,54 @@ const workflow = {
   key: 'video_knowledge',
   label: '知识视频 DAG',
   intake: { modes: [] },
-  nodes: [],
+  nodes: [
+    {
+      key: 'fetch_questions',
+      label: '获取题目',
+      capability: 'fetch_questions',
+      after: [],
+      inputs: [],
+      outputs: ['questions.json'],
+    },
+  ],
   edges: [],
 }
 
+const executorCatalog = [
+  {
+    id: 'local-default',
+    kind: 'local' as const,
+    global_capacity: 16,
+    capabilities: ['fetch_questions'],
+    capability_details: [
+      {
+        name: 'fetch_questions',
+        handler: 'question_comprehension_info.fetch_questions',
+      },
+    ],
+  },
+]
+
 describe('WorkflowStudioRightPanel', () => {
-  it('gives validation autoswitch higher priority than forcedMode', () => {
-    const { rerender } = render(
+  it('contains only the selected node configuration', () => {
+    render(
       <WorkflowStudioRightPanel
         workflow={workflow}
-        selectedNodeKey={null}
+        executorCatalog={executorCatalog}
+        selectedNodeKey="fetch_questions"
         readOnly={false}
         definitionYaml="key: video_knowledge\n"
         setDefinitionYaml={vi.fn()}
-        compareSummary={null}
-        compareState="idle"
-        compareErrors={null}
-        validationMessage=""
-        validationErrors={[]}
-        onSelectNode={vi.fn()}
-        forcedMode="changes"
       />
     )
 
-    expect(screen.getByRole('tab', { name: 'Changes' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-
-    rerender(
-      <WorkflowStudioRightPanel
-        workflow={workflow}
-        selectedNodeKey={null}
-        readOnly={false}
-        definitionYaml="key: video_knowledge\n"
-        setDefinitionYaml={vi.fn()}
-        compareSummary={null}
-        compareState="idle"
-        compareErrors={null}
-        validationMessage="validation message"
-        validationErrors={[]}
-        onSelectNode={vi.fn()}
-        forcedMode="changes"
-      />
-    )
-
-    expect(screen.getByRole('tab', { name: 'Validation' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-
-    rerender(
-      <WorkflowStudioRightPanel
-        workflow={workflow}
-        selectedNodeKey={null}
-        readOnly={false}
-        definitionYaml="key: video_knowledge\n"
-        setDefinitionYaml={vi.fn()}
-        compareSummary={null}
-        compareState="idle"
-        compareErrors={null}
-        validationMessage=""
-        validationErrors={[]}
-        onSelectNode={vi.fn()}
-        forcedMode="changes"
-      />
-    )
-
-    expect(screen.getByRole('tab', { name: 'Changes' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-  })
-
-  it('switches between overview, changes, yaml, and validation modes', () => {
-    const { rerender } = render(
-      <WorkflowStudioRightPanel
-        workflow={workflow}
-        selectedNodeKey={null}
-        readOnly={false}
-        definitionYaml="key: video_knowledge\n"
-        setDefinitionYaml={vi.fn()}
-        compareSummary={null}
-        compareState="idle"
-        compareErrors={null}
-        validationMessage=""
-        validationErrors={[]}
-        onSelectNode={vi.fn()}
-      />
-    )
-
-    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-
-    rerender(
-      <WorkflowStudioRightPanel
-        workflow={workflow}
-        selectedNodeKey={null}
-        readOnly={false}
-        definitionYaml="key: video_knowledge\n"
-        setDefinitionYaml={vi.fn()}
-        compareSummary={null}
-        compareState="idle"
-        compareErrors={null}
-        validationMessage="校验通过"
-        validationErrors={[]}
-        onSelectNode={vi.fn()}
-      />
-    )
-
-    expect(screen.getByRole('tab', { name: 'Validation' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-    expect(screen.getByText('校验通过')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
-    expect(screen.getByLabelText('高级 YAML 编辑器')).toBeInTheDocument()
-
-    fireEvent.click(screen.getByRole('tab', { name: 'Validation' }))
-    expect(screen.getByText('校验通过')).toBeInTheDocument()
-  })
-
-  it('returns to overview when the selected node is deselected', () => {
-    const { rerender } = render(
-      <WorkflowStudioRightPanel
-        workflow={workflow}
-        selectedNodeKey="node-a"
-        readOnly={false}
-        definitionYaml="key: video_knowledge\n"
-        setDefinitionYaml={vi.fn()}
-        compareSummary={null}
-        compareState="idle"
-        compareErrors={null}
-        validationMessage=""
-        validationErrors={[]}
-        onSelectNode={vi.fn()}
-      />
-    )
-
-    expect(screen.getByRole('tab', { name: 'Node' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-
-    rerender(
-      <WorkflowStudioRightPanel
-        workflow={workflow}
-        selectedNodeKey={null}
-        readOnly={false}
-        definitionYaml="key: video_knowledge\n"
-        setDefinitionYaml={vi.fn()}
-        compareSummary={null}
-        compareState="idle"
-        compareErrors={null}
-        validationMessage=""
-        validationErrors={[]}
-        onSelectNode={vi.fn()}
-      />
-    )
-
-    expect(screen.getByRole('tab', { name: 'Overview' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-  })
-
-  it('does not autoswitch back to validation while a manual tab choice is active', () => {
-    const { rerender } = render(
-      <WorkflowStudioRightPanel
-        workflow={workflow}
-        selectedNodeKey={null}
-        readOnly={false}
-        definitionYaml="key: video_knowledge\n"
-        setDefinitionYaml={vi.fn()}
-        compareSummary={null}
-        compareState="idle"
-        compareErrors={null}
-        validationMessage="validation message"
-        validationErrors={[]}
-        onSelectNode={vi.fn()}
-      />
-    )
-
-    expect(screen.getByRole('tab', { name: 'Validation' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-
-    fireEvent.click(screen.getByRole('tab', { name: 'YAML' }))
-    expect(screen.getByRole('tab', { name: 'YAML' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
-
-    rerender(
-      <WorkflowStudioRightPanel
-        workflow={workflow}
-        selectedNodeKey={null}
-        readOnly={false}
-        definitionYaml="key: video_knowledge\n"
-        setDefinitionYaml={vi.fn()}
-        compareSummary={null}
-        compareState="idle"
-        compareErrors={null}
-        validationMessage="validation message"
-        validationErrors={[]}
-        onSelectNode={vi.fn()}
-      />
-    )
-
-    expect(screen.getByRole('tab', { name: 'YAML' })).toHaveAttribute(
-      'aria-selected',
-      'true'
-    )
+    expect(screen.getByRole('region', { name: '节点配置' })).toBeInTheDocument()
+    expect(screen.getByText('编辑节点配置')).toBeInTheDocument()
+    expect(screen.getByText('local-default')).toBeInTheDocument()
+    expect(
+      screen.getByText('question_comprehension_info.fetch_questions')
+    ).toBeInTheDocument()
+    expect(screen.queryByRole('tablist')).not.toBeInTheDocument()
+    expect(screen.queryByText('YAML 源码')).not.toBeInTheDocument()
   })
 })

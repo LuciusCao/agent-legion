@@ -5,16 +5,13 @@ import type {
   WorkflowRevisionSummary,
 } from '../../types'
 import { useFetchWorkflowRevisionDetail } from './useFetchWorkflowRevisionDetail'
-import type { UseWorkflowStudioDataResult } from './useWorkflowStudioData.types'
 
-export function useWorkflowStudioData(
-  workspaceId: string | undefined
-): UseWorkflowStudioDataResult {
-  const [loadState, setLoadState] = useState<
-    'loading' | 'ready' | 'empty' | 'error'
-  >('loading')
-  const [workflow, setWorkflow] = useState<WorkflowDefinitionRecord | null>(
-    null
+type LoadState = 'loading' | 'ready' | 'empty' | 'error'
+
+export function useWorkflowStudioData(workspaceId: string | undefined) {
+  const [loadState, setLoadState] = useState<LoadState>('loading')
+  const [workflow, setWorkflow] = useState(
+    null as WorkflowDefinitionRecord | null
   )
   const [revision, setRevision] = useState<WorkflowRevisionSummary | null>(null)
   const [revisions, setRevisions] = useState<WorkflowRevisionSummary[]>([])
@@ -23,8 +20,10 @@ export function useWorkflowStudioData(
     if (!workspaceId) return
     setLoadState('loading')
     try {
-      const active = await fetchActiveWorkflowRevision(workspaceId)
-      const history = await fetchWorkflowRevisions(workspaceId)
+      const [active, history] = await Promise.all([
+        fetchActiveWorkflowRevision(workspaceId),
+        fetchWorkflowRevisions(workspaceId),
+      ])
       setWorkflow(active.workflow)
       setRevision(active.revision)
       setRevisions(history.revisions)

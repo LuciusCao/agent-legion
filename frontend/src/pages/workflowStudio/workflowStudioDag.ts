@@ -1,9 +1,12 @@
 import type { DagGraphEdge, DagGraphNode } from '../../components/DagGraph'
 import type { WorkflowDefinitionRecord } from '../../types'
+import type { ExecutorDefinition } from '../../executorTypes'
 import { conditionLabel } from './workflowStudioModel'
+import { topologyBadges } from './workflowStudioDagBadges'
 
 export function buildDagNodes(
-  workflow: WorkflowDefinitionRecord | null
+  workflow: WorkflowDefinitionRecord | null,
+  executors: ExecutorDefinition[] = []
 ): DagGraphNode[] {
   return (
     workflow?.nodes.map((node) => ({
@@ -12,6 +15,10 @@ export function buildDagNodes(
       status: 'pending',
       created_at: '',
       capability: node.capability,
+      executorKind: executors.find((executor) =>
+        executor.capabilities.includes(node.capability)
+      )?.kind,
+      topologyBadges: topologyBadges(workflow, node.key),
       terminalOutcome: node.terminal?.outcome,
       inputs: node.inputs,
       outputs: node.outputs,
