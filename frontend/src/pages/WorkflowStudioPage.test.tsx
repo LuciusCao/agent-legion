@@ -56,6 +56,14 @@ vi.mock('../api', () => {
   }
 
   return {
+    api: vi.fn((path: string) => {
+      if (path === '/api/workspaces/ws1') {
+        return Promise.resolve({
+          workspace: { id: 'ws1', name: '题目审题' },
+        })
+      }
+      return Promise.reject(new Error(`Unhandled API path: ${path}`))
+    }),
     fetchActiveWorkflowRevision: vi
       .fn()
       .mockResolvedValue(activeRevisionPayload),
@@ -106,19 +114,19 @@ describe('WorkflowStudioPage', () => {
   it('renders the workflow studio shell', async () => {
     render(<WorkflowStudioPage />)
 
-    expect(await screen.findByText('Workflow Studio')).toBeInTheDocument()
+    expect(await screen.findByText('题目审题 / 编辑工作流')).toBeInTheDocument()
     expect(
       (await screen.findAllByText('知识视频 DAG')).length
     ).toBeGreaterThanOrEqual(1)
   })
 
-  it('renders workflow identity and actions in the app bar without a second summary row', async () => {
+  it('renders workspace editor title and actions in the app bar without workflow label clutter', async () => {
     render(<WorkflowStudioPage />)
 
     const appBar = await screen.findByTestId('app-bar')
-    expect(appBar).toHaveTextContent('Workflow Studio')
-    expect(appBar).toHaveTextContent('知识视频 DAG')
-    expect(appBar).toHaveTextContent('video_knowledge')
+    await screen.findByText('题目审题 / 编辑工作流')
+    expect(appBar).toHaveTextContent('题目审题 / 编辑工作流')
+    expect(appBar).not.toHaveTextContent('知识视频 DAG')
     expect(appBar).toHaveTextContent('v1')
     expect(appBar).toHaveTextContent('校验')
     expect(appBar).toHaveTextContent('发布')
@@ -132,12 +140,12 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
-    expect(await screen.findByText('Workflow Studio')).toBeInTheDocument()
+    expect(await screen.findByText('题目审题 / 编辑工作流')).toBeInTheDocument()
     expect(
       (await screen.findAllByText('知识视频 DAG')).length
     ).toBeGreaterThanOrEqual(1)
-    expect(screen.getAllByText('v1')[0]).toBeInTheDocument()
-    expect(screen.getAllByText('abcdef12')[0]).toBeInTheDocument()
+    expect(screen.getAllByText(/v1/)[0]).toBeInTheDocument()
+    expect(screen.getByText(/abcdef12/)).toBeInTheDocument()
 
     const inspectorPanel = screen.getByRole('region', {
       name: 'Workflow inspector modes',
@@ -152,7 +160,7 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
-    await screen.findByText('Workflow Studio')
+    await screen.findByText('题目审题 / 编辑工作流')
     const inspectorPanel = screen.getByRole('region', {
       name: 'Workflow inspector modes',
     })
@@ -174,7 +182,7 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
-    await screen.findByText('Workflow Studio')
+    await screen.findByText('题目审题 / 编辑工作流')
     const inspectorPanel = screen.getByRole('region', {
       name: 'Workflow inspector modes',
     })
@@ -197,7 +205,7 @@ describe('WorkflowStudioPage', () => {
     const user = userEvent.setup()
     render(<WorkflowStudioPage />)
 
-    await screen.findByText('Workflow Studio')
+    await screen.findByText('题目审题 / 编辑工作流')
     const inspectorPanel = screen.getByRole('region', {
       name: 'Workflow inspector modes',
     })

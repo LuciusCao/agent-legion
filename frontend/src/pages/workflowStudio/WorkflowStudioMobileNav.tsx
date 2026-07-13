@@ -23,7 +23,7 @@ export function WorkflowStudioMobileNav({ value, onChange }: Props) {
       scrollButtons="auto"
       className={styles.nav}
     >
-      <Tab value="versions" label="Versions" />
+      <Tab value="versions" label="Outline" />
       <Tab value="graph" label="Graph" />
       <Tab value="inspector" label="Inspector" />
       <Tab value="changes" label="Changes" />

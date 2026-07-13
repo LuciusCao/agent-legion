@@ -82,6 +82,8 @@ export function WorkflowStudioRightPanel(props: Props) {
           <WorkflowNodeInspector
             workflow={props.workflow}
             selectedNodeKey={props.selectedNodeKey}
+            definitionYaml={props.definitionYaml}
+            setDefinitionYaml={props.setDefinitionYaml}
             readOnly={props.readOnly}
           />
         )}

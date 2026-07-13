@@ -1,7 +1,7 @@
 import { AppBar } from '../../components/AppBar'
 import { WorkflowStudioCommandBar } from './WorkflowStudioCommandBar'
 import type { useWorkflowStudio } from './useWorkflowStudio'
-
+import { useWorkflowStudioAppTitle } from './useWorkflowStudioAppTitle'
 type Studio = ReturnType<typeof useWorkflowStudio>
 
 type Props = {
@@ -11,15 +11,16 @@ type Props = {
 }
 
 export function WorkflowStudioAppBar({ workspaceId, studio, scrolled }: Props) {
+  const title = useWorkflowStudioAppTitle(workspaceId)
   return (
     <AppBar
-      title="Workflow Studio"
+      title={title}
       backTo={workspaceId ? `/workspaces/${workspaceId}` : '/'}
       scrolled={scrolled}
       rightActions={
         <WorkflowStudioCommandBar
-          workflow={studio.workflow}
           revision={studio.revision}
+          revisions={studio.revisions}
           activeRevision={studio.activeRevision}
           viewMode={studio.viewMode}
           dirty={studio.dirty}
@@ -30,6 +31,10 @@ export function WorkflowStudioAppBar({ workspaceId, studio, scrolled }: Props) {
           actionState={studio.actionState}
           canSubmit={studio.canSubmit}
           canPublish={studio.canPublish}
+          selectedRevisionId={studio.selectedRevisionId}
+          isLoadingRevision={studio.isLoadingRevision}
+          revisionLoadError={studio.revisionLoadError}
+          onSelectRevision={studio.selectRevision}
           onValidate={() => void studio.validateDraft()}
           onPublish={() => void studio.requestPublish()}
           onReset={studio.resetDefinition}

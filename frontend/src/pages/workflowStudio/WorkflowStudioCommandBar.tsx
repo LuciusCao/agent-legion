@@ -1,14 +1,13 @@
-import { Button, Chip } from '@mui/material'
-import type {
-  WorkflowDefinitionRecord,
-  WorkflowRevisionSummary,
-} from '../../types'
+import { Chip } from '@mui/material'
+import type { WorkflowRevisionSummary } from '../../types'
 import type { ChangeSummaryViewModel } from './workflowStudioChanges'
+import { WorkflowRevisionSelect } from './WorkflowRevisionSelect'
+import { WorkflowStudioCommandBarActions } from './WorkflowStudioCommandBarActions'
 import styles from './WorkflowStudioCommandBar.module.css'
 
 type Props = {
-  workflow: WorkflowDefinitionRecord | null
   revision: WorkflowRevisionSummary | null
+  revisions: WorkflowRevisionSummary[]
   activeRevision: WorkflowRevisionSummary | null
   viewMode: 'draft' | 'revision'
   dirty: boolean
@@ -19,6 +18,10 @@ type Props = {
   actionState: 'idle' | 'validating' | 'publishing'
   canSubmit: boolean
   canPublish: boolean
+  selectedRevisionId?: string | null
+  isLoadingRevision?: boolean
+  revisionLoadError?: string | null
+  onSelectRevision: (revisionId: string) => void
   onValidate: () => void
   onPublish: () => void
   onReset: () => void
@@ -27,8 +30,8 @@ type Props = {
 }
 
 export function WorkflowStudioCommandBar({
-  workflow,
   revision,
+  revisions,
   activeRevision,
   viewMode,
   dirty,
@@ -39,6 +42,10 @@ export function WorkflowStudioCommandBar({
   actionState,
   canSubmit,
   canPublish,
+  selectedRevisionId,
+  isLoadingRevision,
+  revisionLoadError,
+  onSelectRevision,
   onValidate,
   onPublish,
   onReset,
@@ -46,10 +53,11 @@ export function WorkflowStudioCommandBar({
   useViewedRevisionAsDraft,
 }: Props) {
   const hash = revision?.definition_hash?.slice(0, 8) ?? '--------'
-  const statusText =
+  const modeText =
     viewMode === 'revision'
       ? `viewing v${revision?.version ?? '-'} · ${hash} · read-only`
-      : `${workflow?.key ?? 'workflow'} · draft from v${activeRevision?.version ?? '-'} · ${dirty ? '有未发布变更' : '已同步'}`
+      : `draft from v${activeRevision?.version ?? '-'}`
+  const syncText = readOnly ? '只读' : dirty ? '有未发布变更' : '已同步'
   const risk =
     compareSummary?.riskLevel === 'breaking'
       ? '风险：高'
@@ -61,63 +69,38 @@ export function WorkflowStudioCommandBar({
 
   return (
     <div className={styles.commandBar} aria-label="Workflow command bar">
-      <div className={styles.identity}>
-        <span className={styles.title}>{workflow?.label ?? 'Workflow'}</span>
-        <span className={styles.meta}>{statusText}</span>
-      </div>
+      <span className={styles.meta}>{modeText}</span>
       <div className={styles.status}>
+        <Chip size="small" label={syncText} />
         {compareState === 'loading' && <Chip size="small" label="计算变更" />}
         {risk && <Chip size="small" color="warning" label={risk} />}
         {hasPreservedDraft && <Chip size="small" label="Draft preserved" />}
       </div>
+      <WorkflowRevisionSelect
+        revisions={revisions}
+        activeRevisionId={activeRevision?.id}
+        selectedRevisionId={selectedRevisionId}
+        currentVersion={revision?.version ?? activeRevision?.version}
+        currentHash={
+          revision?.definition_hash ?? activeRevision?.definition_hash ?? null
+        }
+        disabled={isLoadingRevision}
+        error={revisionLoadError}
+        onSelectRevision={onSelectRevision}
+      />
       <div className={styles.actions}>
-        {readOnly ? (
-          <>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={actionState !== 'idle'}
-              onClick={backToDraft}
-            >
-              Back to draft
-            </Button>
-            <Button
-              size="small"
-              variant="contained"
-              disabled={actionState !== 'idle'}
-              onClick={useViewedRevisionAsDraft}
-            >
-              Use as draft
-            </Button>
-          </>
-        ) : (
-          <>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={!canSubmit || actionState !== 'idle'}
-              onClick={onValidate}
-            >
-              校验
-            </Button>
-            <Button
-              size="small"
-              variant="contained"
-              disabled={!canPublish || actionState !== 'idle'}
-              onClick={onPublish}
-            >
-              发布
-            </Button>
-            <Button
-              size="small"
-              variant="outlined"
-              disabled={!dirty || actionState !== 'idle'}
-              onClick={onReset}
-            >
-              重置
-            </Button>
-          </>
-        )}
+        <WorkflowStudioCommandBarActions
+          readOnly={readOnly}
+          dirty={dirty}
+          actionState={actionState}
+          canSubmit={canSubmit}
+          canPublish={canPublish}
+          onValidate={onValidate}
+          onPublish={onPublish}
+          onReset={onReset}
+          backToDraft={backToDraft}
+          useViewedRevisionAsDraft={useViewedRevisionAsDraft}
+        />
       </div>
     </div>
   )

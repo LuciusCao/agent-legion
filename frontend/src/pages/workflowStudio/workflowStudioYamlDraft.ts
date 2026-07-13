@@ -37,6 +37,16 @@ export function patchWorkflowNodeLabel(
   })
 }
 
+export function patchWorkflowNodeCapability(
+  rawYaml: string,
+  nodeKey: string,
+  capability: string
+): string {
+  return patchNode(rawYaml, nodeKey, (node) => {
+    node.capability = capability
+  })
+}
+
 export function patchWorkflowNodeInputs(
   rawYaml: string,
   nodeKey: string,
