@@ -1,18 +1,21 @@
-import { useEffect } from 'react'
+import { useEffect, useState } from 'react'
 import { DagGraph } from '../../components/DagGraph'
-import { WorkflowNodeOutline } from './WorkflowNodeOutline'
-import { WorkflowRevisionList } from './WorkflowRevisionList'
 import { WorkflowDagFullscreenButton } from './components/WorkflowDagFullscreenDialog'
-import { WorkflowStudioRightPanel } from './WorkflowStudioRightPanel'
 import { WorkflowStudioMobileNav } from './WorkflowStudioMobileNav'
+import {
+  WorkflowStudioInspectorPanel,
+  WorkflowStudioLeftPanel,
+} from './WorkflowStudioSidePanels'
 import { useWorkflowStudioMobilePanel } from './useWorkflowStudioMobilePanel'
 import type { StudioLayoutProps } from './workflowStudioLayoutProps'
 import canvasStyles from '../WorkflowStudioPageCanvas.module.css'
 import canvasToolbarStyles from '../WorkflowStudioPageCanvasToolbar.module.css'
 import pageStyles from '../WorkflowStudioPageResponsive.module.css'
-import sidePanelStyles from '../WorkflowStudioPageSidePanel.module.css'
+import resizeStyles from './WorkflowStudioResizableLayout.module.css'
 
 export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
+  const [leftCollapsed, setLeftCollapsed] = useState(false)
+  const [rightCollapsed, setRightCollapsed] = useState(false)
   const { mobilePanel, setMobilePanel } = useWorkflowStudioMobilePanel(
     props.selectedNodeKey
   )
@@ -40,26 +43,15 @@ export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
   return (
     <>
       <WorkflowStudioMobileNav value={mobilePanel} onChange={setMobilePanel} />
-      <div className={pageStyles.layout}>
-        <aside
-          className={`${sidePanelStyles.sidePanel} ${pageStyles.sidePanel}${versionsActive ? ` ${pageStyles.activePanel}` : ''}`}
-          data-mobile-panel="versions"
-        >
-          <WorkflowRevisionList
-            revisions={props.revisions}
-            activeRevisionId={props.activeRevision?.id ?? props.revision?.id}
-            selectedRevisionId={props.selectedRevisionId}
-            isLoadingRevision={props.isLoadingRevision}
-            revisionLoadError={props.revisionLoadError}
-            onSelectRevision={props.selectRevision}
-          />
-          <WorkflowNodeOutline
-            workflow={props.workflow}
-            selectedNodeKey={props.selectedNodeKey}
-            onSelectNode={props.setSelectedNodeKey}
-            changedNodeKeys={props.compareSummary?.changedNodeKeys}
-          />
-        </aside>
+      <div
+        className={`${pageStyles.layout}${leftCollapsed ? ` ${resizeStyles.leftCollapsed}` : ''}${rightCollapsed ? ` ${resizeStyles.rightCollapsed}` : ''}`}
+      >
+        <WorkflowStudioLeftPanel
+          props={props}
+          collapsed={leftCollapsed}
+          active={versionsActive}
+          onToggle={() => setLeftCollapsed((value) => !value)}
+        />
         <main
           className={`${canvasStyles.canvas}${graphActive ? ` ${pageStyles.activePanel}` : ''}`}
           data-mobile-panel="graph"
@@ -82,16 +74,13 @@ export function WorkflowStudioWorkspace(props: StudioLayoutProps) {
             />
           )}
         </main>
-        <aside
-          className={`${sidePanelStyles.sidePanel} ${pageStyles.sidePanel}${inspectorActive ? ` ${pageStyles.activePanel}` : ''}`}
-          data-mobile-panel="inspector"
-        >
-          <WorkflowStudioRightPanel
-            {...props}
-            onSelectNode={props.setSelectedNodeKey}
-            forcedMode={forcedMode}
-          />
-        </aside>
+        <WorkflowStudioInspectorPanel
+          props={props}
+          collapsed={rightCollapsed}
+          active={inspectorActive}
+          forcedMode={forcedMode}
+          onToggle={() => setRightCollapsed((value) => !value)}
+        />
       </div>
     </>
   )

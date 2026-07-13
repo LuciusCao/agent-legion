@@ -1,0 +1,16 @@
+.leftCollapsed {
+  grid-template-columns: 48px minmax(0, 1fr) 360px;
+}
+.rightCollapsed {
+  grid-template-columns: 240px minmax(0, 1fr) 48px;
+}
+.leftCollapsed.rightCollapsed {
+  grid-template-columns: 48px minmax(0, 1fr) 48px;
+}
+@media (max-width: 900px) {
+  .leftCollapsed,
+  .rightCollapsed,
+  .leftCollapsed.rightCollapsed {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -1,0 +1,19 @@
+.revisionSelect {
+  flex: 0 0 auto;
+}
+.version {
+  min-width: 36px;
+  font-weight: 500;
+}
+.status {
+  margin-left: 8px;
+  font-size: 11px;
+  color: #43474e;
+  text-transform: uppercase;
+}
+.hash {
+  margin-left: 12px;
+  color: #616161;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}

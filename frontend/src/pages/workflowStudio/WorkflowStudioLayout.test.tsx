@@ -70,7 +70,7 @@ describe('WorkflowStudioLayout', () => {
     })
     expect(mobileNav).toBeInTheDocument()
     expect(
-      within(mobileNav).getByRole('tab', { name: 'Versions' })
+      within(mobileNav).getByRole('tab', { name: 'Outline' })
     ).toBeInTheDocument()
     expect(
       within(mobileNav).getByRole('tab', { name: 'Graph' })

@@ -62,6 +62,25 @@ describe('WorkflowNodeStructuredEditor', () => {
     expect(onChange).toHaveBeenLastCalledWith(expect.stringContaining('a.json'))
   })
 
+  it('updates yaml when capability changes', () => {
+    const onChange = vi.fn()
+    render(
+      <WorkflowNodeStructuredEditor
+        node={node}
+        definitionYaml={yaml}
+        onDefinitionYamlChange={onChange}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText('能力'), {
+      target: { value: 'fetch_questions_v2' },
+    })
+
+    expect(onChange).toHaveBeenLastCalledWith(
+      expect.stringContaining('capability: fetch_questions_v2')
+    )
+  })
+
   it('updates yaml when terminal outcome changes', () => {
     const terminalNode: WorkflowNodeRecord = {
       ...node,

@@ -1,6 +1,7 @@
 import type { WorkflowNodeRecord } from '../../../types'
 import {
   parseWorkflowNode,
+  patchWorkflowNodeCapability,
   patchWorkflowNodeInputs,
   patchWorkflowNodeLabel,
   patchWorkflowNodeOutputs,
@@ -22,7 +23,7 @@ export function WorkflowNodeStructuredEditor({
 }: Props) {
   const draftNode = parseWorkflowNode(definitionYaml, node.key) ?? node
   const label = draftNode.label
-  const capability = node.capability
+  const capability = draftNode.capability ?? node.capability
   const inputs = draftNode.inputs ?? []
   const outputs = draftNode.outputs ?? []
   const terminalOutcome = draftNode.terminal?.outcome ?? ''
@@ -37,6 +38,10 @@ export function WorkflowNodeStructuredEditor({
         node.key,
         parseLines(event.target.value)
       )
+    )
+  const handleCapabilityChange = (event: React.ChangeEvent<HTMLInputElement>) =>
+    onDefinitionYamlChange(
+      patchWorkflowNodeCapability(definitionYaml, node.key, event.target.value)
     )
   const handleOutputsChange = (event: React.ChangeEvent<HTMLTextAreaElement>) =>
     onDefinitionYamlChange(
@@ -76,7 +81,7 @@ export function WorkflowNodeStructuredEditor({
           aria-label="能力"
           className={styles.fieldInput}
           value={capability}
-          readOnly
+          onChange={handleCapabilityChange}
         />
       </label>
       <label className={styles.field}>
