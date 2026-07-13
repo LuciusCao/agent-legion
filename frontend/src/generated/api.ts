@@ -1432,12 +1432,48 @@ export interface components {
       /** Status */
       status: string
     }
+    /** PackageDeleteResponse */
+    PackageDeleteResponse: {
+      /** Deleted */
+      deleted: boolean
+    }
+    /** PackageItemResponse */
+    PackageItemResponse: {
+      /** Created At */
+      created_at: string
+      /** Id */
+      id: number
+      /** Locked */
+      locked: number
+      /** Name */
+      name: string
+      /** Path */
+      path: string
+      /** Size Bytes */
+      size_bytes: number
+      /** Video Count */
+      video_count: number
+    }
     /** PackageUpdate */
     PackageUpdate: {
       /** Locked */
       locked?: boolean | null
       /** Name */
       name?: string | null
+    }
+    /** PackageUpdateResponse */
+    PackageUpdateResponse: {
+      /** Id */
+      id: number
+      /** Locked */
+      locked?: boolean | null
+      /** Name */
+      name?: string | null
+    }
+    /** PackagesResponse */
+    PackagesResponse: {
+      /** Packages */
+      packages: components['schemas']['PackageItemResponse'][]
     }
     /** QuestionDetailResponse */
     QuestionDetailResponse: {
@@ -2154,6 +2190,25 @@ export interface components {
       /** Deleted */
       deleted: boolean
     }
+    /** WorkspacePackageItemResponse */
+    WorkspacePackageItemResponse: {
+      /** Created At */
+      created_at: string
+      /** Id */
+      id: number
+      /** Locked */
+      locked: number
+      /** Name */
+      name: string
+      /** Path */
+      path: string
+      /** Size Bytes */
+      size_bytes: number
+      /** Video Count */
+      video_count: number
+      /** Workspace Id */
+      workspace_id: string
+    }
     /** WorkspacePackageRequest */
     WorkspacePackageRequest: {
       /** Job Ids */
@@ -2201,6 +2256,11 @@ export interface components {
       locked?: boolean | null
       /** Name */
       name?: string | null
+    }
+    /** WorkspacePackagesResponse */
+    WorkspacePackagesResponse: {
+      /** Packages */
+      packages: components['schemas']['WorkspacePackageItemResponse'][]
     }
     /** WorkspaceResponse */
     WorkspaceResponse: {
@@ -2867,9 +2927,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': {
-            [key: string]: unknown
-          }
+          'application/json': components['schemas']['PackagesResponse']
         }
       }
     }
@@ -2922,9 +2980,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': {
-            [key: string]: boolean
-          }
+          'application/json': components['schemas']['PackageDeleteResponse']
         }
       }
       /** @description Validation Error */
@@ -2959,9 +3015,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': {
-            [key: string]: unknown
-          }
+          'application/json': components['schemas']['PackageUpdateResponse']
         }
       }
       /** @description Validation Error */
@@ -3677,9 +3731,7 @@ export interface operations {
           [name: string]: unknown
         }
         content: {
-          'application/json': {
-            [key: string]: unknown
-          }
+          'application/json': components['schemas']['WorkspacePackagesResponse']
         }
       }
       /** @description Validation Error */

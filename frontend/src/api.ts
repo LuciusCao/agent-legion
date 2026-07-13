@@ -12,6 +12,14 @@ import type { WorkspaceStats } from './workspaceTypes'
 
 export { api } from './api/core'
 export { fetchJobsSnapshot } from './api/jobSnapshot'
+export {
+  deletePackage,
+  deleteWorkspacePackage,
+  fetchPackages,
+  fetchWorkspacePackages,
+  updatePackage,
+  updateWorkspacePackage,
+} from './api/packages'
 // prettier-ignore
 export { compareWorkflowDraft, fetchActiveWorkflowRevision, fetchWorkflowRevisionDetail, fetchWorkflowRevisions } from './api/workflow_revisions'
 export {
@@ -20,58 +28,6 @@ export {
   publishWorkflowDraft,
   validateWorkflowDraft,
 } from './api/workflows'
-
-export async function fetchPackages(): Promise<{
-  packages: Array<{
-    id: number
-    name: string
-    path: string
-    video_count: number
-    size_bytes: number
-    locked: number
-    created_at: string
-  }>
-}> {
-  return api('/api/packages')
-}
-
-export async function deletePackage(id: number): Promise<{ deleted: boolean }> {
-  return api(`/api/packages/${id}`, { method: 'DELETE' })
-}
-
-export async function updatePackage(
-  id: number,
-  fields: { name?: string; locked?: boolean }
-): Promise<{ id: number; name?: string; locked?: boolean }> {
-  return api(`/api/packages/${id}`, {
-    method: 'PATCH',
-    body: JSON.stringify(fields),
-  })
-}
-
-export async function deleteWorkspacePackage(
-  workspaceId: string,
-  packageId: number
-): Promise<{ deleted: boolean }> {
-  return api<{ deleted: boolean }>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/packages/${packageId}`,
-    { method: 'DELETE' }
-  )
-}
-
-export async function updateWorkspacePackage(
-  workspaceId: string,
-  packageId: number,
-  body: { name?: string; locked?: boolean }
-): Promise<{ id: number; name?: string; locked?: boolean }> {
-  return api<{ id: number; name?: string; locked?: boolean }>(
-    `/api/workspaces/${encodeURIComponent(workspaceId)}/packages/${packageId}`,
-    {
-      method: 'PATCH',
-      body: JSON.stringify(body),
-    }
-  )
-}
 
 export async function fetchJobs(
   workspaceId: string,

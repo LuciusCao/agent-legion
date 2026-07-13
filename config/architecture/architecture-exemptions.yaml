@@ -1,46 +1,4 @@
 exemptions:
-- check: architecture.route_response_model
-  path: server/app/routes/packages.py:list_packages
-  reason: Package list endpoint returns a dynamic JSON envelope pending typed response
-    models.
-  owner: video-hive
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_response_model
-  path: server/app/routes/packages.py:delete_package
-  reason: Package delete endpoint returns a dynamic JSON result pending typed response
-    models.
-  owner: video-hive
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_response_model
-  path: server/app/routes/packages.py:update_package
-  reason: Package update endpoint returns a dynamic JSON result pending typed response
-    models.
-  owner: video-hive
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_response_model
-  path: server/app/routes/packages.py:list_workspace_packages
-  reason: Workspace package list endpoint returns a dynamic JSON envelope pending
-    typed response models.
-  owner: workspace-executor
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_annotation_any
-  path: server/app/routes/packages.py:list_packages
-  reason: Package list endpoint returns a dynamic dict[str, Any] envelope pending
-    typed response models.
-  owner: video-hive
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_annotation_any
-  path: server/app/routes/packages.py:update_package
-  reason: Package update endpoint returns a dynamic dict[str, Any] result pending
-    typed response models.
-  owner: video-hive
-  remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_annotation_any
-  path: server/app/routes/packages.py:list_workspace_packages
-  reason: Workspace package list endpoint returns a dynamic dict[str, Any] envelope
-    pending typed response models.
-  owner: workspace-executor
-  remove_when: issues/open/036-P3-type-sync-automation.md
 - check: architecture.scheduler_threadpool
   path: server/app/workflow_worker_thread.py:self._pools[executor_id]
   reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor per executor
@@ -48,13 +6,6 @@ exemptions:
     global capacity and keyed by executor_id, not workspace.
   owner: workspace-executor
   remove_when: issues/open/032-P2-event-driven-worker.md
-- check: architecture.file_budget
-  path: frontend/src/components/PackageHistoryDialog.tsx
-  reason: Task 8 of the align-workspace-packaging plan adds workspace-scoped rename/lock/delete
-    handlers; the component will be split once the plan is complete.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-06-23-align-workspace-packaging.md#task-8
-  ceiling: 290
 - check: architecture.file_budget
   path: frontend/src/components/QuestionContentPanel.tsx
   reason: Task 2 of the socratic-question-inline-display plan adds the local SocraticQuestion

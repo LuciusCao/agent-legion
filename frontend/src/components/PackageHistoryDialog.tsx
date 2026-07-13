@@ -9,26 +9,16 @@ import {
   TextField,
 } from '@mui/material'
 import {
-  api,
   deletePackage,
   deleteWorkspacePackage,
+  fetchWorkspacePackages,
   updatePackage,
   updateWorkspacePackage,
 } from '../api'
 import { triggerDownload } from '../lib/download'
-import { usePackageStore } from '../stores/packageStore'
+import { usePackageStore, type PackageItem } from '../stores/packageStore'
 import { MaterialIcon } from './MaterialIcon'
 import styles from './PackageHistoryDialog.module.css'
-
-interface PackageItem {
-  id: number
-  name: string
-  path: string
-  video_count: number
-  size_bytes: number
-  locked: number
-  created_at: string
-}
 
 interface Props {
   open: boolean
@@ -87,9 +77,7 @@ export function PackageHistoryDialog({
     if (isWorkspace && workspaceId) {
       // eslint-disable-next-line react-hooks/set-state-in-effect
       setWsLoading(true)
-      api<{ packages: PackageItem[] }>(
-        `/api/workspaces/${encodeURIComponent(workspaceId)}/packages`
-      )
+      fetchWorkspacePackages(workspaceId)
         .then((data) => {
           setWorkspacePackages(data.packages || [])
         })
