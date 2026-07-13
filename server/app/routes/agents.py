@@ -1,5 +1,3 @@
-from typing import Any
-
 from fastapi import APIRouter, WebSocket
 from pydantic import BaseModel
 
@@ -25,8 +23,10 @@ def create_agents_router(agent_manager: AgentStatusManager) -> APIRouter:
     router = APIRouter(prefix="/agents", tags=["agents"])
 
     @router.get("", response_model=AgentsResponse)
-    def list_agents() -> dict[str, Any]:
-        return {"agents": agent_manager.to_dicts()}
+    def list_agents() -> AgentsResponse:
+        return AgentsResponse(
+            agents=[AgentStatusResponse.model_validate(agent) for agent in agent_manager.to_dicts()]
+        )
 
     @router.websocket("")
     async def agents_ws(websocket: WebSocket) -> None:

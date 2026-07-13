@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from contextlib import closing
 from pathlib import Path
 
 import pytest
@@ -101,7 +102,7 @@ def test_finish_lease_captures_token_usage(lease_repo):
 
     assert repo.finish(claimed.lease_id, result) is True
 
-    with connect_sqlite(repo.path) as conn:
+    with closing(connect_sqlite(repo.path)) as conn, conn:
         row = conn.execute("select * from node_run_token_usage").fetchone()
 
     assert row is not None
@@ -156,7 +157,7 @@ def test_finish_lease_missing_events_does_not_fail_lease(lease_repo):
 
     assert repo.finish(claimed.lease_id, result) is True
 
-    with connect_sqlite(repo.path) as conn:
+    with closing(connect_sqlite(repo.path)) as conn, conn:
         row = conn.execute("select * from node_run_token_usage").fetchone()
 
     assert row is None

@@ -16,7 +16,6 @@ sys.path.insert(0, str(_TOOL_DIR))
 
 from comprehension_uploader import cli
 from comprehension_uploader.auth import AuthError, get_token
-from comprehension_uploader.db import Database
 from comprehension_uploader.fingerprint import compute_question_fingerprint
 from comprehension_uploader.package_parser import (
     PackageParseError,
@@ -54,6 +53,7 @@ def test_fingerprint_matches_existing_algorithm() -> None:
 def test_fingerprint_trusts_provided_value_when_components_missing(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
+    database,
 ) -> None:
     package = tmp_path / "package.jsonl"
     package.write_text(
@@ -71,7 +71,7 @@ def test_fingerprint_trusts_provided_value_when_components_missing(
     assert record.fingerprint == "deadbeef"
 
     config = make_config(tmp_path)
-    db = Database(config.db_path)
+    db = database(config.db_path)
     db.init_schema()
     uploader = Uploader(config, db, FakeAPIClient([{"code": 0, "data": {"result": 7}}]))
     with caplog.at_level("WARNING"):
@@ -105,9 +105,9 @@ def test_package_parser_stringifies_comprehension_data(tmp_path: Path) -> None:
     assert parsed == payload["comprehension_data"]
 
 
-def test_uploader_add_success_and_duplicate_update(tmp_path: Path) -> None:
+def test_uploader_add_success_and_duplicate_update(tmp_path: Path, database) -> None:
     config = make_config(tmp_path, upload_on_duplicate="update")
-    db = Database(config.db_path)
+    db = database(config.db_path)
     db.init_schema()
 
     record1 = make_record(question_id="Q100", difficulty=50, format_vno="v1")
@@ -147,9 +147,10 @@ def test_uploader_add_success_and_duplicate_update(tmp_path: Path) -> None:
 
 def test_uploader_duplicate_update_includes_format_vno_when_changed(
     tmp_path: Path,
+    database,
 ) -> None:
     config = make_config(tmp_path, upload_on_duplicate="update")
-    db = Database(config.db_path)
+    db = database(config.db_path)
     db.init_schema()
 
     record1 = UploadRecord(
@@ -184,9 +185,9 @@ def test_uploader_duplicate_update_includes_format_vno_when_changed(
     assert update_fields["format_vno"] == "v1"
 
 
-def test_uploader_add_success_and_duplicate_skip(tmp_path: Path) -> None:
+def test_uploader_add_success_and_duplicate_skip(tmp_path: Path, database) -> None:
     config = make_config(tmp_path, upload_on_duplicate="skip")
-    db = Database(config.db_path)
+    db = database(config.db_path)
     db.init_schema()
 
     record1 = make_record(question_id="Q200")
@@ -208,9 +209,9 @@ def test_uploader_add_success_and_duplicate_skip(tmp_path: Path) -> None:
     assert not any(call[0] == "update" for call in client.calls)
 
 
-def test_uploader_skips_non_uploadable_records(tmp_path: Path) -> None:
+def test_uploader_skips_non_uploadable_records(tmp_path: Path, database) -> None:
     config = make_config(tmp_path)
-    db = Database(config.db_path)
+    db = database(config.db_path)
     db.init_schema()
 
     package = tmp_path / "package.jsonl"
@@ -284,9 +285,9 @@ def test_uploader_skips_non_uploadable_records(tmp_path: Path) -> None:
     assert db.logs.get_logs("Q-non-uploadable-outcome") == []
 
 
-def test_scan_detects_fingerprint_change(tmp_path: Path) -> None:
+def test_scan_detects_fingerprint_change(tmp_path: Path, database) -> None:
     config = make_config(tmp_path)
-    db = Database(config.db_path)
+    db = database(config.db_path)
     db.init_schema()
 
     record = make_record(
@@ -327,8 +328,8 @@ def test_scan_detects_fingerprint_change(tmp_path: Path) -> None:
     assert state["stale_reason"] == "fingerprint_changed"
 
 
-def test_db_schema_and_indexes(tmp_path: Path) -> None:
-    db = Database(tmp_path / "schema.db")
+def test_db_schema_and_indexes(tmp_path: Path, database) -> None:
+    db = database(tmp_path / "schema.db")
     db.init_schema()
     rows = db._conn.execute(
         "SELECT name, type FROM sqlite_master WHERE type IN ('table', 'index')"
@@ -651,9 +652,10 @@ def test_package_parser_format_vno_normalization(tmp_path: Path) -> None:
 def test_uploader_logs_api_code_10011_on_validation_failure(
     tmp_path: Path,
     caplog: pytest.LogCaptureFixture,
+    database,
 ) -> None:
     config = make_config(tmp_path)
-    db = Database(config.db_path)
+    db = database(config.db_path)
     db.init_schema()
 
     record = make_record(question_id="Q400")

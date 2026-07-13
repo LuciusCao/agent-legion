@@ -38,18 +38,14 @@ def _load_config(path: str) -> Config:
 
 def cmd_init_db(args: argparse.Namespace) -> int:
     config = _load_config(args.config)
-    db = Database(config.db_path)
-    db.init_schema()
+    with Database(config.db_path) as db:
+        db.init_schema()
     print(f"Initialized database at {config.db_path}")
     return 0
 
 
 def cmd_upload(args: argparse.Namespace) -> int:
     config = _load_config(args.config)
-    db = Database(config.db_path)
-    db.init_schema()
-    api = ComprehensionAPIClient(config)
-    uploader = Uploader(config, db, api)
 
     workspace_id = args.workspace
     if args.batch_id:
@@ -89,27 +85,31 @@ def cmd_upload(args: argparse.Namespace) -> int:
             print(f"Parse error: {exc}", file=sys.stderr)
             return 2
 
-    uploader.upload_batch(records, batch_id, workspace_id=workspace_id)
+    with Database(config.db_path) as db:
+        db.init_schema()
+        api = ComprehensionAPIClient(config)
+        uploader = Uploader(config, db, api)
+        uploader.upload_batch(records, batch_id, workspace_id=workspace_id)
     print(f"Uploaded batch {batch_id} ({len(records)} records)")
     return 0
 
 
 def cmd_scan(args: argparse.Namespace) -> int:
     config = _load_config(args.config)
-    db = Database(config.db_path)
-    db.init_schema()
-    source = build_question_source(config)
-    scanner = Scanner(config, db, source)
-    summary = scanner.scan(args.output)
+    with Database(config.db_path) as db:
+        db.init_schema()
+        source = build_question_source(config)
+        scanner = Scanner(config, db, source)
+        summary = scanner.scan(args.output)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     return 0
 
 
 def cmd_status(args: argparse.Namespace) -> int:
     config = _load_config(args.config)
-    db = Database(config.db_path)
-    state = db.states.get(args.question_id)
-    logs = db.logs.get_logs(args.question_id)
+    with Database(config.db_path) as db:
+        state = db.states.get(args.question_id)
+        logs = db.logs.get_logs(args.question_id)
     output: dict[str, Any] = {
         "state": dict(state) if state else None,
         "logs": [dict(row) for row in logs],

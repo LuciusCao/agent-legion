@@ -6,6 +6,7 @@ import argparse
 import json
 import sqlite3
 import sys
+from contextlib import closing
 from pathlib import Path
 
 # Make the project root importable when the script is invoked directly.
@@ -41,7 +42,7 @@ def _check(
         return 0
 
     uri = f"file:{db_path.resolve().as_posix()}?mode=ro"
-    with sqlite3.connect(uri, uri=True) as conn:
+    with closing(sqlite3.connect(uri, uri=True)) as conn, conn:
         conn.row_factory = sqlite3.Row
         try:
             finalize_legacy_executor_schema(conn, definitions, executors, dry_run=True)
