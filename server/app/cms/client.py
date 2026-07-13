@@ -15,6 +15,10 @@ DEFAULT_QUESTION_LIST_URL = (
 )
 
 
+class CmsClientError(RuntimeError):
+    pass
+
+
 def _build_headers(token: str | None) -> dict[str, str]:
     headers: dict[str, str] = {"Accept": "*/*"}
     if token:
@@ -26,9 +30,12 @@ def _build_headers(token: str | None) -> dict[str, str]:
 
 
 def _fetch_json(url: str, params: dict[str, Any], token: str | None, timeout: int = 15) -> dict:
-    resp = requests.get(url, params=params, headers=_build_headers(token), timeout=timeout)
-    resp.raise_for_status()
-    return resp.json()  # type: ignore[no-any-return]
+    try:
+        resp = requests.get(url, params=params, headers=_build_headers(token), timeout=timeout)
+        resp.raise_for_status()
+        return resp.json()  # type: ignore[no-any-return]
+    except (requests.RequestException, ValueError) as exc:
+        raise CmsClientError(f"CMS request failed: {exc}") from exc
 
 
 @dataclass(frozen=True)

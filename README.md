@@ -251,11 +251,26 @@ With coverage report:
 UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ```
 
-Install the optional pre-commit hook:
+Install the versioned local quality-gate hooks:
 
 ```bash
-./scripts/install-git-hooks.sh
+make install-hooks
 ```
+
+The installer places small dispatchers in the Git common hooks directory. Each dispatcher executes
+the versioned `.githooks/` implementation from the current worktree when that branch contains it;
+older worktrees without `.githooks/` remain unaffected. Successful gate evidence is shared:
+
+- pre-commit runs `scripts/check-fast.sh` for lint, formatting, and type feedback;
+- pre-push runs `scripts/check-quick.sh` for feature branches;
+- pushes to `develop`, `main`, `master`, `release/*`, or tags run `scripts/check.sh`;
+- successful pre-push evidence is cached by commit SHA in the Git common directory, so all
+  worktrees can reuse an unchanged result;
+- pre-push refuses a dirty worktree so the verified commit is exactly the commit being pushed.
+
+Set `VIDEO_HIVE_LOCAL_GATE_FORCE=1` to force a fresh pre-push verification for an unchanged
+commit. See [Local Quality Gates](docs/architecture/local-quality-gates.md) for the GitLab setup
+and operating policy used when no CI runner is available.
 
 > See [docs/architecture/](docs/architecture/) for architecture details, code style conventions, and security notes.
 
@@ -468,4 +483,3 @@ Run report generation:
 ```bash
 uv run python scripts/stress/run_e2e_stress.py --agents 100 --jobs 5000 --duration 600 --browser chromium
 ```
-

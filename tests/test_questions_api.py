@@ -2,6 +2,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
+from server.app.cms.client import CmsClientError
 from server.app.main import create_app
 
 
@@ -78,12 +79,14 @@ def test_question_detail_cms_failure(tmp_path, monkeypatch):
     }
 
     def fake_fetch_question_detail(question_id, api_url, token):
-        raise RuntimeError("CMS down")
+        raise CmsClientError("CMS down")
 
     with (
         TestClient(app) as c,
-        patch("server.app.routes.questions.fetch_question_detail", fake_fetch_question_detail),
-        patch("server.app.routes.questions.get_token", lambda env, config: "token"),
+        patch(
+            "server.app.services.question_detail.fetch_question_detail", fake_fetch_question_detail
+        ),
+        patch("server.app.services.question_detail.get_token", lambda env, config: "token"),
     ):
         c.post(
             "/api/workspaces",
@@ -160,7 +163,7 @@ def test_question_detail_parses_nested_answer_and_analysis(tmp_path, monkeypatch
         fake_fetch_json,
     )
     monkeypatch.setattr(
-        "server.app.routes.questions.get_token",
+        "server.app.services.question_detail.get_token",
         lambda env, config: "token",
     )
 

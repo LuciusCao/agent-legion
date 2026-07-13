@@ -7,6 +7,8 @@ from typing import Any
 
 import requests
 
+from server.app.cms.client import CmsClientError
+
 
 def _token_gen_config(config: dict[str, Any]) -> dict[str, str]:
     cfg = config.get("token_gen") or {}
@@ -33,16 +35,19 @@ def _generate_prod_token(config: dict[str, Any]) -> str | None:
         "nonce": cfg["nonce"],
         "secret": cfg["secret"],
     }
-    resp = requests.post(
-        cfg["url"], json=payload, headers={"Content-Type": "application/json"}, timeout=10
-    )
-    resp.raise_for_status()
-    result = resp.json()
+    try:
+        resp = requests.post(
+            cfg["url"], json=payload, headers={"Content-Type": "application/json"}, timeout=10
+        )
+        resp.raise_for_status()
+        result = resp.json()
+    except (requests.RequestException, ValueError) as exc:
+        raise CmsClientError(f"CMS token request failed: {exc}") from exc
     token: str | None = result.get("token")
     if not token:
         data = result.get("data")
         if isinstance(data, dict):
             token = data.get("token")
     if not token:
-        raise Exception(f"生成 token 失败，响应: {json.dumps(result, ensure_ascii=False)}")
+        raise CmsClientError(f"生成 token 失败，响应: {json.dumps(result, ensure_ascii=False)}")
     return token

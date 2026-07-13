@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
@@ -146,6 +147,13 @@ def create_app(
             workflow_worker_thread.stop()
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=list(settings.cors.allow_origins),
+        allow_credentials=settings.cors.allow_credentials,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
     app.state.settings = settings
     app.state.db = db
     app.state.job_db = job_db

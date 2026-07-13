@@ -5,6 +5,7 @@ from typing import Any
 from server.app.db import Database
 from server.app.pipeline.runners import RunnerPool
 from server.app.settings import Settings
+from server.app.worker_candidates import WorkerCandidatePager
 from server.app.worker_control import WorkerControl
 
 
@@ -30,6 +31,7 @@ class WorkerThread:
         self.running_local_counts: dict[str, int] = {}
         self.running_lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        self._candidate_pager = WorkerCandidatePager()
 
     def start(self) -> None:
         from server.app.worker import process_video_once
@@ -67,7 +69,6 @@ class WorkerThread:
         def _worker_loop() -> None:
             assert self.executor is not None
             while not self.stop_event.is_set():
-                submitted = False
                 if self.worker_control.is_paused():
                     self.stop_event.wait(1)
                     continue
@@ -79,8 +80,14 @@ class WorkerThread:
                 with self.running_lock:
                     running_video_ids = set(self.running_futures)
                     local_counts = dict(self.running_local_counts)
+                page = self._candidate_pager.fetch(self.db, self.settings)
+                candidates = page.videos
+                if page.wrapped:
+                    if runner_slot is not None:
+                        self.runner_pool.release(runner_slot[0])
+                    continue
                 work = pick_next_work(
-                    self.db.list_videos(status_filter=["queued", "missing_url", "running"]),
+                    candidates,
                     running_video_ids=running_video_ids,
                     capacity=WorkerCapacity(
                         free_runner=runner_slot,
@@ -88,10 +95,13 @@ class WorkerThread:
                     ),
                     settings=self.settings,
                 )
+                self._candidate_pager.advance(
+                    self.settings, candidates, work.video if work is not None else None
+                )
                 if work is None:
                     if runner_slot is not None:
                         self.runner_pool.release(runner_slot[0])
-                    wait_seconds = 0.2 if self.worker_control.consume_tick() else 3
+                    wait_seconds = 0.2 if page.has_more or self.worker_control.consume_tick() else 3
                     self.stop_event.wait(wait_seconds)
                     continue
 
@@ -123,7 +133,6 @@ class WorkerThread:
                         _finish_agent_work(vid, idx, aid)
 
                     future.add_done_callback(_on_agent_done)
-                    submitted = True
                 else:
                     if runner_slot is not None:
                         self.runner_pool.release(runner_slot[0])
@@ -142,10 +151,7 @@ class WorkerThread:
                         _finish_local_work(vid, phase)
 
                     future.add_done_callback(_on_local_done)
-                    submitted = True
-                wait_seconds = (
-                    0.2 if self.worker_control.consume_tick() else (1 if submitted else 3)
-                )
+                wait_seconds = 0.2 if self.worker_control.consume_tick() else 1
                 self.stop_event.wait(wait_seconds)
 
         runner_count = self.runner_pool.size()

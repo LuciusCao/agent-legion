@@ -139,8 +139,7 @@ def test_process_next_skips_agent_phase_without_runner(db, settings):
     assert db.get_video(video["id"])["status"] == "queued"
 
 
-def test_process_next_does_not_limit_polling_query(db, settings):
-    """process_next 不应限制 list_videos 结果集，避免旧视频饥饿。"""
+def test_process_next_uses_bounded_polling_query(db, settings):
     db.create_video("https://example.com/a.mp4", "A")
     db.update_video("a", status="queued", current_phase="download")
 
@@ -149,8 +148,28 @@ def test_process_next_does_not_limit_polling_query(db, settings):
         process_next(db, settings)
         mock_list.assert_called_once()
         call_kwargs = mock_list.call_args.kwargs
-        assert "limit" not in call_kwargs
+        assert call_kwargs["limit"] == 100
         assert call_kwargs.get("status_filter") == ["queued", "missing_url", "running"]
+
+
+def test_process_next_scans_later_pages_without_starvation(db, settings):
+    settings.config.setdefault("worker", {})["poll_batch_size"] = 1
+    blocked = db.create_video("https://example.com/blocked.mp4", "Blocked")
+    ready = db.create_video("https://example.com/ready.mp4", "Ready")
+    db.update_video(blocked["id"], current_phase="subtitle_review", status="queued")
+    with db.connect() as conn:
+        conn.execute(
+            "update videos set created_at='2026-01-02 00:00:00' where id=?", (blocked["id"],)
+        )
+        conn.execute(
+            "update videos set created_at='2026-01-01 00:00:00' where id=?", (ready["id"],)
+        )
+
+    with patch("server.app.worker.process_video_once", return_value=True) as process_once:
+        assert process_next(db, settings) is True
+
+    process_once.assert_called_once()
+    assert process_once.call_args.args[2] == ready["id"]
 
 
 def test_phase_run_log_path_is_persisted_relative(db, settings):

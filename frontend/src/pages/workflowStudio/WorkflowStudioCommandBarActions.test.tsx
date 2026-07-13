@@ -20,8 +20,8 @@ it('uses explicit Chinese labels for historical revision actions', () => {
     />
   )
 
-  fireEvent.click(screen.getByRole('button', { name: '返回当前草稿' }))
-  fireEvent.click(screen.getByRole('button', { name: '用此版本替换草稿' }))
+  fireEvent.click(screen.getByRole('button', { name: '返回' }))
+  fireEvent.click(screen.getByRole('button', { name: '设为草稿' }))
 
   expect(backToDraft).toHaveBeenCalledOnce()
   expect(useViewedRevisionAsDraft).toHaveBeenCalledOnce()

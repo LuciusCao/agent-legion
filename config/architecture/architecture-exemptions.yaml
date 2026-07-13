@@ -65,18 +65,6 @@ exemptions:
     pending typed response models.
   owner: workspace-executor
   remove_when: issues/open/036-P3-type-sync-automation.md
-- check: architecture.route_import_boundary
-  path: server/app/routes/questions.py:server.app.cms.client
-  reason: Question detail route uses CMS token client directly while the CMS resource
-    resolver is being moved out of routes.
-  owner: workspace-executor
-  remove_when: issues/open/040-P2-question-route-cms-boundary.md
-- check: architecture.route_import_boundary
-  path: server/app/routes/questions.py:server.app.cms.question
-  reason: Question detail route uses CMS question fetcher directly while the CMS resource
-    resolver is being moved out of routes.
-  owner: workspace-executor
-  remove_when: issues/open/040-P2-question-route-cms-boundary.md
 - check: architecture.scheduler_threadpool
   path: server/app/workflow_worker_thread.py:self._pools[executor_id]
   reason: WorkflowWorkerThread creates one shared ThreadPoolExecutor per executor

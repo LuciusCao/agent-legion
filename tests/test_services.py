@@ -1,5 +1,8 @@
 import json
 
+import pytest
+
+from server.app.cms.client import CmsClientError
 from server.app.services.intake import add_video_items, normalized_content_type
 from server.app.services.manual_run import batch_run_to_phase, run_to_phase
 from server.app.services.video_actions import (
@@ -23,6 +26,38 @@ def test_intake_normalizes_unknown_content_type_and_creates_storage(db, settings
     assert video["id"] == "g1"
     assert video["content_type"] == "knowledge"
     assert (settings.data_dir / "videos" / "g1").is_dir()
+
+
+def test_intake_converts_cms_client_failure_to_result(db, settings, monkeypatch):
+    monkeypatch.setattr(
+        "server.app.services.intake.resolve_video_input",
+        lambda _item, _settings: (_ for _ in ()).throw(CmsClientError("CMS unavailable")),
+    )
+
+    result = add_video_items(
+        db,
+        settings,
+        [InputItem(url="", content_type="knowledge", external_id="K001")],
+    )
+
+    assert result["results"][0]["status"] == "fetch_failed"
+    assert result["results"][0]["message"] == "CMS unavailable"
+
+
+def test_intake_does_not_hide_programming_errors(db, settings, monkeypatch):
+    def fail_with_programming_error(_item, _settings):
+        raise AttributeError("unexpected bug")
+
+    monkeypatch.setattr(
+        "server.app.services.intake.resolve_video_input", fail_with_programming_error
+    )
+
+    with pytest.raises(AttributeError, match="unexpected bug"):
+        add_video_items(
+            db,
+            settings,
+            [InputItem(url="", content_type="knowledge", external_id="K001")],
+        )
 
 
 def test_batch_rerun_uses_same_normalization_as_single_rerun(db, settings):
