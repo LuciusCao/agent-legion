@@ -23,4 +23,10 @@ if [[ "$has_update" -eq 0 ]]; then
   exit 0
 fi
 
+while IFS= read -r name; do
+  if [[ -n "$name" ]]; then
+    unset "$name"
+  fi
+done < <(git rev-parse --local-env-vars)
+
 exec "$ROOT_DIR/scripts/run-local-gate.sh" "$gate"
