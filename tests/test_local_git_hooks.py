@@ -20,11 +20,17 @@ def _run(
     env: dict[str, str] | None = None,
     check: bool = True,
 ) -> subprocess.CompletedProcess[str]:
+    process_env = os.environ.copy()
+    for name in tuple(process_env):
+        if name.startswith("GIT_"):
+            process_env.pop(name)
+    if env is not None:
+        process_env.update(env)
     return subprocess.run(
         [str(arg) for arg in args],
         cwd=cwd,
         input=input_text,
-        env=env,
+        env=process_env,
         text=True,
         capture_output=True,
         check=check,
@@ -52,7 +58,9 @@ def hook_repo(tmp_path: Path) -> tuple[Path, Path]:
     for gate, script_name in (("quick", "check-quick.sh"), ("full", "check.sh")):
         _write_executable(
             repo / "scripts" / script_name,
-            f"#!/usr/bin/env bash\nprintf '{gate}\\n' >>\"$GATE_LOG\"\n",
+            "#!/usr/bin/env bash\n"
+            'if [[ -n "${GIT_DIR:-}${GIT_WORK_TREE:-}" ]]; then exit 99; fi\n'
+            f"printf '{gate}\\n' >>\"$GATE_LOG\"\n",
         )
 
     _run(["git", "init", "-q"], cwd=repo)
@@ -69,7 +77,23 @@ def _push_input(repo: Path, remote_ref: str) -> str:
 
 
 def _hook_env(gate_log: Path) -> dict[str, str]:
-    return {**os.environ, "GATE_LOG": str(gate_log)}
+    return {"GATE_LOG": str(gate_log)}
+
+
+def test_git_commands_ignore_inherited_repository_environment(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    inherited_repo = tmp_path / "inherited"
+    isolated_repo = tmp_path / "isolated"
+    inherited_repo.mkdir()
+    isolated_repo.mkdir()
+    _run(["git", "init", "-q"], cwd=inherited_repo)
+    monkeypatch.setenv("GIT_DIR", str(inherited_repo / ".git"))
+    monkeypatch.setenv("GIT_WORK_TREE", str(inherited_repo))
+
+    _run(["git", "init", "-q"], cwd=isolated_repo)
+
+    assert (isolated_repo / ".git").is_dir()
 
 
 def test_feature_push_runs_quick_gate_once_and_reuses_evidence(
@@ -82,7 +106,11 @@ def test_feature_push_runs_quick_gate_once_and_reuses_evidence(
         [repo / ".githooks" / "pre-push"],
         cwd=repo,
         input_text=push_input,
-        env=_hook_env(gate_log),
+        env={
+            **_hook_env(gate_log),
+            "GIT_DIR": str(repo / ".git"),
+            "GIT_WORK_TREE": str(repo),
+        },
     )
     second = _run(
         [repo / ".githooks" / "pre-push"],
