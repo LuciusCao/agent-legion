@@ -14,6 +14,7 @@ import {
 } from './api'
 import {
   getExecutorCatalog,
+  getSkillDetail,
   getWorkspaceExecutorConfiguration,
 } from './executorApi'
 
@@ -329,6 +330,18 @@ describe('executor configuration api', () => {
 
     expect(fetchMock).toHaveBeenCalledWith(
       '/api/workspaces/reading%20team/executor-configuration',
+      expect.objectContaining({ cache: 'no-store' })
+    )
+  })
+
+  it('loads a configured skill detail', async () => {
+    const fetchMock = mockFetchJson({ key: 'demo/review', files: [] })
+    global.fetch = fetchMock
+
+    await getSkillDetail('demo/review')
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/executors/skills/demo/review',
       expect.objectContaining({ cache: 'no-store' })
     )
   })

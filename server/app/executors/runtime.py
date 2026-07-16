@@ -45,7 +45,7 @@ class ExecutionRuntime:
         with self._lock:
             self._active[claim.execution_id] = token
 
-        context = replace(context, runtime={"cancellation": token})
+        context = replace(context, runtime={**context.runtime, "cancellation": token})
         done_event = threading.Event()
         lease_lost_event = threading.Event()
 

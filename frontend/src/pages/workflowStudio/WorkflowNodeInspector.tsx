@@ -11,6 +11,7 @@ type Props = {
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
+  onClose: () => void
 }
 
 export function WorkflowNodeInspector(props: Props) {
@@ -26,6 +27,7 @@ export function WorkflowNodeInspector(props: Props) {
       definitionYaml={props.definitionYaml}
       setDefinitionYaml={props.setDefinitionYaml}
       readOnly={props.readOnly}
+      onClose={props.onClose}
     />
   )
 }

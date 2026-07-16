@@ -16,6 +16,12 @@ export type WorkflowYamlNode = {
   inputs?: string[]
   outputs?: string[]
   terminal?: { outcome?: string }
+  execution?: {
+    provider?: string
+    model?: string
+    thinking?: string
+    prompt?: string
+  }
 }
 
 export type WorkflowYamlEdge = {

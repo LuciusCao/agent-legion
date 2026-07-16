@@ -1,5 +1,3 @@
-import ChevronRightIcon from '@mui/icons-material/ChevronRight'
-import { WorkflowStudioPanelCollapseButton } from './WorkflowStudioPanelCollapseButton'
 import { WorkflowStudioRightPanel } from './WorkflowStudioRightPanel'
 import type { StudioLayoutProps } from './workflowStudioLayoutProps'
 import pageStyles from '../WorkflowStudioPageResponsive.module.css'
@@ -18,12 +16,7 @@ export function WorkflowStudioInspectorPanel({
 }: Props) {
   return (
     <aside className={panelClass(active)} data-mobile-panel="inspector">
-      <WorkflowStudioPanelCollapseButton
-        label="关闭节点配置"
-        onClick={onClose}
-        icon={<ChevronRightIcon />}
-      />
-      <WorkflowStudioRightPanel {...props} />
+      <WorkflowStudioRightPanel {...props} onClose={onClose} />
     </aside>
   )
 }

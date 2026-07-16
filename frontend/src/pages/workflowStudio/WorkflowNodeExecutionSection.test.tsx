@@ -1,4 +1,4 @@
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen } from '@testing-library/react'
 import { describe, expect, it } from 'vitest'
 import type { ExecutorDefinition } from '../../executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
@@ -37,10 +37,20 @@ const executorCatalog: ExecutorDefinition[] = [
         name: 'generate_key_info',
         skill: 'question_comprehension_info/generate_key_info',
         tools: ['read', 'write', 'bash'],
+        provider: 'deepseek',
+        model: 'your-model-b',
+        thinking: 'low',
+        skill_ref: 'v1.3.8',
+        skill_commit: '5c5eae72064abde37bfc4b07a4b2f7e9637c473d',
       },
     ],
   },
 ]
+
+const editorProps = {
+  definitionYaml: `nodes:\n  generate_key_info:\n    capability: generate_key_info\n`,
+  setDefinitionYaml: () => {},
+}
 
 describe('WorkflowNodeExecutionSection', () => {
   it('shows the executor binding for the selected node capability', () => {
@@ -48,15 +58,44 @@ describe('WorkflowNodeExecutionSection', () => {
       <WorkflowNodeExecutionSection
         node={node}
         executorCatalog={executorCatalog}
+        {...editorProps}
       />
     )
 
-    expect(screen.getAllByText('pi')).toHaveLength(2)
+    expect(screen.getAllByText('pi')).toHaveLength(1)
     expect(
       screen.getByText('question_comprehension_info/generate_key_info')
     ).toBeInTheDocument()
     expect(screen.getByText('read, write, bash')).toBeInTheDocument()
+    expect(screen.getByText('v1.3.8 · 5c5eae7')).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '查看 Prompt' })
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole('button', { name: '浏览技能文件' })
+    ).toBeInTheDocument()
+    expect(screen.getByText(/your-model-b/)).toBeInTheDocument()
     expect(screen.queryByText('local-default')).not.toBeInTheDocument()
+  })
+
+  it('writes a node model override to workflow YAML', () => {
+    let nextYaml = ''
+    render(
+      <WorkflowNodeExecutionSection
+        node={node}
+        executorCatalog={executorCatalog}
+        definitionYaml={editorProps.definitionYaml}
+        setDefinitionYaml={(value) => {
+          nextYaml = value
+        }}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText('Model'), {
+      target: { value: 'gpt-5' },
+    })
+
+    expect(nextYaml).toContain('model: gpt-5')
   })
 
   it('shows an empty state when no executor supports the capability', () => {
@@ -64,6 +103,7 @@ describe('WorkflowNodeExecutionSection', () => {
       <WorkflowNodeExecutionSection
         node={{ ...node, capability: 'missing' }}
         executorCatalog={executorCatalog}
+        {...editorProps}
       />
     )
 

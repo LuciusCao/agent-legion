@@ -85,4 +85,9 @@ def test_catalog_exposes_video_pi_agent_capabilities(service: ExecutorCatalogSer
         "name": "generate_key_info",
         "skill": "question_comprehension_info/generate_key_info",
         "tools": ["read", "write", "bash"],
+        "skill_ref": "v1.3.8",
+        "skill_commit": "5c5eae72064abde37bfc4b07a4b2f7e9637c473d",
+        "provider": "deepseek",
+        "model": "your-model-b",
+        "thinking": "low",
     }

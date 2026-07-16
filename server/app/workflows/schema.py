@@ -21,6 +21,14 @@ class WorkflowTerminal:
 
 
 @dataclass(frozen=True)
+class WorkflowNodeExecution:
+    provider: str = ""
+    model: str = ""
+    thinking: str = ""
+    prompt: str = ""
+
+
+@dataclass(frozen=True)
 class WorkflowEdge:
     source: str
     target: str
@@ -36,6 +44,7 @@ class WorkflowNode:
     inputs: list[str] = field(default_factory=list)
     outputs: list[str] = field(default_factory=list)
     terminal: WorkflowTerminal | None = None
+    execution: WorkflowNodeExecution = field(default_factory=WorkflowNodeExecution)
 
 
 @dataclass(frozen=True)

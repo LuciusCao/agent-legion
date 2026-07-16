@@ -64,6 +64,8 @@ def _node_change_fields(base: WorkflowNode, draft: WorkflowNode) -> list[str]:
         fields.append("inputs")
     if base.outputs != draft.outputs:
         fields.append("outputs")
+    if base.execution != draft.execution:
+        fields.append("execution")
     base_terminal = base.terminal.outcome if base.terminal else None
     draft_terminal = draft.terminal.outcome if draft.terminal else None
     if base_terminal != draft_terminal:
@@ -93,6 +95,8 @@ def _node_field_risks(base: WorkflowNode, draft: WorkflowNode) -> dict[str, str]
             risks["outputs"] = "breaking"
         else:
             risks["outputs"] = "info"
+    if base.execution != draft.execution:
+        risks["execution"] = "warning"
 
     base_terminal = base.terminal.outcome if base.terminal else None
     draft_terminal = draft.terminal.outcome if draft.terminal else None

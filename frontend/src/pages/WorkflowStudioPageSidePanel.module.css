@@ -3,7 +3,7 @@
   overflow: auto;
   background: #ffffff;
   border-right: 1px solid #e0e0e0;
-  padding: 12px;
+  padding: 0;
 }
 .sidePanel:last-child {
   border-right: none;

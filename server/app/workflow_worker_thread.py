@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, wait
+from dataclasses import asdict
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -308,6 +309,7 @@ class WorkflowWorkerThread:
             log_path=log_path,
             inputs=tuple(node.inputs),
             expected_outputs=tuple(node.outputs),
+            runtime={"node_execution": asdict(node.execution)},
         )
 
         pool = self._pools[executor_id]

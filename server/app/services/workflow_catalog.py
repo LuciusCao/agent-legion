@@ -1,4 +1,5 @@
 import logging
+from dataclasses import asdict
 from typing import Any
 
 from server.app.services.job_errors import NotFoundError
@@ -44,6 +45,7 @@ class WorkflowCatalogService:
                 "after": node.after,
                 "inputs": node.inputs,
                 "outputs": node.outputs,
+                "execution": asdict(node.execution),
             }
             for node in definition.nodes.values()
         ]

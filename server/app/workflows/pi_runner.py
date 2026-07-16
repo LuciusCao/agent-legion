@@ -20,6 +20,7 @@ from server.app.services.token_usage_capture import capture_and_persist_token_us
 from server.app.storage_paths import ManagedPathError, make_data_relative, resolve_job_dir
 from server.app.workflows.pi_command_builder import build_pi_command
 from server.app.workflows.pi_config import PiConfig, PiRunResult
+from server.app.workflows.pi_prompt import build_pi_prompt
 
 logger = logging.getLogger(__name__)
 
@@ -50,7 +51,10 @@ class PiRunner:
         cancellation_token: CancellationToken | None = None,
         tracker: SubprocessTracker | None = None,
         skill_version: str = "",
+        config: PiConfig | None = None,
+        additional_prompt: str = "",
     ) -> PiRunResult:
+        run_config = config or self.config
         if job_dir is None:
             if jobs_dir is None:
                 raise ManagedPathError(
@@ -70,7 +74,7 @@ class PiRunner:
         events_file = run_dir / "events.jsonl"
         stderr_file = run_dir / "stderr.log"
 
-        prompt = self._build_prompt(
+        prompt = build_pi_prompt(
             job_id=job["id"],
             node_key=node_key,
             job_dir=job_dir,
@@ -78,12 +82,13 @@ class PiRunner:
             validator_script=skill_dir / "scripts" / "validate_output.py",
             inputs=inputs,
             outputs=outputs,
+            additional_prompt=additional_prompt,
         )
         prompt_file.write_text(prompt, encoding="utf-8")
 
         session_name = f"{job['id']}:{node_key}:{run_token}"
         command = build_pi_command(
-            self.config,
+            run_config,
             skill_dir=skill_dir,
             session_dir=session_dir,
             tools=tools or ["read", "write", "bash"],
@@ -120,7 +125,7 @@ class PiRunner:
                     )
 
             env = dict(os.environ)
-            env.update(self.config.environment)
+            env.update(run_config.environment)
 
             with (
                 open(events_file, "w") as stdout_fh,
@@ -143,13 +148,14 @@ class PiRunner:
                         cancellation_token=cancellation_token,
                         tracker=tracker,
                         execution_id=effective_execution_id,
+                        config=run_config,
                     )
                 finally:
                     if tracker is not None:
                         tracker.unregister(effective_execution_id)
         except FileNotFoundError:
             exit_code = 127
-            error_message = f"Pi binary not found: {self.config.binary}"
+            error_message = f"Pi binary not found: {run_config.binary}"
         except Exception as exc:
             exit_code = 1
             error_message = str(exc)
@@ -192,9 +198,9 @@ class PiRunner:
             "end_time": end_time,
             "exit_code": exit_code,
             "model": {
-                "provider": self.config.provider,
-                "model": self.config.model,
-                "thinking": self.config.thinking,
+                "provider": run_config.provider,
+                "model": run_config.model,
+                "thinking": run_config.thinking,
             },
             "inputs": inputs,
             "outputs": outputs,
@@ -243,6 +249,7 @@ class PiRunner:
         cancellation_token: CancellationToken | None,
         tracker: SubprocessTracker | None,
         execution_id: str,
+        config: PiConfig,
     ) -> tuple[int, str]:
         start = time.monotonic()
         while True:
@@ -250,31 +257,31 @@ class PiRunner:
                 if tracker is not None:
                     tracker.cancel(execution_id)
                 else:
-                    self._terminate_direct(proc)
-                return self._collect_exit(proc, cancelled=True)
+                    self._terminate_direct(proc, config)
+                return self._collect_exit(proc, config, cancelled=True)
             poll = proc.poll()
             if poll is not None:
                 return poll, ""
-            if time.monotonic() - start > self.config.timeout_seconds:
+            if time.monotonic() - start > config.timeout_seconds:
                 if tracker is not None:
                     tracker.cancel(execution_id)
                 else:
-                    self._terminate_direct(proc)
-                return -1, f"Pi session timed out after {self.config.timeout_seconds}s"
+                    self._terminate_direct(proc, config)
+                return -1, f"Pi session timed out after {config.timeout_seconds}s"
 
-    def _terminate_direct(self, proc: subprocess.Popen[Any]) -> None:
+    def _terminate_direct(self, proc: subprocess.Popen[Any], config: PiConfig) -> None:
         proc.terminate()
         try:
-            proc.wait(timeout=self.config.cancellation_grace_seconds)
+            proc.wait(timeout=config.cancellation_grace_seconds)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
 
     def _collect_exit(
-        self, proc: subprocess.Popen[Any], cancelled: bool = False
+        self, proc: subprocess.Popen[Any], config: PiConfig, cancelled: bool = False
     ) -> tuple[int, str]:
         try:
-            exit_code = proc.wait(timeout=self.config.cancellation_grace_seconds)
+            exit_code = proc.wait(timeout=config.cancellation_grace_seconds)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
@@ -321,39 +328,3 @@ class PiRunner:
         except Exception:
             return None
         return None
-
-    def _build_prompt(
-        self,
-        *,
-        job_id: str,
-        node_key: str,
-        job_dir: Path,
-        skill_dir: Path,
-        validator_script: Path,
-        inputs: list[str],
-        outputs: list[str],
-    ) -> str:
-        lines: list[str] = [
-            "Execute the loaded node skill for this Video Hive workflow job.",
-            "",
-            f"Job ID: {job_id}",
-            f"Node: {node_key}",
-            f"Working directory: {job_dir}",
-            f"Skill directory: {skill_dir}",
-            f"Validator script: {validator_script}",
-            "",
-            "Declared inputs:",
-        ]
-        for inp in inputs:
-            lines.append(f"- {inp}")
-        lines.append("")
-        lines.append("Required outputs:")
-        for out in outputs:
-            lines.append(f"- {out}")
-        lines.append("")
-        lines.append(
-            "Write required outputs directly into the working directory. "
-            "Do not modify inputs or create undeclared root-level artifacts. "
-            "Finish after all required outputs are written and correct."
-        )
-        return "\n".join(lines) + "\n"

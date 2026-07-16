@@ -10,6 +10,7 @@ type Props = {
   readOnly: boolean
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
+  onClose: () => void
 }
 
 export function WorkflowStudioRightPanel(props: Props) {
@@ -23,6 +24,7 @@ export function WorkflowStudioRightPanel(props: Props) {
           definitionYaml={props.definitionYaml}
           setDefinitionYaml={props.setDefinitionYaml}
           readOnly={props.readOnly}
+          onClose={props.onClose}
         />
       </div>
     </section>

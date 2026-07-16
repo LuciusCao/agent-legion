@@ -119,3 +119,31 @@ edges:
 
     with pytest.raises(WorkflowDefinitionError, match="Unknown edge target"):
         load_workflow_definition(path)
+
+
+def test_loads_node_execution_overrides(tmp_path: Path) -> None:
+    path = tmp_path / "workflow.yaml"
+    path.write_text(
+        """
+key: agent_demo
+label: Agent Demo
+schema_version: 2
+nodes:
+  generate:
+    capability: generate
+    execution:
+      provider: openai
+      model: gpt-5
+      thinking: high
+      prompt: Check every citation.
+edges: []
+""",
+        encoding="utf-8",
+    )
+
+    execution = load_workflow_definition(path).nodes["generate"].execution
+
+    assert execution.provider == "openai"
+    assert execution.model == "gpt-5"
+    assert execution.thinking == "high"
+    assert execution.prompt == "Check every citation."
