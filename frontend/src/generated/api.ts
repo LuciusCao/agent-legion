@@ -55,6 +55,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/executors/skills/{skill_key}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Skill */
+    get: operations['get_skill_api_executors_skills__skill_key__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/global-services': {
     parameters: {
       query?: never
@@ -1071,10 +1088,20 @@ export interface components {
     ExecutorCapabilityResponse: {
       /** Handler */
       handler?: string | null
+      /** Model */
+      model?: string | null
       /** Name */
       name: string
+      /** Provider */
+      provider?: string | null
       /** Skill */
       skill?: string | null
+      /** Skill Commit */
+      skill_commit?: string | null
+      /** Skill Ref */
+      skill_ref?: string | null
+      /** Thinking */
+      thinking?: string | null
       /** Tools */
       tools?: string[]
     }
@@ -1575,6 +1602,33 @@ export interface components {
       /** Total */
       total: number | null
     }
+    /** SkillDetailResponse */
+    SkillDetailResponse: {
+      /** Available */
+      available: boolean
+      /** Commit */
+      commit: string
+      /** Files */
+      files?: components['schemas']['SkillFileResponse'][]
+      /** Key */
+      key: string
+      /** Ref */
+      ref: string
+    }
+    /** SkillFileResponse */
+    SkillFileResponse: {
+      /** Content */
+      content: string
+      /** Path */
+      path: string
+      /** Size */
+      size: number
+      /**
+       * Truncated
+       * @default false
+       */
+      truncated: boolean
+    }
     /** TokenUsageCostBreakdown */
     TokenUsageCostBreakdown: {
       /** Cache Read */
@@ -2008,12 +2062,36 @@ export interface components {
        */
       type: 'added' | 'removed' | 'modified'
     }
+    /** WorkflowNodeExecutionResponse */
+    WorkflowNodeExecutionResponse: {
+      /**
+       * Model
+       * @default
+       */
+      model: string
+      /**
+       * Prompt
+       * @default
+       */
+      prompt: string
+      /**
+       * Provider
+       * @default
+       */
+      provider: string
+      /**
+       * Thinking
+       * @default
+       */
+      thinking: string
+    }
     /** WorkflowNodeResponse */
     WorkflowNodeResponse: {
       /** After */
       after: string[]
       /** Capability */
       capability: string
+      execution?: components['schemas']['WorkflowNodeExecutionResponse']
       /** Inputs */
       inputs: string[]
       /** Key */
@@ -2443,6 +2521,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['ExecutorCatalogResponse']
+        }
+      }
+    }
+  }
+  get_skill_api_executors_skills__skill_key__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        skill_key: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['SkillDetailResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

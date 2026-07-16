@@ -1,4 +1,5 @@
 import json
+from dataclasses import asdict
 
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
@@ -34,6 +35,7 @@ def build_workspace_dag(
                 "after": node.after,
                 "inputs": node.inputs,
                 "outputs": node.outputs,
+                "execution": asdict(node.execution),
                 "status_counts": {
                     status: counts.get(node.key, {}).get(status, 0) for status in statuses
                 },

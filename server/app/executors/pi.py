@@ -8,6 +8,7 @@ from server.app.executors._pi_skill import get_skill_version, prepare_execution,
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
+from server.app.executors.pi_node_execution import resolve_node_pi_config
 from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.skills.manager import SkillManager
 from server.app.workflows.pi_runner import PiConfig, PiRunner
@@ -79,6 +80,7 @@ class PiExecutor:
             token = maybe_token if isinstance(maybe_token, CancellationToken) else None
 
             skill_version = get_skill_version(self.skill_manager, capability_config.skill)
+            run_config, additional_prompt = resolve_node_pi_config(self.config, context.runtime)
 
             result = self._runner.run(
                 job=dict(context.job),
@@ -93,6 +95,8 @@ class PiExecutor:
                 cancellation_token=token,
                 tracker=self._tracker,
                 skill_version=skill_version,
+                config=run_config,
+                additional_prompt=additional_prompt,
             )
 
             return to_execution_result(result, context)

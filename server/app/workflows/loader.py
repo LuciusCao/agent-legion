@@ -16,6 +16,7 @@ from server.app.workflows.schema import (
     WorkflowTerminal,
 )
 from server.app.workflows.validator import _validate_acyclic
+from server.app.workflows.workflow_node_execution import load_node_execution
 
 
 def _string_list(value: Any, field_name: str, node_key: str) -> list[str]:
@@ -157,6 +158,7 @@ def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
             inputs=_string_list(raw_node.get("inputs"), "inputs", node_key),
             outputs=_string_list(raw_node.get("outputs"), "outputs", node_key),
             terminal=_load_terminal(raw_node, node_key),
+            execution=load_node_execution(raw_node, node_key),
         )
 
     for node in nodes.values():

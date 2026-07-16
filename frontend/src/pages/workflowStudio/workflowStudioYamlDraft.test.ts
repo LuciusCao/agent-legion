@@ -7,6 +7,7 @@ import {
   patchWorkflowNodeOutputs,
   patchWorkflowNodeTerminalOutcome,
 } from './workflowStudioYamlDraft'
+import { patchWorkflowNodeExecution } from './workflowStudioYamlDraft.execution'
 
 const yaml = `key: demo
 label: Demo
@@ -65,6 +66,25 @@ describe('workflowStudioYamlDraft node patches', () => {
 
   it('patches workflow label', () => {
     expect(patchWorkflowLabel(yaml, 'Demo v2')).toContain('label: Demo v2')
+  })
+
+  it('patches node execution settings and removes empty inheritance values', () => {
+    const configured = patchWorkflowNodeExecution(
+      yaml,
+      'fetch',
+      'model',
+      'gpt-5'
+    )
+    expect(configured).toContain('execution:')
+    expect(configured).toContain('model: gpt-5')
+
+    const inherited = patchWorkflowNodeExecution(
+      configured,
+      'fetch',
+      'model',
+      ''
+    )
+    expect(inherited).not.toContain('execution:')
   })
 })
 

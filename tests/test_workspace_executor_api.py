@@ -22,7 +22,22 @@ def test_list_executors_endpoint(client):
         "handler": "question_comprehension_info.fetch_questions",
         "skill": None,
         "tools": [],
+        "provider": None,
+        "model": None,
+        "thinking": None,
+        "skill_ref": None,
+        "skill_commit": None,
     } in executor["capability_details"]
+
+
+def test_get_configured_skill_detail(client):
+    response = client.get("/api/executors/skills/question_comprehension_info/generate_key_info")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["ref"] == "v1.3.8"
+    assert data["commit"].startswith("5c5eae7")
+    assert any(item["path"] == "SKILL.md" for item in data["files"])
 
 
 def test_get_workspace_executor_configuration_reports_no_warnings_after_v005(client):

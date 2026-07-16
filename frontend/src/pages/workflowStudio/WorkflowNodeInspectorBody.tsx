@@ -1,8 +1,11 @@
 import type { ExecutorDefinition } from '../../executorTypes'
 import type { SelectedWorkflowNodeDetails } from './workflowStudioModel'
-import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
+import { findCapabilityBindings } from './WorkflowExecutorBindingList'
+import { WorkflowNodeDataContractSection } from './WorkflowNodeDataContractSection'
+import { WorkflowNodeDependencySection } from './WorkflowNodeDependencySection'
 import { WorkflowNodeEditorSection } from './WorkflowNodeEditorSection'
-import { EdgeList, ItemList } from './WorkflowNodeInspectorLists'
+import { WorkflowNodeExecutionSection } from './WorkflowNodeExecutionSection'
+import { WorkflowNodeInspectorHeader } from './WorkflowNodeInspectorHeader'
 import styles from './WorkflowNodeInspector.module.css'
 
 type Props = {
@@ -11,61 +14,48 @@ type Props = {
   definitionYaml: string
   setDefinitionYaml: (value: string) => void
   readOnly?: boolean
+  onClose: () => void
 }
 
-// WorkflowNodeInspectorBody is currently display-only: it lists node metadata
-// and edges. readOnly is accepted and forwarded so future structured edit
-// inputs can be wired with disabled={readOnly} / readOnly={readOnly}.
 export function WorkflowNodeInspectorBody(props: Props) {
-  const { details, readOnly } = props
-  const { node, incoming, outgoing } = details
+  const { node } = props.details
+  const executorKind =
+    findCapabilityBindings(props.executorCatalog, node.capability)[0]?.executor
+      .kind ?? ''
   return (
     <section aria-label="Workflow inspector" className={styles.panel}>
-      <h2 className={styles.title}>{node.label}</h2>
-      <WorkflowNodeEditorSection
-        node={node}
-        definitionYaml={props.definitionYaml}
-        setDefinitionYaml={props.setDefinitionYaml}
-        readOnly={readOnly}
+      <WorkflowNodeInspectorHeader
+        label={node.label}
+        nodeKey={node.key}
+        executorKind={executorKind}
+        onClose={props.onClose}
       />
-      <div className={styles.section}>
-        <div className={styles.sectionTitle}>标识</div>
-        <div className={styles.value}>{node.key}</div>
+      <div className={styles.content}>
+        <WorkflowNodeEditorSection
+          node={node}
+          definitionYaml={props.definitionYaml}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
+        />
+        <WorkflowNodeExecutionSection
+          node={node}
+          executorCatalog={props.executorCatalog}
+          definitionYaml={props.definitionYaml}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
+        />
+        <WorkflowNodeDataContractSection
+          key={`data-contract-${node.key}`}
+          node={node}
+          definitionYaml={props.definitionYaml}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
+        />
+        <WorkflowNodeDependencySection
+          key={`dependencies-${node.key}`}
+          details={props.details}
+        />
       </div>
-      <div className={styles.section}>
-        <div className={styles.sectionTitle}>能力</div>
-        <div className={styles.value}>{node.capability}</div>
-      </div>
-      <WorkflowNodeExecutionSection
-        node={node}
-        executorCatalog={props.executorCatalog}
-      />
-      <div className={styles.section}>
-        <div className={styles.sectionTitle}>
-          输入产物 ({node.inputs.length})
-        </div>
-        <ItemList items={node.inputs} />
-      </div>
-      <div className={styles.section}>
-        <div className={styles.sectionTitle}>
-          输出产物 ({node.outputs.length})
-        </div>
-        <ItemList items={node.outputs} />
-      </div>
-      <div className={styles.section}>
-        <div className={styles.sectionTitle}>上游</div>
-        <EdgeList edges={incoming} nodeKey={node.key} outgoing={false} />
-      </div>
-      <div className={styles.section}>
-        <div className={styles.sectionTitle}>下游</div>
-        <EdgeList edges={outgoing} nodeKey={node.key} outgoing={true} />
-      </div>
-      {node.terminal && (
-        <div className={styles.section}>
-          <div className={styles.sectionTitle}>Terminal Outcome</div>
-          <span className={styles.outcome}>{node.terminal.outcome}</span>
-        </div>
-      )}
     </section>
   )
 }

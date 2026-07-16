@@ -1,8 +1,8 @@
 import {
   dumpWorkflowYaml,
   parseWorkflowYaml,
-  type WorkflowYamlNode,
 } from './workflowStudioYamlDraft.parse'
+import type { WorkflowYamlNode } from './workflowStudioYamlDraft.parse'
 
 export {
   parseWorkflowEdgeConditions,
@@ -14,7 +14,6 @@ export type {
   WorkflowYamlNode,
   WorkflowYamlObject,
 } from './workflowStudioYamlDraft.parse'
-
 function patchNode(
   rawYaml: string,
   nodeKey: string,

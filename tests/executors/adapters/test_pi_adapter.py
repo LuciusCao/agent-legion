@@ -98,6 +98,61 @@ def test_pi_executor_returns_normalized_result(tmp_path: Path) -> None:
     assert len(run_json["skill_version"]) == 40
 
 
+def test_pi_executor_applies_node_model_and_prompt_overrides(tmp_path: Path) -> None:
+    fake_pi = tmp_path / "fake_pi"
+    fake_pi.write_text("#!/bin/bash\necho '{}' > result.json\n")
+    fake_pi.chmod(0o755)
+    skill_manager = _make_skill_manager(
+        tmp_path,
+        "demo/generate",
+        validate_script="#!/usr/bin/env python3\n",
+    )
+    executor = PiExecutor(
+        "pi",
+        PiRuntimeConfig(binary=str(fake_pi), provider="default", model="base"),
+        skill_manager,
+        {"generate": PiCapabilityConfig(skill="demo/generate")},
+    )
+    job_dir = tmp_path / "job-override"
+    job_dir.mkdir()
+    context = ExecutionContext(
+        execution_id="exec-override",
+        lease_id="lease-override",
+        node_run_id=8,
+        executor_id="pi",
+        workspace_id="ws",
+        job_id="job",
+        workflow_key="demo",
+        node_key="generate",
+        capability="generate",
+        workspace={},
+        job={"id": "job"},
+        job_dir=job_dir,
+        log_path=tmp_path / "run.log",
+        inputs=(),
+        expected_outputs=("result.json",),
+        runtime={
+            "node_execution": {
+                "provider": "openai",
+                "model": "gpt-5",
+                "thinking": "high",
+                "prompt": "Verify the answer twice.",
+            }
+        },
+    )
+
+    result = executor.execute(context)
+    run_dir = Path(result.run_dir)
+    metadata = json.loads((run_dir / "run.json").read_text())
+
+    assert metadata["model"] == {
+        "provider": "openai",
+        "model": "gpt-5",
+        "thinking": "high",
+    }
+    assert "Verify the answer twice." in (run_dir / "prompt.md").read_text()
+
+
 def test_pi_executor_cleans_snapshot_when_runner_raises(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

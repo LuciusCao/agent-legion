@@ -1,0 +1,45 @@
+.header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px 10px;
+  padding: 14px 12px 12px;
+  border-bottom: 1px solid #e0e0e0;
+  background: #fff;
+}
+.identity {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.title {
+  margin: 0;
+  overflow: hidden;
+  color: #1a1c1e;
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kind {
+  flex: 0 0 auto;
+  padding: 2px 6px;
+  border-radius: 4px;
+  background: #eef2f7;
+  color: #43474e;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+.key {
+  grid-column: 1 / -1;
+  overflow: hidden;
+  color: #616161;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

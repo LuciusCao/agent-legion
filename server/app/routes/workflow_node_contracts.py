@@ -1,8 +1,15 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class WorkflowTerminalResponse(BaseModel):
     outcome: str
+
+
+class WorkflowNodeExecutionResponse(BaseModel):
+    provider: str = ""
+    model: str = ""
+    thinking: str = ""
+    prompt: str = ""
 
 
 class WorkflowNodeResponse(BaseModel):
@@ -13,3 +20,4 @@ class WorkflowNodeResponse(BaseModel):
     inputs: list[str]
     outputs: list[str]
     terminal: WorkflowTerminalResponse | None = None
+    execution: WorkflowNodeExecutionResponse = Field(default_factory=WorkflowNodeExecutionResponse)

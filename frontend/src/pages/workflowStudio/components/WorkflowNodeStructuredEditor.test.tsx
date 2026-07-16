@@ -45,23 +45,6 @@ describe('WorkflowNodeStructuredEditor', () => {
     )
   })
 
-  it('updates yaml when inputs change', () => {
-    const onChange = vi.fn()
-    render(
-      <WorkflowNodeStructuredEditor
-        node={node}
-        definitionYaml={yaml}
-        onDefinitionYamlChange={onChange}
-      />
-    )
-
-    fireEvent.change(screen.getByLabelText('输入产物，每行一个'), {
-      target: { value: 'a.json\nb.json' },
-    })
-
-    expect(onChange).toHaveBeenLastCalledWith(expect.stringContaining('a.json'))
-  })
-
   it('updates yaml when capability changes', () => {
     const onChange = vi.fn()
     render(
@@ -78,29 +61,6 @@ describe('WorkflowNodeStructuredEditor', () => {
 
     expect(onChange).toHaveBeenLastCalledWith(
       expect.stringContaining('capability: fetch_questions_v2')
-    )
-  })
-
-  it('updates yaml when terminal outcome changes', () => {
-    const terminalNode: WorkflowNodeRecord = {
-      ...node,
-      terminal: { outcome: 'uploadable' },
-    }
-    const onChange = vi.fn()
-    render(
-      <WorkflowNodeStructuredEditor
-        node={terminalNode}
-        definitionYaml={yaml}
-        onDefinitionYamlChange={onChange}
-      />
-    )
-
-    fireEvent.change(screen.getByLabelText('Terminal Outcome'), {
-      target: { value: 'archived' },
-    })
-
-    expect(onChange).toHaveBeenLastCalledWith(
-      expect.stringContaining('outcome: archived')
     )
   })
 

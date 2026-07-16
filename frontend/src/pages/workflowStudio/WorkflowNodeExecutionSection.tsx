@@ -1,74 +1,47 @@
 import type { ExecutorDefinition } from '../../executorTypes'
 import type { WorkflowNodeRecord } from '../../types'
+import { WorkflowAgentExecutionDetails } from './WorkflowAgentExecutionDetails'
+import {
+  findCapabilityBindings,
+  WorkflowExecutorBindingList,
+} from './WorkflowExecutorBindingList'
 import inspectorStyles from './WorkflowNodeInspector.module.css'
-import styles from './WorkflowNodeExecutionSection.module.css'
 
 type Props = {
   node: WorkflowNodeRecord
   executorCatalog: ExecutorDefinition[]
+  definitionYaml: string
+  setDefinitionYaml: (value: string) => void
+  readOnly?: boolean
 }
 
-type CapabilityBinding = {
-  executor: ExecutorDefinition
-  detail: NonNullable<ExecutorDefinition['capability_details']>[number]
-}
-
-export function WorkflowNodeExecutionSection({ node, executorCatalog }: Props) {
-  const bindings = findCapabilityBindings(executorCatalog, node.capability)
+export function WorkflowNodeExecutionSection(props: Props) {
+  const bindings = findCapabilityBindings(
+    props.executorCatalog,
+    props.node.capability
+  )
+  const agentBinding = bindings.find(({ executor }) => executor.kind === 'pi')
   return (
     <section className={inspectorStyles.section} aria-label="节点执行能力">
-      <div className={inspectorStyles.sectionTitle}>执行能力</div>
+      <div className={inspectorStyles.sectionTitle}>
+        {agentBinding ? 'Agent 配置' : '本地执行'}
+      </div>
       {bindings.length === 0 ? (
         <div className={inspectorStyles.empty}>
           未匹配到 executor capability
         </div>
       ) : (
-        <div className={styles.bindingList}>
-          {bindings.map(({ executor, detail }) => (
-            <article
-              className={styles.bindingCard}
-              key={`${executor.id}:${detail.name}`}
-            >
-              <div className={styles.bindingHeader}>
-                <span>{executor.id}</span>
-                <span>{executor.kind}</span>
-              </div>
-              <dl className={styles.bindingFields}>
-                <BindingField label="Capability" value={detail.name} />
-                {detail.handler && (
-                  <BindingField label="Local Handler" value={detail.handler} />
-                )}
-                {detail.skill && (
-                  <BindingField label="Skill" value={detail.skill} />
-                )}
-                {detail.tools && detail.tools.length > 0 && (
-                  <BindingField label="Tools" value={detail.tools.join(', ')} />
-                )}
-              </dl>
-            </article>
-          ))}
-        </div>
+        <WorkflowExecutorBindingList bindings={bindings} />
+      )}
+      {agentBinding && (
+        <WorkflowAgentExecutionDetails
+          binding={agentBinding}
+          node={props.node}
+          definitionYaml={props.definitionYaml}
+          setDefinitionYaml={props.setDefinitionYaml}
+          readOnly={props.readOnly}
+        />
       )}
     </section>
-  )
-}
-
-function BindingField({ label, value }: { label: string; value: string }) {
-  return (
-    <div>
-      <dt>{label}</dt>
-      <dd>{value}</dd>
-    </div>
-  )
-}
-
-function findCapabilityBindings(
-  executors: ExecutorDefinition[],
-  capability: string
-): CapabilityBinding[] {
-  return executors.flatMap((executor) =>
-    (executor.capability_details ?? [])
-      .filter((detail) => detail.name === capability)
-      .map((detail) => ({ executor, detail }))
   )
 }
