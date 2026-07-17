@@ -18,6 +18,7 @@ import type {
   WorkflowIntakeModeRecord,
   VideoItem,
   WorkspaceRecord,
+  WorkspaceResponse,
 } from '../types'
 import styles from './AddDialog.module.css'
 
@@ -31,7 +32,7 @@ type AddDialogProps = {
 export function AddDialog({
   open,
   onClose,
-  context = 'video',
+  context = 'workspace',
   workspaceId,
 }: AddDialogProps) {
   const { addContentType, setAddContentType, showToast } = useUiStore()
@@ -66,7 +67,10 @@ export function AddDialog({
 
   const getEffectiveLabel = useCallback(
     (mode: WorkflowIntakeModeRecord): string => {
-      const override = workspace?.intake_config?.label_overrides?.[mode.key]
+      const labelOverrides = workspace?.intake_config?.label_overrides as
+        | Record<string, string>
+        | undefined
+      const override = labelOverrides?.[mode.key]
       return override || mode.label
     },
     [workspace]
@@ -77,9 +81,7 @@ export function AddDialog({
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setLoadingModes(true)
     let cancelled = false
-    api<{ workspace: WorkspaceRecord }>(
-      `/api/workspaces/${encodeURIComponent(workspaceId)}`
-    )
+    api<WorkspaceResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}`)
       .then(({ workspace: ws }) => {
         if (cancelled) return
         setWorkspace(ws)

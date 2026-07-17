@@ -29,7 +29,7 @@ export function ResourceProviderCard({ provider, binding, onChange }: Props) {
             label={paramKey}
             variant="outlined"
             placeholder={provider.defaultParams[paramKey] || ''}
-            value={binding.config[paramKey] || ''}
+            value={(binding.config?.[paramKey] as string | undefined) || ''}
             onChange={(event) => onChange(paramKey, event.target.value)}
             fullWidth
           />

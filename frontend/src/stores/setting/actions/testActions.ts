@@ -1,4 +1,5 @@
 import { api } from '../../../api'
+import type { WorkspaceSettingsTestResponse } from '../../../types'
 import { type SettingState, type SettingStoreSet } from '../state'
 import { useUiStore } from '../../uiStore'
 
@@ -9,10 +10,7 @@ export function testActions(set: SettingStoreSet, get: () => SettingState) {
       if (!workspaceId) return
       set({ testStatus: { state: 'testing' } })
       try {
-        const result = await api<{
-          ok?: boolean
-          message?: string
-        }>(
+        const result = await api<WorkspaceSettingsTestResponse>(
           `/api/workspaces/${encodeURIComponent(workspaceId)}/settings/test-connection`,
           {
             method: 'POST',

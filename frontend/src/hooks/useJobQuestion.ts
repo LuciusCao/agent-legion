@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { fetchJobArtifact } from '../api'
-import type { QuestionNormalized } from '../types'
+import type { QuestionArtifactNormalized } from '../types'
 
 export interface UseJobQuestionReturn {
-  question: QuestionNormalized | null
+  question: QuestionArtifactNormalized | null
   loading: boolean
   error: string
 }
@@ -18,7 +18,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function extractFirstQuestion(
   data: QuestionsArtifact
-): QuestionNormalized | null {
+): QuestionArtifactNormalized | null {
   if (!Array.isArray(data.questions) || data.questions.length === 0) {
     return null
   }
@@ -26,14 +26,16 @@ function extractFirstQuestion(
   if (!isRecord(first)) return null
   const normalized = first.normalized
   if (!isRecord(normalized)) return null
-  return normalized as QuestionNormalized
+  return normalized as QuestionArtifactNormalized
 }
 
 export function useJobQuestion(
   jobId: string,
   refreshKey = ''
 ): UseJobQuestionReturn {
-  const [question, setQuestion] = useState<QuestionNormalized | null>(null)
+  const [question, setQuestion] = useState<QuestionArtifactNormalized | null>(
+    null
+  )
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 

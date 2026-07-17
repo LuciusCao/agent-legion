@@ -1,6 +1,3 @@
-import json
-import zipfile
-
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
@@ -74,24 +71,6 @@ def create_packages_router(
                         )
                 except ManagedPathError:
                     continue
-                if not pkg.get("name") or pkg.get("video_count", 0) == 0:
-                    try:
-                        with zipfile.ZipFile(resolved_path) as zf:
-                            manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
-                            video_count = len(manifest.get("videos", []))
-                            name = pkg.get("name") or f"批次 ({video_count}个视频)"
-                            size_bytes = pkg.get("size_bytes") or resolved_path.stat().st_size
-                            db.update_package_stats(
-                                pkg["id"],
-                                name=name,
-                                video_count=video_count,
-                                size_bytes=size_bytes,
-                            )
-                            pkg_out["name"] = name
-                            pkg_out["video_count"] = video_count
-                            pkg_out["size_bytes"] = size_bytes
-                    except Exception:
-                        pass
                 pkg_out["path"] = str(resolved_path)
             result.append(PackageItemResponse.model_validate(pkg_out))
         return PackagesResponse(packages=result)

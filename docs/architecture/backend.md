@@ -425,10 +425,9 @@ Token Usage 收集并展示 Pi agent 节点运行时的 token 消耗与成本。
 `config/app.yaml` 额外配置项：
 
 - `data_dir`: 数据根目录
-- `server.host` / `server.port`: HTTP 监听地址与端口（开发时通常由启动命令覆盖）
+- `server.cors`: 浏览器跨域来源和 credentials 策略
 - `worker.phase_concurrency`: 各视频 phase 的并发上限
 - `worker.poll_batch_size`: 旧视频 worker 单次候选查询上限
-- `server.cors`: 浏览器跨域来源和 credentials 策略
 - `cleanup.log_retention_days` / `run_dir_retention_days` / `interval_seconds`: 日志与运行目录清理策略
 - `token_usage.currency` / `token_usage.pricing`: Token 用量货币与模型单价
 
@@ -462,6 +461,6 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 ## Security Considerations
 
 - 后端通过 `requests` 下载任意 URL；只在可信输入环境下运行。
-- OpenClaw 命令通过 `subprocess.run` 执行，模板来自用户可写的 `config/video_hive.yaml`；需确保该文件不被未信任用户修改。
-- SQLite 与视频存储均为本地，无认证层；不要把开发服务器暴露到不可信网络。
+- OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自用户可写的 `config/video_hive.yaml`；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量；仍需确保该配置文件不被未信任用户修改。
+- SQLite 与视频存储均为本地，**无认证层**；uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何人都可删除 job、下载产物、触发执行。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

@@ -21,6 +21,7 @@ from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
 from server.app.local_handler_loader import build_local_handlers
 from server.app.routes import create_router
+from server.app.services.package_stats_backfill import backfill_package_stats
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
 from server.app.skills.manager import SkillManager
@@ -102,6 +103,7 @@ def create_app(
                 f"Workspace executor finalization blocked: {exc.report.to_json()}. "
                 f"Run `{check_cmd}` for details."
             ) from exc
+    backfill_package_stats(db, settings)
     workflow_worker_thread: WorkflowWorkerThread | None = None
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,

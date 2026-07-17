@@ -15,6 +15,7 @@ import type { SettingState } from '../stores/settingStore'
 import type { WorkspaceSettings } from '../types'
 import { useUiStore } from '../stores/uiStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
+import { makeWorkspace } from '../testing/workspaceFixtures'
 import { api, fetchWorkflows } from '../api'
 import { expectConsoleWarning } from '../test-setup'
 
@@ -123,13 +124,12 @@ describe('SettingsPage', () => {
     useUiStore.setState({ toast: null })
     useWorkspaceStore.setState({
       workspaces: [
-        {
+        makeWorkspace({
           id: 'ws1',
           name: '测试空间',
           description: '测试描述',
           default_workflow_key: 'question_content',
-          default_entity: 'question',
-        },
+        }),
       ],
       currentWorkspace: null,
       workspaceStats: {},

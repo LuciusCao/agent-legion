@@ -68,7 +68,6 @@ export function TokenUsagePanel({ workspaceId }: { workspaceId: string }) {
     let stale = false
     // eslint-disable-next-line react-hooks/set-state-in-effect -- loading state tied to fetch lifecycle
     setLoading(true)
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     setError(null)
     fetchWorkspaceTokenUsage(workspaceId, params)
       .then((next) => {

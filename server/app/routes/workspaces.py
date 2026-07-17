@@ -12,6 +12,7 @@ from server.app.routes.job_contracts import (
     WorkspaceUpdateRequest,
 )
 from server.app.routes.job_http import raise_job_http_error, require_workflows_enabled
+from server.app.routes.workspace_contracts import WorkspaceRecord
 from server.app.services.job_errors import JobServiceError
 from server.app.services.workspace_configuration import WorkspaceConfigurationService
 from server.app.settings import Settings
@@ -28,7 +29,8 @@ def create_workspaces_router(
     def list_workspaces() -> WorkspacesResponse:
         require_workflows_enabled(settings)
         try:
-            return WorkspacesResponse(workspaces=service.list_workspaces())
+            workspaces = [WorkspaceRecord.model_validate(w) for w in service.list_workspaces()]
+            return WorkspacesResponse(workspaces=workspaces)
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
@@ -37,7 +39,7 @@ def create_workspaces_router(
         require_workflows_enabled(settings)
         try:
             workspace = service.create(payload.model_dump())
-            return WorkspaceResponse(workspace=workspace)
+            return WorkspaceResponse(workspace=WorkspaceRecord.model_validate(workspace))
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
@@ -45,7 +47,8 @@ def create_workspaces_router(
     def get_workspace(workspace_id: str) -> WorkspaceResponse:
         require_workflows_enabled(settings)
         try:
-            return WorkspaceResponse(workspace=service.get(workspace_id))
+            workspace = WorkspaceRecord.model_validate(service.get(workspace_id))
+            return WorkspaceResponse(workspace=workspace)
         except JobServiceError as exc:
             raise_job_http_error(exc)
 
@@ -54,7 +57,7 @@ def create_workspaces_router(
         require_workflows_enabled(settings)
         try:
             workspace = service.update(workspace_id, payload.model_dump(exclude_unset=True))
-            return WorkspaceResponse(workspace=workspace)
+            return WorkspaceResponse(workspace=WorkspaceRecord.model_validate(workspace))
         except JobServiceError as exc:
             raise_job_http_error(exc)
 

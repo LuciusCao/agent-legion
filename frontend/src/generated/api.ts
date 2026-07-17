@@ -1035,6 +1035,19 @@ export interface components {
       /** Target Node Key */
       target_node_key: string
     }
+    /** CmsServiceStatus */
+    CmsServiceStatus: {
+      /** Baseurl */
+      baseUrl: string
+      /** Env */
+      env: string
+      /** Healthy */
+      healthy: boolean | null
+      /** Lastcheckedat */
+      lastCheckedAt: string | null
+      /** Tokenconfigured */
+      tokenConfigured: boolean
+    }
     /** ContinueJobRequest */
     ContinueJobRequest: Record<string, never>
     /** DeleteJobResponse */
@@ -1150,10 +1163,7 @@ export interface components {
     }
     /** GlobalServicesResponse */
     GlobalServicesResponse: {
-      /** Cms */
-      cms: {
-        [key: string]: unknown
-      }
+      cms: components['schemas']['CmsServiceStatus']
     }
     /** HTTPValidationError */
     HTTPValidationError: {
@@ -1545,12 +1555,44 @@ export interface components {
       /** Stem */
       stem?: string | null
     }
+    /**
+     * ResourceBinding
+     * @description Per-provider binding stored under resource_config["resources"].
+     *
+     *     Extra keys (e.g. provider) are preserved as-is.
+     */
+    ResourceBinding: {
+      /** Config */
+      config?: {
+        [key: string]: unknown
+      }
+      /**
+       * Enabled
+       * @default false
+       */
+      enabled: boolean
+    } & {
+      [key: string]: unknown
+    }
+    /** ResourceProviderDefinition */
+    ResourceProviderDefinition: {
+      /** Defaultparams */
+      defaultParams: {
+        [key: string]: string
+      }
+      /** Key */
+      key: string
+      /** Paramkeys */
+      paramKeys: string[]
+      /** Path */
+      path: string
+      /** Provider */
+      provider: string
+    }
     /** ResourceProvidersResponse */
     ResourceProvidersResponse: {
       /** Providers */
-      providers: {
-        [key: string]: unknown
-      }[]
+      providers: components['schemas']['ResourceProviderDefinition'][]
     }
     /** RunToRequest */
     RunToRequest: {
@@ -2195,10 +2237,7 @@ export interface components {
     WorkspaceConfigurationResponse: {
       executor_configuration: components['schemas']['WorkspaceExecutorConfigurationResponse']
       settings: components['schemas']['WorkspaceSettingsPayload']
-      /** Workspace */
-      workspace: {
-        [key: string]: unknown
-      }
+      workspace: components['schemas']['WorkspaceRecord']
     }
     /** WorkspaceConfigurationSettingsRequest */
     WorkspaceConfigurationSettingsRequest: {
@@ -2340,12 +2379,47 @@ export interface components {
       /** Packages */
       packages: components['schemas']['WorkspacePackageItemResponse'][]
     }
-    /** WorkspaceResponse */
-    WorkspaceResponse: {
-      /** Workspace */
-      workspace: {
+    /**
+     * WorkspaceRecord
+     * @description Workspace row as returned by the workspace queries (decoded configs included).
+     */
+    WorkspaceRecord: {
+      /** Cms Config */
+      cms_config: {
         [key: string]: unknown
       }
+      /** Cms Config Json */
+      cms_config_json: string
+      /** Created At */
+      created_at: string
+      /** Default Entity */
+      default_entity: string
+      /** Default Workflow Key */
+      default_workflow_key: string
+      /** Description */
+      description: string
+      /** Id */
+      id: string
+      /** Intake Config */
+      intake_config: {
+        [key: string]: unknown
+      }
+      /** Intake Config Json */
+      intake_config_json: string
+      /** Name */
+      name: string
+      /** Resource Config */
+      resource_config: {
+        [key: string]: unknown
+      }
+      /** Resource Config Json */
+      resource_config_json: string
+      /** Updated At */
+      updated_at: string
+    }
+    /** WorkspaceResponse */
+    WorkspaceResponse: {
+      workspace: components['schemas']['WorkspaceRecord']
     }
     /** WorkspaceRunsResponse */
     WorkspaceRunsResponse: {
@@ -2366,7 +2440,7 @@ export interface components {
       }
       /** Resources */
       resources: {
-        [key: string]: unknown
+        [key: string]: components['schemas']['ResourceBinding']
       }
       /** Workflowkey */
       workflowKey: string
@@ -2452,9 +2526,7 @@ export interface components {
     /** WorkspacesResponse */
     WorkspacesResponse: {
       /** Workspaces */
-      workspaces: {
-        [key: string]: unknown
-      }[]
+      workspaces: components['schemas']['WorkspaceRecord'][]
     }
   }
   responses: never

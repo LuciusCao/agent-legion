@@ -6,8 +6,9 @@ import {
 import type {
   WorkspaceSettings,
   GlobalServiceStatus,
-  ResourceProviderDefinition,
-  WorkflowDefinitionRecord,
+  ResourceProvidersResponse,
+  WorkflowResponse,
+  WorkspaceResponse,
 } from '../../../types'
 import {
   computeDirty,
@@ -28,7 +29,7 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
           catalogResult,
           executorConfigurationResult,
         ] = await Promise.all([
-          api<{ workspace: { name: string; description?: string } }>(
+          api<WorkspaceResponse>(
             `/api/workspaces/${encodeURIComponent(workspaceId)}`
           ),
           api<
@@ -80,11 +81,9 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
 
     async fetchGlobalServices() {
       try {
-        const result = await api<{ cms: GlobalServiceStatus['cms'] }>(
-          '/api/global-services'
-        )
+        const result = await api<GlobalServiceStatus>('/api/global-services')
         if (result && typeof result === 'object' && 'cms' in result) {
-          set({ globalServices: result as GlobalServiceStatus })
+          set({ globalServices: result })
         }
       } catch {
         // Silently fail; global services are informational
@@ -93,15 +92,11 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
 
     async fetchResourceProviders() {
       try {
-        const result = await api<{
-          providers: ResourceProviderDefinition[]
-        }>('/api/resource-providers')
+        const result = await api<ResourceProvidersResponse>(
+          '/api/resource-providers'
+        )
         if (result && typeof result === 'object' && 'providers' in result) {
-          set({
-            resourceProviders: (
-              result as { providers: ResourceProviderDefinition[] }
-            ).providers,
-          })
+          set({ resourceProviders: result.providers })
         }
       } catch {
         // Silently fail
@@ -113,7 +108,7 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
       const workflowKey = settings.workflowKey
       if (!workflowKey) return
       try {
-        const result = await api<{ workflow: WorkflowDefinitionRecord }>(
+        const result = await api<WorkflowResponse>(
           `/api/workflows/${encodeURIComponent(workflowKey)}`
         )
         if (
