@@ -4,6 +4,7 @@ from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_node_executor_resolver import resolve_node_executors
 from server.app.services.job_node_ordering import ordered_job_nodes
+from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
 from server.app.services.job_path_projection import resolve_record_paths
 from server.app.services.job_query_presenters import (
     artifact_names,
@@ -21,6 +22,7 @@ from server.app.settings import Settings
 from server.app.workflows.definition import WorkflowDefinition
 
 _RUN_PATH_FIELDS = {"log_path", "run_dir", "session_dir"}
+_UNSET: Any = object()
 
 
 class JobQueryService:
@@ -52,6 +54,7 @@ class JobQueryService:
         job: dict[str, Any],
         nodes: list[dict[str, Any]],
         definition: WorkflowDefinition,
+        active_revision: Any = _UNSET,
     ) -> dict[str, Any]:
         ordered_nodes = ordered_job_nodes(nodes, definition)
         summaries = [node_summary(node, definition) for node in ordered_nodes]
@@ -78,9 +81,12 @@ class JobQueryService:
             if active_summary is not None:
                 error_summary = active_summary["error_message"][:240]
 
-        active = self.job_db.get_active_workflow_revision(
-            str(job["workspace_id"]), str(job["workflow_key"])
-        )
+        if active_revision is _UNSET:
+            active = self.job_db.get_active_workflow_revision(
+                str(job["workspace_id"]), str(job["workflow_key"])
+            )
+        else:
+            active = active_revision
         job_workflow_version = job.get("workflow_version")
         is_outdated = is_workflow_outdated(job, active)
 
@@ -118,21 +124,7 @@ class JobQueryService:
             workflow_key=workflow_key,
             status=status,
         )
-        job_ids = [str(job["id"]) for job in jobs]
-        nodes_by_job = self.job_db.list_job_nodes_for_jobs(job_ids)
-
-        definitions: dict[tuple[str, str], WorkflowDefinition] = {}
-
-        def _definition(job: dict[str, Any]) -> WorkflowDefinition:
-            key = (str(job["workflow_key"]), str(job.get("workflow_definition_hash") or ""))
-            if key not in definitions:
-                definitions[key] = self._definition_for_job(job)
-            return definitions[key]
-
-        return [
-            self._job_summary(job, nodes_by_job.get(str(job["id"]), []), _definition(job))
-            for job in jobs
-        ]
+        return summarize_paginated_jobs(self, self.job_db, jobs)
 
     def detail(self, job_id: str) -> dict[str, Any]:
         job = self._job_or_404(job_id)

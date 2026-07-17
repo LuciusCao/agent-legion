@@ -15,12 +15,12 @@ def list_jobs_paginated(
     params: list[Any] = [workspace_id]
     if cursor:
         created_at, job_id = cursor.split("|", 1)
-        clauses.append("(created_at > ? or (created_at = ? and id > ?))")
+        clauses.append("(created_at < ? or (created_at = ? and id < ?))")
         params.extend([created_at, created_at, job_id])
     where = f" where {' and '.join(clauses)}"
     with job_db._connect_read() as conn:
         rows = conn.execute(
-            f"select * from jobs{where} order by created_at asc, id asc limit ?",
+            f"select * from jobs{where} order by created_at desc, id desc limit ?",
             (*params, limit + 1),
         )
         jobs = [dict(row) for row in rows]
