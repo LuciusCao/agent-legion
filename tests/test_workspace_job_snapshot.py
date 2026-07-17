@@ -74,3 +74,68 @@ def test_workspace_jobs_snapshot_paginates_with_cursor(client_factory):
 
         ids = [job["id"] for page in [first_data, second_data, third_data] for job in page["jobs"]]
         assert sorted(ids) == sorted(created)
+
+
+def test_workspace_jobs_snapshot_returns_newest_first(client_factory):
+    with client_factory(workflows_enabled=True) as client:
+        job_db = client.app.state.job_db
+        workspace = job_db.create_workspace(
+            "order-ws", default_workflow_key="question_comprehension_info"
+        )
+        created = []
+        for i in range(3):
+            job = job_db.create_job(
+                workspace_id=workspace["id"],
+                workflow_key="question_comprehension_info",
+                source_type="question_id",
+                source_id=f"q{i}",
+                batch_id="",
+                title=f"Question {i}",
+                node_keys=["fetch_question_context"],
+            )
+            created.append(job["id"])
+        with job_db.connect() as conn:
+            for index, job_id in enumerate(created):
+                conn.execute(
+                    "update jobs set created_at = ? where id = ?",
+                    (f"2026-07-0{index + 1} 00:00:00", job_id),
+                )
+
+        response = client.get(f"/api/workspaces/{workspace['id']}/jobs/snapshot?limit=10")
+
+    assert response.status_code == 200
+    ordered = [job["id"] for job in response.json()["jobs"]]
+    assert ordered == [created[2], created[1], created[0]]
+
+
+def test_workspace_jobs_snapshot_batches_active_revision_lookup(client_factory, monkeypatch):
+    with client_factory(workflows_enabled=True) as client:
+        job_db = client.app.state.job_db
+        workspace = job_db.create_workspace(
+            "batch-ws", default_workflow_key="question_comprehension_info"
+        )
+        for i in range(3):
+            job_db.create_job(
+                workspace_id=workspace["id"],
+                workflow_key="question_comprehension_info",
+                source_type="question_id",
+                source_id=f"q{i}",
+                batch_id="",
+                title=f"Question {i}",
+                node_keys=["fetch_question_context"],
+            )
+
+        calls = 0
+        original = job_db.get_active_workflow_revision
+
+        def counting(workspace_id, workflow_key):
+            nonlocal calls
+            calls += 1
+            return original(workspace_id, workflow_key)
+
+        monkeypatch.setattr(job_db, "get_active_workflow_revision", counting)
+        response = client.get(f"/api/workspaces/{workspace['id']}/jobs/snapshot?limit=10")
+
+    assert response.status_code == 200
+    assert len(response.json()["jobs"]) == 3
+    assert calls == 1

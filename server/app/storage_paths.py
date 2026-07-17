@@ -1,8 +1,15 @@
 import warnings
+from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
 _MANAGED_CATEGORIES = frozenset({"videos", "jobs", "logs", "packages"})
+
+
+@lru_cache(maxsize=16)
+def _resolved_dir(path: Path) -> Path:
+    """Resolve a managed root once instead of per stored-path lookup."""
+    return path.resolve(strict=True)
 
 
 class ManagedPathError(ValueError):
@@ -99,7 +106,7 @@ def make_data_relative(path: Path, data_dir: Path) -> str:
     directories can be canonicalized before persistence.
     """
     resolved_path = resolve_with_existing_parent(path, allow_missing=True)
-    resolved_data_dir = data_dir.resolve(strict=True)
+    resolved_data_dir = _resolved_dir(data_dir)
     if resolved_path == resolved_data_dir or not resolved_path.is_relative_to(resolved_data_dir):
         raise ManagedPathError("Path is not inside data directory")
     return resolved_path.relative_to(resolved_data_dir).as_posix()
@@ -124,7 +131,7 @@ def resolve_data_path(
         raise ManagedPathError("Stored path is empty", root_kind="data")
 
     candidate = Path(stored_path).expanduser()
-    resolved_data_dir = data_dir.resolve(strict=True)
+    resolved_data_dir = _resolved_dir(data_dir)
 
     if candidate.is_absolute():
         resolved_candidate = resolve_with_existing_parent(candidate, allow_missing=allow_missing)
