@@ -27,12 +27,30 @@ export default defineConfig(({ mode }) => {
       rollupOptions: {
         output: {
           manualChunks(id) {
-            if (id.includes('node_modules')) {
-              if (id.includes('react') || id.includes('react-router-dom')) {
-                return 'vendor-react'
-              }
-              return 'vendor'
+            if (!id.includes('node_modules')) {
+              return
             }
+            // Split heavy route-scoped deps so they load only with the lazy
+            // pages that import them (JobDetail / WorkflowStudio).
+            if (id.includes('@mui') || id.includes('@emotion')) {
+              return 'vendor-mui'
+            }
+            if (id.includes('@xyflow') || id.includes('dagre')) {
+              return 'vendor-xyflow'
+            }
+            // Keep eager katex.min.css (imported in main.tsx) out of the
+            // katex JS chunk, otherwise the entry preloads all of katex.
+            if (id.includes('katex') && !id.endsWith('.css')) {
+              return 'vendor-katex'
+            }
+            if (
+              /node_modules\/(react|react-dom|react-router|react-router-dom|scheduler|@remix-run)\//.test(
+                id
+              )
+            ) {
+              return 'vendor-react'
+            }
+            return 'vendor'
           },
         },
       },
