@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { api } from '../../api'
 import { useWorkspaceStore } from '../../stores/workspaceStore'
+import type { WorkspaceResponse } from '../../types'
 
 export function useWorkspaceDisplayName(workspaceId: string | undefined) {
   const [loaded, setLoaded] = useState<{
@@ -15,9 +16,7 @@ export function useWorkspaceDisplayName(workspaceId: string | undefined) {
   useEffect(() => {
     if (!workspaceId || workspaceName) return
     let cancelled = false
-    api<{ workspace: { name?: string } }>(
-      `/api/workspaces/${encodeURIComponent(workspaceId)}`
-    )
+    api<WorkspaceResponse>(`/api/workspaces/${encodeURIComponent(workspaceId)}`)
       .then((result) => {
         if (!cancelled) {
           setLoaded({ workspaceId, name: result.workspace.name || null })

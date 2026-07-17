@@ -2,6 +2,8 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from server.app.routes.workspace_contracts import ResourceBinding, WorkspaceRecord
+
 
 class ExecutorAllocationRequest(BaseModel):
     executor_id: str = Field(min_length=1)
@@ -36,7 +38,7 @@ class WorkspaceSettingsPayload(BaseModel):
     intakeModes: list[str]
     labelOverrides: dict[str, str]
     workflowKey: str
-    resources: dict[str, Any]
+    resources: dict[str, ResourceBinding]
 
 
 class WorkspaceConfigurationSettingsRequest(BaseModel):
@@ -61,6 +63,6 @@ class WorkspaceConfigurationRequest(BaseModel):
 
 
 class WorkspaceConfigurationResponse(BaseModel):
-    workspace: dict[str, Any]
+    workspace: WorkspaceRecord
     settings: WorkspaceSettingsPayload
     executor_configuration: WorkspaceExecutorConfigurationResponse

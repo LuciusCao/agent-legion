@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { api } from '../api'
-import type { AgentStatus, ContentType } from '../types'
+import type { AgentStatus, ContentType, WorkerStatusResponse } from '../types'
 
 interface Toast {
   message: string
@@ -13,8 +13,6 @@ export interface UiState {
   addContentType: ContentType
   addDialogContext: 'video' | 'workspace'
   addDialogWorkspaceId: string | undefined
-  rerunDialogOpen: boolean
-  deleteDialogOpen: boolean
   workspacePackageDialogOpen: boolean
   tokenUsageDialogOpen: boolean
   workerPausedByWorkspace: Record<string, boolean>
@@ -29,10 +27,6 @@ export interface UiState {
   }) => void
   closeAddDialog: () => void
   setAddContentType: (type: ContentType) => void
-  openRerunDialog: () => void
-  closeRerunDialog: () => void
-  openDeleteDialog: () => void
-  closeDeleteDialog: () => void
   setWorkspacePackageDialogOpen: (open: boolean) => void
   setTokenUsageDialogOpen: (open: boolean) => void
   showToast: (message: string, type: 'success' | 'error') => void
@@ -46,10 +40,8 @@ export const useUiStore = create<UiState>((set, get) => ({
   agents: [],
   addDialogOpen: false,
   addContentType: 'knowledge',
-  addDialogContext: 'video',
+  addDialogContext: 'workspace',
   addDialogWorkspaceId: undefined,
-  rerunDialogOpen: false,
-  deleteDialogOpen: false,
   workspacePackageDialogOpen: false,
   tokenUsageDialogOpen: false,
   workerPausedByWorkspace: {},
@@ -101,7 +93,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   fetchWorkerStatus: async (workspaceId) => {
     const query = `?workspace_id=${encodeURIComponent(workspaceId)}`
-    const data = await api<{ paused: boolean }>(`/api/worker/status${query}`)
+    const data = await api<WorkerStatusResponse>(`/api/worker/status${query}`)
     set((state) => ({
       workerPausedByWorkspace: {
         ...state.workerPausedByWorkspace,
@@ -112,7 +104,7 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   setWorkerPaused: async (paused, workspaceId) => {
     const query = `?workspace_id=${encodeURIComponent(workspaceId)}`
-    const data = await api<{ paused: boolean }>(
+    const data = await api<WorkerStatusResponse>(
       `${paused ? '/api/worker/pause' : '/api/worker/resume'}${query}`,
       { method: 'POST' }
     )
@@ -128,15 +120,11 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({
       addDialogOpen: true,
       addContentType: 'knowledge',
-      addDialogContext: opts?.context || 'video',
+      addDialogContext: opts?.context || 'workspace',
       addDialogWorkspaceId: opts?.workspaceId,
     }),
   closeAddDialog: () => set({ addDialogOpen: false }),
   setAddContentType: (type) => set({ addContentType: type }),
-  openRerunDialog: () => set({ rerunDialogOpen: true }),
-  closeRerunDialog: () => set({ rerunDialogOpen: false }),
-  openDeleteDialog: () => set({ deleteDialogOpen: true }),
-  closeDeleteDialog: () => set({ deleteDialogOpen: false }),
   setWorkspacePackageDialogOpen: (open) =>
     set({ workspacePackageDialogOpen: open }),
   setTokenUsageDialogOpen: (open) => set({ tokenUsageDialogOpen: open }),
