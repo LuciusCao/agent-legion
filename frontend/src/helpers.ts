@@ -1,10 +1,4 @@
 export {
-  type VideoFilter,
-  statusGroup,
-  filterVideos,
-  visibleSelectedIds,
-} from './lib/filters'
-export {
   computeProgress,
   getPhases,
   getSharedPhases,

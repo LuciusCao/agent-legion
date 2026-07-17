@@ -6,6 +6,7 @@ import type {
   JobDetailResponse,
   JobsResponse,
   WorkspaceRecord,
+  WorkspaceResponse,
   WorkspacesResponse,
 } from './types'
 import type { WorkspaceStats } from './workspaceTypes'
@@ -75,7 +76,7 @@ export async function createWorkspace(
   defaultEntity: string = 'question',
   intakeConfig: Record<string, unknown> = {}
 ): Promise<WorkspaceRecord> {
-  const result = await api<{ workspace: WorkspaceRecord }>('/api/workspaces', {
+  const result = await api<WorkspaceResponse>('/api/workspaces', {
     method: 'POST',
     body: JSON.stringify({
       name,
@@ -101,7 +102,7 @@ export async function updateWorkspace(
     intake_config?: Record<string, unknown>
   }
 ): Promise<WorkspaceRecord> {
-  const result = await api<{ workspace: WorkspaceRecord }>(
+  const result = await api<WorkspaceResponse>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}`,
     {
       method: 'PATCH',

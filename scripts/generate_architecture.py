@@ -270,7 +270,7 @@ def extract_config(root: Path) -> str:
 
     descriptions = {
         "data_dir": "数据目录",
-        "server": "HTTP 服务监听地址与端口",
+        "server": "HTTP CORS 策略（监听地址由启动命令 --host/--port 决定）",
         "worker": "后台 worker 并发配置",
         "asr": "ASR 提供商配置（whisper / SenseVoice）",
         "cms": "CMS 集成配置",

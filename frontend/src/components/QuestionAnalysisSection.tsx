@@ -8,7 +8,7 @@ export function QuestionAnalysisSection({
   analysisSteps,
 }: {
   analysis: unknown
-  analysisSteps?: AnalysisStep[][]
+  analysisSteps?: AnalysisStep[][] | null
 }) {
   if (analysisSteps != null && analysisSteps.length > 0) {
     return (

@@ -1,9 +1,12 @@
 import json
+import logging
 import subprocess
 from pathlib import Path
 
 from server.app.pipeline.common import parse_srt
 from server.app.pipeline.upload_params import write_upload_params
+
+logger = logging.getLogger(__name__)
 
 
 def get_video_duration(video_path: Path) -> float:
@@ -26,8 +29,8 @@ def get_video_duration(video_path: Path) -> float:
         )
         if result.returncode == 0:
             return float(result.stdout.strip())
-    except Exception:
-        pass
+    except Exception as exc:
+        logger.warning("Failed to probe video duration for %s: %s", video_path, exc)
     return 0.0
 
 
