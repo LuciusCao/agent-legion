@@ -5,7 +5,6 @@ from pathlib import Path
 from typing import Any
 
 from fastapi import FastAPI
-from fastapi.middleware.cors import CORSMiddleware
 
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
@@ -17,6 +16,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.runtime_factory import build_execution_runtime
+from server.app.http_middleware import add_http_middleware
 from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
 from server.app.local_handler_loader import build_local_handlers
@@ -149,13 +149,7 @@ def create_app(
             workflow_worker_thread.stop()
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=list(settings.cors.allow_origins),
-        allow_credentials=settings.cors.allow_credentials,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
+    add_http_middleware(app, settings)
     app.state.settings = settings
     app.state.db = db
     app.state.job_db = job_db
