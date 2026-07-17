@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,8 @@ from server.app.cms.knowledge import lookup_knowledge_video
 from server.app.security import validate_download_url
 from server.app.services.job_errors import InvalidOperationError, UnsupportedOperationError
 from server.app.services.job_intake_resolution import candidate
+
+logger = logging.getLogger(__name__)
 
 
 def resolve_video_url_candidates(
@@ -54,13 +57,17 @@ def resolve_cms_video_candidates(
 
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
+    seen_urls: set[str] = set()
     for code in input_values:
         lookup = lookup_knowledge_video(code, api_url, token)
-        if lookup.status == "not_found":
+        if lookup.status == "not_found" or code in seen:
             continue
-        if code in seen:
+        url = str(lookup.url or "").strip()
+        if url and url in seen_urls:
+            logger.info("Skipping knowledge_code=%s: duplicate video URL in batch", code)
             continue
         seen.add(code)
+        seen_urls.add(url)
         candidates.append(
             candidate(
                 "video",
