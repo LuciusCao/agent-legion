@@ -15,8 +15,8 @@ sync: ## 同步 Python 依赖 (uv sync)
 	$(UV) sync
 
 .PHONY: dev-backend
-dev-backend: ## 启动后端开发服务器 (port 8000)
-	$(UV) run uvicorn server.app.main:app --reload --reload-dir server --port 8000
+dev-backend: ## 启动后端开发服务器 (127.0.0.1:8000)
+	$(UV) run uvicorn server.app.main:app --reload --reload-dir server --host 127.0.0.1 --port 8000
 
 .PHONY: dev-frontend
 dev-frontend: ## 启动前端开发服务器
@@ -34,6 +34,10 @@ check: ## 运行完整质量门 (提交前使用)
 .PHONY: check-ci
 check-ci: ## 运行 CI 质量门
 	./scripts/check-ci.sh
+
+.PHONY: audit
+audit: ## 依赖漏洞审计 (pip-audit + npm audit)
+	./scripts/check-deps-audit.sh
 
 # Skill 维护
 .PHONY: skills-lock

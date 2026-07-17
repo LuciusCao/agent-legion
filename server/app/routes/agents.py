@@ -1,7 +1,11 @@
-from fastapi import APIRouter, WebSocket
+import logging
+
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 
 from ..agents import AgentStatusManager
+
+logger = logging.getLogger(__name__)
 
 
 class AgentStatusResponse(BaseModel):
@@ -34,8 +38,10 @@ def create_agents_router(agent_manager: AgentStatusManager) -> APIRouter:
         try:
             while True:
                 await websocket.receive_text()
-        except Exception:
+        except WebSocketDisconnect:
             pass
+        except Exception:
+            logger.exception("Agents websocket receive loop failed")
         finally:
             agent_manager.disconnect(websocket)
 

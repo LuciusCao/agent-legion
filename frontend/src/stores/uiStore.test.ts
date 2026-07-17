@@ -26,7 +26,6 @@ describe('uiStore', () => {
       agents: [],
       addDialogOpen: false,
       addContentType: 'knowledge',
-      rerunDialogOpen: false,
       toast: null,
       workerPausedByWorkspace: {},
     })

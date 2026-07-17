@@ -1,5 +1,9 @@
 import { api } from './core'
-import type { WorkflowResponse, WorkflowsListResponse } from '../types'
+import type {
+  WorkflowDraftValidationResponse,
+  WorkflowResponse,
+  WorkflowsListResponse,
+} from '../types'
 
 export async function fetchWorkflows(): Promise<WorkflowsListResponse> {
   return api('/api/workflows')
@@ -14,8 +18,8 @@ export async function fetchWorkflowDefinition(
 export async function validateWorkflowDraft(
   workspaceId: string,
   definitionYaml: string
-): Promise<{ valid: boolean; errors: string[] }> {
-  return api<{ valid: boolean; errors: string[] }>(
+): Promise<WorkflowDraftValidationResponse> {
+  return api<WorkflowDraftValidationResponse>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/workflow-drafts/validate`,
     {
       method: 'POST',
@@ -27,8 +31,8 @@ export async function validateWorkflowDraft(
 export async function publishWorkflowDraft(
   workspaceId: string,
   definitionYaml: string
-): Promise<{ valid: boolean; errors: string[] }> {
-  return api<{ valid: boolean; errors: string[] }>(
+): Promise<WorkflowDraftValidationResponse> {
+  return api<WorkflowDraftValidationResponse>(
     `/api/workspaces/${encodeURIComponent(workspaceId)}/workflow-drafts/publish`,
     {
       method: 'POST',

@@ -31,3 +31,8 @@ npm run test:coverage
 echo "=== Frontend Production Build ==="
 cd "$ROOT_DIR/frontend"
 npm run build
+
+echo "=== Dependency Vulnerability Audit (non-blocking) ==="
+if ! "$ROOT_DIR/scripts/check-deps-audit.sh"; then
+  echo "WARNING: dependency audit reported issues or could not complete (non-blocking)." >&2
+fi

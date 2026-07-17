@@ -59,6 +59,7 @@ make dev-frontend      # 启动前端开发服务器
 make check-quick       # 快速质量门
 make check             # 完整质量门（提交前）
 make check-ci          # CI 质量门
+make audit             # 依赖漏洞审计（pip-audit + npm audit）
 make skills-lock       # 刷新 config/skills.lock
 make api-generate      # 重新生成前端 API 类型
 make install-hooks     # 安装可选的预提交钩子
@@ -151,8 +152,10 @@ Agent nodes in this workflow execute through the Pi agent runner using external 
 Backend with automatic worker:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8000
+UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --host 127.0.0.1 --port 8000
 ```
+
+The backend has no authentication layer; always bind it to `127.0.0.1` and never expose it with `--host 0.0.0.0`.
 
 Frontend during development:
 
@@ -232,7 +235,7 @@ Full gate (before committing or handing off):
 ./scripts/check.sh
 ```
 
-Runs the quick gate, frontend tests with coverage (`npm run test:coverage`), and the frontend production build.
+Runs the quick gate, frontend tests with coverage (`npm run test:coverage`), the frontend production build, and a non-blocking dependency vulnerability audit (`scripts/check-deps-audit.sh`, also available as `make audit`).
 
 Dead-code sweeps with tools such as Vulture are manual review aids, not daily
 gate failures. Treat framework declarations, Pydantic fields, FastAPI route

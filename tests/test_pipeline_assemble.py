@@ -362,3 +362,20 @@ def test_build_review_msg_branches():
     assert _build_review_msg([{"title": "T"}]) == "T"
     assert _build_review_msg([]) == ""
     assert _build_review_msg([{"title": "", "details": ""}]) == ""
+
+
+def test_get_video_duration_logs_warning_and_returns_zero_on_failure(tmp_path, monkeypatch, caplog):
+    import logging
+    import subprocess
+
+    from server.app.pipeline.assemble import get_video_duration
+
+    def fake_run(*args, **kwargs):
+        raise FileNotFoundError("ffprobe not found")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    with caplog.at_level(logging.WARNING, logger="server.app.pipeline.assemble"):
+        assert get_video_duration(tmp_path / "v1.mp4") == 0.0
+
+    assert any("Failed to probe video duration" in record.getMessage() for record in caplog.records)

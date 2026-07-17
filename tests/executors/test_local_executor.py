@@ -1,16 +1,24 @@
 from __future__ import annotations
 
+import logging
+import multiprocessing
+import os
+import sys
 import time
+import types
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 
+from server.app.executors.cancellation import CancellationToken
 from server.app.executors.local import (
     LocalExecutor,
     _handler_key,
     _resolve_handler,
+    _run_handler,
+    _watch_parent_token,
 )
 from server.app.executors.models import ExecutionContext
 
@@ -195,3 +203,222 @@ def test_local_executor_cancel_during_run(context: ExecutionContext) -> None:
     t.join(timeout=5)
 
     assert result_holder["result"].status in ("cancelled", "failed")
+
+
+def _test_handler_raises(
+    _job: dict[str, Any], _job_dir: Path, _runtime: dict[str, Any] | None
+) -> None:
+    raise RuntimeError("boom")
+
+
+def _test_handler_records_job_db(
+    _job: dict[str, Any], job_dir: Path, runtime: dict[str, Any] | None
+) -> None:
+    job_db = runtime.get("job_db") if runtime else None
+    (job_dir / "job-db-type.txt").write_text(type(job_db).__name__, encoding="utf-8")
+
+
+def _test_handler_fd_write(
+    _job: dict[str, Any], job_dir: Path, _runtime: dict[str, Any] | None
+) -> None:
+    # pytest replaces sys.stdout with its own capture object, so verify the
+    # fd-level redirect with a raw fd write instead of print().
+    os.write(1, b"fd line\n")
+    (job_dir / "out.json").write_text("{}", encoding="utf-8")
+
+
+def test_resolve_handler_from_mp_main(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_main = types.ModuleType("__mp_main__")
+    fake_main.my_handler = _test_module_level_handler
+    monkeypatch.setitem(sys.modules, "__mp_main__", fake_main)
+
+    handler = _resolve_handler("my_handler")
+
+    assert handler is _test_module_level_handler
+
+
+def test_run_handler_direct_success(tmp_path: Path) -> None:
+    parent_conn, child_conn = multiprocessing.Pipe()
+    _run_handler(
+        "tests.executors.test_local_executor._test_handler_with_output",
+        {"id": "job-1"},
+        str(tmp_path),
+        {"node_key": "fetch", "capability": "fetch"},
+        child_conn,
+    )
+
+    assert parent_conn.poll(1)
+    assert parent_conn.recv() == ("ok", None)
+    assert (tmp_path / "out.json").is_file()
+
+
+def test_run_handler_direct_log_redirect(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # basicConfig(force=True) would reconfigure root logging for the whole worker.
+    monkeypatch.setattr(logging, "basicConfig", lambda **_: None)
+    saved_stdout = os.dup(1)
+    saved_stderr = os.dup(2)
+    parent_conn, child_conn = multiprocessing.Pipe()
+    try:
+        _run_handler(
+            "tests.executors.test_local_executor._test_handler_fd_write",
+            {"id": "job-1"},
+            str(tmp_path),
+            {"log_path": str(tmp_path / "run.log"), "node_key": "fetch"},
+            child_conn,
+        )
+    finally:
+        os.dup2(saved_stdout, 1)
+        os.dup2(saved_stderr, 2)
+        os.close(saved_stdout)
+        os.close(saved_stderr)
+
+    assert parent_conn.poll(1)
+    assert parent_conn.recv() == ("ok", None)
+    assert "fd line" in (tmp_path / "run.log").read_text(encoding="utf-8")
+
+
+def test_run_handler_direct_log_redirect_failure(tmp_path: Path, caplog) -> None:
+    # A directory as log target makes os.open fail; the handler must still run.
+    log_dir = tmp_path / "log-target"
+    log_dir.mkdir()
+    parent_conn, child_conn = multiprocessing.Pipe()
+    with caplog.at_level(logging.ERROR, logger="server.app.executors.local"):
+        _run_handler(
+            "tests.executors.test_local_executor._test_handler_with_output",
+            {"id": "job-1"},
+            str(tmp_path),
+            {"log_path": str(log_dir), "node_key": "fetch"},
+            child_conn,
+        )
+
+    assert parent_conn.poll(1)
+    assert parent_conn.recv() == ("ok", None)
+    assert any("Failed to redirect run log" in record.getMessage() for record in caplog.records)
+
+
+def test_run_handler_direct_handler_error(tmp_path: Path) -> None:
+    parent_conn, child_conn = multiprocessing.Pipe()
+    _run_handler(
+        "tests.executors.test_local_executor._test_handler_raises",
+        {"id": "job-1"},
+        str(tmp_path),
+        {"node_key": "fetch"},
+        child_conn,
+    )
+
+    assert parent_conn.poll(1)
+    status, payload = parent_conn.recv()
+    assert status == "error"
+    assert "RuntimeError: boom" in payload
+
+
+def test_run_handler_direct_rebuilds_job_db(tmp_path: Path) -> None:
+    jobs_dir = tmp_path / "jobs"
+    jobs_dir.mkdir()
+    parent_conn, child_conn = multiprocessing.Pipe()
+    _run_handler(
+        "tests.executors.test_local_executor._test_handler_records_job_db",
+        {"id": "job-1"},
+        str(tmp_path),
+        {
+            "node_key": "fetch",
+            "_job_db_path": str(tmp_path / "jobs.sqlite"),
+            "_jobs_dir": str(jobs_dir),
+        },
+        child_conn,
+    )
+
+    assert parent_conn.poll(1)
+    assert parent_conn.recv() == ("ok", None)
+    assert (tmp_path / "job-db-type.txt").read_text(encoding="utf-8") == "JobQueries"
+
+
+def test_watch_parent_token_propagates_cancellation() -> None:
+    parent_token = CancellationToken()
+    child_token = CancellationToken()
+    parent_token.cancel()
+
+    _watch_parent_token(parent_token, child_token)
+
+    assert child_token.is_cancelled()
+
+
+def test_local_executor_execute_raises_for_unimportable_handler_key(
+    context: ExecutionContext,
+) -> None:
+    executor = LocalExecutor("local", {"fetch": _test_module_level_handler})
+    executor._handler_keys.clear()
+
+    with pytest.raises(RuntimeError, match="not importable"):
+        executor.execute(replace(context, capability="fetch"))
+
+
+class _FakeConn:
+    """Minimal pipe-end stand-in with scripted poll/recv behavior."""
+
+    def __init__(self, poll_results: list[bool], recv_error: Exception | None = None) -> None:
+        self._poll_results = list(poll_results)
+        self._recv_error = recv_error
+
+    def poll(self, timeout: float = 0.0) -> bool:
+        return self._poll_results.pop(0) if self._poll_results else False
+
+    def recv(self) -> Any:
+        if self._recv_error is not None:
+            raise self._recv_error
+        return None
+
+    def close(self) -> None:
+        return None
+
+
+class _FakeProcess:
+    """Minimal multiprocessing.Process stand-in with scripted is_alive."""
+
+    def __init__(self, alive_results: list[bool]) -> None:
+        self._alive_results = list(alive_results)
+        self.terminated = False
+        self.killed = False
+
+    def start(self) -> None:
+        return None
+
+    def is_alive(self) -> bool:
+        return self._alive_results.pop(0) if self._alive_results else False
+
+    def terminate(self) -> None:
+        self.terminated = True
+
+    def join(self, timeout: float | None = None) -> None:
+        return None
+
+    def kill(self) -> None:
+        self.killed = True
+
+
+def test_execute_isolated_handles_child_dying_without_result(
+    context: ExecutionContext, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The child exits between the poll timeout and the liveness re-check, and the
+    # pipe hits EOF instead of delivering a result.
+    parent_conn = _FakeConn(poll_results=[False, True], recv_error=EOFError())
+    child_conn = _FakeConn(poll_results=[])
+    process = _FakeProcess(alive_results=[True, False, False])
+    monkeypatch.setattr(multiprocessing, "Pipe", lambda: (parent_conn, child_conn))
+    monkeypatch.setattr(multiprocessing, "Process", lambda **_: process)
+
+    executor = LocalExecutor("local", {"fetch": _test_module_level_handler})
+    result = executor.execute(replace(context, capability="fetch"))
+
+    assert result.status == "failed"
+    assert "did not return a result" in result.error_message
+
+
+def test_terminate_child_kills_stubborn_process() -> None:
+    executor = LocalExecutor("local", {"fetch": _test_module_level_handler})
+    process = _FakeProcess(alive_results=[True, False])
+
+    executor._terminate_child(process)
+
+    assert process.terminated
+    assert process.killed

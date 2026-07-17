@@ -32,42 +32,25 @@ export type VideoItem = {
   interaction_review_status?: 'all_passed' | 'partial' | 'all_failed'
 }
 
-export type AgentStatus = {
-  id: string
-  name: string
+/**
+ * Agent status as pushed over the /api/agents WebSocket.
+ *
+ * Derived from the generated HTTP contract; the WS broadcast
+ * (AgentStatusManager.to_dicts) additionally sends workspace_id, task_count
+ * and max_tasks, which the HTTP GET projection intentionally omits.
+ */
+export type AgentStatus = ApiSchemas['AgentStatusResponse'] & {
   workspace_id: string
-  busy: boolean
   task_count: number
   max_tasks: number
-  current_video_id: string | null
-  current_title?: string
-  current_content_type?: ContentType | ''
-  current_external_id?: string
-  current_phase?: string
 }
 
-export type GlobalServiceStatus = {
-  cms: {
-    baseUrl: string
-    tokenConfigured: boolean
-    env: string
-    healthy: boolean | null
-    lastCheckedAt: string | null
-  }
-}
+export type GlobalServiceStatus = ApiSchemas['GlobalServicesResponse']
 
-export type ResourceProviderDefinition = {
-  key: string
-  provider: string
-  path: string
-  defaultParams: Record<string, string>
-  paramKeys: string[]
-}
+export type ResourceProviderDefinition =
+  ApiSchemas['ResourceProviderDefinition']
 
-export type ResourceBinding = {
-  enabled: boolean
-  config: Record<string, string>
-}
+export type ResourceBinding = ApiSchemas['ResourceBinding']
 
 export type Chapter = {
   id?: string
@@ -189,29 +172,18 @@ export type NodeRunRecord = NodeRun
 /** @deprecated use {@link JobDetail} directly */
 export type JobDetailResponse = JobDetail
 
-export type WorkspaceRecord = {
-  id: string
-  name: string
-  description?: string
-  default_workflow_key: string
-  default_entity: string
-  cms_config?: Record<string, unknown>
-  resource_config?: Record<string, unknown>
-  intake_config?: {
-    enabled_modes?: string[]
-    label_overrides?: Record<string, string>
-  }
-}
+export type WorkspaceRecord = ApiSchemas['WorkspaceRecord']
+export type WorkspaceResponse = ApiSchemas['WorkspaceResponse']
+export type WorkspaceConfigurationResponse =
+  ApiSchemas['WorkspaceConfigurationResponse']
+export type WorkspaceSettingsTestResponse =
+  ApiSchemas['WorkspaceSettingsTestResponse']
+export type WorkflowDraftValidationResponse =
+  ApiSchemas['WorkflowDraftValidationResponse']
+export type ResourceProvidersResponse = ApiSchemas['ResourceProvidersResponse']
+export type WorkerStatusResponse = ApiSchemas['WorkerStatusResponse']
 
-export type WorkspaceSettings = {
-  entityType: 'question' | 'knowledge' | 'video'
-  intakeModes: string[]
-  labelOverrides: Record<string, string>
-  workflowKey: string
-  resources: Record<string, ResourceBinding>
-  cmsUrl?: string
-  cmsToken?: string
-}
+export type WorkspaceSettings = ApiSchemas['WorkspaceSettingsPayload']
 
 export type WorkflowNodeRecord = ApiSchemas['WorkflowNodeResponse']
 export type WorkflowIntakeModeRecord = ApiSchemas['WorkflowIntakeModeResponse']
@@ -247,8 +219,7 @@ export type {
   PossibleErrorItem,
   ComprehensionInfo,
   QuestionNormalized,
+  QuestionArtifactNormalized,
 } from './comprehensionTypes'
 
-export type WorkspacesResponse = ApiSchemas['WorkspacesResponse'] & {
-  workspaces: WorkspaceRecord[]
-}
+export type WorkspacesResponse = ApiSchemas['WorkspacesResponse']

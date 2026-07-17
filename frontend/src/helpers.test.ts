@@ -5,15 +5,12 @@ import {
   canRerunFrom,
   canRerunTo,
   computeProgress,
-  filterVideos,
   formatInteractionStats,
   getInteractionQuestion,
   getPhases,
   getSharedPhases,
   parseResourceInputs,
   parseResourceIds,
-  statusGroup,
-  visibleSelectedIds,
 } from './helpers'
 import type { VideoItem } from './types'
 
@@ -51,77 +48,6 @@ const makeVideo = (overrides: Partial<VideoItem> = {}): VideoItem => ({
   duration: 0,
   packed: false,
   ...overrides,
-})
-
-describe('statusGroup', () => {
-  it('treats missing URLs as failed in the list status group', () => {
-    expect(statusGroup(video({ status: 'missing_url' }))).toBe('failed')
-    expect(
-      statusGroup(video({ status: 'queued', current_phase: 'waiting_for_url' }))
-    ).toBe('failed')
-  })
-
-  it('keeps terminal and running statuses distinct', () => {
-    expect(statusGroup(video({ status: 'failed' }))).toBe('failed')
-    expect(statusGroup(video({ status: 'completed' }))).toBe('completed')
-    expect(statusGroup(video({ status: 'running' }))).toBe('running')
-  })
-})
-
-describe('filterVideos', () => {
-  const videos = [
-    video({
-      id: 'knowledge_K001',
-      external_id: 'K001',
-      title: '奇函数',
-      status: 'completed',
-    }),
-    video({
-      id: 'knowledge_K002',
-      external_id: 'K002',
-      title: '未上架视频',
-      status: 'missing_url',
-      current_phase: 'waiting_for_url',
-    }),
-    video({
-      id: 'question_Q001',
-      content_type: 'question',
-      external_id: 'Q001',
-      question_id: 'Q001',
-      knowledge_code: '',
-      title: '题目解析',
-      status: 'failed',
-    }),
-  ]
-
-  it('filters by resource type, status group, and search query', () => {
-    expect(
-      filterVideos(videos, {
-        selectedType: 'question',
-        statusFilter: 'failed',
-        searchQuery: 'q001',
-      }).map((item) => item.id)
-    ).toEqual(['question_Q001'])
-  })
-
-  it('includes missing URLs when filtering failed resources', () => {
-    expect(
-      filterVideos(videos, {
-        selectedType: 'knowledge',
-        statusFilter: 'failed',
-        searchQuery: 'k002',
-      }).map((item) => item.id)
-    ).toEqual(['knowledge_K002'])
-  })
-})
-
-describe('visibleSelectedIds', () => {
-  it('only returns selected ids that are still visible after filtering', () => {
-    const visible = [video({ id: 'knowledge_K001' })]
-    const selected = new Set(['knowledge_K001', 'knowledge_K002'])
-
-    expect(visibleSelectedIds(visible, selected)).toEqual(['knowledge_K001'])
-  })
 })
 
 describe('getInteractionQuestion', () => {

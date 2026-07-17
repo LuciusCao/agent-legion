@@ -1,3 +1,10 @@
+import type { components } from './generated/api'
+
+// The types below model job artifact JSON (questions_parsed / comprehension
+// info files), which is not covered by any OpenAPI response schema, so they
+// stay hand-written. QuestionNormalized is covered by the generated schema
+// and derived from it at the bottom of this file.
+
 export type SocraticOption = {
   label?: string
   text?: string
@@ -59,11 +66,13 @@ export type ComprehensionInfo = {
   }
 }
 
-export type QuestionNormalized = {
-  stem?: string
-  options?: Record<string, unknown>[]
-  answer?: unknown
-  analysis?: unknown
-  answer_blanks?: AnswerBlank[]
-  analysis_steps?: AnalysisStep[][]
+export type QuestionNormalized = components['schemas']['QuestionNormalized']
+
+/** questions.json artifact view of QuestionNormalized, with precise blank/step items. */
+export type QuestionArtifactNormalized = Omit<
+  QuestionNormalized,
+  'answer_blanks' | 'analysis_steps'
+> & {
+  answer_blanks?: AnswerBlank[] | null
+  analysis_steps?: AnalysisStep[][] | null
 }

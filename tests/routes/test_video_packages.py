@@ -330,3 +330,42 @@ def test_workspace_package_lifecycle_rename_lock_delete(workspace_client):
 
     list_resp = workspace_client.get(f"/api/workspaces/{ws_id}/packages")
     assert list_resp.json()["packages"] == []
+
+
+def test_package_download_missing_file_returns_404(client):
+    response = client.get("/api/packages/nope.zip")
+    assert response.status_code == 404
+
+
+def test_package_download_success(client, settings):
+    zip_path = settings.packages_dir / "real.zip"
+    zip_path.write_bytes(b"fake-zip-content")
+
+    response = client.get("/api/packages/real.zip")
+    assert response.status_code == 200
+    assert response.content == b"fake-zip-content"
+
+
+def test_package_download_rejects_symlink_escape(client, settings, tmp_path):
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    (settings.packages_dir / "evil.zip").symlink_to(outside)
+
+    response = client.get("/api/packages/evil.zip")
+    assert response.status_code == 404
+
+
+def test_workspace_package_download_missing_file_returns_404(client):
+    response = client.get("/api/workspaces/ws-x/packages/nope.zip")
+    assert response.status_code == 404
+
+
+def test_workspace_package_download_rejects_symlink_escape(client, settings, tmp_path):
+    outside = tmp_path / "secret.txt"
+    outside.write_text("secret", encoding="utf-8")
+    packages_dir = settings.packages_dir / "workspace-ws-x"
+    packages_dir.mkdir(parents=True)
+    (packages_dir / "evil.zip").symlink_to(outside)
+
+    response = client.get("/api/workspaces/ws-x/packages/evil.zip")
+    assert response.status_code == 404

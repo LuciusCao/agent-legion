@@ -51,8 +51,35 @@ def test_resolve_workflow_skill_rejects_absolute(tmp_path: Path) -> None:
         resolve_workflow_skill(tmp_path, "/outside")
 
 
+def test_resolve_workflow_skill_rejects_symlink_escape(tmp_path: Path) -> None:
+    # Passes the upfront validation (relative, no '..') but resolves outside root.
+    root = tmp_path / "skills"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    (root / "link").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(ValueError, match="must remain below root"):
+        resolve_workflow_skill(root, "link")
+
+
+def test_resolve_workflow_skill_requires_skill_md(tmp_path: Path) -> None:
+    (tmp_path / "foo").mkdir()
+    with pytest.raises(ValueError, match="missing SKILL.md"):
+        resolve_workflow_skill(tmp_path, "foo")
+
+
 def test_resolve_workflow_skill_requires_contract_files(tmp_path: Path) -> None:
     (tmp_path / "foo").mkdir()
     (tmp_path / "foo" / "SKILL.md").write_text("x", encoding="utf-8")
     with pytest.raises(ValueError, match="output-contract"):
+        resolve_workflow_skill(tmp_path, "foo")
+
+
+def test_resolve_workflow_skill_requires_validate_output(tmp_path: Path) -> None:
+    skill_dir = tmp_path / "foo"
+    (skill_dir / "references").mkdir(parents=True)
+    (skill_dir / "SKILL.md").write_text("x", encoding="utf-8")
+    (skill_dir / "references" / "output-contract.md").write_text("x", encoding="utf-8")
+    with pytest.raises(ValueError, match="validate_output"):
         resolve_workflow_skill(tmp_path, "foo")

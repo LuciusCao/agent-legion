@@ -14,7 +14,12 @@ def create_workflow_resource_providers_router(
     @router.get("/resource-providers", response_model=job_contracts.ResourceProvidersResponse)
     def get_resource_providers() -> job_contracts.ResourceProvidersResponse:
         require_workflows_enabled(settings)
-        return job_contracts.ResourceProvidersResponse(providers=service.resource_providers())
+        return job_contracts.ResourceProvidersResponse(
+            providers=[
+                job_contracts.ResourceProviderDefinition.model_validate(p)
+                for p in service.resource_providers()
+            ]
+        )
 
     @router.get("/global-services", response_model=job_contracts.GlobalServicesResponse)
     def get_global_services() -> job_contracts.GlobalServicesResponse:

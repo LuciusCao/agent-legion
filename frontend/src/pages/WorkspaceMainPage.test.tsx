@@ -24,6 +24,7 @@ import { EventSourceMock } from '../testing/eventSourceMock'
 import type { WorkspaceStats } from '../workspaceTypes'
 import type { JobSummary } from '../types'
 import { makeJob } from '../testing/fixtures'
+import { makeAgentStatus } from '../testing/workspaceFixtures'
 
 const mockApi = vi.fn()
 const mockFetchJobs = vi.fn()
@@ -228,20 +229,14 @@ describe('WorkspaceMainPage', () => {
     })
     useUiStore.setState({
       agents: [
-        {
+        makeAgentStatus({
           id: 'agent-a',
           name: 'Agent A',
           workspace_id: 'ws1',
-          busy: false,
-          task_count: 0,
-          max_tasks: 1,
-          current_video_id: null,
-        },
+        }),
       ],
       addDialogOpen: false,
       addContentType: 'knowledge',
-      rerunDialogOpen: false,
-      deleteDialogOpen: false,
       workspacePackageDialogOpen: false,
       tokenUsageDialogOpen: false,
       workerPausedByWorkspace: {},
@@ -252,8 +247,6 @@ describe('WorkspaceMainPage', () => {
       workspaceName: 'WS One',
       workspaceDescription: '',
       settings: {
-        cmsUrl: '',
-        cmsToken: '',
         entityType: 'question',
         intakeModes: [],
         labelOverrides: {},
@@ -263,8 +256,6 @@ describe('WorkspaceMainPage', () => {
       originalWorkspaceName: 'WS One',
       originalWorkspaceDescription: '',
       originalSettings: {
-        cmsUrl: '',
-        cmsToken: '',
         entityType: 'question',
         intakeModes: [],
         labelOverrides: {},

@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
 import { createMockUiState } from '../testing/fixtures'
+import { makeAgentStatus } from '../testing/workspaceFixtures'
 import type { AgentStatus } from '../types'
 
 const fetchWorkerStatusMock = vi.fn()
@@ -10,15 +11,12 @@ const showToastMock = vi.fn()
 
 let mockWorkerPausedByWorkspace: Record<string, boolean> = {}
 let mockAgents: AgentStatus[] = [
-  {
+  makeAgentStatus({
     id: 'main',
     name: 'Main',
     workspace_id: 'ws1',
-    busy: false,
-    task_count: 0,
     max_tasks: 8,
-    current_video_id: null,
-  },
+  }),
 ]
 
 vi.mock('../stores/uiStore', () => ({
@@ -43,15 +41,12 @@ describe('AgentStatusIndicator', () => {
     vi.clearAllMocks()
     mockWorkerPausedByWorkspace = {}
     mockAgents = [
-      {
+      makeAgentStatus({
         id: 'main',
         name: 'Main',
         workspace_id: 'ws1',
-        busy: false,
-        task_count: 0,
         max_tasks: 8,
-        current_video_id: null,
-      },
+      }),
     ]
     fetchWorkerStatusMock.mockResolvedValue(undefined)
     setWorkerPausedMock.mockResolvedValue(undefined)
@@ -102,24 +97,18 @@ describe('AgentStatusIndicator', () => {
 
   it('shows workspace-specific agents', () => {
     mockAgents = [
-      {
+      makeAgentStatus({
         id: 'main',
         name: 'Main',
         workspace_id: 'ws1',
-        busy: false,
-        task_count: 0,
         max_tasks: 8,
-        current_video_id: null,
-      },
-      {
+      }),
+      makeAgentStatus({
         id: 'pi',
         name: 'Pi Agent',
         workspace_id: 'ws2',
-        busy: false,
-        task_count: 0,
         max_tasks: 2,
-        current_video_id: null,
-      },
+      }),
     ]
     render(<AgentStatusIndicator workspaceId="ws1" />)
     expect(screen.getByText('Main')).toBeInTheDocument()
