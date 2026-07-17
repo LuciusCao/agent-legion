@@ -11,7 +11,6 @@ from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import Settings
-from server.app.workflows.definition import WorkflowDefinition
 
 
 class JobPatchQueryService(JobQueryService):
@@ -40,19 +39,7 @@ class JobPatchQueryService(JobQueryService):
         if not job_ids:
             return []
         jobs = self.job_db.list_jobs_by_ids(workspace_id, job_ids)
-        nodes_by_job = self.job_db.list_job_nodes_for_jobs([str(job["id"]) for job in jobs])
-        definitions: dict[tuple[str, str], WorkflowDefinition] = {}
-
-        def _definition(job: dict[str, Any]) -> WorkflowDefinition:
-            key = (str(job["workflow_key"]), str(job.get("workflow_definition_hash") or ""))
-            if key not in definitions:
-                definitions[key] = self._definition_for_job(job)
-            return definitions[key]
-
-        return [
-            self._job_summary(job, nodes_by_job.get(str(job["id"]), []), _definition(job))
-            for job in jobs
-        ]
+        return summarize_paginated_jobs(self, self.job_db, jobs)
 
     def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]:
         return self.job_db.count_jobs_by_status(workspace_id)
