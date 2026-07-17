@@ -1,7 +1,7 @@
 import { lazy } from 'react'
 import { Routes, Route, Navigate } from 'react-router-dom'
-import JobDetailPage from './pages/JobDetailPage'
 
+const JobDetailPage = lazy(() => import('./pages/JobDetailPage'))
 const DashboardPage = lazy(() =>
   import('./pages/DashboardPage').then((m) => ({ default: m.DashboardPage }))
 )

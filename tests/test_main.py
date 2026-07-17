@@ -71,3 +71,57 @@ def test_spa_catch_all_serves_static_files_and_fallback(tmp_path, monkeypatch):
         mounted = c.get("/assets/main.js")
         assert mounted.status_code == 200
         assert mounted.text == "console.log('main')"
+
+
+def test_spa_cache_headers(tmp_path, monkeypatch):
+    from server.app import main
+
+    root_dir, data_dir = setup_spa_app(tmp_path, monkeypatch)
+    frontend_dist = root_dir / "frontend" / "dist"
+    frontend_assets = frontend_dist / "assets"
+    frontend_assets.mkdir(parents=True)
+    (frontend_dist / "index.html").write_text("<div>spa-index</div>", encoding="utf-8")
+    (frontend_dist / "vite.svg").write_text("<svg/>", encoding="utf-8")
+    (frontend_assets / "main.js").write_text("console.log('main')", encoding="utf-8")
+
+    app = main.create_app(data_dir=data_dir, start_worker=False)
+    with TestClient(app) as c:
+        assert c.get("/").headers["Cache-Control"] == "no-cache"
+        assert c.get("/some/client/route").headers["Cache-Control"] == "no-cache"
+        assert c.get("/vite.svg").headers["Cache-Control"] == "no-cache"
+        assert (
+            c.get("/assets/main.js").headers["Cache-Control"]
+            == "public, max-age=31536000, immutable"
+        )
+
+
+def test_gzip_compresses_text_but_skips_range_requests(tmp_path, monkeypatch):
+    from server.app import main
+
+    root_dir, data_dir = setup_spa_app(tmp_path, monkeypatch)
+    frontend_dist = root_dir / "frontend" / "dist"
+    frontend_assets = frontend_dist / "assets"
+    frontend_assets.mkdir(parents=True)
+    (frontend_dist / "index.html").write_text("<div>spa-index</div>", encoding="utf-8")
+    big_js = "console.log('x')\n" * 100  # above the gzip minimum_size
+    (frontend_assets / "big.js").write_text(big_js, encoding="utf-8")
+
+    app = main.create_app(data_dir=data_dir, start_worker=False)
+    with TestClient(app) as c:
+        plain = c.get("/assets/big.js", headers={"Accept-Encoding": "identity"})
+        assert plain.status_code == 200
+        assert "content-encoding" not in plain.headers
+        assert plain.text == big_js
+
+        gzipped = c.get("/assets/big.js", headers={"Accept-Encoding": "gzip"})
+        assert gzipped.status_code == 200
+        assert gzipped.headers["content-encoding"] == "gzip"
+        assert gzipped.text == big_js  # httpx decompresses transparently
+
+        ranged = c.get(
+            "/assets/big.js",
+            headers={"Accept-Encoding": "gzip", "Range": "bytes=0-99"},
+        )
+        assert ranged.status_code == 206
+        assert "content-encoding" not in ranged.headers
+        assert ranged.headers["content-range"].startswith("bytes 0-99/")

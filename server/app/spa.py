@@ -4,7 +4,8 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.staticfiles import StaticFiles
+
+from server.app.spa_static import REVALIDATE_CACHE_CONTROL, FingerprintedStaticFiles
 
 
 def _not_found(path: str) -> None:  # noqa: ARG001
@@ -22,16 +23,17 @@ def mount_spa(app: FastAPI, frontend_dist: Path) -> None:
     frontend_assets = frontend_dist / "assets"
     frontend_index = frontend_dist / "index.html"
     if frontend_index.exists() and frontend_assets.is_dir():
-        app.mount("/assets", StaticFiles(directory=frontend_assets), name="assets")
+        app.mount("/assets", FingerprintedStaticFiles(directory=frontend_assets), name="assets")
 
         @app.get("/{path:path}", response_model=None)
         def spa(path: str):
+            headers = {"Cache-Control": REVALIDATE_CACHE_CONTROL}
             if not path:
-                return FileResponse(frontend_index)
+                return FileResponse(frontend_index, headers=headers)
             requested = (frontend_dist / path).resolve()
             if requested.is_relative_to(frontend_dist.resolve()) and requested.is_file():
-                return FileResponse(requested)
-            return FileResponse(frontend_index)
+                return FileResponse(requested, headers=headers)
+            return FileResponse(frontend_index, headers=headers)
 
     else:
 
