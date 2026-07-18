@@ -164,7 +164,7 @@ def extract_bundle(bundle_path: Path, work_dir: Path) -> tuple[Path, Path, dict[
             name = PurePosixPath(member.name)
             if str(name) == "manifest.json":
                 continue
-            if str(name) == "skill" or "skill" in name.parts[:1]:
+            if "skill" in name.parts[:1]:
                 target = work_dir / name
             elif name.parts and name.parts[0] == "inputs":
                 target = job_dir / PurePosixPath(*name.parts[1:])
@@ -273,7 +273,13 @@ class WorkerClient:
 
     def heartbeat(self, execution_id: str) -> bool:
         status, _ = self._request("POST", f"/api/remote/executions/{execution_id}/heartbeat")
-        return status == 204
+        if status == 204:
+            return True
+        if status == 409:
+            return False
+        # Transient server/proxy error (e.g. 5xx): let the heartbeat loop's
+        # exception path keep the run alive and retry next interval.
+        raise urllib.error.URLError(f"unexpected heartbeat status: {status}")
 
     def report(self, execution_id: str, metadata: dict[str, Any], archive: Path) -> None:
         status, data = self._request(
