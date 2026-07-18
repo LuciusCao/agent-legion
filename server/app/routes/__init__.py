@@ -7,6 +7,12 @@ from ..db import Database
 from ..events import JobEventManager
 from ..executors.remote_broker import RemoteExecutionBroker
 from ..jobs import JobQueries
+from ..services.executor_catalog import ExecutorCatalogService
+from ..services.job_packages import JobPackageService
+from ..services.package_deletion import PackageDeletionService
+from ..services.workflow_catalog import WorkflowCatalogService
+from ..services.workspace_configuration import WorkspaceConfigurationService
+from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
 from ..settings import Settings
 from ..worker_control import WorkspaceWorkerControl
 from .agents import create_agents_router
@@ -30,27 +36,18 @@ def create_router(
     settings: Settings,
     agent_manager: AgentStatusManager,
     workspace_worker_control: WorkspaceWorkerControl | None = None,
+    *,
+    workflow_catalog: WorkflowCatalogService,
+    executor_catalog: ExecutorCatalogService,
+    workspace_executor_configuration: WorkspaceExecutorConfigurationService,
+    workspace_configuration: WorkspaceConfigurationService,
+    package_deletion: PackageDeletionService,
+    job_packages: JobPackageService,
     job_event_manager: JobEventManager | None = None,
     job_event_buffer: Any | None = None,
     remote_broker: RemoteExecutionBroker | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
-
-    from ..services.executor_catalog import ExecutorCatalogService
-    from ..services.job_packages import JobPackageService
-    from ..services.package_deletion import PackageDeletionService
-    from ..services.workflow_catalog import WorkflowCatalogService
-    from ..services.workspace_configuration import WorkspaceConfigurationService
-    from ..services.workspace_executor_configuration import WorkspaceExecutorConfigurationService
-
-    workflow_catalog = WorkflowCatalogService(settings)
-    executor_catalog = ExecutorCatalogService(settings)
-    workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db)
-    workspace_configuration = WorkspaceConfigurationService(
-        job_db, settings, agent_manager, workflow_catalog
-    )
-    package_deletion = PackageDeletionService(db, settings.packages_dir)
-    job_packages = JobPackageService(job_db, settings)
 
     router.include_router(create_common_router(db, settings))
     router.include_router(create_agents_router(agent_manager))
