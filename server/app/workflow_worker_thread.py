@@ -20,7 +20,8 @@ from server.app.jobs import JobQueries
 from server.app.settings import Settings
 from server.app.workflow_worker_agent_status import agent_status_scope
 from server.app.workflow_worker_maintenance import WorkflowMaintenance
-from server.app.workflow_worker_schedule import schedule_workspace
+from server.app.workflow_worker_ready import build_ready_queues
+from server.app.workflow_worker_schedule import claim_next_candidate
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import list_registered_workflows
 
@@ -112,28 +113,32 @@ class WorkflowWorkerThread:
         if not snapshot.has_any_capacity():
             return False
 
-        # One job scan per pass; rounds repeat over the cached job lists so a
-        # single pass can claim multiple nodes while the workspace round-robin
-        # order keeps claims fair. The snapshot is refreshed on the next poll.
+        # One job scan per pass. Jobs are evaluated exactly once into a ready
+        # queue per workspace; rounds then pop one candidate per workspace,
+        # preserving round-robin fairness without re-scanning jobs. The
+        # capacity snapshot is refreshed on the next poll.
         claimed_any = False
         runnable_workspaces, jobs_by_workspace = self._runnable_workspaces()
-        while snapshot.has_any_capacity():
+        workspaces, queues = build_ready_queues(self, runnable_workspaces, jobs_by_workspace)
+        while snapshot.has_any_capacity() and queues:
             round_claimed = False
-            for workspace_id in self._round_robin.order(runnable_workspaces):
-                if (
-                    self.workspace_worker_control is not None
-                    and self.workspace_worker_control.is_paused(workspace_id)
-                ):
+            for workspace_id in self._round_robin.order(list(queues)):
+                queue = queues.get(workspace_id)
+                if queue is None or self._is_paused(workspace_id):
                     continue
-                if schedule_workspace(
-                    self, workspace_id, jobs_by_workspace[workspace_id], snapshot
-                ):
+                if claim_next_candidate(self, workspaces[workspace_id], queue, snapshot):
                     round_claimed = True
                     claimed_any = True
                     self._round_robin.complete_pass(workspace_id)
+                if not queue:
+                    del queues[workspace_id]
             if not round_claimed:
                 break
         return claimed_any
+
+    def _is_paused(self, workspace_id: str) -> bool:
+        control = self.workspace_worker_control
+        return control is not None and control.is_paused(workspace_id)
 
     def _runnable_workspaces(
         self,
@@ -149,6 +154,8 @@ class WorkflowWorkerThread:
                 if not (workspace_id := job.get("workspace_id")):
                     continue
                 workspace_id = str(workspace_id)
+                if self._is_paused(workspace_id):
+                    continue
                 if workspace_id not in jobs_by_workspace:
                     workspace_ids.append(workspace_id)
                     jobs_by_workspace[workspace_id] = []

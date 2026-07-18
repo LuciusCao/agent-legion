@@ -1,14 +1,16 @@
-"""Per-workspace job scanning and lease claiming for the workflow worker.
+"""Lease claiming for the workflow worker's ready candidates.
 
 Extracted from the worker thread to keep it within its size budget. The
 capacity snapshot checks here are optimization hints that skip pointless
 ``try_claim`` write-lock acquisitions; the lease claim transaction remains the
-authoritative capacity enforcement.
+authoritative capacity enforcement. Ready candidates are collected once per
+poll pass by ``server.app.workflow_worker_ready``.
 """
 
 from __future__ import annotations
 
 import logging
+from collections import deque
 from dataclasses import asdict
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -24,72 +26,41 @@ from server.app.jobs.queries.workspace_node_bindings import (
     get_local_node_limit,
     has_local_node_limit,
 )
-from server.app.services.workflow_revision_format import definition_from_job_snapshot
-from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
-from server.app.workflows.execution_control import allowed_nodes
-from server.app.workflows.scheduler import _node_statuses, evaluate_branches, find_ready_nodes
 
 if TYPE_CHECKING:
+    from server.app.workflow_worker_ready import ReadyCandidate
     from server.app.workflow_worker_thread import WorkflowWorkerThread
 
 logger = logging.getLogger(__name__)
 
 
-def schedule_workspace(
+def claim_next_candidate(
     worker: WorkflowWorkerThread,
-    workspace_id: str,
-    jobs: list[tuple[WorkflowDefinition, dict[str, Any]]],
+    workspace: dict[str, Any],
+    candidates: deque[ReadyCandidate],
     snapshot: CapacitySnapshot,
 ) -> bool:
-    workspace = worker.job_db.get_workspace(workspace_id)
-    if workspace is None:
-        return False
+    """Pop candidates until one claim is submitted; return True on a claim.
 
-    for definition, job in jobs:
-        if job.get("status") in ("completed", "failed", "paused"):
-            continue
-        if job.get("execution_paused"):
-            continue
-        snapshot_definition = definition_from_job_snapshot(job)
-        definition_to_run = snapshot_definition or definition
-        job_dir = resolve_job_dir(job, worker.settings.jobs_dir)
-        statuses = _node_statuses(worker.job_db, job["id"])
-        branch_evaluation = evaluate_branches(definition_to_run, statuses, job_dir)
-        worker.job_db.mark_nodes_not_applicable(
-            job["id"],
-            sorted(branch_evaluation.not_applicable),
-            "unselected workflow branch",
-        )
-        if branch_evaluation.not_applicable:
-            statuses = _node_statuses(worker.job_db, job["id"])
-        control_snapshot = {
-            "execution_mode": job.get("execution_mode", "full"),
-            "target_node_key": job.get("target_node_key"),
-            "execution_paused": bool(job.get("execution_paused")),
-            "pause_reason": job.get("pause_reason", ""),
-        }
-        try:
-            allowed = allowed_nodes(definition_to_run, control_snapshot)
-        except Exception:
-            logger.exception("failed to compute allowed nodes for job %s", job["id"])
-            continue
-        ready_nodes = find_ready_nodes(definition_to_run, statuses, job_dir)
-        for node in ready_nodes:
-            if node.key not in allowed:
-                continue
-            if try_claim_and_submit(
-                worker,
-                workspace,
-                definition_to_run,
-                job,
-                node,
-                job_dir,
-                control_snapshot,
-                allowed,
-                snapshot,
-            ):
-                return True
+    Candidates whose claim fails (capacity lost to a race, stale execution
+    target, ...) are dropped for this pass; the next poll pass re-evaluates
+    them from fresh state.
+    """
+    while candidates:
+        candidate = candidates.popleft()
+        if try_claim_and_submit(
+            worker,
+            workspace,
+            candidate.definition,
+            candidate.job,
+            candidate.node,
+            candidate.job_dir,
+            candidate.control_snapshot,
+            candidate.allowed,
+            snapshot,
+        ):
+            return True
     return False
 
 
