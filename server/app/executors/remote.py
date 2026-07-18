@@ -102,7 +102,13 @@ class RemoteExecutor:
                     manifest=manifest,
                 )
             )
+            # A cancel landing between prepare_execution and submit is dropped by the
+            # broker (unknown execution id); re-check here so it is not lost.
+            if context.execution_id in self._cancelled:
+                self._broker.cancel(context.execution_id)
             outcome = self._broker.wait_result(context.execution_id)
+            if outcome.result_archive_name:
+                archive_path = self._broker.bundle_dir / outcome.result_archive_name
             return self._to_result(outcome, context, run_token, skill_version)
         except Exception as exc:
             logger.exception("remote dispatch failed for %s", context.execution_id)
@@ -114,6 +120,7 @@ class RemoteExecutor:
             )
         finally:
             self.skill_manager.cleanup_execution(context.execution_id)
+            self._cancelled.discard(context.execution_id)
             bundle_path.unlink(missing_ok=True)
             archive_path.unlink(missing_ok=True)
 

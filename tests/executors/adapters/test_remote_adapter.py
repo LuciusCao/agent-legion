@@ -205,3 +205,57 @@ def test_unsupported_capability(tmp_path: Path, context: ExecutionContext) -> No
     result = executor.execute(unsupported)
     assert result.status == "failed"
     assert "not supported" in result.error_message
+
+
+def test_execute_fails_when_result_archive_misses_expected_output(
+    tmp_path: Path, context: ExecutionContext
+) -> None:
+    broker = _make_broker(tmp_path)
+    executor = _make_executor(tmp_path, broker)
+    # Worker reports success but the archive does not contain the expected output.
+    worker = threading.Thread(
+        target=_fake_worker, args=(broker, broker.bundle_dir, "unexpected.json")
+    )
+    worker.start()
+
+    result = executor.execute(context)
+
+    worker.join(timeout=10)
+    assert result.status == "failed"
+    assert "Missing outputs" in result.error_message
+
+
+def test_execute_fails_when_result_archive_is_not_unpackable(
+    tmp_path: Path, context: ExecutionContext
+) -> None:
+    broker = _make_broker(tmp_path)
+    executor = _make_executor(tmp_path, broker)
+
+    def garbage_worker() -> None:
+        deadline = time.monotonic() + 10
+        claim = None
+        while time.monotonic() < deadline:
+            claim = broker.dequeue("w1", {"review_keywords"})
+            if claim is not None:
+                break
+            time.sleep(0.05)
+        assert claim is not None
+        archive = broker.bundle_dir / f"{claim.execution_id}.result.tar.gz"
+        archive.write_bytes(b"not a valid tar.gz")
+        outcome = RemoteOutcome(
+            status="completed",
+            exit_code=0,
+            command=("pi", "--mode", "json"),
+            skill_version=claim.manifest["skill_version"],
+            result_archive_name=archive.name,
+        )
+        assert broker.complete(claim.execution_id, "w1", outcome) is True
+
+    worker = threading.Thread(target=garbage_worker)
+    worker.start()
+
+    result = executor.execute(context)
+
+    worker.join(timeout=10)
+    assert result.status == "failed"
+    assert "failed to unpack" in result.error_message
