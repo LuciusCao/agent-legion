@@ -2,9 +2,9 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { JobListItem } from './JobListItem'
-import type { JobRecord } from '../types'
+import type { JobSummary } from '../jobTypes'
 
-const mockJob: JobRecord = {
+const mockJob: JobSummary = {
   id: 'j1',
   workspace_id: 'ws1',
   workflow_key: 'question_content',

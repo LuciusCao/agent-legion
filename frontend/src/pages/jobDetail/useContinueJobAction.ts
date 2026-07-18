@@ -1,8 +1,8 @@
 import { useCallback } from 'react'
 import { useJobStore } from '../../stores/jobStore'
-import type { JobDetailResponse } from '../../types'
+import type { JobDetail } from '../../jobTypes'
 
-type RefreshDetail = () => Promise<JobDetailResponse | null>
+type RefreshDetail = () => Promise<JobDetail | null>
 
 export function useContinueJobAction(
   jobId: string | undefined,

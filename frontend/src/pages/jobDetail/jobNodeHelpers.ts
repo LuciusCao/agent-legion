@@ -1,5 +1,5 @@
 import type { DagEdge, DagGraphNode } from '../../components/DagGraph'
-import type { JobNodeRecord } from '../../types'
+import type { JobNode } from '../../jobTypes'
 
 const VALID_STATUSES = new Set<DagGraphNode['status']>([
   'pending',
@@ -34,7 +34,7 @@ export function computeNodeDuration(
   return (Date.now() - start) / 1000
 }
 
-export function toDagNodes(nodes: JobNodeRecord[]): DagGraphNode[] {
+export function toDagNodes(nodes: JobNode[]): DagGraphNode[] {
   return nodes.map((n) => ({
     key: n.node_key,
     label: n.label || n.node_key,
@@ -47,7 +47,7 @@ export function toDagNodes(nodes: JobNodeRecord[]): DagGraphNode[] {
   }))
 }
 
-export function toDagEdges(nodes: JobNodeRecord[]): DagEdge[] {
+export function toDagEdges(nodes: JobNode[]): DagEdge[] {
   const edges: DagEdge[] = []
   nodes.forEach((node) => {
     if (node.after && Array.isArray(node.after)) {

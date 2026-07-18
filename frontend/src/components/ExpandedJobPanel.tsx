@@ -3,11 +3,11 @@ import { MiniDag, type MiniDagNode } from './MiniDag'
 import { NodeRunsTable, type NodeRun } from './NodeRunsTable'
 import { MaterialIcon } from './MaterialIcon'
 import { JOB_STATUS_LABELS } from '../labels'
-import type { JobRecord } from '../types'
+import type { JobSummary } from '../jobTypes'
 import styles from './ExpandedJobPanel.module.css'
 
 export interface ExpandedJobPanelProps {
-  job: JobRecord
+  job: JobSummary
   workspaceId?: string
   onViewDetail: () => void
   onRerun: () => void
@@ -37,7 +37,7 @@ function deriveNodeStatus(
   return 'pending'
 }
 
-function buildMiniDagNodes(job: JobRecord): MiniDagNode[] {
+function buildMiniDagNodes(job: JobSummary): MiniDagNode[] {
   const completed = job.completed_nodes ?? 0
   return DEFAULT_NODES.map((node, index) => ({
     key: node.key,
@@ -46,7 +46,7 @@ function buildMiniDagNodes(job: JobRecord): MiniDagNode[] {
   }))
 }
 
-function buildNodeRuns(job: JobRecord): NodeRun[] {
+function buildNodeRuns(job: JobSummary): NodeRun[] {
   const nodes = buildMiniDagNodes(job)
   return nodes.map((node) => ({
     nodeKey: node.key,

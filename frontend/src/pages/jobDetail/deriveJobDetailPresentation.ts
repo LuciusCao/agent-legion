@@ -1,7 +1,8 @@
-import type { JobDetailResponse, WorkflowDefinitionRecord } from '../../types'
+import type { JobDetail } from '../../jobTypes'
+import type { WorkflowDefinitionRecord } from '../../types'
 import { toDagEdges, toDagNodes } from './jobNodeHelpers'
 function toWorkflowDefinition(
-  detail: JobDetailResponse | null
+  detail: JobDetail | null
 ): WorkflowDefinitionRecord | null {
   if (!detail) return null
   return {
@@ -20,7 +21,7 @@ function toWorkflowDefinition(
   }
 }
 
-export function deriveJobDetailPresentation(detail: JobDetailResponse | null) {
+export function deriveJobDetailPresentation(detail: JobDetail | null) {
   const nodes = detail ? toDagNodes(detail.nodes) : []
   const edges = detail ? toDagEdges(detail.nodes) : []
   const workflowDefinition = toWorkflowDefinition(detail)

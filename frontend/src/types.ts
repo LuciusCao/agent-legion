@@ -95,15 +95,6 @@ export type {
   TokenUsageWorkspaceResponse,
 }
 
-/** @deprecated use {@link JobSummary} directly */
-export type JobRecord = JobSummary
-/** @deprecated use {@link JobNode} directly */
-export type JobNodeRecord = JobNode
-/** @deprecated use {@link NodeRun} directly */
-export type NodeRunRecord = NodeRun
-/** @deprecated use {@link JobDetail} directly */
-export type JobDetailResponse = JobDetail
-
 export type WorkspaceRecord = ApiSchemas['WorkspaceRecord']
 export type WorkspaceResponse = ApiSchemas['WorkspaceResponse']
 export type WorkspaceConfigurationResponse =

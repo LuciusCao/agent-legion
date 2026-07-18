@@ -1,9 +1,9 @@
-import type { JobRecord, JobSummary } from '../types'
+import type { JobSummary } from '../jobTypes'
 import { MaterialIcon } from './MaterialIcon'
 import styles from './WorkflowVersionChip.module.css'
 
 type WorkflowVersionChipJob = Pick<
-  JobRecord | JobSummary,
+  JobSummary,
   | 'workflow_version'
   | 'current_workflow_revision_version'
   | 'is_workflow_outdated'
