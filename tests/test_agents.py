@@ -24,6 +24,21 @@ def _agent_dict(**kwargs):
     return defaults
 
 
+def test_broadcast_publishes_to_agents_channel():
+    from server.app.event_bus import InProcessEventBus
+
+    bus = InProcessEventBus()
+    manager = AgentStatusManager(event_bus=bus)
+    queue = bus.subscribe("agents")
+    manager._broadcast()
+
+    assert json.loads(queue.get_nowait()) == []
+
+
+def test_broadcast_controller_is_public():
+    assert AgentStatusManager().broadcast_controller is not None
+
+
 def test_discover_uses_injected_callable():
     from server.app.agents import AgentStatusManager
 

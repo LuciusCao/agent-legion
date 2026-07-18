@@ -1,4 +1,5 @@
 import asyncio
+import json
 import threading
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -7,6 +8,7 @@ from typing import Any
 from fastapi import WebSocket
 
 from server.app.agent_broadcast import AgentBroadcastController
+from server.app.event_bus import _EVICTED, EventBus
 
 
 @dataclass
@@ -25,16 +27,26 @@ class AgentStatus:
 
 
 class AgentStatusManager:
-    def __init__(self, discover_agents: Callable[[], list[dict[str, Any]]] | None = None) -> None:
+    def __init__(
+        self,
+        event_bus: EventBus | None = None,
+        discover_agents: Callable[[], list[dict[str, Any]]] | None = None,
+    ) -> None:
+        self._event_bus = event_bus
         self._discover_agents = discover_agents
         self.agents: list[AgentStatus] = []
         self._clients: set[WebSocket] = set()
+        self._forward_tasks: dict[WebSocket, asyncio.Task] = {}
         self._loop: asyncio.AbstractEventLoop | None = None
         self._busy_video_ids: set[str] = set()
         self._agent_video_ids: dict[tuple[str, str], list[str]] = {}
         self._workspace_assignments: dict[str, dict[str, int]] = {}
         self._lock = threading.Lock()
         self._broadcast_controller = AgentBroadcastController(self._lock, lambda: self._broadcast())
+
+    @property
+    def broadcast_controller(self) -> AgentBroadcastController:
+        return self._broadcast_controller
 
     def discover(self) -> list[AgentStatus]:
         try:
@@ -197,12 +209,35 @@ class AgentStatusManager:
         self._clients.add(websocket)
         self._loop = asyncio.get_running_loop()
         await websocket.send_json(self.to_dicts())
+        if self._event_bus is None:
+            return
+        bus = self._event_bus
+        queue = bus.subscribe("agents")
+
+        async def _forward() -> None:
+            try:
+                while True:
+                    data = await queue.get()
+                    if data is _EVICTED:
+                        return
+                    await websocket.send_text(data)
+            finally:
+                bus.unsubscribe("agents", queue)
+
+        self._forward_tasks[websocket] = asyncio.create_task(_forward())
 
     def disconnect(self, websocket: WebSocket) -> None:
         self._clients.discard(websocket)
+        task = self._forward_tasks.pop(websocket, None)
+        if task is not None:
+            task.cancel()
 
     def _broadcast(self) -> None:
         payload = self.to_dicts()
+        if self._event_bus is not None:
+            self._event_bus.publish("agents", json.dumps(payload))
+            return
+        # 无 bus 回退（测试直构造路径）：保持原 run_coroutine_threadsafe 直发
         loop = self._loop
         if loop is None or not loop.is_running():
             return
