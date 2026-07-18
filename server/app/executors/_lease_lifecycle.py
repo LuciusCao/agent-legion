@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import logging
 import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -16,7 +15,6 @@ from server.app.executors._path_canonicalization import (
     canonicalize_finish_paths,
 )
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
-from server.app.services.token_usage_capture import capture_and_persist_token_usage_for_lease
 
 
 def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -> bool:
@@ -96,14 +94,6 @@ def finish_lease(
         ),
     )
     _sync_job_status(conn, lease["job_id"])
-
-    if data_dir is not None and result.status in ("completed", "failed"):
-        try:
-            capture_and_persist_token_usage_for_lease(conn, lease, data_dir)
-        except Exception:
-            logging.getLogger(__name__).debug(
-                "Failed to capture token usage for lease %s", lease_id, exc_info=True
-            )
 
     if result.status == "completed":
         _pause_job_on_target_completion(conn, lease["job_id"], lease["node_key"], now_str)

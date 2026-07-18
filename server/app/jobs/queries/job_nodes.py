@@ -92,21 +92,21 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
         status: str | None = None,
         workspace_id: str | None = None,
         source_id: str | None = None,
+        status_not_in: Sequence[str] | None = None,
     ) -> list[dict[str, Any]]:
-        clauses: list[str] = []
-        params: list[Any] = []
-        if workspace_id:
-            clauses.append("workspace_id=?")
-            params.append(workspace_id)
-        if workflow_key:
-            clauses.append("workflow_key=?")
-            params.append(workflow_key)
-        if status:
-            clauses.append("status=?")
-            params.append(status)
-        if source_id:
-            clauses.append("source_id=?")
-            params.append(source_id)
+        clauses, params = [], []
+        for col, val in (
+            ("workspace_id", workspace_id),
+            ("workflow_key", workflow_key),
+            ("status", status),
+            ("source_id", source_id),
+        ):
+            if val:
+                clauses.append(f"{col}=?")
+                params.append(val)
+        if status_not_in:
+            clauses.append(f"status not in ({','.join('?' * len(status_not_in))})")
+            params.extend(status_not_in)
         where = f" where {' and '.join(clauses)}" if clauses else ""
         with self._connect_read() as conn:
             rows = conn.execute(f"select * from jobs{where} order by created_at desc", params)

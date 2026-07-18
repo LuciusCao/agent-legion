@@ -140,9 +140,11 @@ class WorkflowWorkerThread:
         workspace_ids: list[str] = []
         jobs_by_workspace: dict[str, list[tuple[WorkflowDefinition, dict[str, Any]]]] = {}
         for definition in self._definitions:
-            for job in self.job_db.list_jobs(workspace_id=None, workflow_key=definition.key):
-                if job.get("status") in ("completed", "failed"):
-                    continue
+            for job in self.job_db.list_jobs(
+                workspace_id=None,
+                workflow_key=definition.key,
+                status_not_in=("completed", "failed"),
+            ):
                 if not (workspace_id := job.get("workspace_id")):
                     continue
                 workspace_id = str(workspace_id)
