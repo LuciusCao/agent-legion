@@ -5,8 +5,9 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from server.app.events import JobEventManager, broadcast_job_update, record_job_update
+from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
+from server.app.job_events import broadcast_job_update, record_job_update
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
@@ -153,12 +154,7 @@ class JobExecutionService:
             )
 
         try:
-            self.job_db.apply_run_to_atomic(
-                job_id,
-                target_node_key,
-                closure,
-                now=self._now(),
-            )
+            self.job_db.apply_run_to_atomic(job_id, target_node_key, closure, now=self._now())
         except JobMutationConflict as exc:
             return self._result(
                 job_id,
@@ -174,7 +170,7 @@ class JobExecutionService:
             )
 
         if self.job_event_buffer is not None:
-            record_job_update(self.job_db, self.job_event_buffer, job_id)
+            record_job_update(self.job_db, self.job_event_buffer, job_id, str(job["workspace_id"]))
         elif self.job_event_manager is not None:
             broadcast_job_update(self.job_db, self.job_event_manager, job_id)
         return self._result(job_id, "run_to", "succeeded", target_node_key)
@@ -250,7 +246,7 @@ class JobExecutionService:
 
         commit_staged_outputs(staged, job_id, "run-to")
         if self.job_event_buffer is not None:
-            record_job_update(self.job_db, self.job_event_buffer, job_id)
+            record_job_update(self.job_db, self.job_event_buffer, job_id, str(job["workspace_id"]))
         elif self.job_event_manager is not None:
             broadcast_job_update(self.job_db, self.job_event_manager, job_id)
         return self._result(job_id, "run_to", "succeeded", target_node_key)
@@ -291,7 +287,7 @@ class JobExecutionService:
             )
 
         if self.job_event_buffer is not None:
-            record_job_update(self.job_db, self.job_event_buffer, job_id)
+            record_job_update(self.job_db, self.job_event_buffer, job_id, str(job["workspace_id"]))
         elif self.job_event_manager is not None:
             broadcast_job_update(self.job_db, self.job_event_manager, job_id)
         return self._result(job_id, "continue", "succeeded")

@@ -8,7 +8,7 @@ from typing import Any
 from server.app.db.connection import connect_sqlite
 from server.app.db.retry import retry_on_sqlite_lock
 from server.app.db.schema import init_db
-from server.app.events import JobEventManager, record_job_update
+from server.app.events import JobEventManager
 from server.app.executors import _lease_write_paths
 from server.app.executors._lease_control import active_lease_counts
 from server.app.executors._lease_lifecycle import fail_without_lease
@@ -19,6 +19,7 @@ from server.app.executors.models import (
     ExecutionResult,
     LeaseClaimRequest,
 )
+from server.app.job_events import record_job_update
 from server.app.jobs import JobQueries
 
 logger = logging.getLogger(__name__)

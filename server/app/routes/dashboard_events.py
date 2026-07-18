@@ -21,6 +21,6 @@ def create_dashboard_events_router(
         require_workflows_enabled(settings)
         if job_event_manager is None:
             raise HTTPException(status_code=503, detail="Event manager not available")
-        return await job_event_manager.connect(request, "__dashboard__")
+        return await job_event_manager.connect(request, "dashboard")
 
     return router

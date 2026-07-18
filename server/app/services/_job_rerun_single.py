@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from server.app.events import broadcast_job_update, record_job_update
+from server.app.job_events import broadcast_job_update, record_job_update
 from server.app.jobs.atomic_mutations import JobMutationConflict
 from server.app.services.job_staged_cleanup import commit_staged_outputs
 from server.app.services.workflow_revision_format import definition_from_job_snapshot

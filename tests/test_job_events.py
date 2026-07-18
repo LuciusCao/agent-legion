@@ -8,12 +8,14 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import Request
 
-from server.app.events import JobEventManager, record_job_update
+from server.app.event_bus import _EVICTED, InProcessEventBus, workspace_channel
+from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository, _sqlite_timestamp
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 from server.app.job_events import (
     build_job_patch_batch_payload,
     build_resync_required_payload,
+    record_job_update,
 )
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_patch_queries import JobPatchQueryService
@@ -71,9 +73,9 @@ class FakeJobDB:
 
 @pytest.fixture
 def manager():
-    m = JobEventManager()
-    m._loop = asyncio.new_event_loop()
-    return m
+    bus = InProcessEventBus()
+    bus.attach_loop(asyncio.new_event_loop())
+    return JobEventManager(bus)
 
 
 @pytest.fixture
@@ -142,14 +144,11 @@ def _insert_lease(conn, lease_id, expires_at, status="active"):
 
 
 def _ws1_queue(manager):
-    queue = asyncio.Queue()
-    manager._get_workspace_queues("ws1").add(queue)
-    return queue
+    return manager.bus.subscribe(workspace_channel("ws1"))
 
 
 def test_broadcast_jobs_created_queues_message(manager):
-    queue = asyncio.Queue()
-    manager._get_workspace_queues("ws1").add(queue)
+    queue = manager.bus.subscribe(workspace_channel("ws1"))
     manager.broadcast_jobs_created("ws1", [{"id": "j1"}], {"pending": 1})
     assert not queue.empty()
     data = queue.get_nowait()
@@ -158,10 +157,8 @@ def test_broadcast_jobs_created_queues_message(manager):
 
 
 def test_broadcast_isolated_by_workspace(manager):
-    q1 = asyncio.Queue()
-    q2 = asyncio.Queue()
-    manager._get_workspace_queues("ws1").add(q1)
-    manager._get_workspace_queues("ws2").add(q2)
+    q1 = manager.bus.subscribe(workspace_channel("ws1"))
+    q2 = manager.bus.subscribe(workspace_channel("ws2"))
     manager.broadcast_job_updated("ws1", "j1", {"pending": 1})
     assert not q1.empty()
     assert q2.empty()
@@ -304,23 +301,24 @@ def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
 
 
 def test_connect_evicts_oldest_at_capacity():
-    m = JobEventManager()
-    m._loop = asyncio.new_event_loop()
-    m.MAX_CLIENTS = 2
-    q1 = asyncio.Queue()
-    q2 = asyncio.Queue()
-    m._get_workspace_queues("ws1").add(q1)
-    m._get_workspace_queues("ws2").add(q2)
+    bus = InProcessEventBus()
+    loop = asyncio.new_event_loop()
+    bus.attach_loop(loop)
+    bus.MAX_CLIENTS = 2
+    m = JobEventManager(bus)
+    q1 = bus.subscribe(workspace_channel("ws1"))
+    q2 = bus.subscribe(workspace_channel("ws2"))
 
     async def add_third() -> None:
         request = MagicMock(spec=Request)
-        await m.connect(request, "ws3")
+        await m.connect(request, workspace_channel("ws3"))
 
-    asyncio.set_event_loop(m._loop)
-    m._loop.run_until_complete(add_third())
+    asyncio.set_event_loop(loop)
+    loop.run_until_complete(add_third())
 
-    assert q1 not in m._get_workspace_queues("ws1")
-    assert q2 in m._get_workspace_queues("ws2")
+    assert q1.get_nowait() is _EVICTED
+    assert q1 not in bus._subscribers.get(workspace_channel("ws1"), {})
+    assert q2 in bus._subscribers[workspace_channel("ws2")]
 
 
 def test_job_deletion_broadcasts_job_deleted(manager, tmp_path):
@@ -430,42 +428,38 @@ def test_continue_job_broadcasts_job_updated(manager):
 
 
 def test_evicted_client_stops_streaming():
-    m = JobEventManager()
-    m._loop = asyncio.new_event_loop()
-    m.MAX_CLIENTS = 2
+    bus = InProcessEventBus()
+    loop = asyncio.new_event_loop()
+    bus.attach_loop(loop)
+    bus.MAX_CLIENTS = 2
+    m = JobEventManager(bus)
 
     async def connect_workspace(ws: str) -> asyncio.Queue[str]:
         request = MagicMock(spec=Request)
-        await m.connect(request, ws)
-        return next(iter(m._get_workspace_queues(ws)))
+        await m.connect(request, workspace_channel(ws))
+        return next(iter(bus._subscribers[workspace_channel(ws)]))
 
-    asyncio.set_event_loop(m._loop)
-    q1 = m._loop.run_until_complete(connect_workspace("ws1"))
-    stop_event_q1 = m._stop_events[q1]
-    q2 = m._loop.run_until_complete(connect_workspace("ws2"))
-    q3 = m._loop.run_until_complete(connect_workspace("ws3"))
+    asyncio.set_event_loop(loop)
+    q1 = loop.run_until_complete(connect_workspace("ws1"))
+    q2 = loop.run_until_complete(connect_workspace("ws2"))
+    q3 = loop.run_until_complete(connect_workspace("ws3"))
 
-    assert q1 not in m._get_workspace_queues("ws1")
-    assert q2 in m._get_workspace_queues("ws2")
-    assert q3 in m._get_workspace_queues("ws3")
-    # The evicted queue's stop event should be set so its generator exits.
-    assert stop_event_q1.is_set()
-    assert m._stop_events.get(q1) is None
+    assert q1.get_nowait() is _EVICTED
+    assert q1 not in bus._subscribers.get(workspace_channel("ws1"), {})
+    assert q2 in bus._subscribers[workspace_channel("ws2")]
+    assert q3 in bus._subscribers[workspace_channel("ws3")]
 
 
 def test_dead_queue_stops_streaming():
-    m = JobEventManager()
-    m._loop = asyncio.new_event_loop()
+    bus = InProcessEventBus()
+    bus.attach_loop(asyncio.new_event_loop())
 
     queue = MagicMock(spec=asyncio.Queue)
     queue.put_nowait.side_effect = RuntimeError("dead")
-    m._get_workspace_queues("ws1").add(queue)
-    stop_event = asyncio.Event()
-    m._stop_events[queue] = stop_event
+    bus._subscribers.setdefault(workspace_channel("ws1"), {})[queue] = None
 
-    m._broadcast("ws1", json.dumps({"type": "ping"}))
-    assert queue not in m._get_workspace_queues("ws1")
-    assert stop_event.is_set()
+    bus.publish(workspace_channel("ws1"), json.dumps({"type": "ping"}))
+    assert queue not in bus._subscribers.get(workspace_channel("ws1"), {})
 
 
 def test_run_to_broadcasts_job_updated(manager, tmp_path):
