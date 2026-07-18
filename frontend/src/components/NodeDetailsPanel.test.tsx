@@ -110,6 +110,44 @@ describe('NodeDetailsPanel', () => {
     expect(button).toHaveAttribute('type', 'button')
   })
 
+  it('shows the runner in the latest run card when present', () => {
+    render(
+      <NodeDetailsPanel
+        nodeKey="generate_summary"
+        data={baseData}
+        latestRun={{
+          id: 3,
+          status: 'completed',
+          started_at: '2026-07-18 10:00:00.000000',
+          exit_code: 0,
+          error_message: '',
+          runner: 'mac-mini-3',
+        }}
+        onViewLogs={vi.fn()}
+      />
+    )
+    expect(screen.getByText(/mac-mini-3/)).toBeInTheDocument()
+  })
+
+  it('omits the runner badge when empty', () => {
+    render(
+      <NodeDetailsPanel
+        nodeKey="generate_summary"
+        data={baseData}
+        latestRun={{
+          id: 3,
+          status: 'completed',
+          started_at: '2026-07-18 10:00:00.000000',
+          exit_code: 0,
+          error_message: '',
+          runner: '',
+        }}
+        onViewLogs={vi.fn()}
+      />
+    )
+    expect(screen.queryByText(/Runner/)).not.toBeInTheDocument()
+  })
+
   it('renders error_message when latestRun has one', () => {
     render(
       <NodeDetailsPanel
