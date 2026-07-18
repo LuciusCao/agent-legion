@@ -785,7 +785,6 @@
     "server/app/workflows/conditions.py": 51,
     "server/app/workflows/definition.py": 41,
     "server/app/workflows/execution_control.py": 65,
-    "server/app/workflows/executor.py": 221,
     "server/app/workflows/loader.py": 252,
     "server/app/workflows/pi_command_builder.py": 54,
     "server/app/workflows/pi_config.py": 74,
