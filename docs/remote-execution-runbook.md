@@ -178,7 +178,7 @@ Use the existing workspace executor configuration to point node capabilities
 at `pi-remote` — either in the workspace settings UI or via
 `PUT /api/workspaces/{workspace_id}/configuration` with:
 
-- `executor_allocations`: add `{"executor_id": "pi-remote", "limit": <slots for this workspace>}`.
+- `executor_allocations`: add `{"executor_id": "pi-remote", "concurrency_limit": <slots for this workspace>}`.
 - `node_bindings`: for each node to run remotely,
   `{"workflow_key": ..., "node_key": ..., "executor_id": "pi-remote"}`.
 
@@ -220,6 +220,7 @@ not raise the budget silently (spec Risks).
 | pi "model call failed" on workers | pi provider `base_url` wrong on the device | Re-check §5 step 3: must be `http://<laptop-tailnet-ip>:8788/v1` |
 | Bundle fetch 410 (`bundle is no longer available`) | Server restarted mid-claim and the staged bundle was dropped | The execution is requeued automatically (bounded by `requeue_limit`); rerun if it exhausted |
 | Result upload 413 | Archive exceeds `remote.max_archive_bytes` (default 64 MiB) | Investigate why artifacts ballooned; raise the limit only if legitimate |
+| All `/api/remote/*` calls return 401 | Worker token mismatch — the worker's `--token` / `REMOTE_WORKER_TOKEN` does not match the server's `VIDEO_HIVE_REMOTE_WORKER_TOKEN` in `.env` | Align the token on both sides (§6, §7) and restart the server and workers |
 | Server 503 on `/api/remote/*` | No remote executor configured / token missing | Server refused remote mode at startup — fix §6 and restart |
 | Everything idle, nothing failing | Laptop asleep or offline | Workers hold no state and recover on their own; enforce §2 item 5 |
 
