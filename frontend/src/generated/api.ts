@@ -1263,7 +1263,7 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: 'local' | 'pi' | 'openclaw'
+      kind: 'local' | 'pi' | 'openclaw' | 'remote'
     }
     /** ExecutorRuntimeStatus */
     ExecutorRuntimeStatus: {
