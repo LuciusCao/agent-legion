@@ -4,7 +4,7 @@ import { DagStepper } from './DagStepper'
 import { MaterialIcon } from './MaterialIcon'
 import { durationSeconds, filterRelevantRuns } from '../helpers'
 import { formatDuration } from '../lib/formatters'
-import type { JobNodeRecord, NodeRunRecord } from '../types'
+import type { JobNode, NodeRun } from '../jobTypes'
 import { JOB_STATUS_LABELS } from '../labels'
 import { JobLogDialog } from './JobLogDialog'
 import {
@@ -41,8 +41,8 @@ const BADGE_STATUS_CLASS: Record<string, string> = {
 
 interface JobProgressPanelProps {
   jobId: string
-  nodes: JobNodeRecord[]
-  runs: NodeRunRecord[]
+  nodes: JobNode[]
+  runs: NodeRun[]
   onOpenDagDialog?: () => void
 }
 
@@ -71,7 +71,7 @@ export function JobProgressPanel({
   }, [])
 
   const relevantRuns = filterRelevantRuns(runs, nodes)
-  const runByNodeKey = new Map<string, NodeRunRecord>()
+  const runByNodeKey = new Map<string, NodeRun>()
   for (const run of relevantRuns) {
     const existing = runByNodeKey.get(run.node_key)
     if (!existing || run.id > existing.id) {

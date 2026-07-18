@@ -1,7 +1,7 @@
-import type { JobRecord, JobSummary } from '../types'
+import type { JobSummary } from '../jobTypes'
 
 type WorkflowVersionJob = Pick<
-  JobRecord | JobSummary,
+  JobSummary,
   | 'workflow_version'
   | 'current_workflow_revision_version'
   | 'is_workflow_outdated'

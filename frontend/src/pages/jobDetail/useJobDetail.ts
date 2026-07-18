@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { fetchJobDetail, deleteJob } from '../../api'
 import { rerunJob, runToJob, packageJobs } from '../../jobApi'
 import { usePageHeaderStore } from '../../stores/pageHeaderStore'
-import type { JobDetailResponse } from '../../types'
+import type { JobDetail } from '../../jobTypes'
 import { useContinueJobAction } from './useContinueJobAction'
 import { pageSubtitle } from './jobDetailTitle'
 import { POLLING_STATUSES } from './jobNodeHelpers'
@@ -15,7 +15,7 @@ export function useJobDetail(
 ) {
   const navigate = useNavigate()
   const { setPageTitle, setPageSubtitle } = usePageHeaderStore()
-  const [detail, setDetail] = useState<JobDetailResponse | null>(null)
+  const [detail, setDetail] = useState<JobDetail | null>(null)
   const [error, setError] = useState('')
   const [actionLoading, setActionLoading] = useState(false)
   const detailRef = useRef(detail)
@@ -27,7 +27,7 @@ export function useJobDetail(
   const refreshDetail = useCallback(
     async (options?: {
       signal?: AbortSignal
-    }): Promise<JobDetailResponse | null> => {
+    }): Promise<JobDetail | null> => {
       if (!jobId) return null
       try {
         const data = await fetchJobDetail(jobId)

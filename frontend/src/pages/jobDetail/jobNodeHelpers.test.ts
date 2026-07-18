@@ -1,12 +1,12 @@
 import { describe, it, expect } from 'vitest'
 import { deriveJobDetailPresentation } from './deriveJobDetailPresentation'
-import type { JobDetailResponse } from '../../types'
+import type { JobDetail } from '../../jobTypes'
 
 function makeNode(
   nodeKey: string,
   status: string,
-  overrides: Partial<JobDetailResponse['nodes'][number]> = {}
-): JobDetailResponse['nodes'][number] {
+  overrides: Partial<JobDetail['nodes'][number]> = {}
+): JobDetail['nodes'][number] {
   return {
     id: 1,
     job_id: 'job1',
@@ -28,7 +28,7 @@ function makeNode(
   }
 }
 
-function makeDetail(nodes: JobDetailResponse['nodes']): JobDetailResponse {
+function makeDetail(nodes: JobDetail['nodes']): JobDetail {
   return {
     job: {
       id: 'job1',

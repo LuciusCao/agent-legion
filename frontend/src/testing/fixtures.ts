@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import type { UiState } from '../stores/uiStore'
-import type { JobRecord } from '../types'
+import type { JobSummary } from '../jobTypes'
 
 export function createMockUiState(partial: Partial<UiState> = {}): UiState {
   return {
@@ -27,7 +27,7 @@ export function createMockUiState(partial: Partial<UiState> = {}): UiState {
     ...partial,
   }
 }
-export function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {
+export function makeJob(overrides: Partial<JobSummary> = {}): JobSummary {
   return {
     id: 'j1',
     workspace_id: 'ws1',

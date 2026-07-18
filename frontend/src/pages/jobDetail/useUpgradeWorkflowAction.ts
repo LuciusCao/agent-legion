@@ -1,8 +1,8 @@
 import { useCallback } from 'react'
 import { upgradeJobWorkflow } from '../../jobWorkflowUpgradeApi'
-import type { JobDetailResponse } from '../../types'
+import type { JobDetail } from '../../jobTypes'
 
-type RefreshDetail = () => Promise<JobDetailResponse | null>
+type RefreshDetail = () => Promise<JobDetail | null>
 
 export function useUpgradeWorkflowAction(
   jobId: string | undefined,
