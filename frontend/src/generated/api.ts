@@ -448,6 +448,23 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/remote/workers': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Workers */
+    get: operations['list_workers_api_remote_workers_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/resource-providers': {
     parameters: {
       query?: never
@@ -1388,7 +1405,7 @@ export interface components {
       /** Executor Id */
       executor_id?: string | null
       /** Executor Kind */
-      executor_kind?: ('local' | 'pi' | 'openclaw') | null
+      executor_kind?: ('local' | 'pi' | 'openclaw' | 'remote') | null
       /** Finished At */
       finished_at?: string | null
       /** Id */
@@ -1571,6 +1588,11 @@ export interface components {
       node_key: string
       /** Run Dir */
       run_dir: string
+      /**
+       * Runner
+       * @default
+       */
+      runner: string
       /** Session Dir */
       session_dir: string
       /** Started At */
@@ -1673,6 +1695,21 @@ export interface components {
        * @default
        */
       name: string
+      /** Slots */
+      slots: number
+      /** Worker Id */
+      worker_id: string
+    }
+    /** RemoteWorkerInfo */
+    RemoteWorkerInfo: {
+      /** Capabilities */
+      capabilities: string[]
+      /** Last Seen At */
+      last_seen_at: string
+      /** Name */
+      name: string
+      /** Registered At */
+      registered_at: string
       /** Slots */
       slots: number
       /** Worker Id */
@@ -2026,6 +2063,11 @@ export interface components {
     WorkerStatusResponse: {
       /** Paused */
       paused: boolean
+    }
+    /** WorkersResponse */
+    WorkersResponse: {
+      /** Workers */
+      workers: components['schemas']['RemoteWorkerInfo'][]
     }
     /** WorkflowCompareSummary */
     WorkflowCompareSummary: {
@@ -3482,6 +3524,26 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_workers_api_remote_workers_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkersResponse']
         }
       }
     }

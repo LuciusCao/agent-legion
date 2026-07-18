@@ -25,6 +25,7 @@ const baseRun: components['schemas']['NodeRunResponse'] = {
   node_key: 'generate_summary',
   run_dir: '/tmp/run',
   session_dir: '/tmp/session',
+  runner: '',
 }
 
 describe('NodeDetailsPanel', () => {
