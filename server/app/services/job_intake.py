@@ -7,12 +7,9 @@ from typing import Any
 from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError
+from server.app.services.job_intake_chunks import resolve_fresh_candidates
 from server.app.services.job_intake_resolution import RESOLVER_MAP, normalize_values
-from server.app.services.job_intake_resolver import resolve_candidates
-from server.app.services.job_intake_video import (
-    exclude_existing_candidates,
-    write_video_input,
-)
+from server.app.services.job_intake_video import write_video_input
 from server.app.services.job_intake_workspace import (
     check_resource_enabled,
     effective_cms_config,
@@ -86,7 +83,13 @@ class JobIntakeService:
         if resolver is None:
             raise InvalidOperationError("Unsupported entity and intake mode combination")
 
-        candidates = resolve_candidates(
+        # Filter candidates that already exist in the workspace so duplicates are
+        # reported as created_count=0 instead of failing the whole batch. The
+        # dedup key set is a lightweight projection that grows with every
+        # accepted candidate, so intra-request duplicates across chunk
+        # boundaries are filtered exactly like pre-existing jobs.
+        existing_keys = self.job_db.list_job_dedup_keys(workspace_id)
+        candidates, resolved_any = resolve_fresh_candidates(
             resolver,
             entity,
             input_values,
@@ -96,17 +99,11 @@ class JobIntakeService:
             self.settings,
             workspace,
             workspace_id,
+            existing_keys,
         )
 
-        # Filter candidates that already exist in the workspace so duplicates are
-        # reported as created_count=0 instead of failing the whole batch.
-        original_candidates = candidates
-        existing_jobs = self.job_db.list_jobs(workspace_id=workspace_id)
-        existing_keys = {(str(job["source_type"]), str(job["source_id"])) for job in existing_jobs}
-        candidates = exclude_existing_candidates(candidates, existing_keys)
-
         if not candidates:
-            if entity == "video" and original_candidates:
+            if entity == "video" and resolved_any:
                 return {"created_count": 0, "jobs": []}
             detail = "No tasks were resolved from input"
             if resolver.startswith("cms.") and mode.input_field == "knowledge_codes":
@@ -167,12 +164,8 @@ class JobIntakeService:
             for candidate, job in zip(candidates, jobs, strict=True):
                 write_video_input(resolve_job_dir(job, self.settings.jobs_dir), candidate)
 
-        resolved_jobs: list[dict[str, Any]] = []
         for job in jobs:
-            projected = dict(job)
-            projected["storage_dir"] = str(resolve_job_dir(projected, self.settings.jobs_dir))
-            resolved_jobs.append(projected)
-        jobs = resolved_jobs
+            job["storage_dir"] = str(resolve_job_dir(job, self.settings.jobs_dir))
 
         batch["created_count"] = len(jobs)
         if self.job_event_buffer is not None:

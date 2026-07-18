@@ -57,8 +57,17 @@ def capture_token_usage_after_lease_finish(
     lease_id: str,
     data_dir: Path,
 ) -> None:
-    """Capture token usage for a finished lease, logging failures but not raising."""
+    """Capture token usage for a finished lease; parse outside, persist inside a write tx."""
     try:
-        persist_token_usage_for_lease(conn, lease_id, data_dir)
+        summary = parse_token_usage_for_lease(conn, lease_id, data_dir)
+        if summary is None:
+            return
+        conn.execute("begin immediate")
+        try:
+            persist_node_run_usage(conn, summary)
+            conn.execute("commit")
+        except Exception:
+            conn.execute("rollback")
+            raise
     except Exception:
         logger.debug("Failed to capture token usage for lease %s", lease_id, exc_info=True)

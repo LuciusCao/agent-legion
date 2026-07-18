@@ -233,6 +233,11 @@ _EXPECTED_INDEXES = {
     "idx_phase_runs_video_id",
     "idx_phase_runs_video_id_status",
     "idx_transcription_runs_video_id",
+    "idx_jobs_status",
+    "idx_executor_leases_status_expires_at",
+    "idx_executor_leases_job_status",
+    "idx_node_runs_run_dir",
+    "idx_node_run_token_usage_job_id",
 }
 
 

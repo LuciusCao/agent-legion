@@ -44,7 +44,8 @@ video-hive/
 │       ├── skills/             # 外部 Pi skill 管理
 │       ├── agents.py           # Agent 发现与状态跟踪
 │       ├── events.py           # SSE 事件广播
-│       ├── workflow_worker_thread.py # DAG workflow worker
+│       ├── workflow_worker_thread.py # DAG workflow worker 线程与 poll 循环
+│       ├── workflow_worker_schedule.py # 按 workspace 的 job 扫描与 lease 认领
 │       └── worker*.py          # Worker 控制与遗留 worker 文件
 ├── frontend/
 │   ├── package.json
