@@ -4,7 +4,7 @@ from fastapi import APIRouter
 
 from ..agents import AgentStatusManager
 from ..db import Database
-from ..events import JobEventManager, VideoEventManager
+from ..events import JobEventManager
 from ..executors.remote_broker import RemoteExecutionBroker
 from ..jobs import JobQueries
 from ..settings import Settings
@@ -29,7 +29,6 @@ def create_router(
     job_db: JobQueries,
     settings: Settings,
     agent_manager: AgentStatusManager,
-    video_event_manager: VideoEventManager,
     workspace_worker_control: WorkspaceWorkerControl | None = None,
     job_event_manager: JobEventManager | None = None,
     job_event_buffer: Any | None = None,
@@ -56,9 +55,7 @@ def create_router(
     router.include_router(create_common_router(db, settings))
     router.include_router(create_agents_router(agent_manager))
     router.include_router(
-        create_packages_router(
-            db, job_db, settings, video_event_manager, package_deletion, job_packages
-        )
+        create_packages_router(db, job_db, settings, package_deletion, job_packages)
     )
     router.include_router(create_worker_router(workspace_worker_control))
     if remote_broker is not None:

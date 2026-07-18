@@ -6,7 +6,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from server.app.db import Database
-from server.app.events import VideoEventManager
 from server.app.routes.packages import create_packages_router
 from server.app.services.job_packages import JobPackageService, WorkspacePackageLockedError
 from server.app.services.package_deletion import PackageDeletionService
@@ -306,7 +305,6 @@ def test_create_packages_router_builds_default_job_package_service(db, job_db, s
         db,
         job_db,
         settings,
-        VideoEventManager(),
         PackageDeletionService(db, settings.packages_dir),
     )
     assert any(getattr(route, "path", "") == "/packages" for route in router.routes)
