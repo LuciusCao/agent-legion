@@ -109,6 +109,16 @@ Path("output.json").write_text("{}", encoding="utf-8")
 print(json.dumps({"type": "done"}))
 """
 
+FAKE_PI_ENV_PROBE = """#!/usr/bin/env python3
+import json, os
+from pathlib import Path
+Path("output.json").write_text("{}", encoding="utf-8")
+Path("saw_token.txt").write_text(
+    str("REMOTE_WORKER_TOKEN" in os.environ), encoding="utf-8"
+)
+print(json.dumps({"type": "done"}))
+"""
+
 
 def _write_fake_pi(tmp_path: Path) -> str:
     fake = tmp_path / "fake_pi"
@@ -185,6 +195,22 @@ def test_run_execution_happy_path(tmp_path):
     assert run_json["inputs"] == ["input.json"]
     assert run_json["outputs"] == ["output.json"]
     assert run_json["skill_version"] == "abc"
+
+
+def test_run_execution_strips_worker_token_from_pi_env(tmp_path, monkeypatch):
+    monkeypatch.setenv("REMOTE_WORKER_TOKEN", "super-secret-token")
+    fake = tmp_path / "fake_pi_env"
+    fake.write_text(FAKE_PI_ENV_PROBE, encoding="utf-8")
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": str(fake)}}
+    bundle = _make_bundle(tmp_path, manifest)
+    claim = {"execution_id": "e1", "manifest": manifest}
+
+    metadata, archive = worker.run_execution(StubClient(bundle), claim, tmp_path / "work")
+
+    assert metadata["status"] == "completed"
+    job_dir = tmp_path / "work" / "e1" / "job"
+    assert (job_dir / "saw_token.txt").read_text(encoding="utf-8") == "False"
 
 
 def test_run_execution_missing_output_fails(tmp_path):

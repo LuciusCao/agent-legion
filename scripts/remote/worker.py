@@ -341,6 +341,9 @@ def run_execution(
     )
     pi = manifest["pi"]
     env = {**os.environ, **{str(k): str(v) for k, v in pi.get("environment", {}).items()}}
+    # Never hand the server credential to the LLM-driven agent: it could read
+    # the token via its bash tool and exfiltrate it into events.jsonl.
+    env.pop("REMOTE_WORKER_TOKEN", None)
 
     events_file = run_dir / "events.jsonl"
     stderr_file = run_dir / "stderr.log"
