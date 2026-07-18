@@ -12,11 +12,14 @@ from server.app.executors.config import (
     LocalExecutorConfig,
     OpenClawExecutorConfig,
     PiExecutorConfig,
+    RemoteExecutorConfig,
 )
 from server.app.executors.local import LocalExecutor, LocalHandler
 from server.app.executors.openclaw import build_openclaw_executor
 from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
+from server.app.executors.remote import RemoteExecutor
+from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
 from server.app.skills.manager import SkillManager
 
@@ -58,6 +61,7 @@ class RuntimeDependencies:
     settings_config: Mapping[str, Any] | None = None
     job_db: Any | None = None
     cancellation_grace_seconds: int = 5
+    remote_broker: RemoteExecutionBroker | None = None
 
 
 class ExecutorRegistry:
@@ -108,6 +112,18 @@ class ExecutorRegistry:
                 )
             elif isinstance(config, OpenClawExecutorConfig):
                 executor = build_openclaw_executor(executor_id, runtime.openclaw_runtime, config)
+            elif isinstance(config, RemoteExecutorConfig):
+                if runtime.remote_broker is None:
+                    raise ExecutorRegistryError(
+                        f"remote executor {executor_id!r} requires a remote execution broker"
+                    )
+                executor = RemoteExecutor(
+                    executor_id,
+                    runtime.pi_runtime,
+                    runtime.skill_manager,
+                    config.capabilities,
+                    runtime.remote_broker,
+                )
             else:
                 raise ExecutorRegistryError(
                     f"Executor {executor_id!r}: unsupported kind {getattr(config, 'kind', '?')!r}"
