@@ -32,6 +32,21 @@ class OpenClawCapabilityConfig(BaseModel):
     skill: str = Field(min_length=1)
 
 
+class RemoteCapabilityConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    skill: str = Field(min_length=1)
+    tools: tuple[str, ...] = ("read", "write", "bash")
+
+    @field_validator("skill", mode="after")
+    @classmethod
+    def _reject_unsafe_skill_path(cls, value: str) -> str:
+        if value.startswith("/"):
+            raise ValueError("skill path must not be absolute")
+        if ".." in Path(value).parts:
+            raise ValueError("skill path must not contain '..'")
+        return value
+
+
 class LocalExecutorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["local"]
@@ -81,13 +96,29 @@ class OpenClawExecutorConfig(BaseModel):
         return value
 
 
+class RemoteExecutorConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+    kind: Literal["remote"]
+    global_capacity: int = Field(gt=0, strict=True)
+    capabilities: dict[str, RemoteCapabilityConfig]
+
+    @field_validator("capabilities", mode="after")
+    @classmethod
+    def _reject_empty_capability_names(
+        cls, value: dict[str, RemoteCapabilityConfig]
+    ) -> dict[str, RemoteCapabilityConfig]:
+        if "" in value:
+            raise ValueError("capability names must not be empty")
+        return value
+
+
 ExecutorConfig = Annotated[
-    LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig,
+    LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig | RemoteExecutorConfig,
     Field(discriminator="kind"),
 ]
 
 _executor_config_adapter: TypeAdapter[
-    LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig
+    LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig | RemoteExecutorConfig
 ] = TypeAdapter(ExecutorConfig)
 
 
@@ -103,9 +134,13 @@ def _validation_error_with_executor_id(exc: ValidationError, executor_id: str) -
 
 def load_executor_definitions(
     raw: dict[str, object],
-) -> dict[str, LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig]:
+) -> dict[
+    str, LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig | RemoteExecutorConfig
+]:
     """Validate a mapping of executor ID to executor configuration."""
-    definitions: dict[str, LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig] = {}
+    definitions: dict[
+        str, LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig | RemoteExecutorConfig
+    ] = {}
     for executor_id, value in raw.items():
         if not isinstance(value, dict):
             raise TypeError(

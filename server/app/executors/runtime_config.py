@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import os
 import shutil
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
+
+from server.app.executors.config import ExecutorConfig, RemoteExecutorConfig
 
 
 class PiRuntimeConfig(BaseModel):
@@ -47,6 +50,15 @@ class WorkflowsRuntimeConfig(BaseModel):
     pi: PiRuntimeConfig = Field(default_factory=PiRuntimeConfig)
 
 
+class RemoteRuntimeConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    worker_token: str = ""
+    claim_timeout_seconds: float = Field(default=120.0, gt=0)
+    requeue_limit: int = Field(default=3, ge=0)
+    max_archive_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
+
+
 class ExecutorRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
@@ -58,6 +70,7 @@ class ExecutorRuntimeConfig(BaseModel):
     openclaw: OpenClawRuntimeConfig = Field(
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
     )
+    remote: RemoteRuntimeConfig = Field(default_factory=RemoteRuntimeConfig)
 
 
 class StartupValidationError(Exception):
@@ -140,13 +153,15 @@ def _cms_token_available(config: dict[str, Any]) -> bool:
 def validate_runtime(
     runtime: ExecutorRuntimeConfig,
     config: dict[str, Any],
+    executor_definitions: Mapping[str, ExecutorConfig] | None = None,
 ) -> None:
     """Validate enabled runtime dependencies at startup.
 
     Disabled runtimes require nothing. Enabled executors require their executable
     or working directory to exist. Selected ASR providers require their files;
     ``auto`` needs at least one usable provider. CMS credentials are required only
-    when a CMS-backed resource provider is enabled.
+    when a CMS-backed resource provider is enabled. A remote worker token is
+    required only when a remote executor is defined.
     """
     errors: list[tuple[str, str]] = []
 
@@ -216,6 +231,17 @@ def validate_runtime(
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
+
+    if not runtime.remote.worker_token and any(
+        isinstance(definition, RemoteExecutorConfig)
+        for definition in (executor_definitions or {}).values()
+    ):
+        errors.append(
+            (
+                "remote.worker_token",
+                "required when a remote executor is defined (set VIDEO_HIVE_REMOTE_WORKER_TOKEN)",
+            )
+        )
 
     if _cms_resource_enabled(config) and not _cms_token_available(config):
         cms_config = config.get("cms") or {}
