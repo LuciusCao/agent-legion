@@ -148,9 +148,7 @@ export async function createJobBatch(
   })
 }
 
-export async function fetchJobDetail(
-  jobId: string
-): Promise<JobDetail> {
+export async function fetchJobDetail(jobId: string): Promise<JobDetail> {
   return api(`/api/jobs/${encodeURIComponent(jobId)}`)
 }
 

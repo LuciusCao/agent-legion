@@ -25,9 +25,7 @@ export function useJobDetail(
   }, [detail])
 
   const refreshDetail = useCallback(
-    async (options?: {
-      signal?: AbortSignal
-    }): Promise<JobDetail | null> => {
+    async (options?: { signal?: AbortSignal }): Promise<JobDetail | null> => {
       if (!jobId) return null
       try {
         const data = await fetchJobDetail(jobId)
