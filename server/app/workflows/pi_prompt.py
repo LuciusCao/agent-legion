@@ -29,6 +29,8 @@ def build_pi_prompt(
         "",
         (
             "Write required outputs directly into the working directory. "
+            "Never write outputs into the run/session directory (runs/); "
+            "all declared outputs must live at the top level of the working directory. "
             "Do not modify inputs or create undeclared root-level artifacts. "
             "Finish after all required outputs are written and correct."
         ),
