@@ -14,6 +14,17 @@ traffic flows **worker → tailnet → laptop gateway → 中台**; the 中台 c
 is injected by the gateway on the laptop and never leaves it. Workers hold no
 persistent state and store no secrets.
 
+**Scope note.** The remote-execution architecture is generic: the server treats
+every worker as a "cloud agent" reachable via the claim protocol, and each agent
+may run its own independent LLM endpoint. Only two things in this runbook are
+workarounds for our specific constraints, not architectural requirements:
+
+- the **LLM gateway** — needed solely because 中台 is reachable only from the
+  company network (disappears entirely with per-worker BYO models);
+- the **tailnet** — needed solely because the laptop and home devices are behind
+  separate NATs (replaced by plain TLS + worker token if the control plane is
+  ever publicly reachable).
+
 Components:
 
 - `server/app/executors/remote_broker.py` — claim/heartbeat/requeue broker.
@@ -214,7 +225,7 @@ not raise the budget silently (spec Risks).
 | Symptom | Cause | Action |
 | --- | --- | --- |
 | `/api/remote/claim` returns 204 forever | No executions enqueued for the worker's capabilities | Check workspace node bindings (§8) and that `--capabilities` matches the executor's declared capability names exactly |
-| Heartbeat 409 storms (`claim lost`) | Network partition or server restart — the claim lease expired (`claim_timeout_seconds`) and the execution was requeued/failed | Transient 409s are retried by the worker; persistent storms mean the run is dead — check tailnet, then rerun the failed jobs per existing semantics |
+| Heartbeat 409 storms (`claim lost`) | Network partition or server restart — the claim lease expired (`claim_timeout_seconds`) and the execution was requeued/failed | Any 409 is terminal claim-loss: the worker kills the run immediately (only 5xx/network errors are retried). Persistent storms mean runs are dying — check tailnet, then rerun the failed jobs per existing semantics |
 | Result upload 409 (`execution is not claimed by this worker`) | Same lease expiry as above, discovered at report time | Rerun the job; if frequent, raise `claim_timeout_seconds` or investigate tailnet stability |
 | Gateway 502 | 中台 unreachable from the laptop (VPN dropped, SSID/network change) | Restore the laptop's company network path; workers' pi runs fail fast and retry with backoff |
 | pi "model call failed" on workers | pi provider `base_url` wrong on the device | Re-check §5 step 3: must be `http://<laptop-tailnet-ip>:8788/v1` |
