@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import threading
 from pathlib import Path
 
 import pytest
@@ -334,3 +335,46 @@ def test_register_worker_id_mismatch_returns_400(rig):
     )
     assert resp.status_code == 400
     assert resp.json()["detail"] == "worker id mismatch"
+
+
+def _wait_and_read_archive(
+    broker: RemoteExecutionBroker,
+    execution_id: str,
+    archives: list[bytes],
+    errors: list[BaseException],
+) -> None:
+    try:
+        outcome = broker.wait_result(execution_id)
+        # Executor-equivalent: open the archive the moment the outcome is
+        # visible; a missing file here means the race regressed.
+        archives.append((broker.bundle_dir / outcome.result_archive_name).read_bytes())
+    except BaseException as exc:  # surfaced via assertion in the test body
+        errors.append(exc)
+
+
+def test_report_publishes_archive_before_outcome(rig):
+    """A waiter must find the archive durable at its final name the instant
+    wait_result returns — the outcome is never published before the rename."""
+    client, broker = rig
+    meta = {"status": "completed", "exit_code": 0}
+    for i in range(25):
+        execution_id = f"e{i}"
+        _submit(broker, execution_id)
+        _claim(client)
+        content = f"archive-bytes-{i}".encode()
+        errors: list[BaseException] = []
+        archives: list[bytes] = []
+        waiter = threading.Thread(
+            target=_wait_and_read_archive, args=(broker, execution_id, archives, errors)
+        )
+        waiter.start()
+        resp = client.post(
+            f"/api/remote/executions/{execution_id}/result",
+            headers={**HEADERS, "X-Remote-Result": json.dumps(meta)},
+            content=content,
+        )
+        assert resp.status_code == 204
+        waiter.join(timeout=5)
+        assert not waiter.is_alive()
+        assert errors == []
+        assert archives == [content]
