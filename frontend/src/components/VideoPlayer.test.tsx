@@ -1,24 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, within, fireEvent } from '@testing-library/react'
 import { VideoPlayer } from './VideoPlayer'
-import type { VideoArtifacts, VideoItem } from '../types'
-
-const video: VideoItem = {
-  id: 'v1',
-  title: 'Test',
-  content_type: 'knowledge',
-  status: 'queued',
-  source_url: '',
-  external_id: '',
-  knowledge_code: '',
-  question_id: '',
-  source_uuid: '',
-  current_phase: 'download',
-  error_message: '',
-  storage_dir: '',
-  duration: 0,
-  packed: false,
-}
+import type { VideoArtifacts } from '../types'
 
 const artifacts: VideoArtifacts = {
   subtitles: [],
@@ -31,16 +14,13 @@ const artifacts: VideoArtifacts = {
 
 describe('VideoPlayer', () => {
   it('renders empty state when no video URL', () => {
-    render(
-      <VideoPlayer video={video} artifacts={artifacts} onTimeUpdate={vi.fn()} />
-    )
+    render(<VideoPlayer artifacts={artifacts} onTimeUpdate={vi.fn()} />)
     expect(screen.getByText('视频文件未下载')).toBeInTheDocument()
   })
 
   it('renders an active interaction inside the player wrapper', () => {
     render(
       <VideoPlayer
-        video={video}
         src="/api/jobs/video-v1/video/source"
         artifacts={artifacts}
         onTimeUpdate={vi.fn()}
@@ -72,7 +52,6 @@ describe('VideoPlayer', () => {
 
     render(
       <VideoPlayer
-        video={video}
         src="/api/jobs/video-v1/video/source"
         artifacts={subtitleArtifacts}
         onTimeUpdate={vi.fn()}
@@ -96,7 +75,6 @@ describe('VideoPlayer', () => {
 
     render(
       <VideoPlayer
-        video={video}
         src="/api/jobs/video-v1/video/source"
         artifacts={artifacts}
         onTimeUpdate={vi.fn()}

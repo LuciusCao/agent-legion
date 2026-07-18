@@ -46,13 +46,12 @@ def test_no_import_of_retired_worker_modules():
     assert not offenders, "legacy worker imports resurrected:\n" + "\n".join(offenders)
 
 
-# TODO(Task 5): uncomment once handwritten VideoItem references are removed.
-# def test_frontend_has_no_handwritten_video_item_type():
-#     offenders: list[str] = []
-#     for path in sorted((ROOT / "frontend" / "src").rglob("*")):
-#         if path.suffix not in {".ts", ".tsx"}:
-#             continue
-#         text = path.read_text(encoding="utf-8")
-#         if "VideoItem" in text:
-#             offenders.append(str(path.relative_to(ROOT)))
-#     assert not offenders, "handwritten VideoItem references remain:\n" + "\n".join(offenders)
+def test_frontend_has_no_handwritten_video_item_type():
+    offenders: list[str] = []
+    for path in sorted((ROOT / "frontend" / "src").rglob("*")):
+        if path.suffix not in {".ts", ".tsx"}:
+            continue
+        text = path.read_text(encoding="utf-8")
+        if "VideoItem" in text:
+            offenders.append(str(path.relative_to(ROOT)))
+    assert not offenders, "handwritten VideoItem references remain:\n" + "\n".join(offenders)

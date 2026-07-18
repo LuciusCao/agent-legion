@@ -1,13 +1,4 @@
 export {
-  computeProgress,
-  getPhases,
-  getSharedPhases,
-  canRerunFrom,
-  canRerunFromFailedPhase,
-  canContinueTo,
-  canRerunTo,
-} from './lib/phases'
-export {
   parseResourceIds,
   parseResourceInputs,
   getInteractionQuestion,

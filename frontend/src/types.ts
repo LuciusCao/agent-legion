@@ -13,25 +13,6 @@ export type InteractionStats = {
   total: number
 }
 
-export type VideoItem = {
-  id: string
-  title: string
-  source_url: string
-  content_type: ContentType
-  external_id: string
-  knowledge_code: string
-  question_id: string
-  source_uuid: string
-  status: string
-  current_phase: string
-  error_message: string
-  storage_dir: string
-  duration: number
-  packed: boolean
-  interaction_stats?: Record<string, InteractionStats>
-  interaction_review_status?: 'all_passed' | 'partial' | 'all_failed'
-}
-
 /**
  * Agent status as pushed over the /api/agents WebSocket.
  *
@@ -84,55 +65,6 @@ export type VideoArtifacts = {
   metadata: Record<string, unknown> | null
   review: Record<string, unknown> | null
   checklist: Record<string, unknown> | null
-}
-
-export type AddResult = {
-  external_id: string
-  content_type: ContentType
-  status: string
-  message: string
-  video?: VideoItem
-}
-
-export type BatchResult = {
-  video_id: string
-  status: string
-  phase?: string
-  message: string
-}
-
-export type RunToResult = {
-  video_id: string
-  status: string
-  phase: string
-  message: string
-}
-
-export type PhaseRun = {
-  id: number
-  video_id: string
-  phase_key: string
-  status: string
-  started_at: string
-  finished_at: string | null
-  command_json: string
-  exit_code: number | null
-  log_path: string
-  error_message: string
-  agent_id?: string
-  agent_session_id?: string
-}
-
-export type TranscriptionRun = {
-  id: number
-  video_id: string
-  provider: string
-  status: string
-  started_at: string
-  finished_at: string | null
-  srt_entry_count: number
-  validation_summary: string
-  fallback_reason: string
 }
 
 import type {

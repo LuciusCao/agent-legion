@@ -2,11 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { fetchJobVideoDetail } from '../videoApi'
 import type { VideoJobDetailResponse } from '../videoApi'
 import type {
-  ContentType,
   InteractionNode,
   InteractionOption,
   VideoArtifacts,
-  VideoItem,
 } from '../types'
 import { VideoPlayer } from './VideoPlayer'
 import { TimelineStrip } from './TimelineStrip'
@@ -52,29 +50,6 @@ function toInteractions(
     answer: Array.isArray(n.answer) ? (n.answer as string[]) : undefined,
     grading_mode: n.grading_mode != null ? String(n.grading_mode) : undefined,
   }))
-}
-
-function buildVideoItem(data: VideoJobDetailResponse): VideoItem {
-  const duration =
-    typeof data.artifacts.metadata?.duration === 'number'
-      ? data.artifacts.metadata.duration
-      : 0
-  return {
-    id: data.input.legacy_video_id,
-    title: data.input.title,
-    source_url: data.input.source_url,
-    content_type: data.input.content_type as ContentType,
-    external_id: data.input.external_id,
-    knowledge_code: '',
-    question_id: '',
-    source_uuid: data.input.source_uuid,
-    status: 'completed',
-    current_phase: '',
-    error_message: '',
-    storage_dir: data.artifacts.video_url ? 'job-video' : '',
-    duration,
-    packed: false,
-  }
 }
 
 function getInteractionTriggerTime(node: InteractionNode): number {
@@ -129,7 +104,6 @@ export function VideoContentPanel({
     }
   }, [jobId, refreshKey])
 
-  const video = useMemo(() => (data ? buildVideoItem(data) : null), [data])
   const artifacts = useMemo(() => (data ? buildArtifacts(data) : null), [data])
 
   const playableUrl = useMemo(() => {
@@ -232,7 +206,7 @@ export function VideoContentPanel({
     return <p className={styles.error}>{error}</p>
   }
 
-  if (!data || !video || !artifacts) {
+  if (!data || !artifacts) {
     return <p className={styles.empty}>视频内容尚未生成</p>
   }
 
@@ -240,7 +214,6 @@ export function VideoContentPanel({
     <div className={styles.panel} data-testid="video-content-panel">
       <section className={styles.playerSection}>
         <VideoPlayer
-          video={video}
           artifacts={artifacts}
           src={playableUrl}
           onTimeUpdate={handleTimeUpdate}
