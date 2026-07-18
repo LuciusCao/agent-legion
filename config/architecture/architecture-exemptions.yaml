@@ -92,3 +92,11 @@ exemptions:
     reports; no response body contract exists to model.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6
+- check: architecture.file_budget
+  path: server/app/executors/remote_broker.py
+  reason: Task 2 of the runner-audit plan adds RemoteOutcome.worker_id and the broker-side
+    provenance injection in _finish; the worker-registry section will be split into a
+    separate module once the feature is complete.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-runner-audit.md#task-2
+  ceiling: 259
