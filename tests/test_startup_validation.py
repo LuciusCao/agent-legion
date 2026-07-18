@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from server.app.executors.config import RemoteCapabilityConfig, RemoteExecutorConfig
 from server.app.executors.runtime_config import StartupValidationError, validate_runtime
 from server.app.settings import load_settings, validate_settings
 
@@ -381,3 +382,46 @@ def test_validate_runtime_can_be_called_directly(tmp_path, monkeypatch):
 
     # Should not raise when all configured runtimes are usable.
     validate_runtime(settings.executor_runtime, settings.config)
+
+
+_REMOTE_DEFINITIONS = {
+    "remote": RemoteExecutorConfig(
+        kind="remote",
+        global_capacity=4,
+        capabilities={"cap_a": RemoteCapabilityConfig(skill="wf/extract")},
+    )
+}
+
+
+def _runtime_with_worker_token(tmp_path: Path, worker_token: str):
+    """Minimal settings whose other validate_runtime branches cannot fire."""
+    binary = _make_executable(tmp_path / "whisper-cli")
+    model = tmp_path / "model.bin"
+    model.write_text("model", encoding="utf-8")
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        _minimal_config().format(binary=binary, model=model, cwd=tmp_path),
+        encoding="utf-8",
+    )
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+    remote = settings.executor_runtime.remote.model_copy(update={"worker_token": worker_token})
+    runtime = settings.executor_runtime.model_copy(update={"remote": remote})
+    return runtime, settings.config
+
+
+def test_remote_executor_requires_worker_token(tmp_path, monkeypatch):
+    runtime, config = _runtime_with_worker_token(tmp_path, "")
+
+    with pytest.raises(StartupValidationError) as exc_info:
+        validate_runtime(runtime, config, _REMOTE_DEFINITIONS)
+
+    assert (
+        "remote.worker_token",
+        "required when a remote executor is defined (set VIDEO_HIVE_REMOTE_WORKER_TOKEN)",
+    ) in exc_info.value.fields
+
+
+def test_remote_executor_with_worker_token_passes(tmp_path, monkeypatch):
+    runtime, config = _runtime_with_worker_token(tmp_path, "worker-token")
+
+    validate_runtime(runtime, config, _REMOTE_DEFINITIONS)

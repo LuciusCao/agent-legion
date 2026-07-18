@@ -77,6 +77,7 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
     "VIDEO_HIVE_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
     "VIDEO_HIVE_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
+    "VIDEO_HIVE_REMOTE_WORKER_TOKEN": (("remote", "worker_token"), _str_parser),
 }
 
 
@@ -171,4 +172,4 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
 
 def validate_settings(settings: Settings) -> None:
     """Validate runtime dependencies after settings are constructed."""
-    validate_runtime(settings.executor_runtime, settings.config)
+    validate_runtime(settings.executor_runtime, settings.config, settings.executor_definitions)
