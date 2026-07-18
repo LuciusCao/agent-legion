@@ -251,7 +251,9 @@ def backfill_missing_token_usage(conn: sqlite3.Connection, data_dir: Path, limit
         (max(1, limit),),
     ).fetchall()
 
-    persisted = 0
+    # Parse phase first (pure file reads, no writes) so that the implicit write
+    # transaction opened by the first persist is not held while parsing files.
+    summaries: list[TokenUsageSummary] = []
     for row in rows:
         try:
             run_dir = resolve_data_path(row["run_dir"], data_dir, allow_missing=False)
@@ -262,14 +264,17 @@ def backfill_missing_token_usage(conn: sqlite3.Connection, data_dir: Path, limit
         summary = parse_run_usage(run_dir, node_run)
         if summary is None:
             continue
-        summary = TokenUsageSummary(
-            **{**summary.__dict__, "workspace_id": str(row["workspace_id"])}
+        summaries.append(
+            TokenUsageSummary(**{**summary.__dict__, "workspace_id": str(row["workspace_id"])})
         )
+
+    persisted = 0
+    for summary in summaries:
         try:
             persist_node_run_usage(conn, summary)
             persisted += 1
         except sqlite3.Error:
-            logger.exception("Failed to persist token usage for run %s", row["node_run_id"])
+            logger.exception("Failed to persist token usage for run %s", summary.node_run_id)
 
     return persisted
 

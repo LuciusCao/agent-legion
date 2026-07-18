@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from server.app.services.job_run_dir_lookup import (
-    build_job_dir_index,
-    derive_run_dir_from_index,
+from server.app.services.cleanup_sweep import (
+    cleanup_extra_runs_per_node,
+    sweep_expired_node_runs,
 )
-from server.app.services.run_dir_cleanup import cleanup_extra_runs_per_node, remove_path
-from server.app.storage_paths import resolve_data_path
+from server.app.services.job_run_dir_lookup import build_job_dir_index
+
+if TYPE_CHECKING:
+    from server.app.jobs import JobQueries
 
 logger = logging.getLogger(__name__)
 
@@ -32,8 +34,21 @@ class CleanupConfig:
         )
 
 
+def _expired_job_ids(db: JobQueries, cutoff: str) -> set[str]:
+    """Return job ids with terminally finished node runs older than ``cutoff``."""
+    with db._connect_read() as conn:
+        rows = conn.execute(
+            """
+            select distinct job_id from node_runs
+            where status in ('completed', 'failed') and finished_at != '' and finished_at < ?
+            """,
+            (cutoff,),
+        )
+        return {row["job_id"] for row in rows}
+
+
 def cleanup_old_logs(
-    conn: sqlite3.Connection,
+    db: JobQueries,
     data_dir: Path,
     config: CleanupConfig,
     now: datetime | None = None,
@@ -44,49 +59,23 @@ def cleanup_old_logs(
     node with more than one run directory on disk will have all but the newest
     run directory removed. This prevents retried Pi nodes from accumulating
     unbounded ``events.jsonl`` files regardless of the retention window.
+
+    Filesystem deletions never happen inside a database transaction: expired
+    rows are paged in bounded chunks over short-lived read connections and
+    the accompanying ``node_runs`` updates are flushed in short write
+    transactions (see ``cleanup_sweep``).
     """
     now = now or datetime.now(UTC)
-    logs_removed = 0
     run_dirs_removed = 0
 
     if config.keep_only_latest_run_per_node:
-        run_dirs_removed += cleanup_extra_runs_per_node(conn, data_dir)
+        run_dirs_removed += cleanup_extra_runs_per_node(db, data_dir)
 
     log_cutoff = now - timedelta(days=config.log_retention_days)
     run_dir_cutoff = now - timedelta(days=config.run_dir_retention_days)
-    rows = conn.execute(
-        """
-        select id, job_id, node_key, log_path, run_dir, finished_at
-        from node_runs
-        where status in ('completed', 'failed') and finished_at != ''
-        """
-    ).fetchall()
-    job_dir_index = build_job_dir_index(data_dir / "jobs", {row["job_id"] for row in rows})
-    for row in rows:
-        finished_at = row["finished_at"]
-        try:
-            finished = datetime.fromisoformat(finished_at)
-            if finished.tzinfo is None:
-                finished = finished.replace(tzinfo=UTC)
-        except ValueError:
-            continue
-        log_path_str = row["log_path"]
-        if log_path_str and finished <= log_cutoff:
-            try:
-                remove_path(resolve_data_path(log_path_str, data_dir, allow_missing=True))
-                logs_removed += 1
-            except Exception as exc:
-                logger.warning("Failed to remove log %s: %s", log_path_str, exc)
-        run_dir_str = row["run_dir"]
-        if finished <= run_dir_cutoff:
-            if not run_dir_str:
-                run_dir = derive_run_dir_from_index(row["job_id"], row["node_key"], job_dir_index)
-                if run_dir is not None:
-                    run_dir_str = str(run_dir)
-            if run_dir_str:
-                try:
-                    remove_path(resolve_data_path(run_dir_str, data_dir, allow_missing=True))
-                    run_dirs_removed += 1
-                except Exception as exc:
-                    logger.warning("Failed to remove run_dir %s: %s", run_dir_str, exc)
-    return logs_removed, run_dirs_removed
+    cutoff = max(log_cutoff, run_dir_cutoff).isoformat()
+    job_dir_index = build_job_dir_index(data_dir / "jobs", _expired_job_ids(db, cutoff))
+    logs_removed, swept_run_dirs = sweep_expired_node_runs(
+        db, data_dir, log_cutoff, run_dir_cutoff, job_dir_index
+    )
+    return logs_removed, run_dirs_removed + swept_run_dirs

@@ -52,7 +52,7 @@ def test_inventory_includes_replacement_for_every_legacy_path() -> None:
 REPLACEMENT_TOKENS: dict[str, list[tuple[str, str]]] = {
     "workflow runner": [
         ("server/app/workflows/schema.py", "capability"),
-        ("server/app/workflow_worker_thread.py", "workspace_node_bindings"),
+        ("server/app/workflow_worker_schedule.py", "workspace_node_bindings"),
     ],
     "workflow concurrency": [
         ("server/app/db/migrations/v001_executor_core.py", "workspace_executor_allocations"),

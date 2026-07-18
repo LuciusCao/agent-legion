@@ -170,6 +170,11 @@ def init_db(path: Path) -> None:
             create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
             create index if not exists idx_node_runs_job_id on node_runs(job_id);
             create index if not exists idx_node_runs_status_finished_at on node_runs(status, finished_at);
+            create index if not exists idx_jobs_status on jobs(status);
+            create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
+            create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
+            create index if not exists idx_node_runs_run_dir on node_runs(run_dir);
+            create index if not exists idx_node_run_token_usage_job_id on node_run_token_usage(job_id);
             """,
         )
     finally:

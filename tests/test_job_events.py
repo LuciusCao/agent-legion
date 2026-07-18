@@ -274,7 +274,7 @@ def test_recover_orphaned_running_jobs_broadcasts_job_updated(manager, tmp_path)
 
 
 def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
-    from server.app import executors
+    from server.app.executors import _lease_write_paths
 
     lease_repo = ExecutorLeaseRepository(
         tmp_path / "leases.sqlite",
@@ -290,7 +290,7 @@ def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
         conn.close()
 
     monkeypatch.setattr(
-        executors.leases,
+        _lease_write_paths,
         "finish_lease",
         lambda _conn, _lease_id, _result, _data_dir=None: (_ for _ in ()).throw(
             RuntimeError("simulated failure")

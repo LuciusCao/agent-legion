@@ -3,37 +3,26 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, wait
-from dataclasses import asdict
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import Any
 
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import (
     ClaimedExecution,
-    ConfigurationFailureRequest,
     ExecutionContext,
     ExecutionResult,
-    LeaseClaimRequest,
 )
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.runtime import ExecutionRuntime
+from server.app.executors.scheduling.capacity import load_capacity_snapshot
 from server.app.executors.scheduling.fair import WorkspaceRoundRobin
 from server.app.jobs import JobQueries
-from server.app.jobs.queries.workspace_node_bindings import (
-    get_binding,
-    get_local_node_limit,
-    has_local_node_limit,
-)
-from server.app.services.workflow_revision_format import definition_from_job_snapshot
 from server.app.settings import Settings
-from server.app.storage_paths import resolve_job_dir
 from server.app.workflow_worker_agent_status import agent_status_scope
 from server.app.workflow_worker_maintenance import WorkflowMaintenance
-from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
-from server.app.workflows.execution_control import allowed_nodes
+from server.app.workflow_worker_schedule import schedule_workspace
+from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import list_registered_workflows
-from server.app.workflows.scheduler import _node_statuses, evaluate_branches, find_ready_nodes
 
 logger = logging.getLogger(__name__)
 
@@ -75,6 +64,9 @@ class WorkflowWorkerThread:
                 capacity = self.registry.global_capacity(executor_id) or 1
                 self._pools[executor_id] = ThreadPoolExecutor(max_workers=capacity)
 
+    def _executor_capacities(self) -> dict[str, int]:
+        return {eid: self.registry.global_capacity(eid) or 0 for eid in self.registry.definitions()}
+
     def start(self) -> None:
         self._definitions = list_registered_workflows(self.settings.root_dir)
         self._ensure_pools()
@@ -114,19 +106,28 @@ class WorkflowWorkerThread:
         if recovered:
             logger.warning("recovered orphaned running jobs: %s", ", ".join(recovered))
 
+        # Cheap capacity gate: when every executor is saturated, skip the
+        # expensive job scan for this tick (maintenance above still runs).
+        snapshot = load_capacity_snapshot(self.leases.path, self._executor_capacities())
+        if not snapshot.has_any_capacity():
+            return False
+
+        # One job scan per pass; rounds repeat over the cached job lists so a
+        # single pass can claim multiple nodes while the workspace round-robin
+        # order keeps claims fair. The snapshot is refreshed on the next poll.
         claimed_any = False
-        while True:
-            runnable_workspaces, jobs_by_workspace = self._runnable_workspaces()
-            ordered_workspace_ids = self._round_robin.order(runnable_workspaces)
+        runnable_workspaces, jobs_by_workspace = self._runnable_workspaces()
+        while snapshot.has_any_capacity():
             round_claimed = False
-            for workspace_id in ordered_workspace_ids:
+            for workspace_id in self._round_robin.order(runnable_workspaces):
                 if (
                     self.workspace_worker_control is not None
                     and self.workspace_worker_control.is_paused(workspace_id)
                 ):
                     continue
-                claimed = self._schedule_workspace(workspace_id, jobs_by_workspace[workspace_id])
-                if claimed:
+                if schedule_workspace(
+                    self, workspace_id, jobs_by_workspace[workspace_id], snapshot
+                ):
                     round_claimed = True
                     claimed_any = True
                     self._round_robin.complete_pass(workspace_id)
@@ -153,171 +154,6 @@ class WorkflowWorkerThread:
                     jobs_by_workspace[workspace_id] = []
                 jobs_by_workspace[workspace_id].append((definition, job))
         return workspace_ids, jobs_by_workspace
-
-    def _schedule_workspace(
-        self,
-        workspace_id: str,
-        jobs: list[tuple[WorkflowDefinition, dict[str, Any]]],
-    ) -> bool:
-        workspace = self.job_db.get_workspace(workspace_id)
-        if workspace is None:
-            return False
-
-        for definition, job in jobs:
-            if job.get("status") in ("completed", "failed", "paused"):
-                continue
-            if job.get("execution_paused"):
-                continue
-            snapshot_definition = definition_from_job_snapshot(job)
-            definition_to_run = snapshot_definition or definition
-            job_dir = resolve_job_dir(job, self.settings.jobs_dir)
-            statuses = _node_statuses(self.job_db, job["id"])
-            branch_evaluation = evaluate_branches(definition_to_run, statuses, job_dir)
-            self.job_db.mark_nodes_not_applicable(
-                job["id"],
-                sorted(branch_evaluation.not_applicable),
-                "unselected workflow branch",
-            )
-            if branch_evaluation.not_applicable:
-                statuses = _node_statuses(self.job_db, job["id"])
-            control_snapshot = {
-                "execution_mode": job.get("execution_mode", "full"),
-                "target_node_key": job.get("target_node_key"),
-                "execution_paused": bool(job.get("execution_paused")),
-                "pause_reason": job.get("pause_reason", ""),
-            }
-            try:
-                allowed = allowed_nodes(definition_to_run, control_snapshot)
-            except Exception:
-                logger.exception("failed to compute allowed nodes for job %s", job["id"])
-                continue
-            ready_nodes = find_ready_nodes(definition_to_run, statuses, job_dir)
-            for node in ready_nodes:
-                if node.key not in allowed:
-                    continue
-                if self._try_claim_and_submit(
-                    workspace, definition_to_run, job, node, job_dir, control_snapshot, allowed
-                ):
-                    return True
-        return False
-
-    def _try_claim_and_submit(
-        self,
-        workspace: dict[str, Any],
-        definition: WorkflowDefinition,
-        job: dict[str, Any],
-        node: WorkflowNode,
-        job_dir: Path,
-        control_snapshot: dict[str, Any] | None = None,
-        allowed_node_keys: frozenset[str] | None = None,
-    ) -> bool:
-        workspace_id = workspace["id"]
-        workflow_key = definition.key
-        node_key = node.key
-        log_path = self.settings.logs_dir.resolve() / "jobs" / f"{job['id']}-{node_key}.log"
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-
-        with self.job_db._connect_read() as conn:
-            binding = get_binding(conn, workspace_id, workflow_key, node_key)
-            if binding is None:
-                self.leases.fail_without_lease(
-                    ConfigurationFailureRequest(
-                        workspace_id=workspace_id,
-                        job_id=job["id"],
-                        workflow_key=workflow_key,
-                        node_key=node_key,
-                        capability=node.capability,
-                        log_path=str(log_path),
-                    ),
-                    "No Executor binding",
-                )
-                return True
-
-            executor_id = binding["executor_id"]
-            try:
-                executor = self.registry.require(executor_id, node.capability)
-            except Exception as exc:
-                self.leases.fail_without_lease(
-                    ConfigurationFailureRequest(
-                        workspace_id=workspace_id,
-                        job_id=job["id"],
-                        workflow_key=workflow_key,
-                        node_key=node_key,
-                        capability=node.capability,
-                        log_path=str(log_path),
-                    ),
-                    str(exc),
-                )
-                return True
-
-            local_node_limit: int | None = None
-            if executor.kind == "local":
-                local_node_limit = get_local_node_limit(conn, workspace_id, workflow_key, node_key)
-            elif has_local_node_limit(conn, workspace_id, workflow_key, node_key):
-                self.leases.fail_without_lease(
-                    ConfigurationFailureRequest(
-                        workspace_id=workspace_id,
-                        job_id=job["id"],
-                        workflow_key=workflow_key,
-                        node_key=node_key,
-                        capability=node.capability,
-                        log_path=str(log_path),
-                    ),
-                    "Node limits are not supported for agent executors",
-                )
-                return True
-
-        global_capacity = self.registry.global_capacity(executor_id)
-        if global_capacity is None:
-            return False
-
-        claim = self.leases.try_claim(
-            LeaseClaimRequest(
-                executor_id=executor_id,
-                global_capacity=global_capacity,
-                workspace_id=workspace_id,
-                job_id=job["id"],
-                workflow_key=workflow_key,
-                node_key=node_key,
-                capability=node.capability,
-                local_node_limit=local_node_limit,
-                lease_ttl_seconds=self.runtime.lease_ttl_seconds,
-                log_path=str(log_path),
-                execution_mode=control_snapshot.get("execution_mode", "full")
-                if control_snapshot
-                else "full",
-                target_node_key=control_snapshot.get("target_node_key")
-                if control_snapshot
-                else None,
-                allowed_node_keys=tuple(sorted(allowed_node_keys)) if allowed_node_keys else (),
-            )
-        )
-        if claim is None:
-            return False
-
-        context = ExecutionContext(
-            execution_id=claim.execution_id,
-            lease_id=claim.lease_id,
-            node_run_id=claim.node_run_id,
-            executor_id=claim.executor_id,
-            workspace_id=claim.workspace_id,
-            job_id=claim.job_id,
-            workflow_key=claim.workflow_key,
-            node_key=claim.node_key,
-            capability=claim.capability,
-            workspace=dict(workspace),
-            job=dict(job),
-            job_dir=job_dir,
-            log_path=log_path,
-            inputs=tuple(node.inputs),
-            expected_outputs=tuple(node.outputs),
-            runtime={"node_execution": asdict(node.execution)},
-        )
-
-        pool = self._pools[executor_id]
-        future = pool.submit(self._run_claim, claim, context)
-        self._futures[claim.execution_id] = future
-        return True
 
     def _run_claim(self, claim: ClaimedExecution, context: ExecutionContext) -> ExecutionResult:
         with agent_status_scope(self.agent_manager, self.registry, claim, context):
