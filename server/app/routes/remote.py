@@ -4,6 +4,7 @@ import dataclasses
 import json
 import re
 from typing import Any
+from uuid import uuid4
 
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
@@ -120,10 +121,9 @@ def create_remote_router(broker: RemoteExecutionBroker, settings: Settings) -> A
         body = await request.body()
         if len(body) > remote_config.max_archive_bytes:
             raise HTTPException(status_code=413, detail="result archive too large")
-        archive_name = f"{execution_id}.result.tar.gz"
-        staging_path = broker.bundle_dir / f"{archive_name}.uploading"
+        # Unique staging name: concurrent duplicate reports cannot clobber each other.
+        staging_path = broker.bundle_dir / f"{execution_id}.{uuid4().hex}.result.tar.gz.uploading"
         broker.bundle_dir.mkdir(parents=True, exist_ok=True)
-        # Stage first so a duplicate/late report cannot clobber a committed archive.
         staging_path.write_bytes(body)
         outcome = RemoteOutcome(
             status=status,
@@ -131,12 +131,12 @@ def create_remote_router(broker: RemoteExecutionBroker, settings: Settings) -> A
             error_message=str(meta.get("error_message", "")),
             command=tuple(str(part) for part in meta.get("command", [])),
             skill_version=str(meta.get("skill_version", "")),
-            result_archive_name=archive_name,
+            result_archive_name=f"{execution_id}.result.tar.gz",
         )
-        if not broker.complete(execution_id, worker_id, outcome):
+        # Broker renames and publishes in one critical section; waiters never race the bytes.
+        if not broker.complete_with_archive(execution_id, worker_id, outcome, staging_path):
             staging_path.unlink(missing_ok=True)
             raise HTTPException(status_code=409, detail="execution is not claimed by this worker")
-        staging_path.replace(broker.bundle_dir / archive_name)
         return Response(status_code=204)
 
     return router

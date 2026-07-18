@@ -95,8 +95,7 @@ class RemoteExecutionBroker:
         with self._lock:
             entry = self._entries[execution_id]
         while not entry.done_event.wait(timeout=poll_seconds):
-            # Sweep here too, so a lost worker fails the execution even when no
-            # other worker is polling to trigger the lazy sweep.
+            # Sweep here too, so a lost worker fails even when nobody else polls.
             with self._lock:
                 self._sweep_locked()
         assert entry.outcome is not None
@@ -107,14 +106,10 @@ class RemoteExecutionBroker:
             entry = self._entries.get(execution_id)
             if entry is None or entry.state == "done":
                 return
-            self._finish(
-                entry,
-                RemoteOutcome(
-                    status="cancelled",
-                    exit_code=-1,
-                    error_message="execution was cancelled",
-                ),
+            outcome = RemoteOutcome(
+                status="cancelled", exit_code=-1, error_message="execution was cancelled"
             )
+            self._finish(entry, outcome)
 
     # ---- worker-facing (called from routes) ----
 
@@ -151,6 +146,18 @@ class RemoteExecutionBroker:
             entry = self._entries.get(execution_id)
             if entry is None or entry.state != "claimed" or entry.worker_id != worker_id:
                 return False
+            self._finish(entry, outcome)
+            return True
+
+    def complete_with_archive(
+        self, execution_id: str, worker_id: str, outcome: RemoteOutcome, staging_path: Path
+    ) -> bool:
+        """Validate the claim, publish the archive at its final name, then finish — atomically."""
+        with self._lock:
+            entry = self._entries.get(execution_id)
+            if entry is None or entry.state != "claimed" or entry.worker_id != worker_id:
+                return False
+            staging_path.replace(self.bundle_dir / outcome.result_archive_name)
             self._finish(entry, outcome)
             return True
 
