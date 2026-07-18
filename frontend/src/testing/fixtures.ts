@@ -1,6 +1,6 @@
 import { vi } from 'vitest'
 import type { UiState } from '../stores/uiStore'
-import type { JobRecord, VideoItem } from '../types'
+import type { JobRecord } from '../types'
 
 export function createMockUiState(partial: Partial<UiState> = {}): UiState {
   return {
@@ -25,25 +25,6 @@ export function createMockUiState(partial: Partial<UiState> = {}): UiState {
     showToast: vi.fn(),
     clearToast: vi.fn(),
     ...partial,
-  }
-}
-export function makeVideo(overrides: Partial<VideoItem> = {}): VideoItem {
-  return {
-    id: 'v1',
-    title: 'Test Video',
-    source_url: '',
-    content_type: 'knowledge',
-    external_id: '',
-    knowledge_code: '',
-    question_id: '',
-    source_uuid: '',
-    status: 'queued',
-    current_phase: 'download',
-    error_message: '',
-    storage_dir: '',
-    duration: 0,
-    packed: false,
-    ...overrides,
   }
 }
 export function makeJob(overrides: Partial<JobRecord> = {}): JobRecord {

@@ -10,17 +10,21 @@ import {
 } from '@mui/material'
 import { useUiStore } from '../stores/uiStore'
 import { api, fetchWorkflowDefinition } from '../api'
-import { parseResourceInputs } from '../helpers'
 import type {
-  AddResult,
   ContentType,
   WorkflowDefinitionRecord,
   WorkflowIntakeModeRecord,
-  VideoItem,
   WorkspaceRecord,
   WorkspaceResponse,
 } from '../types'
 import styles from './AddDialog.module.css'
+
+type AddResult = {
+  external_id: string
+  content_type: ContentType
+  status: string
+  message: string
+}
 
 type AddDialogProps = {
   open: boolean
@@ -127,75 +131,47 @@ export function AddDialog({
       const message = err instanceof Error ? err.message : action
       showToast(`${action}失败: ${message}`, 'error')
     }
-    if (context === 'video') {
-      const items = parseResourceInputs(input)
-      if (items.length === 0) return
-      setIsSubmitting(true)
-      try {
-        const response = await api<{
-          videos: VideoItem[]
-          results: AddResult[]
-        }>('/api/videos', {
-          method: 'POST',
-          body: JSON.stringify({
-            items: items.map((item) => ({
-              content_type: addContentType,
-              external_id: item.external_id,
-              source_uuid: item.source_uuid,
-            })),
-          }),
-        })
-        setResults(response.results)
-        setInputValue('')
-      } catch (err) {
-        reportError(err, '添加资源')
-      } finally {
-        setIsSubmitting(false)
-      }
-    } else {
-      const values = input
-        .split('\n')
-        .map((line) => line.trim())
-        .filter(Boolean)
-      if (values.length === 0 || !workspaceId || !selectedModeKey) return
-      const selectedMode = modes.find((m) => m.key === selectedModeKey)
-      if (!selectedMode) return
-      setIsSubmitting(true)
-      try {
-        const response = await api<{
-          batch: Record<string, unknown>
-          created_count: number
-          jobs: Array<{ source_id: string; title: string; status: string }>
-        }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/job-batches`, {
-          method: 'POST',
-          body: JSON.stringify({
-            workflow_key: workspace?.default_workflow_key,
-            entity: workspace?.default_entity || 'question',
-            source_kind: selectedMode.key,
-            [selectedMode.input_field]: values,
-            ...(selectedMode.input_field === 'question_ids'
-              ? { knowledge_codes: [] }
-              : { question_ids: [] }),
-          }),
-        })
-        const mappedResults: AddResult[] = response.jobs.map((job) => ({
-          external_id: job.source_id,
-          content_type:
-            (workspace?.default_entity as ContentType) || 'question',
-          status: job.status || 'created',
-          message: job.title,
-        }))
-        setResults(mappedResults)
-        setInputValue('')
-      } catch (err) {
-        reportError(err, '创建任务')
-      } finally {
-        setIsSubmitting(false)
-      }
+    if (context === 'video') return
+    const values = input
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+    if (values.length === 0 || !workspaceId || !selectedModeKey) return
+    const selectedMode = modes.find((m) => m.key === selectedModeKey)
+    if (!selectedMode) return
+    setIsSubmitting(true)
+    try {
+      const response = await api<{
+        batch: Record<string, unknown>
+        created_count: number
+        jobs: Array<{ source_id: string; title: string; status: string }>
+      }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/job-batches`, {
+        method: 'POST',
+        body: JSON.stringify({
+          workflow_key: workspace?.default_workflow_key,
+          entity: workspace?.default_entity || 'question',
+          source_kind: selectedMode.key,
+          [selectedMode.input_field]: values,
+          ...(selectedMode.input_field === 'question_ids'
+            ? { knowledge_codes: [] }
+            : { question_ids: [] }),
+        }),
+      })
+      const mappedResults: AddResult[] = response.jobs.map((job) => ({
+        external_id: job.source_id,
+        content_type: (workspace?.default_entity as ContentType) || 'question',
+        status: job.status || 'created',
+        message: job.title,
+      }))
+      setResults(mappedResults)
+      setInputValue('')
+    } catch (err) {
+      reportError(err, '创建任务')
+    } finally {
+      setIsSubmitting(false)
     }
   }, [
     context,
-    addContentType,
     workspaceId,
     selectedModeKey,
     workspace,
