@@ -31,7 +31,7 @@ export interface DagGraphNode {
   status: DagNodeStatus
   created_at: string
   duration?: number
-  executorKind?: 'local' | 'pi' | 'openclaw' | null
+  executorKind?: 'local' | 'pi' | 'openclaw' | 'remote' | null
   capability?: string
   topologyBadges?: Array<'entry' | 'branch' | 'terminal'>
   terminalOutcome?: string
@@ -75,7 +75,7 @@ const nodeTypes = { dagNode: DagNodeComponent }
 type NormalizedExecutorKind = NonNullable<DagNodeData['executorKind']>
 
 function normalizeExecutorKind(
-  kind?: 'local' | 'pi' | 'openclaw' | null
+  kind?: 'local' | 'pi' | 'openclaw' | 'remote' | null
 ): DagNodeData['executorKind'] {
   if (!kind) return null
   return kind as NormalizedExecutorKind

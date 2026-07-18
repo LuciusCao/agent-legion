@@ -64,6 +64,7 @@ const mockRuns: NodeRun[] = [
     error_message: '',
     run_dir: '',
     session_dir: '',
+    runner: '',
   },
 ]
 

@@ -5,12 +5,14 @@ export const EXECUTOR_KIND_LABELS: Record<string, string> = {
   local: '本地',
   pi: 'Pi Agent',
   openclaw: 'OpenClaw Agent',
+  remote: '远程',
 }
 
 export const EXECUTOR_KIND_ICONS: Record<string, string> = {
   local: 'build_circle',
   pi: 'smart_toy',
   openclaw: 'smart_toy',
+  remote: 'cloud',
 }
 
 export function computeWaitTime(
