@@ -33,10 +33,6 @@ WHITELIST: set[str] = {
     str(ROOT / "server" / "app" / "workflows" / "loader.py"),
     # Video pipeline runner uses openclaw command template strings.
     str(ROOT / "server" / "app" / "pipeline" / "runners.py"),
-    # Video work scheduler uses 'agent' as a local work-item kind.
-    str(ROOT / "server" / "app" / "worker_scheduler.py"),
-    # Video worker thread uses 'agent' as a local work-item kind.
-    str(ROOT / "server" / "app" / "worker_thread.py"),
     # Comment-only reference to the removed table.
     str(ROOT / "server" / "app" / "services" / "workspace_executor_warnings.py"),
 }

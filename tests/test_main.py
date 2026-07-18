@@ -2,7 +2,6 @@ from fastapi.testclient import TestClient
 
 from server.app.agents import AgentStatusManager
 from server.app.executors.registry import ExecutorRegistry
-from server.app.worker_thread import WorkerThread
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from tests.helpers import setup_spa_app
 
@@ -13,15 +12,11 @@ def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, m
     calls = []
     received_registry = None
 
-    def patched_worker_start(self):
-        calls.append("worker")
-
     def patched_workflow_start(self):
         calls.append("workflow")
         nonlocal received_registry
         received_registry = self.executor_registry
 
-    monkeypatch.setattr(WorkerThread, "start", patched_worker_start)
     monkeypatch.setattr(WorkflowWorkerThread, "start", patched_workflow_start)
 
     # Keep lifespan wiring independent of real openclaw discovery.
@@ -37,7 +32,6 @@ def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, m
     with TestClient(app) as _:
         pass  # lifespan startup runs here
 
-    assert "worker" not in calls
     assert "workflow" in calls
     assert isinstance(app.state.executor_registry, ExecutorRegistry)
     assert app.state.executor_registry is received_registry
