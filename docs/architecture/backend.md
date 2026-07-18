@@ -67,7 +67,8 @@ server/app/
 ├── executors/              # Executor 配置、Runtime、租赁调度
 ├── agents.py               # Agent 发现与状态跟踪
 ├── workflow_worker_thread.py # DAG workflow worker 线程
-└── workflow_worker_schedule.py # 按 workspace 的 job 扫描与 lease 认领
+├── workflow_worker_ready.py  # 每 pass 一次的 ready 候选收集（批量状态查询）
+└── workflow_worker_schedule.py # ready 候选的 lease 认领与提交
 ```
 
 ## Data Flow

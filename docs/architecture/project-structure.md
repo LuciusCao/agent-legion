@@ -45,7 +45,8 @@ video-hive/
 │       ├── agents.py           # Agent 发现与状态跟踪
 │       ├── events.py           # SSE 事件广播
 │       ├── workflow_worker_thread.py # DAG workflow worker 线程与 poll 循环
-│       ├── workflow_worker_schedule.py # 按 workspace 的 job 扫描与 lease 认领
+│       ├── workflow_worker_ready.py  # 每 pass 一次的 ready 候选收集（批量状态查询）
+│       ├── workflow_worker_schedule.py # ready 候选的 lease 认领与提交
 │       └── worker*.py          # Worker 控制与遗留 worker 文件
 ├── frontend/
 │   ├── package.json
