@@ -534,6 +534,7 @@
     "server/app/db/migrations/v016_workflow_revisions.py": 119,
     "server/app/db/migrations/v017_job_workflow_version.py": 56,
     "server/app/db/migrations/v018_node_run_token_usage.py": 63,
+    "server/app/db/migrations/v019_remote_workers.py": 36,
     "server/app/db/notifications.py": 49,
     "server/app/db/queries/__init__.py": 27,
     "server/app/db/queries/base.py": 55,
