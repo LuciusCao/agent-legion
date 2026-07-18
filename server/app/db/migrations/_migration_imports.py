@@ -44,3 +44,4 @@ from server.app.db.migrations.v017_job_workflow_version import (
 from server.app.db.migrations.v018_node_run_token_usage import (
     MIGRATION as V018_NODE_RUN_TOKEN_USAGE,
 )
+from server.app.db.migrations.v019_remote_workers import MIGRATION as V019_REMOTE_WORKERS

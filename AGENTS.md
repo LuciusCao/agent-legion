@@ -97,4 +97,5 @@ LocalExecutor(...).execute(context)
 
 - 项目结构 / 运行细节：[README.md](README.md) / [docs/architecture/](docs/architecture/)
 - 设计规格与计划：[docs/superpowers/](docs/superpowers/)
+- 远程执行运维手册：[docs/remote-execution-runbook.md](docs/remote-execution-runbook.md)
 - 已知问题：[issues/open](issues/open) / [issues/closed](issues/closed)

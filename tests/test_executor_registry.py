@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
 
+from server.app.db.schema import init_db
 from server.app.executors.config import (
     ExecutorConfig,
     LocalCapabilityConfig,
@@ -13,6 +15,8 @@ from server.app.executors.config import (
     OpenClawExecutorConfig,
     PiCapabilityConfig,
     PiExecutorConfig,
+    RemoteCapabilityConfig,
+    RemoteExecutorConfig,
 )
 from server.app.executors.local import LocalExecutor
 from server.app.executors.openclaw import OpenClawExecutor
@@ -23,6 +27,7 @@ from server.app.executors.registry import (
     UnknownExecutorError,
     UnsupportedCapabilityError,
 )
+from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.runtime_config import (
     OpenClawRuntimeConfig,
     OpenClawSkillSafetyRuntimeConfig,
@@ -260,3 +265,39 @@ def test_registry_builds_local_executor_with_settings_and_job_db(
     assert isinstance(executor, LocalExecutor)
     assert executor.settings_config == settings_config
     assert executor.job_db is job_db
+
+
+def _remote_definitions() -> dict[str, ExecutorConfig]:
+    return {
+        "pi-remote": RemoteExecutorConfig(
+            kind="remote",
+            global_capacity=2,
+            capabilities={
+                "review_keywords": RemoteCapabilityConfig(
+                    skill="question_comprehension_info/generate_key_info"
+                ),
+            },
+        ),
+    }
+
+
+def test_registry_rejects_remote_executor_without_broker(
+    runtime_dependencies: RuntimeDependencies,
+) -> None:
+    with pytest.raises(ExecutorRegistryError, match="requires a remote execution broker"):
+        ExecutorRegistry.build(_remote_definitions(), runtime_dependencies)
+
+
+def test_registry_builds_remote_executor_with_broker(
+    runtime_dependencies: RuntimeDependencies, tmp_path: Path
+) -> None:
+    db_path = tmp_path / "jobs.sqlite"
+    init_db(db_path)
+    broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
+    runtime = dataclasses.replace(runtime_dependencies, remote_broker=broker)
+
+    registry = ExecutorRegistry.build(_remote_definitions(), runtime)
+
+    executor = registry.require("pi-remote", "review_keywords")
+    assert executor.kind == "remote"
+    assert executor.supports("review_keywords")

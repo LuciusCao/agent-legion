@@ -5,6 +5,7 @@ from fastapi import APIRouter
 from ..agents import AgentStatusManager
 from ..db import Database
 from ..events import JobEventManager, VideoEventManager
+from ..executors.remote_broker import RemoteExecutionBroker
 from ..jobs import JobQueries
 from ..settings import Settings
 from ..worker_control import WorkspaceWorkerControl
@@ -12,6 +13,7 @@ from .agents import create_agents_router
 from .common import create_common_router
 from .job_route_group import include_job_routes
 from .packages import create_packages_router
+from .remote import create_remote_router
 from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
 from .workflow_resource_providers import create_workflow_resource_providers_router
@@ -31,6 +33,7 @@ def create_router(
     workspace_worker_control: WorkspaceWorkerControl | None = None,
     job_event_manager: JobEventManager | None = None,
     job_event_buffer: Any | None = None,
+    remote_broker: RemoteExecutionBroker | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api")
 
@@ -58,6 +61,8 @@ def create_router(
         )
     )
     router.include_router(create_worker_router(workspace_worker_control))
+    if remote_broker is not None:
+        router.include_router(create_remote_router(remote_broker, settings))
     router.include_router(create_workflow_catalog_router(workflow_catalog, settings))
     router.include_router(create_workflow_resource_providers_router(workflow_catalog, settings))
     router.include_router(
