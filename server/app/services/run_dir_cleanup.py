@@ -26,6 +26,24 @@ def _birthtime(path: Path) -> float:
     return getattr(st, "st_birthtime", st.st_mtime)
 
 
+def find_extra_run_dirs(data_dir: Path, job_dir: Path, node_key: str) -> list[tuple[Path, str]]:
+    """Return run dirs older than the newest for a node as (path, data-relative) pairs."""
+    run_parent = job_dir / "runs" / node_key
+    if not run_parent.is_dir():
+        return []
+    token_dirs = [d for d in run_parent.iterdir() if d.is_dir()]
+    if len(token_dirs) <= 1:
+        return []
+    token_dirs.sort(key=_birthtime, reverse=True)
+    extra: list[tuple[Path, str]] = []
+    for old in token_dirs[1:]:
+        try:
+            extra.append((old, make_data_relative(old, data_dir)))
+        except Exception as exc:
+            logger.warning("Failed to remove extra run dir %s: %s", old, exc)
+    return extra
+
+
 def cleanup_extra_runs_for_node(
     conn: sqlite3.Connection,
     data_dir: Path,
@@ -37,17 +55,9 @@ def cleanup_extra_runs_for_node(
     The database ``run_dir``/``session_dir`` columns for removed directories
     are cleared so stale records do not point to deleted paths.
     """
-    run_parent = job_dir / "runs" / node_key
-    if not run_parent.is_dir():
-        return 0
-    token_dirs = [d for d in run_parent.iterdir() if d.is_dir()]
-    if len(token_dirs) <= 1:
-        return 0
-    token_dirs.sort(key=_birthtime, reverse=True)
     removed = 0
-    for old in token_dirs[1:]:
+    for old, old_rel in find_extra_run_dirs(data_dir, job_dir, node_key):
         try:
-            old_rel = make_data_relative(old, data_dir)
             remove_path(old)
             conn.execute(
                 "update node_runs set run_dir = '', session_dir = '' where run_dir = ?",
@@ -56,31 +66,4 @@ def cleanup_extra_runs_for_node(
             removed += 1
         except Exception as exc:
             logger.warning("Failed to remove extra run dir %s: %s", old, exc)
-    return removed
-
-
-def cleanup_extra_runs_per_node(conn: sqlite3.Connection, data_dir: Path) -> int:
-    """Scan the filesystem and keep only the newest run dir per (job, node).
-
-    This bounds disk usage even when retention windows are long: a retried
-    node may produce many run directories, but only the latest one is useful
-    after the node has finished.
-    """
-    jobs_dir = data_dir / "jobs"
-    if not jobs_dir.is_dir():
-        return 0
-    removed = 0
-    for workspace_dir in jobs_dir.iterdir():
-        if not workspace_dir.is_dir():
-            continue
-        for job_dir in workspace_dir.iterdir():
-            if not job_dir.is_dir():
-                continue
-            runs_dir = job_dir / "runs"
-            if not runs_dir.is_dir():
-                continue
-            for node_dir in runs_dir.iterdir():
-                if not node_dir.is_dir():
-                    continue
-                removed += cleanup_extra_runs_for_node(conn, data_dir, job_dir, node_dir.name)
     return removed

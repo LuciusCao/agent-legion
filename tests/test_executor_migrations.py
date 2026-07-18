@@ -501,6 +501,20 @@ def test_v013_adds_node_runs_skill_version_column(tmp_path: Path) -> None:
               run_dir text not null default '',
               session_dir text not null default ''
             );
+            create table executor_leases (
+              id text primary key,
+              execution_id text not null,
+              executor_id text not null,
+              workspace_id text not null,
+              job_id text not null,
+              workflow_key text not null,
+              node_key text not null,
+              node_run_id integer not null,
+              status text not null,
+              acquired_at text not null,
+              heartbeat_at text not null,
+              expires_at text not null
+            );
             """
         )
 

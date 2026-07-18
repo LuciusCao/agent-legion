@@ -21,11 +21,14 @@ def resolve_candidates(
     settings: Settings,
     workspace: dict[str, Any],
     workspace_id: str,
+    dedup_state: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     if resolver.startswith("direct."):
         return resolve_direct_candidates(entity, input_values, source_kind)
     if resolver.startswith("cms.") and entity == "video":
-        return resolve_cms_video_candidates(entity, input_values, source_kind, resolver, cms_config)
+        return resolve_cms_video_candidates(
+            entity, input_values, source_kind, resolver, cms_config, dedup_state=dedup_state
+        )
     if resolver.startswith("cms."):
         return resolve_cms_question_candidates(
             entity, input_values, source_kind, resolver, mode, settings, workspace, workspace_id
