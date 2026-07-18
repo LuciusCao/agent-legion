@@ -1,12 +1,12 @@
 import asyncio
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
 from fastapi import WebSocket
 
 from server.app.agent_broadcast import AgentBroadcastController
-from server.app.pipeline.runners import list_openclaw_agents
 
 
 @dataclass
@@ -25,7 +25,8 @@ class AgentStatus:
 
 
 class AgentStatusManager:
-    def __init__(self) -> None:
+    def __init__(self, discover_agents: Callable[[], list[dict[str, Any]]] | None = None) -> None:
+        self._discover_agents = discover_agents
         self.agents: list[AgentStatus] = []
         self._clients: set[WebSocket] = set()
         self._loop: asyncio.AbstractEventLoop | None = None
@@ -37,7 +38,7 @@ class AgentStatusManager:
 
     def discover(self) -> list[AgentStatus]:
         try:
-            records = list_openclaw_agents(timeout=10)
+            records = self._discover_agents() if self._discover_agents is not None else []
             agents = [
                 AgentStatus(
                     id=r["id"],

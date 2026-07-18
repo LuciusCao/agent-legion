@@ -21,6 +21,7 @@ from server.app.http_middleware import add_http_middleware
 from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
 from server.app.local_handler_loader import build_local_handlers
+from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
 from server.app.services.package_stats_backfill import backfill_package_stats
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
@@ -67,8 +68,7 @@ def create_app(
     start_worker: bool = False,
 ) -> FastAPI:
     settings = load_settings(data_dir=data_dir)
-
-    agent_manager = AgentStatusManager()
+    agent_manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
     workspace_worker_control = WorkspaceWorkerControl()
     video_event_manager = VideoEventManager()
     job_event_manager = JobEventManager()
