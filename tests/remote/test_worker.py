@@ -4,6 +4,7 @@ import json
 import stat
 import tarfile
 import time
+import urllib.error
 from pathlib import Path
 
 from scripts.remote import worker
@@ -144,6 +145,14 @@ class StubClient:
         return self._heartbeat_ok
 
 
+class FlakyHeartbeatClient(StubClient):
+    """Simulates transient server errors (e.g. 5xx) on every heartbeat."""
+
+    def heartbeat(self, execution_id: str) -> bool:
+        self.heartbeats += 1
+        raise urllib.error.URLError("unexpected heartbeat status: 502")
+
+
 def test_run_execution_happy_path(tmp_path):
     manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": _write_fake_pi(tmp_path)}}
     bundle = _make_bundle(tmp_path, manifest)
@@ -213,3 +222,20 @@ def test_run_execution_aborts_when_claim_lost(tmp_path):
     assert elapsed < 30
     assert metadata["status"] == "cancelled"
     assert archive is None  # nothing to report; the server already requeued/failed it
+
+
+def test_run_execution_survives_transient_heartbeat_errors(tmp_path):
+    manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": _write_fake_pi(tmp_path)}}
+    bundle = _make_bundle(tmp_path, manifest)
+    claim = {"execution_id": "e1", "manifest": manifest}
+    client = FlakyHeartbeatClient(bundle)
+    # shrink the heartbeat interval so the test is fast
+    original = worker.HEARTBEAT_INTERVAL_SECONDS
+    worker.HEARTBEAT_INTERVAL_SECONDS = 0.1
+    try:
+        metadata, archive = worker.run_execution(client, claim, tmp_path / "work")
+    finally:
+        worker.HEARTBEAT_INTERVAL_SECONDS = original
+    assert metadata["status"] == "completed"
+    assert archive is not None and archive.is_file()
+    assert client.heartbeats > 0
