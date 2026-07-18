@@ -363,6 +363,91 @@ export interface paths {
     patch: operations['update_package_api_packages__package_id__patch']
     trace?: never
   }
+  '/api/remote/claim': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Claim */
+    post: operations['claim_api_remote_claim_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/remote/executions/{execution_id}/bundle': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Download Bundle */
+    get: operations['download_bundle_api_remote_executions__execution_id__bundle_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/remote/executions/{execution_id}/heartbeat': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Heartbeat */
+    post: operations['heartbeat_api_remote_executions__execution_id__heartbeat_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/remote/executions/{execution_id}/result': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Report Result */
+    post: operations['report_result_api_remote_executions__execution_id__result_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/remote/register': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Register */
+    post: operations['register_api_remote_register_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/resource-providers': {
     parameters: {
       query?: never
@@ -1035,6 +1120,30 @@ export interface components {
       /** Target Node Key */
       target_node_key: string
     }
+    /** ClaimRequest */
+    ClaimRequest: {
+      /** Capabilities */
+      capabilities: string[]
+      /** Worker Id */
+      worker_id: string
+    }
+    /** ClaimResponse */
+    ClaimResponse: {
+      /** Bundle Url */
+      bundle_url: string
+      /** Capability */
+      capability: string
+      /** Execution Id */
+      execution_id: string
+      /** Job Id */
+      job_id: string
+      /** Manifest */
+      manifest: {
+        [key: string]: unknown
+      }
+      /** Node Key */
+      node_key: string
+    }
     /** CmsServiceStatus */
     CmsServiceStatus: {
       /** Baseurl */
@@ -1554,6 +1663,20 @@ export interface components {
         | null
       /** Stem */
       stem?: string | null
+    }
+    /** RegisterRequest */
+    RegisterRequest: {
+      /** Capabilities */
+      capabilities: string[]
+      /**
+       * Name
+       * @default
+       */
+      name: string
+      /** Slots */
+      slots: number
+      /** Worker Id */
+      worker_id: string
     }
     /**
      * ResourceBinding
@@ -3198,6 +3321,159 @@ export interface operations {
         content: {
           'application/json': components['schemas']['PackageUpdateResponse']
         }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  claim_api_remote_claim_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ClaimRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ClaimResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  download_bundle_api_remote_executions__execution_id__bundle_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        execution_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/gzip': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  heartbeat_api_remote_executions__execution_id__heartbeat_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        execution_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  report_result_api_remote_executions__execution_id__result_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        execution_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  register_api_remote_register_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RegisterRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
       }
       /** @description Validation Error */
       422: {

@@ -66,3 +66,29 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-5
   ceiling: 190
+- check: architecture.file_budget
+  path: server/app/main.py
+  reason: Task 6 of the distributed-agent-execution plan constructs the RemoteExecutionBroker
+    in create_app and threads it through build_executor_registry and create_router; the
+    startup wiring will be extracted into a bootstrap module once the feature is complete.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6
+  ceiling: 190
+- check: architecture.route_response_model
+  path: server/app/routes/remote.py:register
+  reason: Task 6 of the distributed-agent-execution plan returns an empty 204 for worker
+    registration; no response body contract exists to model.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6
+- check: architecture.route_response_model
+  path: server/app/routes/remote.py:heartbeat
+  reason: Task 6 of the distributed-agent-execution plan returns an empty 204 for worker
+    heartbeats; no response body contract exists to model.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6
+- check: architecture.route_response_model
+  path: server/app/routes/remote.py:report_result
+  reason: Task 6 of the distributed-agent-execution plan returns an empty 204 for result
+    reports; no response body contract exists to model.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6

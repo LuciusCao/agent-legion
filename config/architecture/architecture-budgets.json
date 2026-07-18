@@ -642,6 +642,7 @@
     "server/app/routes/package_history_contracts.py": 63,
     "server/app/routes/packages.py": 234,
     "server/app/routes/questions.py": 69,
+    "server/app/routes/remote.py": 142,
     "server/app/routes/skill_catalog_route.py": 32,
     "server/app/routes/skill_contracts.py": 26,
     "server/app/routes/token_usage.py": 83,
