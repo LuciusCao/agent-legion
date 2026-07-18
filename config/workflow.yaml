@@ -89,7 +89,7 @@ workflows:
     provider: deepseek
     model: your-model-b
     thinking: low
-    timeout_seconds: 600
+    timeout_seconds: 900
     environment:
       PI_SKIP_VERSION_CHECK: '1'
       PI_TELEMETRY: '0'

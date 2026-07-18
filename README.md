@@ -152,7 +152,7 @@ Agent nodes in this workflow execute through the Pi agent runner using external 
 Backend with automatic worker:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --host 127.0.0.1 --port 8000
+UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --timeout-graceful-shutdown 3 --host 127.0.0.1 --port 8000
 ```
 
 The backend has no authentication layer; always bind it to `127.0.0.1` and never expose it with `--host 0.0.0.0`.
@@ -180,7 +180,7 @@ For multiple coding agents working in separate git worktrees, give each worktree
 
 ```bash
 # worktree A
-UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --port 8001
+UV_CACHE_DIR=.uv-cache uv run uvicorn server.app.main:app --reload --reload-dir server --timeout-graceful-shutdown 3 --port 8001
 cd frontend
 cp .env.example .env
 printf 'VITE_API_TARGET=http://127.0.0.1:8001\n' > .env
@@ -323,7 +323,7 @@ workflows:
     provider: deepseek
     model: your-model-b
     thinking: low
-    timeout_seconds: 600
+    timeout_seconds: 900
     environment:
       PI_SKIP_VERSION_CHECK: "1"
       PI_TELEMETRY: "0"

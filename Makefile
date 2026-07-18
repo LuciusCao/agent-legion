@@ -16,7 +16,7 @@ sync: ## 同步 Python 依赖 (uv sync)
 
 .PHONY: dev-backend
 dev-backend: ## 启动后端开发服务器 (127.0.0.1:8000)
-	$(UV) run uvicorn server.app.main:app --reload --reload-dir server --host 127.0.0.1 --port 8000
+	$(UV) run uvicorn server.app.main:app --reload --reload-dir server --timeout-graceful-shutdown 3 --host 127.0.0.1 --port 8000
 
 .PHONY: dev-frontend
 dev-frontend: ## 启动前端开发服务器
