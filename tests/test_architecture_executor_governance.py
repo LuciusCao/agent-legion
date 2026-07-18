@@ -39,6 +39,8 @@ WHITELIST: set[str] = {
     str(ROOT / "server" / "app" / "worker_thread.py"),
     # Comment-only reference to the removed table.
     str(ROOT / "server" / "app" / "services" / "workspace_executor_warnings.py"),
+    # Job detail panel picks the new NodeRunResponse.runner API field (run provenance).
+    str(ROOT / "frontend" / "src" / "components" / "NodeDetailsPanel.tsx"),
 }
 
 FORBIDDEN_PATTERNS = {
