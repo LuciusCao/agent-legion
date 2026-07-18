@@ -56,6 +56,7 @@ export interface NodeRunSummary {
   started_at: string
   exit_code?: number | null
   error_message?: string | null
+  runner?: string
 }
 
 interface DagGraphProps {
@@ -259,7 +260,11 @@ export function DagGraph({
       nodeKey: selectedNode,
       data: node.data,
       latestRun: latestRun
-        ? { ...latestRun, error_message: latestRun.error_message ?? '' }
+        ? {
+            ...latestRun,
+            error_message: latestRun.error_message ?? '',
+            runner: latestRun.runner ?? '',
+          }
         : null,
     }
   }, [rfNodes, relevantRuns, selectedNode])
