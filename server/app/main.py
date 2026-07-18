@@ -10,7 +10,7 @@ from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.db.migrations.report import MigrationBlockedError
 from server.app.db.notifications import NotificationHub
-from server.app.events import JobEventManager, VideoEventManager
+from server.app.events import JobEventManager
 from server.app.executors.backup import legacy_backup_path
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
@@ -70,12 +70,8 @@ def create_app(
     settings = load_settings(data_dir=data_dir)
     agent_manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
     workspace_worker_control = WorkspaceWorkerControl()
-    video_event_manager = VideoEventManager()
     job_event_manager = JobEventManager()
     hub = NotificationHub()
-    hub.on_change = video_event_manager.broadcast  # type: ignore[assignment]
-    hub.on_delete = video_event_manager.broadcast_delete
-    hub.on_detail_change = video_event_manager.broadcast_video_detail  # type: ignore[assignment]
     db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
     remote_broker = RemoteExecutionBroker(
@@ -122,7 +118,6 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal workflow_worker_thread
-        video_event_manager._loop = asyncio.get_running_loop()
         job_event_manager._loop = asyncio.get_running_loop()
         if start_worker:
             validate_settings(settings)
@@ -166,7 +161,6 @@ def create_app(
     app.state.remote_broker = remote_broker
     app.state.agent_manager = agent_manager
     app.state.workspace_worker_control = workspace_worker_control
-    app.state.video_event_manager = video_event_manager
     app.state.job_event_manager = job_event_manager
     app.state.job_event_buffer = job_event_buffer
     app.state.workspace_event_aggregator = workspace_event_aggregator
@@ -176,7 +170,6 @@ def create_app(
             job_db,
             settings,
             agent_manager,
-            video_event_manager,
             workspace_worker_control,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
