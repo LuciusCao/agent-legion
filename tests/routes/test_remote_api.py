@@ -264,3 +264,73 @@ def test_duplicate_result_report_returns_409(rig):
         content=b"x",
     )
     assert second.status_code == 409
+
+
+def test_duplicate_result_report_preserves_first_archive(rig):
+    client, broker = rig
+    _submit(broker)
+    _claim(client)
+    meta = {"status": "completed", "exit_code": 0}
+    first = client.post(
+        "/api/remote/executions/e1/result",
+        headers={**HEADERS, "X-Remote-Result": json.dumps(meta)},
+        content=b"first-archive-bytes",
+    )
+    assert first.status_code == 204
+    second = client.post(
+        "/api/remote/executions/e1/result",
+        headers={**HEADERS, "X-Remote-Result": json.dumps(meta)},
+        content=b"clobbering-bytes",
+    )
+    assert second.status_code == 409
+    assert (broker.bundle_dir / "e1.result.tar.gz").read_bytes() == b"first-archive-bytes"
+    assert not (broker.bundle_dir / "e1.result.tar.gz.uploading").exists()
+
+
+def test_result_non_dict_metadata_returns_400(rig):
+    client, broker = rig
+    _submit(broker)
+    _claim(client)
+    resp = client.post(
+        "/api/remote/executions/e1/result",
+        headers={**HEADERS, "X-Remote-Result": "[1]"},
+        content=b"x",
+    )
+    assert resp.status_code == 400
+
+
+def test_result_rejects_path_traversal_execution_id(rig, tmp_path):
+    client, broker = rig
+    _submit(broker)
+    _claim(client)
+    meta = {"status": "completed", "exit_code": 0}
+    resp = client.post(
+        "/api/remote/executions/..%2E%2Eevil/result",
+        headers={**HEADERS, "X-Remote-Result": json.dumps(meta)},
+        content=b"x",
+    )
+    assert resp.status_code == 400
+    outside = [p for p in tmp_path.rglob("*") if p.is_file() and broker.bundle_dir not in p.parents]
+    assert [p.name for p in outside] == ["jobs.sqlite"]
+
+
+def test_claim_worker_id_mismatch_returns_400(rig):
+    client, _ = rig
+    resp = client.post(
+        "/api/remote/claim",
+        json={"worker_id": "w2", "capabilities": ["cap_a"]},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "worker id mismatch"
+
+
+def test_register_worker_id_mismatch_returns_400(rig):
+    client, _ = rig
+    resp = client.post(
+        "/api/remote/register",
+        json={"worker_id": "w2", "name": "x", "capabilities": ["cap_a"], "slots": 1},
+        headers=HEADERS,
+    )
+    assert resp.status_code == 400
+    assert resp.json()["detail"] == "worker id mismatch"
