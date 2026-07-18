@@ -183,6 +183,11 @@ The sum of slots across all devices must not exceed `global_capacity` on the
 `pi-remote` executor — leases enforce it, but oversubscribing wastes polling
 cycles.
 
+Every finished node run records its runner (executor id for local runs, the
+concrete `worker_id` for remote runs) and shows it in the job detail view;
+`GET /api/remote/workers` lists the registered workers and their last-seen
+times (token required).
+
 ## 8. Binding workflows to the remote executor
 
 Use the existing workspace executor configuration to point node capabilities
