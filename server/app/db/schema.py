@@ -169,6 +169,7 @@ def init_db(path: Path) -> None:
             create index if not exists idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id);
             create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
             create index if not exists idx_node_runs_job_id on node_runs(job_id);
+            create index if not exists idx_node_runs_status_finished_at on node_runs(status, finished_at);
             """,
         )
     finally:

@@ -24,6 +24,7 @@ from server.app.executors.models import (
     LeaseClaimRequest,
 )
 from server.app.jobs import JobQueries
+from server.app.services.token_usage_lease import capture_token_usage_after_lease_finish
 
 logger = logging.getLogger(__name__)
 
@@ -48,17 +49,13 @@ class ExecutorLeaseRepository:
 
     def _broadcast_job_update(self, job_id: str) -> None:
         try:
-            if self.job_db is None:
+            if self.job_db is None or self.job_event_manager is None:
                 return
             if self.job_event_buffer is not None:
                 record_job_update(self.job_db, self.job_event_buffer, job_id)
                 return
-            if self.job_event_manager is None:
-                return
             job = self.job_db.get_job(job_id)
-            if job is None:
-                return
-            workspace_id = str(job.get("workspace_id", ""))
+            workspace_id = str(job.get("workspace_id", "")) if job else ""
             if not workspace_id:
                 return
             stats = self.job_db.count_jobs_by_status(workspace_id)
@@ -114,6 +111,17 @@ class ExecutorLeaseRepository:
             job_id = str(lease["job_id"]) if lease else None
             result_flag = finish_lease(conn, lease_id, result, self.data_dir)
             conn.execute("commit")
+
+            # Parse events.jsonl outside the main write transaction.
+            if (
+                result_flag
+                and result.status in ("completed", "failed")
+                and self.data_dir is not None
+            ):
+                conn.execute("begin immediate")
+                capture_token_usage_after_lease_finish(conn, lease_id, self.data_dir)
+                conn.execute("commit")
+
             if job_id is not None and result_flag:
                 self._broadcast_job_update(job_id)
             return result_flag
@@ -194,13 +202,7 @@ class ExecutorLeaseRepository:
             conn.close()
 
     def recover_orphaned_running_jobs(self, now: datetime) -> list[str]:
-        """Return jobs stuck in 'running' with no active lease back to 'queued'.
-
-        A job is orphaned when jobs.status='running' but no executor_leases
-        row exists with the same job_id and status='active'. Any job_nodes
-        still marked 'running' for that job are reset to 'pending' so the
-        scheduler can re-evaluate which node to run next.
-        """
+        """Reset jobs stuck in 'running' with no active lease back to 'queued'."""
         conn = connect_sqlite(self.path)
         conn.isolation_level = None
         recovered: list[str] = []
