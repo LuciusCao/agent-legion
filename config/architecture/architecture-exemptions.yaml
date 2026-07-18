@@ -42,3 +42,19 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-02-workflow-studio-change-review.md#task-1
   ceiling: 40
+- check: architecture.file_budget
+  path: server/app/executors/config.py
+  reason: Task 4 of the distributed-agent-execution plan adds the remote executor
+    config models; the models will be split into a separate module once the feature
+    is complete.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-4
+  ceiling: 163
+- check: architecture.file_budget
+  path: server/app/executors/runtime_config.py
+  reason: Task 4 of the distributed-agent-execution plan adds RemoteRuntimeConfig
+    and remote worker-token startup validation; the remote runtime section will be
+    split into a separate module once the feature is complete.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-4
+  ceiling: 267

@@ -11,6 +11,7 @@ CONFIG_FILE_KEYS: dict[str, frozenset[str]] = {
             "heartbeat_failure_threshold",
             "heartbeat_interval_seconds",
             "lease_ttl_seconds",
+            "remote",
             "workflows",
         }
     ),
