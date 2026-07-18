@@ -480,6 +480,7 @@
     "scripts/migrate-video-hive-to-agent-legion.py": 446,
     "scripts/migrate_video_hive_to_agent_legion_core.py": 265,
     "scripts/ratchet_architecture_budgets.py": 130,
+    "scripts/remote/llm_gateway.py": 114,
     "scripts/remote/worker.py": 530,
     "scripts/stress/_e2e_readiness.py": 65,
     "scripts/stress/_e2e_report.py": 67,
