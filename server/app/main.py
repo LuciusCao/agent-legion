@@ -15,6 +15,7 @@ from server.app.executors.backup import legacy_backup_path
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
+from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.runtime_factory import build_execution_runtime
 from server.app.http_middleware import add_http_middleware
 from server.app.job_events import build_workspace_event_aggregator
@@ -35,6 +36,7 @@ from server.app.workflows.registry import list_registered_workflows
 def build_executor_registry(
     settings: Settings,
     job_db: Any | None = None,
+    remote_broker: RemoteExecutionBroker | None = None,
 ) -> ExecutorRegistry:
     """Build the application-wide executor registry from settings.
 
@@ -55,6 +57,7 @@ def build_executor_registry(
         settings_config=settings.config,
         job_db=job_db,
         cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
+        remote_broker=remote_broker,
     )
     return ExecutorRegistry.build(settings.executor_definitions, runtime)
 
@@ -75,7 +78,13 @@ def create_app(
     hub.on_detail_change = video_event_manager.broadcast_video_detail  # type: ignore[assignment]
     db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
-    executor_registry = build_executor_registry(settings, job_db)
+    remote_broker = RemoteExecutionBroker(
+        job_db.path,
+        settings.data_dir / "remote_bundles",
+        claim_timeout_seconds=settings.executor_runtime.remote.claim_timeout_seconds,
+        requeue_limit=settings.executor_runtime.remote.requeue_limit,
+    )
+    executor_registry = build_executor_registry(settings, job_db, remote_broker=remote_broker)
 
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager
@@ -154,6 +163,7 @@ def create_app(
     app.state.db = db
     app.state.job_db = job_db
     app.state.executor_registry = executor_registry
+    app.state.remote_broker = remote_broker
     app.state.agent_manager = agent_manager
     app.state.workspace_worker_control = workspace_worker_control
     app.state.video_event_manager = video_event_manager
@@ -170,6 +180,7 @@ def create_app(
             workspace_worker_control,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
+            remote_broker=remote_broker,
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")
