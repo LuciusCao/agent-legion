@@ -10,6 +10,7 @@ from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.db.migrations.report import MigrationBlockedError
 from server.app.db.notifications import NotificationHub
+from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
 from server.app.executors.backup import legacy_backup_path
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -70,7 +71,7 @@ def create_app(
     settings = load_settings(data_dir=data_dir)
     agent_manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
     workspace_worker_control = WorkspaceWorkerControl()
-    job_event_manager = JobEventManager()
+    job_event_manager = JobEventManager(InProcessEventBus())
     hub = NotificationHub()
     db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
@@ -83,7 +84,7 @@ def create_app(
     executor_registry = build_executor_registry(settings, job_db, remote_broker=remote_broker)
 
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
-        job_db, settings, job_event_manager
+        job_db, settings, job_event_manager.bus
     )
     definitions = list_registered_workflows(settings.root_dir)
     with job_db.connect() as conn:
@@ -118,7 +119,7 @@ def create_app(
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal workflow_worker_thread
-        job_event_manager._loop = asyncio.get_running_loop()
+        job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
@@ -162,6 +163,7 @@ def create_app(
     app.state.agent_manager = agent_manager
     app.state.workspace_worker_control = workspace_worker_control
     app.state.job_event_manager = job_event_manager
+    app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
     app.state.workspace_event_aggregator = workspace_event_aggregator
     app.include_router(

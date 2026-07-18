@@ -8,11 +8,12 @@ _EVICTED: object = object()
 """投递到被驱逐订阅者队列的哨兵；订阅方收到后应立即结束流。"""
 
 
-class EventBus(Protocol):
-    """进程内事件总线：channel 命名空间 + 有界订阅队列。
+def workspace_channel(workspace_id: str) -> str:
+    return f"workspace:{workspace_id}"
 
-    publish 线程安全：worker 线程调用时经 call_soon_threadsafe 转投 event loop。
-    """
+
+class EventBus(Protocol):
+    """进程内事件总线：channel 命名空间 + 有界订阅队列；publish 线程安全。"""
 
     def attach_loop(self, loop: asyncio.AbstractEventLoop | None) -> None: ...
 
@@ -61,7 +62,6 @@ class InProcessEventBus:
         if loop.is_running():
             loop.call_soon_threadsafe(self._send, channel, payload)
         else:
-            # 同步回退仅限单线程/测试路径。
             self._send(channel, payload)
 
     def _send(self, channel: str, payload: str) -> None:
