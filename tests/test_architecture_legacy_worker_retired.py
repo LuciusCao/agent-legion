@@ -7,7 +7,7 @@ RETIRED_FILES = [
     "server/app/worker_thread.py",
     "server/app/worker_scheduler.py",
     "server/app/worker_candidates.py",
-    # "server/app/workflows/executor.py",  # TODO(Task 2): uncomment when executor.py is retired
+    "server/app/workflows/executor.py",
 ]
 
 RETIRED_MODULE_FRAGMENTS = [
