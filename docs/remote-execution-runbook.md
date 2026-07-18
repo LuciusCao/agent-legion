@@ -1,0 +1,242 @@
+# Remote Execution Runbook
+
+Operator guide for rolling out distributed agent execution across home devices
+(Mac mini, Raspberry Pi) with the company laptop as the only machine that can
+reach the LLM provider.
+
+Design spec: [superpowers/specs/2026-07-18-distributed-agent-execution-design.md](superpowers/specs/2026-07-18-distributed-agent-execution-design.md)
+
+## 1. Overview
+
+Workers on home devices pull claimed executions from the video-hive server over
+the tailnet, run the `pi` CLI locally, and post results back over HTTP. All LLM
+traffic flows **worker → tailnet → laptop gateway → 中台**; the 中台 credential
+is injected by the gateway on the laptop and never leaves it. Workers hold no
+persistent state and store no secrets.
+
+Components:
+
+- `server/app/executors/remote_broker.py` — claim/heartbeat/requeue broker.
+- `server/app/routes/remote.py` — authenticated `/api/remote/*` worker endpoints.
+- `scripts/remote/worker.py` — stdlib-only worker agent (one file, copy to device).
+- `scripts/remote/llm_gateway.py` — laptop-side credential-injecting proxy.
+
+## 2. Prerequisites checklist
+
+Verify all five spec preconditions **before** any rollout step:
+
+1. **Compliance sign-off** — prompts and model responses physically transit
+   personal home devices. Transport is WireGuard-encrypted, but encrypted
+   transport is not policy approval. Hard blocker; confirm first.
+2. **Tailscale installable on the company laptop** (fallback: domestic VPS
+   running frp or Headscale as relay — see §3).
+3. **中台 exposes an OpenAI-compatible HTTP API** so the gateway can proxy it
+   without protocol translation.
+4. **中台 tolerates ~100 concurrent requests from a single token/IP** — confirm
+   with the provider; the design does not solve rate limits.
+5. **Laptop stays awake during production runs** — `caffeinate -dims`, or AC
+   power with display/system sleep disabled and no lid-close sleep.
+
+## 3. Networking (Tailscale)
+
+Install Tailscale on all three devices (laptop, Mac mini, Raspberry Pi) and
+bring them up:
+
+```bash
+tailscale up
+```
+
+Verify connectivity from each worker device to the laptop:
+
+```bash
+tailscale ping <laptop-tailnet-ip>
+tailscale status
+```
+
+Check `tailscale status` output for the laptop peer: it should show `direct`
+(P2P NAT traversal working), not `relay ...` (traffic is bouncing off DERP
+relays, likely overseas — latency rises from ~10–30 ms to a few hundred ms).
+If P2P proves unstable, switch the relay layer to a domestic VPS running
+Headscale + DERP or frp tunnels; every other component in this runbook is
+transport-agnostic and unchanged.
+
+The laptop's tailnet IPv4 address (`tailscale ip -4`, a `100.x.y.z` address) is
+`<laptop-tailnet-ip>` in every command below.
+
+## 4. LLM gateway on the laptop
+
+The gateway binds the tailnet interface only, accepts `POST /v1/*`, and injects
+the 中台 `Authorization: Bearer` header. Start it on the laptop from the repo:
+
+```bash
+REMOTE_LLM_UPSTREAM="https://<zhongtai-base-url>" REMOTE_LLM_KEY="<zhongtai-key>" \
+  uv run python scripts/remote/llm_gateway.py --host <laptop-tailnet-ip> --port 8788
+```
+
+Both environment variables are required; the gateway refuses to start without
+them. Do not inline real keys into shared terminal history — export them from
+a local-only shell or a `.env` you `source` first.
+
+Verify from a worker device:
+
+```bash
+curl -X POST http://<laptop-tailnet-ip>:8788/v1/chat/completions \
+  -H 'Content-Type: application/json' \
+  -d '{"model":"<model>","messages":[{"role":"user","content":"ping"}],"stream":false}'
+```
+
+Expect a normal OpenAI-compatible chat completion response. A `502` means the
+laptop could not reach 中台 (see §10).
+
+## 5. Worker device setup
+
+On each worker device (Mac mini, Raspberry Pi):
+
+1. Install `python3` (3.10+) and the `pi` CLI per the pi CLI's own docs.
+2. Copy `scripts/remote/worker.py` to the device — it is a single stdlib-only
+   file with no pip dependencies:
+   ```bash
+   scp scripts/remote/worker.py <device>:~/worker.py
+   ```
+3. Configure the pi CLI's provider `base_url` to point at the laptop gateway,
+   per the pi CLI's own provider config documentation:
+   `http://<laptop-tailnet-ip>:8788/v1`. No API key is needed on the device —
+   the gateway injects the credential.
+4. Smoke-test one manual `pi` run on the device (a one-line prompt through the
+   configured provider). This validates §3 + §4 + the pi provider config before
+   any server wiring.
+
+## 6. Server configuration
+
+Operator action on the laptop — **do not commit machine-specific values**.
+
+Add a remote executor and the `remote` runtime section to `config/workflow.yaml`:
+
+```yaml
+executors:
+  pi-remote:
+    kind: remote
+    global_capacity: 100   # total remote slots across all workers, 200 MB RAM each
+    capabilities:
+      generate_key_info:
+        skill: question_comprehension_info/generate_key_info
+        tools: [read, write, bash]
+      # ... mirror every capability you intend to run remotely
+remote:
+  claim_timeout_seconds: 120
+  requeue_limit: 3
+```
+
+(`remote.max_archive_bytes` also exists, default 64 MiB; raise only if result
+archives legitimately exceed it.)
+
+Set the pre-shared worker token in `.env`:
+
+```bash
+# generate once, e.g. openssl rand -hex 32
+VIDEO_HIVE_REMOTE_WORKER_TOKEN=<random-token>
+```
+
+Startup validation fails fast if any `kind: remote` executor is defined without
+the token, so a misconfigured server never starts half-open. Restart the server
+after these changes.
+
+## 7. Launching workers
+
+One worker process per concurrent execution slot. Example: fill a Mac mini
+(16 GB → ~65 slots, see capacity rule below):
+
+```bash
+export REMOTE_WORKER_TOKEN='<random-token>'   # same value as server .env
+for i in $(seq 1 65); do
+  nohup python3 worker.py --server http://<laptop-tailnet-ip>:8000 \
+    --token "$REMOTE_WORKER_TOKEN" --worker-id "mac-mini-$i" \
+    --name "Mac mini" --slots 1 \
+    --capabilities generate_key_info,review_key_info \
+    --work-dir ~/remote-worker >> ~/remote-worker.log 2>&1 &
+done
+```
+
+`--token` defaults to the `REMOTE_WORKER_TOKEN` env var; `--worker-id` defaults
+to the hostname; `--capabilities` is a comma-separated list and must be a
+subset of the executor's declared capabilities. See `python3 worker.py --help`
+for all flags (`--poll-interval`, etc.).
+
+**Capacity rule:** budget 200 MB RAM per agent process (measured pi RSS: settled
+~150 MB, peak ~187 MB — see §9). Mac mini 16 GB → ~65 slots; Raspberry Pi 16 GB
+→ ~70 slots; leave the rest as OS headroom. A process manager
+(launchd/systemd/tmux) is the operator's choice; the `nohup` loop above is the
+minimal viable form.
+
+The sum of slots across all devices must not exceed `global_capacity` on the
+`pi-remote` executor — leases enforce it, but oversubscribing wastes polling
+cycles.
+
+## 8. Binding workflows to the remote executor
+
+Use the existing workspace executor configuration to point node capabilities
+at `pi-remote` — either in the workspace settings UI or via
+`PUT /api/workspaces/{workspace_id}/configuration` with:
+
+- `executor_allocations`: add `{"executor_id": "pi-remote", "limit": <slots for this workspace>}`.
+- `node_bindings`: for each node to run remotely,
+  `{"workflow_key": ..., "node_key": ..., "executor_id": "pi-remote"}`.
+
+The server validates that `pi-remote` declares each bound node's capability
+(mismatch is rejected), which is why §6 says to mirror capabilities.
+
+**Rollback:** rebind the same nodes back to executor `pi` (and remove the
+`pi-remote` allocation). No other state changes are needed; in-flight remote
+executions drain or fail-safe via the requeue semantics in §10.
+
+## 9. Memory calibration (required before the 100-agent gate)
+
+The 200 MB/slot budget is planning headroom from a 90-second sample (settled
+~150 MB, peak ~187 MB, 2026-07-18). Long-run peak RSS over full-duration jobs
+is not yet measured — calibrate before enabling 100-agent production:
+
+1. Run full-duration production jobs on each device class (Mac mini and
+   Raspberry Pi separately — ARM vs x86 memory profiles differ).
+2. Record peak RSS of the `pi` processes:
+   - sampled: `ps -o rss= -p <pid>` in a loop during the run;
+   - per-process on macOS: `/usr/bin/time -l pi ...` reports maximum resident
+     set size at exit.
+3. Adjust per-device slot counts from the measured long-run peak, keeping OS
+   headroom: `slots = floor((RAM - OS reserve) / measured peak)`.
+4. Update `pi-remote` `global_capacity` in `config/workflow.yaml` to the sum of
+   per-device slots and restart the server.
+
+If long-run growth exceeds 200 MB/agent materially, reduce slot counts — do
+not raise the budget silently (spec Risks).
+
+## 10. Troubleshooting
+
+| Symptom | Cause | Action |
+| --- | --- | --- |
+| `/api/remote/claim` returns 204 forever | No executions enqueued for the worker's capabilities | Check workspace node bindings (§8) and that `--capabilities` matches the executor's declared capability names exactly |
+| Heartbeat 409 storms (`claim lost`) | Network partition or server restart — the claim lease expired (`claim_timeout_seconds`) and the execution was requeued/failed | Transient 409s are retried by the worker; persistent storms mean the run is dead — check tailnet, then rerun the failed jobs per existing semantics |
+| Result upload 409 (`execution is not claimed by this worker`) | Same lease expiry as above, discovered at report time | Rerun the job; if frequent, raise `claim_timeout_seconds` or investigate tailnet stability |
+| Gateway 502 | 中台 unreachable from the laptop (VPN dropped, SSID/network change) | Restore the laptop's company network path; workers' pi runs fail fast and retry with backoff |
+| pi "model call failed" on workers | pi provider `base_url` wrong on the device | Re-check §5 step 3: must be `http://<laptop-tailnet-ip>:8788/v1` |
+| Bundle fetch 410 (`bundle is no longer available`) | Server restarted mid-claim and the staged bundle was dropped | The execution is requeued automatically (bounded by `requeue_limit`); rerun if it exhausted |
+| Result upload 413 | Archive exceeds `remote.max_archive_bytes` (default 64 MiB) | Investigate why artifacts ballooned; raise the limit only if legitimate |
+| Server 503 on `/api/remote/*` | No remote executor configured / token missing | Server refused remote mode at startup — fix §6 and restart |
+| Everything idle, nothing failing | Laptop asleep or offline | Workers hold no state and recover on their own; enforce §2 item 5 |
+
+## 11. Security notes
+
+- **Tailnet ACLs:** restrict device-to-device traffic so workers can reach only
+  port 8000 (server API) and port 8788 (gateway) on the laptop. Nothing else on
+  the laptop should be reachable from worker devices.
+- **Gateway exposure:** binds the tailnet interface only; it is the single
+  holder of the 中台 credential and must not be run with a widened bind
+  address. It proxies only `POST /v1/*`.
+- **Token handling:** `VIDEO_HIVE_REMOTE_WORKER_TOKEN` lives in the server's
+  `.env` and in the workers' launch environment — never in `config/workflow.yaml`,
+  command templates, or logs. Rotate by updating both sides and restarting.
+- **Worker hygiene:** no credentials, secret-bearing prompts, or API keys in
+  worker logs; workers store no persistent state.
+- **Archive safety:** result archives are path-validated on both ends (no
+  absolute paths, `..`, or links) before extraction.
+- **Compliance:** precondition 1 (§2) is a hard blocker — encrypted transport
+  is not policy approval.
