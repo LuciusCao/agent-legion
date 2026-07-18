@@ -62,10 +62,9 @@ class WorkflowMaintenance:
             return
         self._last_cleanup_at = now
         try:
-            with self.job_db.connect() as conn:
-                logs, run_dirs = cleanup_old_logs(
-                    conn, self.settings.data_dir, self._cleanup_config
-                )
+            logs, run_dirs = cleanup_old_logs(
+                self.job_db, self.settings.data_dir, self._cleanup_config
+            )
             if logs or run_dirs:
                 logger.info("Cleaned up %s old logs and %s old run directories", logs, run_dirs)
         except Exception:

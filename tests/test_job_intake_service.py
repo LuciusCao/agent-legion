@@ -1,5 +1,7 @@
 import pytest
 
+from server.app.cms.question import CmsQuestionSummary
+from server.app.services import job_intake_chunks
 from server.app.services.job_errors import InvalidOperationError, NotFoundError
 from server.app.services.job_intake import JobIntakeService
 from server.app.services.workflow_catalog import WorkflowCatalogService
@@ -100,3 +102,109 @@ def test_job_intake_requires_at_least_one_value(intake_service):
                 "knowledge_codes": [],
             },
         )
+
+
+def test_job_intake_dedups_across_batches_without_full_row_load(job_db, settings, monkeypatch):
+    _create_workspace_with_revision(job_db, settings)
+    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+
+    def fail_list_jobs(*args, **kwargs):
+        raise AssertionError("intake dedup must not materialize full job rows")
+
+    monkeypatch.setattr(job_db, "list_jobs", fail_list_jobs)
+
+    first = service.create_batch(
+        "default",
+        {
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "entity": "question",
+            "question_ids": ["Q1", "Q2"],
+            "knowledge_codes": [],
+        },
+    )
+    second = service.create_batch(
+        "default",
+        {
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "entity": "question",
+            "question_ids": ["Q2", "Q3"],
+            "knowledge_codes": [],
+        },
+    )
+
+    assert first["created_count"] == 2
+    assert second["created_count"] == 1
+    assert [job["source_id"] for job in second["jobs"]] == ["Q3"]
+
+
+def test_list_job_dedup_keys_returns_only_key_columns(job_db, settings):
+    _create_workspace_with_revision(job_db, settings)
+    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    service.create_batch(
+        "default",
+        {
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "entity": "question",
+            "question_ids": ["Q1", "Q2"],
+            "knowledge_codes": [],
+        },
+    )
+
+    keys = job_db.list_job_dedup_keys("default")
+
+    assert keys == {("question", "Q1"), ("question", "Q2")}
+
+
+def test_job_intake_dedups_candidates_across_chunk_boundaries(job_db, settings, monkeypatch):
+    _create_workspace_with_revision(job_db, settings)
+    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    monkeypatch.setattr(job_intake_chunks, "INTAKE_RESOLUTION_CHUNK_SIZE", 2)
+
+    def fake_list_by_knowledge(code, api_url=None, token=None):
+        return [
+            CmsQuestionSummary(question_id=f"Q-{code}", title=f"Question {code}", payload={}),
+            CmsQuestionSummary(question_id="Q-shared", title="Shared", payload={}),
+        ]
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.list_questions_by_knowledge",
+        fake_list_by_knowledge,
+    )
+
+    result = service.create_batch(
+        "default",
+        {
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_knowledge",
+            "entity": "question",
+            "question_ids": [],
+            "knowledge_codes": ["K1", "K2", "K3", "K4", "K5"],
+        },
+    )
+
+    source_ids = [job["source_id"] for job in result["jobs"]]
+    assert result["created_count"] == 6
+    assert sorted(source_ids) == ["Q-K1", "Q-K2", "Q-K3", "Q-K4", "Q-K5", "Q-shared"]
+
+
+def test_job_intake_handles_large_batch_across_default_chunks(job_db, settings):
+    _create_workspace_with_revision(job_db, settings)
+    service = JobIntakeService(job_db, settings, WorkflowCatalogService(settings))
+    question_ids = [f"Q{i:04d}" for i in range(1200)]
+
+    result = service.create_batch(
+        "default",
+        {
+            "workflow_key": "question_comprehension_info",
+            "source_kind": "batch_by_ids",
+            "entity": "question",
+            "question_ids": question_ids,
+            "knowledge_codes": [],
+        },
+    )
+
+    assert result["created_count"] == 1200
+    assert len({job["id"] for job in result["jobs"]}) == 1200

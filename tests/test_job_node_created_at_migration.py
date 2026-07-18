@@ -55,6 +55,20 @@ def test_v008_adds_created_at_to_existing_job_nodes(tmp_path: Path) -> None:
               finished_at text,
               unique(job_id, node_key)
             );
+            create table executor_leases (
+              id text primary key,
+              execution_id text not null,
+              executor_id text not null,
+              workspace_id text not null,
+              job_id text not null,
+              workflow_key text not null,
+              node_key text not null,
+              node_run_id integer not null,
+              status text not null,
+              acquired_at text not null,
+              heartbeat_at text not null,
+              expires_at text not null
+            );
             create table schema_migrations (
               version integer primary key,
               name text not null,

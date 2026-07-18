@@ -66,7 +66,8 @@ server/app/
 ├── video_capabilities/     # 视频能力合约与投影
 ├── executors/              # Executor 配置、Runtime、租赁调度
 ├── agents.py               # Agent 发现与状态跟踪
-└── workflow_worker_thread.py # DAG workflow worker 线程
+├── workflow_worker_thread.py # DAG workflow worker 线程
+└── workflow_worker_schedule.py # 按 workspace 的 job 扫描与 lease 认领
 ```
 
 ## Data Flow

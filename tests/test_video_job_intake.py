@@ -144,3 +144,35 @@ def test_video_knowledge_intake_keeps_distinct_video_urls(app, monkeypatch) -> N
     result = service.create_batch("video_knowledge", payload)
 
     assert result["created_count"] == 2
+
+
+def test_video_knowledge_intake_dedupes_shared_url_across_chunks(app, monkeypatch) -> None:
+    _create_workspace_with_revision(app)
+
+    def fake_lookup_knowledge_video(code, api_url=None, token=None):
+        return CmsVideoLookup(
+            status="found",
+            url="https://example.invalid/shared.mp4",
+            title=f"Knowledge {code}",
+            source_uuid="uuid-shared",
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_video.lookup_knowledge_video",
+        fake_lookup_knowledge_video,
+    )
+    monkeypatch.setattr("server.app.services.job_intake_video.get_token", lambda env, config: "")
+    monkeypatch.setattr("server.app.services.job_intake_chunks.INTAKE_RESOLUTION_CHUNK_SIZE", 1)
+
+    service = make_job_intake_service(app)
+    payload = {
+        "workflow_key": "video_knowledge",
+        "source_kind": "batch_by_knowledge",
+        "entity": "video",
+        "knowledge_codes": ["K001", "K002"],
+    }
+
+    result = service.create_batch("video_knowledge", payload)
+
+    assert result["created_count"] == 1
+    assert result["jobs"][0]["source_id"] == "K001"

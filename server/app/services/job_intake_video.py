@@ -45,6 +45,7 @@ def resolve_cms_video_candidates(
     source_kind: str,
     resolver: str,
     cms_config: dict[str, Any],
+    dedup_state: dict[str, set[str]] | None = None,
 ) -> list[dict[str, Any]]:
     if entity != "video":
         raise UnsupportedOperationError(f"{entity} resolver not yet implemented")
@@ -57,7 +58,7 @@ def resolve_cms_video_candidates(
 
     candidates: list[dict[str, Any]] = []
     seen: set[str] = set()
-    seen_urls: set[str] = set()
+    seen_urls = dedup_state.setdefault("urls", set()) if dedup_state is not None else set()
     for code in input_values:
         lookup = lookup_knowledge_video(code, api_url, token)
         if lookup.status == "not_found" or code in seen:
