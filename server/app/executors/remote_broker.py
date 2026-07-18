@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import threading
 from collections.abc import Callable, Collection
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -42,6 +42,7 @@ class RemoteOutcome:
     command: tuple[str, ...] = ()
     skill_version: str = ""
     result_archive_name: str = ""
+    worker_id: str = ""
 
 
 @dataclass
@@ -226,6 +227,8 @@ class RemoteExecutionBroker:
     # ---- internals ----
 
     def _finish(self, entry: _Entry, outcome: RemoteOutcome) -> None:
+        # The claim record is authoritative for provenance; reported worker_id is ignored.
+        outcome = replace(outcome, worker_id=entry.worker_id)
         entry.state = "done"
         entry.outcome = outcome
         entry.done_event.set()
