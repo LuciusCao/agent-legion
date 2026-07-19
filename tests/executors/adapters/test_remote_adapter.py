@@ -18,6 +18,7 @@ from server.app.executors.remote_broker import (
     RemoteExecutionPayload,
     RemoteOutcome,
 )
+from server.app.executors.remote_payloads.pi import PiPayloadBuilder
 from server.app.executors.runtime_config import PiRuntimeConfig
 from tests.executors.adapters.helpers import _make_skill_manager
 
@@ -41,17 +42,17 @@ def _make_executor(tmp_path: Path, broker: RemoteExecutionBroker) -> RemoteExecu
         "question_comprehension_info/generate_key_info",
         validate_script="#!/usr/bin/env python3\n",
     )
-    return RemoteExecutor(
-        "pi-remote",
+    capabilities = {
+        "review_keywords": RemoteCapabilityConfig(
+            skill="question_comprehension_info/generate_key_info"
+        )
+    }
+    payload_builder = PiPayloadBuilder(
         PiRuntimeConfig(binary="pi", provider="deepseek", model="your-model-b"),
         skill_manager,
-        {
-            "review_keywords": RemoteCapabilityConfig(
-                skill="question_comprehension_info/generate_key_info"
-            )
-        },
-        broker,
+        capabilities,
     )
+    return RemoteExecutor("pi-remote", payload_builder, capabilities, broker)
 
 
 def _result_archive(path: Path, *, node_key: str, run_token: str, output_name: str) -> None:
