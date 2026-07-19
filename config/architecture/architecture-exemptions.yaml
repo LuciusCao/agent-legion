@@ -15,6 +15,15 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
   ceiling: 211
 - check: architecture.file_budget
+  path: server/app/worker_control.py
+  reason: Task 8 of the phase2 state-externalization plan persists pause state
+    in worker_control_state (upsert on pause/resume, uncached reads on is_paused);
+    the single cohesive class outgrows the in-memory-era baseline and the budget
+    will be re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase2-state-externalization.md#task-8
+  ceiling: 58
+- check: architecture.file_budget
   path: server/app/agents.py
   reason: Task 9 of the phase1 event-bus plan routes agent WS broadcasts through
     the EventBus (subscribe/forward in connect, bus publish in _broadcast, public

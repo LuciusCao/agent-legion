@@ -1,21 +1,58 @@
+from __future__ import annotations
+
+import os
+import socket
 import threading
+from datetime import UTC, datetime
+from pathlib import Path
+
+from server.app.db.transaction import read_connection, write_transaction
 
 
 class WorkspaceWorkerControl:
-    """Per-workspace worker pause/resume control (in-memory, defaults to paused)."""
+    """Per-workspace worker pause/resume control.
 
-    def __init__(self) -> None:
+    With ``db_path`` the pause state is persisted in ``worker_control_state``
+    (shared across processes, survives restart); without it the control is
+    in-memory only (test convenience). Unknown workspaces default to paused.
+    """
+
+    def __init__(self, db_path: Path | None = None, *, process_id: str | None = None) -> None:
+        self._db_path = db_path
+        self._process_id = process_id or f"{socket.gethostname()}:{os.getpid()}"
         self._paused: dict[str, bool] = {}
         self._lock = threading.Lock()
 
     def pause(self, workspace_id: str) -> None:
-        with self._lock:
-            self._paused[workspace_id] = True
+        self._set(workspace_id, True)
 
     def resume(self, workspace_id: str) -> None:
-        with self._lock:
-            self._paused[workspace_id] = False
+        self._set(workspace_id, False)
 
     def is_paused(self, workspace_id: str) -> bool:
-        with self._lock:
-            return self._paused.get(workspace_id, True)
+        if self._db_path is None:
+            with self._lock:
+                return self._paused.get(workspace_id, True)
+        with read_connection(self._db_path) as conn:
+            row = conn.execute(
+                "select paused from worker_control_state where scope = ?",
+                (f"workspace:{workspace_id}",),
+            ).fetchone()
+        return True if row is None else bool(row["paused"])
+
+    def _set(self, workspace_id: str, paused: bool) -> None:
+        if self._db_path is None:
+            with self._lock:
+                self._paused[workspace_id] = paused
+            return
+        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
+        with write_transaction(self._db_path) as conn:
+            conn.execute(
+                "insert into worker_control_state (scope, paused, updated_by, updated_at)"
+                " values (?, ?, ?, ?)"
+                " on conflict(scope) do update set"
+                "   paused = excluded.paused,"
+                "   updated_by = excluded.updated_by,"
+                "   updated_at = excluded.updated_at",
+                (f"workspace:{workspace_id}", int(paused), self._process_id, now),
+            )

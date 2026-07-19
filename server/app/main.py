@@ -82,11 +82,11 @@ def create_app(
         event_bus=event_bus,
         discover_agents=lambda: list_openclaw_agents(timeout=10),
     )
-    workspace_worker_control = WorkspaceWorkerControl()
     job_event_manager = JobEventManager(event_bus)
     hub = NotificationHub()
     db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
+    workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
     remote_broker = RemoteExecutionBroker(
         job_db.path,
         settings.data_dir / "remote_bundles",
