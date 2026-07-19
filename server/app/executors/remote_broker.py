@@ -1,15 +1,25 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 import threading
 from collections.abc import Callable, Collection
-from dataclasses import dataclass, field, replace
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._remote_queue_store import (
+    EntriesView,
+    bundle_name_for_claim,
+    cancel_execution,
+    claim_next,
+    finish_execution,
+    heartbeat_claim,
+    sweep,
+)
 from server.app.executors.models import ExecutionStatus
 
 
@@ -45,26 +55,15 @@ class RemoteOutcome:
     worker_id: str = ""
 
 
-@dataclass
-class _Entry:
-    payload: RemoteExecutionPayload
-    state: str = "queued"  # queued | claimed | done
-    worker_id: str = ""
-    last_heartbeat_at: datetime | None = None
-    requeue_count: int = 0
-    outcome: RemoteOutcome | None = None
-    done_event: threading.Event = field(default_factory=threading.Event)
-
-
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
 
 class RemoteExecutionBroker:
-    """In-memory remote execution queue with a sqlite-backed worker registry.
+    """Sqlite-backed remote execution queue and worker registry.
 
-    One instance lives in the FastAPI process, shared by the RemoteExecutor
-    (producer/blocking consumer) and the /api/remote routes (worker-facing).
+    Rows in ``remote_executions`` survive restarts; claims are atomic across
+    processes; ``_done_events`` is only a same-process wake-up hint.
     """
 
     def __init__(
@@ -81,93 +80,119 @@ class RemoteExecutionBroker:
         self._claim_timeout = timedelta(seconds=claim_timeout_seconds)
         self._requeue_limit = requeue_limit
         self._now = time_source or _utcnow
-        self._lock = threading.Lock()
-        self._entries: dict[str, _Entry] = {}
+        self._done_events: dict[str, threading.Event] = {}
+        self._entries = EntriesView(db_path)  # legacy test handle; rows live in sqlite
+        # Recover claims orphaned by a restart before serving new work.
+        self._sweep()
 
     # ---- executor-facing ----
 
     def submit(self, payload: RemoteExecutionPayload) -> None:
-        with self._lock:
-            if payload.execution_id in self._entries:
-                raise ValueError(f"duplicate remote execution {payload.execution_id!r}")
-            self._entries[payload.execution_id] = _Entry(payload=payload)
+        self._sweep()  # Any write path also triggers the done-row cleanup.
+        now = _sqlite_timestamp(self._now())
+        try:
+            with write_transaction(self._db_path) as conn:
+                conn.execute(
+                    "insert into remote_executions"
+                    " (execution_id, lease_id, job_id, node_key, capability,"
+                    "  bundle_name, manifest_json, state, created_at, updated_at)"
+                    " values (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
+                    (
+                        payload.execution_id,
+                        payload.lease_id,
+                        payload.job_id,
+                        payload.node_key,
+                        payload.capability,
+                        payload.bundle_name,
+                        json.dumps(payload.manifest),
+                        now,
+                        now,
+                    ),
+                )
+        except sqlite3.IntegrityError as exc:
+            raise ValueError(f"duplicate remote execution {payload.execution_id!r}") from exc
 
     def wait_result(self, execution_id: str, poll_seconds: float = 0.2) -> RemoteOutcome:
-        with self._lock:
-            entry = self._entries[execution_id]
-        while not entry.done_event.wait(timeout=poll_seconds):
+        event = self._done_events.setdefault(execution_id, threading.Event())
+        while True:
+            with read_connection(self._db_path) as conn:
+                row = conn.execute(
+                    "select outcome_json from remote_executions"
+                    " where execution_id = ? and state = 'done'",
+                    (execution_id,),
+                ).fetchone()
+            if row is not None and row["outcome_json"] is not None:
+                data = json.loads(row["outcome_json"])
+                data["command"] = tuple(data.get("command", []))
+                return RemoteOutcome(**data)
             # Sweep here too, so a lost worker fails even when nobody else polls.
-            with self._lock:
-                self._sweep_locked()
-        assert entry.outcome is not None
-        return entry.outcome
+            self._sweep()
+            event.wait(timeout=poll_seconds)
+            event.clear()
 
     def cancel(self, execution_id: str) -> None:
-        with self._lock:
-            entry = self._entries.get(execution_id)
-            if entry is None or entry.state == "done":
-                return
-            outcome = RemoteOutcome(
-                status="cancelled", exit_code=-1, error_message="execution was cancelled"
-            )
-            self._finish(entry, outcome)
+        outcome = RemoteOutcome(
+            status="cancelled", exit_code=-1, error_message="execution was cancelled"
+        )
+        if cancel_execution(
+            self._db_path, execution_id, asdict(outcome), _sqlite_timestamp(self._now())
+        ):
+            self._signal_done(execution_id)
 
     # ---- worker-facing (called from routes) ----
 
     def dequeue(self, worker_id: str, capabilities: Collection[str]) -> RemoteClaim | None:
-        with self._lock:
-            self._sweep_locked()
-            for entry in self._entries.values():
-                if entry.state != "queued" or entry.payload.capability not in capabilities:
-                    continue
-                entry.state = "claimed"
-                entry.worker_id = worker_id
-                entry.last_heartbeat_at = self._now()
-                return RemoteClaim(
-                    execution_id=entry.payload.execution_id,
-                    job_id=entry.payload.job_id,
-                    node_key=entry.payload.node_key,
-                    capability=entry.payload.capability,
-                    bundle_url=f"/api/remote/executions/{entry.payload.execution_id}/bundle",
-                    manifest=entry.payload.manifest,
-                )
+        if not capabilities:
             return None
+        self._sweep()
+        entry = claim_next(self._db_path, worker_id, capabilities, _sqlite_timestamp(self._now()))
+        if entry is None:
+            return None
+        return RemoteClaim(
+            execution_id=entry["execution_id"],
+            job_id=entry["job_id"],
+            node_key=entry["node_key"],
+            capability=entry["capability"],
+            bundle_url=f"/api/remote/executions/{entry['execution_id']}/bundle",
+            manifest=json.loads(entry["manifest_json"]),
+        )
 
     def heartbeat(self, execution_id: str, worker_id: str) -> bool:
-        with self._lock:
-            self._sweep_locked()
-            entry = self._entries.get(execution_id)
-            if entry is None or entry.state != "claimed" or entry.worker_id != worker_id:
-                return False
-            entry.last_heartbeat_at = self._now()
-            return True
+        self._sweep()
+        return heartbeat_claim(
+            self._db_path, execution_id, worker_id, _sqlite_timestamp(self._now())
+        )
 
     def complete(self, execution_id: str, worker_id: str, outcome: RemoteOutcome) -> bool:
-        with self._lock:
-            entry = self._entries.get(execution_id)
-            if entry is None or entry.state != "claimed" or entry.worker_id != worker_id:
-                return False
-            self._finish(entry, outcome)
-            return True
+        finished = finish_execution(
+            self._db_path, execution_id, worker_id, asdict(outcome), _sqlite_timestamp(self._now())
+        )
+        if finished:
+            self._signal_done(execution_id)
+        return finished
 
     def complete_with_archive(
         self, execution_id: str, worker_id: str, outcome: RemoteOutcome, staging_path: Path
     ) -> bool:
         """Validate the claim, publish the archive at its final name, then finish — atomically."""
-        with self._lock:
-            entry = self._entries.get(execution_id)
-            if entry is None or entry.state != "claimed" or entry.worker_id != worker_id:
-                return False
+
+        def publish_archive() -> None:
             staging_path.replace(self.bundle_dir / outcome.result_archive_name)
-            self._finish(entry, outcome)
-            return True
+
+        finished = finish_execution(
+            self._db_path,
+            execution_id,
+            worker_id,
+            asdict(outcome),
+            _sqlite_timestamp(self._now()),
+            before_update=publish_archive,
+        )
+        if finished:
+            self._signal_done(execution_id)
+        return finished
 
     def bundle_name_for(self, execution_id: str, worker_id: str) -> str | None:
-        with self._lock:
-            entry = self._entries.get(execution_id)
-            if entry is None or entry.state != "claimed" or entry.worker_id != worker_id:
-                return None
-            return entry.payload.bundle_name
+        return bundle_name_for_claim(self._db_path, execution_id, worker_id)
 
     # ---- worker registry (sqlite) ----
 
@@ -215,34 +240,17 @@ class RemoteExecutionBroker:
 
     # ---- internals ----
 
-    def _finish(self, entry: _Entry, outcome: RemoteOutcome) -> None:
-        # The claim record is authoritative for provenance; reported worker_id is ignored.
-        outcome = replace(outcome, worker_id=entry.worker_id)
-        entry.state = "done"
-        entry.outcome = outcome
-        entry.done_event.set()
+    def _signal_done(self, execution_id: str) -> None:
+        event = self._done_events.get(execution_id)
+        if event is not None:
+            event.set()
 
-    def _sweep_locked(self) -> None:
-        now = self._now()
-        for entry in self._entries.values():
-            if entry.state != "claimed" or entry.last_heartbeat_at is None:
-                continue
-            if now - entry.last_heartbeat_at <= self._claim_timeout:
-                continue
-            entry.requeue_count += 1
-            if entry.requeue_count > self._requeue_limit:
-                self._finish(
-                    entry,
-                    RemoteOutcome(
-                        status="failed",
-                        exit_code=1,
-                        error_message=(
-                            f"remote execution lost its worker {entry.requeue_count} times;"
-                            " requeue limit exceeded"
-                        ),
-                    ),
-                )
-            else:
-                entry.state = "queued"
-                entry.worker_id = ""
-                entry.last_heartbeat_at = None
+    def _sweep(self) -> None:
+        finished = sweep(
+            self._db_path,
+            now=self._now(),
+            claim_timeout=self._claim_timeout,
+            requeue_limit=self._requeue_limit,
+        )
+        for execution_id in finished:
+            self._signal_done(execution_id)
