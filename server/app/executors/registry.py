@@ -2,9 +2,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
 
 from server.app.executors.config import (
     ExecutorConfig,
@@ -14,14 +11,12 @@ from server.app.executors.config import (
     PiExecutorConfig,
     RemoteExecutorConfig,
 )
+from server.app.executors.kinds import RuntimeDependencies
 from server.app.executors.local import LocalExecutor, LocalHandler
 from server.app.executors.openclaw import build_openclaw_executor
 from server.app.executors.pi import PiExecutor
 from server.app.executors.protocol import Executor
 from server.app.executors.remote import RemoteExecutor
-from server.app.executors.remote_broker import RemoteExecutionBroker
-from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
-from server.app.skills.manager import SkillManager
 
 logger = logging.getLogger(__name__)
 
@@ -36,32 +31,6 @@ class UnknownExecutorError(ExecutorRegistryError):
 
 class UnsupportedCapabilityError(ExecutorRegistryError):
     """Raised when an executor does not implement a requested capability."""
-
-
-@dataclass(frozen=True)
-class RuntimeDependencies:
-    """Runtime dependencies injected into executor adapters during registry build.
-
-    The registry is intentionally free of import side effects: callers supply the
-    concrete handler functions, Pi configuration, and OpenClaw settings.
-    """
-
-    local_handlers: Mapping[str, LocalHandler] = field(default_factory=dict)
-    pi_runtime: PiRuntimeConfig = field(default_factory=PiRuntimeConfig)
-    skill_manager: SkillManager = field(
-        default_factory=lambda: SkillManager(
-            config_path=Path("config") / "skills.yaml",
-            lock_path=Path("config") / "skills.lock",
-            base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
-        )
-    )
-    openclaw_runtime: OpenClawRuntimeConfig = field(
-        default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
-    )
-    settings_config: Mapping[str, Any] | None = None
-    job_db: Any | None = None
-    cancellation_grace_seconds: int = 5
-    remote_broker: RemoteExecutionBroker | None = None
 
 
 class ExecutorRegistry:
