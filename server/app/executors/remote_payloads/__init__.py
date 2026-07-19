@@ -1,14 +1,7 @@
-"""Remote payload builders: manifest/bundle construction per payload kind.
-
-The registry maps a payload name (``RemoteExecutorConfig.payload``) to a
-factory that builds a ``PayloadBuilder`` from runtime dependencies and the
-executor's capability configs. Importing this package registers the builtin
-builders (see the imports at the bottom).
-"""
+"""Remote payload builders: manifest/bundle construction per payload kind."""
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from typing import TYPE_CHECKING, Any, Protocol
 
 if TYPE_CHECKING:
@@ -24,7 +17,10 @@ class PayloadBuilder(Protocol):
 
     name: str
 
-    def build_manifest(self, context: ExecutionContext) -> dict[str, Any]: ...
+    def build_manifest(self, context: ExecutionContext) -> dict[str, Any]:
+        """Manifest shipped to workers; must include ``run_token`` and
+        ``skill_version`` — ``RemoteExecutor`` consumes both in the result."""
+        ...
 
     def build_bundle_for(self, context: ExecutionContext, bundle_path: Path) -> None: ...
 
@@ -37,9 +33,17 @@ class PayloadBuilder(Protocol):
         ...
 
 
-PayloadBuilderFactory = Callable[
-    ["RuntimeDependencies", dict[str, "RemoteCapabilityConfig"]], "PayloadBuilder"
-]
+class PayloadBuilderFactory(Protocol):
+    """Factory callback: deps + capabilities, plus optional payload agent_id."""
+
+    def __call__(
+        self,
+        deps: RuntimeDependencies,
+        capabilities: dict[str, RemoteCapabilityConfig],
+        *,
+        agent_id: str = "",
+    ) -> PayloadBuilder: ...
+
 
 _PAYLOAD_BUILDERS: dict[str, PayloadBuilderFactory] = {}
 
@@ -61,10 +65,10 @@ def has_payload_builder(name: str) -> bool:
     return name in _PAYLOAD_BUILDERS
 
 
-# Register the builtin payload builders; keep at the bottom so the registry
-# above is fully defined before the submodule factory is referenced (the
-# submodule must not import this package back, otherwise the architecture
-# import-cycle check reports __init__ <-> pi).
+# Register the builtin payload builders at the bottom so the registry is fully
+# defined first; submodules must not import this package back (cycle check).
+from server.app.executors.remote_payloads.openclaw import build_openclaw_payload  # noqa: E402
 from server.app.executors.remote_payloads.pi import build_pi_payload  # noqa: E402
 
 register_payload_builder("pi", build_pi_payload)
+register_payload_builder("openclaw", build_openclaw_payload)

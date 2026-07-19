@@ -163,7 +163,9 @@ def build_remote_executor(
         raise ExecutorKindError(
             f"remote executor {executor_id!r} requires a remote execution broker"
         )
-    builder = get_payload_builder(config.payload)(deps, config.capabilities)
+    builder = get_payload_builder(config.payload)(
+        deps, config.capabilities, agent_id=config.agent_id
+    )
     return RemoteExecutor(
         id=executor_id,
         payload_builder=builder,

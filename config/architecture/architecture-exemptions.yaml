@@ -71,11 +71,12 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/executors/config.py
   reason: Task 4 of the distributed-agent-execution plan adds the remote executor
-    config models; the models will be split into a separate module once the feature
-    is complete.
+    config models; Task 5 of the phase3 execution-decoupling plan adds the
+    agent_id field and its openclaw-payload validator to RemoteExecutorConfig;
+    the models will be split into a separate module once the feature is complete.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-4
-  ceiling: 162
+  ceiling: 177
 - check: architecture.file_budget
   path: server/app/executors/runtime_config.py
   reason: Task 4 of the distributed-agent-execution plan adds RemoteRuntimeConfig
