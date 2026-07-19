@@ -249,3 +249,18 @@ invariants:
       - kind: contract
         target: tests/test_architecture_video_legacy.py
         gate: quick
+
+  - id: DB-STATE-001
+    statement: "Runtime queues (remote execution broker entries) and job event sequence numbers (JobEventBuffer revisions) must be persisted in SQLite; introducing new in-process authoritative runtime state is forbidden."
+    owner: database
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_remote_broker_persistence.py
+        gate: quick
+      - kind: integration
+        target: tests/test_job_event_buffer_db.py
+        gate: quick
+      - kind: contract
+        target: tests/ci/test_no_scattered_begin_immediate.py
+        gate: ci_extended
