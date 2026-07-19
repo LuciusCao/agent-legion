@@ -2,21 +2,23 @@ from __future__ import annotations
 
 import logging
 import uuid
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from server.app.executors._pi_skill import get_skill_version, prepare_execution, resolve_skill_dir
-from server.app.executors.config import RemoteCapabilityConfig
-from server.app.executors.models import ExecutionContext, ExecutionResult
-from server.app.executors.pi_node_execution import resolve_node_pi_config
-from server.app.executors.remote_broker import (
-    RemoteExecutionBroker,
-    RemoteExecutionPayload,
-    RemoteOutcome,
+from server.app.executors.config import RemoteCapabilityConfig, RemoteExecutorConfig
+from server.app.executors.kinds import (
+    ExecutorKind,
+    ExecutorKindError,
+    RuntimeDependencies,
+    register_kind,
 )
+from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.executors.remote_bundle import build_bundle, extract_result_archive
 from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.skills.manager import SkillManager
-from server.app.workflows.pi_config import PiConfig
+
+if TYPE_CHECKING:
+    from server.app.executors.remote_broker import RemoteExecutionBroker, RemoteOutcome
 
 logger = logging.getLogger(__name__)
 
@@ -38,6 +40,11 @@ class RemoteExecutor:
         capabilities: dict[str, RemoteCapabilityConfig],
         broker: RemoteExecutionBroker,
     ) -> None:
+        # Lazy imports: remote_broker and workflows.pi_config transitively
+        # import executors submodules, so module-level imports here would
+        # create an import cycle once the package __init__ registers this kind.
+        from server.app.workflows.pi_config import PiConfig
+
         self.id = id
         self.config = PiConfig.from_runtime(config)
         self.skill_manager = skill_manager
@@ -49,6 +56,10 @@ class RemoteExecutor:
         return capability in self.capabilities
 
     def execute(self, context: ExecutionContext) -> ExecutionResult:
+        # See __init__ for why these imports are function-local.
+        from server.app.executors.pi_node_execution import resolve_node_pi_config
+        from server.app.executors.remote_broker import RemoteExecutionPayload
+
         capability_config, early_result = prepare_execution(
             self._cancelled, self.capabilities, context
         )
@@ -177,3 +188,24 @@ class RemoteExecutor:
             produced_artifacts=produced,
             runner=outcome.worker_id,
         )
+
+
+def build_remote_executor(
+    executor_id: str, config: RemoteExecutorConfig, deps: RuntimeDependencies
+) -> RemoteExecutor:
+    if deps.remote_broker is None:
+        raise ExecutorKindError(
+            f"remote executor {executor_id!r} requires a remote execution broker"
+        )
+    return RemoteExecutor(
+        executor_id,
+        deps.pi_runtime,
+        deps.skill_manager,
+        config.capabilities,
+        deps.remote_broker,
+    )
+
+
+register_kind(
+    ExecutorKind(name="remote", config_model=RemoteExecutorConfig, factory=build_remote_executor)
+)
