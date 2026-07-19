@@ -99,8 +99,18 @@ class OpenClawExecutorConfig(BaseModel):
 class RemoteExecutorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["remote"]
+    payload: str = "pi"
     global_capacity: int = Field(gt=0, strict=True)
     capabilities: dict[str, RemoteCapabilityConfig]
+
+    @field_validator("payload", mode="after")
+    @classmethod
+    def _reject_unknown_payload(cls, value: str) -> str:
+        from server.app.executors import remote_payloads  # lazy: registry import cycle
+
+        if not remote_payloads.has_payload_builder(value):
+            raise ValueError(f"unknown executor payload {value!r}")
+        return value
 
     @field_validator("capabilities", mode="after")
     @classmethod

@@ -134,11 +134,3 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-2
   ceiling: 189
-- check: architecture.file_budget
-  path: server/app/executors/remote.py
-  reason: Task 2 of the phase3 execution-decoupling plan adds build_remote_executor
-    as the builtin remote kind registration home; the budget will be re-ratcheted
-    if the module shrinks.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-2
-  ceiling: 216
