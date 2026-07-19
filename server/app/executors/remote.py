@@ -151,6 +151,7 @@ class RemoteExecutor:
                     command=outcome.command,
                     log_path=str(context.log_path),
                     skill_version=skill_version,
+                    runner=outcome.worker_id,
                 )
         produced = tuple(
             name for name in context.expected_outputs if (context.job_dir / name).is_file()
@@ -174,4 +175,5 @@ class RemoteExecutor:
             session_dir=str(session_dir) if session_dir.is_dir() else "",
             skill_version=skill_version,
             produced_artifacts=produced,
+            runner=outcome.worker_id,
         )

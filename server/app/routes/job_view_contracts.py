@@ -71,7 +71,7 @@ class JobNodeResponse(BaseModel):
     inputs: list[str]
     outputs: list[str]
     executor_id: str | None = None
-    executor_kind: Literal["local", "pi", "openclaw"] | None = None
+    executor_kind: Literal["local", "pi", "openclaw", "remote"] | None = None
 
 
 class NodeRunResponse(BaseModel):
@@ -87,6 +87,7 @@ class NodeRunResponse(BaseModel):
     error_message: str
     run_dir: str
     session_dir: str
+    runner: str = ""
 
 
 class LogEventResponse(BaseModel):

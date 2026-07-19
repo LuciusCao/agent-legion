@@ -15,7 +15,7 @@ export interface DagNodeData extends Record<string, unknown> {
   label: string
   status: DagNodeStatus
   duration?: number
-  executorKind?: 'local' | 'pi' | 'openclaw' | null
+  executorKind?: 'local' | 'pi' | 'openclaw' | 'remote' | null
   nodeKey?: string
   capability?: string
   topologyBadges?: Array<'entry' | 'branch' | 'terminal'>

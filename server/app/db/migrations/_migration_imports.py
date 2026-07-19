@@ -45,3 +45,4 @@ from server.app.db.migrations.v018_node_run_token_usage import (
     MIGRATION as V018_NODE_RUN_TOKEN_USAGE,
 )
 from server.app.db.migrations.v019_remote_workers import MIGRATION as V019_REMOTE_WORKERS
+from server.app.db.migrations.v020_node_run_runner import MIGRATION as V020_NODE_RUN_RUNNER

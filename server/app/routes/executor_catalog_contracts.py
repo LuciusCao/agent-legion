@@ -17,7 +17,7 @@ class ExecutorCapabilityResponse(BaseModel):
 
 class ExecutorDefinitionResponse(BaseModel):
     id: str
-    kind: Literal["local", "pi", "openclaw"]
+    kind: Literal["local", "pi", "openclaw", "remote"]
     global_capacity: int = Field(ge=1)
     capabilities: list[str]
     capability_details: list[ExecutorCapabilityResponse] = Field(default_factory=list)

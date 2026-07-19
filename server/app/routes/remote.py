@@ -39,17 +39,32 @@ class ClaimResponse(BaseModel):
     manifest: dict[str, Any]
 
 
+class RemoteWorkerInfo(BaseModel):
+    worker_id: str
+    name: str
+    capabilities: list[str]
+    slots: int
+    registered_at: str
+    last_seen_at: str
+
+
+class WorkersResponse(BaseModel):
+    workers: list[RemoteWorkerInfo]
+
+
 def create_remote_router(broker: RemoteExecutionBroker, settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/remote", tags=["remote"])
     remote_config = settings.executor_runtime.remote
 
-    def _authorize(request: Request, expected_worker_id: str | None = None) -> str:
+    def _authorize(
+        request: Request, expected_worker_id: str | None = None, require_worker_id: bool = True
+    ) -> str:
         if not remote_config.worker_token:
             raise HTTPException(status_code=503, detail="remote execution is not enabled")
         if request.headers.get("x-worker-token") != remote_config.worker_token:
             raise HTTPException(status_code=401, detail="invalid worker token")
         worker_id = request.headers.get("x-worker-id", "")
-        if not worker_id:
+        if require_worker_id and not worker_id:
             raise HTTPException(status_code=400, detail="missing X-Worker-Id header")
         if expected_worker_id is not None and worker_id != expected_worker_id:
             raise HTTPException(status_code=400, detail="worker id mismatch")
@@ -64,6 +79,11 @@ def create_remote_router(broker: RemoteExecutionBroker, settings: Settings) -> A
         _authorize(request, payload.worker_id)
         broker.register_worker(payload.worker_id, payload.name, payload.capabilities, payload.slots)
         return Response(status_code=204)
+
+    @router.get("/workers", response_model=WorkersResponse)
+    def list_workers(request: Request) -> WorkersResponse:
+        _authorize(request, require_worker_id=False)
+        return WorkersResponse(workers=[RemoteWorkerInfo(**w) for w in broker.list_workers()])
 
     @router.post("/claim", response_model=ClaimResponse)
     def claim(payload: ClaimRequest, request: Request) -> ClaimResponse | Response:

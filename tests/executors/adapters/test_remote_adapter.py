@@ -114,6 +114,7 @@ def test_execute_happy_path(tmp_path: Path, context: ExecutionContext) -> None:
     assert run_dir.is_dir()
     assert (run_dir / "events.jsonl").is_file()
     assert result.skill_version  # 40-char git commit from the fake skill repo
+    assert result.runner == "w1"
     # bundle + result archive cleaned up
     assert list(broker.bundle_dir.iterdir()) == []
 

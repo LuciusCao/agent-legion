@@ -6,7 +6,7 @@ import styles from './NodeDetailsPanel.module.css'
 
 type LatestRun = Pick<
   components['schemas']['NodeRunResponse'],
-  'id' | 'status' | 'started_at' | 'exit_code' | 'error_message'
+  'id' | 'status' | 'started_at' | 'exit_code' | 'error_message' | 'runner'
 >
 
 interface NodeDetailsPanelProps {
@@ -85,6 +85,9 @@ export function NodeDetailsPanel({
             <div>
               Run #{latestRun.id} · {latestRun.status}
             </div>
+            {latestRun.runner && (
+              <div className={styles.muted}>Runner:{latestRun.runner}</div>
+            )}
             <div className={styles.muted}>开始：{latestRun.started_at}</div>
             {latestRun.exit_code !== null && (
               <div>退出码：{latestRun.exit_code}</div>

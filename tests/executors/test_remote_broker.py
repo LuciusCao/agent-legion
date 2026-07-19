@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -93,7 +94,7 @@ def test_complete_unblocks_wait_result(broker):
     outcome = RemoteOutcome(status="completed", exit_code=0, result_archive_name="e1.result.tar.gz")
     thread = threading.Thread(target=broker.complete, args=("e1", "w1", outcome))
     thread.start()
-    assert broker.wait_result("e1") == outcome
+    assert broker.wait_result("e1") == replace(outcome, worker_id="w1")
     thread.join(timeout=5)
 
 
@@ -126,6 +127,15 @@ def test_bundle_name_for_only_claiming_worker(broker):
     broker.dequeue("w1", {"cap_a"})
     assert broker.bundle_name_for("e1", "w1") == "e1.tar.gz"
     assert broker.bundle_name_for("e1", "w2") is None
+
+
+def test_finish_injects_claiming_worker_id(broker):
+    broker.submit(_payload("e1"))
+    broker.dequeue("w1", {"cap_a"})
+    forged = RemoteOutcome(status="completed", exit_code=0, worker_id="w-evil")
+    assert broker.complete("e1", "w1", forged) is True
+    outcome = broker.wait_result("e1")
+    assert outcome.worker_id == "w1"  # broker claim record wins over reported metadata
 
 
 def test_worker_registry_round_trip(broker):

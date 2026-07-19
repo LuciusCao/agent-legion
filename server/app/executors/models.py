@@ -38,6 +38,7 @@ class ExecutionResult:
     session_reference: str = ""
     skill_version: str = ""
     produced_artifacts: tuple[str, ...] = ()
+    runner: str = ""
 
 
 @dataclass(frozen=True)

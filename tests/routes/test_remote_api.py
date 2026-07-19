@@ -337,6 +337,37 @@ def test_register_worker_id_mismatch_returns_400(rig):
     assert resp.json()["detail"] == "worker id mismatch"
 
 
+def test_workers_requires_token(rig):
+    client, _ = rig
+    resp = client.get("/api/remote/workers")
+    assert resp.status_code == 401
+
+
+def test_workers_lists_registered(rig):
+    client, _ = rig
+    client.post(
+        "/api/remote/register",
+        json={"worker_id": "w1", "name": "mac-mini", "capabilities": ["cap_a"], "slots": 65},
+        headers=HEADERS,
+    )
+    resp = client.get("/api/remote/workers", headers={"X-Worker-Token": TOKEN})
+    assert resp.status_code == 200
+    workers = resp.json()["workers"]
+    assert len(workers) == 1
+    assert workers[0]["worker_id"] == "w1"
+    assert workers[0]["name"] == "mac-mini"
+    assert workers[0]["capabilities"] == ["cap_a"]
+    assert workers[0]["slots"] == 65
+    assert workers[0]["registered_at"]
+    assert workers[0]["last_seen_at"]
+
+
+def test_workers_503_when_disabled(tmp_path, settings):
+    client, _ = _client_for(settings, tmp_path)
+    resp = client.get("/api/remote/workers", headers={"X-Worker-Token": "x"})
+    assert resp.status_code == 503
+
+
 def _wait_and_read_archive(
     broker: RemoteExecutionBroker,
     execution_id: str,
