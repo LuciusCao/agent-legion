@@ -32,6 +32,7 @@ Components:
   queued/claimed executions survive a server restart and stale claims are
   requeued by the sweep after `claim_timeout_seconds`.
 - `server/app/routes/remote.py` — authenticated `/api/remote/*` worker endpoints.
+- `server/app/executors/sweeper.py` — lease-hygiene sweeper (see §7).
 - `scripts/remote/worker.py` — stdlib-only worker agent (one file, copy to device).
 - `scripts/remote/llm_gateway.py` — laptop-side credential-injecting proxy.
 
@@ -190,6 +191,99 @@ Every finished node run records its runner (executor id for local runs, the
 concrete `worker_id` for remote runs) and shows it in the job detail view;
 `GET /api/remote/workers` lists the registered workers and their last-seen
 times (token required).
+
+### Upgrade order: server first, then workers
+
+Roll out upgrades in this order: **upgrade the server first, then roll the
+workers**. Current workers run the server-rendered `command_spec` attached to
+each claim; when a claim carries none, the run fails immediately with
+`server did not provide command_spec; upgrade the server first` — the worker
+logs the error, skips the report, and the claim times out server-side.
+
+The reverse order stays workable for **one version**: the server still embeds
+the full manifest in every claim and bundle, so the previous `worker.py`
+release keeps running via its manifest-mirror command path. Treat this as a
+migration window only — copy the new `worker.py` to every device (§5) right
+after the server upgrade; the mirror assumption is dropped after one version.
+
+Rows enqueued before the v023 schema migration carry no stored
+`command_spec`. A current worker claiming such a row hits the error above and
+never reports, so the claim times out, the broker requeues the row
+(`remote.claim_timeout_seconds`), and after `remote.requeue_limit` attempts
+finishes it as failed — the queue converges on its own, at the cost of a few
+failed jobs to rerun. To avoid the churn, drain the remote queue before
+upgrading workers across the v023 boundary.
+
+### Sweeper deployment
+
+The sweeper owns all lease hygiene: requeueing expired remote claims,
+expiring stale leases, recovering orphaned running jobs, and **renewing the
+leases backing live remote executions**. By default one sweeper runs inside
+the server process (`sweeper_enabled: true`).
+
+For multi-replica server deployments, disable the in-process sweeper on every
+API replica in `config/workflow.yaml` and run the sweeper as a dedicated
+process instead:
+
+```yaml
+sweeper_enabled: false        # API replicas only
+sweeper_interval_seconds: 5   # keep far below lease_ttl_seconds (default 90)
+```
+
+Start the dedicated sweeper from the repo root, against the same
+configuration and `data/` directory as the API replicas (the database schema
+must already exist — start it after an API server has initialized the data
+directory at least once):
+
+```bash
+UV_CACHE_DIR=.uv-cache uv run python - <<'EOF'
+import threading
+
+from server.app.executors.leases import ExecutorLeaseRepository
+from server.app.executors.remote_broker import RemoteExecutionBroker
+from server.app.executors.sweeper import SweeperThread
+from server.app.jobs import JobQueries
+from server.app.settings import load_settings
+
+settings = load_settings()
+job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
+leases = ExecutorLeaseRepository(job_db.path, job_db=job_db)
+broker = RemoteExecutionBroker(
+    job_db.path,
+    settings.data_dir / "remote_bundles",
+    claim_timeout_seconds=settings.executor_runtime.remote.claim_timeout_seconds,
+    requeue_limit=settings.executor_runtime.remote.requeue_limit,
+)
+SweeperThread(
+    leases,
+    broker,
+    interval_seconds=settings.executor_runtime.sweeper_interval_seconds,
+    lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
+).start()
+threading.Event().wait()  # run until killed
+EOF
+```
+
+Two hard operational requirements:
+
+- **At least one sweeper must be alive at all times.** With none, expired
+  claims are never requeued, orphaned jobs never recover, and stale leases
+  never expire; and when a sweeper comes back after an outage longer than
+  `lease_ttl_seconds`, its first tick expires the aged leases — including ones
+  backing remote executions that are still in flight. Running more than one
+  sweeper is safe (every step funnels through single-winner sqlite
+  transactions), so prefer a supervised process plus a standby over a bare
+  `nohup`.
+- **`sweeper_interval_seconds` must stay far smaller than `lease_ttl_seconds`.**
+  Each tick expires stale leases *before* renewing live remote leases, so with
+  `interval ≥ ttl` a healthy remote lease can age past its TTL between renewals
+  and be expired by the same tick that was meant to renew it. Keep the interval
+  at or below a third of the TTL (defaults: 5 s vs 90 s).
+
+The dedicated sweeper performs all database hygiene but does not publish
+realtime job-update events; sweeper-driven transitions surface on the next
+client refresh. Single-server deployments should keep the default in-process
+sweeper.
 
 ## 8. Binding workflows to the remote executor
 

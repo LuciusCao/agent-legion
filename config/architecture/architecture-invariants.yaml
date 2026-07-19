@@ -264,3 +264,30 @@ invariants:
       - kind: contract
         target: tests/ci/test_no_scattered_begin_immediate.py
         gate: ci_extended
+
+  - id: EXEC-REMOTE-001
+    statement: "Remote execution completion must be driven by broker completion callbacks; blocking a local thread waiting for a remote result (e.g. wait_result polling) is forbidden on the executor path."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_remote_nonblocking.py::test_execute_returns_immediately_without_waiting
+        gate: quick
+      - kind: integration
+        target: tests/executors/test_remote_nonblocking.py::test_completion_callback_finishes_lease_and_backfills
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_execution_decoupling.py
+        gate: quick
+
+  - id: EXEC-KIND-001
+    statement: "Executor kinds must resolve through the kinds registry (register_kind/build_executor); isinstance dispatch chains over executor config types are forbidden in registry.py."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/executors/test_executor_kind_registration.py::test_unknown_kind_rejected_at_config_load
+        gate: quick
+      - kind: contract
+        target: tests/test_architecture_execution_decoupling.py
+        gate: quick
