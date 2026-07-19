@@ -6,16 +6,26 @@ import threading
 from datetime import UTC, datetime
 from pathlib import Path
 
+from server.app.db.retry import retried_on_sqlite_lock
 from server.app.db.transaction import read_connection, write_transaction
 
 
-class WorkspaceWorkerControl:
-    """Per-workspace worker pause/resume control.
+@retried_on_sqlite_lock
+def _persist_pause(db_path: Path, scope: str, paused: bool, process_id: str) -> None:
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
+    with write_transaction(db_path) as conn:
+        conn.execute(
+            "insert into worker_control_state (scope, paused, updated_by, updated_at)"
+            " values (?, ?, ?, ?) on conflict(scope) do update set paused = excluded.paused,"
+            " updated_by = excluded.updated_by, updated_at = excluded.updated_at",
+            (scope, int(paused), process_id, now),
+        )
 
-    With ``db_path`` the pause state is persisted in ``worker_control_state``
-    (shared across processes, survives restart); without it the control is
-    in-memory only (test convenience). Unknown workspaces default to paused.
-    """
+
+class WorkspaceWorkerControl:
+    """Per-workspace worker pause/resume control. With ``db_path`` the state
+    persists in ``worker_control_state`` across processes/restarts; without it
+    the control is in-memory only. Unknown workspaces default to paused."""
 
     def __init__(self, db_path: Path | None = None, *, process_id: str | None = None) -> None:
         self._db_path = db_path
@@ -45,14 +55,4 @@ class WorkspaceWorkerControl:
             with self._lock:
                 self._paused[workspace_id] = paused
             return
-        now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
-        with write_transaction(self._db_path) as conn:
-            conn.execute(
-                "insert into worker_control_state (scope, paused, updated_by, updated_at)"
-                " values (?, ?, ?, ?)"
-                " on conflict(scope) do update set"
-                "   paused = excluded.paused,"
-                "   updated_by = excluded.updated_by,"
-                "   updated_at = excluded.updated_at",
-                (f"workspace:{workspace_id}", int(paused), self._process_id, now),
-            )
+        _persist_pause(self._db_path, f"workspace:{workspace_id}", paused, self._process_id)

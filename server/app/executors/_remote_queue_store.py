@@ -1,11 +1,11 @@
 """Sqlite write/read paths for the RemoteExecutionBroker queue.
 
-Each function owns its connect-and-transact unit via
-``server.app.db.transaction.write_transaction`` / ``read_connection``, so a
-claim is atomic across broker instances (and processes) and the queue
-survives a server restart. Rows live in the ``remote_executions`` table
-(migration v021); ``outcome_json`` holds ``dataclasses.asdict(RemoteOutcome)``
-with the ``command`` tuple serialized as a JSON list.
+Each write function owns its connect-and-transact unit via
+``server.app.db.transaction.write_transaction`` and is decorated with
+``retried_on_sqlite_lock`` so lock contention retries the whole unit on a
+fresh connection. Rows live in the ``remote_executions`` table (migration
+v021); ``outcome_json`` holds ``dataclasses.asdict(RemoteOutcome)`` with the
+``command`` tuple serialized as a JSON list.
 """
 
 from __future__ import annotations
@@ -16,12 +16,14 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from server.app.db.retry import retried_on_sqlite_lock
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors._lease_transactions import _sqlite_timestamp
 
 _DONE_RETENTION = timedelta(hours=24)
 
 
+@retried_on_sqlite_lock
 def claim_next(
     db_path: Path, worker_id: str, capabilities: Collection[str], now: str
 ) -> dict[str, Any] | None:
@@ -66,6 +68,7 @@ def claim_next(
     return dict(entry)
 
 
+@retried_on_sqlite_lock
 def heartbeat_claim(db_path: Path, execution_id: str, worker_id: str, now: str) -> bool:
     with write_transaction(db_path) as conn:
         cursor = conn.execute(
@@ -76,6 +79,7 @@ def heartbeat_claim(db_path: Path, execution_id: str, worker_id: str, now: str) 
         return cursor.rowcount > 0
 
 
+@retried_on_sqlite_lock
 def finish_execution(
     db_path: Path,
     execution_id: str,
@@ -86,7 +90,8 @@ def finish_execution(
     before_update: Callable[[], None] | None = None,
 ) -> bool:
     """Mark a claimed row done; ``before_update`` (archive rename) runs inside
-    the transaction, so a failure there rolls the finish back."""
+    the transaction, so a failure there rolls the finish back. The retry unit
+    spans the whole call, so ``before_update`` must be idempotent."""
     with write_transaction(db_path) as conn:
         row = conn.execute(
             "select worker_id from remote_executions where execution_id = ? and state = 'claimed'",
@@ -107,6 +112,7 @@ def finish_execution(
         return cursor.rowcount > 0
 
 
+@retried_on_sqlite_lock
 def cancel_execution(
     db_path: Path, execution_id: str, outcome_dict: dict[str, Any], now: str
 ) -> bool:
@@ -137,6 +143,7 @@ def bundle_name_for_claim(db_path: Path, execution_id: str, worker_id: str) -> s
     return row["bundle_name"] if row is not None else None
 
 
+@retried_on_sqlite_lock
 def sweep(
     db_path: Path, *, now: datetime, claim_timeout: timedelta, requeue_limit: int
 ) -> list[str]:

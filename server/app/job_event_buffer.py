@@ -6,6 +6,7 @@ from pathlib import Path
 from threading import Lock
 from typing import Literal
 
+from server.app.db.retry import retried_on_sqlite_lock
 from server.app.db.transaction import write_transaction
 
 JobEventKind = Literal["updated", "created", "deleted"]
@@ -41,13 +42,16 @@ class JobEventBuffer:
         if self._db_path is None:
             self._revision += 1
             return self._revision
-        with write_transaction(self._db_path) as conn:
+        self._revision = self._bump_seq(self._db_path)  # drain_compacted 的 latest_revision 上界
+        return self._revision
+
+    @retried_on_sqlite_lock
+    def _bump_seq(self, db_path: Path) -> int:
+        with write_transaction(db_path) as conn:
             row = conn.execute(
                 "update job_event_seq set value = value + 1 where id = 1 returning value"
             ).fetchone()
-        revision = int(row["value"])
-        self._revision = revision  # drain_compacted 的 latest_revision 上界
-        return revision
+        return int(row["value"])
 
     def record_job_updated(self, workspace_id: str, job_id: str) -> int:
         return self.record(workspace_id, job_id, "updated")
@@ -61,12 +65,7 @@ class JobEventBuffer:
     def record(self, workspace_id: str, job_id: str, kind: JobEventKind) -> int:
         revision = self._next_revision()  # DB 发号在锁外，避免持锁等 IO
         with self._lock:
-            event = JobEvent(
-                revision=revision,
-                workspace_id=workspace_id,
-                job_id=job_id,
-                kind=kind,
-            )
+            event = JobEvent(revision=revision, workspace_id=workspace_id, job_id=job_id, kind=kind)
             if len(self._events) >= self._max_events:
                 dropped = self._events.popleft()
                 self._resync_workspace_ids.add(dropped.workspace_id)

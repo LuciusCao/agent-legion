@@ -1,13 +1,13 @@
 """Bounded retry for transient SQLite lock contention.
 
-SQLite runs with a single writer; concurrent writers surface
-``sqlite3.OperationalError`` lock errors once ``busy_timeout`` is exhausted.
-Callers wrap an idempotent connect-and-transact unit with
-:func:`retry_on_sqlite_lock` so a retry gets a fresh connection.
+SQLite has a single writer; concurrent writers surface ``sqlite3.OperationalError``
+lock errors once ``busy_timeout`` is exhausted. Wrap an idempotent
+connect-and-transact unit with :func:`retry_on_sqlite_lock` for a fresh connection.
 """
 
 from __future__ import annotations
 
+import functools
 import sqlite3
 import time
 from collections.abc import Callable
@@ -53,3 +53,13 @@ def retry_on_sqlite_lock(
                 sleep(min(base_delay_seconds * (2 ** (attempt - 1)), max_delay_seconds))
     # The final loop iteration always returns or raises; this is unreachable.
     raise sqlite3.OperationalError("retry_on_sqlite_lock: attempts exhausted")  # pragma: no cover
+
+
+def retried_on_sqlite_lock(fn: Callable[..., T]) -> Callable[..., T]:
+    """Wrap a connect-and-transact function so lock errors retry the whole call."""
+
+    @functools.wraps(fn)
+    def wrapper(*args: object, **kwargs: object) -> T:
+        return retry_on_sqlite_lock(lambda: fn(*args, **kwargs))
+
+    return wrapper

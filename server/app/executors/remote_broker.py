@@ -4,11 +4,12 @@ import json
 import sqlite3
 import threading
 from collections.abc import Callable, Collection
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, astuple, dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+from server.app.db.retry import retry_on_sqlite_lock
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors._remote_queue_store import (
@@ -89,28 +90,22 @@ class RemoteExecutionBroker:
 
     def submit(self, payload: RemoteExecutionPayload) -> None:
         self._sweep()  # Any write path also triggers the done-row cleanup.
-        now = _sqlite_timestamp(self._now())
         try:
-            with write_transaction(self._db_path) as conn:
-                conn.execute(
-                    "insert into remote_executions"
-                    " (execution_id, lease_id, job_id, node_key, capability,"
-                    "  bundle_name, manifest_json, state, created_at, updated_at)"
-                    " values (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
-                    (
-                        payload.execution_id,
-                        payload.lease_id,
-                        payload.job_id,
-                        payload.node_key,
-                        payload.capability,
-                        payload.bundle_name,
-                        json.dumps(payload.manifest),
-                        now,
-                        now,
-                    ),
-                )
+            retry_on_sqlite_lock(lambda: self._insert_execution(payload))
         except sqlite3.IntegrityError as exc:
             raise ValueError(f"duplicate remote execution {payload.execution_id!r}") from exc
+
+    def _insert_execution(self, payload: RemoteExecutionPayload) -> None:
+        now = _sqlite_timestamp(self._now())
+        # astuple 前 6 个字段与 insert 列顺序一致，manifest 单独序列化。
+        values = (*astuple(payload)[:6], json.dumps(payload.manifest), now, now)
+        self._write(
+            "insert into remote_executions"
+            " (execution_id, lease_id, job_id, node_key, capability,"
+            "  bundle_name, manifest_json, state, created_at, updated_at)"
+            " values (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
+            values,
+        )
 
     def wait_result(self, execution_id: str, poll_seconds: float = 0.2) -> RemoteOutcome:
         event = self._done_events.setdefault(execution_id, threading.Event())
@@ -199,26 +194,26 @@ class RemoteExecutionBroker:
     def register_worker(
         self, worker_id: str, name: str, capabilities: list[str], slots: int
     ) -> None:
+        retry_on_sqlite_lock(lambda: self._upsert_worker(worker_id, name, capabilities, slots))
+
+    def _upsert_worker(self, worker_id: str, name: str, caps: list[str], slots: int) -> None:
         now = _sqlite_timestamp(self._now())
-        with write_transaction(self._db_path) as conn:
-            conn.execute(
-                "insert into remote_workers"
-                " (worker_id, name, capabilities_json, slots, registered_at, last_seen_at)"
-                " values (?, ?, ?, ?, ?, ?)"
-                " on conflict(worker_id) do update set"
-                "   name = excluded.name,"
-                "   capabilities_json = excluded.capabilities_json,"
-                "   slots = excluded.slots,"
-                "   last_seen_at = excluded.last_seen_at",
-                (worker_id, name, json.dumps(capabilities), slots, now, now),
-            )
+        self._write(
+            "insert into remote_workers"
+            " (worker_id, name, capabilities_json, slots, registered_at, last_seen_at)"
+            " values (?, ?, ?, ?, ?, ?) on conflict(worker_id) do update set"
+            "   name = excluded.name, capabilities_json = excluded.capabilities_json,"
+            "   slots = excluded.slots, last_seen_at = excluded.last_seen_at",
+            (worker_id, name, json.dumps(caps), slots, now, now),
+        )
 
     def touch_worker(self, worker_id: str) -> None:
-        with write_transaction(self._db_path) as conn:
-            conn.execute(
+        retry_on_sqlite_lock(
+            lambda: self._write(
                 "update remote_workers set last_seen_at = ? where worker_id = ?",
                 (_sqlite_timestamp(self._now()), worker_id),
             )
+        )
 
     def list_workers(self) -> list[dict[str, Any]]:
         with read_connection(self._db_path) as conn:
@@ -239,6 +234,10 @@ class RemoteExecutionBroker:
             ]
 
     # ---- internals ----
+
+    def _write(self, sql: str, params: tuple[Any, ...]) -> None:
+        with write_transaction(self._db_path) as conn:
+            conn.execute(sql, params)
 
     def _signal_done(self, execution_id: str) -> None:
         event = self._done_events.get(execution_id)
