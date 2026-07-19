@@ -27,7 +27,10 @@ workarounds for our specific constraints, not architectural requirements:
 
 Components:
 
-- `server/app/executors/remote_broker.py` — claim/heartbeat/requeue broker.
+- `server/app/executors/remote_broker.py` — claim/heartbeat/requeue broker. The
+  queue is sqlite-backed (`remote_executions` table in the jobs database), so
+  queued/claimed executions survive a server restart and stale claims are
+  requeued by the sweep after `claim_timeout_seconds`.
 - `server/app/routes/remote.py` — authenticated `/api/remote/*` worker endpoints.
 - `scripts/remote/worker.py` — stdlib-only worker agent (one file, copy to device).
 - `scripts/remote/llm_gateway.py` — laptop-side credential-injecting proxy.
