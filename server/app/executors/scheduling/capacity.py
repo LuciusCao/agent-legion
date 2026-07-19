@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.transaction import read_connection
 from server.app.executors._lease_transactions import _sqlite_timestamp
 
 
@@ -49,8 +49,7 @@ class CapacitySnapshot:
 
 def load_capacity_snapshot(db_path: Path, global_capacities: dict[str, int]) -> CapacitySnapshot:
     """Build a snapshot with two aggregate queries against the lease database."""
-    conn = connect_sqlite(db_path)
-    try:
+    with read_connection(db_path) as conn:
         now_str = _sqlite_timestamp(datetime.now(UTC))
         active_rows = conn.execute(
             """
@@ -67,8 +66,6 @@ def load_capacity_snapshot(db_path: Path, global_capacities: dict[str, int]) -> 
             from workspace_executor_allocations
             """
         ).fetchall()
-    finally:
-        conn.close()
 
     used_global: dict[str, int] = {}
     used_workspace: dict[tuple[str, str], int] = {}

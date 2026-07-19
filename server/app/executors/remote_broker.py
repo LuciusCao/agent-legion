@@ -8,7 +8,7 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.models import ExecutionStatus
 
@@ -175,8 +175,7 @@ class RemoteExecutionBroker:
         self, worker_id: str, name: str, capabilities: list[str], slots: int
     ) -> None:
         now = _sqlite_timestamp(self._now())
-        conn = connect_sqlite(self._db_path)
-        try:
+        with write_transaction(self._db_path) as conn:
             conn.execute(
                 "insert into remote_workers"
                 " (worker_id, name, capabilities_json, slots, registered_at, last_seen_at)"
@@ -188,24 +187,16 @@ class RemoteExecutionBroker:
                 "   last_seen_at = excluded.last_seen_at",
                 (worker_id, name, json.dumps(capabilities), slots, now, now),
             )
-            conn.commit()
-        finally:
-            conn.close()
 
     def touch_worker(self, worker_id: str) -> None:
-        conn = connect_sqlite(self._db_path)
-        try:
+        with write_transaction(self._db_path) as conn:
             conn.execute(
                 "update remote_workers set last_seen_at = ? where worker_id = ?",
                 (_sqlite_timestamp(self._now()), worker_id),
             )
-            conn.commit()
-        finally:
-            conn.close()
 
     def list_workers(self) -> list[dict[str, Any]]:
-        conn = connect_sqlite(self._db_path)
-        try:
+        with read_connection(self._db_path) as conn:
             rows = conn.execute(
                 "select worker_id, name, capabilities_json, slots, registered_at, last_seen_at"
                 " from remote_workers order by worker_id"
@@ -221,8 +212,6 @@ class RemoteExecutionBroker:
                 }
                 for row in rows
             ]
-        finally:
-            conn.close()
 
     # ---- internals ----
 
