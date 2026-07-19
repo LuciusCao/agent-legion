@@ -545,6 +545,7 @@
     "server/app/db/queries/video.py": 383,
     "server/app/db/retry.py": 65,
     "server/app/db/schema.py": 185,
+    "server/app/db/transaction.py": 61,
     "server/app/event_bus.py": 90,
     "server/app/events.py": 103,
     "server/app/executors/__init__.py": 14,
