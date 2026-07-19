@@ -1,8 +1,9 @@
 """Write-path transaction bodies for ExecutorLeaseRepository.
 
-Each function owns its connect-and-transact unit and rolls back on error, so
-the repository can retry the whole unit on transient SQLite lock errors and
-every attempt starts from a fresh connection.
+Each function owns its connect-and-transact unit via
+``server.app.db.transaction.write_transaction`` (commit on success, rollback
+on error), so the repository can retry the whole unit on transient SQLite
+lock errors and every attempt starts from a fresh connection.
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors._lease_claims import claim_lease
 from server.app.executors._lease_control import _sync_job_status
 from server.app.executors._lease_lifecycle import (
@@ -18,7 +19,7 @@ from server.app.executors._lease_lifecycle import (
     finish_lease,
     heartbeat_lease,
 )
-from server.app.executors._lease_transactions import _rollback, _sqlite_timestamp
+from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
     ExecutionResult,
@@ -31,102 +32,63 @@ if TYPE_CHECKING:
 
 
 def try_claim(repo: ExecutorLeaseRepository, request: LeaseClaimRequest) -> ClaimedExecution | None:
-    conn = connect_sqlite(repo.path)
-    conn.isolation_level = None
-    claimed: ClaimedExecution | None = None
-    try:
-        conn.execute("begin immediate")
+    with write_transaction(repo.path) as conn:
         result = claim_lease(conn, request, repo.data_dir)
-        if result is None:
-            conn.execute("rollback")
-        else:
-            conn.execute("commit")
-            claimed = result
-        return result
-    except Exception:
-        _rollback(conn)
-        raise
-    finally:
-        conn.close()
-        if claimed is not None:
-            repo._broadcast_job_update(str(claimed.job_id))
+    # claim_lease returns None without modifying any rows, so letting the
+    # block above commit an empty transaction is equivalent to the old
+    # explicit rollback. Broadcast only after the commit has succeeded,
+    # never inside the transaction.
+    if result is not None:
+        repo._broadcast_job_update(str(result.job_id))
+    return result
 
 
 def heartbeat(repo: ExecutorLeaseRepository, lease_id: str, ttl_seconds: int) -> bool:
-    conn = connect_sqlite(repo.path)
-    conn.isolation_level = None
-    try:
-        conn.execute("begin immediate")
-        result = heartbeat_lease(conn, lease_id, ttl_seconds)
-        conn.execute("commit")
-        return result
-    except Exception:
-        _rollback(conn)
-        raise
-    finally:
-        conn.close()
+    with write_transaction(repo.path) as conn:
+        return heartbeat_lease(conn, lease_id, ttl_seconds)
 
 
 def finish(repo: ExecutorLeaseRepository, lease_id: str, result: ExecutionResult) -> bool:
-    conn = connect_sqlite(repo.path)
-    conn.isolation_level = None
-    job_id: str | None = None
-    result_flag = False
-    try:
-        conn.execute("begin immediate")
+    with write_transaction(repo.path) as conn:
         lease = conn.execute(
             "select job_id from executor_leases where id=?", (lease_id,)
         ).fetchone()
         job_id = str(lease["job_id"]) if lease else None
         result_flag = finish_lease(conn, lease_id, result, repo.data_dir)
-        conn.execute("commit")
 
-        # Parse events.jsonl outside the main write transaction; the
-        # capture helper opens its own short write tx only for the persist.
-        if result_flag and result.status in ("completed", "failed") and repo.data_dir is not None:
-            capture_token_usage_after_lease_finish(conn, lease_id, repo.data_dir)
+    # Parse events.jsonl outside the main write transaction; the
+    # capture helper opens its own short write tx only for the persist.
+    # The helper still expects a caller-provided connection (its own
+    # migration is Task 3), so hand it a fresh one now that the commit
+    # has landed.
+    if result_flag and result.status in ("completed", "failed") and repo.data_dir is not None:
+        with read_connection(repo.path) as read_conn:
+            capture_token_usage_after_lease_finish(read_conn, lease_id, repo.data_dir)
 
-        if job_id is not None and result_flag:
-            repo._broadcast_job_update(job_id)
-        return result_flag
-    except Exception:
-        _rollback(conn)
-        raise
-    finally:
-        conn.close()
+    # Broadcast only after the commit has succeeded, never inside the tx.
+    if job_id is not None and result_flag:
+        repo._broadcast_job_update(job_id)
+    return result_flag
 
 
 def expire_stale(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
-    conn = connect_sqlite(repo.path)
-    conn.isolation_level = None
-    affected_job_ids: list[str] = []
-    try:
-        conn.execute("begin immediate")
+    with write_transaction(repo.path) as conn:
         rows = conn.execute(
             "select job_id from executor_leases where status='active' and expires_at<=?",
             (_sqlite_timestamp(now),),
         ).fetchall()
         affected_job_ids = list({str(row["job_id"]) for row in rows})
         expired = expire_stale_leases(conn, now)
-        conn.execute("commit")
-        for job_id in affected_job_ids:
-            repo._broadcast_job_update(job_id)
-        return expired
-    except Exception:
-        _rollback(conn)
-        raise
-    finally:
-        conn.close()
+    # Broadcast only after the commit has succeeded, never inside the tx.
+    for job_id in affected_job_ids:
+        repo._broadcast_job_update(job_id)
+    return expired
 
 
 def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
     """Reset jobs stuck in 'running' with no active lease back to 'queued'."""
-    conn = connect_sqlite(repo.path)
-    conn.isolation_level = None
-    recovered: list[str] = []
     now_str = _sqlite_timestamp(now)
-    try:
-        conn.execute("begin immediate")
+    with write_transaction(repo.path) as conn:
         rows = conn.execute(
             """
             select j.id
@@ -139,42 +101,34 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
             """
         ).fetchall()
         recovered = [str(row["id"]) for row in rows]
-        if not recovered:
-            conn.execute("commit")
-            return recovered
-
-        placeholders = ",".join("?" * len(recovered))
-        conn.execute(
-            f"""
-            update job_nodes
-            set status='pending',
-                stale_reason='',
-                error_message='',
-                started_at=null,
-                finished_at=null,
-                created_at=current_timestamp
-            where job_id in ({placeholders}) and status='running'
-            """,
-            recovered,
-        )
-        conn.execute(
-            f"""
-            update node_runs
-            set status='failed',
-                error_message='orphaned recovery',
-                finished_at=?
-            where job_id in ({placeholders}) and status='running'
-            """,
-            (now_str, *recovered),
-        )
-        for job_id in recovered:
-            _sync_job_status(conn, job_id)
-        conn.execute("commit")
-        for job_id in recovered:
-            repo._broadcast_job_update(job_id)
-        return recovered
-    except Exception:
-        _rollback(conn)
-        raise
-    finally:
-        conn.close()
+        if recovered:
+            placeholders = ",".join("?" * len(recovered))
+            conn.execute(
+                f"""
+                update job_nodes
+                set status='pending',
+                    stale_reason='',
+                    error_message='',
+                    started_at=null,
+                    finished_at=null,
+                    created_at=current_timestamp
+                where job_id in ({placeholders}) and status='running'
+                """,
+                recovered,
+            )
+            conn.execute(
+                f"""
+                update node_runs
+                set status='failed',
+                    error_message='orphaned recovery',
+                    finished_at=?
+                where job_id in ({placeholders}) and status='running'
+                """,
+                (now_str, *recovered),
+            )
+            for job_id in recovered:
+                _sync_job_status(conn, job_id)
+    # Broadcast only after the commit has succeeded, never inside the tx.
+    for job_id in recovered:
+        repo._broadcast_job_update(job_id)
+    return recovered
