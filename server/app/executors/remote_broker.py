@@ -36,6 +36,9 @@ class RemoteExecutionPayload:
     capability: str
     bundle_name: str
     manifest: dict[str, Any]
+    # Rendered by the payload builder at submit time; the broker only persists
+    # and forwards it, keeping the transport layer free of builder imports.
+    command_spec: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,7 @@ class RemoteClaim:
     capability: str
     bundle_url: str
     manifest: dict[str, Any]
+    command_spec: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -107,13 +111,19 @@ class RemoteExecutionBroker:
 
     def _insert_execution(self, payload: RemoteExecutionPayload) -> None:
         now = _sqlite_timestamp(self._now())
-        # astuple 前 6 个字段与 insert 列顺序一致，manifest 单独序列化。
-        values = (*astuple(payload)[:6], json.dumps(payload.manifest), now, now)
+        # astuple 前 6 个字段与 insert 列顺序一致；manifest 与 command_spec 单独序列化。
+        values = (
+            *astuple(payload)[:6],
+            json.dumps(payload.manifest),
+            json.dumps(payload.command_spec) if payload.command_spec is not None else None,
+            now,
+            now,
+        )
         self._write(
             "insert into remote_executions"
             " (execution_id, lease_id, job_id, node_key, capability,"
-            "  bundle_name, manifest_json, state, created_at, updated_at)"
-            " values (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
+            "  bundle_name, manifest_json, command_spec_json, state, created_at, updated_at)"
+            " values (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
             values,
         )
 
@@ -137,11 +147,13 @@ class RemoteExecutionBroker:
         with read_connection(self._db_path) as conn:
             row = conn.execute(
                 "select execution_id, lease_id, job_id, node_key, capability, bundle_name,"
-                " manifest_json from remote_executions where execution_id = ?",
+                " manifest_json, command_spec_json from remote_executions"
+                " where execution_id = ?",
                 (execution_id,),
             ).fetchone()
         if row is None:
             return None
+        spec_json = row["command_spec_json"]
         return RemoteExecutionPayload(
             execution_id=row["execution_id"],
             lease_id=row["lease_id"],
@@ -150,6 +162,7 @@ class RemoteExecutionBroker:
             capability=row["capability"],
             bundle_name=row["bundle_name"],
             manifest=json.loads(row["manifest_json"]),
+            command_spec=json.loads(spec_json) if spec_json else None,
         )
 
     def active_lease_ids(self) -> list[str]:
@@ -178,6 +191,7 @@ class RemoteExecutionBroker:
         entry = claim_next(self._db_path, worker_id, capabilities, _sqlite_timestamp(self._now()))
         if entry is None:
             return None
+        spec_json = entry.get("command_spec_json")
         return RemoteClaim(
             execution_id=entry["execution_id"],
             job_id=entry["job_id"],
@@ -185,6 +199,7 @@ class RemoteExecutionBroker:
             capability=entry["capability"],
             bundle_url=f"/api/remote/executions/{entry['execution_id']}/bundle",
             manifest=json.loads(entry["manifest_json"]),
+            command_spec=json.loads(spec_json) if spec_json else None,
         )
 
     def heartbeat(self, execution_id: str, worker_id: str) -> bool:

@@ -37,7 +37,11 @@ def rig(tmp_path, remote_settings):
     return TestClient(app), broker
 
 
-def _submit(broker: RemoteExecutionBroker, execution_id: str = "e1") -> None:
+def _submit(
+    broker: RemoteExecutionBroker,
+    execution_id: str = "e1",
+    command_spec: dict | None = None,
+) -> None:
     broker.bundle_dir.mkdir(parents=True, exist_ok=True)
     (broker.bundle_dir / f"{execution_id}.tar.gz").write_bytes(b"bundle-bytes")
     broker.submit(
@@ -49,6 +53,7 @@ def _submit(broker: RemoteExecutionBroker, execution_id: str = "e1") -> None:
             capability="cap_a",
             bundle_name=f"{execution_id}.tar.gz",
             manifest={"job_id": "job1", "node_key": "node_a", "run_token": "abc123"},
+            command_spec=command_spec,
         )
     )
 
@@ -136,6 +141,35 @@ def test_full_claim_report_cycle(rig):
     outcome = broker.wait_result("e1")
     assert outcome.status == "completed"
     assert (broker.bundle_dir / "e1.result.tar.gz").read_bytes() == b"result-tar-bytes"
+
+
+def test_claim_response_includes_command_spec(rig):
+    client, broker = rig
+    spec = {
+        "version": 1,
+        "prompt": "work in {job_dir}",
+        "command": ["pi", "@{prompt_file}", "{session_name}"],
+        "prompt_instruction": "Execute the attached node instructions.",
+    }
+    _submit(broker, command_spec=spec)
+
+    resp = client.post(
+        "/api/remote/claim", json={"worker_id": "w1", "capabilities": ["cap_a"]}, headers=HEADERS
+    )
+    assert resp.status_code == 200
+    assert resp.json()["command_spec"] == spec
+
+
+def test_claim_response_command_spec_defaults_null(rig):
+    # Upgrade window: a legacy submission without a spec serializes as null,
+    # which old workers simply ignore.
+    client, broker = rig
+    _submit(broker)
+    resp = client.post(
+        "/api/remote/claim", json={"worker_id": "w1", "capabilities": ["cap_a"]}, headers=HEADERS
+    )
+    assert resp.status_code == 200
+    assert resp.json()["command_spec"] is None
 
 
 def test_result_rejected_for_wrong_worker(rig):

@@ -61,10 +61,17 @@ def test_execute_submits_and_returns_none(tmp_path: Path, context: ExecutionCont
     assert payload.capability == context.capability
     assert payload.manifest["run_token"]
     assert payload.manifest["skill_version"]
+    # execute renders the command spec at submit time; placeholders stay for
+    # the worker to substitute with its local paths.
+    spec = payload.command_spec
+    assert spec is not None and spec["version"] == 1
+    assert "{job_dir}" in spec["prompt"]
+    assert any("{prompt_file}" in part for part in spec["command"])
     assert (broker.bundle_dir / payload.bundle_name).is_file()
     # The submitted work is claimable by a worker.
     claim = broker.dequeue("w1", {"review_keywords"})
     assert claim is not None and claim.execution_id == context.execution_id
+    assert claim.command_spec == spec
     assert broker.active_lease_ids() == [context.lease_id]
 
 

@@ -52,3 +52,6 @@ from server.app.db.migrations.v021_remote_executions import (
 from server.app.db.migrations.v022_job_event_seq_worker_control import (
     MIGRATION as V022_JOB_EVENT_SEQ_WORKER_CONTROL,
 )
+from server.app.db.migrations.v023_remote_execution_command_spec import (
+    MIGRATION as V023_REMOTE_EXECUTION_COMMAND_SPEC,
+)
