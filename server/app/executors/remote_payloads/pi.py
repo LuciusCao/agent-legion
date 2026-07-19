@@ -105,6 +105,10 @@ class PiPayloadBuilder:
 
 
 def build_pi_payload(
-    deps: RuntimeDependencies, capabilities: dict[str, RemoteCapabilityConfig]
+    deps: RuntimeDependencies,
+    capabilities: dict[str, RemoteCapabilityConfig],
+    *,
+    agent_id: str = "",
 ) -> PayloadBuilder:
+    # agent_id is only consumed by the openclaw payload; pi ignores it.
     return PiPayloadBuilder(deps.pi_runtime, deps.skill_manager, capabilities)

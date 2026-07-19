@@ -3,7 +3,14 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 from pydantic_core import InitErrorDetails
 
 
@@ -100,6 +107,7 @@ class RemoteExecutorConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     kind: Literal["remote"]
     payload: str = "pi"
+    agent_id: str = Field(default="", validate_default=True)
     global_capacity: int = Field(gt=0, strict=True)
     capabilities: dict[str, RemoteCapabilityConfig]
 
@@ -110,6 +118,13 @@ class RemoteExecutorConfig(BaseModel):
 
         if not remote_payloads.has_payload_builder(value):
             raise ValueError(f"unknown executor payload {value!r}")
+        return value
+
+    @field_validator("agent_id", mode="after")
+    @classmethod
+    def _require_agent_id_for_openclaw(cls, value: str, info: ValidationInfo) -> str:
+        if info.data.get("payload") == "openclaw" and not value:
+            raise ValueError("agent_id is required when payload is 'openclaw'")
         return value
 
     @field_validator("capabilities", mode="after")
