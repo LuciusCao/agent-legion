@@ -128,3 +128,28 @@ def test_done_entries_cleaned_up(db_path, tmp_path):
     with read_connection(db_path) as conn:
         rows = conn.execute("select execution_id from remote_executions").fetchall()
     assert [r["execution_id"] for r in rows] == ["e2"]
+
+
+def test_store_write_paths_retry_on_sqlite_lock(db_path, tmp_path, monkeypatch):
+    # 锁竞争下的 OperationalError 触发整单元重试（终审修复回防）。
+    import sqlite3
+
+    from server.app.db.transaction import write_transaction as real_write_transaction
+    from server.app.executors import _remote_queue_store
+
+    broker = _broker(db_path, tmp_path)
+    broker.submit(_payload("e1"))
+    broker.dequeue("w1", {"cap_a"})
+
+    calls = 0
+
+    def flaky_write_transaction(path):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real_write_transaction(path)
+
+    monkeypatch.setattr(_remote_queue_store, "write_transaction", flaky_write_transaction)
+    assert _remote_queue_store.heartbeat_claim(db_path, "e1", "w1", "2026-01-01 00:00:00.000")
+    assert calls == 2

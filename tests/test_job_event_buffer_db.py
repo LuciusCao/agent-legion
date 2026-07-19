@@ -65,3 +65,25 @@ def test_overflow_resync_semantics_unchanged(db_path):
     compacted = buf.drain_compacted()
     assert compacted.resync_workspace_ids == {"ws1"}
     assert compacted.latest_revision == 3
+
+
+def test_db_revision_retries_on_sqlite_lock(db_path, monkeypatch):
+    # DB 发号路径在锁竞争下整体重试（终审修复回防）。
+    import sqlite3
+
+    import server.app.job_event_buffer as buffer_module
+    from server.app.db.transaction import write_transaction as real_write_transaction
+
+    calls = 0
+
+    def flaky_write_transaction(path):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise sqlite3.OperationalError("database is locked")
+        return real_write_transaction(path)
+
+    monkeypatch.setattr(buffer_module, "write_transaction", flaky_write_transaction)
+    buf = JobEventBuffer(db_path=db_path)
+    assert buf.record("ws1", "job1", "updated") == 1
+    assert calls == 2
