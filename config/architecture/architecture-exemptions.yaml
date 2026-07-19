@@ -19,10 +19,11 @@ exemptions:
     constructions from routes/__init__.py into create_app; extracting an
     AppContainer composition module will bring main.py back under budget.
     Task 6 of the phase3 execution-decoupling plan wires the
-    RemoteCompletionHandler callback registration into the lifespan.
+    RemoteCompletionHandler callback registration into the lifespan, and
+    task 8 wires the SweeperThread lifecycle into the lifespan.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 218
+  ceiling: 237
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
@@ -149,12 +150,13 @@ exemptions:
   path: server/app/executors/remote_broker.py
   reason: Task 6 of the phase3 execution-decoupling plan adds completion-callback
     publishing (register/_publish_completion), payload_for and active_lease_ids
-    to the broker, and task 7 adds command_spec pass-through storage; the
-    worker-registry section will be extracted into its own module once remote
-    execution stabilizes.
+    to the broker, task 7 adds command_spec pass-through storage, and task 8
+    exposes the claim sweep as sweep_expired_claims; the worker-registry
+    section will be extracted into its own module once remote execution
+    stabilizes.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 342
+  ceiling: 346
 - check: architecture.file_budget
   path: server/app/executors/runtime.py
   reason: Task 6 of the phase3 execution-decoupling plan adds the submit-only
@@ -163,11 +165,3 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
   ceiling: 163
-- check: architecture.file_budget
-  path: server/app/workflow_worker_thread.py
-  reason: Task 6 of the phase3 execution-decoupling plan adds the shared bounded
-    remote submit pool and _pool_for selection; the budget will be re-ratcheted
-    if the module shrinks.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 231

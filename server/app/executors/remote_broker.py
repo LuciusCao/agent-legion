@@ -92,7 +92,7 @@ class RemoteExecutionBroker:
         self._completion_callbacks: list[Callable[[str, RemoteOutcome], None]] = []
         self._entries = EntriesView(db_path)  # legacy test handle; rows live in sqlite
         # Recover claims orphaned by a restart before serving new work.
-        self._sweep()
+        self.sweep_expired_claims()
 
     def register_completion_callback(self, callback: Callable[[str, RemoteOutcome], None]) -> None:
         """Register a callback invoked (outside the write transaction) each time
@@ -103,7 +103,7 @@ class RemoteExecutionBroker:
     # ---- executor-facing ----
 
     def submit(self, payload: RemoteExecutionPayload) -> None:
-        self._sweep()  # Any write path also triggers the done-row cleanup.
+        self.sweep_expired_claims()  # Any write path also triggers the done-row cleanup.
         try:
             retry_on_sqlite_lock(lambda: self._insert_execution(payload))
         except sqlite3.IntegrityError as exc:
@@ -134,7 +134,7 @@ class RemoteExecutionBroker:
             if outcome is not None:
                 return outcome
             # Sweep here too, so a lost worker fails even when nobody else polls.
-            self._sweep()
+            self.sweep_expired_claims()
             event.wait(timeout=poll_seconds)
             event.clear()
 
@@ -187,7 +187,7 @@ class RemoteExecutionBroker:
     def dequeue(self, worker_id: str, capabilities: Collection[str]) -> RemoteClaim | None:
         if not capabilities:
             return None
-        self._sweep()
+        self.sweep_expired_claims()
         entry = claim_next(self._db_path, worker_id, capabilities, _sqlite_timestamp(self._now()))
         if entry is None:
             return None
@@ -203,7 +203,7 @@ class RemoteExecutionBroker:
         )
 
     def heartbeat(self, execution_id: str, worker_id: str) -> bool:
-        self._sweep()
+        self.sweep_expired_claims()
         return heartbeat_claim(
             self._db_path, execution_id, worker_id, _sqlite_timestamp(self._now())
         )
@@ -329,7 +329,12 @@ class RemoteExecutionBroker:
             except Exception:
                 logger.exception("remote completion callback failed for %s", execution_id)
 
-    def _sweep(self) -> None:
+    def sweep_expired_claims(self) -> list[str]:
+        """Requeue stale claims, fail rows past the requeue limit, reap old done rows.
+
+        Public entry for the lease sweeper (Task 8); broker write paths call it
+        inline as well. Returns execution ids that reached a terminal state here.
+        """
         finished = sweep(
             self._db_path,
             now=self._now(),
@@ -338,3 +343,4 @@ class RemoteExecutionBroker:
         )
         for execution_id in finished:
             self._publish_completion(execution_id)
+        return finished

@@ -10,7 +10,9 @@ from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConf
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.executors.registry import ExecutorRegistry
+from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.runtime import ExecutionRuntime
+from server.app.executors.sweeper import SweeperThread
 from server.app.jobs.queries import JobQueries
 from server.app.settings import Settings
 from server.app.workflow_worker_thread import WorkflowWorkerThread
@@ -38,6 +40,11 @@ def queries(tmp_db: Path) -> JobQueries:
 @pytest.fixture
 def repo(tmp_db: Path) -> ExecutorLeaseRepository:
     return ExecutorLeaseRepository(tmp_db)
+
+
+@pytest.fixture
+def broker(tmp_db: Path, tmp_path: Path) -> RemoteExecutionBroker:
+    return RemoteExecutionBroker(tmp_db, tmp_path / "remote_bundles")
 
 
 def _local_node(key: str) -> WorkflowNode:
@@ -226,8 +233,11 @@ def test_fresh_repo_expire_stale_marks_recovery_state(
     assert job["status"] == "failed"
 
 
-def test_fresh_worker_start_expires_stale_leases(
-    tmp_path: Path, queries: JobQueries, repo: ExecutorLeaseRepository
+def test_fresh_sweeper_start_expires_stale_leases(
+    tmp_path: Path,
+    queries: JobQueries,
+    repo: ExecutorLeaseRepository,
+    broker: RemoteExecutionBroker,
 ) -> None:
     workspace_id, job_id = _setup_workspace(queries, "fresh-worker")
     _claim(workspace_id, job_id, repo)
@@ -240,9 +250,10 @@ def test_fresh_worker_start_expires_stale_leases(
     lease_id = lease_row["id"]
     _set_expired(repo, lease_id)
 
-    worker = _make_worker(tmp_path, queries, repo)
-    worker.start()
-    worker.stop()
+    # The startup sweep moved from the worker thread to the sweeper (task 8).
+    sweeper = SweeperThread(repo, broker)
+    sweeper.start()
+    sweeper.stop()
 
     with queries.connect() as conn:
         lease = conn.execute("select * from executor_leases where id=?", (lease_id,)).fetchone()
@@ -304,7 +315,10 @@ def test_recovery_frees_global_and_workspace_capacity(
 
 
 def test_recovery_does_not_resubmit_failed_node(
-    tmp_path: Path, queries: JobQueries, repo: ExecutorLeaseRepository
+    tmp_path: Path,
+    queries: JobQueries,
+    repo: ExecutorLeaseRepository,
+    broker: RemoteExecutionBroker,
 ) -> None:
     workspace_id, job_id = _setup_workspace(queries, "no-resubmit")
     _claim(workspace_id, job_id, repo)
@@ -317,10 +331,12 @@ def test_recovery_does_not_resubmit_failed_node(
     lease_id = lease_row["id"]
     _set_expired(repo, lease_id)
 
-    worker = _make_worker(tmp_path, queries, repo)
-    worker.start()
-    worker.stop()
+    # The startup sweep that expires the lease now lives in the sweeper (task 8).
+    sweeper = SweeperThread(repo, broker)
+    sweeper.start()
+    sweeper.stop()
 
+    worker = _make_worker(tmp_path, queries, repo)
     processed = worker._poll()
     assert processed is False
 

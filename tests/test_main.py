@@ -2,6 +2,7 @@ from fastapi.testclient import TestClient
 
 from server.app.agents import AgentStatusManager
 from server.app.executors.registry import ExecutorRegistry
+from server.app.executors.sweeper import SweeperThread
 from server.app.workflow_worker_thread import WorkflowWorkerThread
 from tests.helpers import setup_spa_app
 
@@ -35,6 +36,43 @@ def test_lifespan_with_start_worker_initializes_only_workflow_worker(tmp_path, m
     assert "workflow" in calls
     assert isinstance(app.state.executor_registry, ExecutorRegistry)
     assert app.state.executor_registry is received_registry
+
+
+def test_lifespan_sweeper_disabled_by_settings(tmp_path, monkeypatch):
+    from server.app import main
+
+    calls = []
+
+    def patched_workflow_start(self):
+        calls.append("workflow")
+
+    def patched_sweeper_start(self):
+        calls.append("sweeper")
+
+    monkeypatch.setattr(WorkflowWorkerThread, "start", patched_workflow_start)
+    monkeypatch.setattr(SweeperThread, "start", patched_sweeper_start)
+    monkeypatch.setattr(AgentStatusManager, "discover", lambda self: [])
+    monkeypatch.setattr(main, "validate_settings", lambda settings: None)
+
+    for path_name in ["videos", "logs", "packages", "jobs"]:
+        (tmp_path / path_name).mkdir(parents=True, exist_ok=True)
+
+    real_load_settings = main.load_settings
+
+    def load_with_sweeper_disabled(**kwargs):
+        settings = real_load_settings(**kwargs)
+        settings.executor_runtime.sweeper_enabled = False
+        return settings
+
+    monkeypatch.setattr(main, "load_settings", load_with_sweeper_disabled)
+
+    app = main.create_app(data_dir=tmp_path, start_worker=True)
+    with TestClient(app) as _:
+        pass  # lifespan startup runs here
+
+    # sweeper_enabled=False hands lease hygiene to an external sweeper process.
+    assert "workflow" in calls
+    assert "sweeper" not in calls
 
 
 def test_spa_catch_all_serves_static_files_and_fallback(tmp_path, monkeypatch):

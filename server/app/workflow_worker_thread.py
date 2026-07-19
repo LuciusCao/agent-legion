@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, wait
-from datetime import UTC, datetime
 from typing import Any
 
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -82,12 +81,6 @@ class WorkflowWorkerThread:
     def start(self) -> None:
         self._definitions = list_registered_workflows(self.settings.root_dir)
         self._ensure_pools()
-        expired = self.leases.expire_stale(datetime.now(UTC))
-        if expired:
-            logger.warning("expired stale workflow executions on startup: %s", ", ".join(expired))
-        recovered = self.leases.recover_orphaned_running_jobs(datetime.now(UTC))
-        if recovered:
-            logger.warning("recovered orphaned running jobs on startup: %s", ", ".join(recovered))
         self._maintenance.run_backfill()
 
         def _loop() -> None:
@@ -111,12 +104,6 @@ class WorkflowWorkerThread:
             self._ensure_pools()
 
         self._reap_futures()
-        expired = self.leases.expire_stale(datetime.now(UTC))
-        if expired:
-            logger.warning("expired stale workflow executions: %s", ", ".join(expired))
-        recovered = self.leases.recover_orphaned_running_jobs(datetime.now(UTC))
-        if recovered:
-            logger.warning("recovered orphaned running jobs: %s", ", ".join(recovered))
 
         # Cheap capacity gate: when every executor is saturated, skip the
         # expensive job scan for this tick (maintenance above still runs).
