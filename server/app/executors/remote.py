@@ -73,6 +73,7 @@ class RemoteExecutor:
                     capability=context.capability,
                     bundle_name=bundle_path.name,
                     manifest=manifest,
+                    command_spec=self._payload_builder.build_command_spec(manifest),
                 )
             )
             # A cancel landing between prepare_execution and submit is dropped by the

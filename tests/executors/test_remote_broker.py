@@ -57,6 +57,27 @@ def test_claim_bundle_url(broker):
     assert claim.bundle_url == "/api/remote/executions/e1/bundle"
 
 
+def test_claim_carries_command_spec(broker):
+    spec = {"version": 1, "prompt": "work in {job_dir}", "command": ["pi", "@{prompt_file}"]}
+    broker.submit(replace(_payload("e1"), command_spec=spec))
+    claim = broker.dequeue("w1", {"cap_a"})
+    assert claim is not None and claim.command_spec == spec
+
+    # Legacy submissions without a spec stay None (backward-compatible default).
+    broker.submit(_payload("e2"))
+    claim = broker.dequeue("w1", {"cap_a"})
+    assert claim is not None and claim.command_spec is None
+
+    # The spec is persisted with the row: a restarted broker still serves it.
+    broker.submit(replace(_payload("e3"), command_spec=spec))
+    restarted = RemoteExecutionBroker(
+        broker._db_path, broker.bundle_dir, claim_timeout_seconds=60.0
+    )
+    claim = restarted.dequeue("w2", {"cap_a"})
+    assert claim is not None and claim.execution_id == "e3"
+    assert claim.command_spec == spec
+
+
 def test_heartbeat_only_for_claiming_worker(broker):
     broker.submit(_payload("e1"))
     broker.dequeue("w1", {"cap_a"})

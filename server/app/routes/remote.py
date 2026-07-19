@@ -37,6 +37,8 @@ class ClaimResponse(BaseModel):
     capability: str
     bundle_url: str
     manifest: dict[str, Any]
+    # Present on new servers; old workers ignore it, new workers require it.
+    command_spec: dict[str, Any] | None = None
 
 
 class RemoteWorkerInfo(BaseModel):

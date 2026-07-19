@@ -115,11 +115,12 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/routes/remote.py
   reason: Task 3 of the runner-audit plan adds the read-only GET /workers endpoint and
-    its response models; the workers section will be split into a separate module once
-    the feature is complete.
+    its response models, and task 7 of the phase3 execution-decoupling plan adds
+    the ClaimResponse command_spec field; the workers section will be split into
+    a separate module once the feature is complete.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-runner-audit.md#task-3
-  ceiling: 162
+  ceiling: 166
 - check: architecture.file_budget
   path: server/app/executors/local.py
   reason: Task 2 of the phase3 execution-decoupling plan moves build_local_executor
@@ -148,11 +149,12 @@ exemptions:
   path: server/app/executors/remote_broker.py
   reason: Task 6 of the phase3 execution-decoupling plan adds completion-callback
     publishing (register/_publish_completion), payload_for and active_lease_ids
-    to the broker; the worker-registry section will be extracted into its own
-    module once remote execution stabilizes.
+    to the broker, and task 7 adds command_spec pass-through storage; the
+    worker-registry section will be extracted into its own module once remote
+    execution stabilizes.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 327
+  ceiling: 342
 - check: architecture.file_budget
   path: server/app/executors/runtime.py
   reason: Task 6 of the phase3 execution-decoupling plan adds the submit-only
