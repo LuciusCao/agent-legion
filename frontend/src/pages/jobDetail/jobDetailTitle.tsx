@@ -1,8 +1,8 @@
 import type { ReactNode } from 'react'
-import type { JobDetailResponse } from '../../types'
+import type { JobDetail } from '../../jobTypes'
 import { WorkflowVersionChip } from '../../components/WorkflowVersionChip'
 
-export function pageSubtitle(job: JobDetailResponse['job']): ReactNode | null {
+export function pageSubtitle(job: JobDetail['job']): ReactNode | null {
   const sourceId = job.source_id || null
   const versionChip =
     job.workflow_version != null ? <WorkflowVersionChip job={job} /> : null

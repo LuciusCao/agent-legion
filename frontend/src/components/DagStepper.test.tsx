@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { render, screen } from '@testing-library/react'
 import { DagStepper } from './DagStepper'
-import type { JobNodeRecord } from '../types'
+import type { JobNode } from '../jobTypes'
 
 describe('DagStepper', () => {
   const makeNodes = (count: number) =>
@@ -12,7 +12,7 @@ describe('DagStepper', () => {
       label: `节点 ${i}`,
       status: i === 0 ? 'completed' : i === 1 ? 'running' : 'pending',
       after: i > 0 ? [`node-${i - 1}`] : [],
-    })) as JobNodeRecord[]
+    })) as JobNode[]
 
   it('does not render node labels', () => {
     render(<DagStepper nodes={makeNodes(8)} />)
@@ -46,7 +46,7 @@ describe('DagStepper', () => {
               outputs: [],
               stale_reason: '',
             },
-          ] as unknown as JobNodeRecord[]
+          ] as unknown as JobNode[]
         }
       />
     )

@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 from typing import TYPE_CHECKING, Any, Literal, Protocol
 
+from server.app.event_bus import EventBus, workspace_channel
 from server.app.job_dashboard_events import broadcast_workspace_stats_batch
 
 if TYPE_CHECKING:
@@ -109,20 +110,16 @@ class _JobQueries(Protocol):
     def count_jobs_by_status(self, workspace_id: str) -> dict[str, int]: ...
 
 
-class _JobEventManager(Protocol):
-    def _broadcast(self, workspace_id: str, payload: str) -> None: ...
-
-
 class WorkspaceJobEventAggregator:
     def __init__(
         self,
         buffer: JobEventBuffer,
         job_queries: _JobQueries,
-        job_event_manager: _JobEventManager,
+        bus: EventBus,
     ) -> None:
         self.buffer = buffer
         self.job_queries = job_queries
-        self.job_event_manager = job_event_manager
+        self.bus = bus
 
     def flush_once(self) -> None:
         compacted = self.buffer.drain_compacted()
@@ -137,8 +134,8 @@ class WorkspaceJobEventAggregator:
             stats = self.job_queries.count_jobs_by_status(workspace_id)
             workspace_stats.append({"id": workspace_id, "job_stats": stats})
             if workspace_id in compacted.resync_workspace_ids:
-                self.job_event_manager._broadcast(
-                    workspace_id,
+                self.bus.publish(
+                    workspace_channel(workspace_id),
                     build_resync_required_payload(
                         workspace_id,
                         compacted.latest_revision,
@@ -153,8 +150,8 @@ class WorkspaceJobEventAggregator:
             deleted_ids = sorted(compacted.deleted_job_ids_by_workspace.get(workspace_id, set()))
             if changed_ids or deleted_ids:
                 jobs = self.job_queries.list_patch_summaries(workspace_id, changed_ids)
-                self.job_event_manager._broadcast(
-                    workspace_id,
+                self.bus.publish(
+                    workspace_channel(workspace_id),
                     build_job_patch_batch_payload(
                         workspace_id=workspace_id,
                         revision=compacted.latest_revision,
@@ -164,7 +161,7 @@ class WorkspaceJobEventAggregator:
                     ),
                 )
         broadcast_workspace_stats_batch(
-            self.job_event_manager,
+            self.bus,
             compacted.latest_revision,
             workspace_stats,
         )
@@ -178,7 +175,7 @@ class WorkspaceJobEventAggregator:
 def build_workspace_event_aggregator(
     job_db: Any,
     settings: Any,
-    job_event_manager: _JobEventManager,
+    bus: EventBus,
 ) -> tuple[JobEventBuffer, WorkspaceJobEventAggregator]:
     from server.app.services.job_patch_queries import JobPatchQueryService
 
@@ -187,7 +184,7 @@ def build_workspace_event_aggregator(
     aggregator = WorkspaceJobEventAggregator(
         buffer,
         query_service,
-        job_event_manager,
+        bus,
     )
     return buffer, aggregator
 
@@ -230,14 +227,16 @@ def record_job_update(
     job_db: JobQueries | None,
     job_event_buffer: Any | None,
     job_id: str,
+    workspace_id: str | None = None,
 ) -> None:
     try:
         if job_event_buffer is None or job_db is None:
             return
-        job = job_db.get_job(job_id)
-        if job is None:
-            return
-        workspace_id = str(job.get("workspace_id", ""))
+        if workspace_id is None:
+            job = job_db.get_job(job_id)
+            if job is None:
+                return
+            workspace_id = str(job.get("workspace_id", ""))
         if workspace_id:
             job_event_buffer.record_job_updated(workspace_id, job_id)
     except Exception:

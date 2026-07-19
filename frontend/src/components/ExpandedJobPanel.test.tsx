@@ -3,9 +3,9 @@ import { render, screen, fireEvent } from '@testing-library/react'
 import { Route, Routes } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import { ExpandedJobPanel } from './ExpandedJobPanel'
-import type { JobRecord } from '../types'
+import type { JobSummary } from '../jobTypes'
 
-const mockJob: JobRecord = {
+const mockJob: JobSummary = {
   id: 'j1',
   workspace_id: 'ws1',
   workflow_key: 'p1',

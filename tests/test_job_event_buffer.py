@@ -55,18 +55,18 @@ class FakeJobQueries:
         return {"running": 1}
 
 
-class FakeEventManager:
+class FakeEventBus:
     def __init__(self):
         self.patch_batches = []
         self.resyncs = []
         self.dashboard_stats = []
 
-    def _broadcast(self, workspace_id: str, payload: str) -> None:
+    def publish(self, channel: str, payload: str) -> None:
         data = json.loads(payload)
         if data["type"] == "job_patch_batch":
             self.patch_batches.append(
                 (
-                    workspace_id,
+                    channel,
                     data["revision"],
                     data["stats"],
                     data["jobs"],
@@ -74,9 +74,9 @@ class FakeEventManager:
                 )
             )
         elif data["type"] == "resync_required":
-            self.resyncs.append((workspace_id, data["latest_revision"], data["reason"]))
+            self.resyncs.append((channel, data["latest_revision"], data["reason"]))
         elif data["type"] == "workspace_stats_batch":
-            self.dashboard_stats.append((workspace_id, data["latest_revision"], data["workspaces"]))
+            self.dashboard_stats.append((channel, data["latest_revision"], data["workspaces"]))
 
 
 def test_aggregator_flushes_compacted_patch_batch():
@@ -85,23 +85,23 @@ def test_aggregator_flushes_compacted_patch_batch():
     buffer.record_job_updated("ws1", "job1")
     buffer.record_job_deleted("ws1", "job2")
     queries = FakeJobQueries()
-    manager = FakeEventManager()
-    aggregator = WorkspaceJobEventAggregator(buffer, queries, manager)
+    bus = FakeEventBus()
+    aggregator = WorkspaceJobEventAggregator(buffer, queries, bus)
 
     aggregator.flush_once()
 
-    assert manager.patch_batches == [
+    assert bus.patch_batches == [
         (
-            "ws1",
+            "workspace:ws1",
             3,
             {"running": 1},
             [{"id": "job1", "workspace_id": "ws1"}],
             ["job2"],
         )
     ]
-    assert len(manager.dashboard_stats) == 1
-    dashboard_workspace_id, dashboard_revision, dashboard_workspaces = manager.dashboard_stats[0]
-    assert dashboard_workspace_id == "__dashboard__"
+    assert len(bus.dashboard_stats) == 1
+    dashboard_channel, dashboard_revision, dashboard_workspaces = bus.dashboard_stats[0]
+    assert dashboard_channel == "dashboard"
     assert dashboard_revision == 3
     assert [ws["id"] for ws in dashboard_workspaces] == ["ws1"]
 
@@ -110,13 +110,13 @@ def test_aggregator_flush_runs_off_event_loop():
     buffer = JobEventBuffer(max_events=10)
     buffer.record_job_updated("ws1", "job1")
     queries = FakeJobQueries()
-    manager = FakeEventManager()
-    aggregator = WorkspaceJobEventAggregator(buffer, queries, manager)
+    bus = FakeEventBus()
+    aggregator = WorkspaceJobEventAggregator(buffer, queries, bus)
 
     async def _flush() -> None:
         await asyncio.to_thread(aggregator.flush_once)
 
     asyncio.run(_flush())
 
-    assert len(manager.patch_batches) == 1
-    assert manager.patch_batches[0][0] == "ws1"
+    assert len(bus.patch_batches) == 1
+    assert bus.patch_batches[0][0] == "workspace:ws1"

@@ -2,7 +2,6 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
 from ..db import Database
-from ..events import VideoEventManager
 from ..jobs import JobQueries
 from ..security import validate_package_filename
 from ..services.job_packages import (
@@ -40,7 +39,6 @@ def create_packages_router(
     db: Database,
     job_db: JobQueries,
     settings: Settings,
-    video_event_manager: VideoEventManager,
     package_deletion: PackageDeletionService,
     job_packages: JobPackageService | None = None,
 ) -> APIRouter:

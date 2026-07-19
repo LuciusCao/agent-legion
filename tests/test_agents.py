@@ -5,6 +5,7 @@ from pathlib import Path
 
 from server.app.agents import AgentStatus, AgentStatusManager
 from server.app.pipeline.openclaw import OpenClawRunner
+from server.app.pipeline.runners import list_openclaw_agents
 
 
 def _agent_dict(**kwargs):
@@ -21,6 +22,39 @@ def _agent_dict(**kwargs):
     }
     defaults.update(kwargs)
     return defaults
+
+
+def test_broadcast_publishes_to_agents_channel():
+    from server.app.event_bus import InProcessEventBus
+
+    bus = InProcessEventBus()
+    manager = AgentStatusManager(event_bus=bus)
+    queue = bus.subscribe("agents")
+    manager._broadcast()
+
+    assert json.loads(queue.get_nowait()) == []
+
+
+def test_broadcast_controller_is_public():
+    assert AgentStatusManager().broadcast_controller is not None
+
+
+def test_discover_uses_injected_callable():
+    from server.app.agents import AgentStatusManager
+
+    manager = AgentStatusManager(
+        discover_agents=lambda: [{"id": "agent_1", "identityName": "Worker One"}]
+    )
+    agents = manager.discover()
+    assert [a.id for a in agents] == ["agent_1"]
+    assert agents[0].name == "Worker One"
+    assert agents[0].busy is False
+
+
+def test_discover_without_injection_returns_empty():
+    from server.app.agents import AgentStatusManager
+
+    assert AgentStatusManager().discover() == []
 
 
 def test_discover_parses_openclaw_agents(monkeypatch):
@@ -44,7 +78,7 @@ def test_discover_parses_openclaw_agents(monkeypatch):
         )
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    manager = AgentStatusManager()
+    manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
 
     agents = manager.discover()
 
@@ -63,7 +97,7 @@ def test_discover_clears_stale_agents_when_openclaw_fails(monkeypatch):
         return subprocess.CompletedProcess(command, 1, stdout="", stderr="openclaw unavailable")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    manager = AgentStatusManager()
+    manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
     manager.agents = [AgentStatus(id="stale", name="Stale", busy=False)]
 
     assert manager.discover() == []
@@ -75,7 +109,7 @@ def test_discover_clears_stale_agents_when_json_is_invalid(monkeypatch):
         return subprocess.CompletedProcess(command, 0, stdout="{bad json", stderr="")
 
     monkeypatch.setattr(subprocess, "run", fake_run)
-    manager = AgentStatusManager()
+    manager = AgentStatusManager(discover_agents=lambda: list_openclaw_agents(timeout=10))
     manager.agents = [AgentStatus(id="stale", name="Stale", busy=False)]
 
     assert manager.discover() == []

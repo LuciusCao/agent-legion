@@ -1,11 +1,10 @@
 import { useRef, useCallback, useState } from 'react'
-import type { InteractionNode, VideoItem, VideoArtifacts } from '../types'
+import type { InteractionNode, VideoArtifacts } from '../types'
 import { InteractionOverlay } from './InteractionOverlay'
 import { RichText } from './RichText'
 import styles from './VideoPlayer.module.css'
 
 interface VideoPlayerProps {
-  video: VideoItem
   artifacts: VideoArtifacts
   onTimeUpdate: (time: number) => void
   videoRef?: React.RefObject<HTMLVideoElement | null>

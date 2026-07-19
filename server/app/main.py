@@ -10,7 +10,8 @@ from server.app.agents import AgentStatusManager
 from server.app.db import Database
 from server.app.db.migrations.report import MigrationBlockedError
 from server.app.db.notifications import NotificationHub
-from server.app.events import JobEventManager, VideoEventManager
+from server.app.event_bus import InProcessEventBus
+from server.app.events import JobEventManager
 from server.app.executors.backup import legacy_backup_path
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
@@ -21,8 +22,17 @@ from server.app.http_middleware import add_http_middleware
 from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
 from server.app.local_handler_loader import build_local_handlers
+from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
+from server.app.services.executor_catalog import ExecutorCatalogService
+from server.app.services.job_packages import JobPackageService
+from server.app.services.package_deletion import PackageDeletionService
 from server.app.services.package_stats_backfill import backfill_package_stats
+from server.app.services.workflow_catalog import WorkflowCatalogService
+from server.app.services.workspace_configuration import WorkspaceConfigurationService
+from server.app.services.workspace_executor_configuration import (
+    WorkspaceExecutorConfigurationService,
+)
 from server.app.services.workspace_pi_agents import sync_workspace_pi_agents
 from server.app.settings import Settings, load_settings, validate_settings
 from server.app.skills.manager import SkillManager
@@ -67,15 +77,14 @@ def create_app(
     start_worker: bool = False,
 ) -> FastAPI:
     settings = load_settings(data_dir=data_dir)
-
-    agent_manager = AgentStatusManager()
+    event_bus = InProcessEventBus()
+    agent_manager = AgentStatusManager(
+        event_bus=event_bus,
+        discover_agents=lambda: list_openclaw_agents(timeout=10),
+    )
     workspace_worker_control = WorkspaceWorkerControl()
-    video_event_manager = VideoEventManager()
-    job_event_manager = JobEventManager()
+    job_event_manager = JobEventManager(event_bus)
     hub = NotificationHub()
-    hub.on_change = video_event_manager.broadcast  # type: ignore[assignment]
-    hub.on_delete = video_event_manager.broadcast_delete
-    hub.on_detail_change = video_event_manager.broadcast_video_detail  # type: ignore[assignment]
     db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
     remote_broker = RemoteExecutionBroker(
@@ -87,7 +96,7 @@ def create_app(
     executor_registry = build_executor_registry(settings, job_db, remote_broker=remote_broker)
 
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
-        job_db, settings, job_event_manager
+        job_db, settings, job_event_manager.bus
     )
     definitions = list_registered_workflows(settings.root_dir)
     with job_db.connect() as conn:
@@ -116,14 +125,13 @@ def create_app(
     workflow_worker_thread: WorkflowWorkerThread | None = None
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
-        agent_broadcast_controller=agent_manager._broadcast_controller,
+        agent_broadcast_controller=agent_manager.broadcast_controller,
     )
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         nonlocal workflow_worker_thread
-        video_event_manager._loop = asyncio.get_running_loop()
-        job_event_manager._loop = asyncio.get_running_loop()
+        job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         if start_worker:
             validate_settings(settings)
             agent_manager.discover()
@@ -166,18 +174,31 @@ def create_app(
     app.state.remote_broker = remote_broker
     app.state.agent_manager = agent_manager
     app.state.workspace_worker_control = workspace_worker_control
-    app.state.video_event_manager = video_event_manager
     app.state.job_event_manager = job_event_manager
+    app.state.event_bus = job_event_manager.bus
     app.state.job_event_buffer = job_event_buffer
     app.state.workspace_event_aggregator = workspace_event_aggregator
+    workflow_catalog = WorkflowCatalogService(settings)
+    executor_catalog = ExecutorCatalogService(settings)
+    workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db)
+    workspace_configuration = WorkspaceConfigurationService(
+        job_db, settings, agent_manager, workflow_catalog
+    )
+    package_deletion = PackageDeletionService(db, settings.packages_dir)
+    job_packages = JobPackageService(job_db, settings)
     app.include_router(
         create_router(
             db,
             job_db,
             settings,
             agent_manager,
-            video_event_manager,
             workspace_worker_control,
+            workflow_catalog=workflow_catalog,
+            executor_catalog=executor_catalog,
+            workspace_executor_configuration=workspace_executor_configuration,
+            workspace_configuration=workspace_configuration,
+            package_deletion=package_deletion,
+            job_packages=job_packages,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
             remote_broker=remote_broker,

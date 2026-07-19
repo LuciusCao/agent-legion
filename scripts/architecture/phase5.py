@@ -24,8 +24,6 @@ _FORBIDDEN_PATTERN_WHITELIST = {
     "server/app/workflows/definition.py",
     "server/app/workflows/loader.py",
     "server/app/pipeline/runners.py",
-    "server/app/worker_scheduler.py",
-    "server/app/worker_thread.py",
     "server/app/services/workspace_executor_warnings.py",
     # Job detail panel picks the new NodeRunResponse.runner API field (run provenance).
     "frontend/src/components/NodeDetailsPanel.tsx",
