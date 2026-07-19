@@ -589,6 +589,7 @@
     "server/app/executors/scheduling/__init__.py": 13,
     "server/app/executors/scheduling/capacity.py": 96,
     "server/app/executors/scheduling/fair.py": 52,
+    "server/app/executors/sweeper.py": 102,
     "server/app/http_middleware.py": 53,
     "server/app/job_dashboard_events.py": 40,
     "server/app/job_event_buffer.py": 109,
