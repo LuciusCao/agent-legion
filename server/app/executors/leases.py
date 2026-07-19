@@ -5,14 +5,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from server.app.db.connection import connect_sqlite
 from server.app.db.retry import retry_on_sqlite_lock
 from server.app.db.schema import init_db
+from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
 from server.app.executors import _lease_write_paths
 from server.app.executors._lease_control import active_lease_counts
 from server.app.executors._lease_lifecycle import fail_without_lease
-from server.app.executors._lease_transactions import _rollback, _sqlite_timestamp
+from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
     ConfigurationFailureRequest,
@@ -76,53 +76,35 @@ class ExecutorLeaseRepository:
     def fail_without_lease(
         self, request: ConfigurationFailureRequest, error_message: str
     ) -> int | None:
-        conn = connect_sqlite(self.path)
-        conn.isolation_level = None
         job_id = request.job_id
-        run_id: int | None = None
-        try:
-            conn.execute("begin immediate")
+        with write_transaction(self.path) as conn:
             run_id = fail_without_lease(conn, request, error_message, self.data_dir)
-            conn.execute("commit")
-            self._broadcast_job_update(job_id)
-            return run_id
-        except Exception:
-            _rollback(conn)
-            raise
-        finally:
-            conn.close()
+        # Broadcast only after the commit has succeeded, never inside the tx.
+        self._broadcast_job_update(job_id)
+        return run_id
 
     def expire_stale(self, now: datetime) -> list[str]:
         return retry_on_sqlite_lock(lambda: _lease_write_paths.expire_stale(self, now))
 
     def active_counts(self, executor_id: str) -> dict[str, int]:
-        conn = connect_sqlite(self.path)
-        try:
+        with read_connection(self.path) as conn:
             return active_lease_counts(conn, executor_id)
-        finally:
-            conn.close()
 
     def has_active_for_job(self, job_id: str, now: datetime) -> bool:
-        conn = connect_sqlite(self.path)
-        try:
+        with read_connection(self.path) as conn:
             row = conn.execute(
                 "select 1 from executor_leases where job_id=? and status='active' and expires_at>? limit 1",
                 (job_id, _sqlite_timestamp(now)),
             ).fetchone()
             return row is not None
-        finally:
-            conn.close()
 
     def has_active_for_node(self, job_id: str, node_key: str, now: datetime) -> bool:
-        conn = connect_sqlite(self.path)
-        try:
+        with read_connection(self.path) as conn:
             row = conn.execute(
                 "select 1 from executor_leases where job_id=? and node_key=? and status='active' and expires_at>? limit 1",
                 (job_id, node_key, _sqlite_timestamp(now)),
             ).fetchone()
             return row is not None
-        finally:
-            conn.close()
 
     def recover_orphaned_running_jobs(self, now: datetime) -> list[str]:
         """Reset jobs stuck in 'running' with no active lease back to 'queued'."""

@@ -7,6 +7,7 @@ from pathlib import Path
 
 from server.app.db.connection import connect_sqlite
 from server.app.db.schema import init_db
+from server.app.db.transaction import read_connection
 
 
 class JobQueriesBase:
@@ -26,8 +27,5 @@ class JobQueriesBase:
 
     @contextmanager
     def _connect_read(self) -> Iterator[sqlite3.Connection]:
-        conn = connect_sqlite(self.path)
-        try:
+        with read_connection(self.path) as conn:
             yield conn
-        finally:
-            conn.close()

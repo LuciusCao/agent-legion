@@ -4,6 +4,7 @@ import logging
 import sqlite3
 from pathlib import Path
 
+from server.app.db.transaction import write_transaction
 from server.app.services.token_usage import (
     TokenUsageSummary,
     parse_run_usage,
@@ -62,12 +63,11 @@ def capture_token_usage_after_lease_finish(
         summary = parse_token_usage_for_lease(conn, lease_id, data_dir)
         if summary is None:
             return
-        conn.execute("begin immediate")
-        try:
-            persist_node_run_usage(conn, summary)
-            conn.execute("commit")
-        except Exception:
-            conn.execute("rollback")
-            raise
+        # The caller hands us a read-only connection for the parse step; the
+        # short persist transaction runs on its own connection to the same
+        # database file via the unified write_transaction helper.
+        db_file = conn.execute("pragma database_list").fetchone()["file"]
+        with write_transaction(Path(db_file)) as write_conn:
+            persist_node_run_usage(write_conn, summary)
     except Exception:
         logger.debug("Failed to capture token usage for lease %s", lease_id, exc_info=True)
