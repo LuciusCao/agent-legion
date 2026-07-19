@@ -1,7 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { JOB_STATUS_LABELS } from '../labels'
-import type { JobRecord } from '../types'
-import type { JobNodeSummary } from '../jobTypes'
+import type { JobSummary, JobNodeSummary } from '../jobTypes'
 import { JobListItemDescription } from './JobListItemDescription'
 import { JobNodeStepper } from './JobNodeStepper'
 import styles from './JobListItem.module.css'
@@ -9,7 +8,7 @@ import styles from './JobListItem.module.css'
 const TITLE_MAX_LEN = 30
 
 export interface JobListItemProps {
-  job: JobRecord
+  job: JobSummary
   selected: boolean
   selectMode: boolean
   onToggleSelect: () => void
@@ -35,14 +34,14 @@ function activeLabelClass(nodeStatus: string): string {
   return nodeStatus === 'running' ? styles.running : ''
 }
 
-function progressText(job: JobRecord): string {
+function progressText(job: JobSummary): string {
   const completed = job.completed_nodes ?? 0
   const total = job.total_nodes ?? 0
   if (total <= 0) return '—'
   return `${completed}/${total}`
 }
 
-function currentNodeSummary(job: JobRecord): JobNodeSummary | undefined {
+function currentNodeSummary(job: JobSummary): JobNodeSummary | undefined {
   const summaries = job.node_summaries ?? []
 
   if (summaries.length === 0 && (job.total_nodes ?? 0) > 0) {

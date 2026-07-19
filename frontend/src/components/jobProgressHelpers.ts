@@ -1,5 +1,5 @@
 import { formatDuration } from '../lib/formatters'
-import type { JobNodeRecord } from '../types'
+import type { JobNode } from '../jobTypes'
 
 export const EXECUTOR_KIND_LABELS: Record<string, string> = {
   local: '本地',
@@ -16,8 +16,8 @@ export const EXECUTOR_KIND_ICONS: Record<string, string> = {
 }
 
 export function computeWaitTime(
-  node: JobNodeRecord,
-  nodes: JobNodeRecord[]
+  node: JobNode,
+  nodes: JobNode[]
 ): string | undefined {
   if (!node.started_at) return undefined
   const started = new Date(node.started_at).getTime()

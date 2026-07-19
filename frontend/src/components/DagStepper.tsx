@@ -1,4 +1,4 @@
-import type { JobNodeRecord } from '../types'
+import type { JobNode } from '../jobTypes'
 import styles from './DagStepper.module.css'
 
 type StepState = 'completed' | 'running' | 'failed' | 'stale' | 'pending'
@@ -12,7 +12,7 @@ function getStepState(status: string): StepState {
   return 'pending'
 }
 
-export function DagStepper({ nodes }: { nodes: JobNodeRecord[] }) {
+export function DagStepper({ nodes }: { nodes: JobNode[] }) {
   if (nodes.length === 0) return null
 
   return (

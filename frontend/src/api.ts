@@ -1,9 +1,9 @@
 import { api } from './api/core'
+import type { JobDetail } from './jobTypes'
 import type {
   ArtifactResponse,
   CreateJobBatchInput,
   JobBatchResponse,
-  JobDetailResponse,
   JobsResponse,
   WorkspaceRecord,
   WorkspaceResponse,
@@ -148,9 +148,7 @@ export async function createJobBatch(
   })
 }
 
-export async function fetchJobDetail(
-  jobId: string
-): Promise<JobDetailResponse> {
+export async function fetchJobDetail(jobId: string): Promise<JobDetail> {
   return api(`/api/jobs/${encodeURIComponent(jobId)}`)
 }
 

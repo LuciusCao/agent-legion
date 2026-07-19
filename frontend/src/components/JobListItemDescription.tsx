@@ -1,9 +1,9 @@
 import { JOB_SOURCE_TYPE_LABELS } from '../labels'
-import type { JobRecord } from '../types'
+import type { JobSummary } from '../jobTypes'
 import { WorkflowVersionChip } from './WorkflowVersionChip'
 import styles from './JobListItem.module.css'
 
-export function JobListItemDescription({ job }: { job: JobRecord }) {
+export function JobListItemDescription({ job }: { job: JobSummary }) {
   return (
     <div className={styles.description}>
       {JOB_SOURCE_TYPE_LABELS[job.source_type] ?? job.source_type} ·{' '}

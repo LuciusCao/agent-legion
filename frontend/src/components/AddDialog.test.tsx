@@ -56,48 +56,6 @@ describe('AddDialog', () => {
     expect(screen.getByLabelText('题目 ID')).toBeInTheDocument()
   })
 
-  it('submits normalized video resource inputs', async () => {
-    mockApi.mockResolvedValue({ videos: [], results: [] })
-    render(<AddDialog open={true} onClose={vi.fn()} context="video" />)
-    enterResourceIds('x11090605, uuid-1\nx11090606')
-
-    fireEvent.click(screen.getByText('加入队列'))
-
-    await waitFor(() => {
-      expect(mockApi).toHaveBeenCalledWith('/api/videos', {
-        method: 'POST',
-        body: JSON.stringify({
-          items: [
-            {
-              content_type: 'knowledge',
-              external_id: 'x11090605',
-              source_uuid: 'uuid-1',
-            },
-            {
-              content_type: 'knowledge',
-              external_id: 'x11090606',
-              source_uuid: '',
-            },
-          ],
-        }),
-      })
-    })
-  })
-
-  it('shows error toast when video intake fails', async () => {
-    mockApi.mockRejectedValue(new Error('Intake failed'))
-    render(<AddDialog open={true} onClose={vi.fn()} context="video" />)
-    enterResourceIds('x11090605')
-
-    fireEvent.click(screen.getByText('加入队列'))
-
-    await waitFor(() => {
-      expect(useUiStore.getState().toast).toEqual(
-        expect.objectContaining({ type: 'error' })
-      )
-    })
-  })
-
   it('shows error toast when workspace job batch creation fails', async () => {
     mockFetchWorkflowDefinition.mockResolvedValue({
       workflow: {

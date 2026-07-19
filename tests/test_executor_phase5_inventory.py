@@ -24,7 +24,6 @@ PROTECTED_VIDEO_HIVE_PATHS: set[str] = {
     "server/app/routes/agents.py",
     "server/app/agents.py",
     "server/app/pipeline/openclaw.py",
-    "server/app/worker.py",
 }
 
 

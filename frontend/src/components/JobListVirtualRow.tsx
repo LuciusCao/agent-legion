@@ -1,10 +1,10 @@
 import type { VirtualItem } from '@tanstack/react-virtual'
-import type { JobRecord } from '../types'
+import type { JobSummary } from '../jobTypes'
 import { JobListItem } from './JobListItem'
 import styles from './JobList.module.css'
 
 interface JobListVirtualRowProps {
-  job: JobRecord
+  job: JobSummary
   selected: boolean
   selectMode: boolean
   virtualRow: VirtualItem
