@@ -3,14 +3,16 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any, Generic, TypeVar, cast
 
 from pydantic import BaseModel
 
 from server.app.executors.protocol import Executor
-from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
 from server.app.skills.manager import SkillManager
+
+if TYPE_CHECKING:
+    from server.app.executors.remote_broker import RemoteExecutionBroker
 
 
 class ExecutorKindError(Exception):
@@ -21,11 +23,14 @@ class UnknownExecutorKindError(ExecutorKindError):
     """Raised when a configuration references an unregistered executor kind."""
 
 
+ConfigModelT = TypeVar("ConfigModelT", bound=BaseModel)
+
+
 @dataclass(frozen=True)
-class ExecutorKind:
+class ExecutorKind(Generic[ConfigModelT]):
     name: str
-    config_model: type[BaseModel]
-    factory: Callable[[str, BaseModel, RuntimeDependencies], Executor]
+    config_model: type[ConfigModelT]
+    factory: Callable[[str, ConfigModelT, RuntimeDependencies], Executor]
 
 
 @dataclass(frozen=True)
@@ -48,16 +53,16 @@ class RuntimeDependencies:
     remote_broker: RemoteExecutionBroker | None = None
 
 
-_KIND_REGISTRY: dict[str, ExecutorKind] = {}
+_KIND_REGISTRY: dict[str, ExecutorKind[Any]] = {}
 
 
-def register_kind(kind: ExecutorKind) -> None:
+def register_kind(kind: ExecutorKind[Any]) -> None:
     if kind.name in _KIND_REGISTRY:
         raise ExecutorKindError(f"executor kind {kind.name!r} is already registered")
     _KIND_REGISTRY[kind.name] = kind
 
 
-def get_kind(name: str) -> ExecutorKind | None:
+def get_kind(name: str) -> ExecutorKind[Any] | None:
     return _KIND_REGISTRY.get(name)
 
 
@@ -73,7 +78,7 @@ def load_executor_config(executor_id: str, raw: dict[str, Any]) -> BaseModel:
             f"Executor {executor_id!r}: unknown kind {kind_name!r} "
             f"(registered: {', '.join(registered_kind_names()) or 'none'})"
         )
-    return kind.config_model.model_validate(raw)
+    return cast(BaseModel, kind.config_model.model_validate(raw))
 
 
 def build_executor(executor_id: str, config: BaseModel, deps: RuntimeDependencies) -> Executor:

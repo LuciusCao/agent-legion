@@ -4,6 +4,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
+from server.app.executors.kinds import UnknownExecutorKindError
 from server.app.settings import load_env_file, load_settings
 
 
@@ -293,7 +294,7 @@ def test_load_settings_rejects_unknown_executor_kind(tmp_path, monkeypatch):
         encoding="utf-8",
     )
 
-    with pytest.raises(ValidationError) as exc_info:
+    with pytest.raises(UnknownExecutorKindError) as exc_info:
         load_settings(data_dir=tmp_path / "data", config_path=config_path)
 
     assert "weird-exec" in str(exc_info.value)

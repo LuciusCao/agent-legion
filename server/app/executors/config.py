@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal, cast
+from typing import Literal, cast
 
-from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, field_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 from pydantic_core import InitErrorDetails
 
 
@@ -112,14 +112,10 @@ class RemoteExecutorConfig(BaseModel):
         return value
 
 
-ExecutorConfig = Annotated[
-    LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig | RemoteExecutorConfig,
-    Field(discriminator="kind"),
-]
-
-_executor_config_adapter: TypeAdapter[
+ExecutorConfig = (
     LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig | RemoteExecutorConfig
-] = TypeAdapter(ExecutorConfig)
+)
+"""Union of the built-in executor config models, for type annotations only."""
 
 
 def _validation_error_with_executor_id(exc: ValidationError, executor_id: str) -> ValidationError:
@@ -132,22 +128,25 @@ def _validation_error_with_executor_id(exc: ValidationError, executor_id: str) -
     return ValidationError.from_exception_data(exc.title, cast(list[InitErrorDetails], line_errors))
 
 
-def load_executor_definitions(
-    raw: dict[str, object],
-) -> dict[
-    str, LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig | RemoteExecutorConfig
-]:
-    """Validate a mapping of executor ID to executor configuration."""
-    definitions: dict[
-        str, LocalExecutorConfig | PiExecutorConfig | OpenClawExecutorConfig | RemoteExecutorConfig
-    ] = {}
+def load_executor_definitions(raw: dict[str, object]) -> dict[str, BaseModel]:
+    """Validate a mapping of executor ID to executor configuration.
+
+    Dispatch goes through the kind registry: unknown kinds raise
+    ``UnknownExecutorKindError`` (message includes the executor ID); model
+    validation errors are wrapped with the executor ID context.
+    """
+    # Lazy import: kinds.py pulls in runtime_config.py, which imports this
+    # module; importing at module scope would create a cycle.
+    from server.app.executors.kinds import load_executor_config
+
+    definitions: dict[str, BaseModel] = {}
     for executor_id, value in raw.items():
         if not isinstance(value, dict):
             raise TypeError(
                 f"Executor {executor_id!r}: expected a mapping, got {type(value).__name__}"
             )
         try:
-            definitions[executor_id] = _executor_config_adapter.validate_python(value)
+            definitions[executor_id] = load_executor_config(executor_id, value)
         except ValidationError as exc:
             raise _validation_error_with_executor_id(exc, executor_id) from exc
     return definitions
