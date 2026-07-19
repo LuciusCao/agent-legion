@@ -536,6 +536,7 @@
     "server/app/db/migrations/v018_node_run_token_usage.py": 63,
     "server/app/db/migrations/v019_remote_workers.py": 36,
     "server/app/db/migrations/v020_node_run_runner.py": 22,
+    "server/app/db/migrations/v021_remote_executions.py": 50,
     "server/app/db/notifications.py": 49,
     "server/app/db/queries/__init__.py": 27,
     "server/app/db/queries/base.py": 53,
