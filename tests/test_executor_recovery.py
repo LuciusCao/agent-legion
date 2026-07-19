@@ -234,7 +234,6 @@ def test_fresh_repo_expire_stale_marks_recovery_state(
 
 
 def test_fresh_sweeper_start_expires_stale_leases(
-    tmp_path: Path,
     queries: JobQueries,
     repo: ExecutorLeaseRepository,
     broker: RemoteExecutionBroker,
