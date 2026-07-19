@@ -72,6 +72,8 @@ class OpenClawExecutor:
     """Adapter that runs OpenClaw agent nodes through a configured OpenClawRunner."""
 
     kind = "openclaw"
+    # Run-to-completion adapter; submit_only is the remote-executor opt-out.
+    submit_only = False
 
     def __init__(
         self,

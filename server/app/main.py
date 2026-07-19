@@ -17,6 +17,7 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.remote_broker import RemoteExecutionBroker
+from server.app.executors.remote_completion import RemoteCompletionHandler
 from server.app.executors.runtime_factory import build_execution_runtime
 from server.app.http_middleware import add_http_middleware
 from server.app.job_events import build_workspace_event_aggregator
@@ -145,6 +146,12 @@ def create_app(
                 )
                 execution_runtime = build_execution_runtime(
                     executor_leases, executor_registry, settings.executor_runtime
+                )
+                # Submit-only remote executors finish leases via broker callbacks.
+                remote_broker.register_completion_callback(
+                    RemoteCompletionHandler(
+                        remote_broker, executor_leases, settings.jobs_dir
+                    ).handle_completion
                 )
                 workflow_worker_thread = WorkflowWorkerThread(
                     job_db=job_db,

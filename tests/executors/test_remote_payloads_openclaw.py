@@ -137,8 +137,8 @@ def test_remote_executor_openclaw_submit_and_dequeue(
     tmp_path: Path, execution_context: ExecutionContext
 ) -> None:
     # Integration: remote executor with openclaw payload, submit -> fake worker
-    # dequeue. The completion path is Task 6 scope; the worker reports a stub
-    # failure only to unblock execute().
+    # dequeue. The executor is submit-only (Task 6): execute returns None once
+    # the row is enqueued; the completion callback path is covered separately.
     for rel in execution_context.inputs:
         (execution_context.job_dir / rel).write_text("{}", encoding="utf-8")
     db_path = tmp_path / "jobs.sqlite"
@@ -175,20 +175,14 @@ def test_remote_executor_openclaw_submit_and_dequeue(
         broker.complete(
             claim.execution_id,
             "w1",
-            RemoteOutcome(
-                status="failed",
-                exit_code=1,
-                error_message="stub worker: completion path lands in task 6",
-            ),
+            RemoteOutcome(status="failed", exit_code=1, error_message="stub worker done"),
         )
 
     worker = threading.Thread(target=fake_worker)
     worker.start()
-    result = executor.execute(execution_context)
+    assert executor.execute(execution_context) is None
     worker.join(timeout=10)
 
-    assert result.status == "failed"
-    assert "stub worker" in result.error_message
     assert len(claimed) == 1
     manifest = claimed[0].manifest
     oc = manifest["openclaw"]
