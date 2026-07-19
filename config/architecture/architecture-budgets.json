@@ -537,6 +537,7 @@
     "server/app/db/migrations/v019_remote_workers.py": 36,
     "server/app/db/migrations/v020_node_run_runner.py": 22,
     "server/app/db/migrations/v021_remote_executions.py": 50,
+    "server/app/db/migrations/v022_job_event_seq_worker_control.py": 43,
     "server/app/db/notifications.py": 49,
     "server/app/db/queries/__init__.py": 27,
     "server/app/db/queries/base.py": 53,
