@@ -46,3 +46,9 @@ from server.app.db.migrations.v018_node_run_token_usage import (
 )
 from server.app.db.migrations.v019_remote_workers import MIGRATION as V019_REMOTE_WORKERS
 from server.app.db.migrations.v020_node_run_runner import MIGRATION as V020_NODE_RUN_RUNNER
+from server.app.db.migrations.v021_remote_executions import (
+    MIGRATION as V021_REMOTE_EXECUTIONS,
+)
+from server.app.db.migrations.v022_job_event_seq_worker_control import (
+    MIGRATION as V022_JOB_EVENT_SEQ_WORKER_CONTROL,
+)

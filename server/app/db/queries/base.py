@@ -8,6 +8,7 @@ from typing import cast
 from server.app.db.connection import connect_sqlite
 from server.app.db.notifications import NotificationHub
 from server.app.db.schema import init_db
+from server.app.db.transaction import read_connection
 from server.app.records import VideoRecord
 
 
@@ -35,11 +36,8 @@ class VideoQueriesBase:
     @contextmanager
     def _connect_read(self):
         """Read-only connection context that does not implicitly commit."""
-        conn = connect_sqlite(self.path)
-        try:
+        with read_connection(self.path) as conn:
             yield conn
-        finally:
-            conn.close()
 
     def _row(self, row: sqlite3.Row | None) -> VideoRecord | None:
         return cast(VideoRecord, dict(row)) if row else None

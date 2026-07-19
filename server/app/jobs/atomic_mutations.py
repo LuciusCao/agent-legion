@@ -7,7 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Protocol
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.transaction import write_transaction
 
 
 class JobMutationConflict(ValueError):
@@ -33,10 +33,7 @@ def lease_guarded_mutation(
     reject_running_nodes: bool,
 ) -> Iterator[sqlite3.Connection]:
     """Serialize a Job mutation with lease claims and validate busy state."""
-    conn = connect_sqlite(path)
-    conn.isolation_level = None
-    try:
-        conn.execute("begin immediate")
+    with write_transaction(path) as conn:
         active_lease = conn.execute(
             """
             select 1 from executor_leases
@@ -57,13 +54,6 @@ def lease_guarded_mutation(
                 raise JobMutationConflict("busy", "Job has running nodes")
 
         yield conn
-        conn.execute("commit")
-    except Exception:
-        if conn.in_transaction:
-            conn.execute("rollback")
-        raise
-    finally:
-        conn.close()
 
 
 def apply_run_to(
