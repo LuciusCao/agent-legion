@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -53,6 +54,11 @@ def test_poll_updates_agent_status_for_pi_executor(tmp_path: Path) -> None:
 
     worker = _make_pi_worker(tmp_path, db_path, executor, [definition], agent_manager)
     worker._poll()
+
+    # set_busy runs on the executor pool thread; wait for it before asserting.
+    busy_deadline = time.monotonic() + 5
+    while agent_manager.set_busy.call_count == 0 and time.monotonic() < busy_deadline:
+        time.sleep(0.01)
 
     agent_manager.set_busy.assert_called_once()
     args, kwargs = agent_manager.set_busy.call_args

@@ -179,7 +179,7 @@ def try_claim_and_submit(
         runtime={"node_execution": asdict(node.execution)},
     )
 
-    pool = worker._pools[executor_id]
+    pool = worker._pool_for(executor_id)
     future = pool.submit(worker._run_claim, claim, context)
     worker._futures[claim.execution_id] = future
     return True

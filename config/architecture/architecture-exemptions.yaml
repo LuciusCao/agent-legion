@@ -6,14 +6,23 @@ exemptions:
     global capacity and keyed by executor_id, not workspace.
   owner: workspace-executor
   remove_when: issues/open/032-P2-event-driven-worker.md
+- check: architecture.scheduler_threadpool
+  path: server/app/workflow_worker_thread.py:self._submit_pool
+  reason: Task 6 of the phase3 execution-decoupling plan routes all submit-only
+    (remote) claims to one shared ThreadPoolExecutor bounded at 4 workers;
+    submission is a quick enqueue and must not scale with executor capacity.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
 - check: architecture.file_budget
   path: server/app/main.py
   reason: Task 9 of the phase1 event-bus plan converges the six route service
     constructions from routes/__init__.py into create_app; extracting an
     AppContainer composition module will bring main.py back under budget.
+    Task 6 of the phase3 execution-decoupling plan wires the
+    RemoteCompletionHandler callback registration into the lifespan.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 211
+  ceiling: 218
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
@@ -135,3 +144,28 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-2
   ceiling: 189
+- check: architecture.file_budget
+  path: server/app/executors/remote_broker.py
+  reason: Task 6 of the phase3 execution-decoupling plan adds completion-callback
+    publishing (register/_publish_completion), payload_for and active_lease_ids
+    to the broker; the worker-registry section will be extracted into its own
+    module once remote execution stabilizes.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
+  ceiling: 327
+- check: architecture.file_budget
+  path: server/app/executors/runtime.py
+  reason: Task 6 of the phase3 execution-decoupling plan adds the submit-only
+    branch (_run_submit_only) to ExecutionRuntime; the budget will be
+    re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
+  ceiling: 163
+- check: architecture.file_budget
+  path: server/app/workflow_worker_thread.py
+  reason: Task 6 of the phase3 execution-decoupling plan adds the shared bounded
+    remote submit pool and _pool_for selection; the budget will be re-ratcheted
+    if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
+  ceiling: 231
