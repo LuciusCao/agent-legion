@@ -539,6 +539,7 @@
     "server/app/db/migrations/v021_remote_executions.py": 50,
     "server/app/db/migrations/v022_job_event_seq_worker_control.py": 43,
     "server/app/db/migrations/v023_remote_execution_command_spec.py": 24,
+    "server/app/db/migrations/v024_artifacts.py": 55,
     "server/app/db/notifications.py": 49,
     "server/app/db/queries/__init__.py": 27,
     "server/app/db/queries/base.py": 53,
