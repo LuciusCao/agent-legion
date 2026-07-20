@@ -9,6 +9,7 @@ import {
 import { ChipList } from './DagNodeChips'
 import { MaterialIcon } from './MaterialIcon'
 import { DagNodeDefinitionMeta } from './DagNodeDefinitionMeta'
+import { DagNodeExecutorBadge } from './DagNodeExecutorBadge'
 import styles from './DagNode.module.css'
 
 export interface DagNodeData extends Record<string, unknown> {
@@ -16,6 +17,8 @@ export interface DagNodeData extends Record<string, unknown> {
   status: DagNodeStatus
   duration?: number
   executorKind?: 'local' | 'pi' | 'openclaw' | 'remote' | null
+  executorId?: string | null
+  workerId?: string | null
   nodeKey?: string
   capability?: string
   topologyBadges?: Array<'entry' | 'branch' | 'terminal'>
@@ -55,6 +58,7 @@ export const DagNode = memo(function DagNode(props: NodeProps<DagNodeType>) {
         {data.executorKind && (
           <span className={styles.executorTag}>{data.executorKind}</span>
         )}
+        <DagNodeExecutorBadge data={data} />
         {data.terminalOutcome && (
           <span className={styles.terminalTag}>{data.terminalOutcome}</span>
         )}

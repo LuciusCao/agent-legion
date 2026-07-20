@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import { deriveJobDetailPresentation } from './deriveJobDetailPresentation'
+import { toDagNodes } from './jobNodeHelpers'
 import type { JobDetail } from '../../jobTypes'
 
 function makeNode(
@@ -141,5 +142,29 @@ describe('deriveJobDetailPresentation', () => {
     expect(result.possibleErrorsPreviewable).toBe(false)
     expect(result.keyInfoReviewAttempted).toBe(false)
     expect(result.possibleErrorsReviewAttempted).toBe(false)
+  })
+})
+
+describe('toDagNodes', () => {
+  it('maps executor_id / worker_id onto dag nodes', () => {
+    const nodes = toDagNodes([
+      makeNode('generate', 'running', {
+        executor_kind: 'remote',
+        executor_id: 'remote-exec-1',
+        worker_id: 'worker-abc123',
+      }),
+    ])
+
+    expect(nodes[0].executorKind).toBe('remote')
+    expect(nodes[0].executorId).toBe('remote-exec-1')
+    expect(nodes[0].workerId).toBe('worker-abc123')
+  })
+
+  it('defaults executor ids to null when absent', () => {
+    const nodes = toDagNodes([makeNode('generate', 'pending')])
+
+    expect(nodes[0].executorKind).toBeNull()
+    expect(nodes[0].executorId).toBeNull()
+    expect(nodes[0].workerId).toBeNull()
   })
 })

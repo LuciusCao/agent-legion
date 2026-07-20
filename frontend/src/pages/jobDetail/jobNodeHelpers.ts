@@ -44,6 +44,8 @@ export function toDagNodes(nodes: JobNode[]): DagGraphNode[] {
     outputs: n.outputs,
     duration: computeNodeDuration(n.started_at, n.finished_at),
     executorKind: (n.executor_kind as DagGraphNode['executorKind']) ?? null,
+    executorId: n.executor_id ?? null,
+    workerId: n.worker_id ?? null,
   }))
 }
 
