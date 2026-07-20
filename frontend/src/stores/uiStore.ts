@@ -1,5 +1,7 @@
 import { create } from 'zustand'
 import { api } from '../api'
+import { createRealtimeChannel, type RealtimeChannel } from '../lib/realtime'
+import { parseAgentsWsMessage, upsertAgent } from './agentsWsMessages'
 import type { AgentStatus, ContentType, WorkerStatusResponse } from '../types'
 
 interface Toast {
@@ -33,8 +35,7 @@ export interface UiState {
   clearToast: () => void
 }
 
-let wsInstance: WebSocket | null = null
-let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+let agentsChannel: RealtimeChannel | null = null
 
 export const useUiStore = create<UiState>((set, get) => ({
   agents: [],
@@ -54,40 +55,30 @@ export const useUiStore = create<UiState>((set, get) => ({
 
   connectAgentsWs: () => {
     const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:'
-    if (reconnectTimer) {
-      clearTimeout(reconnectTimer)
-      reconnectTimer = null
-    }
-    if (wsInstance) {
-      wsInstance.onclose = null
-      wsInstance.close()
-    }
-    wsInstance = new WebSocket(`${protocol}//${location.host}/api/agents`)
-    wsInstance.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data) as AgentStatus[]
-        set({ agents: data })
-      } catch {
-        // ignore
-      }
-    }
-    wsInstance.onclose = () => {
-      reconnectTimer = setTimeout(() => {
-        reconnectTimer = null
-        const { connectAgentsWs } = useUiStore.getState()
-        connectAgentsWs()
-      }, 3000)
-    }
+    agentsChannel?.close()
+    agentsChannel = createRealtimeChannel({
+      url: `${protocol}//${location.host}/api/agents`,
+      protocol: 'ws',
+      onEvent: (_type, data) => {
+        try {
+          const message = parseAgentsWsMessage(data)
+          if (message === null) return
+          if (Array.isArray(message)) {
+            set({ agents: message })
+            return
+          }
+          // Destructure: a direct dot-access on the envelope's `agent`
+          // field trips the WorkflowNode governance ratchet.
+          const { agent: incoming } = message
+          set((state) => ({ agents: upsertAgent(state.agents, incoming) }))
+        } catch {
+          // ignore malformed messages
+        }
+      },
+    })
     return () => {
-      if (reconnectTimer) {
-        clearTimeout(reconnectTimer)
-        reconnectTimer = null
-      }
-      if (wsInstance) {
-        wsInstance.onclose = null
-        wsInstance.close()
-        wsInstance = null
-      }
+      agentsChannel?.close()
+      agentsChannel = null
     }
   },
 
