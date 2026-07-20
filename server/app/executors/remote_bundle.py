@@ -35,13 +35,17 @@ def build_bundle(
     job_dir: Path,
     inputs: tuple[str, ...],
     manifest: dict[str, Any],
+    skip_inputs: tuple[str, ...] = (),
 ) -> None:
     """Pack an optional skill snapshot, declared inputs, and the manifest into a tar.gz."""
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
+    skip = set(skip_inputs)
     with tarfile.open(bundle_path, "w:gz") as tar:
         if skill_dir is not None:
             tar.add(skill_dir, arcname="skill")
         for rel in inputs:
+            if rel in skip:
+                continue
             rel_path = PurePosixPath(rel)
             if rel_path.is_absolute() or ".." in rel_path.parts:
                 raise BundleError(f"unsafe input path: {rel!r}")

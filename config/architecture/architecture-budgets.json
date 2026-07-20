@@ -582,6 +582,7 @@
     "server/app/executors/remote_bundle.py": 82,
     "server/app/executors/remote_completion.py": 156,
     "server/app/executors/remote_payloads/__init__.py": 77,
+    "server/app/executors/remote_payloads/_artifact_refs.py": 61,
     "server/app/executors/remote_payloads/openclaw.py": 152,
     "server/app/executors/remote_payloads/pi.py": 120,
     "server/app/executors/runtime.py": 137,

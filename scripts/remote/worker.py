@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import shutil
@@ -170,6 +171,21 @@ class WorkerClient:
             raise RuntimeError(f"bundle download failed: HTTP {status}")
         dest.write_bytes(data)
 
+    def upload_artifact(self, data: bytes) -> str:
+        """POST bytes as an artifact; returns the sha256 hex digest."""
+        status, resp = self._request("POST", "/api/artifacts", body=data)
+        if status != 201:
+            raise RuntimeError(f"artifact upload failed: HTTP {status}: {resp[:200]!r}")
+        return str(json.loads(resp.decode("utf-8"))["hash"])
+
+    def download_artifact(self, hash: str, dest: Path) -> None:
+        """GET an artifact onto disk; the sha256 check makes it self-proving."""
+        status, data = self._request("GET", f"/api/artifacts/{hash}")
+        if status != 200 or hashlib.sha256(data).hexdigest() != hash:
+            raise RuntimeError(f"artifact download failed for {hash}: HTTP {status}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(data)
+
     def heartbeat(self, execution_id: str) -> bool:
         status, _ = self._request("POST", f"/api/remote/executions/{execution_id}/heartbeat")
         if status == 204:
@@ -228,6 +244,10 @@ def run_execution(
     bundle_path = work_dir / "bundle.tar.gz"
     client.download_bundle(claim, bundle_path)
     job_dir, skill_dir, manifest = extract_bundle(bundle_path, work_dir)
+    refs_mode = manifest.get("bundle_mode") == "refs"
+    if refs_mode:  # inputs ship as artifact references; pull each into place
+        for rel, ref in manifest["input_artifacts"].items():
+            client.download_artifact(ref.split(":", 1)[1], job_dir / rel)
 
     run_token = manifest["run_token"]
     run_dir = job_dir / "runs" / manifest["node_key"] / run_token
@@ -355,6 +375,13 @@ def run_execution(
     }
     (run_dir / "run.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2))
 
+    output_artifacts = {}
+    if refs_mode:  # upload outputs first; the report metadata references them by hash
+        for name in manifest["expected_outputs"]:
+            src = job_dir / name
+            if src.is_file():
+                output_artifacts[name] = "sha256:" + client.upload_artifact(src.read_bytes())
+
     archive_path = work_dir / "result.tar.gz"
     pack_result_archive(
         archive_path,
@@ -368,6 +395,7 @@ def run_execution(
         "error_message": error_message,
         "command": command,
         "skill_version": manifest["skill_version"],
+        **({"output_artifacts": output_artifacts} if output_artifacts else {}),
     }
     return metadata, archive_path
 
