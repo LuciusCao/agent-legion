@@ -26,6 +26,7 @@ from server.app.jobs import JobQueries
 from server.app.local_handler_loader import build_local_handlers
 from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
+from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_packages import JobPackageService
 from server.app.services.package_deletion import PackageDeletionService
@@ -95,6 +96,7 @@ def create_app(
         claim_timeout_seconds=settings.executor_runtime.remote.claim_timeout_seconds,
         requeue_limit=settings.executor_runtime.remote.requeue_limit,
     )
+    artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
     executor_registry = build_executor_registry(settings, job_db, remote_broker=remote_broker)
 
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
@@ -198,6 +200,7 @@ def create_app(
     app.state.job_db = job_db
     app.state.executor_registry = executor_registry
     app.state.remote_broker = remote_broker
+    app.state.artifact_store = artifact_store
     app.state.agent_manager = agent_manager
     app.state.workspace_worker_control = workspace_worker_control
     app.state.job_event_manager = job_event_manager
@@ -228,6 +231,7 @@ def create_app(
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
             remote_broker=remote_broker,
+            artifact_store=artifact_store,
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")

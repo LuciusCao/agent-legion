@@ -21,6 +21,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/artifacts': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Upload Artifact */
+    post: operations['upload_artifact_api_artifacts_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/artifacts/{hash}': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Download Artifact */
+    get: operations['download_artifact_api_artifacts__hash__get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/dashboard/events': {
     parameters: {
       query?: never
@@ -1117,6 +1151,11 @@ export interface components {
       content: string
       /** Name */
       name: string
+    }
+    /** ArtifactUploadResponse */
+    ArtifactUploadResponse: {
+      /** Hash */
+      hash: string
     }
     /** BatchJobIdsRequest */
     BatchJobIdsRequest: {
@@ -2722,6 +2761,57 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['AgentsResponse']
+        }
+      }
+    }
+  }
+  upload_artifact_api_artifacts_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['ArtifactUploadResponse']
+        }
+      }
+    }
+  }
+  download_artifact_api_artifacts__hash__get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        hash: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }
