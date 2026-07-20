@@ -23,11 +23,21 @@ from server.app.executors._remote_queue_store import (
     claim_next,
     finish_execution,
     heartbeat_claim,
+    labels_satisfy,
     sweep,
 )
 from server.app.executors.models import ExecutionStatus
 
 logger = logging.getLogger(__name__)
+
+
+__all__ = [
+    "RemoteClaim",
+    "RemoteExecutionBroker",
+    "RemoteExecutionPayload",
+    "RemoteOutcome",
+    "labels_satisfy",
+]
 
 
 @dataclass(frozen=True)
@@ -100,12 +110,17 @@ class RemoteExecutionBroker:
         claim_timeout_seconds: float = 120.0,
         requeue_limit: int = 3,
         time_source: Callable[[], datetime] | None = None,
+        capability_label_requirements: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         self._db_path = db_path
         self.bundle_dir = bundle_dir
         self._claim_timeout = timedelta(seconds=claim_timeout_seconds)
         self._requeue_limit = requeue_limit
         self._now = time_source or _utcnow
+        # capability -> requires_labels constraints evaluated at dequeue time.
+        self._label_requirements = {
+            cap: dict(reqs) for cap, reqs in (capability_label_requirements or {}).items()
+        }
         self._done_events: dict[str, threading.Event] = {}
         self._completion_callbacks: list[Callable[[str, RemoteOutcome], None]] = []
         self._entries = EntriesView(db_path)  # legacy test handle; rows live in sqlite
@@ -206,7 +221,13 @@ class RemoteExecutionBroker:
         if not capabilities:
             return None
         self.sweep_expired_claims()
-        entry = claim_next(self._db_path, worker_id, capabilities, _sqlite_timestamp(self._now()))
+        entry = claim_next(
+            self._db_path,
+            worker_id,
+            capabilities,
+            _sqlite_timestamp(self._now()),
+            label_requirements=self._label_requirements or None,
+        )
         if entry is None:
             return None
         spec_json = entry.get("command_spec_json")
@@ -280,6 +301,21 @@ class RemoteExecutionBroker:
             lambda: self._write(
                 "update remote_workers set last_seen_at = ? where worker_id = ?",
                 (_sqlite_timestamp(self._now()), worker_id),
+            )
+        )
+
+    def update_worker_labels(self, worker_id: str, labels: Mapping[str, Any]) -> None:
+        """Replace a worker's stored labels from its claim-time self-report.
+
+        Same flat-scalar rules as token issuance (Task 4): nested values are
+        rejected so the registry cannot smuggle large or sensitive payloads.
+        """
+        flat_labels = dict(labels)
+        _validate_labels(flat_labels)
+        retry_on_sqlite_lock(
+            lambda: self._write(
+                "update remote_workers set labels_json = ? where worker_id = ?",
+                (json.dumps(flat_labels), worker_id),
             )
         )
 
