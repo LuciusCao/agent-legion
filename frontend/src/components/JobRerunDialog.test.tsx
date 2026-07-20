@@ -187,6 +187,64 @@ describe('JobRerunDialog', () => {
     expect(onClose).toHaveBeenCalled()
   })
 
+  it('counts and submits only jobs that have executed the selected node', async () => {
+    const onConfirm = vi.fn().mockResolvedValue(undefined)
+    render(
+      <JobRerunDialog
+        open
+        allowFailedNodeMode
+        jobs={[
+          makeJob({
+            id: 'j1',
+            status: 'completed',
+            workflow_key: 'question_content',
+            node_summaries: [
+              {
+                node_key: 'generate',
+                label: '生成',
+                status: 'completed',
+                error_message: '',
+              },
+            ],
+          }),
+          makeJob({
+            id: 'j2',
+            status: 'queued',
+            workflow_key: 'question_content',
+            node_summaries: [
+              {
+                node_key: 'generate',
+                label: '生成',
+                status: 'stale',
+                error_message: '',
+              },
+            ],
+          }),
+        ]}
+        workflowDefinition={workflow}
+        onConfirm={onConfirm}
+        onClose={vi.fn()}
+      />
+    )
+
+    act(() => {
+      screen.getByTestId('rerun-chip-generate').click()
+    })
+
+    expect(
+      screen.getByText('已选择 2 个任务，可重跑 1 个，1 个尚未执行到所选节点')
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText('1 个任务尚未执行到所选节点，不能重跑。')
+    ).toBeInTheDocument()
+
+    await act(async () => {
+      screen.getByRole('button', { name: '重跑 1 个任务' }).click()
+    })
+
+    expect(onConfirm).toHaveBeenCalledWith('generate', false, ['j1'])
+  })
+
   it('calls onClose when cancel is clicked', () => {
     const onClose = vi.fn()
     render(

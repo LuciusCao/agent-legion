@@ -10,6 +10,8 @@ import {
   computeOrderedNodes,
   type WorkflowNodesByKey,
 } from '../../lib/workflowNodes'
+import { JobRerunExcludedLists } from './JobRerunExcludedLists'
+import { JobRerunSelectionSummary } from './JobRerunSelectionSummary'
 import styles from './JobRerunDialog.module.css'
 
 export type JobRerunDialogContentProps = {
@@ -25,6 +27,9 @@ export type JobRerunDialogContentProps = {
   failedJobs: JobSummary[]
   nonFailedJobs: JobSummary[]
   excluded: JobSummary[]
+  runnableJobs: JobSummary[]
+  notStartedJobs: JobSummary[]
+  runningJobs: JobSummary[]
   canConfirm: boolean
   loading: boolean
   onConfirm: () => void | Promise<void>
@@ -44,6 +49,9 @@ export function JobRerunDialogContent({
   failedJobs,
   nonFailedJobs,
   excluded,
+  runnableJobs,
+  notStartedJobs,
+  runningJobs,
   canConfirm,
   loading,
   onConfirm,
@@ -93,37 +101,28 @@ export function JobRerunDialogContent({
             </div>
           )}
 
-          {failedMode && nonFailedJobs.length > 0 && (
-            <div className={styles.excludedBox}>
-              <div className={styles.excludedTitle}>
-                以下任务未失败，将被跳过：
-              </div>
-              <ul className={styles.excludedList}>
-                {nonFailedJobs.map((job) => (
-                  <li key={job.id}>{job.source_id || job.title || job.id}</li>
-                ))}
-              </ul>
+          <JobRerunExcludedLists
+            failedMode={failedMode}
+            effectiveNodeKey={effectiveNodeKey}
+            nonFailedJobs={nonFailedJobs}
+            excluded={excluded}
+          />
+
+          {!failedMode && allowFailedNodeMode ? (
+            <JobRerunSelectionSummary
+              jobs={jobs}
+              itemLabel={itemLabel}
+              runnableJobs={runnableJobs}
+              notStartedJobs={notStartedJobs}
+              runningJobs={runningJobs}
+            />
+          ) : (
+            <div className={styles.summary}>
+              {failedMode
+                ? `已选择 ${jobs.length} 个${itemLabel}，其中 ${failedJobs.length} 个失败任务将从各自失败节点重跑`
+                : `已选择 ${jobs.length} 个${itemLabel}${effectiveNodeKey ? `，重跑节点：${orderedNodes.find((n) => n.key === effectiveNodeKey)?.label || effectiveNodeKey}` : ''}`}
             </div>
           )}
-
-          {!failedMode && excluded.length > 0 && effectiveNodeKey && (
-            <div className={styles.excludedBox}>
-              <div className={styles.excludedTitle}>
-                以下任务不包含所选节点，将被跳过：
-              </div>
-              <ul className={styles.excludedList}>
-                {excluded.map((job) => (
-                  <li key={job.id}>{job.source_id || job.title || job.id}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-
-          <div className={styles.summary}>
-            {failedMode
-              ? `已选择 ${jobs.length} 个${itemLabel}，其中 ${failedJobs.length} 个失败任务将从各自失败节点重跑`
-              : `已选择 ${jobs.length} 个${itemLabel}${effectiveNodeKey ? `，重跑节点：${orderedNodes.find((n) => n.key === effectiveNodeKey)?.label || effectiveNodeKey}` : ''}`}
-          </div>
         </div>
       </DialogContent>
       <DialogActions>
@@ -140,7 +139,11 @@ export function JobRerunDialogContent({
           onClick={onConfirm}
           disabled={!canConfirm || loading}
         >
-          {failedMode ? `重跑 ${failedJobs.length} 个失败任务` : '确认重跑'}
+          {failedMode
+            ? `重跑 ${failedJobs.length} 个失败任务`
+            : allowFailedNodeMode
+              ? `重跑 ${runnableJobs.length} 个${itemLabel}`
+              : '确认重跑'}
         </Button>
       </DialogActions>
     </>

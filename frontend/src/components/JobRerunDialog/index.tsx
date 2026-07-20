@@ -16,7 +16,8 @@ export type JobRerunDialogProps = {
   allowFailedNodeMode?: boolean
   onConfirm: (
     nodeKey: string | null,
-    fromFailedNode: boolean
+    fromFailedNode: boolean,
+    jobIds?: string[]
   ) => void | Promise<void>
   onClose: () => void
 }
@@ -39,6 +40,9 @@ export function JobRerunDialog({
     failedJobs,
     nonFailedJobs,
     excluded,
+    runnableJobs,
+    notStartedJobs,
+    runningJobs,
   } = useJobRerunDialog({ jobs, workflowDefinition, workflowNodesByKey })
 
   const [loading, setLoading] = useState(false)
@@ -46,27 +50,29 @@ export function JobRerunDialog({
   if (!open) return null
 
   const handleConfirm = async () => {
-    if (failedMode) {
-      setLoading(true)
-      try {
-        await onConfirm(null, true)
-      } finally {
-        setLoading(false)
-      }
-      onClose()
-      return
-    }
-    if (!effectiveNodeKey) return
+    if (!failedMode && !effectiveNodeKey) return
     setLoading(true)
     try {
-      await onConfirm(effectiveNodeKey, false)
+      if (failedMode) {
+        await onConfirm(null, true)
+      } else if (allowFailedNodeMode) {
+        await onConfirm(
+          effectiveNodeKey,
+          false,
+          runnableJobs.map((job) => job.id)
+        )
+      } else {
+        await onConfirm(effectiveNodeKey, false)
+      }
     } finally {
       setLoading(false)
     }
     onClose()
   }
 
-  const canConfirm = failedMode ? failedJobs.length > 0 : !!effectiveNodeKey
+  const canConfirm = failedMode
+    ? failedJobs.length > 0
+    : !!effectiveNodeKey && (!allowFailedNodeMode || runnableJobs.length > 0)
 
   return (
     <Dialog
@@ -93,6 +99,9 @@ export function JobRerunDialog({
         failedJobs={failedJobs}
         nonFailedJobs={nonFailedJobs}
         excluded={excluded}
+        runnableJobs={runnableJobs}
+        notStartedJobs={notStartedJobs}
+        runningJobs={runningJobs}
         canConfirm={canConfirm}
         loading={loading}
         onConfirm={handleConfirm}

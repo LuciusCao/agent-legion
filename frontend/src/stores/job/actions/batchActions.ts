@@ -19,9 +19,10 @@ export function batchActions(set: JobStoreSet, get: () => JobState) {
     async batchRerun(
       workspaceId: string,
       nodeKey: string | null,
-      fromFailedNode?: boolean
+      fromFailedNode?: boolean,
+      jobIds?: string[]
     ) {
-      const ids = Array.from(get().selectedIds)
+      const ids = jobIds ?? Array.from(get().selectedIds)
       if (ids.length === 0) return { results: [] }
       set({ batchRerunLoading: true })
       try {
