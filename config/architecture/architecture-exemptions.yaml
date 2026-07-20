@@ -201,9 +201,11 @@ exemptions:
     Task 5 adds capability_label_requirements injection, its pass-through in
     dequeue, and claim-time update_worker_labels. Task 9 extends list_workers
     with labels and the revoked flag for the page-facing workers endpoint.
+    The final-review fix rejects dotted worker_ids at token issuance (the
+    "{worker_id}.{secret}" token form could never authenticate them back).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 500
+  ceiling: 505
 - check: architecture.file_budget
   path: server/app/executors/runtime.py
   reason: Task 6 of the phase3 execution-decoupling plan adds the submit-only
@@ -221,9 +223,11 @@ exemptions:
     until the artifact section is extracted into a generated bundle. Task 4
     adds the --register-token startup exchange for per-worker tokens. Task 5
     adds the repeatable --label flag and label reporting on register/claim.
+    The final-review fix adds the early --worker-id dotted-name rejection
+    (parser.error before any server call).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-3
-  ceiling: 544
+  ceiling: 552
 - check: architecture.file_budget
   path: server/app/workflows/schema.py
   reason: Task 6 of the phase4 agent-collaboration plan adds the frozen
