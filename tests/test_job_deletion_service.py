@@ -10,6 +10,7 @@ import pytest
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
 from server.app.services.job_deletion import (
     DeletionRollbackConflict,
     JobDeleteResult,
@@ -173,6 +174,75 @@ def test_delete_succeeds_for_inactive_job(job_db: JobQueries, tmp_path: Path) ->
     assert result["status"] == "succeeded"
     assert job_db.get_job(job["id"]) is None
     assert not storage_dir.exists()
+
+
+def _create_artifact_store(job_db: JobQueries, tmp_path: Path) -> ArtifactStore:
+    return ArtifactStore(tmp_path / "artifacts", job_db.path)
+
+
+def test_delete_cleans_artifact_refs_and_unreferenced_files(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    store = _create_artifact_store(job_db, tmp_path)
+    service = JobDeletionService(job_db, lease_repo, settings, artifact_store=store)
+
+    job_a = _create_job(job_db, "ws-gc", "Q100", status="completed")
+    job_b = _create_job(job_db, "ws-gc", "Q101", status="completed")
+    exclusive_hash = store.put(b"exclusive artifact")
+    shared_hash = store.put(b"shared artifact")
+    store.add_ref(job_a["id"], "extract_question", "exclusive.json", exclusive_hash)
+    store.add_ref(job_a["id"], "extract_question", "shared.json", shared_hash)
+    store.add_ref(job_b["id"], "extract_question", "shared.json", shared_hash)
+
+    result: JobDeleteResult = service.delete(job_a["workspace_id"], job_a["id"])
+
+    assert result["status"] == "succeeded"
+    assert store.refs_for_job(job_a["id"]) == []
+    # 独占 artifact 被物理删除；共享 artifact 因 job_b 仍引用而保留。
+    with pytest.raises(ArtifactNotFoundError):
+        store.open(exclusive_hash)
+    assert store.open(shared_hash).read_bytes() == b"shared artifact"
+    assert [ref["hash"] for ref in store.refs_for_job(job_b["id"])] == [shared_hash]
+
+
+def test_delete_with_artifact_store_and_no_refs_keeps_existing_behavior(
+    job_db: JobQueries, tmp_path: Path
+) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    store = _create_artifact_store(job_db, tmp_path)
+    service = JobDeletionService(job_db, lease_repo, settings, artifact_store=store)
+
+    job = _create_job(job_db, "ws-no-refs", "Q102", status="completed")
+    storage_dir = resolve_job_dir(job, settings.jobs_dir)
+    storage_dir.mkdir(parents=True, exist_ok=True)
+
+    result: JobDeleteResult = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    assert job_db.get_job(job["id"]) is None
+    assert not storage_dir.exists()
+    assert store.refs_for_job(job["id"]) == []
+
+
+def test_delete_without_artifact_store_skips_cleanup(job_db: JobQueries, tmp_path: Path) -> None:
+    settings = _create_settings(tmp_path)
+    lease_repo = ExecutorLeaseRepository(job_db.path)
+    store = _create_artifact_store(job_db, tmp_path)
+    service = JobDeletionService(job_db, lease_repo, settings)
+
+    job = _create_job(job_db, "ws-no-store", "Q103", status="completed")
+    artifact_hash = store.put(b"orphan candidate")
+    store.add_ref(job["id"], "extract_question", "out.json", artifact_hash)
+
+    result: JobDeleteResult = service.delete(job["workspace_id"], job["id"])
+
+    assert result["status"] == "succeeded"
+    # refs 仍由 FK 级联清除；未注入 store 时跳过物理 GC，artifact 文件保留。
+    assert store.refs_for_job(job["id"]) == []
+    assert store.open(artifact_hash).read_bytes() == b"orphan candidate"
 
 
 def test_delete_rejects_wrong_workspace(job_db: JobQueries, tmp_path: Path) -> None:
