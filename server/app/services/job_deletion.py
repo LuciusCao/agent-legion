@@ -14,6 +14,8 @@ from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.jobs.atomic_mutations import JobMutationConflict
+from server.app.services.artifact_store import ArtifactStore
+from server.app.services.job_artifact_gc import gc_deleted_job_artifacts, read_artifact_candidates
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError, resolve_job_dir
 
@@ -52,6 +54,7 @@ class JobDeletionService:
         clock: Callable[[], float] | None = None,
         job_event_manager: JobEventManager | None = None,
         job_event_buffer: Any | None = None,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self.job_db = job_db
         self.lease_repo = lease_repo
@@ -59,6 +62,7 @@ class JobDeletionService:
         self.clock = clock
         self.job_event_manager = job_event_manager
         self.job_event_buffer = job_event_buffer
+        self.artifact_store = artifact_store
 
     def _now(self) -> datetime:
         if self.clock is not None:
@@ -109,6 +113,7 @@ class JobDeletionService:
         except ManagedPathError as exc:
             return self._result(job_id, "failed", "delete_failed", str(exc))
 
+        artifact_candidates = read_artifact_candidates(self.artifact_store, job_id)
         operation_id = f"{self._now().strftime('%Y%m%d%H%M%S%f')}-{uuid.uuid4().hex[:8]}"
         staged_storage: Path | None = None
         staged_logs: list[Path] = []
@@ -164,6 +169,7 @@ class JobDeletionService:
         self._cleanup_staged_paths(job_id, staged_storage, staged_logs)
         self._prune_empty_trash(self.settings.jobs_dir / ".trash" / operation_id)
         self._prune_empty_trash(self.settings.logs_dir / "jobs" / ".trash" / operation_id)
+        gc_deleted_job_artifacts(self.artifact_store, job_id, artifact_candidates)
         if self.job_event_buffer is not None:
             self.job_event_buffer.record_job_deleted(workspace_id, job_id)
         elif self.job_event_manager is not None:

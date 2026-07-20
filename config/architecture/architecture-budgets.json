@@ -705,6 +705,7 @@
     "server/app/services/intake.py": 185,
     "server/app/services/interaction_cache.py": 49,
     "server/app/services/interaction_stats.py": 157,
+    "server/app/services/job_artifact_gc.py": 58,
     "server/app/services/job_artifact_mutation.py": 145,
     "server/app/services/job_artifacts.py": 48,
     "server/app/services/job_deletion.py": 231,

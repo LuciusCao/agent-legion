@@ -85,6 +85,7 @@ def create_router(
         workspace_executor_configuration,
         job_event_manager,
         job_event_buffer,
+        artifact_store=artifact_store,
     )
 
     return router
