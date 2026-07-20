@@ -91,6 +91,39 @@ def test_max_shards_must_be_positive():
         workflow_definition_from_mapping(_wf({"review": {"shard": {"count": 4, "max_shards": 0}}}))
 
 
+def test_shard_count_must_be_positive():
+    with pytest.raises(WorkflowDefinitionError, match="shard.count"):
+        workflow_definition_from_mapping(_wf({"review": {"shard": {"count": 0}}}))
+
+
+def test_shard_max_concurrency_must_be_positive():
+    with pytest.raises(WorkflowDefinitionError, match="shard.max_concurrency"):
+        workflow_definition_from_mapping(
+            _wf({"review": {"shard": {"count": 4, "max_concurrency": 0}}})
+        )
+
+
+def test_shard_over_must_use_inputs_prefix():
+    with pytest.raises(WorkflowDefinitionError, match="shard.over"):
+        workflow_definition_from_mapping(_wf({"review": {"shard": {"over": "questions.json"}}}))
+
+
+def test_shard_must_be_a_mapping():
+    with pytest.raises(WorkflowDefinitionError, match="shard must be a mapping"):
+        workflow_definition_from_mapping(_wf({"review": {"shard": "yes"}}))
+
+
+def test_reduce_from_is_required():
+    with pytest.raises(WorkflowDefinitionError, match="reduce.from"):
+        workflow_definition_from_mapping(
+            _wf({"review": {"shard": {"count": 4}}, "aggregate": {"reduce": {}}})
+        )
+    with pytest.raises(WorkflowDefinitionError, match="reduce.from"):
+        workflow_definition_from_mapping(
+            _wf({"review": {"shard": {"count": 4}}, "aggregate": {"reduce": {"from": ""}}})
+        )
+
+
 def test_snapshot_round_trip_preserves_shard():
     # workflow_definition_from_dict 是 job snapshot 的还原路径：
     # shard/reduce 声明必须幸存，否则存量 running job resume 后丢分片语义
