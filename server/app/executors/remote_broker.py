@@ -356,6 +356,11 @@ class RemoteExecutionBroker:
         secret dies immediately) and clears any prior revocation — re-issuance
         is the operator's re-onboarding path and requires the management token.
         """
+        # The token form is "{worker_id}.{secret}" and authentication splits on
+        # the first ".", so a dotted worker_id would issue a token that can
+        # never authenticate back (fail-closed, with no error anywhere).
+        if "." in worker_id:
+            raise ValueError(f"worker_id must not contain '.': {worker_id!r}")
         flat_labels = dict(labels or {})
         _validate_labels(flat_labels)
         secret = secrets.token_urlsafe(32)

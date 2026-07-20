@@ -484,6 +484,14 @@ def main(argv: list[str] | None = None) -> int:
     capabilities = [c.strip() for c in args.capabilities.split(",") if c.strip()]
     if not capabilities:
         parser.error("--capabilities must list at least one capability")
+    if "." in args.worker_id:
+        # Tokens look like "<worker_id>.<secret>" and the server authenticates
+        # by splitting on the first ".": a dotted id can never authenticate.
+        parser.error(
+            f"--worker-id must not contain '.', got {args.worker_id!r} — the"
+            " hostname default often contains dots (e.g. 'mac-mini.local');"
+            " pass an explicit --worker-id"
+        )
     try:
         labels = _parse_labels(args.label)
     except ValueError as exc:

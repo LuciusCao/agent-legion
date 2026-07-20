@@ -232,6 +232,26 @@ def test_revoke_unknown_worker_returns_404(rig) -> None:
     assert client.post("/api/remote/workers/ghost/revoke").status_code == 401
 
 
+# ---- dotted worker_id is rejected at issuance (token form "{worker_id}.{secret}") ----
+
+
+def test_register_rejects_dotted_worker_id(rig) -> None:
+    client, _, _ = rig
+    resp = _register(client, "mac-mini.local")
+    assert resp.status_code == 400
+    assert "must not contain '.'" in resp.json()["detail"]
+
+
+def test_issue_worker_token_rejects_dotted_worker_id(tmp_path: Path) -> None:
+    """A dotted worker_id would issue a token that authenticate_worker (split
+    on the first ".") can never resolve — fail closed at issuance instead."""
+    db_path = tmp_path / "jobs.sqlite"
+    init_db(db_path)
+    broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
+    with pytest.raises(ValueError, match=r"worker_id must not contain '\.'"):
+        broker.issue_worker_token("mac-mini.local", "mac", ["cap_a"], 1)
+
+
 # ---- broker layer: idempotent re-issue invalidates the old token ----
 
 
