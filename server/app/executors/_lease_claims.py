@@ -13,6 +13,7 @@ from server.app.executors._lease_control import (
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors._path_canonicalization import canonicalize_data_path
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
+from server.app.workflows.sharding import try_start_shard
 
 
 def claim_lease(
@@ -121,20 +122,27 @@ def claim_lease(
         if node_count >= request.local_node_limit:
             return None
 
-    cursor = conn.execute(
-        """
-        update job_nodes
-        set status='running',
-            stale_reason='',
-            error_message='',
-            started_at=?,
-            finished_at=null
-        where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
-        """,
-        (now_str, request.job_id, request.node_key),
-    )
-    if cursor.rowcount == 0:
-        return None
+    if request.shard_index is not None:
+        started = try_start_shard(
+            conn, request.job_id, request.node_key, request.shard_index, execution_id, now_str
+        )
+        if not started:
+            return None
+    else:
+        cursor = conn.execute(
+            """
+            update job_nodes
+            set status='running',
+                stale_reason='',
+                error_message='',
+                started_at=?,
+                finished_at=null
+            where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
+            """,
+            (now_str, request.job_id, request.node_key),
+        )
+        if cursor.rowcount == 0:
+            return None
 
     log_path = canonicalize_data_path(request.log_path, data_dir, "logs")
     cursor = conn.execute(
@@ -189,4 +197,5 @@ def claim_lease(
         node_key=request.node_key,
         capability=request.capability,
         log_path=request.log_path,
+        shard_index=request.shard_index,
     )

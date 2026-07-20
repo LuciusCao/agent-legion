@@ -39,6 +39,9 @@ class ExecutionResult:
     skill_version: str = ""
     produced_artifacts: tuple[str, ...] = ()
     runner: str = ""
+    # Shard executions return their per-shard output payload here; the lease
+    # finish path persists it into node_shards.output_json for reduce fan-in.
+    output_json: str = ""
 
 
 @dataclass(frozen=True)
@@ -56,6 +59,7 @@ class LeaseClaimRequest:
     execution_mode: Literal["full", "until_node"] = "full"
     target_node_key: str | None = None
     allowed_node_keys: tuple[str, ...] = ()
+    shard_index: int | None = None
 
 
 @dataclass(frozen=True)
@@ -80,3 +84,4 @@ class ClaimedExecution:
     node_key: str
     capability: str
     log_path: str
+    shard_index: int | None = None
