@@ -5,7 +5,7 @@ def test_list_executors_endpoint(client):
     executor = data["executors"][0]
     assert executor["id"] == "local-default"
     assert executor["kind"] == "local"
-    assert executor["global_capacity"] == 16
+    assert executor["global_capacity"] == 128
     assert executor["capabilities"] == [
         "assemble_comprehension_info",
         "assemble_video_metadata",

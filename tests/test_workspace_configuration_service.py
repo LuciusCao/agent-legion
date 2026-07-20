@@ -189,13 +189,13 @@ def test_executor_stats_report_configured_capacity_and_leases(
     executors = {e["executor_id"]: e for e in executor_status["executors"]}
 
     assert executors["local-default"]["kind"] == "local"
-    assert executors["local-default"]["global_capacity"] == 16
+    assert executors["local-default"]["global_capacity"] == 128
     assert executors["local-default"]["workspace_limit"] == 4
     assert executors["local-default"]["running"] == 1
     assert executors["local-default"]["available"] == 3
 
     assert executors["pi"]["kind"] == "pi"
-    assert executors["pi"]["global_capacity"] == 12
+    assert executors["pi"]["global_capacity"] == 128
     assert executors["pi"]["workspace_limit"] == 6
     assert executors["pi"]["running"] == 1
     assert executors["pi"]["available"] == 5
@@ -259,7 +259,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
     other = workspace_service.create(
         {"name": "Other", "default_workflow_key": "question_comprehension_info"}
     )
-    for workspace_id, limit in ((workspace["id"], 8), (other["id"], 16)):
+    for workspace_id, limit in ((workspace["id"], 8), (other["id"], 128)):
         job_db.replace_workspace_executor_configuration(
             workspace_id,
             allocations=[{"executor_id": "local-default", "concurrency_limit": limit}],
@@ -274,7 +274,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
         )
 
     repo = ExecutorLeaseRepository(job_db.path)
-    for i in range(16):
+    for i in range(128):
         owner = other
         job = job_db.create_job(
             workflow_key="question_comprehension_info",
@@ -288,7 +288,7 @@ def test_executor_stats_available_respects_global_usage_by_other_workspaces(
         claim = repo.try_claim(
             LeaseClaimRequest(
                 executor_id="local-default",
-                global_capacity=16,
+                global_capacity=128,
                 workspace_id=owner["id"],
                 job_id=job["id"],
                 workflow_key="question_comprehension_info",
