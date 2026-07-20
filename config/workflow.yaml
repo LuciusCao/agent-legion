@@ -1,7 +1,7 @@
 executors:
   local-default:
     kind: local
-    global_capacity: 16
+    global_capacity: 128
     capabilities:
       fetch_questions:
         handler: question_comprehension_info.fetch_questions
@@ -23,7 +23,7 @@ executors:
         handler: video_knowledge.package_video_job
   pi:
     kind: pi
-    global_capacity: 12
+    global_capacity: 128
     capabilities:
       generate_key_info:
         skill: question_comprehension_info/generate_key_info
