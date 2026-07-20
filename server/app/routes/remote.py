@@ -47,6 +47,8 @@ class WorkerTokenRegisterResponse(BaseModel):
 class ClaimRequest(BaseModel):
     worker_id: str = Field(min_length=1)
     capabilities: list[str] = Field(min_length=1)
+    # Workers re-report their labels on claim; non-empty updates the registry.
+    labels: dict[str, Any] = Field(default_factory=dict)
 
 
 class ClaimResponse(BaseModel):
@@ -128,6 +130,11 @@ def create_remote_router(
     @router.post("/claim", response_model=ClaimResponse)
     def claim(payload: ClaimRequest, request: Request) -> ClaimResponse | Response:
         _authorize(request, payload.worker_id)
+        if payload.labels:
+            try:
+                broker.update_worker_labels(payload.worker_id, payload.labels)
+            except ValueError as exc:
+                raise HTTPException(status_code=400, detail=str(exc)) from exc
         claimed = broker.dequeue(payload.worker_id, frozenset(payload.capabilities))
         if claimed is None:
             return Response(status_code=204)

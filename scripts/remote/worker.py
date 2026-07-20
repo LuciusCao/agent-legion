@@ -39,6 +39,17 @@ HEARTBEAT_INTERVAL_SECONDS = 15.0
 KILL_GRACE_SECONDS = 5.0
 
 
+def _parse_labels(raw_labels: list[str]) -> dict[str, str]:
+    """Parse repeated ``--label key=value`` flags into a flat string mapping."""
+    labels: dict[str, str] = {}
+    for raw in raw_labels:
+        key, sep, value = raw.partition("=")
+        if not sep or not key:
+            raise ValueError(f"--label must be key=value, got {raw!r}")
+        labels[key] = value
+    return labels
+
+
 def _substitute(spec_part: str, paths: dict[str, str]) -> str:
     """Replace ``{placeholder}`` tokens in a command-spec part with local paths."""
     for key, value in paths.items():
@@ -138,54 +149,67 @@ class WorkerClient:
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read()
 
-    def register(self, name: str, capabilities: list[str], slots: int) -> None:
+    def register(
+        self, name: str, capabilities: list[str], slots: int, labels: dict[str, str] | None = None
+    ) -> None:
+        body: dict[str, Any] = {
+            "worker_id": self._worker_id,
+            "name": name,
+            "capabilities": capabilities,
+            "slots": slots,
+        }
+        if labels:
+            body["labels"] = labels
         status, data = self._request(
             "POST",
             "/api/remote/register",
-            body=json.dumps(
-                {
-                    "worker_id": self._worker_id,
-                    "name": name,
-                    "capabilities": capabilities,
-                    "slots": slots,
-                }
-            ).encode("utf-8"),
+            body=json.dumps(body).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
         if status != 204:
             raise RuntimeError(f"register failed: HTTP {status}: {data[:200]!r}")
 
-    def register_worker(self, name: str, capabilities: list[str], slots: int) -> str:
+    def register_worker(
+        self,
+        name: str,
+        capabilities: list[str],
+        slots: int,
+        labels: dict[str, str] | None = None,
+    ) -> str:
         """Exchange the management (register) token for a per-worker token.
 
         The returned token replaces the management token for all subsequent
         calls; only its sha256 hash is stored server-side and it can be
         revoked independently of every other worker.
         """
+        body: dict[str, Any] = {
+            "worker_id": self._worker_id,
+            "name": name,
+            "capabilities": capabilities,
+            "slots": slots,
+        }
+        if labels:
+            body["labels"] = labels
         status, data = self._request(
             "POST",
             "/api/remote/workers/register",
-            body=json.dumps(
-                {
-                    "worker_id": self._worker_id,
-                    "name": name,
-                    "capabilities": capabilities,
-                    "slots": slots,
-                }
-            ).encode("utf-8"),
+            body=json.dumps(body).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
         if status != 201:
             raise RuntimeError(f"worker register failed: HTTP {status}: {data[:200]!r}")
         return str(json.loads(data.decode("utf-8"))["worker_token"])
 
-    def claim(self, capabilities: list[str]) -> dict[str, Any] | None:
+    def claim(
+        self, capabilities: list[str], labels: dict[str, str] | None = None
+    ) -> dict[str, Any] | None:
+        body: dict[str, Any] = {"worker_id": self._worker_id, "capabilities": capabilities}
+        if labels:
+            body["labels"] = labels
         status, data = self._request(
             "POST",
             "/api/remote/claim",
-            body=json.dumps({"worker_id": self._worker_id, "capabilities": capabilities}).encode(
-                "utf-8"
-            ),
+            body=json.dumps(body).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
         if status == 204:
@@ -446,6 +470,13 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--name", default="")
     parser.add_argument("--slots", type=int, default=4)
     parser.add_argument("--capabilities", required=True, help="comma-separated capability names")
+    parser.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="worker label reported at register and every claim; repeatable",
+    )
     parser.add_argument("--work-dir", default="./remote-worker-work")
     parser.add_argument("--poll-interval", type=float, default=5.0)
     args = parser.parse_args(argv)
@@ -453,6 +484,10 @@ def main(argv: list[str] | None = None) -> int:
     capabilities = [c.strip() for c in args.capabilities.split(",") if c.strip()]
     if not capabilities:
         parser.error("--capabilities must list at least one capability")
+    try:
+        labels = _parse_labels(args.label)
+    except ValueError as exc:
+        parser.error(str(exc))
     if not args.register_token and not args.token:
         parser.error(
             "--token, REMOTE_WORKER_TOKEN, --register-token or"
@@ -467,19 +502,19 @@ def main(argv: list[str] | None = None) -> int:
         # per-worker token, then run the main loop with the per-worker token.
         registrar = WorkerClient(args.server, args.register_token, args.worker_id)
         worker_token = registrar.register_worker(
-            args.name or args.worker_id, capabilities, args.slots
+            args.name or args.worker_id, capabilities, args.slots, labels
         )
         client = WorkerClient(args.server, worker_token, args.worker_id)
         print(f"[worker] issued per-worker token for {args.worker_id}", flush=True)
     else:
         # Legacy fallback window: static shared token + self-register.
         client = WorkerClient(args.server, args.token, args.worker_id)
-        client.register(args.name or args.worker_id, capabilities, args.slots)
+        client.register(args.name or args.worker_id, capabilities, args.slots, labels)
     print(f"[worker] registered as {args.worker_id} with {args.slots} slots", flush=True)
 
     while True:
         try:
-            claim = client.claim(capabilities)
+            claim = client.claim(capabilities, labels)
         except Exception as exc:
             print(f"[worker] poll error: {exc}; retrying", flush=True)
             time.sleep(args.poll_interval * 2)

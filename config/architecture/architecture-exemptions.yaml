@@ -25,9 +25,11 @@ exemptions:
     next to the RemoteExecutionBroker and mounts the artifacts router.
     Task 3 of the phase4 agent-collaboration plan injects the ArtifactStore
     into RuntimeDependencies and the RemoteCompletionHandler callback.
+    Task 5 of the phase4 agent-collaboration plan extracts capability
+    requires_labels from the remote executor definitions into the broker.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 248
+  ceiling: 259
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
@@ -88,9 +90,11 @@ exemptions:
     config models; Task 5 of the phase3 execution-decoupling plan adds the
     agent_id field and its openclaw-payload validator to RemoteExecutorConfig;
     the models will be split into a separate module once the feature is complete.
+    Task 5 of the phase4 agent-collaboration plan adds the requires_labels field
+    and its constraint-value validator to RemoteCapabilityConfig.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-4
-  ceiling: 177
+  ceiling: 195
 - check: architecture.file_budget
   path: server/app/executors/runtime_config.py
   reason: Task 4 of the distributed-agent-execution plan adds RemoteRuntimeConfig
@@ -142,9 +146,10 @@ exemptions:
     routes/remote_auth.py, shrinking this module. Task 3 of the phase4
     agent-collaboration plan validates output_artifacts hashes in report_result.
     Task 4 adds the workers/register and workers/{id}/revoke management endpoints.
+    Task 5 adds the ClaimRequest.labels field and its claim-time registry upsert.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-runner-audit.md#task-3
-  ceiling: 219
+  ceiling: 226
 - check: architecture.file_budget
   path: server/app/executors/local.py
   reason: Task 2 of the phase3 execution-decoupling plan moves build_local_executor
@@ -170,6 +175,16 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-2
   ceiling: 189
 - check: architecture.file_budget
+  path: server/app/executors/_remote_queue_store.py
+  reason: Task 5 of the phase4 agent-collaboration plan adds the labels_satisfy
+    constraint evaluator and extends claim_next with in-memory requires_labels
+    candidate filtering inside the claim transaction (the limit-1 fast path is
+    kept when no constraints are configured); the claim path will be extracted
+    into its own module if the store keeps growing.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-5
+  ceiling: 285
+- check: architecture.file_budget
   path: server/app/executors/remote_broker.py
   reason: Task 6 of the phase3 execution-decoupling plan adds completion-callback
     publishing (register/_publish_completion), payload_for and active_lease_ids
@@ -179,9 +194,11 @@ exemptions:
     stabilizes. Task 3 of the phase4 agent-collaboration plan adds the
     RemoteOutcome.output_artifacts field. Task 4 adds the worker trust
     section (issue/authenticate/revoke per-worker tokens, SEC-WORKER-001).
+    Task 5 adds capability_label_requirements injection, its pass-through in
+    dequeue, and claim-time update_worker_labels.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 462
+  ceiling: 498
 - check: architecture.file_budget
   path: server/app/executors/runtime.py
   reason: Task 6 of the phase3 execution-decoupling plan adds the submit-only
@@ -197,7 +214,8 @@ exemptions:
     run_execution; the single-file stdlib worker cannot be split without
     breaking its copy-to-any-machine deployment, so the ceiling tracks growth
     until the artifact section is extracted into a generated bundle. Task 4
-    adds the --register-token startup exchange for per-worker tokens.
+    adds the --register-token startup exchange for per-worker tokens. Task 5
+    adds the repeatable --label flag and label reporting on register/claim.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-3
-  ceiling: 509
+  ceiling: 544

@@ -1214,6 +1214,10 @@ export interface components {
     ClaimRequest: {
       /** Capabilities */
       capabilities: string[]
+      /** Labels */
+      labels?: {
+        [key: string]: unknown
+      }
       /** Worker Id */
       worker_id: string
     }

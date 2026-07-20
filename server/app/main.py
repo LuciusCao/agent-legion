@@ -13,6 +13,7 @@ from server.app.db.notifications import NotificationHub
 from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
 from server.app.executors.backup import legacy_backup_path
+from server.app.executors.config import RemoteExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
@@ -92,11 +93,21 @@ def create_app(
     db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
+    # capability -> requires_labels from every remote executor definition,
+    # for label-affinity filtering at dequeue time.
+    label_requirements = {
+        capability: capability_config.requires_labels
+        for definition in settings.executor_definitions.values()
+        if isinstance(definition, RemoteExecutorConfig)
+        for capability, capability_config in definition.capabilities.items()
+        if capability_config.requires_labels
+    }
     remote_broker = RemoteExecutionBroker(
         job_db.path,
         settings.data_dir / "remote_bundles",
         claim_timeout_seconds=settings.executor_runtime.remote.claim_timeout_seconds,
         requeue_limit=settings.executor_runtime.remote.requeue_limit,
+        capability_label_requirements=label_requirements or None,
     )
     artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
     executor_registry = build_executor_registry(

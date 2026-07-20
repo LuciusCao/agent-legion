@@ -11,7 +11,7 @@ v021); ``outcome_json`` holds ``dataclasses.asdict(RemoteOutcome)`` with the
 from __future__ import annotations
 
 import json
-from collections.abc import Callable, Collection
+from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -23,20 +23,52 @@ from server.app.executors._lease_transactions import _sqlite_timestamp
 _DONE_RETENTION = timedelta(hours=24)
 
 
+def labels_satisfy(labels: Mapping[str, Any], requirements: Mapping[str, str]) -> bool:
+    """Evaluate capability ``requires_labels`` constraints against worker labels.
+
+    Each constraint value is either ``">=<int>"`` (numeric comparison; the
+    label value must be float-convertible) or a literal matched by string
+    equality. An unknown label never satisfies its constraint.
+    """
+    for key, req in requirements.items():
+        value = labels.get(key)
+        if value is None:
+            return False
+        if req.startswith(">="):
+            try:
+                if float(value) < float(req[2:]):
+                    return False
+            except (TypeError, ValueError):
+                return False
+        elif str(value) != req:
+            return False
+    return True
+
+
 @retried_on_sqlite_lock
 def claim_next(
-    db_path: Path, worker_id: str, capabilities: Collection[str], now: str
+    db_path: Path,
+    worker_id: str,
+    capabilities: Collection[str],
+    now: str,
+    *,
+    label_requirements: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, Any] | None:
     """Atomically claim the oldest queued row matching ``capabilities``.
 
     Registered workers are capped at their ``remote_workers.slots`` held
-    claims; unregistered workers keep the legacy no-slots behavior.
+    claims; unregistered workers keep the legacy no-slots behavior. When
+    ``label_requirements`` constrains a capability, candidates of that
+    capability are skipped unless the worker's stored labels satisfy every
+    constraint; the filter runs in memory inside this transaction, FIFO order
+    and the slots cap are untouched.
     """
     placeholders = ",".join("?" * len(capabilities))
     with write_transaction(db_path) as conn:
         row = conn.execute(
-            "select slots from remote_workers where worker_id = ?", (worker_id,)
+            "select slots, labels_json from remote_workers where worker_id = ?", (worker_id,)
         ).fetchone()
+        worker_labels: Mapping[str, Any] = {}
         if row is not None:
             held = conn.execute(
                 "select count(*) as cnt from remote_executions"
@@ -45,27 +77,33 @@ def claim_next(
             ).fetchone()["cnt"]
             if held >= row["slots"]:
                 return None
-        candidate = conn.execute(
-            f"select execution_id from remote_executions"
+            worker_labels = json.loads(row["labels_json"] or "{}")
+        # Without constraints the legacy limit-1 fast path avoids scanning the queue.
+        limit = "" if label_requirements else " limit 1"
+        candidates = conn.execute(
+            f"select execution_id, capability from remote_executions"
             f" where state = 'queued' and capability in ({placeholders})"
-            f" order by created_at limit 1",
+            f" order by created_at{limit}",
             tuple(capabilities),
-        ).fetchone()
-        if candidate is None:
-            return None
-        cursor = conn.execute(
-            "update remote_executions set state = 'claimed', worker_id = ?,"
-            " last_heartbeat_at = ?, updated_at = ?"
-            " where execution_id = ? and state = 'queued'",
-            (worker_id, now, now, candidate["execution_id"]),
-        )
-        if cursor.rowcount == 0:
-            return None  # Lost a cross-connection race; the caller polls again.
-        entry = conn.execute(
-            "select * from remote_executions where execution_id = ?",
-            (candidate["execution_id"],),
-        ).fetchone()
-    return dict(entry)
+        ).fetchall()
+        for candidate in candidates:
+            requirements = (label_requirements or {}).get(candidate["capability"])
+            if requirements and not labels_satisfy(worker_labels, requirements):
+                continue
+            cursor = conn.execute(
+                "update remote_executions set state = 'claimed', worker_id = ?,"
+                " last_heartbeat_at = ?, updated_at = ?"
+                " where execution_id = ? and state = 'queued'",
+                (worker_id, now, now, candidate["execution_id"]),
+            )
+            if cursor.rowcount == 0:
+                continue  # Lost a cross-connection race; try the next candidate.
+            entry = conn.execute(
+                "select * from remote_executions where execution_id = ?",
+                (candidate["execution_id"],),
+            ).fetchone()
+            return dict(entry)
+        return None
 
 
 @retried_on_sqlite_lock
