@@ -219,3 +219,21 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-3
   ceiling: 544
+- check: architecture.file_budget
+  path: server/app/workflows/schema.py
+  reason: Task 6 of the phase4 agent-collaboration plan adds the frozen
+    WorkflowShardSpec/WorkflowReduceSpec dataclasses and the shard/reduce
+    fields on WorkflowNode; the node schema stays one declarative module and
+    the budget will be re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-6
+  ceiling: 112
+- check: architecture.file_budget
+  path: server/app/workflows/loader.py
+  reason: Task 6 of the phase4 agent-collaboration plan adds the _load_shard /
+    _load_reduce node-declaration validators and their wiring in _load_nodes;
+    the loaders stay next to the existing node loaders and the budget will be
+    re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-6
+  ceiling: 320
