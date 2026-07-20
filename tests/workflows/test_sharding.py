@@ -2,7 +2,7 @@
 
 Covers the Task 7 test matrix: DB-level materialization/aggregation semantics
 (items 1-9) and end-to-end scheduling through real leases (items 10-14,
-including the SCHED-SHARD-001 evidence assertion).
+including the EXEC-SHARD-001 evidence assertion).
 """
 
 from __future__ import annotations
@@ -483,7 +483,7 @@ def test_failed_shard_fails_node_and_reduce_never_ready(tmp_path):
 
 
 def test_every_shard_claim_goes_through_leases(tmp_path):
-    """Item 14 (SCHED-SHARD-001 证据): lease 表行数 == 分片数。"""
+    """Item 14 (EXEC-SHARD-001 证据): lease 表行数 == 分片数。"""
     executor = FakeShardExecutor()
     worker, job_db, job, _job_dir = _make_e2e(tmp_path, _over_definition(), executor)
     db_path = worker.leases.path

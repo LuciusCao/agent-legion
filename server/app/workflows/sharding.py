@@ -4,7 +4,7 @@
 declares ``shard:`` in the workflow definition. The node's ``job_nodes`` row
 stays the single aggregate authority; shard rows never leak into the node
 state machine directly. Every shard execution is claimed through the
-executor lease system (SCHED-SHARD-001) — this module only owns the
+executor lease system (EXEC-SHARD-001) — this module only owns the
 shard-table reads and writes behind those claim/finish paths.
 
 All functions take an open connection from the caller's ``write_transaction``

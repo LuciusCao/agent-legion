@@ -136,6 +136,10 @@ executors:
       generate_key_info:
         skill: question_comprehension_info/generate_key_info
         tools: [read, write, bash]
+        # optional: only dequeue this capability to workers whose labels match
+        requires_labels:
+          mem_gb: ">=16"    # numeric comparisons exist only as ">=<int>"
+          device: mac-mini  # any other value is a literal equality match
       # ... mirror every capability you intend to run remotely
 remote:
   claim_timeout_seconds: 120
@@ -183,6 +187,36 @@ is controlled by `remote.allow_legacy_worker_token` (default `true`). Set it
 to `false` once every worker runs with `--register-token` — per-worker tokens
 keep working, the shared token stops.
 
+### Artifact store
+
+Remote runs exchange payloads through a content-addressed artifact store
+instead of inline bundle contents:
+
+- **Layout:** blobs live under `data/artifacts/<hash[:2]>/<sha256>`; uploads
+  are fsynced inside `data/artifacts/.staging/` and published atomically
+  (`os.replace`), so a crash never leaves a half-written blob. The jobs
+  database holds two tables: `artifacts` (hash → size) and `artifact_refs`
+  (job_id, node_key, name → hash) — the reference list any GC builds on.
+- **Endpoints:** `POST /api/artifacts` (raw request body → `{"hash": ...}`;
+  413 beyond `remote.max_archive_bytes`) and `GET /api/artifacts/{hash}`
+  (404 for malformed or unknown hashes). Both authenticate like the other
+  worker-facing endpoints (per-worker token, or the legacy static token
+  while the fallback window is open).
+- **Refs-mode bundles:** at submit time the server puts declared inputs into
+  the store and marks the claim manifest `bundle_mode: "refs"` with
+  `input_artifacts` (`name → "sha256:<hash>"`); the bundle then skips those
+  payloads and the worker downloads them via `GET /api/artifacts`. For
+  results the worker uploads outputs first and reports with an
+  `output_artifacts` map; the server rejects unknown refs with 409 (`upload
+  output artifact first`). Content-carrying bundles still work as the
+  compatibility path during migration (phase 4, Decision 9); removing them
+  is tracked as a follow-up in issue 045.
+- **GC baseline:** deleting a job removes its `artifact_refs` rows. There is
+  no orphan sweep for unreferenced blobs yet — that is a known debt tracked
+  in [issues/open/044-P2-artifact-gc-orphans.md](../issues/open/044-P2-artifact-gc-orphans.md).
+  Until it lands, `data/artifacts` grows monotonically; watch disk usage on
+  long-running servers.
+
 ## 7. Launching workers
 
 One worker process per concurrent execution slot. Example: fill a Mac mini
@@ -210,6 +244,13 @@ its old self-register behavior.
 `--worker-id` defaults to the hostname; `--capabilities` is a comma-separated
 list and must be a subset of the executor's declared capabilities. See
 `python3 worker.py --help` for all flags (`--poll-interval`, etc.).
+
+`--label KEY=VALUE` (repeatable) attaches string labels to the worker. Labels
+are reported at register time and on every claim, and the broker only
+dequeues an execution to a worker whose labels satisfy the capability's
+`requires_labels` constraints (§6) — e.g. a capability requiring
+`mem_gb: ">=16"` never lands on a worker launched without that label or with
+a smaller value. Labels are routing metadata, not credentials.
 
 **Capacity rule:** budget 200 MB RAM per agent process (measured pi RSS: settled
 ~150 MB, peak ~187 MB — see §9). Mac mini 16 GB → ~65 slots; Raspberry Pi 16 GB
@@ -337,6 +378,38 @@ The server validates that `pi-remote` declares each bound node's capability
 `pi-remote` allocation). No other state changes are needed; in-flight remote
 executions drain or fail-safe via the requeue semantics in §10.
 
+### Shard fan-out and reduce fan-in
+
+A workflow node can fan out across workers by declaring `shard:` in the
+workflow definition, and a downstream node can fan the results back in with
+`reduce:`:
+
+```yaml
+nodes:
+  generate:
+    capability: generate_key_info
+    shard:
+      over: inputs.questions  # fan out over a JSON-array input file...
+      # count: 100            # ...or over N synthetic {"index": i} inputs
+      max_concurrency: 10     # optional scheduling hint per pass
+      max_shards: 1000        # optional hard cap, default 1000
+  summarize:
+    capability: summarize_results
+    reduce:
+      from: generate
+```
+
+Each shard is claimed through the lease system as its own execution — one
+lease per shard, so the capacity rules from §6/§7 apply unchanged and a
+sharded node bound to `pi-remote` spreads across the whole fleet.
+`max_concurrency` is only a hint bounding how many shards of the node are
+dispatched per scheduling pass; authoritative capacity stays with the
+leases. The node completes when every shard completes and fails as soon as
+any shard fails terminally. Before a `reduce:` node is claimed, the server
+aggregates its `from` node's shard outputs into `<node_key>.shards.json` in
+the job directory. Fan-out beyond `max_shards` (default 1000) is rejected
+when the shards are materialized.
+
 ## 9. Memory calibration (required before the 100-agent gate)
 
 The 200 MB/slot budget is planning headroom from a 90-second sample (settled
@@ -403,6 +476,10 @@ not raise the budget silently (spec Risks).
   and before the window is removed in a future version.
 - **Worker hygiene:** no credentials, secret-bearing prompts, or API keys in
   worker logs; workers store no persistent state.
+- **Worker labels:** labels travel in register/claim payloads and are listed
+  by the page-facing `GET /api/remote/workers`. They are routing metadata —
+  never put secrets, tokens, or other sensitive values into label keys or
+  values.
 - **Archive safety:** result archives are path-validated on both ends (no
   absolute paths, `..`, or links) before extraction.
 - **Compliance:** precondition 1 (§2) is a hard blocker — encrypted transport
