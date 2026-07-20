@@ -13,6 +13,7 @@ from starlette import concurrency
 
 from server.app.executors.models import ExecutionStatus
 from server.app.executors.remote_broker import RemoteExecutionBroker, RemoteOutcome
+from server.app.routes.remote_auth import create_worker_authorizer
 from server.app.settings import Settings
 
 _VALID_STATUSES: tuple[ExecutionStatus, ...] = ("completed", "failed", "cancelled")
@@ -58,20 +59,7 @@ class WorkersResponse(BaseModel):
 def create_remote_router(broker: RemoteExecutionBroker, settings: Settings) -> APIRouter:
     router = APIRouter(prefix="/remote", tags=["remote"])
     remote_config = settings.executor_runtime.remote
-
-    def _authorize(
-        request: Request, expected_worker_id: str | None = None, require_worker_id: bool = True
-    ) -> str:
-        if not remote_config.worker_token:
-            raise HTTPException(status_code=503, detail="remote execution is not enabled")
-        if request.headers.get("x-worker-token") != remote_config.worker_token:
-            raise HTTPException(status_code=401, detail="invalid worker token")
-        worker_id = request.headers.get("x-worker-id", "")
-        if require_worker_id and not worker_id:
-            raise HTTPException(status_code=400, detail="missing X-Worker-Id header")
-        if expected_worker_id is not None and worker_id != expected_worker_id:
-            raise HTTPException(status_code=400, detail="worker id mismatch")
-        return worker_id
+    _authorize = create_worker_authorizer(remote_config)
 
     def _validate_execution_id(execution_id: str) -> None:
         if not _EXECUTION_ID_RE.match(execution_id):

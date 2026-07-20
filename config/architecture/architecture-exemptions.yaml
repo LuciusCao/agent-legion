@@ -21,9 +21,11 @@ exemptions:
     Task 6 of the phase3 execution-decoupling plan wires the
     RemoteCompletionHandler callback registration into the lifespan, and
     task 8 wires the SweeperThread lifecycle into the lifespan.
+    Task 2 of the phase4 agent-collaboration plan assembles the ArtifactStore
+    next to the RemoteExecutionBroker and mounts the artifacts router.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 237
+  ceiling: 241
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
@@ -118,10 +120,12 @@ exemptions:
   reason: Task 3 of the runner-audit plan adds the read-only GET /workers endpoint and
     its response models, and task 7 of the phase3 execution-decoupling plan adds
     the ClaimResponse command_spec field; the workers section will be split into
-    a separate module once the feature is complete.
+    a separate module once the feature is complete. Task 2 of the phase4
+    agent-collaboration plan extracts the _authorize helper into
+    routes/remote_auth.py, shrinking this module.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-runner-audit.md#task-3
-  ceiling: 166
+  ceiling: 164
 - check: architecture.file_budget
   path: server/app/executors/local.py
   reason: Task 2 of the phase3 execution-decoupling plan moves build_local_executor
