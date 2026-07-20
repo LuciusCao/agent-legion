@@ -50,6 +50,7 @@ def build_executor_registry(
     settings: Settings,
     job_db: Any | None = None,
     remote_broker: RemoteExecutionBroker | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> ExecutorRegistry:
     """Build the application-wide executor registry from settings.
 
@@ -71,6 +72,7 @@ def build_executor_registry(
         job_db=job_db,
         cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
         remote_broker=remote_broker,
+        artifact_store=artifact_store,
     )
     return ExecutorRegistry.build(settings.executor_definitions, runtime)
 
@@ -97,7 +99,9 @@ def create_app(
         requeue_limit=settings.executor_runtime.remote.requeue_limit,
     )
     artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
-    executor_registry = build_executor_registry(settings, job_db, remote_broker=remote_broker)
+    executor_registry = build_executor_registry(
+        settings, job_db, remote_broker=remote_broker, artifact_store=artifact_store
+    )
 
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager.bus
@@ -154,7 +158,10 @@ def create_app(
                 # Submit-only remote executors finish leases via broker callbacks.
                 remote_broker.register_completion_callback(
                     RemoteCompletionHandler(
-                        remote_broker, executor_leases, settings.jobs_dir
+                        remote_broker,
+                        executor_leases,
+                        settings.jobs_dir,
+                        artifact_store=artifact_store,
                     ).handle_completion
                 )
                 # The sweeper owns all lease hygiene (startup + interval sweeps,

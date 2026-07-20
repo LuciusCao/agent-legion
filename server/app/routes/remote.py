@@ -14,10 +14,12 @@ from starlette import concurrency
 from server.app.executors.models import ExecutionStatus
 from server.app.executors.remote_broker import RemoteExecutionBroker, RemoteOutcome
 from server.app.routes.remote_auth import create_worker_authorizer
+from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
 from server.app.settings import Settings
 
 _VALID_STATUSES: tuple[ExecutionStatus, ...] = ("completed", "failed", "cancelled")
 _EXECUTION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
+_OUTPUT_HASH_RE = re.compile(r"sha256:[0-9a-f]{64}")
 
 
 class RegisterRequest(BaseModel):
@@ -56,7 +58,11 @@ class WorkersResponse(BaseModel):
     workers: list[RemoteWorkerInfo]
 
 
-def create_remote_router(broker: RemoteExecutionBroker, settings: Settings) -> APIRouter:
+def create_remote_router(
+    broker: RemoteExecutionBroker,
+    settings: Settings,
+    artifact_store: ArtifactStore | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/remote", tags=["remote"])
     remote_config = settings.executor_runtime.remote
     _authorize = create_worker_authorizer(remote_config)
@@ -129,6 +135,21 @@ def create_remote_router(broker: RemoteExecutionBroker, settings: Settings) -> A
             exit_code = int(meta.get("exit_code", 1))
         except (TypeError, ValueError) as exc:
             raise HTTPException(status_code=400, detail="invalid exit_code") from exc
+        # Workers upload outputs as artifacts first, then reference them here.
+        output_refs = meta.get("output_artifacts") or {}
+        if not isinstance(output_refs, dict):
+            raise HTTPException(status_code=400, detail="output_artifacts must be an object")
+        for name, ref in output_refs.items():
+            if not _OUTPUT_HASH_RE.fullmatch(str(ref)):
+                raise HTTPException(status_code=400, detail=f"invalid artifact hash: {name!r}")
+            if artifact_store is None:
+                continue
+            try:
+                artifact_store.open(str(ref).split(":", 1)[1])
+            except ArtifactNotFoundError as exc:
+                raise HTTPException(
+                    status_code=409, detail=f"upload output artifact first: {name!r}"
+                ) from exc
         body = await request.body()
         if len(body) > remote_config.max_archive_bytes:
             raise HTTPException(status_code=413, detail="result archive too large")
@@ -143,6 +164,7 @@ def create_remote_router(broker: RemoteExecutionBroker, settings: Settings) -> A
             command=tuple(str(part) for part in meta.get("command", [])),
             skill_version=str(meta.get("skill_version", "")),
             result_archive_name=f"{execution_id}.result.tar.gz",
+            output_artifacts={str(k): str(v) for k, v in output_refs.items()},
         )
         # Broker renames and publishes in one critical section; waiters never race the bytes.
         complete_args = (execution_id, worker_id, outcome, staging_path)

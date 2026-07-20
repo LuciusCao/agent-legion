@@ -4,8 +4,8 @@ import json
 import logging
 import sqlite3
 import threading
-from collections.abc import Callable, Collection
-from dataclasses import asdict, astuple, dataclass
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import asdict, astuple, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -61,6 +61,8 @@ class RemoteOutcome:
     skill_version: str = ""
     result_archive_name: str = ""
     worker_id: str = ""
+    # name -> "sha256:<hash>" for outputs the worker uploaded as artifacts.
+    output_artifacts: Mapping[str, str] = field(default_factory=dict)
 
 
 def _utcnow() -> datetime:

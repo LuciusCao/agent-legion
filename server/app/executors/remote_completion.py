@@ -6,8 +6,8 @@ reaches a terminal state — a worker result report, a cancel, or a
 requeue-limit failure — the broker invokes the registered completion
 callbacks with the stored outcome. This handler is that callback: it
 rebuilds the run context from the persisted broker row, unpacks the result
-archive, translates the outcome into an ``ExecutionResult``, and finishes
-the lease. All of it is idempotent: duplicate reports are deduplicated by
+archive, registers output artifact refs, translates the outcome into an
+``ExecutionResult``, and finishes the lease. All of it is idempotent: duplicate reports are deduplicated by
 the broker state machine, and an already-finished lease makes this a no-op.
 """
 
@@ -25,6 +25,7 @@ from server.app.executors.remote_broker import (
     RemoteOutcome,
 )
 from server.app.executors.remote_bundle import extract_result_archive
+from server.app.services.artifact_store import ArtifactStore
 from server.app.skills.manager import SkillManager
 from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.pi_protocol import detect_model_error
@@ -42,6 +43,7 @@ class RemoteCompletionHandler:
         jobs_dir: Path,
         skill_manager: SkillManager | None = None,
         scan_error: Callable[[Path], str | None] | None = None,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self._broker = broker
         self._leases = leases
@@ -50,6 +52,7 @@ class RemoteCompletionHandler:
         # not need skill resolution today, so the composition layer omits it.
         self._skill_manager = skill_manager
         self._scan_error = scan_error or detect_model_error
+        self._artifact_store = artifact_store
 
     def handle_completion(self, execution_id: str, outcome: RemoteOutcome) -> None:
         payload = self._broker.payload_for(execution_id)
@@ -105,6 +108,10 @@ class RemoteCompletionHandler:
                     skill_version=skill_version,
                     runner=outcome.worker_id,
                 )
+        store = self._artifact_store
+        if store is not None:
+            for name, ref in outcome.output_artifacts.items():
+                store.add_ref(payload.job_id, payload.node_key, name, ref.split(":", 1)[1])
         expected_outputs = tuple(str(name) for name in manifest.get("expected_outputs", ()))
         produced = tuple(name for name in expected_outputs if (job_dir / name).is_file())
         status = outcome.status
