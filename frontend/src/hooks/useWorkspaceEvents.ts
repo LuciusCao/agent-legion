@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { useJobStore } from '../stores/jobStore'
+import { useExecutorsStore } from '../stores/executorsStore'
 import { createRealtimeChannel } from '../lib/realtime'
 import { handleWorkspaceEvent } from './workspaceEventHandlers'
 import { refreshWorkspaceEvents } from './workspaceEventRefresh'
@@ -38,6 +39,9 @@ export function useWorkspaceEvents(
       refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null
         void refresh(true)
+        // Worker assignment may change with job updates; refresh alongside
+        // the job snapshot (same 750ms debounce tier, inside refreshWorkers).
+        void useExecutorsStore.getState().refreshWorkers()
       }, jobUpdateRefreshDelay)
     }
 

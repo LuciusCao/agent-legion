@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { api } from '../api'
 import { createRealtimeChannel, type RealtimeChannel } from '../lib/realtime'
 import { parseAgentsWsMessage, upsertAgent } from './agentsWsMessages'
+import { useExecutorsStore } from './executorsStore'
 import type { AgentStatus, ContentType, WorkerStatusResponse } from '../types'
 
 interface Toast {
@@ -59,6 +60,9 @@ export const useUiStore = create<UiState>((set, get) => ({
     agentsChannel = createRealtimeChannel({
       url: `${protocol}//${location.host}/api/agents`,
       protocol: 'ws',
+      onStatus: (status) => {
+        useExecutorsStore.getState().setConnectionStatus('agents', status)
+      },
       onEvent: (_type, data) => {
         try {
           const message = parseAgentsWsMessage(data)

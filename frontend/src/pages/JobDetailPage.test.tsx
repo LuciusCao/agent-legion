@@ -296,7 +296,8 @@ describe('JobDetailPage', () => {
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
-    expect(fetchMock).toHaveBeenCalledTimes(3)
+    // +1 detail poll, +1 mount-time workers refresh (750ms debounce).
+    expect(fetchMock).toHaveBeenCalledTimes(4)
   })
 
   it.each([['running'], ['queued']] as const)(
@@ -315,14 +316,15 @@ describe('JobDetailPage', () => {
       await act(async () => {
         vi.advanceTimersByTime(5000)
       })
-      expect(fetchMock).toHaveBeenCalledTimes(3)
+      // +1 detail poll, +1 mount-time workers refresh (750ms debounce).
+      expect(fetchMock).toHaveBeenCalledTimes(4)
 
       unmount()
 
       await act(async () => {
         vi.advanceTimersByTime(5000)
       })
-      expect(fetchMock).toHaveBeenCalledTimes(3)
+      expect(fetchMock).toHaveBeenCalledTimes(4)
     }
   )
 
@@ -407,7 +409,9 @@ describe('JobDetailPage', () => {
     await act(async () => {
       vi.advanceTimersByTime(5000)
     })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    // No detail poll for a completed job; the mount-time workers refresh
+    // (750ms debounce) fires once when timers advance.
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
   it('disables rerun and package for a running job', async () => {
