@@ -20,6 +20,7 @@ from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
 from server.app.workflows.scheduler import evaluate_branches, find_ready_nodes
+from server.app.workflows.sharding import has_pending_shards
 from server.app.workflows.workflow_branching import RUNNABLE_STATUSES
 
 if TYPE_CHECKING:
@@ -89,6 +90,13 @@ def collect_ready_candidates(
         except Exception:
             logger.exception("failed to compute allowed nodes for job %s", job["id"])
             continue
+        # A shard node whose aggregate row sits in 'running' may still hold
+        # pending shards; mirror it as runnable so the rest of them dispatch.
+        for node in definition_to_run.nodes.values():
+            if node.shard is not None and statuses.get(node.key) == "running":
+                with worker.job_db._connect_read() as conn:
+                    if has_pending_shards(conn, job["id"], node.key):
+                        statuses[node.key] = "pending"
         for node in find_ready_nodes(definition_to_run, statuses, job_dir):
             if node.key in allowed:
                 candidates.append(
