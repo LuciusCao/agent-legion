@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime, timedelta
 
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -220,6 +221,39 @@ def test_finish_is_idempotent_and_updates_job_aggregate_status(
     assert run["session_dir"] == session_dir.relative_to(data_dir).as_posix()
     assert run["skill_version"] == "v1.2.3@abc123"
     assert job["status"] == "completed"
+
+
+def test_finish_compresses_persisted_pi_event_stream(
+    queries: JobQueries, repo_a: ExecutorLeaseRepository
+) -> None:
+    workspace_id, job_id = _setup_workspace(queries, "ws-compress", "pi-default", workspace_limit=1)
+    claim = repo_a.try_claim(
+        _claim_request(workspace_id, job_id, executor_id="pi-default", global_capacity=1)
+    )
+    assert claim is not None
+
+    data_dir = queries.path.parent
+    run_dir = data_dir / "jobs" / workspace_id / job_id / "runs" / "review_keywords" / "run-1"
+    run_dir.mkdir(parents=True)
+    events = run_dir / "events.jsonl"
+    events.write_text(
+        "\n".join(
+            json.dumps(event)
+            for event in (
+                {"type": "message_update", "delta": "streaming"},
+                {"type": "text_delta", "delta": "partial"},
+                {"type": "message_end", "message": {"content": "final"}},
+            )
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    result = ExecutionResult(status="completed", exit_code=0, run_dir=str(run_dir))
+    assert repo_a.finish(claim.lease_id, result) is True
+
+    remaining = [json.loads(line) for line in events.read_text(encoding="utf-8").splitlines()]
+    assert remaining == [{"type": "message_end", "message": {"content": "final"}}]
 
 
 def test_fail_without_lease_creates_failed_run_and_updates_job_status(

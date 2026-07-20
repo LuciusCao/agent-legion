@@ -77,7 +77,7 @@ class JobArtifactMutationService:
         *,
         closure: set[str] | frozenset[str] | None = None,
     ) -> StagedOutputs:
-        """Move declared outputs of ``node_keys`` and their descendants to staging.
+        """Move rerun outputs and run histories to reversible staging.
 
         When ``closure`` is provided, only outputs declared by nodes inside the
         closure are staged. This supports targeted rerun-to operations where
@@ -106,12 +106,15 @@ class JobArtifactMutationService:
         for key in affected_keys:
             outputs.update(definition.nodes[key].outputs)
 
+        paths = set(outputs)
+        paths.update(f"runs/{key}" for key in affected_keys)
+
         staged_dir = storage_dir / ".staged"
         staged_dir.mkdir(parents=True, exist_ok=True)
 
         moves: list[tuple[Path, Path]] = []
         try:
-            for name in sorted(outputs):
+            for name in sorted(paths):
                 original_path = (storage_dir / name).resolve()
                 try:
                     original_path.relative_to(storage_dir)

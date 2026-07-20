@@ -25,7 +25,9 @@ from server.app.executors.models import (
     ExecutionResult,
     LeaseClaimRequest,
 )
+from server.app.services.pi_event_compression import compress_pi_events
 from server.app.services.token_usage_lease import capture_token_usage_after_lease_finish
+from server.app.storage_paths import resolve_data_path
 
 if TYPE_CHECKING:
     from server.app.executors.leases import ExecutorLeaseRepository
@@ -64,6 +66,9 @@ def finish(repo: ExecutorLeaseRepository, lease_id: str, result: ExecutionResult
     if result_flag and result.status in ("completed", "failed") and repo.data_dir is not None:
         with read_connection(repo.path) as read_conn:
             capture_token_usage_after_lease_finish(read_conn, lease_id, repo.data_dir)
+            if result.run_dir:
+                run_dir = resolve_data_path(result.run_dir, repo.data_dir, allow_missing=True)
+                compress_pi_events(run_dir / "events.jsonl")
 
     # Broadcast only after the commit has succeeded, never inside the tx.
     if job_id is not None and result_flag:
