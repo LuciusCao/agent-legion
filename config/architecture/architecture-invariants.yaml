@@ -303,3 +303,12 @@ invariants:
       - kind: integration
         target: tests/full/test_worker_token_security.py
         gate: full
+
+  - id: EXEC-SHARD-001
+    statement: "Shard executions must go through ExecutorLeaseRepository.try_claim with one lease per shard; fan-out paths that bypass the capacity system are forbidden."
+    owner: architecture
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/workflows/test_sharding.py
+        gate: quick

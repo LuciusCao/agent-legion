@@ -2,7 +2,7 @@
 
 When a ready node declares ``shard:``, the first scheduling pass materializes
 its shard rows (one per fan-out input), then each pending shard is claimed
-individually through the lease system (SCHED-SHARD-001) and submitted as an
+individually through the lease system (EXEC-SHARD-001) and submitted as an
 independent execution. ``max_concurrency`` is a pure hint: it only bounds how
 many shards of the node are dispatched per pass; authoritative capacity
 enforcement stays inside ``leases.try_claim``.
