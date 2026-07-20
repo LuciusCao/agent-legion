@@ -115,7 +115,7 @@ def test_workspace_stats_executor_status_reflects_allocations_and_leases(
     assert len(executors) == 1
     assert executors[0]["executor_id"] == "local-default"
     assert executors[0]["kind"] == "local"
-    assert executors[0]["global_capacity"] == 16
+    assert executors[0]["global_capacity"] == 128
     assert executors[0]["workspace_limit"] == 4
     assert executors[0]["running"] == 0
     assert executors[0]["available"] == 4

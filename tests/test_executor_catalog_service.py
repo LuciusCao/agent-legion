@@ -13,7 +13,7 @@ def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogSer
     assert result["executors"][0] == {
         "id": "local-default",
         "kind": "local",
-        "global_capacity": 16,
+        "global_capacity": 128,
         "capabilities": [
             "assemble_comprehension_info",
             "assemble_video_metadata",
