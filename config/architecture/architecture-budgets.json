@@ -723,6 +723,7 @@
     "server/app/services/job_logs.py": 111,
     "server/app/services/job_node_executor_resolver.py": 45,
     "server/app/services/job_node_ordering.py": 54,
+    "server/app/services/job_node_worker_projection.py": 44,
     "server/app/services/job_packages.py": 122,
     "server/app/services/job_patch_queries.py": 72,
     "server/app/services/job_patch_query_summaries.py": 38,

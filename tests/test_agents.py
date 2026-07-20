@@ -32,7 +32,49 @@ def test_broadcast_publishes_to_agents_channel():
     queue = bus.subscribe("agents")
     manager._broadcast()
 
-    assert json.loads(queue.get_nowait()) == []
+    assert json.loads(queue.get_nowait()) == {"type": "snapshot", "agents": []}
+
+
+def test_broadcast_sends_incremental_agent_events():
+    from server.app.event_bus import InProcessEventBus
+
+    bus = InProcessEventBus()
+    manager = AgentStatusManager(event_bus=bus)
+    manager.agents = [AgentStatus(id="main", name="Main", busy=False)]
+    queue = bus.subscribe("agents")
+
+    manager.set_busy("main", "v1")
+    manager._broadcast()
+    assert json.loads(queue.get_nowait()) == {
+        "type": "agent_busy",
+        "agent": _agent_dict(
+            id="main", name="Main", busy=True, task_count=1, current_video_id="v1"
+        ),
+    }
+
+    manager.set_idle("main")
+    manager._broadcast()
+    assert json.loads(queue.get_nowait()) == {
+        "type": "agent_idle",
+        "agent": _agent_dict(id="main", name="Main"),
+    }
+
+
+def test_add_pi_agent_broadcasts_snapshot_envelope():
+    from server.app.event_bus import InProcessEventBus
+
+    bus = InProcessEventBus()
+    manager = AgentStatusManager(event_bus=bus)
+    queue = bus.subscribe("agents")
+
+    manager.add_pi_agent_for_workspace("ws-1", max_tasks=2)
+
+    assert json.loads(queue.get_nowait()) == {
+        "type": "snapshot",
+        "agents": [
+            _agent_dict(id="pi", name="Pi Agent", max_tasks=2, workspace_id="ws-1"),
+        ],
+    }
 
 
 def test_broadcast_controller_is_public():

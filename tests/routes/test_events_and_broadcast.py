@@ -18,10 +18,11 @@ def test_agents_websocket_sends_initial_list(client, monkeypatch):
 
     with client.websocket_connect("/api/agents") as ws:
         data = ws.receive_json()
-        assert len(data) == 1
-        assert data[0]["id"] == "main"
-        assert data[0]["name"] == "Main"
-        assert data[0]["busy"] is False
+        assert data["type"] == "snapshot"
+        assert len(data["agents"]) == 1
+        assert data["agents"][0]["id"] == "main"
+        assert data["agents"][0]["name"] == "Main"
+        assert data["agents"][0]["busy"] is False
 
 
 def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
@@ -38,7 +39,8 @@ def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
     agent_manager.discover()
 
     with client.websocket_connect("/api/agents") as ws:
-        ws.receive_json()
+        snapshot = ws.receive_json()
+        assert snapshot["type"] == "snapshot"
         agent_manager.set_busy(
             "main",
             {
@@ -50,14 +52,17 @@ def test_agents_websocket_broadcasts_busy_idle_updates(client, monkeypatch):
             },
         )
         data = ws.receive_json()
-        assert data[0]["busy"] is True
-        assert data[0]["current_video_id"] == "v1"
-        assert data[0]["current_title"] == "T1"
+        assert data["type"] == "agent_busy"
+        assert data["agent"]["id"] == "main"
+        assert data["agent"]["busy"] is True
+        assert data["agent"]["current_video_id"] == "v1"
+        assert data["agent"]["current_title"] == "T1"
 
         agent_manager.set_idle("main")
         data = ws.receive_json()
-        assert data[0]["busy"] is False
-        assert data[0]["current_video_id"] is None
+        assert data["type"] == "agent_idle"
+        assert data["agent"]["busy"] is False
+        assert data["agent"]["current_video_id"] is None
 
 
 def test_agents_websocket_clean_disconnect_stays_silent(caplog):

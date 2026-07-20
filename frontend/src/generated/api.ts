@@ -489,7 +489,14 @@ export interface paths {
       path?: never
       cookie?: never
     }
-    /** List Workers */
+    /**
+     * List Workers
+     * @description Page-facing read-only worker registry (phase 4, Decision 10).
+     *
+     *     The executors store polls this from the same-origin page context, so
+     *     unlike the worker-action endpoints it takes no worker token; it still
+     *     reports 503 while remote execution is disabled.
+     */
     get: operations['list_workers_api_remote_workers_get']
     put?: never
     post?: never
@@ -1507,6 +1514,8 @@ export interface components {
       started_at?: string | null
       /** Status */
       status: string
+      /** Worker Id */
+      worker_id?: string | null
     }
     /** JobNodeSummaryResponse */
     JobNodeSummaryResponse: {
@@ -1781,16 +1790,22 @@ export interface components {
       /** Worker Id */
       worker_id: string
     }
-    /** RemoteWorkerInfo */
-    RemoteWorkerInfo: {
+    /** RemoteWorkerSummaryResponse */
+    RemoteWorkerSummaryResponse: {
       /** Capabilities */
       capabilities: string[]
+      /** Labels */
+      labels: {
+        [key: string]: unknown
+      }
       /** Last Seen At */
       last_seen_at: string
       /** Name */
       name: string
       /** Registered At */
       registered_at: string
+      /** Revoked */
+      revoked: boolean
       /** Slots */
       slots: number
       /** Worker Id */
@@ -2171,7 +2186,7 @@ export interface components {
     /** WorkersResponse */
     WorkersResponse: {
       /** Workers */
-      workers: components['schemas']['RemoteWorkerInfo'][]
+      workers: components['schemas']['RemoteWorkerSummaryResponse'][]
     }
     /** WorkflowCompareSummary */
     WorkflowCompareSummary: {

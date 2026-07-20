@@ -44,10 +44,12 @@ exemptions:
   reason: Task 9 of the phase1 event-bus plan routes agent WS broadcasts through
     the EventBus (subscribe/forward in connect, bus publish in _broadcast, public
     broadcast_controller); the WS forwarding block will be extracted into its own
-    module once the event-bus migration completes.
+    module once the event-bus migration completes. Task 9 of the phase4
+    agent-collaboration plan envelopes WS messages (snapshot/agent_busy/
+    agent_idle) and buffers per-agent incremental events between flushes.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 248
+  ceiling: 282
 - check: architecture.file_budget
   path: frontend/src/components/QuestionContentPanel.tsx
   reason: Task 2 of the socratic-question-inline-display plan adds the local SocraticQuestion
@@ -147,9 +149,11 @@ exemptions:
     agent-collaboration plan validates output_artifacts hashes in report_result.
     Task 4 adds the workers/register and workers/{id}/revoke management endpoints.
     Task 5 adds the ClaimRequest.labels field and its claim-time registry upsert.
+    Task 9 turns GET /workers into the page-facing read-only registry
+    (RemoteWorkerSummaryResponse with labels/revoked, no worker token).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-runner-audit.md#task-3
-  ceiling: 226
+  ceiling: 237
 - check: architecture.file_budget
   path: server/app/executors/local.py
   reason: Task 2 of the phase3 execution-decoupling plan moves build_local_executor
@@ -195,10 +199,11 @@ exemptions:
     RemoteOutcome.output_artifacts field. Task 4 adds the worker trust
     section (issue/authenticate/revoke per-worker tokens, SEC-WORKER-001).
     Task 5 adds capability_label_requirements injection, its pass-through in
-    dequeue, and claim-time update_worker_labels.
+    dequeue, and claim-time update_worker_labels. Task 9 extends list_workers
+    with labels and the revoked flag for the page-facing workers endpoint.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 498
+  ceiling: 500
 - check: architecture.file_budget
   path: server/app/executors/runtime.py
   reason: Task 6 of the phase3 execution-decoupling plan adds the submit-only
@@ -237,3 +242,11 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-6
   ceiling: 320
+- check: architecture.file_budget
+  path: server/app/routes/job_view_contracts.py
+  reason: Task 9 of the phase4 agent-collaboration plan adds the JobNodeResponse
+    worker_id field (claimed remote worker projection); the contract module
+    stays cohesive and the budget will be re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-9
+  ceiling: 113

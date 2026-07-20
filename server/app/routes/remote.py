@@ -62,17 +62,19 @@ class ClaimResponse(BaseModel):
     command_spec: dict[str, Any] | None = None
 
 
-class RemoteWorkerInfo(BaseModel):
+class RemoteWorkerSummaryResponse(BaseModel):
     worker_id: str
     name: str
     capabilities: list[str]
     slots: int
+    labels: dict[str, Any]
     registered_at: str
     last_seen_at: str
+    revoked: bool
 
 
 class WorkersResponse(BaseModel):
-    workers: list[RemoteWorkerInfo]
+    workers: list[RemoteWorkerSummaryResponse]
 
 
 def create_remote_router(
@@ -123,9 +125,18 @@ def create_remote_router(
         return Response(status_code=204)
 
     @router.get("/workers", response_model=WorkersResponse)
-    def list_workers(request: Request) -> WorkersResponse:
-        _authorize(request, require_worker_id=False)
-        return WorkersResponse(workers=[RemoteWorkerInfo(**w) for w in broker.list_workers()])
+    def list_workers() -> WorkersResponse:
+        """Page-facing read-only worker registry (phase 4, Decision 10).
+
+        The executors store polls this from the same-origin page context, so
+        unlike the worker-action endpoints it takes no worker token; it still
+        reports 503 while remote execution is disabled.
+        """
+        if not remote_config.worker_token:
+            raise HTTPException(status_code=503, detail="remote execution is not enabled")
+        return WorkersResponse(
+            workers=[RemoteWorkerSummaryResponse(**w) for w in broker.list_workers()]
+        )
 
     @router.post("/claim", response_model=ClaimResponse)
     def claim(payload: ClaimRequest, request: Request) -> ClaimResponse | Response:

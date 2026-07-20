@@ -371,10 +371,12 @@ def test_register_worker_id_mismatch_returns_400(rig):
     assert resp.json()["detail"] == "worker id mismatch"
 
 
-def test_workers_requires_token(rig):
+def test_workers_allows_page_access_without_token(rig):
+    # Decision 10 (phase 4): the executors store polls this endpoint from the
+    # same-origin page context, so it no longer requires a worker token.
     client, _ = rig
     resp = client.get("/api/remote/workers")
-    assert resp.status_code == 401
+    assert resp.status_code == 200
 
 
 def test_workers_lists_registered(rig):
