@@ -109,6 +109,74 @@ def test_detect_model_error_assistant_message_event(tmp_path: Path) -> None:
     assert detect_model_error(events) == "boom"
 
 
+def test_detect_model_error_ignores_error_recovered_by_retry(tmp_path: Path) -> None:
+    # Pi auto-retries transient model errors (e.g. upstream "terminated"); once
+    # a later assistant message succeeds, the run recovered and the early
+    # error must not fail the node.
+    events = tmp_path / "events.jsonl"
+    events.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "stopReason": "error",
+                            "errorMessage": "terminated",
+                        },
+                    }
+                ),
+                json.dumps({"type": "auto_retry_start", "attempt": 1}),
+                json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {"role": "assistant", "stopReason": "toolUse"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {"role": "assistant", "stopReason": "stop"},
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert detect_model_error(events) is None
+
+
+def test_detect_model_error_reports_unrecovered_error(tmp_path: Path) -> None:
+    # A successful message followed by an error with no later success is still
+    # a terminal model failure.
+    events = tmp_path / "events.jsonl"
+    events.write_text(
+        "\n".join(
+            [
+                json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {"role": "assistant", "stopReason": "toolUse"},
+                    }
+                ),
+                json.dumps(
+                    {
+                        "type": "message_end",
+                        "message": {
+                            "role": "assistant",
+                            "stopReason": "error",
+                            "errorMessage": "terminated",
+                        },
+                    }
+                ),
+            ]
+        ),
+        encoding="utf-8",
+    )
+    assert detect_model_error(events) == "terminated"
+
+
 def test_render_command_spec_uses_placeholders() -> None:
     spec = render_command_spec(MANIFEST)
     assert spec["version"] == 1

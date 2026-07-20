@@ -96,9 +96,13 @@ def detect_model_error(events_file: Path) -> str | None:
     assistant messages whose ``stopReason`` is ``error`` and which carry an
     ``errorMessage``. Detecting this prevents us from reporting a misleading
     "Missing outputs" error when the agent never had a chance to run.
+
+    Pi auto-retries transient failures (e.g. "terminated"), so an error only
+    counts when no later assistant message succeeds; recovered retries pass.
     """
     if not events_file.is_file():
         return None
+    last_error: str | None = None
     try:
         with events_file.open("r", encoding="utf-8") as fh:
             for line in fh:
@@ -109,24 +113,30 @@ def detect_model_error(events_file: Path) -> str | None:
                     event = json.loads(line)
                 except json.JSONDecodeError:
                     continue
-
+                messages: list[dict[str, Any]] = []
                 # message_start / message_end / turn_end wrap the assistant msg
                 msg = event.get("message") or {}
                 if not isinstance(msg, dict):
                     turn_end = event.get("turn_end") or {}
                     msg = turn_end.get("message") if isinstance(turn_end, dict) else {}
-                if isinstance(msg, dict) and msg.get("errorMessage"):
-                    return str(msg["errorMessage"])
+                if isinstance(msg, dict):
+                    messages.append(msg)
 
                 # message_update events nest under assistantMessageEvent
                 assistant_event = event.get("assistantMessageEvent") or {}
                 if isinstance(assistant_event, dict):
-                    msg = assistant_event.get("message") or {}
-                    if isinstance(msg, dict) and msg.get("errorMessage"):
-                        return str(msg["errorMessage"])
+                    nested = assistant_event.get("message") or {}
+                    if isinstance(nested, dict):
+                        messages.append(nested)
+
+                for msg in messages:
+                    if msg.get("errorMessage"):
+                        last_error = str(msg["errorMessage"])
+                    elif msg.get("stopReason") in ("stop", "toolUse"):
+                        last_error = None
     except Exception:
         return None
-    return None
+    return last_error
 
 
 def render_command_spec(manifest: dict[str, Any]) -> dict[str, Any]:
