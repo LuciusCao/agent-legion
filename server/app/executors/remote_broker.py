@@ -322,8 +322,8 @@ class RemoteExecutionBroker:
     def list_workers(self) -> list[dict[str, Any]]:
         with read_connection(self._db_path) as conn:
             rows = conn.execute(
-                "select worker_id, name, capabilities_json, slots, registered_at, last_seen_at"
-                " from remote_workers order by worker_id"
+                "select worker_id, name, capabilities_json, slots, labels_json, registered_at,"
+                " last_seen_at, revoked_at from remote_workers order by worker_id"
             ).fetchall()
             return [
                 {
@@ -331,8 +331,10 @@ class RemoteExecutionBroker:
                     "name": row["name"],
                     "capabilities": json.loads(row["capabilities_json"]),
                     "slots": row["slots"],
+                    "labels": json.loads(row["labels_json"] or "{}"),
                     "registered_at": row["registered_at"],
                     "last_seen_at": row["last_seen_at"],
+                    "revoked": row["revoked_at"] is not None,
                 }
                 for row in rows
             ]

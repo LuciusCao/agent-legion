@@ -223,8 +223,9 @@ cycles.
 
 Every finished node run records its runner (executor id for local runs, the
 concrete `worker_id` for remote runs) and shows it in the job detail view;
-`GET /api/remote/workers` lists the registered workers and their last-seen
-times (token required).
+`GET /api/remote/workers` lists the registered workers with their labels,
+last-seen times, and revocation flags (read-only page endpoint, no worker
+token; 503 while remote execution is disabled).
 
 ### Upgrade order: server first, then workers
 
