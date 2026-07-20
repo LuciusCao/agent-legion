@@ -8,12 +8,18 @@ then run it pointing at the video-hive server over the tailnet:
     python3 worker.py --server http://100.x.y.z:8000 --token "$REMOTE_WORKER_TOKEN" \
         --worker-id mac-mini --name "Mac mini" --slots 65 \
         --capabilities generate_key_info,review_key_info
+
+Prefer `--register-token "$REMOTE_WORKER_REGISTER_TOKEN"` (management token)
+over `--token`: the worker exchanges it for a revocable per-worker token at
+startup. `--token` (the shared static token) keeps working during the
+server-side fallback window (`remote.allow_legacy_worker_token`).
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
 import os
 import shutil
@@ -31,6 +37,17 @@ from typing import Any
 
 HEARTBEAT_INTERVAL_SECONDS = 15.0
 KILL_GRACE_SECONDS = 5.0
+
+
+def _parse_labels(raw_labels: list[str]) -> dict[str, str]:
+    """Parse repeated ``--label key=value`` flags into a flat string mapping."""
+    labels: dict[str, str] = {}
+    for raw in raw_labels:
+        key, sep, value = raw.partition("=")
+        if not sep or not key:
+            raise ValueError(f"--label must be key=value, got {raw!r}")
+        labels[key] = value
+    return labels
 
 
 def _substitute(spec_part: str, paths: dict[str, str]) -> str:
@@ -132,30 +149,67 @@ class WorkerClient:
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read()
 
-    def register(self, name: str, capabilities: list[str], slots: int) -> None:
+    def register(
+        self, name: str, capabilities: list[str], slots: int, labels: dict[str, str] | None = None
+    ) -> None:
+        body: dict[str, Any] = {
+            "worker_id": self._worker_id,
+            "name": name,
+            "capabilities": capabilities,
+            "slots": slots,
+        }
+        if labels:
+            body["labels"] = labels
         status, data = self._request(
             "POST",
             "/api/remote/register",
-            body=json.dumps(
-                {
-                    "worker_id": self._worker_id,
-                    "name": name,
-                    "capabilities": capabilities,
-                    "slots": slots,
-                }
-            ).encode("utf-8"),
+            body=json.dumps(body).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
         if status != 204:
             raise RuntimeError(f"register failed: HTTP {status}: {data[:200]!r}")
 
-    def claim(self, capabilities: list[str]) -> dict[str, Any] | None:
+    def register_worker(
+        self,
+        name: str,
+        capabilities: list[str],
+        slots: int,
+        labels: dict[str, str] | None = None,
+    ) -> str:
+        """Exchange the management (register) token for a per-worker token.
+
+        The returned token replaces the management token for all subsequent
+        calls; only its sha256 hash is stored server-side and it can be
+        revoked independently of every other worker.
+        """
+        body: dict[str, Any] = {
+            "worker_id": self._worker_id,
+            "name": name,
+            "capabilities": capabilities,
+            "slots": slots,
+        }
+        if labels:
+            body["labels"] = labels
+        status, data = self._request(
+            "POST",
+            "/api/remote/workers/register",
+            body=json.dumps(body).encode("utf-8"),
+            headers={"Content-Type": "application/json"},
+        )
+        if status != 201:
+            raise RuntimeError(f"worker register failed: HTTP {status}: {data[:200]!r}")
+        return str(json.loads(data.decode("utf-8"))["worker_token"])
+
+    def claim(
+        self, capabilities: list[str], labels: dict[str, str] | None = None
+    ) -> dict[str, Any] | None:
+        body: dict[str, Any] = {"worker_id": self._worker_id, "capabilities": capabilities}
+        if labels:
+            body["labels"] = labels
         status, data = self._request(
             "POST",
             "/api/remote/claim",
-            body=json.dumps({"worker_id": self._worker_id, "capabilities": capabilities}).encode(
-                "utf-8"
-            ),
+            body=json.dumps(body).encode("utf-8"),
             headers={"Content-Type": "application/json"},
         )
         if status == 204:
@@ -168,6 +222,21 @@ class WorkerClient:
         status, data = self._request("GET", claim["bundle_url"])
         if status != 200:
             raise RuntimeError(f"bundle download failed: HTTP {status}")
+        dest.write_bytes(data)
+
+    def upload_artifact(self, data: bytes) -> str:
+        """POST bytes as an artifact; returns the sha256 hex digest."""
+        status, resp = self._request("POST", "/api/artifacts", body=data)
+        if status != 201:
+            raise RuntimeError(f"artifact upload failed: HTTP {status}: {resp[:200]!r}")
+        return str(json.loads(resp.decode("utf-8"))["hash"])
+
+    def download_artifact(self, hash: str, dest: Path) -> None:
+        """GET an artifact onto disk; the sha256 check makes it self-proving."""
+        status, data = self._request("GET", f"/api/artifacts/{hash}")
+        if status != 200 or hashlib.sha256(data).hexdigest() != hash:
+            raise RuntimeError(f"artifact download failed for {hash}: HTTP {status}")
+        dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(data)
 
     def heartbeat(self, execution_id: str) -> bool:
@@ -228,6 +297,10 @@ def run_execution(
     bundle_path = work_dir / "bundle.tar.gz"
     client.download_bundle(claim, bundle_path)
     job_dir, skill_dir, manifest = extract_bundle(bundle_path, work_dir)
+    refs_mode = manifest.get("bundle_mode") == "refs"
+    if refs_mode:  # inputs ship as artifact references; pull each into place
+        for rel, ref in manifest["input_artifacts"].items():
+            client.download_artifact(ref.split(":", 1)[1], job_dir / rel)
 
     run_token = manifest["run_token"]
     run_dir = job_dir / "runs" / manifest["node_key"] / run_token
@@ -249,6 +322,7 @@ def run_execution(
     # Never hand the server credential to the LLM-driven agent: it could read
     # the token via its bash tool and exfiltrate it into events.jsonl.
     env.pop("REMOTE_WORKER_TOKEN", None)
+    env.pop("REMOTE_WORKER_REGISTER_TOKEN", None)
 
     events_file = run_dir / "events.jsonl"
     stderr_file = run_dir / "stderr.log"
@@ -355,6 +429,13 @@ def run_execution(
     }
     (run_dir / "run.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2))
 
+    output_artifacts = {}
+    if refs_mode:  # upload outputs first; the report metadata references them by hash
+        for name in manifest["expected_outputs"]:
+            src = job_dir / name
+            if src.is_file():
+                output_artifacts[name] = "sha256:" + client.upload_artifact(src.read_bytes())
+
     archive_path = work_dir / "result.tar.gz"
     pack_result_archive(
         archive_path,
@@ -368,6 +449,7 @@ def run_execution(
         "error_message": error_message,
         "command": command,
         "skill_version": manifest["skill_version"],
+        **({"output_artifacts": output_artifacts} if output_artifacts else {}),
     }
     return metadata, archive_path
 
@@ -379,30 +461,68 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Agent Legion remote worker")
     parser.add_argument("--server", required=True, help="e.g. http://100.x.y.z:8000")
     parser.add_argument("--token", default=os.environ.get("REMOTE_WORKER_TOKEN", ""))
+    parser.add_argument(
+        "--register-token",
+        default=os.environ.get("REMOTE_WORKER_REGISTER_TOKEN", ""),
+        help="management token exchanged for a per-worker token at startup",
+    )
     parser.add_argument("--worker-id", default=socket.gethostname())
     parser.add_argument("--name", default="")
     parser.add_argument("--slots", type=int, default=4)
     parser.add_argument("--capabilities", required=True, help="comma-separated capability names")
+    parser.add_argument(
+        "--label",
+        action="append",
+        default=[],
+        metavar="KEY=VALUE",
+        help="worker label reported at register and every claim; repeatable",
+    )
     parser.add_argument("--work-dir", default="./remote-worker-work")
     parser.add_argument("--poll-interval", type=float, default=5.0)
     args = parser.parse_args(argv)
 
-    if not args.token:
-        parser.error("--token or REMOTE_WORKER_TOKEN is required")
     capabilities = [c.strip() for c in args.capabilities.split(",") if c.strip()]
     if not capabilities:
         parser.error("--capabilities must list at least one capability")
+    if "." in args.worker_id:
+        # Tokens look like "<worker_id>.<secret>" and the server authenticates
+        # by splitting on the first ".": a dotted id can never authenticate.
+        parser.error(
+            f"--worker-id must not contain '.', got {args.worker_id!r} — the"
+            " hostname default often contains dots (e.g. 'mac-mini.local');"
+            " pass an explicit --worker-id"
+        )
+    try:
+        labels = _parse_labels(args.label)
+    except ValueError as exc:
+        parser.error(str(exc))
+    if not args.register_token and not args.token:
+        parser.error(
+            "--token, REMOTE_WORKER_TOKEN, --register-token or"
+            " REMOTE_WORKER_REGISTER_TOKEN is required"
+        )
 
-    client = WorkerClient(args.server, args.token, args.worker_id)
     work_root = Path(args.work_dir)
     work_root.mkdir(parents=True, exist_ok=True)
 
-    client.register(args.name or args.worker_id, capabilities, args.slots)
+    if args.register_token:
+        # Preferred path: exchange the management token for a revocable
+        # per-worker token, then run the main loop with the per-worker token.
+        registrar = WorkerClient(args.server, args.register_token, args.worker_id)
+        worker_token = registrar.register_worker(
+            args.name or args.worker_id, capabilities, args.slots, labels
+        )
+        client = WorkerClient(args.server, worker_token, args.worker_id)
+        print(f"[worker] issued per-worker token for {args.worker_id}", flush=True)
+    else:
+        # Legacy fallback window: static shared token + self-register.
+        client = WorkerClient(args.server, args.token, args.worker_id)
+        client.register(args.name or args.worker_id, capabilities, args.slots, labels)
     print(f"[worker] registered as {args.worker_id} with {args.slots} slots", flush=True)
 
     while True:
         try:
-            claim = client.claim(capabilities)
+            claim = client.claim(capabilities, labels)
         except Exception as exc:
             print(f"[worker] poll error: {exc}; retrying", flush=True)
             time.sleep(args.poll_interval * 2)

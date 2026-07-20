@@ -43,6 +43,8 @@ class RemoteCapabilityConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     skill: str = Field(min_length=1)
     tools: tuple[str, ...] = ("read", "write", "bash")
+    # Worker-label constraints for dequeue routing, e.g. {"mem_gb": ">=16"}.
+    requires_labels: dict[str, str] = Field(default_factory=dict)
 
     @field_validator("skill", mode="after")
     @classmethod
@@ -51,6 +53,22 @@ class RemoteCapabilityConfig(BaseModel):
             raise ValueError("skill path must not be absolute")
         if ".." in Path(value).parts:
             raise ValueError("skill path must not contain '..'")
+        return value
+
+    @field_validator("requires_labels", mode="after")
+    @classmethod
+    def _reject_invalid_label_constraints(cls, value: dict[str, str]) -> dict[str, str]:
+        for key, constraint in value.items():
+            if constraint.startswith(">"):
+                # Numeric comparisons only exist as ">=<int>"; any other
+                # ">-prefixed form (">>16", ">16", ">=1.5") is a typo, reject it.
+                if not (constraint.startswith(">=") and constraint[2:].isdigit()):
+                    raise ValueError(
+                        f"requires_labels[{key!r}] numeric constraints must match '>=<int>',"
+                        f" got {constraint!r}"
+                    )
+            elif not constraint:
+                raise ValueError(f"requires_labels[{key!r}] literal constraints must be non-empty")
         return value
 
 

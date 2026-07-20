@@ -1,9 +1,9 @@
 """Pi payload builder: manifest/bundle construction for remote pi executions.
 
 Extracted from ``RemoteExecutor`` (Task 4 of the phase3 execution-decoupling
-plan). The manifest layout and bundle contents are identical to the previous
-inline construction in ``executors/remote.py``; ``run_token`` stays
-``uuid.uuid4().hex[:12]``.
+plan). The manifest layout and bundle contents match the previous inline
+construction in ``executors/remote.py``; ``run_token`` stays
+``uuid.uuid4().hex[:12]``. Task 3 (phase 4) adds refs-mode bundles.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.executors._pi_skill import get_skill_version, resolve_skill_dir
 from server.app.executors.config import RemoteCapabilityConfig
 from server.app.executors.remote_bundle import build_bundle
+from server.app.executors.remote_payloads._artifact_refs import stage_input_artifacts
 from server.app.executors.runtime_config import PiRuntimeConfig
 from server.app.skills.manager import SkillManager
 from server.app.workflows.pi_protocol import detect_model_error, render_command_spec
@@ -23,6 +24,7 @@ if TYPE_CHECKING:
     from server.app.executors.kinds import RuntimeDependencies
     from server.app.executors.models import ExecutionContext
     from server.app.executors.remote_payloads import PayloadBuilder
+    from server.app.services.artifact_store import ArtifactStore
 
 
 class PiPayloadBuilder:
@@ -35,6 +37,7 @@ class PiPayloadBuilder:
         config: PiRuntimeConfig,
         skill_manager: SkillManager,
         capabilities: dict[str, RemoteCapabilityConfig],
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         # Lazy import: workflows.pi_config imports executors submodules, so a
         # module-level import here would cycle once executors/__init__ pulls in
@@ -44,6 +47,7 @@ class PiPayloadBuilder:
         self.config = PiConfig.from_runtime(config)
         self.skill_manager = skill_manager
         self.capabilities = capabilities
+        self._artifact_store = artifact_store
         # Per-execution staging: build_manifest resolves the skill dir and
         # builds the manifest; build_bundle_for consumes the same objects so
         # the bundle and the submitted manifest stay identical.
@@ -85,12 +89,14 @@ class PiPayloadBuilder:
 
     def build_bundle_for(self, context: ExecutionContext, bundle_path: Path) -> None:
         skill_dir, manifest = self._prepared[context.execution_id]
+        skip = stage_input_artifacts(self._artifact_store, context, manifest)
         build_bundle(
             bundle_path,
             skill_dir=skill_dir,
             job_dir=context.job_dir,
             inputs=context.inputs,
             manifest=manifest,
+            skip_inputs=skip,
         )
 
     def build_command_spec(self, manifest: dict[str, Any]) -> dict[str, Any]:
@@ -111,4 +117,4 @@ def build_pi_payload(
     agent_id: str = "",
 ) -> PayloadBuilder:
     # agent_id is only consumed by the openclaw payload; pi ignores it.
-    return PiPayloadBuilder(deps.pi_runtime, deps.skill_manager, capabilities)
+    return PiPayloadBuilder(deps.pi_runtime, deps.skill_manager, capabilities, deps.artifact_store)

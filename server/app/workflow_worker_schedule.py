@@ -26,6 +26,7 @@ from server.app.jobs.queries.workspace_node_bindings import (
     get_local_node_limit,
     has_local_node_limit,
 )
+from server.app.workflow_worker_shards import assemble_reduce_inputs, claim_shard_node
 from server.app.workflows.definition import WorkflowDefinition, WorkflowNode
 
 if TYPE_CHECKING:
@@ -78,6 +79,12 @@ def try_claim_and_submit(
     workspace_id = workspace["id"]
     workflow_key = definition.key
     node_key = node.key
+    if node.shard is not None:
+        return claim_shard_node(
+            worker, workspace, job, node, job_dir, control_snapshot, allowed_node_keys, snapshot
+        )
+    if node.reduce is not None:
+        assemble_reduce_inputs(worker, job["id"], node, job_dir)
     log_path = worker.settings.logs_dir.resolve() / "jobs" / f"{job['id']}-{node_key}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 

@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react'
 import { useJobStore } from '../stores/jobStore'
+import { useExecutorsStore } from '../stores/executorsStore'
+import { createRealtimeChannel } from '../lib/realtime'
 import { handleWorkspaceEvent } from './workspaceEventHandlers'
 import { refreshWorkspaceEvents } from './workspaceEventRefresh'
 import {
@@ -11,7 +13,6 @@ export function useWorkspaceEvents(
   enabled = true,
   statsOnly = false
 ) {
-  const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const refreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const snapshotLoadingRef = useRef(!statsOnly)
   const pendingEventsRef = useRef<MessageEvent[]>([])
@@ -21,9 +22,6 @@ export function useWorkspaceEvents(
   useEffect(() => {
     if (!enabled || !workspaceId || typeof EventSource === 'undefined') return
 
-    let source: EventSource | null = null
-    let reconnectDelay = 1000
-    const maxReconnectDelay = 30000
     const jobUpdateRefreshDelay = 750
     const maxPendingEvents = 1000
     let closed = false
@@ -41,6 +39,9 @@ export function useWorkspaceEvents(
       refreshTimerRef.current = setTimeout(() => {
         refreshTimerRef.current = null
         void refresh(true)
+        // Worker assignment may change with job updates; refresh alongside
+        // the job snapshot (same 750ms debounce tier, inside refreshWorkers).
+        void useExecutorsStore.getState().refreshWorkers()
       }, jobUpdateRefreshDelay)
     }
 
@@ -63,51 +64,33 @@ export function useWorkspaceEvents(
       () => stale || closed
     )
 
-    const connect = () => {
-      if (source || closed || stale) return
-      source = new EventSource(
-        `/api/workspaces/${encodeURIComponent(workspaceId)}/events`
-      )
-      source.onopen = () => {
-        reconnectDelay = 1000
+    const channel = createRealtimeChannel({
+      url: `/api/workspaces/${encodeURIComponent(workspaceId)}/events`,
+      protocol: 'sse',
+      onEvent: (_type, data) => {
+        const event = new MessageEvent('message', { data })
+        if (snapshotLoadingRef.current) {
+          enqueuePendingEvent(pendingEventsRef, event, maxPendingEvents)
+        } else {
+          processEvent(event)
+        }
+      },
+      onStatus: (status) => {
+        if (status !== 'open') return
         if (statsOnly) {
           snapshotLoadingRef.current = false
           void refresh(false)
         } else {
           void loadSnapshot()
         }
-      }
-      source.onmessage = (event) => {
-        if (snapshotLoadingRef.current) {
-          enqueuePendingEvent(pendingEventsRef, event, maxPendingEvents)
-        } else {
-          processEvent(event)
-        }
-      }
-      source.onerror = () => {
-        source?.close()
-        source = null
-        if (closed || stale) return
-        reconnectTimerRef.current = setTimeout(() => {
-          reconnectDelay = Math.min(reconnectDelay * 2, maxReconnectDelay)
-          connect()
-        }, reconnectDelay)
-      }
-    }
+      },
+    })
 
-    connect()
     return () => {
       stale = true
       closed = true
-      for (const timer of [
-        reconnectTimerRef.current,
-        refreshTimerRef.current,
-      ]) {
-        if (timer) clearTimeout(timer)
-      }
-      if (source) {
-        source.close()
-      }
+      if (refreshTimerRef.current) clearTimeout(refreshTimerRef.current)
+      channel.close()
     }
   }, [enabled, workspaceId, statsOnly])
 }

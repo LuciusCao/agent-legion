@@ -13,6 +13,7 @@ from server.app.skills.manager import SkillManager
 
 if TYPE_CHECKING:
     from server.app.executors.remote_broker import RemoteExecutionBroker
+    from server.app.services.artifact_store import ArtifactStore
 
 
 class ExecutorKindError(Exception):
@@ -51,6 +52,7 @@ class RuntimeDependencies:
     job_db: Any | None = None
     cancellation_grace_seconds: int = 5
     remote_broker: RemoteExecutionBroker | None = None
+    artifact_store: ArtifactStore | None = None
 
 
 _KIND_REGISTRY: dict[str, ExecutorKind[Any]] = {}

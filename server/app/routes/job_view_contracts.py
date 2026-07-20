@@ -72,6 +72,7 @@ class JobNodeResponse(BaseModel):
     outputs: list[str]
     executor_id: str | None = None
     executor_kind: Literal["local", "pi", "openclaw", "remote"] | None = None
+    worker_id: str | None = None
 
 
 class NodeRunResponse(BaseModel):

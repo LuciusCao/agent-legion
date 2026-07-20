@@ -36,6 +36,19 @@ class WorkflowEdge:
 
 
 @dataclass(frozen=True)
+class WorkflowShardSpec:
+    over: str | None = None
+    count: int | None = None
+    max_concurrency: int | None = None
+    max_shards: int = 1000
+
+
+@dataclass(frozen=True)
+class WorkflowReduceSpec:
+    from_node: str
+
+
+@dataclass(frozen=True)
 class WorkflowNode:
     key: str
     label: str
@@ -45,6 +58,8 @@ class WorkflowNode:
     outputs: list[str] = field(default_factory=list)
     terminal: WorkflowTerminal | None = None
     execution: WorkflowNodeExecution = field(default_factory=WorkflowNodeExecution)
+    shard: WorkflowShardSpec | None = None
+    reduce: WorkflowReduceSpec | None = None
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,7 @@ from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
     _sync_job_status,
 )
+from server.app.executors._lease_shards import finish_shard_execution
 from server.app.executors._lease_transactions import _sqlite_timestamp
 from server.app.executors._path_canonicalization import (
     canonicalize_data_path,
@@ -80,6 +81,9 @@ def finish_lease(
             lease["node_run_id"],
         ),
     )
+    if finish_shard_execution(conn, lease, result, now_str):
+        return True
+
     conn.execute(
         """
         update job_nodes

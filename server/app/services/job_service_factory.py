@@ -5,6 +5,7 @@ from typing import Any
 from server.app.events import JobEventManager
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
+from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
 from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_deletion import JobDeletionService
@@ -31,6 +32,7 @@ class JobServices:
         workspace_executor_configuration: WorkspaceExecutorConfigurationService,
         job_event_manager: JobEventManager | None,
         job_event_buffer: Any | None,
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self.executor_leases = ExecutorLeaseRepository(
             job_db.path,
@@ -81,4 +83,5 @@ class JobServices:
             settings,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
+            artifact_store=artifact_store,
         )

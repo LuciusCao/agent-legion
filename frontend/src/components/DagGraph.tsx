@@ -32,6 +32,8 @@ export interface DagGraphNode {
   created_at: string
   duration?: number
   executorKind?: 'local' | 'pi' | 'openclaw' | 'remote' | null
+  executorId?: string | null
+  workerId?: string | null
   capability?: string
   topologyBadges?: Array<'entry' | 'branch' | 'terminal'>
   terminalOutcome?: string
@@ -111,6 +113,8 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
         status: node.status,
         duration: node.duration,
         executorKind: normalizeExecutorKind(node.executorKind),
+        executorId: node.executorId ?? null,
+        workerId: node.workerId ?? null,
         nodeKey: node.capability ? node.key : undefined,
         capability: node.capability,
         topologyBadges: node.topologyBadges,

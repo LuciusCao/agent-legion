@@ -82,6 +82,39 @@ describe('DagNode', () => {
     expect(screen.getByTestId(`dag-icon-${status}`)).toBeInTheDocument()
   })
 
+  it('renders executor badge with short worker id and full title', () => {
+    renderWithProvider({
+      ...baseData,
+      executorKind: 'remote',
+      executorId: 'remote-exec-1',
+      workerId: 'worker-abc123def456',
+    })
+    const badge = screen.getByTestId('dag-node-executor-badge')
+    expect(badge).toHaveTextContent('abc123de')
+    expect(badge).toHaveAttribute(
+      'title',
+      'remote-exec-1 / worker-abc123def456'
+    )
+  })
+
+  it('falls back to executorId when workerId is missing', () => {
+    renderWithProvider({
+      ...baseData,
+      executorId: 'local-default',
+      workerId: null,
+    })
+    const badge = screen.getByTestId('dag-node-executor-badge')
+    expect(badge).toHaveTextContent('local-default')
+    expect(badge).toHaveAttribute('title', 'local-default')
+  })
+
+  it('renders no executor badge when both executorId and workerId are missing', () => {
+    renderWithProvider({ ...baseData, executorId: null, workerId: null })
+    expect(
+      screen.queryByTestId('dag-node-executor-badge')
+    ).not.toBeInTheDocument()
+  })
+
   it('renders not applicable node status', () => {
     renderWithProvider({
       label: '生成关键信息',

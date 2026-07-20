@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
+import secrets
 import sqlite3
 import threading
-from collections.abc import Callable, Collection
-from dataclasses import asdict, astuple, dataclass
+from collections.abc import Callable, Collection, Mapping
+from dataclasses import asdict, astuple, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -20,11 +23,21 @@ from server.app.executors._remote_queue_store import (
     claim_next,
     finish_execution,
     heartbeat_claim,
+    labels_satisfy,
     sweep,
 )
 from server.app.executors.models import ExecutionStatus
 
 logger = logging.getLogger(__name__)
+
+
+__all__ = [
+    "RemoteClaim",
+    "RemoteExecutionBroker",
+    "RemoteExecutionPayload",
+    "RemoteOutcome",
+    "labels_satisfy",
+]
 
 
 @dataclass(frozen=True)
@@ -61,10 +74,25 @@ class RemoteOutcome:
     skill_version: str = ""
     result_archive_name: str = ""
     worker_id: str = ""
+    # name -> "sha256:<hash>" for outputs the worker uploaded as artifacts.
+    output_artifacts: Mapping[str, str] = field(default_factory=dict)
 
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _validate_labels(labels: Mapping[str, Any]) -> None:
+    """Worker labels are flat scalars only; nested objects could smuggle large
+    or sensitive payloads into the registry (spec Security)."""
+    for key, value in labels.items():
+        if not isinstance(key, str):
+            raise ValueError(f"labels keys must be strings, got {type(key).__name__}")
+        if not isinstance(value, (str, int, float, bool)):
+            raise ValueError(
+                f"labels values must be str/int/float/bool scalars, got {type(value).__name__}"
+                f" for key {key!r}"
+            )
 
 
 class RemoteExecutionBroker:
@@ -82,12 +110,17 @@ class RemoteExecutionBroker:
         claim_timeout_seconds: float = 120.0,
         requeue_limit: int = 3,
         time_source: Callable[[], datetime] | None = None,
+        capability_label_requirements: Mapping[str, Mapping[str, str]] | None = None,
     ) -> None:
         self._db_path = db_path
         self.bundle_dir = bundle_dir
         self._claim_timeout = timedelta(seconds=claim_timeout_seconds)
         self._requeue_limit = requeue_limit
         self._now = time_source or _utcnow
+        # capability -> requires_labels constraints evaluated at dequeue time.
+        self._label_requirements = {
+            cap: dict(reqs) for cap, reqs in (capability_label_requirements or {}).items()
+        }
         self._done_events: dict[str, threading.Event] = {}
         self._completion_callbacks: list[Callable[[str, RemoteOutcome], None]] = []
         self._entries = EntriesView(db_path)  # legacy test handle; rows live in sqlite
@@ -188,7 +221,13 @@ class RemoteExecutionBroker:
         if not capabilities:
             return None
         self.sweep_expired_claims()
-        entry = claim_next(self._db_path, worker_id, capabilities, _sqlite_timestamp(self._now()))
+        entry = claim_next(
+            self._db_path,
+            worker_id,
+            capabilities,
+            _sqlite_timestamp(self._now()),
+            label_requirements=self._label_requirements or None,
+        )
         if entry is None:
             return None
         spec_json = entry.get("command_spec_json")
@@ -265,11 +304,26 @@ class RemoteExecutionBroker:
             )
         )
 
+    def update_worker_labels(self, worker_id: str, labels: Mapping[str, Any]) -> None:
+        """Replace a worker's stored labels from its claim-time self-report.
+
+        Same flat-scalar rules as token issuance (Task 4): nested values are
+        rejected so the registry cannot smuggle large or sensitive payloads.
+        """
+        flat_labels = dict(labels)
+        _validate_labels(flat_labels)
+        retry_on_sqlite_lock(
+            lambda: self._write(
+                "update remote_workers set labels_json = ? where worker_id = ?",
+                (json.dumps(flat_labels), worker_id),
+            )
+        )
+
     def list_workers(self) -> list[dict[str, Any]]:
         with read_connection(self._db_path) as conn:
             rows = conn.execute(
-                "select worker_id, name, capabilities_json, slots, registered_at, last_seen_at"
-                " from remote_workers order by worker_id"
+                "select worker_id, name, capabilities_json, slots, labels_json, registered_at,"
+                " last_seen_at, revoked_at from remote_workers order by worker_id"
             ).fetchall()
             return [
                 {
@@ -277,11 +331,116 @@ class RemoteExecutionBroker:
                     "name": row["name"],
                     "capabilities": json.loads(row["capabilities_json"]),
                     "slots": row["slots"],
+                    "labels": json.loads(row["labels_json"] or "{}"),
                     "registered_at": row["registered_at"],
                     "last_seen_at": row["last_seen_at"],
+                    "revoked": row["revoked_at"] is not None,
                 }
                 for row in rows
             ]
+
+    # ---- worker trust: per-worker tokens (SEC-WORKER-001) ----
+
+    def issue_worker_token(
+        self,
+        worker_id: str,
+        name: str,
+        capabilities: list[str],
+        slots: int,
+        labels: Mapping[str, Any] | None = None,
+    ) -> str:
+        """Register/rotate a worker and return its plaintext token exactly once.
+
+        Only ``sha256(secret)`` is persisted; the worker_id half of the token
+        is the plaintext lookup key. Re-issuing rotates the hash (the old
+        secret dies immediately) and clears any prior revocation — re-issuance
+        is the operator's re-onboarding path and requires the management token.
+        """
+        # The token form is "{worker_id}.{secret}" and authentication splits on
+        # the first ".", so a dotted worker_id would issue a token that can
+        # never authenticate back (fail-closed, with no error anywhere).
+        if "." in worker_id:
+            raise ValueError(f"worker_id must not contain '.': {worker_id!r}")
+        flat_labels = dict(labels or {})
+        _validate_labels(flat_labels)
+        secret = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+        retry_on_sqlite_lock(
+            lambda: self._upsert_worker_token(
+                worker_id, name, capabilities, slots, flat_labels, token_hash
+            )
+        )
+        return f"{worker_id}.{secret}"
+
+    def _upsert_worker_token(
+        self,
+        worker_id: str,
+        name: str,
+        caps: list[str],
+        slots: int,
+        labels: dict[str, Any],
+        token_hash: str,
+    ) -> None:
+        now = _sqlite_timestamp(self._now())
+        self._write(
+            "insert into remote_workers"
+            " (worker_id, name, capabilities_json, slots, labels_json, token_hash,"
+            "  registered_at, last_seen_at)"
+            " values (?, ?, ?, ?, ?, ?, ?, ?) on conflict(worker_id) do update set"
+            "   name = excluded.name, capabilities_json = excluded.capabilities_json,"
+            "   slots = excluded.slots, labels_json = excluded.labels_json,"
+            "   token_hash = excluded.token_hash, revoked_at = null,"
+            "   last_seen_at = excluded.last_seen_at",
+            (worker_id, name, json.dumps(caps), slots, json.dumps(labels), token_hash, now, now),
+        )
+
+    def authenticate_worker(self, token: str) -> dict[str, Any] | None:
+        """Resolve ``{worker_id}.{secret}`` to the worker record, or None.
+
+        Revoked workers and hash mismatches both return None; the caller cannot
+        distinguish them (no oracle for valid worker_ids).
+        """
+        worker_id, sep, secret = token.partition(".")
+        if not sep or not worker_id or not secret:
+            return None
+        with read_connection(self._db_path) as conn:
+            row = conn.execute(
+                "select worker_id, name, capabilities_json, slots, labels_json, token_hash,"
+                " revoked_at from remote_workers where worker_id = ?",
+                (worker_id,),
+            ).fetchone()
+        if row is None or row["revoked_at"] is not None or not row["token_hash"]:
+            return None
+        digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(digest, row["token_hash"]):
+            return None
+        return {
+            "worker_id": row["worker_id"],
+            "name": row["name"],
+            "capabilities": json.loads(row["capabilities_json"]),
+            "slots": row["slots"],
+            "labels": json.loads(row["labels_json"]),
+        }
+
+    def revoke_worker(self, worker_id: str) -> bool:
+        """Mark a worker revoked; authentication rejects it from this commit on."""
+
+        def _revoke() -> bool:
+            with write_transaction(self._db_path) as conn:
+                cursor = conn.execute(
+                    "update remote_workers set revoked_at = ? where worker_id = ?",
+                    (_sqlite_timestamp(self._now()), worker_id),
+                )
+                return cursor.rowcount > 0
+
+        return retry_on_sqlite_lock(_revoke)
+
+    def is_worker_revoked(self, worker_id: str) -> bool:
+        with read_connection(self._db_path) as conn:
+            row = conn.execute(
+                "select revoked_at from remote_workers where worker_id = ?", (worker_id,)
+            ).fetchone()
+        return row is not None and row["revoked_at"] is not None
 
     # ---- internals ----
 
