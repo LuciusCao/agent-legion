@@ -128,6 +128,7 @@ def mark_nodes_for_rerun(
         for descendant in downstream_map.get(node_key, [])
         if descendant not in node_keys
     }
+    affected_nodes = set(node_keys) | descendants
     for descendant in descendants:
         conn.execute(
             """
@@ -138,6 +139,15 @@ def mark_nodes_for_rerun(
             """,
             (job_id, descendant),
         )
+    placeholders = ",".join("?" * len(affected_nodes))
+    conn.execute(
+        f"""
+        update node_runs
+        set run_dir='', session_dir=''
+        where job_id=? and node_key in ({placeholders})
+        """,
+        (job_id, *sorted(affected_nodes)),
+    )
     conn.execute(
         """
         update jobs

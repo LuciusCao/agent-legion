@@ -106,6 +106,25 @@ def test_stage_outputs_preserves_inputs_and_unrelated_files(tmp_path, mutation_s
     assert not (storage_dir / "c.json").exists()
 
 
+def test_stage_outputs_removes_affected_run_history_only(tmp_path, mutation_service, definition):
+    storage_dir = tmp_path / "jobs" / "job"
+    (storage_dir / "runs" / "a" / "run-1").mkdir(parents=True)
+    (storage_dir / "runs" / "b" / "run-1").mkdir(parents=True)
+    (storage_dir / "runs" / "c" / "run-1").mkdir(parents=True)
+    (storage_dir / "runs" / "a" / "run-1" / "events.jsonl").write_text("ancestor")
+    (storage_dir / "runs" / "b" / "run-1" / "events.jsonl").write_text("selected")
+    (storage_dir / "runs" / "c" / "run-1" / "events.jsonl").write_text("downstream")
+
+    staged = mutation_service.stage_outputs(_make_job(storage_dir, tmp_path), ["b"], definition)
+
+    assert (storage_dir / "runs" / "a").exists()
+    assert not (storage_dir / "runs" / "b").exists()
+    assert not (storage_dir / "runs" / "c").exists()
+
+    staged.commit()
+    assert not (storage_dir / ".staged" / "runs" / "b").exists()
+
+
 def test_stage_outputs_rejects_escape_paths(tmp_path, mutation_service):
     definition = WorkflowDefinition(
         key="test_workflow",

@@ -268,6 +268,43 @@ def test_rerun_stages_and_removes_artifacts(rerun_service, job, settings):
     assert (storage / "fetch.log").exists()
 
 
+def test_rerun_removes_affected_run_history_and_clears_database_paths(rerun_service, job, settings):
+    storage = resolve_job_dir(job, settings.jobs_dir)
+    affected_run = storage / "runs" / "clean_and_parse" / "run-1"
+    descendant_run = storage / "runs" / "generate_key_info" / "run-2"
+    ancestor_run = storage / "runs" / "fetch_questions" / "run-3"
+    for run_dir in (affected_run, descendant_run, ancestor_run):
+        run_dir.mkdir(parents=True)
+        (run_dir / "events.jsonl").write_text("events")
+
+    with rerun_service.job_db.connect() as conn:
+        for node_key, run_dir in (
+            ("clean_and_parse", affected_run),
+            ("generate_key_info", descendant_run),
+            ("fetch_questions", ancestor_run),
+        ):
+            relative = run_dir.relative_to(settings.data_dir).as_posix()
+            conn.execute(
+                """
+                insert into node_runs(job_id, node_key, status, run_dir, session_dir)
+                values (?, ?, 'completed', ?, ?)
+                """,
+                (job["id"], node_key, relative, f"{relative}/session"),
+            )
+
+    result = rerun_service.rerun(job["workspace_id"], job["id"], "clean_and_parse")
+
+    assert result["status"] == "succeeded"
+    assert not affected_run.exists()
+    assert not descendant_run.exists()
+    assert ancestor_run.exists()
+    runs = {run["node_key"]: run for run in rerun_service.job_db.list_node_runs(job["id"])}
+    assert runs["clean_and_parse"]["run_dir"] == ""
+    assert runs["clean_and_parse"]["session_dir"] == ""
+    assert runs["generate_key_info"]["run_dir"] == ""
+    assert runs["fetch_questions"]["run_dir"] != ""
+
+
 def test_rerun_rolls_back_artifacts_when_db_fails(rerun_service, job, settings, monkeypatch):
     storage = resolve_job_dir(job, settings.jobs_dir)
     storage.mkdir(parents=True, exist_ok=True)

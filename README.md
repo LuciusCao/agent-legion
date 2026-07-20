@@ -375,7 +375,7 @@ runs/extract_keywords/550e8400-e29b-41d4-a716-446655440000/
   session/           # Pi session directory
 ```
 
-Previous runs are preserved. Rerunning a node deletes that node's and all downstream nodes' declared outputs, but never touches `runs/` history.
+Rerunning a node deletes that node's and all downstream nodes' declared outputs and `runs/` history. Ancestor node runs are preserved.
 
 ### Authentication
 
