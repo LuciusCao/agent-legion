@@ -268,23 +268,33 @@ concrete `worker_id` for remote runs) and shows it in the job detail view;
 last-seen times, and revocation flags (read-only page endpoint, no worker
 token; 503 while remote execution is disabled).
 
-### Upgrade order: server first, then workers
+### Upgrade order: workers first, then server (this version)
 
-Roll out upgrades in this order: **upgrade the server first, then roll the
-workers**. Current workers run the server-rendered `command_spec` attached to
-each claim; when a claim carries none, the run fails immediately with
-`server did not provide command_spec; upgrade the server first` — the worker
-logs the error, skips the report, and the claim times out server-side.
+This version turns on refs-mode bundles by default (§6): at submit time the
+server puts declared inputs into the artifact store and marks the claim
+manifest `bundle_mode: "refs"`. There is no worker version negotiation yet,
+so roll out upgrades in this order: **roll the workers first, then upgrade
+the server**. The new worker is fully backward-compatible with
+content-carrying (full) bundles, so it keeps running correctly against the
+old server during the window; once the server is upgraded it starts
+dispatching refs-mode manifests, which the already-upgraded workers
+understand.
 
-The reverse order stays workable for **one version**: the server still embeds
-the full manifest in every claim and bundle, so the previous `worker.py`
-release keeps running via its manifest-mirror command path. Treat this as a
-migration window only — copy the new `worker.py` to every device (§5) right
-after the server upgrade; the mirror assumption is dropped after one version.
+The reverse order is NOT safe at this boundary: the previous `worker.py`
+release ignores `bundle_mode` and never verifies that declared inputs exist,
+so an old worker claiming a refs-mode bundle runs the agent in a job
+directory with no input files and silently reports fabricated outputs. Copy
+the new `worker.py` to every device (§5) before restarting the server.
+
+When the full-bundle compatibility path is removed next version (Rollout 5,
+issue 045), the order flips back to **server first, then workers** for that
+boundary — the same one-version compatibility-window framing as the Task 9
+websocket envelope change.
 
 Rows enqueued before the v023 schema migration carry no stored
-`command_spec`. A current worker claiming such a row hits the error above and
-never reports, so the claim times out, the broker requeues the row
+`command_spec`. A current worker claiming such a row fails immediately with
+`server did not provide command_spec; upgrade the server first` and never
+reports, so the claim times out, the broker requeues the row
 (`remote.claim_timeout_seconds`), and after `remote.requeue_limit` attempts
 finishes it as failed — the queue converges on its own, at the cost of a few
 failed jobs to rerun. To avoid the churn, drain the remote queue before
@@ -409,6 +419,18 @@ any shard fails terminally. Before a `reduce:` node is claimed, the server
 aggregates its `from` node's shard outputs into `<node_key>.shards.json` in
 the job directory. Fan-out beyond `max_shards` (default 1000) is rejected
 when the shards are materialized.
+
+**Current limitation — shard-aware executors only.** The scheduling,
+persistence, and aggregation machinery above is in place, but the built-in
+executors (pi/openclaw/remote) do not yet deliver `shard_input` to the
+capability or map a shard's output back to `ExecutionResult.output_json`.
+Today `shard:` requires a shard-aware custom executor — one that consumes
+`runtime["shard_index"]` / `runtime["shard_input"]` and produces
+`output_json`. Declaring `shard:` on a capability that runs on the built-in
+executors makes every shard run the same full input set (concurrently
+overwriting the same output files) and the reduce step aggregate nulls. The
+built-in executor shard contract lands with the follow-ups tracked in
+[issues/open/045-P2-phase4-agent-collaboration-followups.md](../issues/open/045-P2-phase4-agent-collaboration-followups.md).
 
 ## 9. Memory calibration (required before the 100-agent gate)
 
