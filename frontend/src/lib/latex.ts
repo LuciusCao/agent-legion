@@ -10,6 +10,19 @@ export interface LatexPart {
   display: boolean
 }
 
+/**
+ * Convert valid LaTeX emitted by some question sources into syntax supported by
+ * KaTeX. MathType commonly exports a one-column array with the LaTeX `array`
+ * package shorthand `*{20}{l}`. KaTeX does not implement that shorthand and
+ * would otherwise fall back to displaying the source text.
+ */
+export function normalizeLatexForKatex(latex: string): string {
+  return latex.replace(
+    /\\begin\{array\}\{\*\{\d+\}\{([lcr])\}\}/g,
+    '\\begin{array}{$1}'
+  )
+}
+
 export function extractLatexParts(text: string): LatexPart[] {
   if (!text) return []
 
@@ -171,10 +184,13 @@ export function renderLatexInHtml(html: string): string {
     for (const part of parts) {
       if (part.type === 'latex') {
         try {
-          const latexHtml = katex.renderToString(part.content, {
-            throwOnError: false,
-            displayMode: false,
-          })
+          const latexHtml = katex.renderToString(
+            normalizeLatexForKatex(part.content),
+            {
+              throwOnError: false,
+              displayMode: false,
+            }
+          )
           const wrapper = doc.createElement('span')
           wrapper.innerHTML = latexHtml
           fragment.appendChild(wrapper)

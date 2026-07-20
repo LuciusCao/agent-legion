@@ -15,6 +15,20 @@ describe('LaTeXSpan', () => {
     expect(document.querySelector('.katex')).toBeInTheDocument()
   })
 
+  it('renders MathType array repetition syntax', () => {
+    render(
+      <LaTeXSpan
+        latex={
+          '\\left\\{{\\begin{array}{*{20}{l}}{x+y=22}\\\\{2x+y=40}\\end{array}}\\right.'
+        }
+      />
+    )
+    expect(document.querySelector('.katex')).toBeInTheDocument()
+    expect(screen.getByTestId('latex-span').textContent).not.toContain(
+      '*{20}{l}'
+    )
+  })
+
   it('falls back to raw text on invalid latex', () => {
     expectConsoleWarning(/Failed to render LaTeX/)
     render(<LaTeXSpan latex="\broken{" />)
