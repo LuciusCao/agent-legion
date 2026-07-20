@@ -2,6 +2,7 @@ import pytest
 from pydantic import ValidationError
 
 from server.app.executors.config import load_executor_definitions
+from server.app.executors.kinds import UnknownExecutorKindError
 
 
 def test_loads_discriminated_executor_definitions() -> None:
@@ -45,7 +46,7 @@ def test_rejects_non_positive_global_capacity(capacity: object) -> None:
 
 
 def test_rejects_unknown_executor_kind() -> None:
-    with pytest.raises(ValidationError):
+    with pytest.raises(UnknownExecutorKindError, match="'bad'.*unknown kind 'unknown'"):
         load_executor_definitions(
             {"bad": {"kind": "unknown", "global_capacity": 1, "capabilities": {}}}
         )

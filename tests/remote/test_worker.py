@@ -9,9 +9,7 @@ from pathlib import Path
 
 from scripts.remote import worker
 from server.app.executors.remote_bundle import build_bundle
-from server.app.workflows.pi_command_builder import build_pi_command
-from server.app.workflows.pi_config import PiConfig
-from server.app.workflows.pi_prompt import build_pi_prompt
+from server.app.workflows.pi_protocol import render_command_spec
 
 MANIFEST = {
     "job_id": "job-1",
@@ -35,71 +33,13 @@ MANIFEST = {
 }
 
 
-def test_render_prompt_matches_server(tmp_path):
-    job_dir = tmp_path / "job"
-    skill_dir = tmp_path / "skill"
-    expected = build_pi_prompt(
-        job_id="job-1",
-        node_key="node_a",
-        job_dir=str(job_dir),
-        skill_dir=str(skill_dir),
-        validator_script=str(skill_dir / "scripts" / "validate_output.py"),
-        inputs=["input.json"],
-        outputs=["output.json"],
-        additional_prompt="",
-    )
-    assert worker.render_prompt(MANIFEST, job_dir, skill_dir) == expected
-
-
-def test_render_prompt_with_additional_instructions(tmp_path):
-    manifest = {**MANIFEST, "additional_prompt": "  be careful  "}
-    job_dir, skill_dir = tmp_path / "job", tmp_path / "skill"
-    expected = build_pi_prompt(
-        job_id="job-1",
-        node_key="node_a",
-        job_dir=str(job_dir),
-        skill_dir=str(skill_dir),
-        validator_script=str(skill_dir / "scripts" / "validate_output.py"),
-        inputs=["input.json"],
-        outputs=["output.json"],
-        additional_prompt="be careful",
-    )
-    assert worker.render_prompt(manifest, job_dir, skill_dir) == expected
-
-
-def test_build_command_matches_server(tmp_path):
-    command = worker.build_command(
-        MANIFEST,
-        skill_dir=tmp_path / "skill",
-        session_dir=tmp_path / "sess",
-        session_name="job-1:node_a:tok123",
-        prompt_file=tmp_path / "prompt.md",
-    )
-    expected = build_pi_command(
-        PiConfig(
-            binary="pi",
-            provider="deepseek",
-            model="your-model-b",
-            thinking="low",
-        ),
-        skill_dir=tmp_path / "skill",
-        session_dir=tmp_path / "sess",
-        tools=["read", "write", "bash"],
-        session_name="job-1:node_a:tok123",
-        prompt_file=tmp_path / "prompt.md",
-    )
-    assert command == expected
-
-
-def test_detect_model_error(tmp_path):
-    events = tmp_path / "events.jsonl"
-    events.write_text(
-        '{"type":"message","message":{"role":"assistant","stopReason":"error","errorMessage":"400 bad request"}}\n',
-        encoding="utf-8",
-    )
-    assert "400 bad request" in worker.detect_model_error(events)
-    events.write_text('{"type":"done"}\n', encoding="utf-8")
-    assert worker.detect_model_error(events) is None
+def _claim(execution_id: str, manifest: dict) -> dict:
+    """Claim shaped like a new-server response: manifest plus its command spec."""
+    return {
+        "execution_id": execution_id,
+        "manifest": manifest,
+        "command_spec": render_command_spec(manifest),
+    }
 
 
 FAKE_PI = """#!/usr/bin/env python3
@@ -166,7 +106,7 @@ class FlakyHeartbeatClient(StubClient):
 def test_run_execution_happy_path(tmp_path):
     manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": _write_fake_pi(tmp_path)}}
     bundle = _make_bundle(tmp_path, manifest)
-    claim = {"execution_id": "e1", "manifest": manifest}
+    claim = _claim("e1", manifest)
     client = StubClient(bundle)
 
     metadata, archive = worker.run_execution(client, claim, tmp_path / "work")
@@ -204,7 +144,7 @@ def test_run_execution_strips_worker_token_from_pi_env(tmp_path, monkeypatch):
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": str(fake)}}
     bundle = _make_bundle(tmp_path, manifest)
-    claim = {"execution_id": "e1", "manifest": manifest}
+    claim = _claim("e1", manifest)
 
     metadata, archive = worker.run_execution(StubClient(bundle), claim, tmp_path / "work")
 
@@ -219,7 +159,7 @@ def test_run_execution_missing_output_fails(tmp_path):
     fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
     manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": str(fake)}}
     bundle = _make_bundle(tmp_path, manifest)
-    claim = {"execution_id": "e1", "manifest": manifest}
+    claim = _claim("e1", manifest)
 
     metadata, archive = worker.run_execution(StubClient(bundle), claim, tmp_path / "work")
 
@@ -234,7 +174,7 @@ def test_run_execution_aborts_when_claim_lost(tmp_path):
     sleepy.chmod(sleepy.stat().st_mode | stat.S_IXUSR)
     manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": str(sleepy), "timeout_seconds": 600}}
     bundle = _make_bundle(tmp_path, manifest)
-    claim = {"execution_id": "e1", "manifest": manifest}
+    claim = _claim("e1", manifest)
     client = StubClient(bundle, heartbeat_ok=False)
     # shrink the heartbeat interval so the test is fast
     original = worker.HEARTBEAT_INTERVAL_SECONDS
@@ -253,7 +193,7 @@ def test_run_execution_aborts_when_claim_lost(tmp_path):
 def test_run_execution_survives_transient_heartbeat_errors(tmp_path):
     manifest = {**MANIFEST, "pi": {**MANIFEST["pi"], "binary": _write_fake_pi(tmp_path)}}
     bundle = _make_bundle(tmp_path, manifest)
-    claim = {"execution_id": "e1", "manifest": manifest}
+    claim = _claim("e1", manifest)
     client = FlakyHeartbeatClient(bundle)
     # shrink the heartbeat interval so the test is fast
     original = worker.HEARTBEAT_INTERVAL_SECONDS

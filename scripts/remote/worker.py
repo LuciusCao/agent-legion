@@ -30,115 +30,14 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 HEARTBEAT_INTERVAL_SECONDS = 15.0
-PROMPT_INSTRUCTION = "Execute the attached node instructions."
 KILL_GRACE_SECONDS = 5.0
 
 
-# ---- pure builders (must mirror server/app/workflows/pi_prompt.py and pi_command_builder.py) ----
-
-
-def render_prompt(manifest: dict[str, Any], job_dir: Path, skill_dir: Path) -> str:
-    lines = [
-        "Execute the loaded node skill for this Video Hive workflow job.",
-        "",
-        f"Job ID: {manifest['job_id']}",
-        f"Node: {manifest['node_key']}",
-        f"Working directory: {job_dir}",
-        f"Skill directory: {skill_dir}",
-        f"Validator script: {skill_dir / 'scripts' / 'validate_output.py'}",
-        "",
-        "Declared inputs:",
-        *(f"- {item}" for item in manifest["inputs"]),
-        "",
-        "Required outputs:",
-        *(f"- {item}" for item in manifest["expected_outputs"]),
-        "",
-        (
-            "Write required outputs directly into the working directory. "
-            "Never write outputs into the run/session directory (runs/); "
-            "all declared outputs must live at the top level of the working directory. "
-            "Do not modify inputs or create undeclared root-level artifacts. "
-            "Finish after all required outputs are written and correct."
-        ),
-    ]
-    additional = str(manifest.get("additional_prompt", "")).strip()
-    if additional:
-        lines.extend(["", "Additional node instructions:", additional])
-    return "\n".join(lines) + "\n"
-
-
-def build_command(
-    manifest: dict[str, Any],
-    *,
-    skill_dir: Path,
-    session_dir: Path,
-    session_name: str,
-    prompt_file: Path,
-) -> list[str]:
-    pi = manifest["pi"]
-    cmd: list[str] = [
-        str(pi.get("binary") or "pi"),
-        "--mode",
-        "json",
-        "--session-dir",
-        str(session_dir),
-        "--name",
-        session_name,
-        "--no-context-files",
-        "--no-extensions",
-        "--no-prompt-templates",
-        "--no-skills",
-        "--skill",
-        str(skill_dir),
-        "--tools",
-        ",".join(manifest["tools"]),
-        "--approve",
-    ]
-    for flag, key in (("--provider", "provider"), ("--model", "model"), ("--thinking", "thinking")):
-        value = str(pi.get(key) or "")
-        if value:
-            cmd.extend([flag, value])
-    cmd.extend([f"@{prompt_file}", PROMPT_INSTRUCTION])
-    return cmd
-
-
-def detect_model_error(events_file: Path) -> str | None:
-    """Mirror pi_runner._detect_model_error's reading of real pi events.
-
-    Pi can exit 0 even when the upstream model request fails; the events file
-    then carries assistant messages with an ``errorMessage``. Field access here
-    must stay identical to the server-side scanner.
-    """
-    if not events_file.is_file():
-        return None
-    try:
-        with events_file.open("r", encoding="utf-8") as fh:
-            for line in fh:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    event = json.loads(line)
-                except json.JSONDecodeError:
-                    continue
-
-                # message_start / message_end / turn_end wrap the assistant msg
-                msg = event.get("message") or {}
-                if not isinstance(msg, dict):
-                    turn_end = event.get("turn_end") or {}
-                    msg = turn_end.get("message") if isinstance(turn_end, dict) else {}
-                if isinstance(msg, dict) and msg.get("errorMessage"):
-                    return str(msg["errorMessage"])
-
-                # message_update events nest under assistantMessageEvent
-                assistant_event = event.get("assistantMessageEvent") or {}
-                if isinstance(assistant_event, dict):
-                    msg = assistant_event.get("message") or {}
-                    if isinstance(msg, dict) and msg.get("errorMessage"):
-                        return str(msg["errorMessage"])
-    except Exception:
-        return None
-    return None
+def _substitute(spec_part: str, paths: dict[str, str]) -> str:
+    """Replace ``{placeholder}`` tokens in a command-spec part with local paths."""
+    for key, value in paths.items():
+        spec_part = spec_part.replace("{" + key + "}", value)
+    return spec_part
 
 
 # ---- archive handling (same safety rules as server remote_bundle.py) ----
@@ -313,9 +212,14 @@ def run_execution(
 ) -> tuple[dict[str, Any], Path | None]:
     """Run one claimed execution. Returns (result_metadata, archive_path|None).
 
-    archive_path is None when the claim was lost mid-run (server requeued or
-    cancelled it) — the caller must NOT report in that case.
+    The claim must carry the server-rendered ``command_spec``; the worker only
+    substitutes local paths into its prompt/command. archive_path is None when
+    the claim was lost mid-run (server requeued or cancelled it) — the caller
+    must NOT report in that case.
     """
+    spec = claim.get("command_spec")
+    if not spec:
+        raise RuntimeError("server did not provide command_spec; upgrade the server first")
     execution_id = claim["execution_id"]
     work_dir = work_root / execution_id
     if work_dir.exists():
@@ -330,15 +234,16 @@ def run_execution(
     session_dir = run_dir / "session"
     session_dir.mkdir(parents=True, exist_ok=True)
     prompt_file = run_dir / "prompt.md"
-    prompt_file.write_text(render_prompt(manifest, job_dir, skill_dir), encoding="utf-8")
-    session_name = f"{manifest['job_id']}:{manifest['node_key']}:{run_token}"
-    command = build_command(
-        manifest,
-        skill_dir=skill_dir,
-        session_dir=session_dir,
-        session_name=session_name,
-        prompt_file=prompt_file,
-    )
+    paths = {
+        "job_dir": str(job_dir),
+        "skill_dir": str(skill_dir),
+        "session_dir": str(session_dir),
+        # The session name stays worker-local: job_id:node_key:run_token.
+        "session_name": f"{manifest['job_id']}:{manifest['node_key']}:{run_token}",
+        "prompt_file": str(prompt_file),
+    }
+    prompt_file.write_text(_substitute(str(spec["prompt"]), paths), encoding="utf-8")
+    command = [_substitute(str(part), paths) for part in spec["command"]]
     pi = manifest["pi"]
     env = {**os.environ, **{str(k): str(v) for k, v in pi.get("environment", {}).items()}}
     # Never hand the server credential to the LLM-driven agent: it could read
@@ -404,15 +309,13 @@ def run_execution(
         heartbeat_thread.join(timeout=5)
 
     if exit_code == 0:
-        model_error = detect_model_error(events_file)
-        if model_error:
+        # Model-error scanning moved to the server completion callback
+        # (pi_protocol.detect_model_error via RemoteCompletionHandler); the
+        # worker keeps only the fast local missing-outputs check.
+        missing = [o for o in manifest["expected_outputs"] if not (job_dir / o).is_file()]
+        if missing:
             exit_code = 1
-            error_message = f"Pi model call failed: {model_error}"
-        else:
-            missing = [o for o in manifest["expected_outputs"] if not (job_dir / o).is_file()]
-            if missing:
-                exit_code = 1
-                error_message = f"Missing outputs after Pi run: {', '.join(missing)}"
+            error_message = f"Missing outputs after Pi run: {', '.join(missing)}"
 
     if exit_code == 0:
         validator = skill_dir / "scripts" / "validate_output.py"

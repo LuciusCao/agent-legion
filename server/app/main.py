@@ -17,7 +17,9 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.remote_broker import RemoteExecutionBroker
+from server.app.executors.remote_completion import RemoteCompletionHandler
 from server.app.executors.runtime_factory import build_execution_runtime
+from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
 from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
@@ -123,6 +125,7 @@ def create_app(
             ) from exc
     backfill_package_stats(db, settings)
     workflow_worker_thread: WorkflowWorkerThread | None = None
+    sweeper_thread: SweeperThread | None = None
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
@@ -130,7 +133,7 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        nonlocal workflow_worker_thread
+        nonlocal workflow_worker_thread, sweeper_thread
         job_event_manager.bus.attach_loop(asyncio.get_running_loop())
         if start_worker:
             validate_settings(settings)
@@ -146,6 +149,27 @@ def create_app(
                 execution_runtime = build_execution_runtime(
                     executor_leases, executor_registry, settings.executor_runtime
                 )
+                # Submit-only remote executors finish leases via broker callbacks.
+                remote_broker.register_completion_callback(
+                    RemoteCompletionHandler(
+                        remote_broker, executor_leases, settings.jobs_dir
+                    ).handle_completion
+                )
+                # The sweeper owns all lease hygiene (startup + interval sweeps,
+                # remote lease renewal). With sweeper_enabled=False an external
+                # sweeper process must run instead (multi-replica deployments).
+                if settings.executor_runtime.sweeper_enabled:
+                    sweeper_thread = SweeperThread(
+                        executor_leases,
+                        remote_broker,
+                        interval_seconds=settings.executor_runtime.sweeper_interval_seconds,
+                        lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
+                    )
+                    try:
+                        sweeper_thread.start()
+                    except Exception:
+                        logging.getLogger(__name__).exception("sweeper failed to start")
+                        sweeper_thread = None
                 workflow_worker_thread = WorkflowWorkerThread(
                     job_db=job_db,
                     leases=executor_leases,
@@ -162,6 +186,8 @@ def create_app(
         background_tasks.start(app)
         yield
         background_tasks.stop(app)
+        if sweeper_thread is not None:
+            sweeper_thread.stop()
         if workflow_worker_thread is not None:
             workflow_worker_thread.stop()
 

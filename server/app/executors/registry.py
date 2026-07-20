@@ -1,29 +1,10 @@
 from __future__ import annotations
 
-import logging
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any
 
-from server.app.executors.config import (
-    ExecutorConfig,
-    LocalCapabilityConfig,
-    LocalExecutorConfig,
-    OpenClawExecutorConfig,
-    PiExecutorConfig,
-    RemoteExecutorConfig,
-)
-from server.app.executors.local import LocalExecutor, LocalHandler
-from server.app.executors.openclaw import build_openclaw_executor
-from server.app.executors.pi import PiExecutor
+from server.app.executors.config import ExecutorConfig
+from server.app.executors.kinds import ExecutorKindError, RuntimeDependencies, build_executor
 from server.app.executors.protocol import Executor
-from server.app.executors.remote import RemoteExecutor
-from server.app.executors.remote_broker import RemoteExecutionBroker
-from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntimeConfig
-from server.app.skills.manager import SkillManager
-
-logger = logging.getLogger(__name__)
 
 
 class ExecutorRegistryError(Exception):
@@ -36,32 +17,6 @@ class UnknownExecutorError(ExecutorRegistryError):
 
 class UnsupportedCapabilityError(ExecutorRegistryError):
     """Raised when an executor does not implement a requested capability."""
-
-
-@dataclass(frozen=True)
-class RuntimeDependencies:
-    """Runtime dependencies injected into executor adapters during registry build.
-
-    The registry is intentionally free of import side effects: callers supply the
-    concrete handler functions, Pi configuration, and OpenClaw settings.
-    """
-
-    local_handlers: Mapping[str, LocalHandler] = field(default_factory=dict)
-    pi_runtime: PiRuntimeConfig = field(default_factory=PiRuntimeConfig)
-    skill_manager: SkillManager = field(
-        default_factory=lambda: SkillManager(
-            config_path=Path("config") / "skills.yaml",
-            lock_path=Path("config") / "skills.lock",
-            base_dir=Path.home() / ".agents" / "skills" / "agent-legion",
-        )
-    )
-    openclaw_runtime: OpenClawRuntimeConfig = field(
-        default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
-    )
-    settings_config: Mapping[str, Any] | None = None
-    job_db: Any | None = None
-    cancellation_grace_seconds: int = 5
-    remote_broker: RemoteExecutionBroker | None = None
 
 
 class ExecutorRegistry:
@@ -85,51 +40,18 @@ class ExecutorRegistry:
     ) -> ExecutorRegistry:
         """Construct executor adapters from typed definitions and runtime dependencies.
 
-        Adapter construction switches only on the typed ``kind`` union. Error
-        messages include the executor ID, kind, and capability where applicable.
+        Adapter construction dispatches through the kind registry; kind errors
+        are surfaced as ``ExecutorRegistryError`` with the executor ID in the
+        message.
         """
         executors: dict[str, Executor] = {}
         global_capacities: dict[str, int] = {}
 
         for executor_id, config in definitions.items():
-            if isinstance(config, LocalExecutorConfig):
-                handlers = _resolve_local_handlers(
-                    executor_id, config.capabilities, runtime.local_handlers
-                )
-                executor: Executor = LocalExecutor(
-                    id=executor_id,
-                    handlers=handlers,
-                    settings_config=runtime.settings_config,
-                    job_db=runtime.job_db,
-                    cancellation_grace_seconds=runtime.cancellation_grace_seconds,
-                )
-            elif isinstance(config, PiExecutorConfig):
-                executor = PiExecutor(
-                    id=executor_id,
-                    config=runtime.pi_runtime,
-                    skill_manager=runtime.skill_manager,
-                    capabilities=config.capabilities,
-                )
-            elif isinstance(config, OpenClawExecutorConfig):
-                executor = build_openclaw_executor(executor_id, runtime.openclaw_runtime, config)
-            elif isinstance(config, RemoteExecutorConfig):
-                if runtime.remote_broker is None:
-                    raise ExecutorRegistryError(
-                        f"remote executor {executor_id!r} requires a remote execution broker"
-                    )
-                executor = RemoteExecutor(
-                    executor_id,
-                    runtime.pi_runtime,
-                    runtime.skill_manager,
-                    config.capabilities,
-                    runtime.remote_broker,
-                )
-            else:
-                raise ExecutorRegistryError(
-                    f"Executor {executor_id!r}: unsupported kind {getattr(config, 'kind', '?')!r}"
-                )
-
-            executors[executor_id] = executor
+            try:
+                executors[executor_id] = build_executor(executor_id, config, runtime)
+            except ExecutorKindError as exc:
+                raise ExecutorRegistryError(str(exc)) from exc
             global_capacities[executor_id] = config.global_capacity
 
         return cls(executors, global_capacities, definitions)
@@ -157,24 +79,3 @@ class ExecutorRegistry:
     def global_capacity(self, executor_id: str) -> int | None:
         """Return the configured global capacity for *executor_id*."""
         return self._global_capacities.get(executor_id)
-
-
-def _resolve_local_handlers(
-    executor_id: str,
-    capabilities: dict[str, LocalCapabilityConfig],
-    available_handlers: Mapping[str, LocalHandler],
-) -> dict[str, LocalHandler]:
-    """Map capability names to handler functions supplied by the caller."""
-    handlers: dict[str, LocalHandler] = {}
-    for capability, cap_config in capabilities.items():
-        handler = available_handlers.get(cap_config.handler)
-        if handler is None:
-            logger.warning(
-                "Executor %s (kind=local) capability %s: handler %s is not available; skipping",
-                executor_id,
-                capability,
-                cap_config.handler,
-            )
-            continue
-        handlers[capability] = handler
-    return handlers

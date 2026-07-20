@@ -31,15 +31,16 @@ def _safe_members(tar: tarfile.TarFile) -> Iterable[tarfile.TarInfo]:
 def build_bundle(
     bundle_path: Path,
     *,
-    skill_dir: Path,
+    skill_dir: Path | None = None,
     job_dir: Path,
     inputs: tuple[str, ...],
     manifest: dict[str, Any],
 ) -> None:
-    """Pack a skill snapshot, declared inputs, and the manifest into a tar.gz."""
+    """Pack an optional skill snapshot, declared inputs, and the manifest into a tar.gz."""
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
     with tarfile.open(bundle_path, "w:gz") as tar:
-        tar.add(skill_dir, arcname="skill")
+        if skill_dir is not None:
+            tar.add(skill_dir, arcname="skill")
         for rel in inputs:
             rel_path = PurePosixPath(rel)
             if rel_path.is_absolute() or ".." in rel_path.parts:

@@ -9,6 +9,7 @@ from uuid import uuid4
 from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette import concurrency
 
 from server.app.executors.models import ExecutionStatus
 from server.app.executors.remote_broker import RemoteExecutionBroker, RemoteOutcome
@@ -37,6 +38,8 @@ class ClaimResponse(BaseModel):
     capability: str
     bundle_url: str
     manifest: dict[str, Any]
+    # Present on new servers; old workers ignore it, new workers require it.
+    command_spec: dict[str, Any] | None = None
 
 
 class RemoteWorkerInfo(BaseModel):
@@ -154,7 +157,8 @@ def create_remote_router(broker: RemoteExecutionBroker, settings: Settings) -> A
             result_archive_name=f"{execution_id}.result.tar.gz",
         )
         # Broker renames and publishes in one critical section; waiters never race the bytes.
-        if not broker.complete_with_archive(execution_id, worker_id, outcome, staging_path):
+        complete_args = (execution_id, worker_id, outcome, staging_path)
+        if not await concurrency.run_in_threadpool(broker.complete_with_archive, *complete_args):
             staging_path.unlink(missing_ok=True)
             raise HTTPException(status_code=409, detail="execution is not claimed by this worker")
         return Response(status_code=204)

@@ -12,6 +12,8 @@ from pathlib import Path
 from typing import Any, cast
 
 from server.app.executors.cancellation import CancellationToken
+from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
+from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
 from server.app.executors.models import ExecutionContext, ExecutionResult
 
 logger = logging.getLogger(__name__)
@@ -116,6 +118,8 @@ class LocalExecutor:
     """Adapter that runs repository-owned local handlers inside the workspace runtime."""
 
     kind = "local"
+    # Run-to-completion adapter; submit_only is the remote-executor opt-out.
+    submit_only = False
 
     def __init__(
         self,
@@ -327,3 +331,42 @@ class LocalExecutor:
             log_path=str(context.log_path),
             produced_artifacts=produced,
         )
+
+
+def _resolve_local_handlers(
+    executor_id: str,
+    capabilities: dict[str, LocalCapabilityConfig],
+    available_handlers: Mapping[str, LocalHandler],
+) -> dict[str, LocalHandler]:
+    """Map capability names to handler functions supplied by the caller."""
+    handlers: dict[str, LocalHandler] = {}
+    for capability, cap_config in capabilities.items():
+        handler = available_handlers.get(cap_config.handler)
+        if handler is None:
+            logger.warning(
+                "Executor %s (kind=local) capability %s: handler %s is not available; skipping",
+                executor_id,
+                capability,
+                cap_config.handler,
+            )
+            continue
+        handlers[capability] = handler
+    return handlers
+
+
+def build_local_executor(
+    executor_id: str, config: LocalExecutorConfig, deps: RuntimeDependencies
+) -> LocalExecutor:
+    handlers = _resolve_local_handlers(executor_id, config.capabilities, deps.local_handlers)
+    return LocalExecutor(
+        id=executor_id,
+        handlers=handlers,
+        settings_config=deps.settings_config,
+        job_db=deps.job_db,
+        cancellation_grace_seconds=deps.cancellation_grace_seconds,
+    )
+
+
+register_kind(
+    ExecutorKind(name="local", config_model=LocalExecutorConfig, factory=build_local_executor)
+)

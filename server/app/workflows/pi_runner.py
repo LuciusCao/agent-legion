@@ -21,6 +21,7 @@ from server.app.storage_paths import ManagedPathError, make_data_relative, resol
 from server.app.workflows.pi_command_builder import build_pi_command
 from server.app.workflows.pi_config import PiConfig, PiRunResult
 from server.app.workflows.pi_prompt import build_pi_prompt
+from server.app.workflows.pi_protocol import detect_model_error
 
 logger = logging.getLogger(__name__)
 
@@ -290,41 +291,4 @@ class PiRunner:
         return exit_code, error_message
 
     def _detect_model_error(self, events_file: Path) -> str | None:
-        """Scan Pi JSONL events for model-call failures reported by the CLI.
-
-        Pi can exit with code 0 even when the upstream model request fails
-        (e.g. a 400 from the provider). In that case the events file contains
-        assistant messages whose ``stopReason`` is ``error`` and which carry an
-        ``errorMessage``. Detecting this prevents us from reporting a misleading
-        "Missing outputs" error when the agent never had a chance to run.
-        """
-        if not events_file.is_file():
-            return None
-        try:
-            with events_file.open("r", encoding="utf-8") as fh:
-                for line in fh:
-                    line = line.strip()
-                    if not line:
-                        continue
-                    try:
-                        event = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
-
-                    # message_start / message_end / turn_end wrap the assistant msg
-                    msg = event.get("message") or {}
-                    if not isinstance(msg, dict):
-                        turn_end = event.get("turn_end") or {}
-                        msg = turn_end.get("message") if isinstance(turn_end, dict) else {}
-                    if isinstance(msg, dict) and msg.get("errorMessage"):
-                        return str(msg["errorMessage"])
-
-                    # message_update events nest under assistantMessageEvent
-                    assistant_event = event.get("assistantMessageEvent") or {}
-                    if isinstance(assistant_event, dict):
-                        msg = assistant_event.get("message") or {}
-                        if isinstance(msg, dict) and msg.get("errorMessage"):
-                            return str(msg["errorMessage"])
-        except Exception:
-            return None
-        return None
+        return detect_model_error(events_file)

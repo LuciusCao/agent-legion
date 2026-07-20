@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from server.app.workflows.pi_protocol import build_prompt
+
 
 def build_pi_prompt(
     *,
@@ -12,32 +14,16 @@ def build_pi_prompt(
     outputs: list[str],
     additional_prompt: str = "",
 ) -> str:
-    lines = [
-        "Execute the loaded node skill for this Video Hive workflow job.",
-        "",
-        f"Job ID: {job_id}",
-        f"Node: {node_key}",
-        f"Working directory: {job_dir}",
-        f"Skill directory: {skill_dir}",
-        f"Validator script: {validator_script}",
-        "",
-        "Declared inputs:",
-        *(f"- {item}" for item in inputs),
-        "",
-        "Required outputs:",
-        *(f"- {item}" for item in outputs),
-        "",
-        (
-            "Write required outputs directly into the working directory. "
-            "Never write outputs into the run/session directory (runs/); "
-            "all declared outputs must live at the top level of the working directory. "
-            "Do not modify inputs or create undeclared root-level artifacts. "
-            "Finish after all required outputs are written and correct."
-        ),
-    ]
-    if additional_prompt.strip():
-        lines.extend(["", "Additional node instructions:", additional_prompt.strip()])
-    return "\n".join(lines) + "\n"
+    # validator_script is kept for signature compatibility; the shared protocol
+    # derives it as skill_dir/scripts/validate_output.py (all callers pass that).
+    manifest = {
+        "job_id": job_id,
+        "node_key": node_key,
+        "inputs": inputs,
+        "expected_outputs": outputs,
+        "additional_prompt": additional_prompt,
+    }
+    return build_prompt(manifest, job_dir=Path(job_dir), skill_dir=Path(skill_dir))
 
 
 def build_pi_prompt_preview(
