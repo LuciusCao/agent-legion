@@ -211,6 +211,35 @@ def test_executor_runtime_config_parses_lease_heartbeat_settings():
     assert config.heartbeat_failure_threshold == 3
 
 
+def test_executor_runtime_config_sweeper_defaults():
+    config = ExecutorRuntimeConfig.model_validate({"openclaw": {"command_template": ["openclaw"]}})
+    assert config.sweeper_enabled is True
+    assert config.sweeper_interval_seconds == 5.0
+
+
+def test_executor_runtime_config_sweeper_overrides():
+    config = ExecutorRuntimeConfig.model_validate(
+        {
+            "sweeper_enabled": False,
+            "sweeper_interval_seconds": 1.5,
+            "openclaw": {"command_template": ["openclaw"]},
+        }
+    )
+    assert config.sweeper_enabled is False
+    assert config.sweeper_interval_seconds == 1.5
+
+
+def test_executor_runtime_config_rejects_non_positive_sweeper_interval():
+    with pytest.raises(ValidationError) as exc_info:
+        ExecutorRuntimeConfig.model_validate(
+            {
+                "sweeper_interval_seconds": 0,
+                "openclaw": {"command_template": ["openclaw"]},
+            }
+        )
+    assert "sweeper_interval_seconds" in str(exc_info.value)
+
+
 def test_executor_runtime_config_rejects_missing_command_template():
     raw = {"workflows": {"enabled": True}, "openclaw": {"cwd": "."}}
     with pytest.raises(ValidationError) as exc_info:

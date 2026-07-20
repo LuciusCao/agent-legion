@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 import sqlite3
 import threading
 from collections.abc import Callable, Collection
@@ -23,6 +24,8 @@ from server.app.executors._remote_queue_store import (
 )
 from server.app.executors.models import ExecutionStatus
 
+logger = logging.getLogger(__name__)
+
 
 @dataclass(frozen=True)
 class RemoteExecutionPayload:
@@ -33,6 +36,9 @@ class RemoteExecutionPayload:
     capability: str
     bundle_name: str
     manifest: dict[str, Any]
+    # Rendered by the payload builder at submit time; the broker only persists
+    # and forwards it, keeping the transport layer free of builder imports.
+    command_spec: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -43,6 +49,7 @@ class RemoteClaim:
     capability: str
     bundle_url: str
     manifest: dict[str, Any]
+    command_spec: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -82,14 +89,21 @@ class RemoteExecutionBroker:
         self._requeue_limit = requeue_limit
         self._now = time_source or _utcnow
         self._done_events: dict[str, threading.Event] = {}
+        self._completion_callbacks: list[Callable[[str, RemoteOutcome], None]] = []
         self._entries = EntriesView(db_path)  # legacy test handle; rows live in sqlite
         # Recover claims orphaned by a restart before serving new work.
-        self._sweep()
+        self.sweep_expired_claims()
+
+    def register_completion_callback(self, callback: Callable[[str, RemoteOutcome], None]) -> None:
+        """Register a callback invoked (outside the write transaction) each time
+        an execution reaches a terminal state — result report, cancel, or
+        requeue-limit failure. Registration is a composition-layer concern."""
+        self._completion_callbacks.append(callback)
 
     # ---- executor-facing ----
 
     def submit(self, payload: RemoteExecutionPayload) -> None:
-        self._sweep()  # Any write path also triggers the done-row cleanup.
+        self.sweep_expired_claims()  # Any write path also triggers the done-row cleanup.
         try:
             retry_on_sqlite_lock(lambda: self._insert_execution(payload))
         except sqlite3.IntegrityError as exc:
@@ -97,33 +111,67 @@ class RemoteExecutionBroker:
 
     def _insert_execution(self, payload: RemoteExecutionPayload) -> None:
         now = _sqlite_timestamp(self._now())
-        # astuple 前 6 个字段与 insert 列顺序一致，manifest 单独序列化。
-        values = (*astuple(payload)[:6], json.dumps(payload.manifest), now, now)
+        # astuple 前 6 个字段与 insert 列顺序一致；manifest 与 command_spec 单独序列化。
+        values = (
+            *astuple(payload)[:6],
+            json.dumps(payload.manifest),
+            json.dumps(payload.command_spec) if payload.command_spec is not None else None,
+            now,
+            now,
+        )
         self._write(
             "insert into remote_executions"
             " (execution_id, lease_id, job_id, node_key, capability,"
-            "  bundle_name, manifest_json, state, created_at, updated_at)"
-            " values (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
+            "  bundle_name, manifest_json, command_spec_json, state, created_at, updated_at)"
+            " values (?, ?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?)",
             values,
         )
 
     def wait_result(self, execution_id: str, poll_seconds: float = 0.2) -> RemoteOutcome:
         event = self._done_events.setdefault(execution_id, threading.Event())
         while True:
-            with read_connection(self._db_path) as conn:
-                row = conn.execute(
-                    "select outcome_json from remote_executions"
-                    " where execution_id = ? and state = 'done'",
-                    (execution_id,),
-                ).fetchone()
-            if row is not None and row["outcome_json"] is not None:
-                data = json.loads(row["outcome_json"])
-                data["command"] = tuple(data.get("command", []))
-                return RemoteOutcome(**data)
+            outcome = self._read_outcome(execution_id)
+            if outcome is not None:
+                return outcome
             # Sweep here too, so a lost worker fails even when nobody else polls.
-            self._sweep()
+            self.sweep_expired_claims()
             event.wait(timeout=poll_seconds)
             event.clear()
+
+    def payload_for(self, execution_id: str) -> RemoteExecutionPayload | None:
+        """Return the stored submission payload for an execution, in any state.
+
+        Rows survive restarts, so completion callbacks can always rebuild the
+        submission context (lease, job, manifest) even after a process bounce.
+        """
+        with read_connection(self._db_path) as conn:
+            row = conn.execute(
+                "select execution_id, lease_id, job_id, node_key, capability, bundle_name,"
+                " manifest_json, command_spec_json from remote_executions"
+                " where execution_id = ?",
+                (execution_id,),
+            ).fetchone()
+        if row is None:
+            return None
+        spec_json = row["command_spec_json"]
+        return RemoteExecutionPayload(
+            execution_id=row["execution_id"],
+            lease_id=row["lease_id"],
+            job_id=row["job_id"],
+            node_key=row["node_key"],
+            capability=row["capability"],
+            bundle_name=row["bundle_name"],
+            manifest=json.loads(row["manifest_json"]),
+            command_spec=json.loads(spec_json) if spec_json else None,
+        )
+
+    def active_lease_ids(self) -> list[str]:
+        """Lease ids of queued or claimed rows; renewal input for the lease sweeper."""
+        with read_connection(self._db_path) as conn:
+            rows = conn.execute(
+                "select lease_id from remote_executions where state in ('queued', 'claimed')"
+            ).fetchall()
+            return [str(row["lease_id"]) for row in rows]
 
     def cancel(self, execution_id: str) -> None:
         outcome = RemoteOutcome(
@@ -132,17 +180,18 @@ class RemoteExecutionBroker:
         if cancel_execution(
             self._db_path, execution_id, asdict(outcome), _sqlite_timestamp(self._now())
         ):
-            self._signal_done(execution_id)
+            self._publish_completion(execution_id)
 
     # ---- worker-facing (called from routes) ----
 
     def dequeue(self, worker_id: str, capabilities: Collection[str]) -> RemoteClaim | None:
         if not capabilities:
             return None
-        self._sweep()
+        self.sweep_expired_claims()
         entry = claim_next(self._db_path, worker_id, capabilities, _sqlite_timestamp(self._now()))
         if entry is None:
             return None
+        spec_json = entry.get("command_spec_json")
         return RemoteClaim(
             execution_id=entry["execution_id"],
             job_id=entry["job_id"],
@@ -150,10 +199,11 @@ class RemoteExecutionBroker:
             capability=entry["capability"],
             bundle_url=f"/api/remote/executions/{entry['execution_id']}/bundle",
             manifest=json.loads(entry["manifest_json"]),
+            command_spec=json.loads(spec_json) if spec_json else None,
         )
 
     def heartbeat(self, execution_id: str, worker_id: str) -> bool:
-        self._sweep()
+        self.sweep_expired_claims()
         return heartbeat_claim(
             self._db_path, execution_id, worker_id, _sqlite_timestamp(self._now())
         )
@@ -163,7 +213,7 @@ class RemoteExecutionBroker:
             self._db_path, execution_id, worker_id, asdict(outcome), _sqlite_timestamp(self._now())
         )
         if finished:
-            self._signal_done(execution_id)
+            self._publish_completion(execution_id)
         return finished
 
     def complete_with_archive(
@@ -183,7 +233,7 @@ class RemoteExecutionBroker:
             before_update=publish_archive,
         )
         if finished:
-            self._signal_done(execution_id)
+            self._publish_completion(execution_id)
         return finished
 
     def bundle_name_for(self, execution_id: str, worker_id: str) -> str | None:
@@ -244,7 +294,47 @@ class RemoteExecutionBroker:
         if event is not None:
             event.set()
 
-    def _sweep(self) -> None:
+    def _read_outcome(self, execution_id: str) -> RemoteOutcome | None:
+        with read_connection(self._db_path) as conn:
+            row = conn.execute(
+                "select outcome_json from remote_executions"
+                " where execution_id = ? and state = 'done'",
+                (execution_id,),
+            ).fetchone()
+        if row is None or row["outcome_json"] is None:
+            return None
+        data = json.loads(row["outcome_json"])
+        data["command"] = tuple(data.get("command", []))
+        return RemoteOutcome(**data)
+
+    def _publish_completion(self, execution_id: str) -> None:
+        """Signal waiters and invoke completion callbacks for a finished row.
+
+        Every terminal write path (result report, cancel, requeue-limit
+        failure) funnels here after its transaction has committed, so
+        callbacks never observe uncommitted state. The broker state machine
+        deduplicates terminal writes, so each execution publishes exactly
+        once. Callback exceptions are logged, never propagated: a faulty
+        callback cannot undo the committed completion.
+        """
+        self._signal_done(execution_id)
+        if not self._completion_callbacks:
+            return
+        outcome = self._read_outcome(execution_id)
+        if outcome is None:
+            return
+        for callback in self._completion_callbacks:
+            try:
+                callback(execution_id, outcome)
+            except Exception:
+                logger.exception("remote completion callback failed for %s", execution_id)
+
+    def sweep_expired_claims(self) -> list[str]:
+        """Requeue stale claims, fail rows past the requeue limit, reap old done rows.
+
+        Public entry for the lease sweeper (Task 8); broker write paths call it
+        inline as well. Returns execution ids that reached a terminal state here.
+        """
         finished = sweep(
             self._db_path,
             now=self._now(),
@@ -252,4 +342,5 @@ class RemoteExecutionBroker:
             requeue_limit=self._requeue_limit,
         )
         for execution_id in finished:
-            self._signal_done(execution_id)
+            self._publish_completion(execution_id)
+        return finished

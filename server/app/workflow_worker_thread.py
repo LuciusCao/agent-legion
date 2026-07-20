@@ -3,7 +3,6 @@ from __future__ import annotations
 import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, wait
-from datetime import UTC, datetime
 from typing import Any
 
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -51,7 +50,10 @@ class WorkflowWorkerThread:
         self._thread: threading.Thread | None = None
         self._definitions: list[WorkflowDefinition] = []
         self._pools: dict[str, ThreadPoolExecutor] = {}
-        self._futures: dict[str, Future[ExecutionResult]] = {}
+        # All submit-only (remote) claims share one bounded pool: submission is
+        # a quick enqueue, so it must not scale with executor global capacity.
+        self._submit_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="remote-submit")
+        self._futures: dict[str, Future[ExecutionResult | None]] = {}
         self._round_robin = WorkspaceRoundRobin()
         self._maintenance = WorkflowMaintenance(job_db, settings)
 
@@ -60,10 +62,18 @@ class WorkflowWorkerThread:
         return settings.executor_runtime.workflows.enabled
 
     def _ensure_pools(self) -> None:
-        for executor_id in self.registry.definitions():
+        for executor_id, config in self.registry.definitions().items():
+            if config.kind == "remote":
+                continue  # remote claims run on the shared submit pool
             if executor_id not in self._pools:
                 capacity = self.registry.global_capacity(executor_id) or 1
                 self._pools[executor_id] = ThreadPoolExecutor(max_workers=capacity)
+
+    def _pool_for(self, executor_id: str) -> ThreadPoolExecutor:
+        executor = self.registry.get(executor_id)
+        if executor is not None and getattr(executor, "submit_only", False):
+            return self._submit_pool
+        return self._pools[executor_id]
 
     def _executor_capacities(self) -> dict[str, int]:
         return {eid: self.registry.global_capacity(eid) or 0 for eid in self.registry.definitions()}
@@ -71,12 +81,6 @@ class WorkflowWorkerThread:
     def start(self) -> None:
         self._definitions = list_registered_workflows(self.settings.root_dir)
         self._ensure_pools()
-        expired = self.leases.expire_stale(datetime.now(UTC))
-        if expired:
-            logger.warning("expired stale workflow executions on startup: %s", ", ".join(expired))
-        recovered = self.leases.recover_orphaned_running_jobs(datetime.now(UTC))
-        if recovered:
-            logger.warning("recovered orphaned running jobs on startup: %s", ", ".join(recovered))
         self._maintenance.run_backfill()
 
         def _loop() -> None:
@@ -100,12 +104,6 @@ class WorkflowWorkerThread:
             self._ensure_pools()
 
         self._reap_futures()
-        expired = self.leases.expire_stale(datetime.now(UTC))
-        if expired:
-            logger.warning("expired stale workflow executions: %s", ", ".join(expired))
-        recovered = self.leases.recover_orphaned_running_jobs(datetime.now(UTC))
-        if recovered:
-            logger.warning("recovered orphaned running jobs: %s", ", ".join(recovered))
 
         # Cheap capacity gate: when every executor is saturated, skip the
         # expensive job scan for this tick (maintenance above still runs).
@@ -162,7 +160,9 @@ class WorkflowWorkerThread:
                 jobs_by_workspace[workspace_id].append((definition, job))
         return workspace_ids, jobs_by_workspace
 
-    def _run_claim(self, claim: ClaimedExecution, context: ExecutionContext) -> ExecutionResult:
+    def _run_claim(
+        self, claim: ClaimedExecution, context: ExecutionContext
+    ) -> ExecutionResult | None:
         with agent_status_scope(self.agent_manager, self.registry, claim, context):
             try:
                 return self.runtime.run(claim, context)
@@ -215,3 +215,4 @@ class WorkflowWorkerThread:
         for pool in self._pools.values():
             pool.shutdown(wait=False, cancel_futures=True)
         self._pools.clear()
+        self._submit_pool.shutdown(wait=False, cancel_futures=True)

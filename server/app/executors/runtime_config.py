@@ -66,6 +66,8 @@ class ExecutorRuntimeConfig(BaseModel):
     lease_ttl_seconds: int = Field(default=90, ge=1)
     heartbeat_failure_threshold: int = Field(default=3, ge=1)
     cancellation_grace_seconds: int = Field(default=5, ge=0)
+    sweeper_enabled: bool = True
+    sweeper_interval_seconds: float = Field(default=5.0, gt=0)
     workflows: WorkflowsRuntimeConfig = Field(default_factory=WorkflowsRuntimeConfig)
     openclaw: OpenClawRuntimeConfig = Field(
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))

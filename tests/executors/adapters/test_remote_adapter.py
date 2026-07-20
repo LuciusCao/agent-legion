@@ -1,10 +1,6 @@
 from __future__ import annotations
 
 import dataclasses
-import io
-import tarfile
-import threading
-import time
 from pathlib import Path
 
 import pytest
@@ -13,11 +9,8 @@ from server.app.db.schema import init_db
 from server.app.executors.config import RemoteCapabilityConfig
 from server.app.executors.models import ExecutionContext
 from server.app.executors.remote import RemoteExecutor
-from server.app.executors.remote_broker import (
-    RemoteExecutionBroker,
-    RemoteExecutionPayload,
-    RemoteOutcome,
-)
+from server.app.executors.remote_broker import RemoteExecutionBroker
+from server.app.executors.remote_payloads.pi import PiPayloadBuilder
 from server.app.executors.runtime_config import PiRuntimeConfig
 from tests.executors.adapters.helpers import _make_skill_manager
 
@@ -41,162 +34,45 @@ def _make_executor(tmp_path: Path, broker: RemoteExecutionBroker) -> RemoteExecu
         "question_comprehension_info/generate_key_info",
         validate_script="#!/usr/bin/env python3\n",
     )
-    return RemoteExecutor(
-        "pi-remote",
+    capabilities = {
+        "review_keywords": RemoteCapabilityConfig(
+            skill="question_comprehension_info/generate_key_info"
+        )
+    }
+    payload_builder = PiPayloadBuilder(
         PiRuntimeConfig(binary="pi", provider="deepseek", model="your-model-b"),
         skill_manager,
-        {
-            "review_keywords": RemoteCapabilityConfig(
-                skill="question_comprehension_info/generate_key_info"
-            )
-        },
-        broker,
+        capabilities,
     )
+    return RemoteExecutor("pi-remote", payload_builder, capabilities, broker)
 
 
-def _result_archive(path: Path, *, node_key: str, run_token: str, output_name: str) -> None:
-    with tarfile.open(path, "w:gz") as tar:
-        for name, content in (
-            (output_name, b"{}"),
-            (f"runs/{node_key}/{run_token}/events.jsonl", b'{"type":"done"}\n'),
-            (f"runs/{node_key}/{run_token}/run.json", b"{}"),
-        ):
-            info = tarfile.TarInfo(name)
-            info.size = len(content)
-            tar.addfile(info, io.BytesIO(content))
-
-
-def _fake_worker(broker: RemoteExecutionBroker, bundle_dir: Path, output_name: str) -> None:
-    # Poll for a claim, then report a successful result archive.
-    deadline = time.monotonic() + 10
-    claim = None
-    while time.monotonic() < deadline:
-        claim = broker.dequeue("w1", {"review_keywords"})
-        if claim is not None:
-            break
-        time.sleep(0.05)
-    assert claim is not None
-    archive = bundle_dir / f"{claim.execution_id}.result.tar.gz"
-    _result_archive(
-        archive,
-        node_key=claim.manifest["node_key"],
-        run_token=claim.manifest["run_token"],
-        output_name=output_name,
-    )
-    outcome = RemoteOutcome(
-        status="completed",
-        exit_code=0,
-        command=("pi", "--mode", "json"),
-        skill_version=claim.manifest["skill_version"],
-        result_archive_name=archive.name,
-    )
-    assert broker.complete(claim.execution_id, "w1", outcome) is True
-
-
-def test_execute_happy_path(tmp_path: Path, context: ExecutionContext) -> None:
-    broker = _make_broker(tmp_path)
-    executor = _make_executor(tmp_path, broker)
-    expected_output = context.expected_outputs[0]
-    worker = threading.Thread(
-        target=_fake_worker, args=(broker, broker.bundle_dir, expected_output)
-    )
-    worker.start()
-
-    result = executor.execute(context)
-
-    worker.join(timeout=10)
-    assert result.status == "completed", result.error_message
-    assert result.exit_code == 0
-    assert result.command == ("pi", "--mode", "json")
-    assert result.produced_artifacts == (expected_output,)
-    assert (context.job_dir / expected_output).is_file()
-    run_dir = Path(result.run_dir)
-    assert run_dir.is_dir()
-    assert (run_dir / "events.jsonl").is_file()
-    assert result.skill_version  # 40-char git commit from the fake skill repo
-    assert result.runner == "w1"
-    # bundle + result archive cleaned up
-    assert list(broker.bundle_dir.iterdir()) == []
-
-
-def test_execute_returns_failed_when_worker_reports_failure(
-    tmp_path: Path, context: ExecutionContext
-) -> None:
+def test_execute_submits_and_returns_none(tmp_path: Path, context: ExecutionContext) -> None:
     broker = _make_broker(tmp_path)
     executor = _make_executor(tmp_path, broker)
 
-    def failing_worker() -> None:
-        deadline = time.monotonic() + 10
-        claim = None
-        while time.monotonic() < deadline:
-            claim = broker.dequeue("w1", {"review_keywords"})
-            if claim is not None:
-                break
-            time.sleep(0.05)
-        assert claim is not None
-        broker.complete(
-            claim.execution_id,
-            "w1",
-            RemoteOutcome(
-                status="failed",
-                exit_code=1,
-                error_message="Missing outputs after Pi run: out.json",
-            ),
-        )
+    assert executor.execute(context) is None
 
-    worker = threading.Thread(target=failing_worker)
-    worker.start()
-    result = executor.execute(context)
-    worker.join(timeout=10)
-    assert result.status == "failed"
-    assert "Missing outputs" in result.error_message
-
-
-def test_cancel_unblocks_execute(tmp_path: Path, context: ExecutionContext) -> None:
-    broker = _make_broker(tmp_path)
-    executor = _make_executor(tmp_path, broker)
-    submitted = threading.Event()
-    original_submit = broker.submit
-
-    def submit_then_signal(payload: RemoteExecutionPayload) -> None:
-        original_submit(payload)
-        submitted.set()
-
-    broker.submit = submit_then_signal
-
-    def canceller() -> None:
-        # Cancel only after the execution is enqueued so the signal cannot be lost.
-        assert submitted.wait(timeout=10)
-        executor.cancel(context.execution_id)
-
-    thread = threading.Thread(target=canceller)
-    thread.start()
-    result = executor.execute(context)
-    thread.join(timeout=10)
-    assert result.status == "cancelled"
-
-
-def test_execute_failed_after_requeue_limit(tmp_path: Path, context: ExecutionContext) -> None:
-    broker = _make_broker(tmp_path, claim_timeout_seconds=0.05, requeue_limit=1)
-    executor = _make_executor(tmp_path, broker)
-
-    def zombie_worker() -> None:
-        # Claim twice without ever heartbeating; broker sweeps and fails.
-        for _ in range(2):
-            deadline = time.monotonic() + 10
-            while time.monotonic() < deadline:
-                claim = broker.dequeue("w-zombie", {"review_keywords"})
-                if claim is not None:
-                    break
-                time.sleep(0.05)
-            time.sleep(0.1)  # let the claim go stale
-
-    worker = threading.Thread(target=zombie_worker)
-    worker.start()
-    result = executor.execute(context)
-    worker.join(timeout=10)
-    assert result.status == "failed"
-    assert "requeue limit" in result.error_message
+    payload = broker.payload_for(context.execution_id)
+    assert payload is not None
+    assert payload.lease_id == context.lease_id
+    assert payload.job_id == context.job_id
+    assert payload.node_key == context.node_key
+    assert payload.capability == context.capability
+    assert payload.manifest["run_token"]
+    assert payload.manifest["skill_version"]
+    # execute renders the command spec at submit time; placeholders stay for
+    # the worker to substitute with its local paths.
+    spec = payload.command_spec
+    assert spec is not None and spec["version"] == 1
+    assert "{job_dir}" in spec["prompt"]
+    assert any("{prompt_file}" in part for part in spec["command"])
+    assert (broker.bundle_dir / payload.bundle_name).is_file()
+    # The submitted work is claimable by a worker.
+    claim = broker.dequeue("w1", {"review_keywords"})
+    assert claim is not None and claim.execution_id == context.execution_id
+    assert claim.command_spec == spec
+    assert broker.active_lease_ids() == [context.lease_id]
 
 
 def test_unsupported_capability(tmp_path: Path, context: ExecutionContext) -> None:
@@ -204,59 +80,49 @@ def test_unsupported_capability(tmp_path: Path, context: ExecutionContext) -> No
     executor = _make_executor(tmp_path, broker)
     unsupported = dataclasses.replace(context, capability="nope")
     result = executor.execute(unsupported)
+    assert result is not None
     assert result.status == "failed"
     assert "not supported" in result.error_message
 
 
-def test_execute_fails_when_result_archive_misses_expected_output(
+def test_cancel_before_execute_returns_early_result(
     tmp_path: Path, context: ExecutionContext
 ) -> None:
     broker = _make_broker(tmp_path)
     executor = _make_executor(tmp_path, broker)
-    # Worker reports success but the archive does not contain the expected output.
-    worker = threading.Thread(
-        target=_fake_worker, args=(broker, broker.bundle_dir, "unexpected.json")
-    )
-    worker.start()
-
+    executor.cancel(context.execution_id)
     result = executor.execute(context)
+    assert result is not None
+    assert result.status == "cancelled"
+    assert broker.payload_for(context.execution_id) is None  # nothing was submitted
 
-    worker.join(timeout=10)
-    assert result.status == "failed"
-    assert "Missing outputs" in result.error_message
 
-
-def test_execute_fails_when_result_archive_is_not_unpackable(
+def test_cancel_landing_during_submit_cancels_execution(
     tmp_path: Path, context: ExecutionContext
 ) -> None:
     broker = _make_broker(tmp_path)
     executor = _make_executor(tmp_path, broker)
+    original_submit = broker.submit
 
-    def garbage_worker() -> None:
-        deadline = time.monotonic() + 10
-        claim = None
-        while time.monotonic() < deadline:
-            claim = broker.dequeue("w1", {"review_keywords"})
-            if claim is not None:
-                break
-            time.sleep(0.05)
-        assert claim is not None
-        archive = broker.bundle_dir / f"{claim.execution_id}.result.tar.gz"
-        archive.write_bytes(b"not a valid tar.gz")
-        outcome = RemoteOutcome(
-            status="completed",
-            exit_code=0,
-            command=("pi", "--mode", "json"),
-            skill_version=claim.manifest["skill_version"],
-            result_archive_name=archive.name,
-        )
-        assert broker.complete(claim.execution_id, "w1", outcome) is True
+    def submit_then_cancel(payload: object) -> None:
+        original_submit(payload)  # type: ignore[arg-type]
+        # A cancel racing the submit must not be lost once the row exists.
+        executor.cancel(context.execution_id)
 
-    worker = threading.Thread(target=garbage_worker)
-    worker.start()
+    broker.submit = submit_then_cancel  # type: ignore[method-assign]
+    assert executor.execute(context) is None
+    assert broker.wait_result(context.execution_id).status == "cancelled"
 
+
+def test_execute_returns_failed_when_dispatch_raises(
+    tmp_path: Path, context: ExecutionContext
+) -> None:
+    broker = _make_broker(tmp_path)
+    executor = _make_executor(tmp_path, broker)
+    # Remove a declared input so the bundle build fails before submission.
+    (context.job_dir / context.inputs[0]).unlink()
     result = executor.execute(context)
-
-    worker.join(timeout=10)
+    assert result is not None
     assert result.status == "failed"
-    assert "failed to unpack" in result.error_message
+    assert "remote dispatch error" in result.error_message
+    assert broker.payload_for(context.execution_id) is None

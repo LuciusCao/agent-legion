@@ -2,7 +2,7 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlencode
 
 from server.app.configuration import load_application_config
@@ -154,7 +154,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     jobs_dir = resolved_data_dir / "jobs"
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
-    executor_definitions = load_executor_definitions(config.get("executors", {}))
+    executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     return Settings(
         root_dir=root_dir,

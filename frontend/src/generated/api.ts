@@ -1150,6 +1150,10 @@ export interface components {
       bundle_url: string
       /** Capability */
       capability: string
+      /** Command Spec */
+      command_spec?: {
+        [key: string]: unknown
+      } | null
       /** Execution Id */
       execution_id: string
       /** Job Id */
