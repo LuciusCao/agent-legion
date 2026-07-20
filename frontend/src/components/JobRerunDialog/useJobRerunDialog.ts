@@ -6,6 +6,7 @@ import {
   excludedJobs,
   type WorkflowNodesByKey,
 } from '../../lib/workflowNodes'
+import { partitionJobsForNodeRerun } from './rerunEligibility'
 
 export type UseJobRerunDialogOptions = {
   jobs: JobSummary[]
@@ -61,6 +62,14 @@ export function useJobRerunDialog({
     [jobs, effectiveNodeKey, workflowNodesByKey, workflowDefinition]
   )
 
+  const eligibility = useMemo(
+    () =>
+      effectiveNodeKey
+        ? partitionJobsForNodeRerun(jobs, effectiveNodeKey, excluded)
+        : { runnableJobs: [], notStartedJobs: [], runningJobs: [] },
+    [effectiveNodeKey, excluded, jobs]
+  )
+
   return {
     orderedNodes,
     selectedNodeKey,
@@ -71,5 +80,6 @@ export function useJobRerunDialog({
     failedJobs,
     nonFailedJobs,
     excluded,
+    ...eligibility,
   }
 }

@@ -65,7 +65,8 @@ export interface JobState {
   batchRerun: (
     workspaceId: string,
     nodeKey: string | null,
-    fromFailedNode?: boolean
+    fromFailedNode?: boolean,
+    jobIds?: string[]
   ) => Promise<BatchJobMutationResult>
   batchDelete: (workspaceId: string) => Promise<BatchJobMutationResult>
   batchPackage: (workspaceId: string) => Promise<WorkspacePackageResult>

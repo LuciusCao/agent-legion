@@ -55,7 +55,6 @@ export default function WorkspaceMainPage() {
   const [workflowDefinition, setWorkflowDefinition] =
     useState<WorkflowDefinitionRecord | null>(null)
   const [workflowError, setWorkflowError] = useState<string | null>(null)
-
   useWorkspaceEvents(workspaceId)
 
   useEffect(() => {
@@ -110,9 +109,11 @@ export default function WorkspaceMainPage() {
 
   const handleRerun = async (
     nodeKey: string | null,
-    fromFailedNode?: boolean
+    fromFailedNode?: boolean,
+    jobIds?: string[]
   ) => {
-    if (workspaceId) await batchRerun(workspaceId, nodeKey, fromFailedNode)
+    if (workspaceId)
+      await batchRerun(workspaceId, nodeKey, fromFailedNode, jobIds)
   }
 
   const handleRunTo = async (targetKey: string, startKey?: string) => {

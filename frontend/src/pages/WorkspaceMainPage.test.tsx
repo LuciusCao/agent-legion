@@ -475,12 +475,33 @@ describe('WorkspaceMainPage', () => {
         id: 'j1',
         status: 'failed',
         workflow_key: 'question_content',
+        node_summaries: [
+          {
+            node_key: 'extract',
+            label: '提取',
+            status: 'failed',
+            error_message: 'boom',
+          },
+        ],
+      }),
+      makeJob({
+        id: 'j2',
+        status: 'queued',
+        workflow_key: 'question_content',
+        node_summaries: [
+          {
+            node_key: 'extract',
+            label: '提取',
+            status: 'stale',
+            error_message: '',
+          },
+        ],
       }),
     ]
     mockFetchJobs.mockResolvedValue({ jobs: seed })
     useJobStore.setState({
       jobs: seed,
-      selectedIds: new Set(['j1']),
+      selectedIds: new Set(['j1', 'j2']),
       selectMode: true,
     })
 
@@ -502,9 +523,12 @@ describe('WorkspaceMainPage', () => {
     })
 
     expect(screen.getByText('选择重跑节点')).toBeInTheDocument()
+    expect(
+      screen.getByText('已选择 2 个任务，可重跑 1 个，1 个尚未执行到所选节点')
+    ).toBeInTheDocument()
 
     await act(async () => {
-      screen.getByText('确认重跑').click()
+      screen.getByText('重跑 1 个任务').click()
     })
 
     expect(mockBatchRerunJobs).toHaveBeenCalledWith('ws1', 'extract', ['j1'], {
