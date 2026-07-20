@@ -5,7 +5,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel
 from starlette import concurrency
 
-from server.app.routes.remote_auth import create_worker_authorizer
+from server.app.routes.remote_auth import WorkerAuthenticator, create_worker_authorizer
 from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
 from server.app.settings import Settings
 
@@ -14,11 +14,13 @@ class ArtifactUploadResponse(BaseModel):
     hash: str
 
 
-def create_artifacts_router(store: ArtifactStore, settings: Settings) -> APIRouter:
+def create_artifacts_router(
+    store: ArtifactStore, settings: Settings, broker: WorkerAuthenticator | None = None
+) -> APIRouter:
     """Worker-facing artifact upload/download; auth + forwarding only (no storage logic)."""
     router = APIRouter(prefix="/artifacts", tags=["artifacts"])
     remote_config = settings.executor_runtime.remote
-    authorize = create_worker_authorizer(remote_config)
+    authorize = create_worker_authorizer(remote_config, broker)
 
     @router.post("", status_code=201, response_model=ArtifactUploadResponse)
     async def upload_artifact(request: Request) -> ArtifactUploadResponse:

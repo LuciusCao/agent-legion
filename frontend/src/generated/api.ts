@@ -499,6 +499,40 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/remote/workers/register': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Register Worker Token */
+    post: operations['register_worker_token_api_remote_workers_register_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/remote/workers/{worker_id}/revoke': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Revoke Worker Token */
+    post: operations['revoke_worker_token_api_remote_workers__worker_id__revoke_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/resource-providers': {
     parameters: {
       query?: never
@@ -2107,6 +2141,29 @@ export interface components {
       /** Paused */
       paused: boolean
     }
+    /** WorkerTokenRegisterRequest */
+    WorkerTokenRegisterRequest: {
+      /** Capabilities */
+      capabilities: string[]
+      /** Labels */
+      labels?: {
+        [key: string]: unknown
+      }
+      /**
+       * Name
+       * @default
+       */
+      name: string
+      /** Slots */
+      slots: number
+      /** Worker Id */
+      worker_id: string
+    }
+    /** WorkerTokenRegisterResponse */
+    WorkerTokenRegisterResponse: {
+      /** Worker Token */
+      worker_token: string
+    }
     /** WorkersResponse */
     WorkersResponse: {
       /** Workers */
@@ -3638,6 +3695,68 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkersResponse']
+        }
+      }
+    }
+  }
+  register_worker_token_api_remote_workers_register_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['WorkerTokenRegisterRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkerTokenRegisterResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  revoke_worker_token_api_remote_workers__worker_id__revoke_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        worker_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
         }
       }
     }

@@ -57,6 +57,10 @@ class RemoteRuntimeConfig(BaseModel):
     claim_timeout_seconds: float = Field(default=120.0, gt=0)
     requeue_limit: int = Field(default=3, ge=0)
     max_archive_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
+    # Fallback window: accept the global static worker_token on worker-facing
+    # endpoints while workers migrate to per-worker tokens. Revocation still
+    # wins over the window. Remove one version after per-worker tokens ship.
+    allow_legacy_worker_token: bool = True
 
 
 class ExecutorRuntimeConfig(BaseModel):

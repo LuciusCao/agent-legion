@@ -291,3 +291,15 @@ invariants:
       - kind: contract
         target: tests/test_architecture_execution_decoupling.py
         gate: quick
+
+  - id: SECURITY-WORKER-001
+    statement: "Remote worker credentials must be per-worker and revocable: per-worker tokens are persisted only as sha256 hashes of the secret part, revocation takes effect immediately (and beats the static-token fallback window), and management endpoints accept only the global management token. New shared-credential paths on worker-facing endpoints are forbidden."
+    owner: security
+    risk: critical
+    evidence:
+      - kind: integration
+        target: tests/remote/test_worker_tokens.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_worker_token_security.py
+        gate: full
