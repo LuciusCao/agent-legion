@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, act, fireEvent, waitFor } from '@testing-library/react'
-import { Routes, Route } from 'react-router-dom'
+import { Link, Routes, Route } from 'react-router-dom'
 import { MemoryRouter } from '../testing/TestMemoryRouter'
 import WorkspaceMainPage from './WorkspaceMainPage'
 import { useJobStore } from '../stores/jobStore'
@@ -74,6 +74,20 @@ vi.mock('../jobWorkflowUpgradeApi', () => ({
 function renderPage(workspaceId = 'ws1') {
   return render(
     <MemoryRouter initialEntries={[`/workspaces/${workspaceId}`]}>
+      <Routes>
+        <Route
+          path="/workspaces/:workspaceId/*"
+          element={<WorkspaceMainPage />}
+        />
+      </Routes>
+    </MemoryRouter>
+  )
+}
+
+function renderPageWithWorkspaceSwitcher() {
+  return render(
+    <MemoryRouter initialEntries={['/workspaces/ws1']}>
+      <Link to="/workspaces/ws2">切换 Workspace</Link>
       <Routes>
         <Route
           path="/workspaces/:workspaceId/*"
@@ -419,6 +433,37 @@ describe('WorkspaceMainPage', () => {
     })
 
     expect(useJobStore.getState().filterConfig.search).toBe('algebra')
+  })
+
+  it('clears job filters when switching workspaces', async () => {
+    useJobStore.setState({
+      jobsWorkspaceId: 'ws1',
+      filterConfig: {
+        status: 'failed',
+        search: 'algebra',
+        workflowVersion: null,
+        activeNodeKey: null,
+      },
+    })
+
+    await act(async () => {
+      renderPageWithWorkspaceSwitcher()
+    })
+    expect(screen.getByPlaceholderText('搜索 ID / 标题 / 批次')).toHaveValue(
+      'algebra'
+    )
+
+    await act(async () => {
+      screen.getByRole('link', { name: '切换 Workspace' }).click()
+    })
+
+    expect(useJobStore.getState().filterConfig).toEqual({
+      status: null,
+      search: '',
+      workflowVersion: null,
+      activeNodeKey: null,
+    })
+    expect(screen.getByPlaceholderText('搜索 ID / 标题 / 批次')).toHaveValue('')
   })
 
   it('submits batch rerun with selected node key', async () => {

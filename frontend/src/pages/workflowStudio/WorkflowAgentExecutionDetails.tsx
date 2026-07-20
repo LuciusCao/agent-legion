@@ -20,8 +20,9 @@ export function WorkflowAgentExecutionDetails(props: {
 }) {
   const [dialog, setDialog] = useState<'prompt' | 'skill' | null>(null)
   const draft = parseWorkflowNode(props.definitionYaml, props.node.key)
-  const additionalPrompt =
-    draft?.execution?.prompt ?? props.node.execution?.prompt ?? ''
+  const additionalPrompt = draft
+    ? (draft.execution?.prompt ?? '')
+    : (props.node.execution?.prompt ?? '')
   const skillKey = props.binding.detail.skill ?? ''
   return (
     <>

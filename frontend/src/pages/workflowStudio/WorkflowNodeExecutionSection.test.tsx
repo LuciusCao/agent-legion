@@ -98,6 +98,48 @@ describe('WorkflowNodeExecutionSection', () => {
     expect(nextYaml).toContain('model: gpt-5')
   })
 
+  it('keeps a cleared provider empty instead of restoring the persisted value', () => {
+    let nextYaml = ''
+    const nodeWithProvider: WorkflowNodeRecord = {
+      ...node,
+      execution: {
+        provider: 'deepseek',
+        model: '',
+        thinking: '',
+        prompt: '',
+      },
+    }
+    const initialYaml = `nodes:\n  generate_key_info:\n    capability: generate_key_info\n    execution:\n      provider: deepseek\n`
+    const { rerender } = render(
+      <WorkflowNodeExecutionSection
+        node={nodeWithProvider}
+        executorCatalog={executorCatalog}
+        definitionYaml={initialYaml}
+        setDefinitionYaml={(value) => {
+          nextYaml = value
+        }}
+      />
+    )
+
+    fireEvent.change(screen.getByLabelText('Provider'), {
+      target: { value: '' },
+    })
+
+    expect(nextYaml).not.toContain('provider:')
+    rerender(
+      <WorkflowNodeExecutionSection
+        node={nodeWithProvider}
+        executorCatalog={executorCatalog}
+        definitionYaml={nextYaml}
+        setDefinitionYaml={(value) => {
+          nextYaml = value
+        }}
+      />
+    )
+    expect(screen.getByLabelText('Provider')).toHaveValue('')
+    expect(screen.getByText('继承全局：deepseek')).toBeInTheDocument()
+  })
+
   it('shows an empty state when no executor supports the capability', () => {
     render(
       <WorkflowNodeExecutionSection
