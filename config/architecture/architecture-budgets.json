@@ -205,6 +205,7 @@
     "frontend/src/lib/jobDag.ts": 81,
     "frontend/src/lib/jobRuns.ts": 59,
     "frontend/src/lib/jobWorkflowVersion.ts": 27,
+    "frontend/src/lib/katexNormalize.ts": 22,
     "frontend/src/lib/latex.ts": 206,
     "frontend/src/lib/materialWeb.ts": 17,
     "frontend/src/lib/parsers.ts": 62,
