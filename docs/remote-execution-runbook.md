@@ -156,26 +156,60 @@ Startup validation fails fast if any `kind: remote` executor is defined without
 the token, so a misconfigured server never starts half-open. Restart the server
 after these changes.
 
+### Issuing per-worker tokens
+
+The static token doubles as the **management token**: it is the only
+credential accepted by the worker-token issuance and revocation endpoints.
+Issue each worker its own revocable token (returned exactly once — only the
+sha256 hash of the secret part is stored server-side):
+
+```bash
+curl -sS -X POST http://localhost:8000/api/remote/workers/register \
+  -H "X-Worker-Token: $VIDEO_HIVE_REMOTE_WORKER_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"worker_id": "mac-mini-1", "name": "Mac mini",
+       "capabilities": ["generate_key_info", "review_key_info"], "slots": 1}'
+# => {"worker_token": "mac-mini-1.<secret>"}
+```
+
+Re-issuing for the same `worker_id` rotates the token (the old secret stops
+working immediately) and re-onboards a previously revoked worker. You normally
+do not run this by hand — workers exchange the management token themselves at
+startup (§7).
+
+During the migration window the legacy static token is still accepted on the
+worker-facing endpoints (claim/heartbeat/result/bundle/artifacts); the window
+is controlled by `remote.allow_legacy_worker_token` (default `true`). Set it
+to `false` once every worker runs with `--register-token` — per-worker tokens
+keep working, the shared token stops.
+
 ## 7. Launching workers
 
 One worker process per concurrent execution slot. Example: fill a Mac mini
 (16 GB → ~65 slots, see capacity rule below):
 
 ```bash
-export REMOTE_WORKER_TOKEN='<random-token>'   # same value as server .env
+export REMOTE_WORKER_REGISTER_TOKEN='<random-token>'   # same value as server .env
 for i in $(seq 1 65); do
   nohup python3 worker.py --server http://<laptop-tailnet-ip>:8000 \
-    --token "$REMOTE_WORKER_TOKEN" --worker-id "mac-mini-$i" \
+    --register-token "$REMOTE_WORKER_REGISTER_TOKEN" --worker-id "mac-mini-$i" \
     --name "Mac mini" --slots 1 \
     --capabilities generate_key_info,review_key_info \
     --work-dir ~/remote-worker >> ~/remote-worker.log 2>&1 &
 done
 ```
 
-`--token` defaults to the `REMOTE_WORKER_TOKEN` env var; `--worker-id` defaults
-to the hostname; `--capabilities` is a comma-separated list and must be a
-subset of the executor's declared capabilities. See `python3 worker.py --help`
-for all flags (`--poll-interval`, etc.).
+With `--register-token` (env `REMOTE_WORKER_REGISTER_TOKEN`) each worker
+exchanges the management token for its own per-worker token at startup and
+runs the main loop with it — the per-worker token is what the server
+authenticates, and it can be revoked per device (§11). The legacy form
+(`--token` / `REMOTE_WORKER_TOKEN`, the shared static token) still works
+during the fallback window (`remote.allow_legacy_worker_token`, §6) and keeps
+its old self-register behavior.
+
+`--worker-id` defaults to the hostname; `--capabilities` is a comma-separated
+list and must be a subset of the executor's declared capabilities. See
+`python3 worker.py --help` for all flags (`--poll-interval`, etc.).
 
 **Capacity rule:** budget 200 MB RAM per agent process (measured pi RSS: settled
 ~150 MB, peak ~187 MB — see §9). Mac mini 16 GB → ~65 slots; Raspberry Pi 16 GB
@@ -347,7 +381,25 @@ not raise the budget silently (spec Risks).
   address. It proxies only `POST /v1/*`.
 - **Token handling:** `VIDEO_HIVE_REMOTE_WORKER_TOKEN` lives in the server's
   `.env` and in the workers' launch environment — never in `config/workflow.yaml`,
-  command templates, or logs. Rotate by updating both sides and restarting.
+  command templates, or logs. It now doubles as the management token for the
+  worker-token endpoints. Per-worker tokens are stored server-side as sha256
+  hashes of the secret part only; the plaintext is shown once at issuance.
+- **Revoking a worker:** when a device is lost or suspect, revoke it — the
+  per-worker token stops authenticating immediately, and even the legacy
+  static token is rejected for that `worker_id` while the fallback window is
+  open (revocation beats the window):
+
+  ```bash
+  curl -sS -X POST http://localhost:8000/api/remote/workers/<worker_id>/revoke \
+    -H "X-Worker-Token: $VIDEO_HIVE_REMOTE_WORKER_TOKEN"
+  ```
+
+  Re-onboard later by re-issuing via `workers/register` (§6): it rotates the
+  token and clears the revocation.
+- **Fallback window:** `remote.allow_legacy_worker_token` (default `true`)
+  keeps the shared static token valid on worker-facing endpoints while workers
+  migrate to `--register-token`; set it to `false` after the fleet is migrated
+  and before the window is removed in a future version.
 - **Worker hygiene:** no credentials, secret-bearing prompts, or API keys in
   worker logs; workers store no persistent state.
 - **Archive safety:** result archives are path-validated on both ends (no

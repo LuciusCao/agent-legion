@@ -117,6 +117,21 @@ exemptions:
     reports; no response body contract exists to model.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6
+- check: architecture.route_response_model
+  path: server/app/routes/remote.py:revoke_worker_token
+  reason: Task 4 of the phase4 agent-collaboration plan returns an empty 204 for worker
+    token revocation; no response body contract exists to model.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-4
+- check: architecture.file_budget
+  path: server/app/routes/remote_auth.py
+  reason: Task 4 of the phase4 agent-collaboration plan extends the extracted worker
+    authorizer with per-worker token authentication plus the static-token fallback
+    window (authorize_worker); the helper stays a single focused module and the
+    budget will be re-ratcheted when the fallback window is removed.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-4
+  ceiling: 94
 - check: architecture.file_budget
   path: server/app/routes/remote.py
   reason: Task 3 of the runner-audit plan adds the read-only GET /workers endpoint and
@@ -126,9 +141,10 @@ exemptions:
     agent-collaboration plan extracts the _authorize helper into
     routes/remote_auth.py, shrinking this module. Task 3 of the phase4
     agent-collaboration plan validates output_artifacts hashes in report_result.
+    Task 4 adds the workers/register and workers/{id}/revoke management endpoints.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-runner-audit.md#task-3
-  ceiling: 176
+  ceiling: 219
 - check: architecture.file_budget
   path: server/app/executors/local.py
   reason: Task 2 of the phase3 execution-decoupling plan moves build_local_executor
@@ -161,10 +177,11 @@ exemptions:
     exposes the claim sweep as sweep_expired_claims; the worker-registry
     section will be extracted into its own module once remote execution
     stabilizes. Task 3 of the phase4 agent-collaboration plan adds the
-    RemoteOutcome.output_artifacts field.
+    RemoteOutcome.output_artifacts field. Task 4 adds the worker trust
+    section (issue/authenticate/revoke per-worker tokens, SEC-WORKER-001).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 348
+  ceiling: 462
 - check: architecture.file_budget
   path: server/app/executors/runtime.py
   reason: Task 6 of the phase3 execution-decoupling plan adds the submit-only
@@ -179,7 +196,8 @@ exemptions:
     to WorkerClient and the bundle_mode=refs input pull / outputs upload to
     run_execution; the single-file stdlib worker cannot be split without
     breaking its copy-to-any-machine deployment, so the ceiling tracks growth
-    until the artifact section is extracted into a generated bundle.
+    until the artifact section is extracted into a generated bundle. Task 4
+    adds the --register-token startup exchange for per-worker tokens.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-3
-  ceiling: 460
+  ceiling: 509

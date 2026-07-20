@@ -61,7 +61,7 @@ def create_router(
     if remote_broker is not None:
         router.include_router(create_remote_router(remote_broker, settings, artifact_store))
     if artifact_store is not None:
-        router.include_router(create_artifacts_router(artifact_store, settings))
+        router.include_router(create_artifacts_router(artifact_store, settings, remote_broker))
     router.include_router(create_workflow_catalog_router(workflow_catalog, settings))
     router.include_router(create_workflow_resource_providers_router(workflow_catalog, settings))
     router.include_router(

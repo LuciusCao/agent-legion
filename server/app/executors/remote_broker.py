@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import hashlib
+import hmac
 import json
 import logging
+import secrets
 import sqlite3
 import threading
 from collections.abc import Callable, Collection, Mapping
@@ -67,6 +70,19 @@ class RemoteOutcome:
 
 def _utcnow() -> datetime:
     return datetime.now(UTC)
+
+
+def _validate_labels(labels: Mapping[str, Any]) -> None:
+    """Worker labels are flat scalars only; nested objects could smuggle large
+    or sensitive payloads into the registry (spec Security)."""
+    for key, value in labels.items():
+        if not isinstance(key, str):
+            raise ValueError(f"labels keys must be strings, got {type(key).__name__}")
+        if not isinstance(value, (str, int, float, bool)):
+            raise ValueError(
+                f"labels values must be str/int/float/bool scalars, got {type(value).__name__}"
+                f" for key {key!r}"
+            )
 
 
 class RemoteExecutionBroker:
@@ -284,6 +300,104 @@ class RemoteExecutionBroker:
                 }
                 for row in rows
             ]
+
+    # ---- worker trust: per-worker tokens (SEC-WORKER-001) ----
+
+    def issue_worker_token(
+        self,
+        worker_id: str,
+        name: str,
+        capabilities: list[str],
+        slots: int,
+        labels: Mapping[str, Any] | None = None,
+    ) -> str:
+        """Register/rotate a worker and return its plaintext token exactly once.
+
+        Only ``sha256(secret)`` is persisted; the worker_id half of the token
+        is the plaintext lookup key. Re-issuing rotates the hash (the old
+        secret dies immediately) and clears any prior revocation — re-issuance
+        is the operator's re-onboarding path and requires the management token.
+        """
+        flat_labels = dict(labels or {})
+        _validate_labels(flat_labels)
+        secret = secrets.token_urlsafe(32)
+        token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+        retry_on_sqlite_lock(
+            lambda: self._upsert_worker_token(
+                worker_id, name, capabilities, slots, flat_labels, token_hash
+            )
+        )
+        return f"{worker_id}.{secret}"
+
+    def _upsert_worker_token(
+        self,
+        worker_id: str,
+        name: str,
+        caps: list[str],
+        slots: int,
+        labels: dict[str, Any],
+        token_hash: str,
+    ) -> None:
+        now = _sqlite_timestamp(self._now())
+        self._write(
+            "insert into remote_workers"
+            " (worker_id, name, capabilities_json, slots, labels_json, token_hash,"
+            "  registered_at, last_seen_at)"
+            " values (?, ?, ?, ?, ?, ?, ?, ?) on conflict(worker_id) do update set"
+            "   name = excluded.name, capabilities_json = excluded.capabilities_json,"
+            "   slots = excluded.slots, labels_json = excluded.labels_json,"
+            "   token_hash = excluded.token_hash, revoked_at = null,"
+            "   last_seen_at = excluded.last_seen_at",
+            (worker_id, name, json.dumps(caps), slots, json.dumps(labels), token_hash, now, now),
+        )
+
+    def authenticate_worker(self, token: str) -> dict[str, Any] | None:
+        """Resolve ``{worker_id}.{secret}`` to the worker record, or None.
+
+        Revoked workers and hash mismatches both return None; the caller cannot
+        distinguish them (no oracle for valid worker_ids).
+        """
+        worker_id, sep, secret = token.partition(".")
+        if not sep or not worker_id or not secret:
+            return None
+        with read_connection(self._db_path) as conn:
+            row = conn.execute(
+                "select worker_id, name, capabilities_json, slots, labels_json, token_hash,"
+                " revoked_at from remote_workers where worker_id = ?",
+                (worker_id,),
+            ).fetchone()
+        if row is None or row["revoked_at"] is not None or not row["token_hash"]:
+            return None
+        digest = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+        if not hmac.compare_digest(digest, row["token_hash"]):
+            return None
+        return {
+            "worker_id": row["worker_id"],
+            "name": row["name"],
+            "capabilities": json.loads(row["capabilities_json"]),
+            "slots": row["slots"],
+            "labels": json.loads(row["labels_json"]),
+        }
+
+    def revoke_worker(self, worker_id: str) -> bool:
+        """Mark a worker revoked; authentication rejects it from this commit on."""
+
+        def _revoke() -> bool:
+            with write_transaction(self._db_path) as conn:
+                cursor = conn.execute(
+                    "update remote_workers set revoked_at = ? where worker_id = ?",
+                    (_sqlite_timestamp(self._now()), worker_id),
+                )
+                return cursor.rowcount > 0
+
+        return retry_on_sqlite_lock(_revoke)
+
+    def is_worker_revoked(self, worker_id: str) -> bool:
+        with read_connection(self._db_path) as conn:
+            row = conn.execute(
+                "select revoked_at from remote_workers where worker_id = ?", (worker_id,)
+            ).fetchone()
+        return row is not None and row["revoked_at"] is not None
 
     # ---- internals ----
 

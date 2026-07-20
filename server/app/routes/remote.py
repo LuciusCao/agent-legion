@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hmac
 import json
 import re
 from typing import Any
@@ -27,6 +28,20 @@ class RegisterRequest(BaseModel):
     name: str = ""
     capabilities: list[str] = Field(min_length=1)
     slots: int = Field(gt=0)
+
+
+class WorkerTokenRegisterRequest(BaseModel):
+    worker_id: str = Field(min_length=1)
+    name: str = ""
+    capabilities: list[str] = Field(min_length=1)
+    slots: int = Field(gt=0)
+    labels: dict[str, Any] = Field(default_factory=dict)
+
+
+class WorkerTokenRegisterResponse(BaseModel):
+    # The plaintext per-worker token is returned exactly once; only its
+    # sha256 hash is persisted server-side.
+    worker_token: str
 
 
 class ClaimRequest(BaseModel):
@@ -65,11 +80,39 @@ def create_remote_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/remote", tags=["remote"])
     remote_config = settings.executor_runtime.remote
-    _authorize = create_worker_authorizer(remote_config)
+    _authorize = create_worker_authorizer(remote_config, broker)
+
+    def _authorize_management(request: Request) -> None:
+        """Token issuance/revocation accept only the global management token."""
+        if not remote_config.worker_token:
+            raise HTTPException(status_code=503, detail="remote execution is not enabled")
+        token = request.headers.get("x-worker-token", "")
+        if not hmac.compare_digest(token, remote_config.worker_token):
+            raise HTTPException(status_code=401, detail="invalid management token")
 
     def _validate_execution_id(execution_id: str) -> None:
         if not _EXECUTION_ID_RE.match(execution_id):
             raise HTTPException(status_code=400, detail="invalid execution id")
+
+    @router.post("/workers/register", status_code=201, response_model=WorkerTokenRegisterResponse)
+    def register_worker_token(
+        payload: WorkerTokenRegisterRequest, request: Request
+    ) -> WorkerTokenRegisterResponse:
+        _authorize_management(request)
+        try:
+            token = broker.issue_worker_token(
+                payload.worker_id, payload.name, payload.capabilities, payload.slots, payload.labels
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return WorkerTokenRegisterResponse(worker_token=token)
+
+    @router.post("/workers/{worker_id}/revoke", status_code=204)
+    def revoke_worker_token(worker_id: str, request: Request) -> Response:
+        _authorize_management(request)
+        if not broker.revoke_worker(worker_id):
+            raise HTTPException(status_code=404, detail="unknown worker")
+        return Response(status_code=204)
 
     @router.post("/register", status_code=204)
     def register(payload: RegisterRequest, request: Request) -> Response:
@@ -97,7 +140,7 @@ def create_remote_router(
         responses={200: {"content": {"application/gzip": {}}}},
     )
     def download_bundle(execution_id: str, request: Request) -> FileResponse:
-        worker_id = _authorize(request)
+        worker_id = str(_authorize(request)["worker_id"])
         _validate_execution_id(execution_id)
         bundle_name = broker.bundle_name_for(execution_id, worker_id)
         if bundle_name is None:
@@ -109,7 +152,7 @@ def create_remote_router(
 
     @router.post("/executions/{execution_id}/heartbeat", status_code=204)
     def heartbeat(execution_id: str, request: Request) -> Response:
-        worker_id = _authorize(request)
+        worker_id = str(_authorize(request)["worker_id"])
         _validate_execution_id(execution_id)
         if not broker.heartbeat(execution_id, worker_id):
             raise HTTPException(status_code=409, detail="claim lost")
@@ -117,7 +160,7 @@ def create_remote_router(
 
     @router.post("/executions/{execution_id}/result", status_code=204)
     async def report_result(execution_id: str, request: Request) -> Response:
-        worker_id = _authorize(request)
+        worker_id = str(_authorize(request)["worker_id"])
         _validate_execution_id(execution_id)
         meta_raw = request.headers.get("x-remote-result")
         if not meta_raw:
