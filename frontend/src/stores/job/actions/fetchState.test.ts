@@ -15,6 +15,12 @@ describe('resetForWorkspace', () => {
       isLoading: false,
       error: 'boom',
       selectedIds: new Set(['j1']),
+      filterConfig: {
+        status: 'failed',
+        search: 'algebra',
+        workflowVersion: 4,
+        activeNodeKey: 'review',
+      },
     })
 
     const next = resetForWorkspace('ws2')(state)
@@ -24,19 +30,32 @@ describe('resetForWorkspace', () => {
     expect(next.jobsWorkspaceId).toBe('ws2')
     expect(next.error).toBeNull()
     expect(next.selectedIds).toEqual(new Set())
+    expect(next.filterConfig).toEqual({
+      status: null,
+      search: '',
+      workflowVersion: null,
+      activeNodeKey: null,
+    })
   })
 
-  it('preserves selectedIds when jobsWorkspaceId matches target workspace and clears jobs', () => {
+  it('preserves selection and filters when jobsWorkspaceId matches target workspace', () => {
     const state = createJobState({
       jobsWorkspaceId: 'ws1',
       jobs: [createJobSummary({ id: 'j1', workspace_id: 'ws1' })],
       selectedIds: new Set(['j1']),
+      filterConfig: {
+        status: 'completed',
+        search: 'geometry',
+        workflowVersion: 3,
+        activeNodeKey: 'generate',
+      },
     })
 
     const next = resetForWorkspace('ws1')(state)
 
     expect(next.jobs).toEqual([])
     expect(next.selectedIds).toEqual(new Set(['j1']))
+    expect(next.filterConfig).toEqual(state.filterConfig)
   })
 
   it('preserves selectedIds when all jobs belong to target workspace and clears jobs', () => {

@@ -198,6 +198,7 @@ export default function WorkspaceMainPage() {
 
       <section>
         <JobFilterBar
+          key={workspaceId}
           filterConfig={filterConfig}
           counts={filterCounts}
           workflowDefinition={workflowDefinition}

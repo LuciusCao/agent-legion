@@ -18,7 +18,9 @@ export function WorkflowNodeRuntimeSettings(props: {
   readOnly?: boolean
 }) {
   const draft = parseWorkflowNode(props.definitionYaml, props.node.key)
-  const execution = draft?.execution ?? props.node.execution ?? {}
+  const execution = draft
+    ? (draft.execution ?? {})
+    : (props.node.execution ?? {})
   const patch = (
     field: 'provider' | 'model' | 'thinking' | 'prompt',
     value: string
