@@ -17,6 +17,7 @@ from server.app.routes.questions import create_questions_router
 from server.app.routes.token_usage import create_token_usage_router
 from server.app.routes.video_jobs import create_video_jobs_router
 from server.app.routes.workspace_runs import create_workspace_runs_router
+from server.app.services.artifact_store import ArtifactStore
 from server.app.services.job_service_factory import JobServices
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
@@ -33,6 +34,7 @@ def include_job_routes(
     workspace_executor_configuration: WorkspaceExecutorConfigurationService,
     job_event_manager: JobEventManager | None,
     job_event_buffer: Any | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> None:
     services = JobServices(
         job_db,
@@ -41,6 +43,7 @@ def include_job_routes(
         workspace_executor_configuration,
         job_event_manager,
         job_event_buffer,
+        artifact_store=artifact_store,
     )
 
     router.include_router(create_job_batches_router(services.intake, settings))

@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react'
 import { IconButton, Switch } from '@mui/material'
 import { MaterialIcon } from './MaterialIcon'
+import { AgentConnectionDot } from './AgentConnectionDot'
 import { useUiStore } from '../stores/uiStore'
 import styles from './AgentStatusIndicator.module.css'
 
@@ -45,6 +46,7 @@ export function AgentStatusIndicator({
           aria-hidden="true"
           className={`${styles.indicator} ${busy ? styles.active : ''}`}
         />
+        <AgentConnectionDot />
       </IconButton>
       <div className={styles.popover} role="status">
         <div className={styles.controlRow}>

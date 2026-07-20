@@ -13,6 +13,8 @@ from server.app.workflows.schema import (
     WorkflowIntake,
     WorkflowIntakeMode,
     WorkflowNode,
+    WorkflowReduceSpec,
+    WorkflowShardSpec,
     WorkflowTerminal,
 )
 from server.app.workflows.validator import _validate_acyclic
@@ -37,6 +39,61 @@ def _load_terminal(raw_node: dict[str, Any], node_key: str) -> WorkflowTerminal 
     if not isinstance(outcome, str) or not outcome:
         raise WorkflowDefinitionError(f"Node {node_key}.terminal.outcome is required")
     return WorkflowTerminal(outcome=outcome)
+
+
+def _positive_int(value: Any, field_name: str, node_key: str) -> int:
+    if not isinstance(value, int) or isinstance(value, bool) or value < 1:
+        raise WorkflowDefinitionError(f"Node {node_key}.{field_name} must be an integer >= 1")
+    return value
+
+
+def _load_shard(
+    raw_node: dict[str, Any], node_key: str, node_inputs: list[str]
+) -> WorkflowShardSpec | None:
+    raw_shard = raw_node.get("shard")
+    if raw_shard is None:
+        return None
+    if not isinstance(raw_shard, dict):
+        raise WorkflowDefinitionError(f"Node {node_key}.shard must be a mapping")
+    over = raw_shard.get("over")
+    count = raw_shard.get("count")
+    if over is None and count is None:
+        raise WorkflowDefinitionError(f"Node {node_key}.shard requires 'over' or 'count'")
+    if over is not None and count is not None:
+        raise WorkflowDefinitionError(
+            f"Node {node_key}.shard 'over' and 'count' are mutually exclusive"
+        )
+    if over is not None:
+        prefix = "inputs."
+        if not isinstance(over, str) or not over.startswith(prefix) or not over[len(prefix) :]:
+            raise WorkflowDefinitionError(
+                f"Node {node_key}.shard.over must be of the form 'inputs.<name>'"
+            )
+        if over[len(prefix) :] not in node_inputs:
+            raise WorkflowDefinitionError(
+                f"Node {node_key}.shard.over {over!r} must reference a node input"
+            )
+    if count is not None:
+        count = _positive_int(count, "shard.count", node_key)
+    max_shards = _positive_int(raw_shard.get("max_shards", 1000), "shard.max_shards", node_key)
+    max_concurrency = raw_shard.get("max_concurrency")
+    if max_concurrency is not None:
+        max_concurrency = _positive_int(max_concurrency, "shard.max_concurrency", node_key)
+    return WorkflowShardSpec(
+        over=over, count=count, max_concurrency=max_concurrency, max_shards=max_shards
+    )
+
+
+def _load_reduce(raw_node: dict[str, Any], node_key: str) -> WorkflowReduceSpec | None:
+    raw_reduce = raw_node.get("reduce")
+    if raw_reduce is None:
+        return None
+    if not isinstance(raw_reduce, dict):
+        raise WorkflowDefinitionError(f"Node {node_key}.reduce must be a mapping")
+    from_node = raw_reduce.get("from")
+    if not isinstance(from_node, str) or not from_node:
+        raise WorkflowDefinitionError(f"Node {node_key}.reduce.from is required")
+    return WorkflowReduceSpec(from_node=from_node)
 
 
 def _load_condition(raw_edge: dict[str, Any], edge_name: str) -> WorkflowCondition | None:
@@ -150,21 +207,33 @@ def _load_nodes(raw_nodes: dict[str, Any]) -> dict[str, WorkflowNode]:
         if not isinstance(capability, str) or not capability:
             raise WorkflowDefinitionError(f"Node {node_key} capability must be a non-empty string")
 
+        inputs = _string_list(raw_node.get("inputs"), "inputs", node_key)
         nodes[node_key] = WorkflowNode(
             key=node_key,
             label=node_label,
             capability=capability,
             after=_string_list(raw_node.get("after"), "after", node_key),
-            inputs=_string_list(raw_node.get("inputs"), "inputs", node_key),
+            inputs=inputs,
             outputs=_string_list(raw_node.get("outputs"), "outputs", node_key),
             terminal=_load_terminal(raw_node, node_key),
             execution=load_node_execution(raw_node, node_key),
+            shard=_load_shard(raw_node, node_key, inputs),
+            reduce=_load_reduce(raw_node, node_key),
         )
 
     for node in nodes.values():
         for dep in node.after:
             if dep not in nodes:
                 raise WorkflowDefinitionError(f"Unknown dependency {dep!r} for node {node.key}")
+        if node.shard is not None and node.reduce is not None:
+            raise WorkflowDefinitionError(f"Node {node.key} cannot declare both shard and reduce")
+        if node.reduce is not None:
+            source = nodes.get(node.reduce.from_node)
+            if source is None or source.shard is None:
+                raise WorkflowDefinitionError(
+                    f"Node {node.key} reduce.from {node.reduce.from_node!r} "
+                    "must reference a node that declares shard"
+                )
 
     return nodes
 

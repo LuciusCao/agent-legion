@@ -7,6 +7,7 @@ injected into ``command_template`` at manifest time via the shared
 ``executors.openclaw._inject_agent_id``; the command spec never carries an
 environment section or secrets. OpenClaw skills run installed on the worker,
 so the bundle packs no skill snapshot and ``skill_version`` stays empty.
+Task 3 (phase 4) adds refs-mode bundles via the shared staging helper.
 """
 
 from __future__ import annotations
@@ -18,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from server.app.executors.config import RemoteCapabilityConfig
 from server.app.executors.openclaw import _inject_agent_id
 from server.app.executors.remote_bundle import build_bundle
+from server.app.executors.remote_payloads._artifact_refs import stage_input_artifacts
 from server.app.executors.runtime_config import OpenClawRuntimeConfig
 from server.app.workflows.pi_protocol import JOB_DIR_PLACEHOLDER, PROMPT_FILE_PLACEHOLDER
 
@@ -25,6 +27,7 @@ if TYPE_CHECKING:
     from server.app.executors.kinds import RuntimeDependencies
     from server.app.executors.models import ExecutionContext
     from server.app.executors.remote_payloads import PayloadBuilder
+    from server.app.services.artifact_store import ArtifactStore
 
 # OpenClaw command templates may reference the prompt inline instead of a file.
 PROMPT_TEXT_PLACEHOLDER = "{prompt_text}"
@@ -69,10 +72,12 @@ class OpenClawPayloadBuilder:
         runtime: OpenClawRuntimeConfig,
         agent_id: str,
         capabilities: dict[str, RemoteCapabilityConfig],
+        artifact_store: ArtifactStore | None = None,
     ) -> None:
         self._runtime = runtime
         self._agent_id = agent_id
         self.capabilities = capabilities
+        self._artifact_store = artifact_store
         # Per-execution staging: build_manifest renders the manifest;
         # build_bundle_for consumes the same object so the bundle and the
         # submitted manifest stay identical.
@@ -106,11 +111,14 @@ class OpenClawPayloadBuilder:
         return manifest
 
     def build_bundle_for(self, context: ExecutionContext, bundle_path: Path) -> None:
+        manifest = self._prepared[context.execution_id]
+        skip = stage_input_artifacts(self._artifact_store, context, manifest)
         build_bundle(
             bundle_path,
             job_dir=context.job_dir,
             inputs=context.inputs,
-            manifest=self._prepared[context.execution_id],
+            manifest=manifest,
+            skip_inputs=skip,
         )
 
     def build_command_spec(self, manifest: dict[str, Any]) -> dict[str, Any]:
@@ -139,4 +147,6 @@ def build_openclaw_payload(
     *,
     agent_id: str = "",
 ) -> PayloadBuilder:
-    return OpenClawPayloadBuilder(deps.openclaw_runtime, agent_id, capabilities)
+    return OpenClawPayloadBuilder(
+        deps.openclaw_runtime, agent_id, capabilities, deps.artifact_store
+    )

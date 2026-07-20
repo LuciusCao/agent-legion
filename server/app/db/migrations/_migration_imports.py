@@ -55,3 +55,5 @@ from server.app.db.migrations.v022_job_event_seq_worker_control import (
 from server.app.db.migrations.v023_remote_execution_command_spec import (
     MIGRATION as V023_REMOTE_EXECUTION_COMMAND_SPEC,
 )
+from server.app.db.migrations.v024_artifacts import MIGRATION as V024_ARTIFACTS
+from server.app.db.migrations.v025_node_shards import MIGRATION as V025_NODE_SHARDS

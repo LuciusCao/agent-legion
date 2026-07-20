@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
+import { useExecutorsStore } from '../stores/executorsStore'
 import { createMockUiState } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
 import type { AgentStatus } from '../types'
@@ -40,6 +41,7 @@ describe('AgentStatusIndicator', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockWorkerPausedByWorkspace = {}
+    useExecutorsStore.setState({ workers: [], connectionStatus: {} })
     mockAgents = [
       makeAgentStatus({
         id: 'main',
@@ -113,5 +115,29 @@ describe('AgentStatusIndicator', () => {
     render(<AgentStatusIndicator workspaceId="ws1" />)
     expect(screen.getByText('Main')).toBeInTheDocument()
     expect(screen.queryByText('Pi Agent')).not.toBeInTheDocument()
+  })
+
+  it('shows a disconnected status dot when the agents channel is closed', () => {
+    useExecutorsStore.setState({ connectionStatus: { agents: 'closed' } })
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    const dot = screen.getByTestId('agents-connection-status')
+    expect(dot).toBeInTheDocument()
+    expect(dot).toHaveAttribute('title', 'Agent 连接已断开')
+  })
+
+  it('shows a connecting status dot when the agents channel is connecting', () => {
+    useExecutorsStore.setState({ connectionStatus: { agents: 'connecting' } })
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    const dot = screen.getByTestId('agents-connection-status')
+    expect(dot).toBeInTheDocument()
+    expect(dot).toHaveAttribute('title', 'Agent 连接中')
+  })
+
+  it('hides the status dot when the agents channel is open', () => {
+    useExecutorsStore.setState({ connectionStatus: { agents: 'open' } })
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    expect(
+      screen.queryByTestId('agents-connection-status')
+    ).not.toBeInTheDocument()
   })
 })

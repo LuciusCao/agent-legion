@@ -26,6 +26,22 @@ class AgentStatus:
     current_phase: str = ""
 
 
+def _agent_dict(agent: AgentStatus) -> dict[str, Any]:
+    return {
+        "id": agent.id,
+        "name": agent.name,
+        "busy": agent.busy,
+        "task_count": agent.task_count,
+        "max_tasks": agent.max_tasks,
+        "workspace_id": agent.workspace_id,
+        "current_video_id": agent.current_video_id,
+        "current_title": agent.current_title,
+        "current_content_type": agent.current_content_type,
+        "current_external_id": agent.current_external_id,
+        "current_phase": agent.current_phase,
+    }
+
+
 class AgentStatusManager:
     def __init__(
         self,
@@ -41,6 +57,10 @@ class AgentStatusManager:
         self._busy_video_ids: set[str] = set()
         self._agent_video_ids: dict[tuple[str, str], list[str]] = {}
         self._workspace_assignments: dict[str, dict[str, int]] = {}
+        # Incremental WS events buffered between broadcast flushes, keyed by
+        # (agent_id, workspace_id) so the latest state per agent wins.
+        self._pending_events: dict[tuple[str, str], dict[str, Any]] = {}
+        self._snapshot_pending = False
         self._lock = threading.Lock()
         self._broadcast_controller = AgentBroadcastController(self._lock, lambda: self._broadcast())
 
@@ -113,7 +133,7 @@ class AgentStatusManager:
                 )
                 should_broadcast = True
         if should_broadcast:
-            self._broadcast()
+            self._broadcast_snapshot()
 
     def remove_pi_agent_for_workspace(self, workspace_id: str) -> None:
         with self._lock:
@@ -125,7 +145,7 @@ class AgentStatusManager:
             ]
             removed = len(self.agents) != before
         if removed:
-            self._broadcast()
+            self._broadcast_snapshot()
 
     def set_busy(
         self, agent_id: str, video: str | dict[str, Any], *, workspace_id: str = ""
@@ -146,6 +166,10 @@ class AgentStatusManager:
                         agent.current_content_type = str(video.get("content_type", ""))
                         agent.current_external_id = str(video.get("external_id", ""))
                         agent.current_phase = str(video.get("current_phase", ""))
+                    self._pending_events[(agent.id, agent.workspace_id)] = {
+                        "type": "agent_busy",
+                        "agent": _agent_dict(agent),
+                    }
                     break
         self._broadcast_controller.mark_broadcast_pending()
 
@@ -172,6 +196,10 @@ class AgentStatusManager:
                         agent.current_phase = ""
                     elif video_ids:
                         agent.current_video_id = video_ids[-1]
+                    self._pending_events[(agent.id, agent.workspace_id)] = {
+                        "type": "agent_idle",
+                        "agent": _agent_dict(agent),
+                    }
                     break
         self._broadcast_controller.mark_broadcast_pending()
 
@@ -187,28 +215,13 @@ class AgentStatusManager:
 
     def to_dicts(self) -> list[dict[str, Any]]:
         with self._lock:
-            return [
-                {
-                    "id": a.id,
-                    "name": a.name,
-                    "busy": a.busy,
-                    "task_count": a.task_count,
-                    "max_tasks": a.max_tasks,
-                    "workspace_id": a.workspace_id,
-                    "current_video_id": a.current_video_id,
-                    "current_title": a.current_title,
-                    "current_content_type": a.current_content_type,
-                    "current_external_id": a.current_external_id,
-                    "current_phase": a.current_phase,
-                }
-                for a in self.agents
-            ]
+            return [_agent_dict(a) for a in self.agents]
 
     async def connect(self, websocket: WebSocket) -> None:
         await websocket.accept()
         self._clients.add(websocket)
         self._loop = asyncio.get_running_loop()
-        await websocket.send_json(self.to_dicts())
+        await websocket.send_json({"type": "snapshot", "agents": self.to_dicts()})
         if self._event_bus is None:
             return
         bus = self._event_bus
@@ -233,9 +246,30 @@ class AgentStatusManager:
             task.cancel()
 
     def _broadcast(self) -> None:
-        payload = self.to_dicts()
+        """Flush buffered events: envelopes per changed agent, snapshot otherwise.
+
+        A pending structural change (or an empty buffer, e.g. a set_busy on an
+        unknown agent) supersedes incrementals with a full snapshot envelope.
+        """
+        with self._lock:
+            snapshot = self._snapshot_pending
+            self._snapshot_pending = False
+            events = [] if snapshot else list(self._pending_events.values())
+            self._pending_events.clear()
+        if not events:
+            self._send_envelope({"type": "snapshot", "agents": self.to_dicts()})
+            return
+        for event in events:
+            self._send_envelope(event)
+
+    def _broadcast_snapshot(self) -> None:
+        with self._lock:
+            self._snapshot_pending = True
+        self._broadcast()
+
+    def _send_envelope(self, envelope: dict[str, Any]) -> None:
         if self._event_bus is not None:
-            self._event_bus.publish("agents", json.dumps(payload))
+            self._event_bus.publish("agents", json.dumps(envelope))
             return
         # 无 bus 回退（测试直构造路径）：保持原 run_coroutine_threadsafe 直发
         loop = self._loop
@@ -243,6 +277,6 @@ class AgentStatusManager:
             return
         for ws in list(self._clients):
             try:
-                asyncio.run_coroutine_threadsafe(ws.send_json(payload), loop)
+                asyncio.run_coroutine_threadsafe(ws.send_json(envelope), loop)
             except Exception:
                 self._clients.discard(ws)

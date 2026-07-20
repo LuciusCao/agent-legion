@@ -79,6 +79,18 @@ executors:
         - read
         - write
         - bash
+  # Remote executors may constrain which workers a capability is routed to via
+  # `requires_labels` (worker labels arrive at register/claim time). Values are
+  # either ">=<int>" (numeric) or a literal (exact match); all must hold:
+  #   remote-gpu:
+  #     kind: remote
+  #     global_capacity: 4
+  #     capabilities:
+  #       transcribe_video:
+  #         skill: video_knowledge/transcribe_video
+  #         requires_labels:
+  #           mem_gb: ">=16"
+  #           device: mac-mini
 heartbeat_interval_seconds: 10
 lease_ttl_seconds: 90
 heartbeat_failure_threshold: 3

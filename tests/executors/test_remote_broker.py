@@ -169,8 +169,10 @@ def test_worker_registry_round_trip(broker):
             "name": "mac-mini",
             "capabilities": ["cap_a", "cap_b"],
             "slots": 70,
+            "labels": {},
             "registered_at": workers[0]["registered_at"],
             "last_seen_at": workers[0]["last_seen_at"],
+            "revoked": False,
         }
     ]
     before = workers[0]["last_seen_at"]

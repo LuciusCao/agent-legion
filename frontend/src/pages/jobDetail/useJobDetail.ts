@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { fetchJobDetail, deleteJob } from '../../api'
 import { rerunJob, runToJob, packageJobs } from '../../jobApi'
 import { usePageHeaderStore } from '../../stores/pageHeaderStore'
+import { useExecutorsStore } from '../../stores/executorsStore'
 import type { JobDetail } from '../../jobTypes'
 import { useContinueJobAction } from './useContinueJobAction'
 import { pageSubtitle } from './jobDetailTitle'
@@ -41,6 +42,11 @@ export function useJobDetail(
     },
     [jobId]
   )
+
+  useEffect(() => {
+    // Refresh executor visibility once on job detail mount.
+    void useExecutorsStore.getState().refreshWorkers()
+  }, [])
 
   useEffect(() => {
     if (!jobId) return

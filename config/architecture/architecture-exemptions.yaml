@@ -21,9 +21,15 @@ exemptions:
     Task 6 of the phase3 execution-decoupling plan wires the
     RemoteCompletionHandler callback registration into the lifespan, and
     task 8 wires the SweeperThread lifecycle into the lifespan.
+    Task 2 of the phase4 agent-collaboration plan assembles the ArtifactStore
+    next to the RemoteExecutionBroker and mounts the artifacts router.
+    Task 3 of the phase4 agent-collaboration plan injects the ArtifactStore
+    into RuntimeDependencies and the RemoteCompletionHandler callback.
+    Task 5 of the phase4 agent-collaboration plan extracts capability
+    requires_labels from the remote executor definitions into the broker.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 237
+  ceiling: 259
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
@@ -38,10 +44,12 @@ exemptions:
   reason: Task 9 of the phase1 event-bus plan routes agent WS broadcasts through
     the EventBus (subscribe/forward in connect, bus publish in _broadcast, public
     broadcast_controller); the WS forwarding block will be extracted into its own
-    module once the event-bus migration completes.
+    module once the event-bus migration completes. Task 9 of the phase4
+    agent-collaboration plan envelopes WS messages (snapshot/agent_busy/
+    agent_idle) and buffers per-agent incremental events between flushes.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 248
+  ceiling: 282
 - check: architecture.file_budget
   path: frontend/src/components/QuestionContentPanel.tsx
   reason: Task 2 of the socratic-question-inline-display plan adds the local SocraticQuestion
@@ -84,9 +92,11 @@ exemptions:
     config models; Task 5 of the phase3 execution-decoupling plan adds the
     agent_id field and its openclaw-payload validator to RemoteExecutorConfig;
     the models will be split into a separate module once the feature is complete.
+    Task 5 of the phase4 agent-collaboration plan adds the requires_labels field
+    and its constraint-value validator to RemoteCapabilityConfig.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-4
-  ceiling: 177
+  ceiling: 195
 - check: architecture.file_budget
   path: server/app/executors/runtime_config.py
   reason: Task 4 of the distributed-agent-execution plan adds RemoteRuntimeConfig
@@ -113,15 +123,37 @@ exemptions:
     reports; no response body contract exists to model.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6
+- check: architecture.route_response_model
+  path: server/app/routes/remote.py:revoke_worker_token
+  reason: Task 4 of the phase4 agent-collaboration plan returns an empty 204 for worker
+    token revocation; no response body contract exists to model.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-4
+- check: architecture.file_budget
+  path: server/app/routes/remote_auth.py
+  reason: Task 4 of the phase4 agent-collaboration plan extends the extracted worker
+    authorizer with per-worker token authentication plus the static-token fallback
+    window (authorize_worker); the helper stays a single focused module and the
+    budget will be re-ratcheted when the fallback window is removed.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-4
+  ceiling: 94
 - check: architecture.file_budget
   path: server/app/routes/remote.py
   reason: Task 3 of the runner-audit plan adds the read-only GET /workers endpoint and
     its response models, and task 7 of the phase3 execution-decoupling plan adds
     the ClaimResponse command_spec field; the workers section will be split into
-    a separate module once the feature is complete.
+    a separate module once the feature is complete. Task 2 of the phase4
+    agent-collaboration plan extracts the _authorize helper into
+    routes/remote_auth.py, shrinking this module. Task 3 of the phase4
+    agent-collaboration plan validates output_artifacts hashes in report_result.
+    Task 4 adds the workers/register and workers/{id}/revoke management endpoints.
+    Task 5 adds the ClaimRequest.labels field and its claim-time registry upsert.
+    Task 9 turns GET /workers into the page-facing read-only registry
+    (RemoteWorkerSummaryResponse with labels/revoked, no worker token).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-runner-audit.md#task-3
-  ceiling: 166
+  ceiling: 237
 - check: architecture.file_budget
   path: server/app/executors/local.py
   reason: Task 2 of the phase3 execution-decoupling plan moves build_local_executor
@@ -147,16 +179,33 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-2
   ceiling: 189
 - check: architecture.file_budget
+  path: server/app/executors/_remote_queue_store.py
+  reason: Task 5 of the phase4 agent-collaboration plan adds the labels_satisfy
+    constraint evaluator and extends claim_next with in-memory requires_labels
+    candidate filtering inside the claim transaction (the limit-1 fast path is
+    kept when no constraints are configured); the claim path will be extracted
+    into its own module if the store keeps growing.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-5
+  ceiling: 285
+- check: architecture.file_budget
   path: server/app/executors/remote_broker.py
   reason: Task 6 of the phase3 execution-decoupling plan adds completion-callback
     publishing (register/_publish_completion), payload_for and active_lease_ids
     to the broker, task 7 adds command_spec pass-through storage, and task 8
     exposes the claim sweep as sweep_expired_claims; the worker-registry
     section will be extracted into its own module once remote execution
-    stabilizes.
+    stabilizes. Task 3 of the phase4 agent-collaboration plan adds the
+    RemoteOutcome.output_artifacts field. Task 4 adds the worker trust
+    section (issue/authenticate/revoke per-worker tokens, SEC-WORKER-001).
+    Task 5 adds capability_label_requirements injection, its pass-through in
+    dequeue, and claim-time update_worker_labels. Task 9 extends list_workers
+    with labels and the revoked flag for the page-facing workers endpoint.
+    The final-review fix rejects dotted worker_ids at token issuance (the
+    "{worker_id}.{secret}" token form could never authenticate them back).
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 346
+  ceiling: 505
 - check: architecture.file_budget
   path: server/app/executors/runtime.py
   reason: Task 6 of the phase3 execution-decoupling plan adds the submit-only
@@ -165,3 +214,43 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
   ceiling: 163
+- check: architecture.file_budget
+  path: scripts/remote/worker.py
+  reason: Task 3 of the phase4 agent-collaboration plan adds artifact upload/download
+    to WorkerClient and the bundle_mode=refs input pull / outputs upload to
+    run_execution; the single-file stdlib worker cannot be split without
+    breaking its copy-to-any-machine deployment, so the ceiling tracks growth
+    until the artifact section is extracted into a generated bundle. Task 4
+    adds the --register-token startup exchange for per-worker tokens. Task 5
+    adds the repeatable --label flag and label reporting on register/claim.
+    The final-review fix adds the early --worker-id dotted-name rejection
+    (parser.error before any server call).
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-3
+  ceiling: 552
+- check: architecture.file_budget
+  path: server/app/workflows/schema.py
+  reason: Task 6 of the phase4 agent-collaboration plan adds the frozen
+    WorkflowShardSpec/WorkflowReduceSpec dataclasses and the shard/reduce
+    fields on WorkflowNode; the node schema stays one declarative module and
+    the budget will be re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-6
+  ceiling: 112
+- check: architecture.file_budget
+  path: server/app/workflows/loader.py
+  reason: Task 6 of the phase4 agent-collaboration plan adds the _load_shard /
+    _load_reduce node-declaration validators and their wiring in _load_nodes;
+    the loaders stay next to the existing node loaders and the budget will be
+    re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-6
+  ceiling: 320
+- check: architecture.file_budget
+  path: server/app/routes/job_view_contracts.py
+  reason: Task 9 of the phase4 agent-collaboration plan adds the JobNodeResponse
+    worker_id field (claimed remote worker projection); the contract module
+    stays cohesive and the budget will be re-ratcheted if the module shrinks.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-9
+  ceiling: 113

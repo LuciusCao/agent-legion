@@ -13,6 +13,7 @@ from server.app.db.notifications import NotificationHub
 from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
 from server.app.executors.backup import legacy_backup_path
+from server.app.executors.config import RemoteExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
@@ -26,6 +27,7 @@ from server.app.jobs import JobQueries
 from server.app.local_handler_loader import build_local_handlers
 from server.app.pipeline.runners import list_openclaw_agents
 from server.app.routes import create_router
+from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
 from server.app.services.job_packages import JobPackageService
 from server.app.services.package_deletion import PackageDeletionService
@@ -49,6 +51,7 @@ def build_executor_registry(
     settings: Settings,
     job_db: Any | None = None,
     remote_broker: RemoteExecutionBroker | None = None,
+    artifact_store: ArtifactStore | None = None,
 ) -> ExecutorRegistry:
     """Build the application-wide executor registry from settings.
 
@@ -70,6 +73,7 @@ def build_executor_registry(
         job_db=job_db,
         cancellation_grace_seconds=settings.executor_runtime.cancellation_grace_seconds,
         remote_broker=remote_broker,
+        artifact_store=artifact_store,
     )
     return ExecutorRegistry.build(settings.executor_definitions, runtime)
 
@@ -89,13 +93,26 @@ def create_app(
     db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
     job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
+    # capability -> requires_labels from every remote executor definition,
+    # for label-affinity filtering at dequeue time.
+    label_requirements = {
+        capability: capability_config.requires_labels
+        for definition in settings.executor_definitions.values()
+        if isinstance(definition, RemoteExecutorConfig)
+        for capability, capability_config in definition.capabilities.items()
+        if capability_config.requires_labels
+    }
     remote_broker = RemoteExecutionBroker(
         job_db.path,
         settings.data_dir / "remote_bundles",
         claim_timeout_seconds=settings.executor_runtime.remote.claim_timeout_seconds,
         requeue_limit=settings.executor_runtime.remote.requeue_limit,
+        capability_label_requirements=label_requirements or None,
     )
-    executor_registry = build_executor_registry(settings, job_db, remote_broker=remote_broker)
+    artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
+    executor_registry = build_executor_registry(
+        settings, job_db, remote_broker=remote_broker, artifact_store=artifact_store
+    )
 
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager.bus
@@ -152,7 +169,10 @@ def create_app(
                 # Submit-only remote executors finish leases via broker callbacks.
                 remote_broker.register_completion_callback(
                     RemoteCompletionHandler(
-                        remote_broker, executor_leases, settings.jobs_dir
+                        remote_broker,
+                        executor_leases,
+                        settings.jobs_dir,
+                        artifact_store=artifact_store,
                     ).handle_completion
                 )
                 # The sweeper owns all lease hygiene (startup + interval sweeps,
@@ -198,6 +218,7 @@ def create_app(
     app.state.job_db = job_db
     app.state.executor_registry = executor_registry
     app.state.remote_broker = remote_broker
+    app.state.artifact_store = artifact_store
     app.state.agent_manager = agent_manager
     app.state.workspace_worker_control = workspace_worker_control
     app.state.job_event_manager = job_event_manager
@@ -228,6 +249,7 @@ def create_app(
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
             remote_broker=remote_broker,
+            artifact_store=artifact_store,
         )
     )
     mount_spa(app, settings.root_dir / "frontend" / "dist")
