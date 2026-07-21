@@ -2,7 +2,6 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-
 cd "$ROOT_DIR"
 
 COVERAGE_FILE="${COVERAGE_FILE:-$ROOT_DIR/.coverage.check-quick.$$}"
@@ -14,38 +13,55 @@ if [[ -z "${KEEP_COVERAGE:-}" ]]; then
   trap cleanup_coverage EXIT
 fi
 
-echo "=== Ruff Lint ==="
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run ruff check .
+log_dir="$(mktemp -d "${TMPDIR:-/tmp}/agent-legion-quick.XXXXXX")"
+cleanup_logs() {
+  rm -rf "$log_dir"
+}
+if [[ -z "${KEEP_COVERAGE:-}" ]]; then
+  trap 'cleanup_logs; cleanup_coverage' EXIT
+else
+  trap cleanup_logs EXIT
+fi
 
-echo "=== Ruff Format ==="
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run ruff format --check .
+echo "=== Parallel Quick Gate ==="
+echo "Running parallel static-check and test rounds; lane output is buffered."
+lanes_started_at=$SECONDS
 
-echo "=== Architecture Invariant Registry ==="
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_invariants.py
+run_round() {
+  round="$1"
+  backend_phase="$2"
+  frontend_phase="$3"
+  backend_log="$log_dir/backend-${round}.log"
+  frontend_log="$log_dir/frontend-${round}.log"
 
-echo "=== Skill Shared Content Sync ==="
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check-skills-shared.py
+  echo "Starting ${round} round."
+  BACKEND_GATE_PHASE="$backend_phase" \
+    "$ROOT_DIR/scripts/check-quick-backend.sh" >"$backend_log" 2>&1 &
+  backend_pid=$!
+  FRONTEND_GATE_PHASE="$frontend_phase" \
+    FRONTEND_TEST_MODE="${FRONTEND_TEST_MODE:-test}" \
+    "$ROOT_DIR/scripts/check-quick-frontend.sh" >"$frontend_log" 2>&1 &
+  frontend_pid=$!
 
-echo "=== Python Tests + Coverage ==="
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run pytest -q --ignore=tests/full --ignore=tests/ci -n auto --cov=server --cov-report=term-missing
+  set +e
+  wait "$backend_pid"
+  backend_status=$?
+  wait "$frontend_pid"
+  frontend_status=$?
+  set -e
 
-echo "=== MyPy Type Check ==="
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run mypy server/app
+  echo "=== Backend ${round} Output ==="
+  cat "$backend_log"
+  echo "=== Frontend ${round} Output ==="
+  cat "$frontend_log"
 
-echo "=== Architecture Contracts ==="
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/check_architecture.py
+  if [[ "$backend_status" -ne 0 || "$frontend_status" -ne 0 ]]; then
+    echo "Parallel ${round} round failed: backend=$backend_status frontend=$frontend_status" >&2
+    return 1
+  fi
+}
 
-echo "=== Generated API Contract ==="
-cd "$ROOT_DIR/frontend"
-npm run api:check
+run_round "static-check" "static" "static"
+run_round "test" "test" "test"
 
-echo "=== Frontend Tests ==="
-cd "$ROOT_DIR/frontend"
-npm run format:check
-npm run lint
-npm run typecheck
-npm run test
-
-echo "=== Spec Health Check ==="
-cd "$ROOT_DIR"
-UV_CACHE_DIR="${UV_CACHE_DIR:-.uv-cache}" uv run python scripts/verify_specs.py --check
+echo "Parallel quick gate passed in $((SECONDS - lanes_started_at))s."

@@ -34,6 +34,7 @@ markers = [
   "full_gate: deterministic higher-fidelity architecture scenarios",
   "ci_extended: repeated stress scenarios for CI",
   "slow: tests involving real subprocesses or long sleeps",
+  "repository_gate: whole-repository checks executed separately by the quality gate",
 ]
 filterwarnings = [
   "error::ResourceWarning:sqlite3",

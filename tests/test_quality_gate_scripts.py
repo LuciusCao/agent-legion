@@ -1,0 +1,104 @@
+from __future__ import annotations
+
+import os
+import shutil
+import stat
+import subprocess
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _write_executable(path: Path, content: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding="utf-8")
+    path.chmod(path.stat().st_mode | stat.S_IXUSR)
+
+
+def _run(path: Path, *, cwd: Path, env: dict[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        [str(path)],
+        cwd=cwd,
+        env={**os.environ, **env},
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+
+
+def test_quick_gate_starts_backend_and_frontend_lanes_concurrently(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    marker = tmp_path / "frontend.started"
+
+    _write_executable(
+        scripts / "check-quick-backend.sh",
+        "#!/usr/bin/env bash\n"
+        "for attempt in $(seq 1 100); do\n"
+        '  [[ -f "$GATE_MARKER" ]] && exit 0\n'
+        "  sleep 0.05\n"
+        "done\n"
+        "exit 9\n",
+    )
+    _write_executable(
+        scripts / "check-quick-frontend.sh",
+        '#!/usr/bin/env bash\ntouch "$GATE_MARKER"\n',
+    )
+
+    result = _run(quick_gate, cwd=tmp_path, env={"GATE_MARKER": str(marker)})
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Parallel quick gate passed" in result.stdout
+
+
+def test_quick_gate_reports_each_lane_status(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    quick_gate = scripts / "check-quick.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check-quick.sh", quick_gate)
+    _write_executable(scripts / "check-quick-backend.sh", "#!/usr/bin/env bash\nexit 7\n")
+    _write_executable(scripts / "check-quick-frontend.sh", "#!/usr/bin/env bash\nexit 0\n")
+
+    result = _run(quick_gate, cwd=tmp_path, env={})
+
+    assert result.returncode == 1
+    assert "backend=7 frontend=0" in result.stderr
+
+
+def test_full_gate_reuses_coverage_tests_and_bundle_only_build(tmp_path: Path) -> None:
+    scripts = tmp_path / "scripts"
+    frontend = tmp_path / "frontend"
+    fake_bin = tmp_path / "bin"
+    scripts.mkdir()
+    frontend.mkdir()
+    fake_bin.mkdir()
+    full_gate = scripts / "check.sh"
+    shutil.copy2(PROJECT_ROOT / "scripts" / "check.sh", full_gate)
+    gate_log = tmp_path / "gate.log"
+
+    _write_executable(
+        scripts / "check-quick.sh",
+        '#!/usr/bin/env bash\nprintf "quick:%s\\n" "${FRONTEND_TEST_MODE:-unset}" >>"$GATE_LOG"\n',
+    )
+    _write_executable(scripts / "check-deps-audit.sh", "#!/usr/bin/env bash\nexit 0\n")
+    for command in ("uv", "npm"):
+        _write_executable(
+            fake_bin / command,
+            f'#!/usr/bin/env bash\nprintf "{command}:%s\\n" "$*" >>"$GATE_LOG"\n',
+        )
+
+    result = _run(
+        full_gate,
+        cwd=tmp_path,
+        env={"GATE_LOG": str(gate_log), "PATH": f"{fake_bin}:{os.environ['PATH']}"},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    calls = gate_log.read_text(encoding="utf-8").splitlines()
+    assert calls.count("quick:coverage") == 1
+    assert calls.count("npm:run build:bundle") == 1
+    assert not any("test:coverage" in call for call in calls)
+    assert any("pytest -q tests/full" in call for call in calls)
+    assert any("coverage report" in call for call in calls)
