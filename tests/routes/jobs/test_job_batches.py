@@ -1,4 +1,5 @@
 import json
+from concurrent.futures import ThreadPoolExecutor
 
 
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
@@ -32,6 +33,113 @@ def test_create_question_jobs_when_enabled(tmp_path):
     assert body["jobs"][0]["workspace_id"] == ws_id
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["source_id"] for job in body["jobs"]] == ["Q001", "Q002"]
+
+
+def test_async_question_batch_returns_before_cms_and_consumes_in_chunks(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.cms.question import CmsQuestionDetail
+    from server.app.main import create_app
+    from server.app.services.job_intake_queue import JobIntakeQueue
+
+    calls: list[str] = []
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        calls.append(question_id)
+        return CmsQuestionDetail(
+            question_id=question_id,
+            title=f"Title {question_id}",
+            normalized={"stem": f"Stem {question_id}"},
+            payload={"uuid": question_id},
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
+    monkeypatch.setattr("server.app.services.job_intake_queue.INTAKE_QUEUE_CHUNK_SIZE", 2)
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    intake_queue = JobIntakeQueue(app.state.job_db, app.state.settings, app.state.job_event_buffer)
+    monkeypatch.setattr(
+        "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
+        lambda self: False,
+    )
+    with TestClient(app) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/job-batches",
+            json={
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q001", "Q002", "Q003"],
+                "knowledge_codes": [],
+                "async_processing": True,
+            },
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["batch"]["status"] == "queued"
+        assert body["created_count"] == 0
+        assert body["jobs"] == []
+        assert calls == []
+
+        claimed = app.state.job_db.claim_intake_batch()
+        assert claimed is not None
+        intake_queue._consume_chunk(claimed)
+        first = app.state.job_db.get_batch(body["batch"]["id"])
+        assert first is not None
+        assert first["status"] == "queued"
+        assert first["created_count"] == 2
+        assert {job["source_id"] for job in app.state.job_db.list_jobs(workspace_id=ws_id)} == {
+            "Q001",
+            "Q002",
+        }
+
+        claimed = app.state.job_db.claim_intake_batch()
+        assert claimed is not None
+        intake_queue._consume_chunk(claimed)
+        completed = app.state.job_db.get_batch(body["batch"]["id"])
+        assert completed is not None
+        assert completed["status"] == "completed"
+        assert completed["created_count"] == 3
+        assert calls == ["Q001", "Q002", "Q003"]
+
+
+def test_async_batch_claim_is_atomic_across_consumers(tmp_path, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
+        lambda self: False,
+    )
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/job-batches",
+            json={
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q001"],
+                "knowledge_codes": [],
+                "async_processing": True,
+            },
+        )
+        assert response.status_code == 200
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            claims = list(pool.map(lambda _: app.state.job_db.claim_intake_batch(), range(2)))
+
+    assert len([claim for claim in claims if claim is not None]) == 1
 
 
 def test_workspace_job_batch_stores_normalized_source_payload(tmp_path):

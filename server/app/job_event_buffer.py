@@ -1,31 +1,11 @@
 from __future__ import annotations
 
 from collections import deque
-from dataclasses import dataclass, field
 from threading import Lock
-from typing import Literal
 
 from server.app.db.retry import retried_on_database_conflict
 from server.app.db.transaction import write_transaction
-
-JobEventKind = Literal["updated", "created", "deleted"]
-
-
-@dataclass(frozen=True)
-class JobEvent:
-    revision: int
-    workspace_id: str
-    job_id: str
-    kind: JobEventKind
-
-
-@dataclass(frozen=True)
-class CompactedJobEvents:
-    latest_revision: int
-    updated_job_ids_by_workspace: dict[str, set[str]] = field(default_factory=dict)
-    created_job_ids_by_workspace: dict[str, set[str]] = field(default_factory=dict)
-    deleted_job_ids_by_workspace: dict[str, set[str]] = field(default_factory=dict)
-    resync_workspace_ids: set[str] = field(default_factory=set)
+from server.app.job_event_models import CompactedJobEvents, JobEvent, JobEventKind
 
 
 class JobEventBuffer:
@@ -59,6 +39,24 @@ class JobEventBuffer:
 
     def record_job_created(self, workspace_id: str, job_id: str) -> int:
         return self.record(workspace_id, job_id, "created")
+
+    def record_jobs_created(self, workspace_id: str, job_ids: list[str]) -> int:
+        if not job_ids:
+            return self._revision
+        revision = self._next_revision()
+        with self._lock:
+            for job_id in job_ids:
+                event = JobEvent(
+                    revision=revision,
+                    workspace_id=workspace_id,
+                    job_id=job_id,
+                    kind="created",
+                )
+                if len(self._events) >= self._max_events:
+                    dropped = self._events.popleft()
+                    self._resync_workspace_ids.add(dropped.workspace_id)
+                self._events.append(event)
+        return revision
 
     def record_job_deleted(self, workspace_id: str, job_id: str) -> int:
         return self.record(workspace_id, job_id, "deleted")

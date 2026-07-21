@@ -11,20 +11,13 @@ import {
 import { useUiStore } from '../stores/uiStore'
 import { api, fetchWorkflowDefinition } from '../api'
 import type {
-  ContentType,
   WorkflowDefinitionRecord,
   WorkflowIntakeModeRecord,
+  JobBatchResponse,
   WorkspaceRecord,
   WorkspaceResponse,
 } from '../types'
 import styles from './AddDialog.module.css'
-
-type AddResult = {
-  external_id: string
-  content_type: ContentType
-  status: string
-  message: string
-}
 
 type AddDialogProps = {
   open: boolean
@@ -40,7 +33,6 @@ export function AddDialog({
   workspaceId,
 }: AddDialogProps) {
   const { addContentType, setAddContentType, showToast } = useUiStore()
-  const [results, setResults] = useState<AddResult[]>([])
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [workspace, setWorkspace] = useState<WorkspaceRecord | null>(null)
   const [workflow, setWorkflow] = useState<WorkflowDefinitionRecord | null>(
@@ -141,30 +133,33 @@ export function AddDialog({
     if (!selectedMode) return
     setIsSubmitting(true)
     try {
-      const response = await api<{
-        batch: Record<string, unknown>
-        created_count: number
-        jobs: Array<{ source_id: string; title: string; status: string }>
-      }>(`/api/workspaces/${encodeURIComponent(workspaceId)}/job-batches`, {
-        method: 'POST',
-        body: JSON.stringify({
-          workflow_key: workspace?.default_workflow_key,
-          entity: workspace?.default_entity || 'question',
-          source_kind: selectedMode.key,
-          [selectedMode.input_field]: values,
-          ...(selectedMode.input_field === 'question_ids'
-            ? { knowledge_codes: [] }
-            : { question_ids: [] }),
-        }),
-      })
-      const mappedResults: AddResult[] = response.jobs.map((job) => ({
-        external_id: job.source_id,
-        content_type: (workspace?.default_entity as ContentType) || 'question',
-        status: job.status || 'created',
-        message: job.title,
-      }))
-      setResults(mappedResults)
+      const response = await api<JobBatchResponse>(
+        `/api/workspaces/${encodeURIComponent(workspaceId)}/job-batches`,
+        {
+          method: 'POST',
+          body: JSON.stringify({
+            workflow_key: workspace?.default_workflow_key,
+            entity: workspace?.default_entity || 'question',
+            source_kind: selectedMode.key,
+            async_processing: true,
+            [selectedMode.input_field]: values,
+            ...(selectedMode.input_field === 'question_ids'
+              ? { knowledge_codes: [] }
+              : { question_ids: [] }),
+          }),
+        }
+      )
       setInputValue('')
+      const queued = ['queued', 'processing'].includes(
+        String(response.batch.status)
+      )
+      showToast(
+        queued
+          ? `已加入队列，共 ${values.length} 项`
+          : `批次已处理，共创建 ${response.created_count} 个任务`,
+        'success'
+      )
+      onClose()
     } catch (err) {
       reportError(err, '创建任务')
     } finally {
@@ -178,10 +173,10 @@ export function AddDialog({
     modes,
     inputValue,
     showToast,
+    onClose,
   ])
 
   const handleClose = useCallback(() => {
-    setResults([])
     setWorkspace(null)
     setWorkflow(null)
     setSelectedModeKey('')
@@ -264,17 +259,6 @@ export function AddDialog({
             onChange={(event) => setInputValue(event.target.value)}
             fullWidth
           />
-          {results.length > 0 && (
-            <div className={styles.addResults}>
-              {results.map((r, i) => (
-                <div key={i} className={styles.addResult}>
-                  <span>{r.external_id}</span>
-                  <span>{r.status}</span>
-                  <span>{r.message || ''}</span>
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </DialogContent>
       <DialogActions>

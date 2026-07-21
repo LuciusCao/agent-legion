@@ -15,6 +15,7 @@ class JobBatchRequest(BaseModel):
     source_kind: str
     question_ids: list[str] = Field(default_factory=list)
     knowledge_codes: list[str] = Field(default_factory=list)
+    async_processing: bool = False
 
 
 class JobBatchResponse(BaseModel):

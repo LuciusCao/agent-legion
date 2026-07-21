@@ -8,6 +8,7 @@ from server.app.events import JobEventManager
 from server.app.jobs import JobQueries
 from server.app.services.job_errors import InvalidOperationError
 from server.app.services.job_intake_chunks import resolve_fresh_candidates
+from server.app.services.job_intake_enqueue import enqueue_intake_batch
 from server.app.services.job_intake_resolution import RESOLVER_MAP, normalize_values
 from server.app.services.job_intake_video import write_video_input
 from server.app.services.job_intake_workspace import (
@@ -83,6 +84,19 @@ class JobIntakeService:
         if resolver is None:
             raise InvalidOperationError("Unsupported entity and intake mode combination")
 
+        if payload.get("async_processing"):
+            return enqueue_intake_batch(
+                self.job_db,
+                workspace_id,
+                payload,
+                entity,
+                input_values,
+                cms_config,
+                resource_config,
+                mode,
+                active_revision,
+            )
+
         # Filter candidates that already exist in the workspace so duplicates are
         # reported as created_count=0 instead of failing the whole batch. The
         # dedup key set is a lightweight projection that grows with every
@@ -141,24 +155,14 @@ class JobIntakeService:
             source_payload,
             workspace_id=workspace_id,
         )
-        jobs: list[dict[str, Any]] = []
-        for candidate in candidates:
-            jobs.append(
-                self.job_db.create_job(
-                    workflow_key=workflow_key,
-                    source_type=str(candidate["entity_type"]),
-                    source_id=str(candidate["entity_id"]),
-                    batch_id=batch["id"],
-                    title=str(candidate["title"]),
-                    node_keys=list(definition.nodes),
-                    workspace_id=workspace_id,
-                    stem=str(candidate.get("stem", "")),
-                    workflow_revision_id=active_revision["id"],
-                    workflow_version=int(active_revision["version"]),
-                    workflow_definition_hash=active_revision["definition_hash"],
-                    workflow_definition_snapshot_json=active_revision["definition_json"],
-                )
-            )
+        jobs = self.job_db.create_jobs_bulk(
+            candidates=candidates,
+            workflow_key=workflow_key,
+            batch_id=batch["id"],
+            node_keys=list(definition.nodes),
+            workspace_id=workspace_id,
+            revision=active_revision,
+        )
 
         if entity == "video" and workflow_key == "video_knowledge":
             for candidate, job in zip(candidates, jobs, strict=True):
@@ -169,8 +173,9 @@ class JobIntakeService:
 
         batch["created_count"] = len(jobs)
         if self.job_event_buffer is not None:
-            for job in jobs:
-                self.job_event_buffer.record_job_created(workspace_id, str(job["id"]))
+            self.job_event_buffer.record_jobs_created(
+                workspace_id, [str(job["id"]) for job in jobs]
+            )
         elif self.job_event_manager is not None:
             stats = self.job_db.count_jobs_by_status(workspace_id)
             self.job_event_manager.broadcast_jobs_created(workspace_id, jobs, stats)

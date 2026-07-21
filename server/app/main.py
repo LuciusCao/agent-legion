@@ -27,6 +27,7 @@ from server.app.remote_wiring import register_remote_completion
 from server.app.routes import create_router
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
+from server.app.services.job_intake_queue import JobIntakeQueue
 from server.app.services.job_packages import JobPackageService
 from server.app.services.package_deletion import PackageDeletionService
 from server.app.services.package_stats_backfill import backfill_package_stats
@@ -120,6 +121,7 @@ def create_app(
     background_tasks = BackgroundTasks(
         workspace_event_aggregator=workspace_event_aggregator,
         agent_broadcast_controller=agent_manager.broadcast_controller,
+        job_intake_queue=JobIntakeQueue(job_db, settings, job_event_buffer),
     )
 
     @asynccontextmanager

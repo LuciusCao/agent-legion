@@ -147,7 +147,11 @@ describe('AddDialog', () => {
           },
         },
       })
-      .mockResolvedValueOnce({ batch: {}, created_count: 1, jobs: [] })
+      .mockResolvedValueOnce({
+        batch: { status: 'queued' },
+        created_count: 0,
+        jobs: [],
+      })
 
     render(
       <AddDialog
@@ -184,7 +188,14 @@ describe('AddDialog', () => {
       source_kind: 'batch_by_ids',
       question_ids: ['5cf31cfe5805488fe22aea87b3853267'],
       knowledge_codes: [],
+      async_processing: true,
     })
+    expect(useUiStore.getState().toast).toEqual(
+      expect.objectContaining({
+        type: 'success',
+        message: '已加入队列，共 1 项',
+      })
+    )
   })
 
   it('attaches the select change listener when the dialog opens after mount', async () => {
@@ -225,7 +236,11 @@ describe('AddDialog', () => {
           },
         },
       })
-      .mockResolvedValueOnce({ batch: {}, created_count: 1, jobs: [] })
+      .mockResolvedValueOnce({
+        batch: { status: 'queued' },
+        created_count: 0,
+        jobs: [],
+      })
 
     const { rerender } = render(
       <AddDialog
@@ -269,6 +284,7 @@ describe('AddDialog', () => {
       source_kind: 'batch_by_ids',
       question_ids: ['5cf31cfe5805488fe22aea87b3853267'],
       knowledge_codes: [],
+      async_processing: true,
     })
   })
 
