@@ -4,7 +4,7 @@ from typing import Any
 
 import pytest
 
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.job_artifact_mutation import JobArtifactMutationService
@@ -87,9 +87,9 @@ def _create_active_lease(
                 job["workflow_key"],
                 node_key,
                 run["id"],
-                _sqlite_timestamp(now),
-                _sqlite_timestamp(now),
-                _sqlite_timestamp(expires),
+                _database_timestamp(now),
+                _database_timestamp(now),
+                _database_timestamp(expires),
             ),
         )
 

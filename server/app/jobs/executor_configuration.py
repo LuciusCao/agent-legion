@@ -1,45 +1,26 @@
 from __future__ import annotations
 
-import sqlite3
 from collections.abc import Mapping, Sequence
 from typing import Any
 
-
-def _bootstrap_state_table_exists(conn: sqlite3.Connection) -> bool:
-    row = conn.execute(
-        "select 1 from sqlite_master where type='table' and name='workspace_executor_bootstrap_state'"
-    ).fetchone()
-    return row is not None
+from server.app.db.connection import DatabaseConnection
 
 
 def workspace_executor_configuration_is_authoritative(
-    conn: sqlite3.Connection, workspace_id: str
+    conn: DatabaseConnection, workspace_id: str
 ) -> bool:
-    if not _bootstrap_state_table_exists(conn):
-        # After V005 the bootstrap state table is dropped and every configuration
-        # is considered authoritative.
-        return True
-    row = conn.execute(
-        "select 1 from workspace_executor_bootstrap_state where workspace_id=?",
-        (workspace_id,),
-    ).fetchone()
-    return row is not None
+    del conn, workspace_id
+    return True
 
 
 def mark_workspace_executor_configuration_authoritative(
-    conn: sqlite3.Connection, workspace_id: str
+    conn: DatabaseConnection, workspace_id: str
 ) -> None:
-    if not _bootstrap_state_table_exists(conn):
-        return
-    conn.execute(
-        "insert into workspace_executor_bootstrap_state(workspace_id) values (?) "
-        "on conflict(workspace_id) do nothing",
-        (workspace_id,),
-    )
+    del conn, workspace_id
 
 
 def get_workspace_executor_configuration(
-    conn: sqlite3.Connection, workspace_id: str
+    conn: DatabaseConnection, workspace_id: str
 ) -> dict[str, list[dict[str, Any]]]:
     allocations = conn.execute(
         "select workspace_id, executor_id, concurrency_limit "
@@ -64,7 +45,7 @@ def get_workspace_executor_configuration(
 
 
 def replace_workspace_executor_configuration(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     workspace_id: str,
     allocations: Sequence[Mapping[str, Any]],
     bindings: Sequence[Mapping[str, Any]],

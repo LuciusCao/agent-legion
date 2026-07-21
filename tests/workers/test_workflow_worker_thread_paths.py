@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from server.app.jobs import JobQueries
+from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import (
     RecordingExecutor,
     _local_node,
@@ -12,7 +13,7 @@ from tests.workers.helpers import (
 
 
 def test_poll_persists_relative_log_path_and_keeps_context_absolute(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")

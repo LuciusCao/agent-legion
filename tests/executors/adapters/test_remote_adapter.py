@@ -13,6 +13,7 @@ from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.remote_payloads.pi import PiPayloadBuilder
 from server.app.executors.runtime_config import PiRuntimeConfig
 from tests.executors.adapters.helpers import _make_skill_manager
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture(autouse=True)
@@ -23,7 +24,7 @@ def _declared_inputs(context: ExecutionContext) -> None:
 
 
 def _make_broker(tmp_path: Path, **kwargs: float | int) -> RemoteExecutionBroker:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     return RemoteExecutionBroker(db_path, tmp_path / "bundles", **kwargs)
 

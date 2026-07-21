@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 import pytest
 
 from server.app.executors._lease_claims import claim_lease
-from server.app.executors.leases import ExecutorLeaseRepository, _sqlite_timestamp
+from server.app.executors.leases import ExecutorLeaseRepository, _database_timestamp
 from server.app.executors.models import (
     ConfigurationFailureRequest,
     ExecutionResult,
@@ -19,7 +19,7 @@ from tests.executors.leases.helpers import (
 
 
 def test_claim_lease_persists_relative_log_path(queries: JobQueries) -> None:
-    data_dir = queries.path.parent
+    data_dir = queries.jobs_dir.parent
     log_path = data_dir / "logs" / "jobs" / "run.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
     workspace_id, job_id = _setup_workspace(
@@ -58,7 +58,7 @@ def test_finish_lease_persists_relative_log_path(
     )
     assert claim is not None
 
-    data_dir = queries.path.parent
+    data_dir = queries.jobs_dir.parent
     absolute_log = data_dir / "logs" / "updated.log"
     result = ExecutionResult(
         status="completed",
@@ -79,7 +79,7 @@ def test_fail_without_lease_persists_relative_log_path(
     workspace_id, job_id = _setup_workspace(
         queries, "ws-rel-fail", "local-default", workspace_limit=2
     )
-    data_dir = queries.path.parent
+    data_dir = queries.jobs_dir.parent
     absolute_log = data_dir / "logs" / "error.log"
     request = ConfigurationFailureRequest(
         workspace_id=workspace_id,
@@ -104,7 +104,7 @@ def test_try_claim_returns_absolute_log_path_and_persists_relative(
     workspace_id, job_id = _setup_workspace(
         queries, "ws-repo-claim-abs", "local-default", workspace_limit=2
     )
-    data_dir = queries.path.parent
+    data_dir = queries.jobs_dir.parent
     absolute_log = data_dir / "logs" / "jobs" / "run.log"
     absolute_log.parent.mkdir(parents=True, exist_ok=True)
     request = _claim_request(
@@ -139,7 +139,7 @@ def test_finish_lease_canonicalizes_fallback_legacy_absolute_log_path(
     )
     assert claim is not None
 
-    data_dir = queries.path.parent
+    data_dir = queries.jobs_dir.parent
     legacy_absolute_log = data_dir / "logs" / "legacy.log"
     legacy_absolute_log.parent.mkdir(parents=True, exist_ok=True)
     with queries.connect() as conn:
@@ -169,7 +169,7 @@ def test_finish_lease_persists_relative_session_dir(
     )
     assert claim is not None
 
-    data_dir = queries.path.parent
+    data_dir = queries.jobs_dir.parent
     absolute_session = (
         data_dir / "jobs" / workspace_id / job_id / "runs" / "node" / "abc" / "session"
     )
@@ -207,6 +207,6 @@ def test_finish_lease_rejects_session_dir_outside_jobs(
         repo_a.finish(claim.lease_id, result)
 
 
-def test_sqlite_timestamp_is_utc_without_t_separator() -> None:
+def test_database_timestamp_is_utc_without_t_separator() -> None:
     now = datetime(2025, 1, 2, 3, 4, 5, 123456, tzinfo=UTC)
-    assert _sqlite_timestamp(now) == "2025-01-02 03:04:05.123456"
+    assert _database_timestamp(now) == "2025-01-02 03:04:05.123456"

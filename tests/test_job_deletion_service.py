@@ -7,7 +7,7 @@ from typing import Any
 
 import pytest
 
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.jobs import JobQueries
 from server.app.services.artifact_store import ArtifactNotFoundError, ArtifactStore
@@ -76,10 +76,11 @@ def _insert_active_lease(
             """
             insert into node_runs(job_id, node_key, status, command_json, log_path, run_dir, session_dir, started_at)
             values (?, ?, 'running', ?, ?, '', '', ?)
+            returning id
             """,
-            (job_id, node_key, "[]", "", _sqlite_timestamp(now)),
+            (job_id, node_key, "[]", "", _database_timestamp(now)),
         )
-        node_run_id = cursor.lastrowid
+        node_run_id = cursor.fetchone()["id"]
         conn.execute(
             """
             insert into executor_leases(
@@ -97,9 +98,9 @@ def _insert_active_lease(
                 "question_comprehension_info",
                 node_key,
                 node_run_id,
-                _sqlite_timestamp(now),
-                _sqlite_timestamp(now),
-                _sqlite_timestamp(expires),
+                _database_timestamp(now),
+                _database_timestamp(now),
+                _database_timestamp(expires),
             ),
         )
 

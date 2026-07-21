@@ -32,7 +32,7 @@ video-hive/
 │       ├── settings.py         # 配置加载与合并
 │       ├── routes/             # REST API 路由与合约
 │       ├── services/           # 业务逻辑服务层
-│       ├── db/                 # SQLite schema、迁移、共享查询构造
+│       ├── db/                 # PostgreSQL schema、连接池、事务与共享查询构造
 │       ├── jobs/               # Job 领域查询与类型
 │       ├── executors/          # Executor 配置、runtime、lease 调度
 │       ├── workflows/          # Agent Legion DAG 定义与执行
@@ -100,7 +100,6 @@ video-hive/
 │   ├── open/                   # 待修复问题
 │   └── closed/                 # 已修复问题
 └── data/                       # 运行时数据（gitignored）
-    ├── video_hive.sqlite
     ├── videos/
     ├── jobs/
     ├── packages/

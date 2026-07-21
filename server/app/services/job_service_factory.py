@@ -37,6 +37,7 @@ class JobServices:
         self.executor_leases = ExecutorLeaseRepository(
             job_db.path,
             job_db=job_db,
+            data_dir=settings.data_dir,
             job_event_manager=job_event_manager,
             job_event_buffer=job_event_buffer,
         )

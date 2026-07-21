@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import re
-import sqlite3
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
@@ -34,7 +33,7 @@ def _decode_json_object(value: Any) -> dict[str, Any]:
     return loaded if isinstance(loaded, dict) else {}
 
 
-def _workspace_record(row: sqlite3.Row) -> dict[str, Any]:
+def _workspace_record(row: dict[str, Any]) -> dict[str, Any]:
     record = dict(row)
     record["cms_config"] = _decode_json_object(record.get("cms_config_json"))
     record["resource_config"] = _decode_json_object(record.get("resource_config_json"))
@@ -99,6 +98,8 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                 ),
             )
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+        if row is None:
+            raise RuntimeError("workspace insert did not return a row")
         return _workspace_record(row)
 
     def list_workspaces(self) -> list[dict[str, Any]]:
@@ -174,6 +175,8 @@ class WorkspaceQueriesMixin(JobQueriesBase):
             if cursor.rowcount == 0:
                 raise ValueError("Workspace not found")
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+        if row is None:
+            raise RuntimeError("workspace update did not return a row")
         return _workspace_record(row)
 
     def update_workspace_configuration(
@@ -223,6 +226,8 @@ class WorkspaceQueriesMixin(JobQueriesBase):
                 node_limits or [],
             )
             row = conn.execute("select * from workspaces where id=?", (workspace_id,)).fetchone()
+        if row is None:
+            raise RuntimeError("workspace configuration update did not return a row")
         return _workspace_record(row)
 
     def delete_workspace(self, workspace_id: str) -> None:

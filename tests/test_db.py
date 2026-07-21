@@ -1,5 +1,4 @@
 import json
-import sqlite3
 import threading
 from pathlib import Path
 
@@ -9,15 +8,17 @@ from freezegun import freeze_time
 from server.app.db import Database
 from server.app.db.notifications import NotificationHub
 from server.app.records import PHASE_RUN_FIELDS, VIDEO_RECORD_FIELDS
+from tests.postgres_support import TEST_DATABASE_URL
 
 
-def test_video_query_connections_enable_sqlite_safety_pragmas(tmp_path):
-    database = Database(tmp_path / "video_hive.sqlite")
+def test_video_query_connections_use_postgres(tmp_path):
+    del tmp_path
+    database = Database(TEST_DATABASE_URL)
 
     with database._connect_read() as conn:
-        assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
-        assert conn.execute("pragma journal_mode").fetchone()[0] == "wal"
-        assert conn.execute("pragma busy_timeout").fetchone()[0] >= 5000
+        row = conn.execute("select current_database() as name").fetchone()
+    assert row is not None
+    assert row["name"]
 
 
 def test_database_creates_video_and_phase_run(db):
@@ -117,7 +118,7 @@ def test_notify_includes_interaction_stats_for_knowledge_videos(tmp_path: Path) 
         on_change=lambda video: captured.update(video or {}),
     )
 
-    db = Database(tmp_path / "video_hive.sqlite", hub=hub, videos_dir=videos_dir)
+    db = Database(TEST_DATABASE_URL, hub=hub, videos_dir=videos_dir)
     db.create_video(
         "https://example.com/k001.mp4",
         title="K001",
@@ -149,7 +150,7 @@ def test_notify_does_not_include_interaction_stats_for_question_videos(tmp_path:
         on_change=lambda video: captured.update(video or {}),
     )
 
-    db = Database(tmp_path / "video_hive.sqlite", hub=hub, videos_dir=videos_dir)
+    db = Database(TEST_DATABASE_URL, hub=hub, videos_dir=videos_dir)
     db.create_video(
         "https://example.com/q001.mp4",
         title="Q001",
@@ -171,7 +172,7 @@ def test_notify_skips_interaction_stats_when_videos_dir_is_none(tmp_path: Path) 
         on_change=lambda video: captured.update(video or {}),
     )
 
-    db = Database(tmp_path / "video_hive.sqlite", hub=hub)
+    db = Database(TEST_DATABASE_URL, hub=hub)
     db.create_video(
         "https://example.com/k001.mp4",
         title="K001",
@@ -245,8 +246,10 @@ def test_database_creates_performance_indexes(db):
     """Regression test for issue 012: critical indexes must exist."""
     with db.connect() as conn:
         indexes = {
-            row["name"]
-            for row in conn.execute("select name from sqlite_master where type='index'").fetchall()
+            row["indexname"]
+            for row in conn.execute(
+                "select indexname from pg_indexes where schemaname=current_schema()"
+            ).fetchall()
         }
     assert _EXPECTED_INDEXES.issubset(indexes), f"Missing indexes: {_EXPECTED_INDEXES - indexes}"
 
@@ -429,34 +432,6 @@ def test_batch_update_packed_empty_list(db):
     db.batch_update_packed([], packed=1)
 
 
-def test_batch_notify_uses_single_connection(db):
-    """batch_notify should reuse a single read connection for all video_ids."""
-    from unittest.mock import patch
-
-    v1 = db.create_video("https://example.com/v1.mp4", "V1")
-    v2 = db.create_video("https://example.com/v2.mp4", "V2")
-    v3 = db.create_video("https://example.com/v3.mp4", "V3")
-
-    created_connections = []
-    original_connect = sqlite3.connect
-
-    def tracking_connect(*args, **kwargs):
-        conn = original_connect(*args, **kwargs)
-        created_connections.append(conn)
-        return conn
-
-    with patch("server.app.db.queries.sqlite3.connect", side_effect=tracking_connect):
-        db.batch_notify([v1["id"], v2["id"], v3["id"]])
-
-    # batch_notify should use a single read connection for all videos.
-    # The write connections from create_video are unrelated.
-    # We allow some slack for any internal connections, but the key is
-    # that batch_notify itself doesn't open a new connection per video.
-    assert len(created_connections) <= 4, (
-        f"Expected at most 4 connections, got {len(created_connections)}"
-    )
-
-
 def test_batch_update_packed_triggers_notification(db):
     """batch_update_packed should notify all affected videos."""
     from unittest.mock import MagicMock
@@ -476,7 +451,7 @@ def test_batch_update_packed_triggers_notification(db):
 
 
 def test_notify_safe_under_concurrent_threads(db):
-    """多个工作线程并发触发 _notify 时不应报 SQLite 线程错误（regression #232）。"""
+    """多个工作线程并发触发 _notify 时应安全使用连接池。"""
     from unittest.mock import MagicMock
 
     v = db.create_video("https://example.com/v1.mp4", "V1")
@@ -539,11 +514,11 @@ def test_update_package_name(db):
     assert db.list_packages(limit=1)[0]["name"] == "新名称"
 
 
-def test_database_initialization_runs_migrations(db):
-    """Database construction must run migrations and record V003 legacy columns."""
+def test_database_initialization_records_postgres_schema(db):
+    """Database construction records the PostgreSQL control-plane schema."""
     with db.connect() as conn:
         versions = {
             row["version"]
             for row in conn.execute("select version from schema_migrations").fetchall()
         }
-    assert 3 in versions, "V003 legacy column migration should be recorded"
+    assert versions == {1}

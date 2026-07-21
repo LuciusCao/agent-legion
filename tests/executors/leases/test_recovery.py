@@ -4,7 +4,7 @@ from datetime import UTC, datetime, timedelta
 
 from server.app.executors._lease_claims import claim_lease
 from server.app.executors._lease_control import _sync_job_status
-from server.app.executors.leases import ExecutorLeaseRepository, _sqlite_timestamp
+from server.app.executors.leases import ExecutorLeaseRepository, _database_timestamp
 from server.app.executors.models import (
     LeaseClaimRequest,
 )
@@ -155,7 +155,7 @@ def test_claim_lease_transitions_queued_job_back_to_running(
     )
 
     with queries.connect() as conn:
-        claimed = claim_lease(conn, request, queries.path.parent)
+        claimed = claim_lease(conn, request, queries.jobs_dir.parent)
         conn.commit()
 
     assert claimed is not None
@@ -245,10 +245,11 @@ def test_recover_skips_jobs_with_active_lease(
             """
             insert into node_runs(job_id, node_key, status, started_at, log_path)
             values (?, ?, 'running', ?, ?)
+            returning id
             """,
-            (job_id, "node_a", _sqlite_timestamp(datetime.now(UTC)), "/tmp/run.log"),
+            (job_id, "node_a", _database_timestamp(datetime.now(UTC)), "/tmp/run.log"),
         )
-        node_run_id = cursor.lastrowid
+        node_run_id = cursor.fetchone()["id"]
         conn.execute(
             """
             insert into executor_leases(
@@ -266,9 +267,9 @@ def test_recover_skips_jobs_with_active_lease(
                 "question_comprehension_info",
                 "node_a",
                 node_run_id,
-                _sqlite_timestamp(datetime.now(UTC)),
-                _sqlite_timestamp(datetime.now(UTC)),
-                _sqlite_timestamp(datetime.now(UTC) + timedelta(seconds=60)),
+                _database_timestamp(datetime.now(UTC)),
+                _database_timestamp(datetime.now(UTC)),
+                _database_timestamp(datetime.now(UTC) + timedelta(seconds=60)),
             ),
         )
         conn.execute("commit")
@@ -288,7 +289,7 @@ def test_recover_orphaned_running_jobs_marks_running_node_runs_failed(
         queries, "ws-orphan-runs", "exec-orphan-runs", 1, node_keys=["node_a", "node_b"]
     )
     now = datetime.now(UTC)
-    now_str = _sqlite_timestamp(now)
+    now_str = _database_timestamp(now)
     with queries.connect() as conn:
         conn.execute(
             "update job_nodes set status='running' where job_id=? and node_key=?",

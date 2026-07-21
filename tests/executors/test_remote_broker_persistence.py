@@ -12,6 +12,7 @@ from server.app.executors.remote_broker import (
     RemoteExecutionPayload,
     RemoteOutcome,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _payload(execution_id: str, capability: str = "cap_a") -> RemoteExecutionPayload:
@@ -28,7 +29,7 @@ def _payload(execution_id: str, capability: str = "cap_a") -> RemoteExecutionPay
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
-    path = tmp_path / "jobs.sqlite"
+    path = TEST_DATABASE_URL
     init_db(path)
     return path
 
@@ -130,9 +131,8 @@ def test_done_entries_cleaned_up(db_path, tmp_path):
     assert [r["execution_id"] for r in rows] == ["e2"]
 
 
-def test_store_write_paths_retry_on_sqlite_lock(db_path, tmp_path, monkeypatch):
-    # 锁竞争下的 OperationalError 触发整单元重试（终审修复回防）。
-    import sqlite3
+def test_store_write_paths_retry_on_transaction_conflict(db_path, tmp_path, monkeypatch):
+    from psycopg.errors import SerializationFailure
 
     from server.app.db.transaction import write_transaction as real_write_transaction
     from server.app.executors import _remote_queue_store
@@ -147,7 +147,7 @@ def test_store_write_paths_retry_on_sqlite_lock(db_path, tmp_path, monkeypatch):
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise sqlite3.OperationalError("database is locked")
+            raise SerializationFailure("serialization failure")
         return real_write_transaction(path)
 
     monkeypatch.setattr(_remote_queue_store, "write_transaction", flaky_write_transaction)

@@ -54,8 +54,8 @@ REPLACEMENT_TOKENS: dict[str, list[tuple[str, str]]] = {
         ("server/app/workflow_worker_schedule.py", "workspace_node_bindings"),
     ],
     "workflow concurrency": [
-        ("server/app/db/migrations/v001_executor_core.py", "workspace_executor_allocations"),
-        ("server/app/db/migrations/v001_executor_core.py", "workspace_node_limits"),
+        ("server/app/db/postgres_schema.sql", "workspace_executor_allocations"),
+        ("server/app/db/postgres_schema.sql", "workspace_node_limits"),
     ],
 }
 

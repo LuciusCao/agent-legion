@@ -3,7 +3,6 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
 from server.app.event_bus import EventBus, workspace_channel
@@ -92,7 +91,7 @@ def build_workspace_event_aggregator(
     from server.app.services.job_patch_queries import JobPatchQueryService
 
     query_service = JobPatchQueryService(job_db, settings)
-    buffer = JobEventBuffer(db_path=Path(job_db.path))
+    buffer = JobEventBuffer(db_path=job_db.path)
     aggregator = WorkspaceJobEventAggregator(
         buffer,
         query_service,

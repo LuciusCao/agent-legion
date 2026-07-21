@@ -1,22 +1,24 @@
-import sqlite3
+from datetime import datetime
 from pathlib import Path
 
 import pytest
+from psycopg import IntegrityError
 
 from server.app.jobs.queries import JobQueries
+from tests.postgres_support import TEST_DATABASE_URL
 
 
-def test_job_query_connections_enable_sqlite_safety_pragmas(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+def test_job_query_connections_use_postgres(tmp_path: Path) -> None:
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
 
     with db._connect_read() as conn:
-        assert conn.execute("pragma foreign_keys").fetchone()[0] == 1
-        assert conn.execute("pragma journal_mode").fetchone()[0] == "wal"
-        assert conn.execute("pragma busy_timeout").fetchone()[0] >= 5000
+        row = conn.execute("select current_database() as name").fetchone()
+    assert row is not None
+    assert row["name"]
 
 
 def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "Cascade Workspace", default_workflow_key="question_comprehension_info"
     )
@@ -45,13 +47,14 @@ def test_fresh_schema_cascades_workspace_jobs_and_runs(tmp_path: Path) -> None:
         )
 
 
-def _looks_like_timestamp(value: str) -> bool:
-    """Return True for SQLite current_timestamp style strings."""
-    return len(value) >= 19 and value[4] == "-" and value[10] in (" ", "T")
+def _looks_like_timestamp(value: datetime | str) -> bool:
+    return isinstance(value, datetime) or (
+        len(value) >= 19 and value[4] == "-" and value[10] in (" ", "T")
+    )
 
 
 def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "Created At Workspace", default_workflow_key="question_comprehension_info"
     )
@@ -77,7 +80,7 @@ def test_create_job_sets_node_created_at(tmp_path: Path) -> None:
 
 
 def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "Rerun Workspace", default_workflow_key="question_comprehension_info"
     )
@@ -123,7 +126,7 @@ def test_mark_node_for_rerun_resets_node_created_at(tmp_path: Path) -> None:
 
 
 def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "Target Workspace", default_workflow_key="question_comprehension_info"
     )
@@ -158,7 +161,7 @@ def test_set_and_clear_job_execution_target(tmp_path: Path) -> None:
 
 
 def test_pause_and_resume_job(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "Pause Workspace", default_workflow_key="question_comprehension_info"
     )
@@ -188,7 +191,7 @@ def test_pause_and_resume_job(tmp_path: Path) -> None:
 
 
 def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "Continue Workspace", default_workflow_key="question_comprehension_info"
     )
@@ -224,7 +227,7 @@ def test_resume_job_clears_target_reached_state(tmp_path: Path) -> None:
 
 
 def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "Validation Workspace", default_workflow_key="question_comprehension_info"
     )
@@ -251,12 +254,12 @@ def test_job_execution_target_rejects_invalid_mode_and_paused_values(tmp_path: P
         db.set_job_execution_mode(job["id"], "until_node")
 
     # paused is stored as an integer but exposed as a boolean.
-    with db.connect() as conn, pytest.raises(sqlite3.IntegrityError):
+    with db.connect() as conn, pytest.raises(IntegrityError):
         conn.execute("update jobs set execution_paused = 2 where id=?", (job["id"],))
 
 
 def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "UpdatedAt Workspace", default_workflow_key="question_comprehension_info"
     )
@@ -306,12 +309,12 @@ def test_execution_control_mutations_bump_updated_at(tmp_path: Path) -> None:
 
 
 def test_get_job_execution_control_returns_none_for_missing_job(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     assert db.get_job_execution_control("missing-job") is None
 
 
 def test_execution_control_mutations_raise_for_unknown_job(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
 
     with pytest.raises(ValueError):
         db.pause_job("missing-job", "reason")
@@ -324,7 +327,7 @@ def test_execution_control_mutations_raise_for_unknown_job(tmp_path: Path) -> No
 
 
 def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "List By Ids Workspace", default_workflow_key="question_comprehension_info"
     )
@@ -366,7 +369,7 @@ def test_list_jobs_by_ids_returns_only_matching_jobs(tmp_path: Path) -> None:
 
 
 def test_list_jobs_by_ids_returns_empty_for_empty_input(tmp_path: Path) -> None:
-    db = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    db = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = db.create_workspace(
         "Empty List Workspace", default_workflow_key="question_comprehension_info"
     )

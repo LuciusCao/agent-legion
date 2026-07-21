@@ -1,16 +1,16 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from server.app.db.connection import DatabaseConnection
 from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
     _sync_job_status,
 )
 from server.app.executors._lease_shards import finish_shard_execution
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors._path_canonicalization import (
     canonicalize_data_path,
     canonicalize_finish_paths,
@@ -18,7 +18,7 @@ from server.app.executors._path_canonicalization import (
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 
 
-def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -> bool:
+def heartbeat_lease(conn: DatabaseConnection, lease_id: str, ttl_seconds: int) -> bool:
     now = datetime.now(UTC)
     lease = conn.execute(
         "select status from executor_leases where id=?",
@@ -33,16 +33,16 @@ def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -
         set heartbeat_at=?, expires_at=?
         where id=? and status='active'
         """,
-        (_sqlite_timestamp(now), _sqlite_timestamp(expires_at), lease_id),
+        (_database_timestamp(now), _database_timestamp(expires_at), lease_id),
     )
     return True
 
 
 def finish_lease(
-    conn: sqlite3.Connection, lease_id: str, result: ExecutionResult, data_dir: Path | None = None
+    conn: DatabaseConnection, lease_id: str, result: ExecutionResult, data_dir: Path | None = None
 ) -> bool:
     now = datetime.now(UTC)
-    now_str = _sqlite_timestamp(now)
+    now_str = _database_timestamp(now)
     lease = conn.execute("select * from executor_leases where id=?", (lease_id,)).fetchone()
     if lease is None or lease["status"] != "active":
         return False
@@ -107,14 +107,14 @@ def finish_lease(
 
 
 def fail_without_lease(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     request: ConfigurationFailureRequest,
     error_message: str,
     data_dir: Path | None = None,
 ) -> int | None:
     """Record a failed node run without claiming a lease."""
     now = datetime.now(UTC)
-    now_str = _sqlite_timestamp(now)
+    now_str = _database_timestamp(now)
     cursor = conn.execute(
         """
         update job_nodes
@@ -134,6 +134,7 @@ def fail_without_lease(
             run_dir, session_dir, started_at, finished_at, error_message
         )
         values (?, ?, 'failed', ?, ?, '', '', ?, ?, ?)
+        returning id
         """,
         (
             request.job_id,
@@ -145,14 +146,17 @@ def fail_without_lease(
             error_message,
         ),
     )
-    node_run_id = cursor.lastrowid
+    inserted = cursor.fetchone()
+    if inserted is None:
+        raise RuntimeError("node_runs insert did not return a row id")
+    node_run_id = int(inserted["id"])
 
     _sync_job_status(conn, request.job_id)
     return node_run_id
 
 
-def expire_stale_leases(conn: sqlite3.Connection, now: datetime) -> list[str]:
-    now_str = _sqlite_timestamp(now)
+def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
+    now_str = _database_timestamp(now)
     rows = conn.execute(
         """
         select id, job_id, node_key, node_run_id

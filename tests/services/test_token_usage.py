@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.connection import connect_database
 from server.app.db.schema import init_db
 from server.app.services.token_usage import (
     TokenUsageSummary,
@@ -14,6 +14,7 @@ from server.app.services.token_usage import (
     parse_run_usage,
     persist_node_run_usage,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _write_events(run_dir: Path, events: list[dict]) -> None:
@@ -193,7 +194,7 @@ def test_parse_returns_none_when_only_malformed_lines(tmp_path):
 
 
 def test_persist_node_run_usage_creates_row(tmp_path):
-    db_path = tmp_path / "test.db"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     summary = TokenUsageSummary(
         node_run_id=1,
@@ -209,16 +210,20 @@ def test_persist_node_run_usage_creates_row(tmp_path):
         cache_read_tokens=10,
         total_tokens=160,
     )
-    with closing(connect_sqlite(db_path)) as conn:
+    with closing(connect_database(db_path)) as conn:
         # Insert required parent rows.
-        conn.execute("insert or ignore into workspaces(id, name) values (?, ?)", ("ws-1", "Test"))
         conn.execute(
-            "insert or ignore into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (?, ?, ?, ?, ?)",
+            "insert into workspaces(id, name) values (?, ?) on conflict (id) do nothing",
+            ("ws-1", "Test"),
+        )
+        conn.execute(
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
+            "values (?, ?, ?, ?, ?) on conflict (id) do nothing",
             ("job-1", "ws-1", "wf", "source", "id"),
         )
         conn.execute(
-            "insert or ignore into node_runs(id, job_id, node_key, status) values (?, ?, ?, ?)",
+            "insert into node_runs(id, job_id, node_key, status) values (?, ?, ?, ?)"
+            " on conflict (id) do nothing",
             (1, "job-1", "node-a", "completed"),
         )
         persist_node_run_usage(conn, summary)
@@ -285,7 +290,7 @@ def test_cost_for_unknown_model():
 def test_backfill_persists_rows_for_existing_run_dirs(tmp_path):
     data_dir = tmp_path / "data"
     jobs_dir = data_dir / "jobs"
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
 
     workspace_id = "ws-1"
@@ -305,7 +310,7 @@ def test_backfill_persists_rows_for_existing_run_dirs(tmp_path):
         ],
     )
 
-    with closing(connect_sqlite(db_path)) as conn:
+    with closing(connect_database(db_path)) as conn:
         conn.execute("insert into workspaces(id, name) values (?, ?)", (workspace_id, "Test"))
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
@@ -334,10 +339,10 @@ def test_backfill_persists_rows_for_existing_run_dirs(tmp_path):
 def test_backfill_skips_missing_run_dirs_and_missing_events(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True)
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
 
-    with closing(connect_sqlite(db_path)) as conn:
+    with closing(connect_database(db_path)) as conn:
         conn.execute("insert into workspaces(id, name) values (?, ?)", ("ws-1", "Test"))
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "

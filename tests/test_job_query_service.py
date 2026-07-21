@@ -5,7 +5,7 @@ from typing import Any
 
 import pytest
 
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors.config import RemoteCapabilityConfig, RemoteExecutorConfig
 from server.app.executors.remote_broker import RemoteExecutionBroker, RemoteExecutionPayload
 from server.app.services.job_queries import JobQueryService
@@ -171,7 +171,13 @@ def test_list_jobs_loads_nodes_in_one_query(query_service, job_db, monkeypatch):
     @contextmanager
     def traced():
         with original() as conn:
-            conn.set_trace_callback(statements.append)
+            execute = conn.execute
+
+            def traced_execute(sql, params=None):
+                statements.append(sql)
+                return execute(sql, params)
+
+            monkeypatch.setattr(conn, "execute", traced_execute)
             yield conn
 
     monkeypatch.setattr(job_db, "_connect_read", traced)
@@ -192,7 +198,13 @@ def test_list_jobs_does_not_reload_each_job_for_execution_control(
     @contextmanager
     def traced():
         with original() as conn:
-            conn.set_trace_callback(statements.append)
+            execute = conn.execute
+
+            def traced_execute(sql, params=None):
+                statements.append(sql)
+                return execute(sql, params)
+
+            monkeypatch.setattr(conn, "execute", traced_execute)
             yield conn
 
     monkeypatch.setattr(job_db, "_connect_read", traced)
@@ -674,9 +686,9 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
                 job["workflow_key"],
                 node_key,
                 run["id"],
-                _sqlite_timestamp(now),
-                _sqlite_timestamp(now),
-                _sqlite_timestamp(now + timedelta(seconds=300)),
+                _database_timestamp(now),
+                _database_timestamp(now),
+                _database_timestamp(now + timedelta(seconds=300)),
             ),
         )
 

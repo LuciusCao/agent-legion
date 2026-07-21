@@ -9,10 +9,8 @@ revocation takes effect immediately and beats the fallback window.
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import hashlib
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -20,15 +18,17 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 from server.app.db.schema import init_db
+from server.app.db.transaction import read_connection
 from server.app.executors.remote_broker import RemoteExecutionBroker, RemoteExecutionPayload
 from server.app.routes.remote import create_remote_router
+from tests.postgres_support import TEST_DATABASE_URL
 
 ADMIN_TOKEN = "admin-global-token"
 ADMIN_HEADERS = {"X-Worker-Token": ADMIN_TOKEN}
 
 
-def _fetchone(db_path: Path, sql: str, params: tuple = ()):
-    with contextlib.closing(sqlite3.connect(db_path)) as conn:
+def _fetchone(db_path: str, sql: str, params: tuple = ()):
+    with read_connection(db_path) as conn:
         return conn.execute(sql, params).fetchone()
 
 
@@ -42,7 +42,7 @@ def _remote_settings(settings, *, allow_legacy: bool = True):
 
 @pytest.fixture
 def rig(tmp_path: Path, settings):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     app = FastAPI()
@@ -122,7 +122,7 @@ def test_register_issues_token_and_stores_only_hash(rig) -> None:
         "select token_hash, labels_json, revoked_at from remote_workers where worker_id = 'w1'",
     )
     assert row is not None
-    token_hash, labels_json, revoked_at = row
+    token_hash, labels_json, revoked_at = row.values()
     assert token_hash == hashlib.sha256(secret.encode("utf-8")).hexdigest()
     assert token_hash != secret
     assert secret not in (labels_json or "")
@@ -184,7 +184,7 @@ def test_legacy_token_allowed_during_fallback_window(rig) -> None:
 
 
 def test_legacy_token_rejected_when_window_closed(tmp_path: Path, settings) -> None:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     app = FastAPI()
@@ -245,7 +245,7 @@ def test_register_rejects_dotted_worker_id(rig) -> None:
 def test_issue_worker_token_rejects_dotted_worker_id(tmp_path: Path) -> None:
     """A dotted worker_id would issue a token that authenticate_worker (split
     on the first ".") can never resolve — fail closed at issuance instead."""
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     with pytest.raises(ValueError, match=r"worker_id must not contain '\.'"):
@@ -256,7 +256,7 @@ def test_issue_worker_token_rejects_dotted_worker_id(tmp_path: Path) -> None:
 
 
 def test_issue_worker_token_reissue_rotates_hash(tmp_path: Path) -> None:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
 
@@ -290,7 +290,7 @@ def test_issue_worker_token_reissue_rotates_hash(tmp_path: Path) -> None:
     ],
 )
 def test_authenticate_worker_malformed_tokens_return_none(tmp_path: Path, token: str) -> None:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     broker.issue_worker_token("w1", "w1", ["cap_a"], 1)
@@ -302,7 +302,7 @@ def test_authenticate_worker_malformed_tokens_return_none(tmp_path: Path, token:
 
 @pytest.mark.parametrize("bad_value", [{"nested": 1}, ["list"], None, (1, 2)])
 def test_issue_worker_token_rejects_non_scalar_labels(tmp_path: Path, bad_value) -> None:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     with pytest.raises(ValueError, match="labels"):
@@ -310,7 +310,7 @@ def test_issue_worker_token_rejects_non_scalar_labels(tmp_path: Path, bad_value)
 
 
 def test_issue_worker_token_accepts_scalar_labels(tmp_path: Path) -> None:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     labels = {"device": "mac-mini", "mem_gb": 16, "weight": 1.5, "gpu": False}
@@ -324,7 +324,7 @@ def test_issue_worker_token_accepts_scalar_labels(tmp_path: Path) -> None:
 
 
 def test_revoke_worker_rowcount_semantics(tmp_path: Path) -> None:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     assert broker.revoke_worker("ghost") is False
@@ -337,7 +337,7 @@ def test_revoke_worker_rowcount_semantics(tmp_path: Path) -> None:
 def test_reissue_after_revoke_reonboards_worker(tmp_path: Path) -> None:
     """Re-issuing via the management endpoint is the operator re-onboarding
     path: it rotates the hash and clears the revocation."""
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     broker.issue_worker_token("w1", "w1", ["cap_a"], 1)

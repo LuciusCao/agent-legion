@@ -43,6 +43,7 @@ from tests.executors.leases.helpers import (
     _create_job_in_workspace,
     _setup_workspace,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 from tests.test_workflow_worker_concurrency import _allocate, _bind
 
 EXECUTOR_ID = "pi-remote"
@@ -56,7 +57,7 @@ def _utcnow() -> datetime:
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
-    return tmp_path / "jobs.sqlite"
+    return TEST_DATABASE_URL
 
 
 @pytest.fixture

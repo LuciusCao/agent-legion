@@ -1,23 +1,18 @@
 from contextlib import closing
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.connection import connect_database
 from server.app.services.job_run_dir_backfill import backfill_node_run_dirs
 from server.app.storage_paths import make_data_relative
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _setup(conn):
-    conn.executescript(
-        """
-        create table node_runs (
-            id integer primary key autoincrement,
-            job_id text not null,
-            node_key text not null,
-            status text not null,
-            log_path text not null default '',
-            run_dir text not null default '',
-            session_dir text not null default ''
-        );
-        """
+    conn.execute(
+        "insert into workspaces(id, name) values ('ws1', 'ws1') on conflict (id) do nothing"
+    )
+    conn.execute(
+        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
+        " values ('job-1', 'ws1', 'wf', 'question', 'q1')"
     )
 
 
@@ -30,7 +25,7 @@ def test_backfill_derives_run_dir_and_session_dir(tmp_path):
     log_path.parent.mkdir(parents=True)
     log_path.write_text("log")
 
-    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         conn.execute(
             """
@@ -54,7 +49,7 @@ def test_backfill_skips_when_no_run_dir_on_disk(tmp_path):
     log_path.parent.mkdir(parents=True)
     log_path.write_text("log")
 
-    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         conn.execute(
             """
@@ -78,7 +73,7 @@ def test_backfill_only_updates_empty_session_dir_when_run_dir_present(tmp_path):
     log_path.parent.mkdir(parents=True)
     log_path.write_text("log")
 
-    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         existing_run_dir = "jobs/ws1/job-1/runs/node-a/tok-1"
         conn.execute(
@@ -105,7 +100,7 @@ def test_backfill_ignores_running_runs(tmp_path):
     log_path.parent.mkdir(parents=True)
     log_path.write_text("log")
 
-    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         conn.execute(
             """

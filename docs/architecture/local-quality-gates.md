@@ -63,7 +63,7 @@ passed the local full gate.
 
 Run `scripts/check-ci.sh` manually before pushing when changes touch any of these areas:
 
-- SQLite schema migration, backup, or restore;
+- PostgreSQL schema migration, offline SQLite import, backup, or restore;
 - executor leases, capacity, cancellation, or worker concurrency;
 - filesystem deletion, path validation, or artifact recovery;
 - release tags or a large multi-branch integration.

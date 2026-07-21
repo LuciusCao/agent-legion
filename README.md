@@ -4,7 +4,7 @@ Local processing console for educational videos. It queues knowledge videos and 
 
 ## Technology Stack
 
-- **Backend**: Python 3.11+ (project currently runs on Python 3.13), FastAPI, Uvicorn, SQLite, PyYAML, Requests
+- **Backend**: Python 3.11+ (project currently runs on Python 3.13), FastAPI, Uvicorn, PostgreSQL, PyYAML, Requests
 - **Frontend**: React 18, TypeScript 5.8, Vite, React Router v6, Zustand, `@mui/material` (MUI v6), `@xyflow/react` (React Flow), `dagre`, `katex`, `@tanstack/react-virtual`
 - **Package Management**: `uv` for Python; `npm` for the frontend
 - **Linting / Formatting**: Ruff (Python), ESLint + Prettier (TypeScript)
@@ -13,10 +13,10 @@ Local processing console for educational videos. It queues knowledge videos and 
 
 ## Current Shape
 
-- Backend: FastAPI, SQLite, background worker.
+- Backend: FastAPI, PostgreSQL, background worker.
 - Python tooling: `uv` for dependency/runtime management, `ruff` for lint/format, `mypy` for type checking.
 - Frontend: Vite + TypeScript, ESLint + Prettier.
-- Storage: `data/video_hive.sqlite`, `data/videos/{video_id}/`, `data/logs/`, `data/packages/`, `data/jobs/`.
+- Storage: PostgreSQL control plane plus `data/videos/{video_id}/`, `data/logs/`, `data/packages/`, `data/jobs/`.
 - Video queue model: each item has `content_type`, `external_id`, optional `source_url`, and phase/status fields.
 - Agent Legion workflow model: workspace-scoped DAG jobs with configurable workflow definitions (`config/workflows/`).
 
@@ -26,6 +26,8 @@ For the full directory tree, see [docs/architecture/project-structure.md](docs/a
 
 ```bash
 uv sync
+createdb agent_legion
+export VIDEO_HIVE_DATABASE_URL=postgresql://127.0.0.1:5432/agent_legion
 cd frontend
 npm install
 ```
@@ -75,7 +77,7 @@ make upload-workspace-package # 从 workspace zip 直接上传审题信息
 
 Configuration is split by domain into files under `config/`:
 
-- `config/app.yaml`: application paths, HTTP settings, worker concurrency, log/run-dir cleanup, and token-usage pricing.
+- `config/app.yaml`: PostgreSQL URL, application paths, HTTP settings, worker concurrency, log/run-dir cleanup, and token-usage pricing.
 - `config/video_hive.yaml`: ASR, CMS, resource providers, cleanup, and OpenClaw settings.
 - `config/workflow.yaml`: workspace executors, workflow runtime, and Pi agent settings.
 - `config/skills.yaml` / `config/skills.lock`: skill source declarations and resolved versions for Pi agent nodes.
@@ -187,7 +189,8 @@ printf 'VITE_API_TARGET=http://127.0.0.1:8001\n' > .env
 npm run dev -- --port 5174
 ```
 
-Use different ports for each additional worktree, and keep each worktree's default `data/` directory separate so SQLite state, logs, videos, packages, and jobs do not overlap.
+Use different ports and PostgreSQL databases or schemas for each additional worktree. Keep each
+worktree's `data/` directory separate so logs, videos, packages, and jobs do not overlap.
 
 Production-style frontend build:
 
@@ -381,37 +384,20 @@ Rerunning a node deletes that node's and all downstream nodes' declared outputs 
 
 Do not pass API keys on the command line. Pi inherits authentication from its environment or existing login store. Set provider credentials through Pi's standard environment variables if needed.
 
-## Phase 6 Workspace Executor Migration
+## SQLite to PostgreSQL migration
 
-If you are upgrading from a pre-Phase-6 database that still contains Workspace Agent
-assignments or `pipeline_config_json`, run the one-time finalizer before starting the server:
-
-```bash
-UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --check
-UV_CACHE_DIR=.uv-cache uv run python scripts/finalize-workspace-executor-migration.py --apply
-```
-
-- `--check` is read-only and prints a JSON report. An empty `issues` list means finalization can
-  proceed safely.
-- `--apply` creates a timestamped SQLite backup beside `data/video_hive.sqlite` and then migrates
-  legacy Agent/Workflow settings into Executor allocations, bindings, and local Node limits.
-
-If the report lists unknown legacy Agent IDs, either configure an equivalent Executor in
-`config/workflow.yaml` or manually remediate the `workspace_agent_assignments` rows before
-retrying. The server refuses to start until `--check` reports zero issues.
-
-## Video Hive Legacy Migration
-
-For local single-user upgrades from the legacy Video Hive runtime:
+The application no longer has a SQLite runtime mode. For an existing installation, stop all
+writers and import the final SQLite database into a fresh PostgreSQL database once:
 
 ```bash
-UV_CACHE_DIR=.uv-cache uv run python scripts/migrate-video-hive-to-agent-legion.py --check
-UV_CACHE_DIR=.uv-cache uv run python scripts/migrate-video-hive-to-agent-legion.py --apply
+UV_CACHE_DIR=.uv-cache uv run python scripts/import-sqlite-to-postgres.py \
+  data/video_hive.sqlite \
+  postgresql://127.0.0.1:5432/agent_legion
 ```
 
-Stop the application before `--apply`. The command backs up SQLite, copies legacy video artifacts
-into `data/jobs/...`, creates Workspace Jobs in `video_knowledge`, and writes a migration report
-under `data/backups/`.
+The target must be empty unless `--truncate-target` is passed explicitly. Keep the SQLite file as
+a rollback snapshot until row counts and application smoke tests have been verified. See
+[the PostgreSQL runbook](docs/postgresql-runbook.md).
 
 ## API Notes
 

@@ -23,6 +23,7 @@ class WorkspacePackageQueriesMixin(JobQueriesBase):
                   workspace_id, path, name, job_count, size_bytes, locked, created_at
                 )
                 values (?, ?, ?, ?, ?, ?, ?)
+                returning id
                 """,
                 (
                     workspace_id,
@@ -34,7 +35,10 @@ class WorkspacePackageQueriesMixin(JobQueriesBase):
                     datetime.now(UTC).isoformat(),
                 ),
             )
-            return cursor.lastrowid or 0
+            row = cursor.fetchone()
+            if row is None:
+                raise RuntimeError("workspace package insert did not return an id")
+            return int(row["id"])
 
     def list_workspace_packages(self, workspace_id: str, limit: int = 10) -> list[dict[str, Any]]:
         with self._connect_read() as conn:
