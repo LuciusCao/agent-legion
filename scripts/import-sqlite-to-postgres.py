@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
 """One-time, offline import from the final SQLite schema to PostgreSQL."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
 import sqlite3
+import sys
 from collections.abc import Sequence
 from contextlib import closing
 from pathlib import Path
 from typing import Any
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
 
 import psycopg
 from psycopg import sql
