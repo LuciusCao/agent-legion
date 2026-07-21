@@ -110,6 +110,23 @@ def mark_nodes_for_rerun(
     node_keys: Sequence[str],
     downstream_map: dict[str, list[str]],
 ) -> None:
+    descendants = {
+        descendant
+        for node_key in node_keys
+        for descendant in downstream_map.get(node_key, [])
+        if descendant not in node_keys
+    }
+    affected_nodes = set(node_keys) | descendants
+    placeholders = ",".join("?" * len(affected_nodes))
+    conn.execute(
+        f"""
+        update node_runs
+        set run_dir='', session_dir=''
+        where job_id=? and node_key in ({placeholders})
+        """,
+        (job_id, *sorted(affected_nodes)),
+    )
+    delete_shards(conn, job_id, affected_nodes)
     for node_key in node_keys:
         cursor = conn.execute(
             """
@@ -122,15 +139,6 @@ def mark_nodes_for_rerun(
         )
         if cursor.rowcount == 0:
             raise ValueError(f"Unknown job node: {job_id}.{node_key}")
-
-    descendants = {
-        descendant
-        for node_key in node_keys
-        for descendant in downstream_map.get(node_key, [])
-        if descendant not in node_keys
-    }
-    affected_nodes = set(node_keys) | descendants
-    delete_shards(conn, job_id, affected_nodes)
     for descendant in descendants:
         conn.execute(
             """
@@ -141,15 +149,6 @@ def mark_nodes_for_rerun(
             """,
             (job_id, descendant),
         )
-    placeholders = ",".join("?" * len(affected_nodes))
-    conn.execute(
-        f"""
-        update node_runs
-        set run_dir='', session_dir=''
-        where job_id=? and node_key in ({placeholders})
-        """,
-        (job_id, *sorted(affected_nodes)),
-    )
     conn.execute(
         """
         update jobs

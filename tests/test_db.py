@@ -7,6 +7,7 @@ from freezegun import freeze_time
 
 from server.app.db import Database
 from server.app.db.notifications import NotificationHub
+from server.app.db.schema import SCHEMA_VERSION
 from server.app.records import PHASE_RUN_FIELDS, VIDEO_RECORD_FIELDS
 from tests.postgres_support import TEST_DATABASE_URL
 
@@ -521,4 +522,4 @@ def test_database_initialization_records_postgres_schema(db):
             row["version"]
             for row in conn.execute("select version from schema_migrations").fetchall()
         }
-    assert versions == {1}
+    assert versions == {SCHEMA_VERSION}

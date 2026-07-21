@@ -1376,6 +1376,11 @@ export interface components {
     }
     /** JobBatchRequest */
     JobBatchRequest: {
+      /**
+       * Async Processing
+       * @default false
+       */
+      async_processing: boolean
       /** Entity */
       entity?: string | null
       /** Knowledge Codes */

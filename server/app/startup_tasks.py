@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import asyncio
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -9,17 +9,19 @@ if TYPE_CHECKING:
     from server.app.agent_broadcast import AgentBroadcastController
     from server.app.job_events import WorkspaceJobEventAggregator
 
+from server.app.job_intake_background import consume_intake_batches
+
 
 class BackgroundTasks:
-    """Manages background tasks created during app startup."""
-
     def __init__(
         self,
         workspace_event_aggregator: WorkspaceJobEventAggregator,
         agent_broadcast_controller: AgentBroadcastController,
+        job_intake_queue: Any,
     ) -> None:
         self._workspace_event_aggregator = workspace_event_aggregator
         self._agent_broadcast_controller = agent_broadcast_controller
+        self._job_intake_queue = job_intake_queue
 
     def start(self, app: FastAPI) -> None:
         app.state.workspace_event_aggregator_task = asyncio.create_task(
@@ -33,8 +35,16 @@ class BackgroundTasks:
 
         app.state.agent_status_flush_task = asyncio.create_task(_flush_agent_status_loop())
 
+        app.state.job_intake_queue_task = asyncio.create_task(
+            consume_intake_batches(self._job_intake_queue)
+        )
+
     def stop(self, app: FastAPI) -> None:
-        for attr in ("workspace_event_aggregator_task", "agent_status_flush_task"):
+        for attr in (
+            "workspace_event_aggregator_task",
+            "agent_status_flush_task",
+            "job_intake_queue_task",
+        ):
             task = getattr(app.state, attr, None)
             if task is not None:
                 task.cancel()

@@ -17,6 +17,17 @@ def test_records_revisions_in_order():
     assert [event.job_id for event in events] == ["job1", "job2"]
 
 
+def test_records_created_jobs_with_one_revision():
+    buffer = JobEventBuffer(max_events=10)
+
+    revision = buffer.record_jobs_created("ws1", ["job1", "job2", "job3"])
+
+    events = buffer.drain()
+    assert revision == 1
+    assert [event.revision for event in events] == [1, 1, 1]
+    assert [event.job_id for event in events] == ["job1", "job2", "job3"]
+
+
 def test_deduplicates_workspace_job_to_latest_revision():
     buffer = JobEventBuffer(max_events=10)
 

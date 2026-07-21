@@ -261,6 +261,9 @@ invariants:
       - kind: integration
         target: tests/test_job_event_buffer_db.py
         gate: quick
+      - kind: integration
+        target: tests/routes/jobs/test_job_batches.py::test_async_batch_claim_is_atomic_across_consumers
+        gate: quick
       - kind: contract
         target: tests/ci/test_postgres_only_runtime.py
         gate: ci_extended

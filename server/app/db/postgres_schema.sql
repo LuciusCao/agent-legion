@@ -305,6 +305,10 @@ create index if not exists idx_phase_runs_video_id_status on phase_runs(video_id
 create index if not exists idx_transcription_runs_video_id on transcription_runs(video_id);
 create index if not exists idx_workspaces_created_at on workspaces(created_at);
 create index if not exists idx_job_batches_workspace on job_batches(workspace_id, created_at);
+alter table job_batches
+  add column if not exists updated_at timestamptz not null default current_timestamp;
+create index if not exists idx_job_batches_intake_queue
+  on job_batches(status, updated_at) where status in ('queued', 'processing');
 create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status);
 create index if not exists idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id);
 create index if not exists idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status);
