@@ -1,24 +1,67 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from scripts.remote import llm_gateway
+from scripts.remote.llm_gateway_config import load_pi_provider
 
 
 class FakeUpstreamResponse:
-    def __init__(self, status_code: int = 200, chunks=(), content_type="text/event-stream"):
+    def __init__(
+        self,
+        status_code: int = 200,
+        chunks=(),
+        content_type="text/event-stream",
+        stream_error: Exception | None = None,
+    ):
         self.status_code = status_code
         self._chunks = chunks
+        self._stream_error = stream_error
         self.headers = {"content-type": content_type}
         self.closed = False
 
     def iter_content(self, chunk_size: int = 8192):
         yield from self._chunks
+        if self._stream_error is not None:
+            raise self._stream_error
 
     def close(self):
         self.closed = True
+
+
+def test_load_pi_provider_strips_openai_v1_suffix(tmp_path: Path):
+    models_json = tmp_path / "models.json"
+    models_json.write_text(
+        json.dumps(
+            {
+                "providers": {
+                    "gateway": {
+                        "baseUrl": "https://llm.example.com/llmaiplatform/v1/",
+                        "apiKey": "secret",
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert load_pi_provider(models_json, "gateway") == (
+        "https://llm.example.com/llmaiplatform",
+        "secret",
+    )
+
+
+def test_load_pi_provider_reports_missing_provider_without_leaking_document(tmp_path: Path):
+    models_json = tmp_path / "models.json"
+    models_json.write_text('{"providers":{"other":{"apiKey":"secret"}}}', encoding="utf-8")
+
+    with pytest.raises(ValueError, match="cannot load provider 'gateway'") as exc_info:
+        load_pi_provider(models_json, "gateway")
+    assert "secret" not in str(exc_info.value)
 
 
 def test_proxy_forwards_body_and_streams(monkeypatch, caplog):
@@ -73,3 +116,30 @@ def test_proxy_upstream_unreachable(monkeypatch):
     app = llm_gateway.create_gateway_app("https://llm.example.com", "k")
     resp = TestClient(app).post("/v1/chat/completions", json={})
     assert resp.status_code == 502
+
+
+def test_stream_tolerates_chunk_truncation_after_sse_done():
+    fake = FakeUpstreamResponse(
+        chunks=[b'data: {"delta":"pong"}\n\n', b"data: [DO", b"NE]\n\n"],
+        stream_error=llm_gateway.requests.exceptions.ChunkedEncodingError(
+            "Response ended prematurely"
+        ),
+    )
+
+    assert b"".join(llm_gateway._stream_upstream(fake)) == (
+        b'data: {"delta":"pong"}\n\ndata: [DONE]\n\n'
+    )
+    assert fake.closed is True
+
+
+def test_stream_preserves_chunk_truncation_before_sse_done():
+    fake = FakeUpstreamResponse(
+        chunks=[b'data: {"delta":"partial"}\n\n'],
+        stream_error=llm_gateway.requests.exceptions.ChunkedEncodingError(
+            "Response ended prematurely"
+        ),
+    )
+
+    with pytest.raises(llm_gateway.requests.exceptions.ChunkedEncodingError):
+        b"".join(llm_gateway._stream_upstream(fake))
+    assert fake.closed is True

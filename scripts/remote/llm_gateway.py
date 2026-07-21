@@ -11,14 +11,22 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
-from collections.abc import Iterator
 
 import requests
 import uvicorn
 from fastapi import Body, FastAPI, Response
 from fastapi.responses import StreamingResponse
 from pydantic import PlainValidator
+
+if __package__:
+    from scripts.remote.llm_gateway_config import (
+        add_provider_arguments,
+        resolve_credentials,
+    )
+    from scripts.remote.llm_gateway_stream import stream_upstream as _stream_upstream
+else:
+    from llm_gateway_config import add_provider_arguments, resolve_credentials
+    from llm_gateway_stream import stream_upstream as _stream_upstream
 
 CONNECT_TIMEOUT_SECONDS = 10.0
 
@@ -63,14 +71,8 @@ def create_gateway_app(upstream: str, key: str, timeout_seconds: float = 600.0) 
                 media_type="text/plain",
             )
 
-        def stream() -> Iterator[bytes]:
-            try:
-                yield from upstream_resp.iter_content(chunk_size=8192)
-            finally:
-                upstream_resp.close()
-
         return StreamingResponse(
-            stream(),
+            _stream_upstream(upstream_resp),
             status_code=upstream_resp.status_code,
             media_type=upstream_resp.headers.get("content-type", "application/json"),
         )
@@ -82,14 +84,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Agent Legion remote LLM gateway")
     parser.add_argument("--host", required=True, help="tailnet IP of this machine, e.g. 100.x.y.z")
     parser.add_argument("--port", type=int, default=8788)
+    add_provider_arguments(parser)
     args = parser.parse_args(argv)
-
-    upstream = os.environ.get("REMOTE_LLM_UPSTREAM", "")
-    key = os.environ.get("REMOTE_LLM_KEY", "")
-    if not upstream:
-        parser.error("REMOTE_LLM_UPSTREAM is required (中台 base URL)")
-    if not key:
-        parser.error("REMOTE_LLM_KEY is required (中台 credential)")
+    upstream, key = resolve_credentials(parser, args)
 
     uvicorn.run(
         create_gateway_app(upstream, key),

@@ -6,6 +6,10 @@ UV            ?= uv
 UV_CACHE_DIR  ?= .uv-cache
 NPM           ?= npm
 FRONTEND_DIR  ?= frontend
+LLM_GATEWAY_PROVIDER ?= gateway
+LLM_GATEWAY_HOST     ?= 127.0.0.1
+LLM_GATEWAY_PORT     ?= 8788
+PI_MODELS_JSON       ?= $(HOME)/.pi/agent/models.json
 
 export UV_CACHE_DIR
 
@@ -21,6 +25,12 @@ dev-backend: ## 启动后端开发服务器 (127.0.0.1:8000)
 .PHONY: dev-frontend
 dev-frontend: ## 启动前端开发服务器
 	cd $(FRONTEND_DIR) && $(NPM) run dev
+
+.PHONY: llm-gateway
+llm-gateway: ## 从 Pi models.json 读取凭据并启动远程 LLM 网关
+	$(UV) run python scripts/remote/llm_gateway.py \
+		--host "$(LLM_GATEWAY_HOST)" --port "$(LLM_GATEWAY_PORT)" \
+		--provider "$(LLM_GATEWAY_PROVIDER)" --models-json "$(PI_MODELS_JSON)"
 
 # 质量门
 .PHONY: check-quick
