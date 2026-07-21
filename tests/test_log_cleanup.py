@@ -1,18 +1,19 @@
-import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 
+from server.app.db.connection import DatabaseConnection
 from server.app.jobs import JobQueries
 from server.app.services import cleanup_sweep
 from server.app.services.log_cleanup import CleanupConfig, cleanup_old_logs
 from server.app.storage_paths import make_data_relative
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _make_db(tmp_path):
     data_dir = tmp_path / "data"
     jobs_dir = data_dir / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir, JobQueries(tmp_path / "db.sqlite", jobs_dir)
+    return data_dir, JobQueries(TEST_DATABASE_URL, jobs_dir)
 
 
 def _seed_workspace(conn, workspace_id="ws1"):
@@ -270,7 +271,7 @@ def test_cleanup_deletes_files_outside_db_transaction(tmp_path, monkeypatch):
             finished_at=old_finished,
         )
 
-    active_write_conns: list[sqlite3.Connection] = []
+    active_write_conns: list[DatabaseConnection] = []
     real_connect = db.connect
 
     @contextmanager
@@ -288,9 +289,7 @@ def test_cleanup_deletes_files_outside_db_transaction(tmp_path, monkeypatch):
     removed_paths = []
 
     def spy_remove_path(path):
-        assert not any(conn.in_transaction for conn in active_write_conns), (
-            f"filesystem deletion inside a DB transaction: {path}"
-        )
+        assert not active_write_conns, f"filesystem deletion inside a DB transaction: {path}"
         removed_paths.append(path)
         real_remove_path(path)
 

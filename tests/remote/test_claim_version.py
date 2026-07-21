@@ -1,19 +1,22 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from server.app.db.schema import init_db
 from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.routes.remote import create_remote_router
+from tests.postgres_support import TEST_DATABASE_URL
 
 ADMIN_TOKEN = "admin-token"
 
 
-def _client(tmp_path: Path, settings, min_version: int) -> tuple[TestClient, str]:
+@contextmanager
+def _client(tmp_path: Path, settings, min_version: int) -> Iterator[tuple[TestClient, str]]:
     remote = settings.executor_runtime.remote.model_copy(
         update={
             "worker_token": ADMIN_TOKEN,
@@ -22,8 +25,7 @@ def _client(tmp_path: Path, settings, min_version: int) -> tuple[TestClient, str
     )
     runtime = settings.executor_runtime.model_copy(update={"remote": remote})
     configured = dataclasses.replace(settings, executor_runtime=runtime)
-    db_path = tmp_path / "jobs.sqlite"
-    init_db(db_path)
+    db_path = TEST_DATABASE_URL
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     app = FastAPI()
     app.include_router(create_remote_router(broker, configured), prefix="/api")
@@ -39,7 +41,10 @@ def _client(tmp_path: Path, settings, min_version: int) -> tuple[TestClient, str
         headers={"X-Worker-Token": ADMIN_TOKEN},
     )
     assert issued.status_code == 201
-    return client, str(issued.json()["worker_token"])
+    try:
+        yield client, str(issued.json()["worker_token"])
+    finally:
+        broker.close()
 
 
 def _claim(client: TestClient, token: str, **body: int) -> int:
@@ -51,20 +56,20 @@ def _claim(client: TestClient, token: str, **body: int) -> int:
 
 
 def test_claim_without_version_is_rejected(tmp_path: Path, settings) -> None:
-    client, token = _client(tmp_path, settings, 1)
-    assert _claim(client, token) == 409
+    with _client(tmp_path, settings, 1) as (client, token):
+        assert _claim(client, token) == 409
 
 
 def test_claim_with_current_version_is_accepted(tmp_path: Path, settings) -> None:
-    client, token = _client(tmp_path, settings, 1)
-    assert _claim(client, token, worker_version=1) == 204
+    with _client(tmp_path, settings, 1) as (client, token):
+        assert _claim(client, token, worker_version=1) == 204
 
 
 def test_claim_below_min_version_is_rejected(tmp_path: Path, settings) -> None:
-    client, token = _client(tmp_path, settings, 2)
-    assert _claim(client, token, worker_version=1) == 409
+    with _client(tmp_path, settings, 2) as (client, token):
+        assert _claim(client, token, worker_version=1) == 409
 
 
 def test_min_version_zero_is_escape_hatch(tmp_path: Path, settings) -> None:
-    client, token = _client(tmp_path, settings, 0)
-    assert _claim(client, token) == 204
+    with _client(tmp_path, settings, 0) as (client, token):
+        assert _claim(client, token) == 204

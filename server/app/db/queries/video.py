@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import json
-import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, cast
 
+from server.app.db.connection import DatabaseConnection
 from server.app.db.notifications import NotificationHub
 from server.app.db.queries.base import VideoQueriesBase
 from server.app.pipeline.common import make_record_id, resolve_video_dir
@@ -16,13 +17,13 @@ from server.app.services.interaction_stats import (
 )
 
 
-def _iso(dt_str: str | None) -> str | None:
-    """Convert SQLite timestamp (UTC) to ISO 8601 format with timezone."""
-    if not dt_str:
+def _iso(value: datetime | str | None) -> str | None:
+    """Return a PostgreSQL timestamp as an ISO 8601 string."""
+    if not value:
         return None
-    from datetime import UTC, datetime
-
-    dt = datetime.strptime(dt_str, "%Y-%m-%d %H:%M:%S").replace(tzinfo=UTC)
+    dt = value if isinstance(value, datetime) else datetime.fromisoformat(value.replace(" ", "T"))
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
     return dt.isoformat()
 
 
@@ -64,7 +65,7 @@ def _build_update_assignments(ordered_keys: list[str]) -> str:
     """Build SQL assignment clause from whitelisted keys.
 
     Keys are validated against VIDEO_UPDATE_FIELDS before calling this function.
-    SQLite does not support parameterized column names, so we use string
+    SQL does not support parameterized column names, so we use string
     interpolation here. The caller must ensure keys come from the whitelist.
     """
     return ", ".join(f"{key}=?" for key in ordered_keys)
@@ -75,7 +76,7 @@ class VideoQueriesMixin(VideoQueriesBase):
     _videos_dir: Path | None
 
     def _list_phase_runs_with_conn(
-        self, conn: sqlite3.Connection, video_id: str
+        self, conn: DatabaseConnection, video_id: str
     ) -> list[PhaseRunRecord]:
         rows = [
             dict(row)
@@ -90,7 +91,7 @@ class VideoQueriesMixin(VideoQueriesBase):
         return cast(list[PhaseRunRecord], rows)
 
     def _list_transcription_runs_with_conn(
-        self, conn: sqlite3.Connection, video_id: str
+        self, conn: DatabaseConnection, video_id: str
     ) -> list[dict[str, Any]]:
         rows = [
             dict(row)
@@ -103,7 +104,7 @@ class VideoQueriesMixin(VideoQueriesBase):
             row["finished_at"] = _iso(row["finished_at"])
         return rows
 
-    def _notify_with_conn(self, video_id: str, conn: sqlite3.Connection) -> None:
+    def _notify_with_conn(self, video_id: str, conn: DatabaseConnection) -> None:
         if self._hub is None:
             return
         row = conn.execute("select * from videos where id=?", (video_id,)).fetchone()

@@ -1,10 +1,10 @@
 from __future__ import annotations
 
-import sqlite3
+from server.app.db.connection import DatabaseConnection
 
 
 def upgrade_job_workflow(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     job_id: str,
     *,
     workflow_revision_id: str,

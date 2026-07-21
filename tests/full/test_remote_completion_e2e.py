@@ -11,13 +11,13 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
-from server.app.db.schema import init_db
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.remote_broker import RemoteExecutionBroker, RemoteExecutionPayload
 from server.app.jobs import JobQueries
 from server.app.remote_wiring import register_remote_completion
 from server.app.routes.remote import create_remote_router
 from tests.executors.leases.helpers import _claim_request, _setup_workspace
+from tests.postgres_support import TEST_DATABASE_URL
 
 pytestmark = pytest.mark.full_gate
 
@@ -34,8 +34,7 @@ def test_remote_completion_drill(tmp_path: Path, settings) -> None:
     remote = settings.executor_runtime.remote.model_copy(update={"worker_token": admin_token})
     runtime = settings.executor_runtime.model_copy(update={"remote": remote})
     configured = dataclasses.replace(settings, executor_runtime=runtime)
-    db_path = tmp_path / "jobs.sqlite"
-    init_db(db_path)
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, tmp_path / "jobs")
     workspace_id, job_id = _setup_workspace(
         job_db,
@@ -45,7 +44,7 @@ def test_remote_completion_drill(tmp_path: Path, settings) -> None:
         node_key="review_keywords",
         local_limit=None,
     )
-    leases = ExecutorLeaseRepository(db_path, job_db=job_db)
+    leases = ExecutorLeaseRepository(db_path, job_db=job_db, data_dir=tmp_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     try:
         register_remote_completion(broker, leases, tmp_path / "jobs", None)

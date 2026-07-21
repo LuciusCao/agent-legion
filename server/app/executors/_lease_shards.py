@@ -11,8 +11,9 @@ node row stays the aggregate authority).
 
 from __future__ import annotations
 
-import sqlite3
+from typing import Any
 
+from server.app.db.connection import DatabaseConnection
 from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
     _sync_job_status,
@@ -27,8 +28,8 @@ from server.app.workflows.sharding import (
 
 
 def finish_shard_execution(
-    conn: sqlite3.Connection,
-    lease: sqlite3.Row,
+    conn: DatabaseConnection,
+    lease: dict[str, Any],
     result: ExecutionResult,
     now_str: str,
 ) -> bool:

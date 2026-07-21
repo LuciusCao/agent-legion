@@ -30,7 +30,7 @@ _EXPIRED_NODE_RUNS_SQL = """
 select id, job_id, node_key, log_path, run_dir, finished_at
 from node_runs
 where status = ?
-  and finished_at != ''
+  and finished_at is not null
   and finished_at < ?
   and (finished_at > ? or (finished_at = ? and id > ?))
 order by finished_at, id
@@ -96,7 +96,12 @@ def _remove_row_artifacts(
 ) -> tuple[int, int]:
     """Remove the log file and run dir for one expired row, if past retention."""
     try:
-        finished = datetime.fromisoformat(row["finished_at"])
+        raw_finished = row["finished_at"]
+        finished = (
+            raw_finished
+            if isinstance(raw_finished, datetime)
+            else datetime.fromisoformat(raw_finished)
+        )
         if finished.tzinfo is None:
             finished = finished.replace(tzinfo=UTC)
     except ValueError:
@@ -138,15 +143,14 @@ def sweep_expired_node_runs(
     ``idx_node_runs_status_finished_at`` serves every chunk read without
     sorting. Each chunk is fetched on its own short-lived read connection, so
     no transaction is held while files are deleted. The SQL cutoff is a
-    coarse superset filter (ISO strings compare correctly for the UTC
-    ``current_timestamp``/``_sqlite_timestamp`` formats); the exact per-row
-    retention check in ``_remove_row_artifacts`` is unchanged.
+    coarse superset filter; the exact per-row retention check in
+    ``_remove_row_artifacts`` is unchanged.
     """
-    cutoff = max(log_cutoff, run_dir_cutoff).isoformat()
+    cutoff = max(log_cutoff, run_dir_cutoff)
     logs_removed = 0
     run_dirs_removed = 0
     for status in ("completed", "failed"):
-        last_finished_at = ""
+        last_finished_at = datetime.min.replace(tzinfo=UTC)
         last_id = 0
         while True:
             with db._connect_read() as conn:
@@ -169,7 +173,12 @@ def sweep_expired_node_runs(
                 )
                 logs_removed += logs
                 run_dirs_removed += run_dirs
-            last_finished_at = rows[-1]["finished_at"]
+            raw_last_finished_at = rows[-1]["finished_at"]
+            last_finished_at = (
+                raw_last_finished_at
+                if isinstance(raw_last_finished_at, datetime)
+                else datetime.fromisoformat(raw_last_finished_at).replace(tzinfo=UTC)
+            )
             last_id = rows[-1]["id"]
             if len(rows) < LOG_CLEANUP_CHUNK_SIZE:
                 break

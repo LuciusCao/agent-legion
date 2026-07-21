@@ -1,51 +1,36 @@
-"""Unified connection/transaction contexts for SQLite access.
-
-All write paths in ``server/app`` must go through :func:`write_transaction`
-(the only place the literal ``begin immediate`` may appear) and read-only
-paths through :func:`read_connection`. Combine with
-``server.app.db.retry.retry_on_sqlite_lock`` for lock-contention retries —
-the whole ``with write_transaction(...)`` block is the retry unit.
-"""
+"""Unified PostgreSQL connection and transaction contexts."""
 
 from __future__ import annotations
 
-import contextlib
-import sqlite3
 from collections.abc import Iterator
 from contextlib import contextmanager
-from pathlib import Path
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.connection import DatabaseConnection, DatabaseDsn, connect_database
 
 
 @contextmanager
-def write_transaction(db_path: Path) -> Iterator[sqlite3.Connection]:
-    """Yield a connection inside a ``begin immediate`` write transaction.
-
-    Commits when the body returns normally; rolls back on exception. The
-    connection is always closed. Do not nest write transactions.
-    """
-    conn = connect_sqlite(db_path)
-    conn.isolation_level = None
+def write_transaction(database_dsn: DatabaseDsn) -> Iterator[DatabaseConnection]:
+    """Yield one PostgreSQL transaction and deterministically release it."""
+    conn = connect_database(database_dsn)
     try:
-        conn.execute("begin immediate")
+        conn.execute("begin")
         try:
             yield conn
         except Exception:
-            with contextlib.suppress(sqlite3.OperationalError):
-                conn.execute("rollback")
+            conn.rollback()
             raise
         else:
-            conn.execute("commit")
+            conn.commit()
     finally:
         conn.close()
 
 
 @contextmanager
-def read_connection(db_path: Path) -> Iterator[sqlite3.Connection]:
-    """Yield a read-only connection without an explicit transaction."""
-    conn = connect_sqlite(db_path)
+def read_connection(database_dsn: DatabaseDsn) -> Iterator[DatabaseConnection]:
+    """Yield a pooled PostgreSQL connection for bounded read operations."""
+    conn = connect_database(database_dsn)
     try:
         yield conn
     finally:
+        conn.rollback()
         conn.close()

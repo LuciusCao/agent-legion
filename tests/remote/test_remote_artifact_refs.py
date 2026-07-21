@@ -42,6 +42,7 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.workflows.pi_protocol import render_command_spec
 from tests.executors.adapters.helpers import _make_skill_manager
 from tests.executors.leases.helpers import _claim_request, _setup_workspace
+from tests.postgres_support import TEST_DATABASE_URL
 
 INPUT_BYTES = b'{"question": "1+1=?"}'
 
@@ -76,7 +77,7 @@ def _execution_context(
 
 def _store_and_job(tmp_path: Path) -> tuple[ArtifactStore, str]:
     # artifact_refs.job_id references jobs(id): staging needs a real job row.
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     job_db = JobQueries(db_path, tmp_path / "jobs")
     _, job_id = _setup_workspace(job_db, "WS", "test-exec", workspace_limit=5, local_limit=None)
@@ -170,7 +171,7 @@ CAPABILITY = "review_keywords"
 
 @pytest.fixture
 def completion_rig(tmp_path: Path):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     job_db = JobQueries(db_path, tmp_path / "jobs")
     leases = ExecutorLeaseRepository(db_path, job_db=job_db)
@@ -270,9 +271,9 @@ def route_rig(tmp_path: Path, settings):
     )
     runtime = settings.executor_runtime.model_copy(update={"remote": remote})
     remote_settings = dataclasses.replace(settings, executor_runtime=runtime)
-    init_db(tmp_path / "jobs.sqlite")
-    broker = RemoteExecutionBroker(tmp_path / "jobs.sqlite", tmp_path / "bundles")
-    store = ArtifactStore(tmp_path / "artifacts", tmp_path / "jobs.sqlite")
+    init_db(TEST_DATABASE_URL)
+    broker = RemoteExecutionBroker(TEST_DATABASE_URL, tmp_path / "bundles")
+    store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
     app = FastAPI()
     app.include_router(create_remote_router(broker, remote_settings, store), prefix="/api")
     HEADERS["X-Worker-Token"] = broker.issue_worker_token("w1", "w1", ["cap_a"], 1)

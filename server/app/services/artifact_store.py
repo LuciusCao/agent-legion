@@ -23,7 +23,7 @@ class ArtifactNotFoundError(ArtifactStoreError):
 
 
 class ArtifactStore:
-    def __init__(self, root: Path, db_path: Path) -> None:
+    def __init__(self, root: Path, db_path: str) -> None:
         self.root = root
         self.db_path = db_path
         (self.root / ".staging").mkdir(parents=True, exist_ok=True)
@@ -44,7 +44,7 @@ class ArtifactStore:
             staging.unlink(missing_ok=True)
         with write_transaction(self.db_path) as conn:
             conn.execute(
-                "insert or ignore into artifacts(hash, size) values (?, ?)",
+                "insert into artifacts(hash, size) values (?, ?) on conflict(hash) do nothing",
                 (digest, len(data)),
             )
         return digest
@@ -66,8 +66,8 @@ class ArtifactStore:
     def add_ref(self, job_id: str, node_key: str, name: str, hash: str) -> None:
         with write_transaction(self.db_path) as conn:
             conn.execute(
-                "insert or replace into artifact_refs(job_id, node_key, name, hash)"
-                " values (?, ?, ?, ?)",
+                "insert into artifact_refs(job_id, node_key, name, hash) values (?, ?, ?, ?)"
+                " on conflict(job_id, node_key, name) do update set hash=excluded.hash",
                 (job_id, node_key, name, hash),
             )
 
@@ -93,9 +93,12 @@ class ArtifactStore:
             orphaned = [
                 h
                 for h in hashes
-                if conn.execute(
-                    "select count(*) from artifact_refs where hash = ?", (h,)
-                ).fetchone()[0]
+                if (
+                    conn.execute(
+                        "select count(*) as cnt from artifact_refs where hash = ?", (h,)
+                    ).fetchone()
+                    or {"cnt": 0}
+                )["cnt"]
                 == 0
             ]
         return orphaned
@@ -104,9 +107,10 @@ class ArtifactStore:
         deleted = 0
         with write_transaction(self.db_path) as conn:
             for h in hashes:
-                refs = conn.execute(
-                    "select count(*) from artifact_refs where hash = ?", (h,)
-                ).fetchone()[0]
+                refs_row = conn.execute(
+                    "select count(*) as cnt from artifact_refs where hash = ?", (h,)
+                ).fetchone()
+                refs = int(refs_row["cnt"]) if refs_row is not None else 0
                 if refs:
                     continue
                 conn.execute("delete from artifacts where hash = ?", (h,))

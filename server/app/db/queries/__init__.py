@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sqlite3  # noqa: F401
-
 from server.app.db.queries.base import VideoQueriesBase
 from server.app.db.queries.package import PackageQueriesMixin
 from server.app.db.queries.phase_run import PhaseRunQueriesMixin

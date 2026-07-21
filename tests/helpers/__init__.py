@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import contextlib
 import json
 import time
 from collections.abc import Callable
@@ -15,40 +14,10 @@ from server.app.workflow_worker_thread import WorkflowWorkerThread
 from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import load_registered_workflow
 
-_LEGACY_AGENT_TABLE_SQL = """
-create table if not exists workspace_agent_assignments (
-    workspace_id text not null,
-    agent_id text not null,
-    concurrency_limit integer not null default 1,
-    primary key (workspace_id, agent_id)
-)
-"""
-
-_LEGACY_BOOTSTRAP_TABLE_SQL = """
-create table if not exists workspace_executor_bootstrap_state (
-    workspace_id text primary key,
-    completed_at text not null default current_timestamp,
-    foreign key(workspace_id) references workspaces(id) on delete cascade
-)
-"""
-
 
 def ensure_legacy_workspace_tables(db_or_conn: Any) -> None:
-    """Recreate legacy tables removed from base schema so tests can seed pre-V005 state.
-
-    Accepts either a sqlite3.Connection or any object with a ``connect()`` context
-    manager that yields a connection.
-    """
-    import sqlite3
-
-    if isinstance(db_or_conn, sqlite3.Connection):
-        db_or_conn.execute(_LEGACY_AGENT_TABLE_SQL)
-        db_or_conn.execute(_LEGACY_BOOTSTRAP_TABLE_SQL)
-        return
-
-    with db_or_conn.connect() as conn:
-        conn.execute(_LEGACY_AGENT_TABLE_SQL)
-        conn.execute(_LEGACY_BOOTSTRAP_TABLE_SQL)
+    """Compatibility no-op for tests that predate authoritative configuration."""
+    del db_or_conn
 
 
 def make_workflow_worker(
@@ -62,7 +31,6 @@ def make_workflow_worker(
     """Build a configured WorkflowWorkerThread for *workflow_key*."""
     from server.app import main as app_main
     from server.app.executors.leases import ExecutorLeaseRepository
-    from server.app.executors.legacy_migration import finalize_legacy_executor_schema
     from server.app.executors.runtime import ExecutionRuntime
 
     definition = load_registered_workflow(Path("."), workflow_key)
@@ -84,7 +52,7 @@ def make_workflow_worker(
     )
 
     registry = app_main.build_executor_registry(settings, queries)
-    leases = ExecutorLeaseRepository(queries.path)
+    leases = ExecutorLeaseRepository(queries.path, data_dir=tmp_path)
     runtime = ExecutionRuntime(
         leases=leases,
         registry=registry,
@@ -100,12 +68,6 @@ def make_workflow_worker(
         settings=settings,
     )
     worker._definitions = [definition]
-    with queries.connect() as conn:
-        definitions = [definition]
-        with contextlib.suppress(KeyError, FileNotFoundError):
-            definitions.append(load_registered_workflow(Path("."), "question_comprehension_info"))
-        finalize_legacy_executor_schema(conn, definitions, settings.executor_definitions)
-
     return worker, definition
 
 

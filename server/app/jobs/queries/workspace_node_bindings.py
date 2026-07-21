@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-import sqlite3
 from typing import Any
+
+from server.app.db.connection import DatabaseConnection
 
 
 def get_binding(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     workspace_id: str,
     workflow_key: str,
     node_key: str,
@@ -21,7 +22,7 @@ def get_binding(
 
 
 def get_local_node_limit(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     workspace_id: str,
     workflow_key: str,
     node_key: str,
@@ -37,7 +38,7 @@ def get_local_node_limit(
 
 
 def has_local_node_limit(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     workspace_id: str,
     workflow_key: str,
     node_key: str,

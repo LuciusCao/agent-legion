@@ -2,7 +2,7 @@
 
 This script seeds a workspace with synthetic jobs and simulates high-frequency
 job/node status transitions without invoking any LLM or external executor. It can
-run against the project's SQLite database directly for maximum throughput, while
+run against the project's PostgreSQL database directly, while
 an optional SSE listener measures the rate at which the running backend broadcasts
 aggregated patch batches.
 
@@ -100,7 +100,7 @@ class StressSimulator:
 
     def _setup_db(self) -> JobQueries:
         settings = load_settings()
-        job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
+        job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
         return job_db
 
     def _ensure_workspace_and_revision(self, job_db: JobQueries) -> None:
@@ -265,7 +265,7 @@ class StressSimulator:
         statuses = ["pending", "running", "completed", "failed"]
         nodes = _STRESS_NODE_KEYS
         end_time = time.monotonic() + self.duration
-        # Throttle DB writes to avoid completely saturating SQLite.
+        # Throttle DB writes so state churn does not dominate the simulation.
         interval = max(0.05, 1.0 / (self.event_rate / 10))
 
         while time.monotonic() < end_time and not self._stop_event.is_set():

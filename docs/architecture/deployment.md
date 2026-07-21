@@ -2,18 +2,17 @@
 
 ## Overview
 
-Video Hive 设计为**本地运行**的工具，不依赖云服务。开发者通过 `uv` 管理 Python 依赖，`npm` 管理前端依赖。
+Agent Legion 使用 PostgreSQL 作为唯一控制面数据库；开发机和生产环境使用同一数据库语义。
 
 ## Directory Structure
 
 ```
 config/
-├── app.yaml                # 应用路径、HTTP 设置、worker 并发
+├── app.yaml                # PostgreSQL、应用路径、HTTP 设置、worker 并发
 ├── video_hive.yaml         # ASR、CMS、资源提供方、OpenClaw 配置
 └── workflow.yaml           # Workspace 执行器与工作流运行时开关
 
-data/                       # 运行时数据（gitignored）
-├── video_hive.sqlite       # SQLite 数据库
+data/                       # 文件产物（gitignored）
 ├── videos/                 # 下载的视频与产物
 ├── packages/               # ZIP 输出
 └── logs/                   # 处理日志
@@ -29,7 +28,7 @@ scripts/
 ```
 开发者启动后端（uvicorn 8000）+ 前端（vite 5173）
     → 前端通过 Vite proxy 访问后端 API
-    → 后端读写 data/ 目录
+    → 后端通过 PostgreSQL 协调任务，并读写 data/ 目录产物
     → 流水线产物存入 data/videos/{video_id}/
 ```
 
@@ -38,6 +37,7 @@ scripts/
 ## Key Decisions
 
 - 使用 `uv` 而非 `pip`/`poetry`，依赖锁定在 `uv.lock`。
+- PostgreSQL 是唯一运行时数据库；SQLite 只由一次性离线导入器读取。
 - 质量门分为 `check-quick.sh`（日常）和 `check.sh`（提交前）。
 - 多 worktree 开发时，每个 worktree 使用独立的后端端口和 `data/` 目录。
 

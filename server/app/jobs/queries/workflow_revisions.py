@@ -48,6 +48,8 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
             row = conn.execute(
                 "select * from workflow_revisions where id=?", (revision_id,)
             ).fetchone()
+        if row is None:
+            raise RuntimeError("workflow revision insert did not return a row")
         return dict(row)
 
     def get_active_workflow_revision(
@@ -92,7 +94,7 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
                 """,
                 (workspace_id, workflow_key),
             ).fetchone()
-        return int(row["next_version"])
+        return int(row["next_version"]) if row is not None else 1
 
     def list_workflow_revisions(self, workspace_id: str, workflow_key: str) -> list[dict[str, Any]]:
         with self._connect_read() as conn:

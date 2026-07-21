@@ -34,13 +34,14 @@ class CleanupConfig:
         )
 
 
-def _expired_job_ids(db: JobQueries, cutoff: str) -> set[str]:
+def _expired_job_ids(db: JobQueries, cutoff: datetime) -> set[str]:
     """Return job ids with terminally finished node runs older than ``cutoff``."""
     with db._connect_read() as conn:
         rows = conn.execute(
             """
             select distinct job_id from node_runs
-            where status in ('completed', 'failed') and finished_at != '' and finished_at < ?
+            where status in ('completed', 'failed') and finished_at is not null
+              and finished_at < ?
             """,
             (cutoff,),
         )
@@ -73,7 +74,7 @@ def cleanup_old_logs(
 
     log_cutoff = now - timedelta(days=config.log_retention_days)
     run_dir_cutoff = now - timedelta(days=config.run_dir_retention_days)
-    cutoff = max(log_cutoff, run_dir_cutoff).isoformat()
+    cutoff = max(log_cutoff, run_dir_cutoff)
     job_dir_index = build_job_dir_index(data_dir / "jobs", _expired_job_ids(db, cutoff))
     logs_removed, swept_run_dirs = sweep_expired_node_runs(
         db, data_dir, log_cutoff, run_dir_cutoff, job_dir_index

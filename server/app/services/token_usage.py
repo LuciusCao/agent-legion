@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from psycopg import Error
+
+from server.app.db.connection import DatabaseConnection
 from server.app.services.token_usage_pricing import calculate_cost, load_pricing_config
 from server.app.services.token_usage_response import (
     _currency_from_config,
@@ -175,7 +177,7 @@ def parse_run_usage(
     )
 
 
-def persist_node_run_usage(conn: sqlite3.Connection, summary: TokenUsageSummary) -> None:
+def persist_node_run_usage(conn: DatabaseConnection, summary: TokenUsageSummary) -> None:
     """Persist a token usage summary, replacing any existing row for the run."""
     conn.execute(
         """
@@ -222,7 +224,7 @@ def persist_node_run_usage(conn: sqlite3.Connection, summary: TokenUsageSummary)
     )
 
 
-def backfill_missing_token_usage(conn: sqlite3.Connection, data_dir: Path, limit: int = 500) -> int:
+def backfill_missing_token_usage(conn: DatabaseConnection, data_dir: Path, limit: int = 500) -> int:
     """Backfill token usage for completed/failed node runs that lack a summary row.
 
     Returns the number of rows persisted. Missing run directories and missing
@@ -273,7 +275,7 @@ def backfill_missing_token_usage(conn: sqlite3.Connection, data_dir: Path, limit
         try:
             persist_node_run_usage(conn, summary)
             persisted += 1
-        except sqlite3.Error:
+        except Error:
             logger.exception("Failed to persist token usage for run %s", summary.node_run_id)
 
     return persisted

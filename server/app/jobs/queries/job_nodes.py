@@ -78,12 +78,15 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
             for node_key in node_keys:
                 conn.execute(
                     """
-                    insert or ignore into job_nodes(job_id, node_key, status, created_at)
+                    insert into job_nodes(job_id, node_key, status, created_at)
                     values (?, ?, 'pending', current_timestamp)
+                    on conflict(job_id, node_key) do nothing
                     """,
                     (job_id, node_key),
                 )
             row = conn.execute("select * from jobs where id=?", (job_id,)).fetchone()
+        if row is None:
+            raise RuntimeError("job upsert did not return a row")
         return dict(row)
 
     def list_jobs(
@@ -230,10 +233,13 @@ class JobNodeQueriesMixin(JobNodeLifecycleQueriesMixin):
                   job_id, node_key, status, command_json, log_path, run_dir, session_dir, skill_version
                 )
                 values (?, ?, 'running', ?, ?, ?, ?, ?)
+                returning *
                 """,
                 (job_id, node_key, command_json, log_path, run_dir, session_dir, skill_version),
             )
-            row = conn.execute("select * from node_runs where id=?", (cursor.lastrowid,)).fetchone()
+            row = cursor.fetchone()
+        if row is None:
+            raise RuntimeError("node run insert did not return a row")
         return dict(row)
 
     def finish_node_run(self, run_id: int, status: str, exit_code: int, error_message: str) -> None:

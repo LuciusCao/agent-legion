@@ -27,6 +27,7 @@ from server.app.executors.remote_broker import (
 from server.app.executors.sweeper import SweeperThread
 from server.app.jobs import JobQueries
 from tests.executors.leases.helpers import _claim_request, _setup_workspace
+from tests.postgres_support import TEST_DATABASE_URL
 
 EXECUTOR_ID = "pi-remote"
 CAPABILITY = "review_keywords"
@@ -35,7 +36,7 @@ NODE_KEY = "review_keywords"
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
-    return tmp_path / "jobs.sqlite"
+    return TEST_DATABASE_URL
 
 
 @pytest.fixture

@@ -1,3 +1,6 @@
+from tests.postgres_support import TEST_DATABASE_URL
+
+
 def _create_workspace(client, name="default", default_workflow_key="question_comprehension_info"):
     return client.post(
         "/api/workspaces",
@@ -133,27 +136,29 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
     assert config == original_config
 
 
-def test_app_startup_materializes_executor_configuration_for_workspace(tmp_path):
+def test_app_startup_preserves_executor_configuration_for_workspace(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.jobs import JobQueries
     from server.app.main import create_app
-    from tests.helpers import ensure_legacy_workspace_tables
 
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     queries = JobQueries(db_path, jobs_dir=jobs_dir)
-    ensure_legacy_workspace_tables(queries)
     workspace = queries.create_workspace(
         "Materialized", default_workflow_key="question_comprehension_info"
     )
     ws_id = workspace["id"]
-    with queries.connect() as conn:
-        conn.execute(
-            "insert into workspace_agent_assignments(workspace_id, agent_id, concurrency_limit) values (?, ?, ?)",
-            (ws_id, "pi", 3),
-        )
+    queries.replace_workspace_executor_configuration(
+        ws_id,
+        [
+            {"executor_id": "local-default", "concurrency_limit": 1},
+            {"executor_id": "pi", "concurrency_limit": 3},
+        ],
+        [],
+        [],
+    )
 
     app = create_app(data_dir=tmp_path, start_worker=False)
     with TestClient(app) as c:

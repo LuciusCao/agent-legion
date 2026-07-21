@@ -81,12 +81,12 @@ invariants:
         gate: quick
 
   - id: DB-LIFECYCLE-001
-    statement: "SQLite connections opened by application and tests are deterministically closed."
+    statement: "PostgreSQL connections are bounded by a shared pool and deterministically returned after each transaction."
     owner: database
     risk: high
     evidence:
       - kind: integration
-        target: tests/test_sqlite_connection_lifecycle.py
+        target: tests/db/test_postgres_runtime.py
         gate: quick
 
   - id: EXEC-CAPACITY-001
@@ -129,27 +129,27 @@ invariants:
         gate: full
 
   - id: RECOVERY-MIGRATION-001
-    statement: "Interrupted migration is atomic or reopens into a recoverable pre-migration state with valid foreign keys and integrity."
+    statement: "PostgreSQL schema initialization is transactional, advisory-locked, and idempotent."
     owner: database
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_workspace_dag_fk_migration.py::test_v004_interruption_after_copy_recovers_on_reopen
+        target: tests/db/test_postgres_runtime.py::test_schema_initialization_is_idempotent
         gate: quick
       - kind: integration
-        target: tests/full/test_migration_interruption_recovery.py
+        target: tests/full/test_postgres_agent_concurrency.py
         gate: full
 
   - id: RECOVERY-BACKUP-001
-    statement: "A created SQLite backup can be restored atomically without losing the current database and reopened with invariant-preserving data."
+    statement: "The offline SQLite importer refuses populated targets and preserves source IDs in PostgreSQL."
     owner: database
     risk: critical
     evidence:
       - kind: integration
-        target: tests/test_executor_backup_restore.py::test_restore_preserves_current_database_and_returns_rows
+        target: tests/db/test_sqlite_import.py
         gate: quick
       - kind: integration
-        target: tests/full/test_backup_restore_drill.py
+        target: tests/full/test_sqlite_import_recovery.py
         gate: full
 
   - id: CONFIG-STARTUP-001
@@ -173,7 +173,7 @@ invariants:
   - id: EXEC-EVENT-001
     statement: |
       Workspace job lifecycle SSE events are broadcast to JobEventManager only
-      after the underlying SQLite transaction has been committed. Broadcasting
+      after the underlying PostgreSQL transaction has been committed. Broadcasting
       inside a transaction is forbidden because clients may react by querying
       the database and seeing pre-transaction state.
     owner: workspace-executor
@@ -251,7 +251,7 @@ invariants:
         gate: quick
 
   - id: DB-STATE-001
-    statement: "Runtime queues (remote execution broker entries) and job event sequence numbers (JobEventBuffer revisions) must be persisted in SQLite; introducing new in-process authoritative runtime state is forbidden."
+    statement: "Runtime queues and job event sequence numbers are persisted in PostgreSQL; introducing new in-process authoritative runtime state is forbidden."
     owner: database
     risk: high
     evidence:
@@ -262,7 +262,7 @@ invariants:
         target: tests/test_job_event_buffer_db.py
         gate: quick
       - kind: contract
-        target: tests/ci/test_no_scattered_begin_immediate.py
+        target: tests/ci/test_postgres_only_runtime.py
         gate: ci_extended
 
   - id: EXEC-REMOTE-001

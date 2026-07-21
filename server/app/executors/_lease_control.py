@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import sqlite3
 from datetime import UTC, datetime
 from typing import Any
 
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.db.connection import DatabaseConnection
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors.models import LeaseClaimRequest
 
 
-def _read_job_execution_control(conn: sqlite3.Connection, job_id: str) -> dict[str, Any]:
+def _read_job_execution_control(conn: DatabaseConnection, job_id: str) -> dict[str, Any]:
     row = conn.execute(
         """
         select execution_mode, target_node_key, execution_paused, pause_reason
@@ -51,7 +51,7 @@ def _execution_control_rejects_claim(
         return request.node_key not in request.allowed_node_keys
 
 
-def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:
+def _sync_job_status(conn: DatabaseConnection, job_id: str) -> None:
     still_running = conn.execute(
         "select 1 from job_nodes where job_id=? and status='running'",
         (job_id,),
@@ -59,7 +59,7 @@ def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:
     if still_running is not None:
         conn.execute(
             "update jobs set status=?, updated_at=? where id=?",
-            ("running", _sqlite_timestamp(datetime.now(UTC)), job_id),
+            ("running", _database_timestamp(datetime.now(UTC)), job_id),
         )
         return
 
@@ -70,7 +70,7 @@ def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:
     if any_failed is not None:
         conn.execute(
             "update jobs set status=?, updated_at=? where id=?",
-            ("failed", _sqlite_timestamp(datetime.now(UTC)), job_id),
+            ("failed", _database_timestamp(datetime.now(UTC)), job_id),
         )
         return
 
@@ -81,7 +81,7 @@ def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:
     if paused is not None:
         conn.execute(
             "update jobs set status=?, updated_at=? where id=?",
-            ("paused", _sqlite_timestamp(datetime.now(UTC)), job_id),
+            ("paused", _database_timestamp(datetime.now(UTC)), job_id),
         )
         return
 
@@ -95,18 +95,18 @@ def _sync_job_status(conn: sqlite3.Connection, job_id: str) -> None:
     if non_terminal is not None:
         conn.execute(
             "update jobs set status=?, updated_at=? where id=?",
-            ("queued", _sqlite_timestamp(datetime.now(UTC)), job_id),
+            ("queued", _database_timestamp(datetime.now(UTC)), job_id),
         )
         return
 
     conn.execute(
         "update jobs set status=?, updated_at=? where id=?",
-        ("completed", _sqlite_timestamp(datetime.now(UTC)), job_id),
+        ("completed", _database_timestamp(datetime.now(UTC)), job_id),
     )
 
 
 def _pause_job_on_target_completion(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     job_id: str,
     completed_node_key: str,
     now_str: str,
@@ -138,8 +138,8 @@ def _pause_job_on_target_completion(
         )
 
 
-def active_lease_counts(conn: sqlite3.Connection, executor_id: str) -> dict[str, int]:
-    now_str = _sqlite_timestamp(datetime.now(UTC))
+def active_lease_counts(conn: DatabaseConnection, executor_id: str) -> dict[str, int]:
+    now_str = _database_timestamp(datetime.now(UTC))
     counts: dict[str, int] = {"global": 0}
 
     allocated = conn.execute(
@@ -157,7 +157,7 @@ def active_lease_counts(conn: sqlite3.Connection, executor_id: str) -> dict[str,
         """,
         (executor_id, now_str),
     ).fetchone()
-    counts["global"] = global_row["cnt"]
+    counts["global"] = int(global_row["cnt"]) if global_row is not None else 0
 
     rows = conn.execute(
         """

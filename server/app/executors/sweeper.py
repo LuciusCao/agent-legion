@@ -6,9 +6,9 @@ expires stale leases, recovers orphaned running jobs, and renews the leases
 backing live remote executions (Decision 6) — without that renewal, submit-only
 remote leases would be expired while their executions are still in flight.
 
-The sweeper is safe to run in multiple replicas: every step funnels through the
-same sqlite transactions the single-process path uses, so expiry and claim
-requeues stay single-winner across processes.
+The sweeper is safe to run in multiple replicas: every step funnels through
+PostgreSQL transactions with conditional writes, so expiry and claim requeues
+stay single-winner across processes.
 """
 
 from __future__ import annotations

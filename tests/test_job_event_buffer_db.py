@@ -6,11 +6,12 @@ import pytest
 
 from server.app.db.schema import init_db
 from server.app.job_events import JobEventBuffer
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture
 def db_path(tmp_path: Path) -> Path:
-    path = tmp_path / "jobs.sqlite"
+    path = TEST_DATABASE_URL
     init_db(path)
     return path
 
@@ -67,9 +68,8 @@ def test_overflow_resync_semantics_unchanged(db_path):
     assert compacted.latest_revision == 3
 
 
-def test_db_revision_retries_on_sqlite_lock(db_path, monkeypatch):
-    # DB 发号路径在锁竞争下整体重试（终审修复回防）。
-    import sqlite3
+def test_db_revision_retries_on_transaction_conflict(db_path, monkeypatch):
+    from psycopg.errors import SerializationFailure
 
     import server.app.job_event_buffer as buffer_module
     from server.app.db.transaction import write_transaction as real_write_transaction
@@ -80,7 +80,7 @@ def test_db_revision_retries_on_sqlite_lock(db_path, monkeypatch):
         nonlocal calls
         calls += 1
         if calls == 1:
-            raise sqlite3.OperationalError("database is locked")
+            raise SerializationFailure("serialization failure")
         return real_write_transaction(path)
 
     monkeypatch.setattr(buffer_module, "write_transaction", flaky_write_transaction)

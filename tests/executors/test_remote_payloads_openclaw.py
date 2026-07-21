@@ -20,6 +20,7 @@ from server.app.executors.remote_broker import RemoteClaim, RemoteExecutionBroke
 from server.app.executors.remote_payloads import get_payload_builder
 from server.app.executors.remote_payloads.openclaw import OpenClawPayloadBuilder
 from server.app.executors.runtime_config import OpenClawRuntimeConfig
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _builder() -> OpenClawPayloadBuilder:
@@ -152,7 +153,7 @@ def test_remote_executor_openclaw_submit_and_dequeue(
     # the row is enqueued; the completion callback path is covered separately.
     for rel in execution_context.inputs:
         (execution_context.job_dir / rel).write_text("{}", encoding="utf-8")
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
 

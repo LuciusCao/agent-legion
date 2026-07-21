@@ -7,12 +7,25 @@ import pytest
 import requests
 from fastapi.testclient import TestClient
 
+from tests.postgres_support import BASE_DATABASE_URL, TEST_DATABASE_URL, TEST_SCHEMA
+
+os.environ["VIDEO_HIVE_DATABASE_URL"] = TEST_DATABASE_URL
+
+import psycopg
+from psycopg import sql
+
+with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as _bootstrap_conn:
+    _bootstrap_conn.execute(
+        sql.SQL("create schema if not exists {}").format(sql.Identifier(TEST_SCHEMA))
+    )
+
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
+from server.app.db.connection import close_database_pools
+from server.app.db.schema import init_db
 from server.app.jobs import JobQueries
 from server.app.main import create_app
 from server.app.settings import load_settings
-from tests.helpers import ensure_legacy_workspace_tables
 
 _CMS_ENV_KEYS = (
     "BASECMS_BASE_URL",
@@ -31,6 +44,25 @@ def pytest_configure() -> None:
         os.environ.setdefault("VIDEO_HIVE_SKIP_DOTENV", "1")
         for key in _CMS_ENV_KEYS:
             os.environ[key] = ""
+
+
+@pytest.fixture(autouse=True)
+def _isolate_postgres_database():
+    close_database_pools()
+    try:
+        with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as conn:
+            conn.execute(
+                sql.SQL("drop schema if exists {} cascade").format(sql.Identifier(TEST_SCHEMA))
+            )
+            conn.execute(sql.SQL("create schema {}").format(sql.Identifier(TEST_SCHEMA)))
+    except psycopg.Error as exc:
+        pytest.fail(
+            "PostgreSQL is required for tests. Set VIDEO_HIVE_TEST_DATABASE_URL to a reachable "
+            f"test database: {exc}"
+        )
+    init_db(TEST_DATABASE_URL)
+    yield
+    close_database_pools()
 
 
 @pytest.fixture(autouse=True)
@@ -112,15 +144,14 @@ def settings(tmp_path):
 
 @pytest.fixture
 def db(settings):
-    return Database(settings.data_dir / "video_hive.sqlite")
+    return Database(TEST_DATABASE_URL)
 
 
 @pytest.fixture
 def job_db(settings):
     jobs_dir = settings.data_dir / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
-    queries = JobQueries(settings.data_dir / "jobs.sqlite", jobs_dir)
-    ensure_legacy_workspace_tables(queries)
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir)
     return queries
 
 

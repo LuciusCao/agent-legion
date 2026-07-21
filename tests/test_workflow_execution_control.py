@@ -29,24 +29,26 @@ from server.app.workflows.execution_control import (
     allowed_nodes,
     ancestor_closure,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture
-def tmp_db(tmp_path: Path) -> Path:
-    path = tmp_path / "control.sqlite"
+def tmp_db(tmp_path: Path) -> str:
+    del tmp_path
+    path = TEST_DATABASE_URL
     init_db(path)
     return path
 
 
 @pytest.fixture
-def queries(tmp_db: Path) -> JobQueries:
-    jobs_dir = tmp_db.parent / "jobs"
+def queries(tmp_db: str, tmp_path: Path) -> JobQueries:
+    jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     return JobQueries(tmp_db, jobs_dir)
 
 
 @pytest.fixture
-def repo(tmp_db: Path) -> ExecutorLeaseRepository:
+def repo(tmp_db: str) -> ExecutorLeaseRepository:
     return ExecutorLeaseRepository(tmp_db)
 
 

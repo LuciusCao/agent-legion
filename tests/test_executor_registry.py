@@ -34,6 +34,7 @@ from server.app.executors.runtime_config import (
     PiRuntimeConfig,
 )
 from server.app.skills.manager import SkillManager
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _write_handler_artifact(artifact_dir: Path, name: str) -> None:
@@ -291,7 +292,7 @@ def test_registry_rejects_remote_executor_without_broker(
 def test_registry_builds_remote_executor_with_broker(
     runtime_dependencies: RuntimeDependencies, tmp_path: Path
 ) -> None:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     runtime = dataclasses.replace(runtime_dependencies, remote_broker=broker)

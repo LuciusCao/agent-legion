@@ -90,7 +90,7 @@ def _run_handler(
         if job_db_path and jobs_dir:
             from server.app.jobs import JobQueries
 
-            runtime["job_db"] = JobQueries(Path(job_db_path), Path(jobs_dir))
+            runtime["job_db"] = JobQueries(str(job_db_path), Path(jobs_dir))
         job_dir = Path(job_dir_str)
         handler(job, job_dir, runtime)
         logger.info("%s completed", prefix)

@@ -28,7 +28,7 @@ workarounds for our specific constraints, not architectural requirements:
 Components:
 
 - `server/app/executors/remote_broker.py` — claim/heartbeat/requeue broker. The
-  queue is sqlite-backed (`remote_executions` table in the jobs database), so
+  queue is PostgreSQL-backed (`remote_executions` table), so
   queued/claimed executions survive a server restart and stale claims are
   requeued by the sweep after `claim_timeout_seconds`.
 - `server/app/routes/remote.py` — authenticated `/api/remote/*` worker endpoints.
@@ -325,8 +325,8 @@ from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import load_settings
 
 settings = load_settings()
-job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
-leases = ExecutorLeaseRepository(job_db.path, job_db=job_db)
+job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
+leases = ExecutorLeaseRepository(job_db.path, job_db=job_db, data_dir=settings.data_dir)
 broker = RemoteExecutionBroker(
     job_db.path,
     settings.data_dir / "remote_bundles",
@@ -352,8 +352,8 @@ Two hard operational requirements:
   never expire; and when a sweeper comes back after an outage longer than
   `lease_ttl_seconds`, its first tick expires the aged leases — including ones
   backing remote executions that are still in flight. Running more than one
-  sweeper is safe (every step funnels through single-winner sqlite
-  transactions), so prefer a supervised process plus a standby over a bare
+  sweeper is safe (row predicates and PostgreSQL transactions select a single
+  winner), so prefer a supervised process plus a standby over a bare
   `nohup`.
 - **`sweeper_interval_seconds` must stay far smaller than `lease_ttl_seconds`.**
   Each tick expires stale leases *before* renewing live remote leases, so with

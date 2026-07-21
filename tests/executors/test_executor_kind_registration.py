@@ -23,6 +23,7 @@ from server.app.executors.pi import PiExecutor
 from server.app.executors.registry import ExecutorRegistry
 from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.skills.manager import SkillManager
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_builtin_kinds_registered() -> None:
@@ -75,7 +76,7 @@ def test_build_executor_dispatch_equivalence() -> None:
 
 
 def test_registry_build_matches_previous_behavior(tmp_path: Path) -> None:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     runtime = RuntimeDependencies(

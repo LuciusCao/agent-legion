@@ -1,6 +1,6 @@
 from contextlib import closing, contextmanager
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.connection import connect_database
 from server.app.jobs import JobQueries
 from server.app.services.cleanup_sweep import (
     RUN_DIR_UPDATE_BATCH_SIZE,
@@ -8,21 +8,16 @@ from server.app.services.cleanup_sweep import (
 )
 from server.app.services.run_dir_cleanup import cleanup_extra_runs_for_node
 from server.app.storage_paths import make_data_relative
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _setup(conn):
-    conn.executescript(
-        """
-        create table node_runs (
-            id integer primary key autoincrement,
-            job_id text not null,
-            node_key text not null,
-            status text not null,
-            log_path text not null default '',
-            run_dir text not null default '',
-            session_dir text not null default ''
-        );
-        """
+    conn.execute(
+        "insert into workspaces(id, name) values ('ws1', 'ws1') on conflict (id) do nothing"
+    )
+    conn.execute(
+        "insert into jobs(id, workspace_id, workflow_key, source_type, source_id)"
+        " values ('job-1', 'ws1', 'wf', 'question', 'q1')"
     )
 
 
@@ -30,12 +25,13 @@ def _make_db(tmp_path):
     data_dir = tmp_path / "data"
     jobs_dir = data_dir / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
-    return data_dir, JobQueries(tmp_path / "db.sqlite", jobs_dir)
+    return data_dir, JobQueries(TEST_DATABASE_URL, jobs_dir)
 
 
 def _seed_job(conn, job_id, workspace_id="ws1"):
     conn.execute(
-        "insert or ignore into workspaces(id, name) values (?, ?)", (workspace_id, workspace_id)
+        "insert into workspaces(id, name) values (?, ?) on conflict (id) do nothing",
+        (workspace_id, workspace_id),
     )
     conn.execute(
         """
@@ -66,7 +62,7 @@ def test_cleanup_extra_runs_for_node_keeps_newest(tmp_path):
     (old_dir / "events.jsonl").write_text("old")
     (new_dir / "events.jsonl").write_text("new")
 
-    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         conn.execute(
             "insert into node_runs(job_id, node_key, status, run_dir) values (?, ?, 'completed', ?)",
@@ -88,7 +84,7 @@ def test_cleanup_extra_runs_for_node_keeps_single_run(tmp_path):
     only_dir = node_dir / "tok-only"
     only_dir.mkdir(parents=True)
 
-    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         removed = cleanup_extra_runs_for_node(conn, data_dir, node_dir.parent.parent, "node-a")
         assert removed == 0

@@ -1,4 +1,6 @@
 data_dir: data
+database:
+  url: postgresql://127.0.0.1:5432/agent_legion
 server:
   cors:
     allow_origins:

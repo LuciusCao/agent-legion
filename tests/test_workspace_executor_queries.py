@@ -4,11 +4,12 @@ import pytest
 
 from server.app.jobs.executor_configuration import replace_workspace_executor_configuration
 from server.app.jobs.queries import JobQueries
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture
 def queries(tmp_path: Path) -> JobQueries:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     return JobQueries(db_path, jobs_dir)

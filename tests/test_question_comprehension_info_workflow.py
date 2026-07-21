@@ -13,6 +13,7 @@ from server.app.workflows.question_comprehension_info import (
     clean_and_parse,
     finalize_non_uploadable,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 _TOOL_DIR = Path(__file__).parents[1] / "tools" / "comprehension-uploader"
 sys.path.insert(0, str(_TOOL_DIR))
@@ -21,7 +22,7 @@ from comprehension_uploader.schemas import registry  # noqa: E402
 
 
 def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -67,7 +68,7 @@ def test_clean_and_parse_preserves_cms_fingerprint(tmp_path):
 
 
 def test_clean_and_parse_uses_md5_fallback_when_cms_fingerprint_missing(tmp_path):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -113,7 +114,7 @@ def test_clean_and_parse_uses_md5_fallback_when_cms_fingerprint_missing(tmp_path
 
 
 def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -222,7 +223,7 @@ def test_assemble_comprehension_info_writes_package_artifacts(tmp_path):
 
 
 def test_assemble_comprehension_info_records_skill_versions(tmp_path):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -327,7 +328,7 @@ def test_assemble_comprehension_info_records_skill_versions(tmp_path):
 
 
 def test_clean_and_parse_md5_is_deterministic(tmp_path):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -386,7 +387,7 @@ def test_clean_and_parse_md5_is_deterministic(tmp_path):
 
 
 def test_clean_and_parse_missing_fingerprint_when_no_content(tmp_path):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -528,7 +529,7 @@ def test_finalize_non_uploadable_writes_non_uploadable_manifest(tmp_path):
 
 def test_assemble_comprehension_info_passes_uploader_v1_schema_validation(tmp_path):
     """Regression: assemble must include the Socratic question field required by v1."""
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
