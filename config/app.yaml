@@ -34,3 +34,13 @@ token_usage:
       input_per_1m: 3.0
       output_per_1m: 15.0
       cache_read_per_1m: 0.6
+    - provider: gateway
+      model: your-model-b
+      input_per_1m: 1.0
+      output_per_1m: 2.0
+      cache_read_per_1m: 0.2
+    - provider: deepseek
+      model: your-model-b
+      input_per_1m: 1.0
+      output_per_1m: 2.0
+      cache_read_per_1m: 0.2
