@@ -6,8 +6,10 @@
 
 | 脚本 | 用途 |
 |------|------|
-| `check-quick.sh` | 日常快速质量门：Ruff、Python 测试、mypy、架构检查、API 漂移检查、前端 lint/typecheck/test、spec health。 |
-| `check.sh` | 完整质量门（提交前）：quick gate + 前端测试覆盖率 + 生产构建。 |
+| `check-quick.sh` | 日常快速质量门：先并行 backend/frontend 静态检查，再并行 pytest/Vitest，避免静态检查与两套测试 runner 同时争抢 CPU。 |
+| `check-quick-backend.sh` | quick gate 后端 lane；支持 `BACKEND_GATE_PHASE=static\|test\|all`。 |
+| `check-quick-frontend.sh` | quick gate 前端 lane；支持 `FRONTEND_GATE_PHASE=static\|test\|all`，并通过 `FRONTEND_TEST_MODE=test\|coverage` 选择 Vitest 模式。 |
+| `check.sh` | 完整质量门（提交前）：coverage 模式 quick gate + 并行的 full backend evidence/前端 bundle，避免重复 Vitest 与 typecheck。 |
 | `check-ci.sh` | CI 质量门：完整 gate 的 CI 扩展版本。 |
 | `run-local-gate.sh` | 对精确 commit 执行 quick/full gate，并在 Git common directory 记录可复用的本地通过凭证。 |
 

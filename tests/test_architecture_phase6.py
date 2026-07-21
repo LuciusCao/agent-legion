@@ -185,6 +185,7 @@ class TestSchemaMutationLocations:
         assert not any("schema mutation" in error for error in errors)
 
 
+@pytest.mark.repository_gate
 def test_phase6_current_repository_has_no_errors():
     errors = check_repository(ROOT)
     phase6_errors = [

@@ -119,6 +119,7 @@ class TestWorkspacePipelinePhaseImports:
         )
 
 
+@pytest.mark.repository_gate
 def test_video_legacy_current_repository_has_no_errors():
     errors = check_repository(ROOT)
     video_legacy_errors = [

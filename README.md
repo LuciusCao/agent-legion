@@ -206,11 +206,15 @@ Quick gate (for daily development):
 ./scripts/check-quick.sh
 ```
 
-Runs Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy,
-architecture invariant checks (`scripts/check_invariants.py`), shared skill asset checks
-(`scripts/check-skills-shared.py`), architecture contract checks (`scripts/check_architecture.py`),
-generated API type drift check (`npm run api:check`), frontend Prettier + ESLint + typecheck +
-Vitest (without coverage), and the spec health check (`scripts/verify_specs.py --check`).
+Runs two buffered parallel rounds: backend/frontend static checks first, then pytest/Vitest. The
+backend side covers Ruff lint + format check, Python tests with coverage (`fail_under = 85`), mypy, architecture invariant checks
+(`scripts/check_invariants.py`), shared skill asset checks (`scripts/check-skills-shared.py`), the
+whole-repository architecture contract check (`scripts/check_architecture.py`), and spec health
+(`scripts/verify_specs.py --check`). The frontend lane covers generated API drift, Prettier,
+ESLint, typecheck, and Vitest without coverage. Vitest uses its thread pool to reduce per-file
+process startup overhead while retaining file isolation. Repository-wide architecture assertions are
+excluded from the parallel pytest run because the backend lane executes the authoritative scan
+once after pytest.
 
 `mypy` runs with unreachable-code warnings enabled. When it flags code behind
 dynamic JSON, database, or framework boundaries, first check whether the type
@@ -235,7 +239,11 @@ Full gate (before committing or handing off):
 ./scripts/check.sh
 ```
 
-Runs the quick gate, frontend tests with coverage (`npm run test:coverage`), the frontend production build, and a non-blocking dependency vulnerability audit (`scripts/check-deps-audit.sh`, also available as `make audit`).
+Runs the parallel quick gate with frontend coverage enabled, then runs full-gate backend evidence
+and the frontend production bundle in parallel. Frontend tests and TypeScript typechecking are not
+repeated: coverage replaces the quick Vitest invocation, while the production extension only runs
+`vite build`. The non-blocking dependency vulnerability audit remains available through
+`scripts/check-deps-audit.sh` and `make audit`.
 
 Dead-code sweeps with tools such as Vulture are manual review aids, not daily
 gate failures. Treat framework declarations, Pydantic fields, FastAPI route
