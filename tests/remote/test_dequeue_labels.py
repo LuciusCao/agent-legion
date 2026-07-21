@@ -300,7 +300,12 @@ def _register_via_api(client: TestClient, worker_id: str, **overrides) -> str:
 
 
 def _claim_via_api(client: TestClient, worker_id: str, token: str, **overrides):
-    body = {"worker_id": worker_id, "capabilities": ["transcribe"], **overrides}
+    body = {
+        "worker_id": worker_id,
+        "capabilities": ["transcribe"],
+        "worker_version": 1,
+        **overrides,
+    }
     return client.post(
         "/api/remote/claim",
         json=body,
@@ -386,6 +391,7 @@ def test_worker_client_claim_reports_labels() -> None:
         "worker_id": "w1",
         "capabilities": ["transcribe"],
         "labels": {"mem_gb": "32"},
+        "worker_version": 1,
     }
 
 

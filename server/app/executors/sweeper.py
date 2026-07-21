@@ -65,6 +65,11 @@ class SweeperThread:
             expired = self._leases.expire_stale(now)
             if expired:
                 logger.warning("expired stale workflow executions: %s", ", ".join(expired))
+                for lease_id in expired:
+                    try:
+                        self._broker.cancel_by_lease(lease_id)
+                    except Exception:
+                        logger.exception("remote cancel failed for expired lease %s", lease_id)
         except Exception:
             logger.exception("lease expiry sweep failed")
         try:

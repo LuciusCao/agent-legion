@@ -83,8 +83,10 @@ def try_claim_and_submit(
         return claim_shard_node(
             worker, workspace, job, node, job_dir, control_snapshot, allowed_node_keys, snapshot
         )
+    inputs = tuple(node.inputs)
     if node.reduce is not None:
         assemble_reduce_inputs(worker, job["id"], node, job_dir)
+        inputs = (*inputs, f"{node.key}.shards.json")
     log_path = worker.settings.logs_dir.resolve() / "jobs" / f"{job['id']}-{node_key}.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -181,7 +183,7 @@ def try_claim_and_submit(
         job=dict(job),
         job_dir=job_dir,
         log_path=log_path,
-        inputs=tuple(node.inputs),
+        inputs=inputs,
         expected_outputs=tuple(node.outputs),
         runtime={"node_execution": asdict(node.execution)},
     )

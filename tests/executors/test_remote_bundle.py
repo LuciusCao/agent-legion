@@ -18,18 +18,13 @@ def _make_skill(root: Path) -> Path:
     return skill
 
 
-def test_build_bundle_contains_skill_inputs_manifest(tmp_path):
+def test_build_bundle_contains_skill_and_manifest_only(tmp_path):
     skill = _make_skill(tmp_path)
-    job_dir = tmp_path / "job"
-    job_dir.mkdir()
-    (job_dir / "input.json").write_text("{}", encoding="utf-8")
     bundle = tmp_path / "bundles" / "e1.tar.gz"
 
     build_bundle(
         bundle,
         skill_dir=skill,
-        job_dir=job_dir,
-        inputs=("input.json",),
         manifest={"job_id": "j1", "run_token": "abc"},
     )
 
@@ -37,37 +32,9 @@ def test_build_bundle_contains_skill_inputs_manifest(tmp_path):
         names = set(tar.getnames())
         assert "skill/SKILL.md" in names
         assert "skill/scripts/validate_output.py" in names
-        assert "inputs/input.json" in names
+        assert not any(name.startswith("inputs/") for name in names)
         manifest = json.loads(tar.extractfile("manifest.json").read().decode("utf-8"))
         assert manifest == {"job_id": "j1", "run_token": "abc"}
-
-
-def test_build_bundle_rejects_missing_input(tmp_path):
-    skill = _make_skill(tmp_path)
-    job_dir = tmp_path / "job"
-    job_dir.mkdir()
-    with pytest.raises(BundleError, match="declared input missing"):
-        build_bundle(
-            tmp_path / "b.tar.gz",
-            skill_dir=skill,
-            job_dir=job_dir,
-            inputs=("nope.json",),
-            manifest={},
-        )
-
-
-def test_build_bundle_rejects_unsafe_input_path(tmp_path):
-    skill = _make_skill(tmp_path)
-    job_dir = tmp_path / "job"
-    job_dir.mkdir()
-    with pytest.raises(BundleError, match="unsafe input path"):
-        build_bundle(
-            tmp_path / "b.tar.gz",
-            skill_dir=skill,
-            job_dir=job_dir,
-            inputs=("../escape.json",),
-            manifest={},
-        )
 
 
 def test_extract_result_archive_writes_outputs_and_runs(tmp_path):

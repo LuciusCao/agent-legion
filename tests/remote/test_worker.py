@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import stat
 import tarfile
@@ -10,6 +11,8 @@ from pathlib import Path
 from scripts.remote import worker
 from server.app.executors.remote_bundle import build_bundle
 from server.app.workflows.pi_protocol import render_command_spec
+
+INPUT_HASH = hashlib.sha256(b"{}").hexdigest()
 
 MANIFEST = {
     "job_id": "job-1",
@@ -22,6 +25,9 @@ MANIFEST = {
     "skill": "wf/extract",
     "skill_version": "abc",
     "run_token": "tok123",
+    "bundle_mode": "refs",
+    "artifact_upload_url": "/api/artifacts",
+    "input_artifacts": {"input.json": f"sha256:{INPUT_HASH}"},
     "pi": {
         "binary": "pi",
         "provider": "deepseek",
@@ -71,24 +77,35 @@ def _make_bundle(tmp_path: Path, manifest: dict) -> Path:
     skill_src = tmp_path / "skill_src"
     skill_src.mkdir()
     (skill_src / "SKILL.md").write_text("# s", encoding="utf-8")
-    job_src = tmp_path / "job_src"
-    job_src.mkdir()
-    (job_src / "input.json").write_text("{}", encoding="utf-8")
     bundle = tmp_path / "e1.tar.gz"
-    build_bundle(
-        bundle, skill_dir=skill_src, job_dir=job_src, inputs=("input.json",), manifest=manifest
-    )
+    build_bundle(bundle, skill_dir=skill_src, manifest=manifest)
     return bundle
 
 
 class StubClient:
-    def __init__(self, bundle: Path, heartbeat_ok: bool = True):
+    def __init__(
+        self,
+        bundle: Path,
+        artifacts: dict[str, bytes] | None = None,
+        heartbeat_ok: bool = True,
+    ):
         self._bundle = bundle
+        self._artifacts = artifacts or {INPUT_HASH: b"{}"}
+        self.uploads: dict[str, bytes] = {}
         self._heartbeat_ok = heartbeat_ok
         self.heartbeats = 0
 
     def download_bundle(self, claim: dict, dest: Path) -> None:
         dest.write_bytes(self._bundle.read_bytes())
+
+    def download_artifact(self, hash: str, dest: Path) -> None:
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(self._artifacts[hash])
+
+    def upload_artifact(self, data: bytes) -> str:
+        digest = hashlib.sha256(data).hexdigest()
+        self.uploads[digest] = data
+        return digest
 
     def heartbeat(self, execution_id: str) -> bool:
         self.heartbeats += 1
@@ -113,6 +130,7 @@ def test_run_execution_happy_path(tmp_path):
 
     assert metadata["status"] == "completed"
     assert metadata["exit_code"] == 0
+    assert metadata["output_artifacts"]["output.json"].startswith("sha256:")
     assert archive is not None and archive.is_file()
     with tarfile.open(archive, "r:gz") as tar:
         names = set(tar.getnames())
@@ -205,3 +223,33 @@ def test_run_execution_survives_transient_heartbeat_errors(tmp_path):
     assert metadata["status"] == "completed"
     assert archive is not None and archive.is_file()
     assert client.heartbeats > 0
+
+
+def test_run_execution_reports_shard_output(tmp_path):
+    fake = tmp_path / "fake_pi_shard"
+    fake.write_text(
+        "#!/usr/bin/env python3\n"
+        "from pathlib import Path\n"
+        "Path('output.json').write_text('{}', encoding='utf-8')\n"
+        "Path('shard_output.json').write_text('{\"r\": 1}', encoding='utf-8')\n",
+        encoding="utf-8",
+    )
+    fake.chmod(fake.stat().st_mode | stat.S_IXUSR)
+    manifest = {
+        **MANIFEST,
+        "pi": {**MANIFEST["pi"], "binary": str(fake)},
+        "shard_index": 1,
+        "shard_input": {"q": 2},
+    }
+    bundle = _make_bundle(tmp_path, manifest)
+    metadata, _archive = worker.run_execution(
+        StubClient(bundle),
+        _claim("e1", manifest),
+        tmp_path / "work",
+    )
+    prompt = (
+        tmp_path / "work" / "e1" / "job" / "runs" / "node_a" / "tok123" / "prompt.md"
+    ).read_text(encoding="utf-8")
+    assert "Shard index: 1" in prompt
+    assert '"q": 2' in prompt
+    assert metadata["shard_output"] == '{"r": 1}'

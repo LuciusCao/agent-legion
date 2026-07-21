@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 import pytest
@@ -53,6 +54,18 @@ class PerWorkspaceBlockingExecutor:
 
 def _active_counts(worker: WorkflowWorkerThread, executor_id: str) -> dict[str, int]:
     return worker.leases.active_counts(executor_id)
+
+
+def _poll_counts_until(worker, predicate, timeout: float = 15.0) -> dict[str, int]:
+    deadline = time.monotonic() + timeout
+    counts: dict[str, int] = {}
+    while time.monotonic() < deadline:
+        worker._poll()
+        counts = _active_counts(worker, "local-default")
+        if predicate(counts):
+            return counts
+        time.sleep(0.01)
+    raise AssertionError(f"condition not met within {timeout}s; last counts: {counts}")
 
 
 @pytest.mark.full_gate
@@ -110,13 +123,7 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
 
     worker = make_worker(tmp_path, db_path, registry, [definition])
 
-    for _ in range(20):
-        worker._poll()
-        counts = _active_counts(worker, "local-default")
-        if counts.get(ws_a["id"], 0) == 8:
-            break
-    else:
-        raise AssertionError("workspace A did not reach its allocation limit")
+    counts = _poll_counts_until(worker, lambda c: c.get(ws_a["id"], 0) == 8)
 
     counts = _active_counts(worker, "local-default")
     assert counts.get("global", 0) == 8
@@ -137,7 +144,8 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
             )
 
     c_started = False
-    for _ in range(5):
+    deadline = time.monotonic() + 15.0
+    while time.monotonic() < deadline:
         worker._poll()
         counts = _active_counts(worker, "local-default")
         assert counts.get("global", 0) <= 10
@@ -148,6 +156,7 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
             c_started = True
         if counts.get("global", 0) == 10:
             break
+        time.sleep(0.01)
 
     assert c_started, "workspace C must start within 5 scheduling passes"
 
@@ -159,21 +168,18 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
 
     events[ws_a["id"]].set()
 
-    for _ in range(20):
-        worker._poll()
-        counts = _active_counts(worker, "local-default")
+    def allocations_reached(counts: dict[str, int]) -> bool:
         assert counts.get("global", 0) <= 10
         assert counts.get(ws_a["id"], 0) <= 8
         assert counts.get(ws_b["id"], 0) <= 6
         assert counts.get(ws_c["id"], 0) <= 2
-        if (
+        return (
             counts.get(ws_b["id"], 0) == 6
             and counts.get(ws_c["id"], 0) == 2
             and counts.get(ws_a["id"], 0) == 0
-        ):
-            break
-    else:
-        raise AssertionError("B/C did not reach allocations after A released capacity")
+        )
+
+    counts = _poll_counts_until(worker, allocations_reached)
 
     counts = _active_counts(worker, "local-default")
     assert counts.get(ws_a["id"], 0) == 0

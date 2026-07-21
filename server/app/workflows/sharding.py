@@ -1,4 +1,10 @@
-"""Shard fan-out state for sharded workflow nodes.
+"""Experimental shard fan-out state for sharded workflow nodes.
+
+Shard/reduce is an internal experimental capability and is not supported for
+production workflow revisions yet.  In particular, Workflow Studio does not
+round-trip the declarations and local concurrent shards do not have isolated
+output directories.  Keep production workflows on ordinary DAG fan-out until
+those gaps are closed.
 
 ``node_shards`` rows are the per-shard execution records of a node that
 declares ``shard:`` in the workflow definition. The node's ``job_nodes`` row
@@ -15,6 +21,7 @@ transactions or connections.
 from __future__ import annotations
 
 import json
+from collections.abc import Iterable
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -203,3 +210,20 @@ def read_shard_outputs(conn: DatabaseConnection, job_id: str, node_key: str) -> 
         (job_id, node_key),
     ).fetchall()
     return [str(row["output_json"]) for row in rows]
+
+
+def delete_shards(
+    conn: DatabaseConnection,
+    job_id: str,
+    node_keys: Iterable[str],
+) -> int:
+    """Delete shard rows for reset nodes so the next tick rematerializes them."""
+    keys = sorted(set(node_keys))
+    if not keys:
+        return 0
+    placeholders = ",".join("?" for _ in keys)
+    cursor = conn.execute(
+        f"delete from node_shards where job_id=? and node_key in ({placeholders})",
+        (job_id, *keys),
+    )
+    return cursor.rowcount

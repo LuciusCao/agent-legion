@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import math
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor, wait
 from typing import Any
@@ -25,6 +26,14 @@ from server.app.workflows.definition import WorkflowDefinition
 from server.app.workflows.registry import list_registered_workflows
 
 logger = logging.getLogger(__name__)
+
+
+def resolve_submit_max_workers(configured: int | None, remote_capacities: list[int]) -> int:
+    """Resolve the shared remote-submit pool size."""
+    if configured is not None:
+        return configured
+    capacity = max(remote_capacities, default=0)
+    return max(4, math.ceil(capacity / 2)) if capacity else 4
 
 
 class WorkflowWorkerThread:
@@ -52,7 +61,16 @@ class WorkflowWorkerThread:
         self._pools: dict[str, ThreadPoolExecutor] = {}
         # All submit-only (remote) claims share one bounded pool: submission is
         # a quick enqueue, so it must not scale with executor global capacity.
-        self._submit_pool = ThreadPoolExecutor(max_workers=4, thread_name_prefix="remote-submit")
+        configured = settings.executor_runtime.workflows.submit_max_workers
+        remote_capacities = [
+            self.registry.global_capacity(executor_id) or 0
+            for executor_id, definition in self.registry.definitions().items()
+            if definition.kind == "remote"
+        ]
+        self._submit_pool = ThreadPoolExecutor(
+            max_workers=resolve_submit_max_workers(configured, remote_capacities),
+            thread_name_prefix="remote-submit",
+        )
         self._futures: dict[str, Future[ExecutionResult | None]] = {}
         self._round_robin = WorkspaceRoundRobin()
         self._maintenance = WorkflowMaintenance(job_db, settings)

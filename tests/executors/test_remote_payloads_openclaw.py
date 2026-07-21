@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import threading
 import time
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -55,6 +56,16 @@ def test_build_manifest_carries_remote_executor_contract_keys(execution_context)
     manifest = _builder().build_manifest(execution_context)
     assert manifest["run_token"]
     assert "skill_version" in manifest
+
+
+def test_build_manifest_carries_shard_fields(execution_context) -> None:
+    context = replace(
+        execution_context,
+        runtime={"shard_index": 1, "shard_input": {"q": 2}},
+    )
+    manifest = _builder().build_manifest(context)
+    assert manifest["shard_index"] == 1
+    assert manifest["shard_input"] == {"q": 2}
 
 
 def test_command_spec_prompt_mentions_skill_and_outputs(execution_context) -> None:
@@ -145,6 +156,14 @@ def test_remote_executor_openclaw_submit_and_dequeue(
     db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
+
+    class StubArtifactStore:
+        def put(self, data: bytes) -> str:
+            return "ab" * 32
+
+        def add_ref(self, job_id: str, node_key: str, name: str, digest: str) -> None:
+            return None
+
     config = RemoteExecutorConfig(
         kind="remote",
         payload="openclaw",
@@ -158,6 +177,7 @@ def test_remote_executor_openclaw_submit_and_dequeue(
             timeout_seconds=120,
         ),
         remote_broker=broker,
+        artifact_store=StubArtifactStore(),  # type: ignore[arg-type]
     )
     executor = build_remote_executor("oc-remote", config, deps)
 

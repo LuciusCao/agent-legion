@@ -24,7 +24,9 @@ HEADERS = {"X-Worker-Token": TOKEN, "X-Worker-Id": "w1"}
 
 @pytest.fixture
 def remote_settings(settings):
-    remote = settings.executor_runtime.remote.model_copy(update={"worker_token": TOKEN})
+    remote = settings.executor_runtime.remote.model_copy(
+        update={"worker_token": TOKEN, "min_worker_protocol_version": 0}
+    )
     runtime = settings.executor_runtime.model_copy(update={"remote": remote})
     return dataclasses.replace(settings, executor_runtime=runtime)
 
@@ -35,6 +37,7 @@ def rig(tmp_path, remote_settings):
     broker = RemoteExecutionBroker(TEST_DATABASE_URL, tmp_path / "bundles")
     app = FastAPI()
     app.include_router(create_remote_router(broker, remote_settings), prefix="/api")
+    HEADERS["X-Worker-Token"] = broker.issue_worker_token("w1", "mac-mini", ["cap_a"], 65)
     return TestClient(app), broker
 
 
@@ -60,7 +63,9 @@ def _submit(
 
 
 def _settings_with_remote(settings: Settings, **updates: object) -> Settings:
-    remote = settings.executor_runtime.remote.model_copy(update=updates)
+    remote = settings.executor_runtime.remote.model_copy(
+        update={"min_worker_protocol_version": 0, **updates}
+    )
     runtime = settings.executor_runtime.model_copy(update={"remote": remote})
     return dataclasses.replace(settings, executor_runtime=runtime)
 
@@ -70,6 +75,8 @@ def _client_for(settings: Settings, tmp_path: Path) -> tuple[TestClient, RemoteE
     broker = RemoteExecutionBroker(TEST_DATABASE_URL, tmp_path / "bundles")
     app = FastAPI()
     app.include_router(create_remote_router(broker, settings), prefix="/api")
+    if settings.executor_runtime.remote.worker_token:
+        HEADERS["X-Worker-Token"] = broker.issue_worker_token("w1", "mac-mini", ["cap_a"], 65)
     return TestClient(app), broker
 
 
@@ -86,14 +93,14 @@ def test_unauthorized_without_token(rig):
     assert resp.status_code == 401
 
 
-def test_register_and_list_workers(rig):
+def test_legacy_register_endpoint_is_removed(rig):
     client, broker = rig
     resp = client.post(
         "/api/remote/register",
         json={"worker_id": "w1", "name": "mac-mini", "capabilities": ["cap_a"], "slots": 65},
         headers=HEADERS,
     )
-    assert resp.status_code == 204
+    assert resp.status_code == 404
     assert broker.list_workers()[0]["worker_id"] == "w1"
 
 
@@ -173,7 +180,7 @@ def test_claim_response_command_spec_defaults_null(rig):
     assert resp.json()["command_spec"] is None
 
 
-def test_result_rejected_for_wrong_worker(rig):
+def test_per_worker_token_identity_ignores_spoofed_header(rig):
     client, broker = rig
     _submit(broker)
     client.post(
@@ -183,13 +190,13 @@ def test_result_rejected_for_wrong_worker(rig):
     resp = client.post(
         "/api/remote/executions/e1/result",
         headers={
-            "X-Worker-Token": TOKEN,
+            "X-Worker-Token": HEADERS["X-Worker-Token"],
             "X-Worker-Id": "w2",
             "X-Remote-Result": json.dumps(meta),
         },
         content=b"x",
     )
-    assert resp.status_code == 409
+    assert resp.status_code == 204
 
 
 def test_result_rejects_invalid_status(rig):
@@ -229,14 +236,14 @@ def test_service_unavailable_without_configured_token(tmp_path, settings):
     assert resp.status_code == 503
 
 
-def test_missing_worker_id_returns_400(rig):
+def test_per_worker_token_does_not_require_worker_id_header(rig):
     client, _ = rig
     resp = client.post(
         "/api/remote/claim",
         json={"worker_id": "w1", "capabilities": ["cap_a"]},
-        headers={"X-Worker-Token": TOKEN},
+        headers={"X-Worker-Token": HEADERS["X-Worker-Token"]},
     )
-    assert resp.status_code == 400
+    assert resp.status_code == 204
 
 
 def test_bundle_410_when_bundle_file_gone(rig):
@@ -361,15 +368,14 @@ def test_claim_worker_id_mismatch_returns_400(rig):
     assert resp.json()["detail"] == "worker id mismatch"
 
 
-def test_register_worker_id_mismatch_returns_400(rig):
+def test_legacy_register_worker_id_route_is_removed(rig):
     client, _ = rig
     resp = client.post(
         "/api/remote/register",
         json={"worker_id": "w2", "name": "x", "capabilities": ["cap_a"], "slots": 1},
         headers=HEADERS,
     )
-    assert resp.status_code == 400
-    assert resp.json()["detail"] == "worker id mismatch"
+    assert resp.status_code == 404
 
 
 def test_workers_allows_page_access_without_token(rig):
@@ -382,11 +388,6 @@ def test_workers_allows_page_access_without_token(rig):
 
 def test_workers_lists_registered(rig):
     client, _ = rig
-    client.post(
-        "/api/remote/register",
-        json={"worker_id": "w1", "name": "mac-mini", "capabilities": ["cap_a"], "slots": 65},
-        headers=HEADERS,
-    )
     resp = client.get("/api/remote/workers", headers={"X-Worker-Token": TOKEN})
     assert resp.status_code == 200
     workers = resp.json()["workers"]

@@ -1,10 +1,9 @@
-"""Per-worker token issuance, authentication, revocation, legacy fallback (phase 4, task 4).
+"""Per-worker token issuance, authentication, and revocation.
 
 Covers the SEC-WORKER-001 trust model: the management (global static) token
 issues per-worker tokens via ``POST /api/remote/workers/register``; only the
 sha256 of the secret part is persisted; claim/heartbeat/result/bundle accept a
-per-worker token or — during the fallback window — the legacy global token;
-revocation takes effect immediately and beats the fallback window.
+per-worker token; revocation takes effect immediately.
 """
 
 from __future__ import annotations
@@ -32,10 +31,8 @@ def _fetchone(db_path: str, sql: str, params: tuple = ()):
         return conn.execute(sql, params).fetchone()
 
 
-def _remote_settings(settings, *, allow_legacy: bool = True):
-    remote = settings.executor_runtime.remote.model_copy(
-        update={"worker_token": ADMIN_TOKEN, "allow_legacy_worker_token": allow_legacy}
-    )
+def _remote_settings(settings):
+    remote = settings.executor_runtime.remote.model_copy(update={"worker_token": ADMIN_TOKEN})
     runtime = settings.executor_runtime.model_copy(update={"remote": remote})
     return dataclasses.replace(settings, executor_runtime=runtime)
 
@@ -70,7 +67,7 @@ def _register_ok(client: TestClient, worker_id: str, **overrides) -> str:
 def _claim(client: TestClient, worker_id: str, token: str):
     return client.post(
         "/api/remote/claim",
-        json={"worker_id": worker_id, "capabilities": ["cap_a"]},
+        json={"worker_id": worker_id, "capabilities": ["cap_a"], "worker_version": 1},
         headers={"X-Worker-Token": token, "X-Worker-Id": worker_id},
     )
 
@@ -172,29 +169,9 @@ def test_cross_mixed_worker_id_and_secret_rejected(rig) -> None:
     assert _claim(client, "wA", mixed).status_code == 401
 
 
-# ---- matrix 6: legacy global token passes during the fallback window ----
-
-
-def test_legacy_token_allowed_during_fallback_window(rig) -> None:
+def test_static_management_token_is_rejected_on_worker_endpoint(rig) -> None:
     client, _, _ = rig
-    assert _claim(client, "w-legacy", ADMIN_TOKEN).status_code == 204
-
-
-# ---- matrix 7: legacy global token rejected once the window closes ----
-
-
-def test_legacy_token_rejected_when_window_closed(tmp_path: Path, settings) -> None:
-    db_path = TEST_DATABASE_URL
-    init_db(db_path)
-    broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
-    app = FastAPI()
-    app.include_router(
-        create_remote_router(broker, _remote_settings(settings, allow_legacy=False)),
-        prefix="/api",
-    )
-    client = TestClient(app)
     assert _claim(client, "w-legacy", ADMIN_TOKEN).status_code == 401
-    # Per-worker tokens still work after the window closes.
     token = _register_ok(client, "w1")
     assert _claim(client, "w1", token).status_code == 204
 
@@ -211,7 +188,7 @@ def test_revoked_worker_token_rejected_immediately(rig) -> None:
     assert _claim(client, "w1", token).status_code == 401
 
 
-# ---- matrix 9: revocation beats the fallback window ----
+# ---- matrix 9: static management token never bypasses revocation ----
 
 
 def test_revoked_worker_rejected_even_with_legacy_token(rig) -> None:

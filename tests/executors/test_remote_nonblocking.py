@@ -9,6 +9,7 @@ thread pools.
 
 from __future__ import annotations
 
+import hashlib
 import io
 import tarfile
 import threading
@@ -51,6 +52,14 @@ CAPABILITY = "review_keywords"
 SKILL = "question_comprehension_info/generate_key_info"
 
 
+class _ArtifactStoreStub:
+    def put(self, data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
+    def add_ref(self, job_id: str, node_key: str, name: str, digest: str) -> None:
+        return None
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -84,6 +93,7 @@ def remote_executor(tmp_path: Path, broker: RemoteExecutionBroker) -> RemoteExec
         PiRuntimeConfig(binary="pi", provider="deepseek", model="your-model-b"),
         skill_manager,
         capabilities,
+        artifact_store=_ArtifactStoreStub(),  # type: ignore[arg-type]
     )
     return RemoteExecutor(EXECUTOR_ID, payload_builder, capabilities, broker)
 
@@ -192,6 +202,7 @@ def _complete_with_archive(broker: RemoteExecutionBroker, output_name: str = "ou
         command=("pi", "--mode", "json"),
         skill_version=str(remote_claim.manifest["skill_version"]),
         result_archive_name=archive.name,
+        output_artifacts={output_name: f"sha256:{'0' * 64}"},
     )
     return broker.complete(remote_claim.execution_id, "w1", outcome)
 
@@ -292,7 +303,8 @@ def test_completion_callback_finishes_lease_and_backfills(
 ) -> None:
     assert remote_executor.execute(execution_context) is None
     assert _complete_with_archive(broker) is True
-    # The handler is registered on the broker; finish happens synchronously in the callback.
+    broker.wait_idle()
+    # The handler is registered on the broker; wait for the dispatcher callback.
     assert not leases.has_active_for_job(execution_context.job_id, _utcnow())
     assert (execution_context.job_dir / "out.json").is_file()
     node = job_db.get_job_node(execution_context.job_id, execution_context.node_key)
@@ -322,6 +334,7 @@ def test_duplicate_result_report_is_idempotent(
         )
         is False
     )
+    broker.wait_idle()
     assert callback_calls == [execution_context.execution_id]
     assert not leases.has_active_for_job(execution_context.job_id, _utcnow())
 
@@ -375,6 +388,7 @@ def test_finish_cancel_race_single_winner(
         for thread in threads:
             thread.join(timeout=10)
             assert not thread.is_alive()
+        broker.wait_idle()
         # Exactly one of cancel/complete wins, so the callback fires exactly once
         # and the lease is finished exactly once, in a single final state.
         assert callback_calls.count(claim.execution_id) == 1
@@ -423,6 +437,7 @@ def test_requeue_limit_exceeded_finishes_failed(
     current[0] += timedelta(seconds=11)
     # Second stale sweep exceeds the requeue limit: done/failed, callback fires.
     assert broker.dequeue("w3", {CAPABILITY}) is None
+    broker.wait_idle()
 
     assert len(outcomes) == 1
     assert outcomes[0].status == "failed"
@@ -443,6 +458,7 @@ def test_cancel_completion_finishes_lease(
 ) -> None:
     assert remote_executor.execute(execution_context) is None
     remote_executor.cancel(execution_context.execution_id)
+    broker.wait_idle()
     # The cancel lands on the broker and drives the same completion callback.
     assert not leases.has_active_for_job(execution_context.job_id, _utcnow())
     run = _node_run(job_db, execution_context.job_id)
@@ -499,6 +515,7 @@ def test_completion_handler_result_fields(
     broker.register_completion_callback(handler.handle_completion)
     assert remote_executor.execute(execution_context) is None
     assert _complete_with_archive(broker) is True
+    broker.wait_idle()
 
     assert len(spy.finished) == 1
     lease_id, result = spy.finished[0]
@@ -531,6 +548,7 @@ def test_completion_handler_worker_reported_failure(
         error_message="Missing outputs after Pi run: out.json",
     )
     assert broker.complete(execution_context.execution_id, "w1", outcome) is True
+    broker.wait_idle()
     node = job_db.get_job_node(execution_context.job_id, execution_context.node_key)
     assert node["status"] == "failed"
     assert "Missing outputs" in node["error_message"]
@@ -546,6 +564,7 @@ def test_completion_handler_missing_outputs(
     assert remote_executor.execute(execution_context) is None
     # Worker reports success but the archive does not contain the expected output.
     assert _complete_with_archive(broker, output_name="unexpected.json") is True
+    broker.wait_idle()
     node = job_db.get_job_node(execution_context.job_id, execution_context.node_key)
     assert node["status"] == "failed"
     assert "Missing outputs" in node["error_message"]
@@ -570,6 +589,7 @@ def test_completion_handler_unpack_failure(
         result_archive_name=archive.name,
     )
     assert broker.complete(remote_claim.execution_id, "w1", outcome) is True
+    broker.wait_idle()
     node = job_db.get_job_node(execution_context.job_id, execution_context.node_key)
     assert node["status"] == "failed"
     assert "failed to unpack" in node["error_message"]
@@ -646,5 +666,5 @@ def test_no_thread_pool_growth_for_remote_claims(
     # Remote executors share one bounded submit pool; no per-executor pool is created.
     assert EXECUTOR_ID not in worker._pools
     growth = len(threading.enumerate()) - threads_before
-    assert growth < 5, f"remote claims must not grow thread pools unboundedly (+{growth})"
+    assert growth <= 11, f"capacity-derived remote submit pool exceeded its bound (+{growth})"
     worker.stop()

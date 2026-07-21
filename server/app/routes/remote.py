@@ -23,13 +23,6 @@ _EXECUTION_ID_RE = re.compile(r"^[A-Za-z0-9_-]+$")
 _OUTPUT_HASH_RE = re.compile(r"sha256:[0-9a-f]{64}")
 
 
-class RegisterRequest(BaseModel):
-    worker_id: str = Field(min_length=1)
-    name: str = ""
-    capabilities: list[str] = Field(min_length=1)
-    slots: int = Field(gt=0)
-
-
 class WorkerTokenRegisterRequest(BaseModel):
     worker_id: str = Field(min_length=1)
     name: str = ""
@@ -49,6 +42,7 @@ class ClaimRequest(BaseModel):
     capabilities: list[str] = Field(min_length=1)
     # Workers re-report their labels on claim; non-empty updates the registry.
     labels: dict[str, Any] = Field(default_factory=dict)
+    worker_version: int | None = None
 
 
 class ClaimResponse(BaseModel):
@@ -118,12 +112,6 @@ def create_remote_router(
             raise HTTPException(status_code=404, detail="unknown worker")
         return Response(status_code=204)
 
-    @router.post("/register", status_code=204)
-    def register(payload: RegisterRequest, request: Request) -> Response:
-        _authorize(request, payload.worker_id)
-        broker.register_worker(payload.worker_id, payload.name, payload.capabilities, payload.slots)
-        return Response(status_code=204)
-
     @router.get("/workers", response_model=WorkersResponse)
     def list_workers() -> WorkersResponse:
         """Page-facing read-only worker registry (phase 4, Decision 10).
@@ -141,6 +129,12 @@ def create_remote_router(
     @router.post("/claim", response_model=ClaimResponse)
     def claim(payload: ClaimRequest, request: Request) -> ClaimResponse | Response:
         _authorize(request, payload.worker_id)
+        min_version = remote_config.min_worker_protocol_version
+        if min_version and (payload.worker_version is None or payload.worker_version < min_version):
+            raise HTTPException(
+                status_code=409,
+                detail="worker protocol too old; upgrade scripts/remote/worker.py",
+            )
         if payload.labels:
             try:
                 broker.update_worker_labels(payload.worker_id, payload.labels)
@@ -226,6 +220,7 @@ def create_remote_router(
             skill_version=str(meta.get("skill_version", "")),
             result_archive_name=f"{execution_id}.result.tar.gz",
             output_artifacts={str(k): str(v) for k, v in output_refs.items()},
+            shard_output=str(meta.get("shard_output", "")),
         )
         # Broker renames and publishes in one critical section; waiters never race the bytes.
         complete_args = (execution_id, worker_id, outcome, staging_path)

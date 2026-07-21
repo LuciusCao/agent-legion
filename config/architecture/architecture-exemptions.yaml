@@ -8,11 +8,11 @@ exemptions:
   remove_when: issues/open/032-P2-event-driven-worker.md
 - check: architecture.scheduler_threadpool
   path: server/app/workflow_worker_thread.py:self._submit_pool
-  reason: Task 6 of the phase3 execution-decoupling plan routes all submit-only
-    (remote) claims to one shared ThreadPoolExecutor bounded at 4 workers;
-    submission is a quick enqueue and must not scale with executor capacity.
+  reason: Remote submit-only claims share one configurable ThreadPoolExecutor;
+    its default derives from the largest remote executor capacity to keep bundle
+    construction queue time below the lease TTL.
   owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
+  remove_when: issues/open/032-P2-event-driven-worker.md
 - check: architecture.file_budget
   path: server/app/main.py
   reason: Task 9 of the phase1 event-bus plan converges the six route service
@@ -106,12 +106,6 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-4
   ceiling: 267
 - check: architecture.route_response_model
-  path: server/app/routes/remote.py:register
-  reason: Task 6 of the distributed-agent-execution plan returns an empty 204 for worker
-    registration; no response body contract exists to model.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-distributed-agent-execution.md#task-6
-- check: architecture.route_response_model
   path: server/app/routes/remote.py:heartbeat
   reason: Task 6 of the distributed-agent-execution plan returns an empty 204 for worker
     heartbeats; no response body contract exists to model.
@@ -130,15 +124,6 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-4
 - check: architecture.file_budget
-  path: server/app/routes/remote_auth.py
-  reason: Task 4 of the phase4 agent-collaboration plan extends the extracted worker
-    authorizer with per-worker token authentication plus the static-token fallback
-    window (authorize_worker); the helper stays a single focused module and the
-    budget will be re-ratcheted when the fallback window is removed.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-4
-  ceiling: 94
-- check: architecture.file_budget
   path: server/app/routes/remote.py
   reason: Task 3 of the runner-audit plan adds the read-only GET /workers endpoint and
     its response models, and task 7 of the phase3 execution-decoupling plan adds
@@ -155,30 +140,6 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-07-18-runner-audit.md#task-3
   ceiling: 237
 - check: architecture.file_budget
-  path: server/app/executors/local.py
-  reason: Task 2 of the phase3 execution-decoupling plan moves build_local_executor
-    and _resolve_local_handlers into local.py as the builtin local kind
-    registration home; the budget will be re-ratcheted if the module shrinks.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-2
-  ceiling: 380
-- check: architecture.file_budget
-  path: server/app/executors/pi.py
-  reason: Task 2 of the phase3 execution-decoupling plan adds build_pi_executor
-    as the builtin pi kind registration home; the budget will be re-ratcheted
-    if the module shrinks.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-2
-  ceiling: 133
-- check: architecture.file_budget
-  path: server/app/executors/openclaw.py
-  reason: Task 2 of the phase3 execution-decoupling plan adds build_openclaw_executor_entry
-    as the builtin openclaw kind registration home; the budget will be re-ratcheted
-    if the module shrinks.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-2
-  ceiling: 189
-- check: architecture.file_budget
   path: server/app/executors/_remote_queue_store.py
   reason: Task 5 of the phase4 agent-collaboration plan adds the labels_satisfy
     constraint evaluator and extends claim_next with in-memory requires_labels
@@ -188,32 +149,6 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-5
   ceiling: 285
-- check: architecture.file_budget
-  path: server/app/executors/remote_broker.py
-  reason: Task 6 of the phase3 execution-decoupling plan adds completion-callback
-    publishing (register/_publish_completion), payload_for and active_lease_ids
-    to the broker, task 7 adds command_spec pass-through storage, and task 8
-    exposes the claim sweep as sweep_expired_claims; the worker-registry
-    section will be extracted into its own module once remote execution
-    stabilizes. Task 3 of the phase4 agent-collaboration plan adds the
-    RemoteOutcome.output_artifacts field. Task 4 adds the worker trust
-    section (issue/authenticate/revoke per-worker tokens, SEC-WORKER-001).
-    Task 5 adds capability_label_requirements injection, its pass-through in
-    dequeue, and claim-time update_worker_labels. Task 9 extends list_workers
-    with labels and the revoked flag for the page-facing workers endpoint.
-    The final-review fix rejects dotted worker_ids at token issuance (the
-    "{worker_id}.{secret}" token form could never authenticate them back).
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 505
-- check: architecture.file_budget
-  path: server/app/executors/runtime.py
-  reason: Task 6 of the phase3 execution-decoupling plan adds the submit-only
-    branch (_run_submit_only) to ExecutionRuntime; the budget will be
-    re-ratcheted if the module shrinks.
-  owner: workspace-executor
-  remove_when: docs/superpowers/plans/2026-07-18-phase3-execution-decoupling.md#task-6
-  ceiling: 163
 - check: architecture.file_budget
   path: scripts/remote/worker.py
   reason: Task 3 of the phase4 agent-collaboration plan adds artifact upload/download

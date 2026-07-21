@@ -1,4 +1,9 @@
-"""Shard fan-out scheduling and reduce fan-in assembly for the workflow worker.
+"""Experimental shard fan-out and reduce fan-in support for the workflow worker.
+
+This module is not a production workflow authoring surface yet.  Workflow
+Studio cannot currently round-trip shard/reduce declarations, and local
+concurrent shards still share their job output directory.  Production
+workflows should use ordinary DAG branches until both limitations are closed.
 
 When a ready node declares ``shard:``, the first scheduling pass materializes
 its shard rows (one per fan-out input), then each pending shard is claimed
