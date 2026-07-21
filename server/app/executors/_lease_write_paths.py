@@ -28,6 +28,7 @@ from server.app.executors.models import (
 from server.app.services.pi_event_compression import compress_pi_events
 from server.app.services.token_usage_lease import capture_token_usage_after_lease_finish
 from server.app.storage_paths import resolve_data_path
+from server.app.workflows.sharding import delete_shards
 
 if TYPE_CHECKING:
     from server.app.executors.leases import ExecutorLeaseRepository
@@ -108,6 +109,13 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
         recovered = [str(row["id"]) for row in rows]
         if recovered:
             placeholders = ",".join("?" * len(recovered))
+            running_nodes = conn.execute(
+                f"""
+                select job_id, node_key from job_nodes
+                where job_id in ({placeholders}) and status='running'
+                """,
+                recovered,
+            ).fetchall()
             conn.execute(
                 f"""
                 update job_nodes
@@ -121,6 +129,8 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
                 """,
                 recovered,
             )
+            for row in running_nodes:
+                delete_shards(conn, str(row["job_id"]), [str(row["node_key"])])
             conn.execute(
                 f"""
                 update node_runs

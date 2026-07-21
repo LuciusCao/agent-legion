@@ -107,19 +107,17 @@ class OpenClawPayloadBuilder:
                 "isolated_workspace_root": self._runtime.isolated_workspace_root,
             },
         }
+        shard_index = context.runtime.get("shard_index")
+        if shard_index is not None:
+            manifest["shard_index"] = shard_index
+            manifest["shard_input"] = context.runtime.get("shard_input")
         self._prepared[context.execution_id] = manifest
         return manifest
 
     def build_bundle_for(self, context: ExecutionContext, bundle_path: Path) -> None:
         manifest = self._prepared[context.execution_id]
-        skip = stage_input_artifacts(self._artifact_store, context, manifest)
-        build_bundle(
-            bundle_path,
-            job_dir=context.job_dir,
-            inputs=context.inputs,
-            manifest=manifest,
-            skip_inputs=skip,
-        )
+        stage_input_artifacts(self._artifact_store, context, manifest)
+        build_bundle(bundle_path, manifest=manifest)
 
     def build_command_spec(self, manifest: dict[str, Any]) -> dict[str, Any]:
         command = list(manifest["openclaw"]["command_template"])
@@ -134,7 +132,8 @@ class OpenClawPayloadBuilder:
         }
 
     def scan_error(self, events_file: Path) -> str | None:
-        # OpenClaw has no events protocol; nothing to scan.
+        # OpenClaw has no events protocol; placeholder for the future
+        # worker-side openclaw execution path.
         return None
 
     def cleanup(self, context: ExecutionContext) -> None:

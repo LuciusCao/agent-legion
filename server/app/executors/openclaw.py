@@ -5,6 +5,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from server.app.executors._shard_contract import read_shard_output, shard_prompt_section
 from server.app.executors.cancellation import CancellationToken
 from server.app.executors.config import OpenClawCapabilityConfig, OpenClawExecutorConfig
 from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
@@ -134,6 +135,7 @@ class OpenClawExecutor:
             "Finish after all required outputs are written and correct."
         )
         prompt_text = "\n".join(prompt_lines) + "\n"
+        prompt_text += shard_prompt_section(context.runtime)
 
         context.job_dir.mkdir(parents=True, exist_ok=True)
         context.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -161,6 +163,11 @@ class OpenClawExecutor:
             command=tuple(result.command),
             log_path=str(context.log_path),
             produced_artifacts=produced,
+            output_json=(
+                read_shard_output(context.job_dir, context.runtime)
+                if result.status == "completed"
+                else ""
+            ),
         )
 
     def cancel(self, execution_id: str) -> None:

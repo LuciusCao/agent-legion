@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 from pathlib import Path
 
 import pytest
@@ -14,6 +15,14 @@ from server.app.executors.remote_payloads.pi import PiPayloadBuilder
 from server.app.executors.runtime_config import PiRuntimeConfig
 from tests.executors.adapters.helpers import _make_skill_manager
 from tests.postgres_support import TEST_DATABASE_URL
+
+
+class _ArtifactStoreStub:
+    def put(self, data: bytes) -> str:
+        return hashlib.sha256(data).hexdigest()
+
+    def add_ref(self, job_id: str, node_key: str, name: str, digest: str) -> None:
+        return None
 
 
 @pytest.fixture(autouse=True)
@@ -44,6 +53,7 @@ def _make_executor(tmp_path: Path, broker: RemoteExecutionBroker) -> RemoteExecu
         PiRuntimeConfig(binary="pi", provider="deepseek", model="your-model-b"),
         skill_manager,
         capabilities,
+        artifact_store=_ArtifactStoreStub(),  # type: ignore[arg-type]
     )
     return RemoteExecutor("pi-remote", payload_builder, capabilities, broker)
 

@@ -109,6 +109,7 @@ def _claim_request(
     execution_mode: str = "full",
     target_node_key: str | None = None,
     allowed_node_keys: tuple[str, ...] = (),
+    shard_index: int | None = None,
 ) -> LeaseClaimRequest:
     return LeaseClaimRequest(
         executor_id=executor_id,
@@ -124,4 +125,5 @@ def _claim_request(
         execution_mode=execution_mode,  # type: ignore[arg-type]
         target_node_key=target_node_key,
         allowed_node_keys=allowed_node_keys,
+        shard_index=shard_index,
     )

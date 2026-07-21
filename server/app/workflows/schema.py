@@ -37,6 +37,8 @@ class WorkflowEdge:
 
 @dataclass(frozen=True)
 class WorkflowShardSpec:
+    """Experimental per-node fan-out declaration; not production-supported yet."""
+
     over: str | None = None
     count: int | None = None
     max_concurrency: int | None = None
@@ -45,6 +47,8 @@ class WorkflowShardSpec:
 
 @dataclass(frozen=True)
 class WorkflowReduceSpec:
+    """Experimental fan-in declaration paired with :class:`WorkflowShardSpec`."""
+
     from_node: str
 
 

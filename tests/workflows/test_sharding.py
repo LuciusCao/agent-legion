@@ -399,6 +399,9 @@ def test_all_shards_completed_advances_node_and_reduce(tmp_path):
         content = json.loads((job_dir / "aggregate.shards.json").read_text(encoding="utf-8"))
         assert content == expected
         assert executor.merged_shards == expected
+        reduce_contexts = [c for c in executor.contexts if c.node_key == "aggregate"]
+        assert reduce_contexts
+        assert "aggregate.shards.json" in reduce_contexts[0].inputs
         assert job_db.get_job(job["id"])["status"] == "completed"
     finally:
         worker.stop()
@@ -499,5 +502,62 @@ def test_every_shard_claim_goes_through_leases(tmp_path):
         runs = [run for run in job_db.list_node_runs(job["id"]) if run["node_key"] == "review"]
         assert len(runs) == 4
         assert all(run["status"] == "completed" for run in runs)
+    finally:
+        worker.stop()
+
+
+def test_rerun_shard_node_rematerializes_shards(tmp_path):
+    from server.app.db.transaction import write_transaction
+    from server.app.jobs.atomic_mutations import mark_nodes_for_rerun
+
+    executor = FakeShardExecutor()
+    worker, job_db, job, _job_dir = _make_e2e(tmp_path, _over_definition(), executor)
+    db_path = worker.leases.path
+    try:
+        assert _poll_until(worker, lambda: _node_status(job_db, job["id"], "review") == "completed")
+        assert len(_node_shards(db_path, job["id"], "review")) == 4
+        with write_transaction(db_path) as conn:
+            mark_nodes_for_rerun(
+                conn,
+                str(job["id"]),
+                ["review"],
+                {"review": ["aggregate"]},
+            )
+        assert _node_shards(db_path, job["id"], "review") == []
+        assert _poll_until(
+            worker,
+            lambda: len(_node_shards(db_path, job["id"], "review")) == 4,
+        )
+        assert _poll_until(worker, lambda: _node_status(job_db, job["id"], "review") == "completed")
+    finally:
+        worker.stop()
+
+
+def test_apply_run_to_clears_shard_rows(tmp_path):
+    from server.app.db.transaction import write_transaction
+    from server.app.jobs.atomic_mutations import apply_run_to
+    from server.app.workflows.sharding import materialize_shards
+
+    executor = FakeShardExecutor()
+    worker, _job_db, job, _job_dir = _make_e2e(tmp_path, _over_definition(), executor)
+    db_path = worker.leases.path
+    try:
+        with write_transaction(db_path) as conn:
+            materialize_shards(
+                conn,
+                str(job["id"]),
+                "review",
+                [{"q": 0}],
+                max_shards=4,
+            )
+        assert len(_node_shards(db_path, job["id"], "review")) == 1
+        with write_transaction(db_path) as conn:
+            apply_run_to(
+                conn,
+                str(job["id"]),
+                "review",
+                frozenset({"parse", "review"}),
+            )
+        assert _node_shards(db_path, job["id"], "review") == []
     finally:
         worker.stop()

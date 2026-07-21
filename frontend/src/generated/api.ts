@@ -465,23 +465,6 @@ export interface paths {
     patch?: never
     trace?: never
   }
-  '/api/remote/register': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Register */
-    post: operations['register_api_remote_register_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
   '/api/remote/workers': {
     parameters: {
       query?: never
@@ -1227,6 +1210,8 @@ export interface components {
       }
       /** Worker Id */
       worker_id: string
+      /** Worker Version */
+      worker_version?: number | null
     }
     /** ClaimResponse */
     ClaimResponse: {
@@ -1775,20 +1760,6 @@ export interface components {
         | null
       /** Stem */
       stem?: string | null
-    }
-    /** RegisterRequest */
-    RegisterRequest: {
-      /** Capabilities */
-      capabilities: string[]
-      /**
-       * Name
-       * @default
-       */
-      name: string
-      /** Slots */
-      slots: number
-      /** Worker Id */
-      worker_id: string
     }
     /** RemoteWorkerSummaryResponse */
     RemoteWorkerSummaryResponse: {
@@ -3648,37 +3619,6 @@ export interface operations {
       cookie?: never
     }
     requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  register_api_remote_register_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['RegisterRequest']
-      }
-    }
     responses: {
       /** @description Successful Response */
       204: {

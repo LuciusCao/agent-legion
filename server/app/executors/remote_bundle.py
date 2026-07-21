@@ -32,27 +32,13 @@ def build_bundle(
     bundle_path: Path,
     *,
     skill_dir: Path | None = None,
-    job_dir: Path,
-    inputs: tuple[str, ...],
     manifest: dict[str, Any],
-    skip_inputs: tuple[str, ...] = (),
 ) -> None:
-    """Pack an optional skill snapshot, declared inputs, and the manifest into a tar.gz."""
+    """Pack an optional skill snapshot and manifest into a refs-only bundle."""
     bundle_path.parent.mkdir(parents=True, exist_ok=True)
-    skip = set(skip_inputs)
     with tarfile.open(bundle_path, "w:gz") as tar:
         if skill_dir is not None:
             tar.add(skill_dir, arcname="skill")
-        for rel in inputs:
-            if rel in skip:
-                continue
-            rel_path = PurePosixPath(rel)
-            if rel_path.is_absolute() or ".." in rel_path.parts:
-                raise BundleError(f"unsafe input path: {rel!r}")
-            src = job_dir / rel
-            if not src.is_file():
-                raise BundleError(f"declared input missing from job dir: {rel}")
-            tar.add(src, arcname=f"inputs/{rel}")
         data = json.dumps(manifest, ensure_ascii=False, indent=2).encode("utf-8")
         info = tarfile.TarInfo("manifest.json")
         info.size = len(data)

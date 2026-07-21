@@ -144,6 +144,9 @@ executors:
 remote:
   claim_timeout_seconds: 120
   requeue_limit: 3
+  min_worker_protocol_version: 1
+workflows:
+  submit_max_workers: null  # max(4, ceil(largest remote capacity / 2))
 ```
 
 (`remote.max_archive_bytes` also exists, default 64 MiB; raise only if result
@@ -181,11 +184,16 @@ working immediately) and re-onboards a previously revoked worker. You normally
 do not run this by hand — workers exchange the management token themselves at
 startup (§7).
 
-During the migration window the legacy static token is still accepted on the
-worker-facing endpoints (claim/heartbeat/result/bundle/artifacts); the window
-is controlled by `remote.allow_legacy_worker_token` (default `true`). Set it
-to `false` once every worker runs with `--register-token` — per-worker tokens
-keep working, the shared token stops.
+The static token is management-only. Worker-facing endpoints accept only the
+revocable per-worker token issued at startup.
+
+### Submit pool sizing
+
+Remote submissions share `workflows.submit_max_workers`; when unset it derives
+as `max(4, ceil(<largest remote executor capacity> / 2))`. Bundle construction
+does not renew its lease, so deployments must satisfy:
+
+    ceil(capacity / submit_max_workers) × bundle_build_seconds < lease_ttl_seconds
 
 ### Artifact store
 
@@ -200,17 +208,15 @@ instead of inline bundle contents:
 - **Endpoints:** `POST /api/artifacts` (raw request body → `{"hash": ...}`;
   413 beyond `remote.max_archive_bytes`) and `GET /api/artifacts/{hash}`
   (404 for malformed or unknown hashes). Both authenticate like the other
-  worker-facing endpoints (per-worker token, or the legacy static token
-  while the fallback window is open).
-- **Refs-mode bundles:** at submit time the server puts declared inputs into
+  worker-facing endpoints (per-worker token only).
+- **Refs-only bundles:** at submit time the server puts declared inputs into
   the store and marks the claim manifest `bundle_mode: "refs"` with
   `input_artifacts` (`name → "sha256:<hash>"`); the bundle then skips those
   payloads and the worker downloads them via `GET /api/artifacts`. For
   results the worker uploads outputs first and reports with an
   `output_artifacts` map; the server rejects unknown refs with 409 (`upload
-  output artifact first`). Content-carrying bundles still work as the
-  compatibility path during migration (phase 4, Decision 9); removing them
-  is tracked as a follow-up in issue 045.
+  output artifact first`). Staging failures are hard submission failures;
+  content-carrying bundles and archive-output fallback are removed.
 - **GC baseline:** deleting a job removes its `artifact_refs` rows. There is
   no orphan sweep for unreferenced blobs yet — that is a known debt tracked
   in [issues/open/044-P2-artifact-gc-orphans.md](../issues/open/044-P2-artifact-gc-orphans.md).
@@ -236,10 +242,8 @@ done
 With `--register-token` (env `REMOTE_WORKER_REGISTER_TOKEN`) each worker
 exchanges the management token for its own per-worker token at startup and
 runs the main loop with it — the per-worker token is what the server
-authenticates, and it can be revoked per device (§11). The legacy form
-(`--token` / `REMOTE_WORKER_TOKEN`, the shared static token) still works
-during the fallback window (`remote.allow_legacy_worker_token`, §6) and keeps
-its old self-register behavior.
+authenticates, and it can be revoked per device (§11). `--register-token` is
+required; the legacy `--token` self-registration path no longer exists.
 
 `--worker-id` defaults to the hostname; `--capabilities` is a comma-separated
 list and must be a subset of the executor's declared capabilities. See
@@ -268,28 +272,15 @@ concrete `worker_id` for remote runs) and shows it in the job detail view;
 last-seen times, and revocation flags (read-only page endpoint, no worker
 token; 503 while remote execution is disabled).
 
-### Upgrade order: workers first, then server (this version)
+### Upgrade order: server first, then workers
 
-This version turns on refs-mode bundles by default (§6): at submit time the
-server puts declared inputs into the artifact store and marks the claim
-manifest `bundle_mode: "refs"`. There is no worker version negotiation yet,
-so roll out upgrades in this order: **roll the workers first, then upgrade
-the server**. The new worker is fully backward-compatible with
-content-carrying (full) bundles, so it keeps running correctly against the
-old server during the window; once the server is upgraded it starts
-dispatching refs-mode manifests, which the already-upgraded workers
-understand.
-
-The reverse order is NOT safe at this boundary: the previous `worker.py`
-release ignores `bundle_mode` and never verifies that declared inputs exist,
-so an old worker claiming a refs-mode bundle runs the agent in a job
-directory with no input files and silently reports fabricated outputs. Copy
-the new `worker.py` to every device (§5) before restarting the server.
-
-When the full-bundle compatibility path is removed next version (Rollout 5,
-issue 045), the order flips back to **server first, then workers** for that
-boundary — the same one-version compatibility-window framing as the Task 9
-websocket envelope change.
+Upgrade the server first. It rejects old claims with HTTP 409 through the
+worker protocol handshake, so remote processing pauses safely while workers
+are upgraded; local execution is unaffected. Then copy the current
+`worker.py` to every device and restart it with `--register-token`.
+`remote.min_worker_protocol_version` defaults to 1; setting it to 0 disables
+the handshake and is only a temporary incident escape hatch because it can
+admit workers that do not understand refs-only bundles.
 
 Rows enqueued before the v023 schema migration carry no stored
 `command_spec`. A current worker claiming such a row fails immediately with
@@ -329,6 +320,8 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.sweeper import SweeperThread
 from server.app.jobs import JobQueries
+from server.app.remote_wiring import register_remote_completion
+from server.app.services.artifact_store import ArtifactStore
 from server.app.settings import load_settings
 
 settings = load_settings()
@@ -340,6 +333,8 @@ broker = RemoteExecutionBroker(
     claim_timeout_seconds=settings.executor_runtime.remote.claim_timeout_seconds,
     requeue_limit=settings.executor_runtime.remote.requeue_limit,
 )
+artifact_store = ArtifactStore(settings.data_dir / "artifacts", job_db.path)
+register_remote_completion(broker, leases, settings.jobs_dir, artifact_store)
 SweeperThread(
     leases,
     broker,
@@ -366,6 +361,10 @@ Two hard operational requirements:
   and be expired by the same tick that was meant to renew it. Keep the interval
   at or below a third of the TTL (defaults: 5 s vs 90 s).
 
+Every API replica registers the completion handler, so a worker report may
+land on any replica. A standalone sweeper must register it too, as above,
+because lease-expiry cancellation also publishes a completion.
+
 The dedicated sweeper performs all database hygiene but does not publish
 realtime job-update events; sweeper-driven transitions surface on the next
 client refresh. Single-server deployments should keep the default in-process
@@ -388,7 +387,15 @@ The server validates that `pi-remote` declares each bound node's capability
 `pi-remote` allocation). No other state changes are needed; in-flight remote
 executions drain or fail-safe via the requeue semantics in §10.
 
-### Shard fan-out and reduce fan-in
+### Experimental: shard fan-out and reduce fan-in
+
+> **Not production-supported.** Shard/reduce is currently an internal
+> experimental capability. Do not add `shard:` or `reduce:` to active
+> production workflow revisions. Workflow Studio does not yet preserve these
+> declarations when it converts a stored revision back to YAML, and concurrent
+> local shards do not yet have isolated output directories. Existing workflows
+> continue to use ordinary DAG branching, which already runs independent ready
+> nodes concurrently.
 
 A workflow node can fan out across workers by declaring `shard:` in the
 workflow definition, and a downstream node can fan the results back in with
@@ -420,17 +427,12 @@ aggregates its `from` node's shard outputs into `<node_key>.shards.json` in
 the job directory. Fan-out beyond `max_shards` (default 1000) is rejected
 when the shards are materialized.
 
-**Current limitation — shard-aware executors only.** The scheduling,
-persistence, and aggregation machinery above is in place, but the built-in
-executors (pi/openclaw/remote) do not yet deliver `shard_input` to the
-capability or map a shard's output back to `ExecutionResult.output_json`.
-Today `shard:` requires a shard-aware custom executor — one that consumes
-`runtime["shard_index"]` / `runtime["shard_input"]` and produces
-`output_json`. Declaring `shard:` on a capability that runs on the built-in
-executors makes every shard run the same full input set (concurrently
-overwriting the same output files) and the reduce step aggregate nulls. The
-built-in executor shard contract lands with the follow-ups tracked in
-[issues/open/045-P2-phase4-agent-collaboration-followups.md](../issues/open/045-P2-phase4-agent-collaboration-followups.md).
+**Built-in shard contract.** Pi/OpenClaw and remote workers receive the shard
+index/input in their prompt and must write JSON to `shard_output.json` in the
+working directory. Local handlers consume `context.runtime["shard_input"]`
+directly and return `ExecutionResult.output_json`. The finish path persists
+that value to `node_shards.output_json`; reduce receives its generated
+`<node_key>.shards.json` as an ordinary declared input (artifact ref remotely).
 
 ## 9. Memory calibration (required before the 100-agent gate)
 
@@ -463,7 +465,8 @@ not raise the budget silently (spec Risks).
 | pi "model call failed" on workers | pi provider `base_url` wrong on the device | Re-check §5 step 3: must be `http://<laptop-tailnet-ip>:8788/v1` |
 | Bundle fetch 410 (`bundle is no longer available`) | Server restarted mid-claim and the staged bundle was dropped | The execution is requeued automatically (bounded by `requeue_limit`); rerun if it exhausted |
 | Result upload 413 | Archive exceeds `remote.max_archive_bytes` (default 64 MiB) | Investigate why artifacts ballooned; raise the limit only if legitimate |
-| All `/api/remote/*` calls return 401 | Worker token mismatch — the worker's `--token` / `REMOTE_WORKER_TOKEN` does not match the server's `VIDEO_HIVE_REMOTE_WORKER_TOKEN` in `.env` | Align the token on both sides (§6, §7) and restart the server and workers |
+| Worker-facing calls return 401 | Per-worker token is invalid or revoked | Restart with the correct management `--register-token` to issue a fresh per-worker token (§6, §7) |
+| `/api/remote/claim` returns 409 protocol too old | Worker omitted `worker_version` or is below the configured minimum | Upgrade `scripts/remote/worker.py`; use minimum 0 only as a short emergency escape hatch |
 | Server 503 on `/api/remote/*` | No remote executor configured / token missing | Server refused remote mode at startup — fix §6 and restart |
 | Everything idle, nothing failing | Laptop asleep or offline | Workers hold no state and recover on their own; enforce §2 item 5 |
 
@@ -481,9 +484,7 @@ not raise the budget silently (spec Risks).
   worker-token endpoints. Per-worker tokens are stored server-side as sha256
   hashes of the secret part only; the plaintext is shown once at issuance.
 - **Revoking a worker:** when a device is lost or suspect, revoke it — the
-  per-worker token stops authenticating immediately, and even the legacy
-  static token is rejected for that `worker_id` while the fallback window is
-  open (revocation beats the window):
+  per-worker token stops authenticating immediately:
 
   ```bash
   curl -sS -X POST http://localhost:8000/api/remote/workers/<worker_id>/revoke \
@@ -492,10 +493,6 @@ not raise the budget silently (spec Risks).
 
   Re-onboard later by re-issuing via `workers/register` (§6): it rotates the
   token and clears the revocation.
-- **Fallback window:** `remote.allow_legacy_worker_token` (default `true`)
-  keeps the shared static token valid on worker-facing endpoints while workers
-  migrate to `--register-token`; set it to `false` after the fleet is migrated
-  and before the window is removed in a future version.
 - **Worker hygiene:** no credentials, secret-bearing prompts, or API keys in
   worker logs; workers store no persistent state.
 - **Worker labels:** labels travel in register/claim payloads and are listed

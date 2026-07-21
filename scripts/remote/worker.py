@@ -5,14 +5,10 @@
 Stdlib-only single file: copy it to any machine with python3 and the pi CLI,
 then run it pointing at the video-hive server over the tailnet:
 
-    python3 worker.py --server http://100.x.y.z:8000 --token "$REMOTE_WORKER_TOKEN" \
+    python3 worker.py --server http://100.x.y.z:8000 \
+        --register-token "$REMOTE_WORKER_REGISTER_TOKEN" \
         --worker-id mac-mini --name "Mac mini" --slots 65 \
         --capabilities generate_key_info,review_key_info
-
-Prefer `--register-token "$REMOTE_WORKER_REGISTER_TOKEN"` (management token)
-over `--token`: the worker exchanges it for a revocable per-worker token at
-startup. `--token` (the shared static token) keeps working during the
-server-side fallback window (`remote.allow_legacy_worker_token`).
 """
 
 from __future__ import annotations
@@ -37,6 +33,7 @@ from typing import Any
 
 HEARTBEAT_INTERVAL_SECONDS = 15.0
 KILL_GRACE_SECONDS = 5.0
+WORKER_PROTOCOL_VERSION = 1
 
 
 def _parse_labels(raw_labels: list[str]) -> dict[str, str]:
@@ -82,8 +79,6 @@ def extract_bundle(bundle_path: Path, work_dir: Path) -> tuple[Path, Path, dict[
                 continue
             if "skill" in name.parts[:1]:
                 target = work_dir / name
-            elif name.parts and name.parts[0] == "inputs":
-                target = job_dir / PurePosixPath(*name.parts[1:])
             else:
                 continue
             if member.isdir():
@@ -149,26 +144,6 @@ class WorkerClient:
         except urllib.error.HTTPError as exc:
             return exc.code, exc.read()
 
-    def register(
-        self, name: str, capabilities: list[str], slots: int, labels: dict[str, str] | None = None
-    ) -> None:
-        body: dict[str, Any] = {
-            "worker_id": self._worker_id,
-            "name": name,
-            "capabilities": capabilities,
-            "slots": slots,
-        }
-        if labels:
-            body["labels"] = labels
-        status, data = self._request(
-            "POST",
-            "/api/remote/register",
-            body=json.dumps(body).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-        )
-        if status != 204:
-            raise RuntimeError(f"register failed: HTTP {status}: {data[:200]!r}")
-
     def register_worker(
         self,
         name: str,
@@ -203,7 +178,11 @@ class WorkerClient:
     def claim(
         self, capabilities: list[str], labels: dict[str, str] | None = None
     ) -> dict[str, Any] | None:
-        body: dict[str, Any] = {"worker_id": self._worker_id, "capabilities": capabilities}
+        body: dict[str, Any] = {
+            "worker_id": self._worker_id,
+            "capabilities": capabilities,
+            "worker_version": WORKER_PROTOCOL_VERSION,
+        }
         if labels:
             body["labels"] = labels
         status, data = self._request(
@@ -297,11 +276,30 @@ def run_execution(
     bundle_path = work_dir / "bundle.tar.gz"
     client.download_bundle(claim, bundle_path)
     job_dir, skill_dir, manifest = extract_bundle(bundle_path, work_dir)
-    refs_mode = manifest.get("bundle_mode") == "refs"
-    if refs_mode:  # inputs ship as artifact references; pull each into place
-        for rel, ref in manifest["input_artifacts"].items():
-            client.download_artifact(ref.split(":", 1)[1], job_dir / rel)
-
+    if manifest.get("bundle_mode") != "refs":
+        raise RuntimeError("server did not provide a refs bundle; upgrade the server first")
+    for rel, ref in manifest.get("input_artifacts", {}).items():
+        client.download_artifact(ref.split(":", 1)[1], job_dir / rel)
+    pi = manifest.get("pi")
+    if pi is None:
+        metadata = {
+            "status": "failed",
+            "exit_code": 1,
+            "error_message": (
+                "manifest has no 'pi' section; openclaw remote execution"
+                " is not supported by this worker yet"
+            ),
+            "command": [],
+            "skill_version": str(manifest.get("skill_version", "")),
+        }
+        archive_path = work_dir / "result.tar.gz"
+        pack_result_archive(
+            archive_path,
+            job_dir=job_dir,
+            run_dir=job_dir / "runs",
+            expected_outputs=[],
+        )
+        return metadata, archive_path
     run_token = manifest["run_token"]
     run_dir = job_dir / "runs" / manifest["node_key"] / run_token
     session_dir = run_dir / "session"
@@ -315,9 +313,16 @@ def run_execution(
         "session_name": f"{manifest['job_id']}:{manifest['node_key']}:{run_token}",
         "prompt_file": str(prompt_file),
     }
-    prompt_file.write_text(_substitute(str(spec["prompt"]), paths), encoding="utf-8")
+    prompt_text = _substitute(str(spec["prompt"]), paths)
+    if manifest.get("shard_index") is not None:
+        prompt_text += (
+            "\nShard execution:\n"
+            f"- Shard index: {manifest['shard_index']}\n"
+            f"- Shard input (JSON): {json.dumps(manifest.get('shard_input'), ensure_ascii=False)}\n"
+            "- Write the shard result as JSON to shard_output.json in the working directory.\n"
+        )
+    prompt_file.write_text(prompt_text, encoding="utf-8")
     command = [_substitute(str(part), paths) for part in spec["command"]]
-    pi = manifest["pi"]
     env = {**os.environ, **{str(k): str(v) for k, v in pi.get("environment", {}).items()}}
     # Never hand the server credential to the LLM-driven agent: it could read
     # the token via its bash tool and exfiltrate it into events.jsonl.
@@ -430,11 +435,10 @@ def run_execution(
     (run_dir / "run.json").write_text(json.dumps(run_meta, ensure_ascii=False, indent=2))
 
     output_artifacts = {}
-    if refs_mode:  # upload outputs first; the report metadata references them by hash
-        for name in manifest["expected_outputs"]:
-            src = job_dir / name
-            if src.is_file():
-                output_artifacts[name] = "sha256:" + client.upload_artifact(src.read_bytes())
+    for name in manifest["expected_outputs"]:
+        src = job_dir / name
+        if src.is_file():
+            output_artifacts[name] = "sha256:" + client.upload_artifact(src.read_bytes())
 
     archive_path = work_dir / "result.tar.gz"
     pack_result_archive(
@@ -451,6 +455,9 @@ def run_execution(
         "skill_version": manifest["skill_version"],
         **({"output_artifacts": output_artifacts} if output_artifacts else {}),
     }
+    shard_output_path = job_dir / "shard_output.json"
+    if manifest.get("shard_index") is not None and shard_output_path.is_file():
+        metadata["shard_output"] = shard_output_path.read_text(encoding="utf-8")
     return metadata, archive_path
 
 
@@ -460,11 +467,10 @@ def run_execution(
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Agent Legion remote worker")
     parser.add_argument("--server", required=True, help="e.g. http://100.x.y.z:8000")
-    parser.add_argument("--token", default=os.environ.get("REMOTE_WORKER_TOKEN", ""))
     parser.add_argument(
         "--register-token",
         default=os.environ.get("REMOTE_WORKER_REGISTER_TOKEN", ""),
-        help="management token exchanged for a per-worker token at startup",
+        help="management token exchanged for a per-worker token at startup (required)",
     )
     parser.add_argument("--worker-id", default=socket.gethostname())
     parser.add_argument("--name", default="")
@@ -496,28 +502,18 @@ def main(argv: list[str] | None = None) -> int:
         labels = _parse_labels(args.label)
     except ValueError as exc:
         parser.error(str(exc))
-    if not args.register_token and not args.token:
-        parser.error(
-            "--token, REMOTE_WORKER_TOKEN, --register-token or"
-            " REMOTE_WORKER_REGISTER_TOKEN is required"
-        )
+    if not args.register_token:
+        parser.error("--register-token or REMOTE_WORKER_REGISTER_TOKEN is required")
 
     work_root = Path(args.work_dir)
     work_root.mkdir(parents=True, exist_ok=True)
 
-    if args.register_token:
-        # Preferred path: exchange the management token for a revocable
-        # per-worker token, then run the main loop with the per-worker token.
-        registrar = WorkerClient(args.server, args.register_token, args.worker_id)
-        worker_token = registrar.register_worker(
-            args.name or args.worker_id, capabilities, args.slots, labels
-        )
-        client = WorkerClient(args.server, worker_token, args.worker_id)
-        print(f"[worker] issued per-worker token for {args.worker_id}", flush=True)
-    else:
-        # Legacy fallback window: static shared token + self-register.
-        client = WorkerClient(args.server, args.token, args.worker_id)
-        client.register(args.name or args.worker_id, capabilities, args.slots, labels)
+    registrar = WorkerClient(args.server, args.register_token, args.worker_id)
+    worker_token = registrar.register_worker(
+        args.name or args.worker_id, capabilities, args.slots, labels
+    )
+    client = WorkerClient(args.server, worker_token, args.worker_id)
+    print(f"[worker] issued per-worker token for {args.worker_id}", flush=True)
     print(f"[worker] registered as {args.worker_id} with {args.slots} slots", flush=True)
 
     while True:
