@@ -39,7 +39,6 @@ from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntime
 from server.app.jobs import JobQueries
 from server.app.routes.remote import create_remote_router
 from server.app.services.artifact_store import ArtifactStore
-from server.app.storage_paths import resolve_job_dir
 from server.app.workflows.pi_protocol import render_command_spec
 from tests.executors.adapters.helpers import _make_skill_manager
 from tests.executors.leases.helpers import _claim_request, _setup_workspace
@@ -122,19 +121,16 @@ def test_pi_manifest_refs_mode_skips_bundle_inputs(tmp_path: Path) -> None:
     assert {(r["node_key"], r["name"], r["hash"]) for r in refs} == {("gen", "in.json", digest)}
 
 
-def test_pi_manifest_full_mode_without_store(tmp_path: Path) -> None:
-    builder = _pi_builder(tmp_path)  # no store wired: full bundle, legacy shape
+def test_pi_manifest_without_store_fails_loudly(tmp_path: Path) -> None:
+    builder = _pi_builder(tmp_path)
     context = _execution_context(tmp_path, "job-1")
-    manifest = builder.build_manifest(context)
+    builder.build_manifest(context)
     bundle = tmp_path / "bundle.tar.gz"
-    builder.build_bundle_for(context, bundle)
-
-    assert manifest.get("bundle_mode", "full") == "full"
-    assert "input_artifacts" not in manifest
-    assert "inputs/in.json" in _bundle_names(bundle)
+    with pytest.raises(RuntimeError, match="artifact store is required"):
+        builder.build_bundle_for(context, bundle)
 
 
-def test_pi_manifest_full_mode_when_staging_fails(tmp_path: Path, monkeypatch) -> None:
+def test_pi_manifest_staging_failure_raises(tmp_path: Path, monkeypatch) -> None:
     store, job_id = _store_and_job(tmp_path)
     builder = _pi_builder(tmp_path, store)
     context = _execution_context(tmp_path, job_id)
@@ -143,13 +139,10 @@ def test_pi_manifest_full_mode_when_staging_fails(tmp_path: Path, monkeypatch) -
         raise OSError("disk full")
 
     monkeypatch.setattr(store, "put", _failing_put)
-    manifest = builder.build_manifest(context)
+    builder.build_manifest(context)
     bundle = tmp_path / "bundle.tar.gz"
-    builder.build_bundle_for(context, bundle)  # must not raise
-
-    assert manifest.get("bundle_mode", "full") == "full"
-    assert "input_artifacts" not in manifest
-    assert "inputs/in.json" in _bundle_names(bundle)
+    with pytest.raises(OSError, match="disk full"):
+        builder.build_bundle_for(context, bundle)
 
 
 def test_openclaw_manifest_refs_mode_skips_bundle_inputs(tmp_path: Path) -> None:
@@ -240,6 +233,7 @@ def test_completion_registers_output_artifacts(completion_rig, tmp_path: Path) -
     )
 
     assert broker.complete(claim.execution_id, "w1", outcome) is True
+    broker.wait_idle()
 
     refs = store.refs_for_job(job_id)
     assert {(r["node_key"], r["name"], r["hash"]) for r in refs} == {
@@ -247,7 +241,7 @@ def test_completion_registers_output_artifacts(completion_rig, tmp_path: Path) -
     }
 
 
-def test_completion_without_output_artifacts_keeps_archive_flow(completion_rig, tmp_path) -> None:
+def test_completion_without_output_artifacts_fails_refs_contract(completion_rig, tmp_path) -> None:
     broker, store, job_db, job_id, claim = completion_rig
     _submit_and_dequeue(broker, claim, job_id)
     archive = broker.bundle_dir / f"{claim.execution_id}.result.tar.gz"
@@ -255,10 +249,11 @@ def test_completion_without_output_artifacts_keeps_archive_flow(completion_rig, 
     outcome = RemoteOutcome(status="completed", exit_code=0, result_archive_name=archive.name)
 
     assert broker.complete(claim.execution_id, "w1", outcome) is True
+    broker.wait_idle()
 
-    job = job_db.get_job(job_id)
-    job_dir = resolve_job_dir(job, tmp_path / "jobs")
-    assert (job_dir / "out.json").is_file()
+    node = job_db.get_job_node(job_id, claim.node_key)
+    assert node is not None and node["status"] == "failed"
+    assert node["error_message"] == "worker did not report output artifacts"
     assert store.refs_for_job(job_id) == []
 
 
@@ -270,7 +265,9 @@ HEADERS = {"X-Worker-Token": TOKEN, "X-Worker-Id": "w1"}
 
 @pytest.fixture
 def route_rig(tmp_path: Path, settings):
-    remote = settings.executor_runtime.remote.model_copy(update={"worker_token": TOKEN})
+    remote = settings.executor_runtime.remote.model_copy(
+        update={"worker_token": TOKEN, "min_worker_protocol_version": 0}
+    )
     runtime = settings.executor_runtime.model_copy(update={"remote": remote})
     remote_settings = dataclasses.replace(settings, executor_runtime=runtime)
     init_db(tmp_path / "jobs.sqlite")
@@ -278,6 +275,7 @@ def route_rig(tmp_path: Path, settings):
     store = ArtifactStore(tmp_path / "artifacts", tmp_path / "jobs.sqlite")
     app = FastAPI()
     app.include_router(create_remote_router(broker, remote_settings, store), prefix="/api")
+    HEADERS["X-Worker-Token"] = broker.issue_worker_token("w1", "w1", ["cap_a"], 1)
     broker.bundle_dir.mkdir(parents=True, exist_ok=True)
     (broker.bundle_dir / "e1.tar.gz").write_bytes(b"bundle-bytes")
     broker.submit(
@@ -431,7 +429,7 @@ def test_worker_refs_mode_pulls_inputs_and_uploads_outputs(tmp_path: Path) -> No
     empty_job_src = tmp_path / "job_src"
     empty_job_src.mkdir()
     bundle = tmp_path / "e1.tar.gz"
-    build_bundle(bundle, job_dir=empty_job_src, inputs=(), manifest=manifest)
+    build_bundle(bundle, manifest=manifest)
     claim = {
         "execution_id": "e1",
         "manifest": manifest,
@@ -451,7 +449,7 @@ def test_worker_refs_mode_pulls_inputs_and_uploads_outputs(tmp_path: Path) -> No
     assert archive is not None and archive.is_file()  # archive still shipped for compat
 
 
-def test_worker_full_mode_never_touches_artifacts(tmp_path: Path) -> None:
+def test_worker_rejects_non_refs_bundle(tmp_path: Path) -> None:
     fake = _write_fake_pi(
         tmp_path,
         "#!/usr/bin/env python3\nimport json\n"
@@ -465,15 +463,12 @@ def test_worker_full_mode_never_touches_artifacts(tmp_path: Path) -> None:
     job_src.mkdir()
     (job_src / "input.json").write_bytes(INPUT_BYTES)
     bundle = tmp_path / "e1.tar.gz"
-    build_bundle(bundle, job_dir=job_src, inputs=("input.json",), manifest=manifest)
+    build_bundle(bundle, manifest=manifest)
     claim = {
         "execution_id": "e1",
         "manifest": manifest,
         "command_spec": render_command_spec(manifest),
     }
 
-    metadata, archive = worker.run_execution(FullOnlyStubClient(bundle), claim, tmp_path / "work")
-
-    assert metadata["status"] == "completed"
-    assert "output_artifacts" not in metadata
-    assert archive is not None and archive.is_file()
+    with pytest.raises(RuntimeError, match="refs"):
+        worker.run_execution(FullOnlyStubClient(bundle), claim, tmp_path / "work")

@@ -70,6 +70,14 @@ class ExecutorLeaseRepository:
             lambda: _lease_write_paths.heartbeat(self, lease_id, ttl_seconds)
         )
 
+    def lease_status(self, lease_id: str) -> str | None:
+        """Return the lease's current status, or None when unknown."""
+        with read_connection(self.path) as conn:
+            row = conn.execute(
+                "select status from executor_leases where id=?", (lease_id,)
+            ).fetchone()
+        return str(row["status"]) if row is not None else None
+
     def finish(self, lease_id: str, result: ExecutionResult) -> bool:
         return retry_on_sqlite_lock(lambda: _lease_write_paths.finish(self, lease_id, result))
 

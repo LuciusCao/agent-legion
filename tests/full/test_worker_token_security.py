@@ -2,9 +2,8 @@
 
 End-to-end worker trust scenario over the real HTTP stack and a real SQLite
 registry: a per-worker token is issued by the management endpoint, authenticates
-claims, and revocation takes effect on the very next request — for the
-per-worker token and for the legacy static token alike (revocation beats the
-fallback window). The registry row is checked directly to prove only the
+claims, and revocation takes effect on the very next request. The static
+management token is never accepted by worker-facing endpoints. The registry row proves only the
 sha256 of the secret persists.
 """
 
@@ -32,7 +31,7 @@ ADMIN_TOKEN = "full-gate-admin-token"
 def _claim(client: TestClient, worker_id: str, token: str) -> int:
     return client.post(
         "/api/remote/claim",
-        json={"worker_id": worker_id, "capabilities": ["cap_a"]},
+        json={"worker_id": worker_id, "capabilities": ["cap_a"], "worker_version": 1},
         headers={"X-Worker-Token": token, "X-Worker-Id": worker_id},
     ).status_code
 
@@ -71,8 +70,7 @@ def test_revocation_is_immediate_and_beats_fallback_window(tmp_path: Path, setti
     assert revoked.status_code == 204
 
     # Immediate effect: the per-worker token dies on the next request, and the
-    # legacy static token is rejected for the revoked worker even though the
-    # fallback window is open (default allow_legacy_worker_token=True).
+    # static management token is always rejected on worker-facing endpoints.
     assert _claim(client, "w1", token) == 401
     assert _claim(client, "w1", ADMIN_TOKEN) == 401
 

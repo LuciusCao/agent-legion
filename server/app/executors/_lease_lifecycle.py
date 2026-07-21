@@ -16,6 +16,11 @@ from server.app.executors._path_canonicalization import (
     canonicalize_finish_paths,
 )
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
+from server.app.workflows.sharding import (
+    failed_shard_error,
+    on_shard_finished,
+    shard_index_for_execution,
+)
 
 
 def heartbeat_lease(conn: sqlite3.Connection, lease_id: str, ttl_seconds: int) -> bool:
@@ -155,7 +160,7 @@ def expire_stale_leases(conn: sqlite3.Connection, now: datetime) -> list[str]:
     now_str = _sqlite_timestamp(now)
     rows = conn.execute(
         """
-        select id, job_id, node_key, node_run_id
+        select id, job_id, node_key, node_run_id, execution_id
         from executor_leases
         where status='active' and expires_at<=?
         """,
@@ -176,6 +181,43 @@ def expire_stale_leases(conn: sqlite3.Connection, now: datetime) -> list[str]:
             """,
             (now_str, row["node_run_id"]),
         )
+        shard_index = shard_index_for_execution(
+            conn,
+            str(row["job_id"]),
+            str(row["node_key"]),
+            str(row["execution_id"]),
+        )
+        if shard_index is not None:
+            aggregate = on_shard_finished(
+                conn,
+                str(row["job_id"]),
+                str(row["node_key"]),
+                shard_index,
+                "failed",
+                error_message="lease expired",
+            )
+            if aggregate in ("completed", "failed"):
+                error_message = failed_shard_error(
+                    conn,
+                    str(row["job_id"]),
+                    str(row["node_key"]),
+                )
+                conn.execute(
+                    """
+                    update job_nodes
+                    set status=?, stale_reason='', error_message=?, finished_at=?
+                    where job_id=? and node_key=?
+                    """,
+                    (
+                        aggregate,
+                        error_message,
+                        now_str,
+                        row["job_id"],
+                        row["node_key"],
+                    ),
+                )
+                _sync_job_status(conn, str(row["job_id"]))
+            continue
         conn.execute(
             """
             update job_nodes

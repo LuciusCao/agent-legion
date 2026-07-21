@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Protocol
 
 from server.app.db.transaction import write_transaction
+from server.app.workflows.sharding import delete_shards
 
 
 class JobMutationConflict(ValueError):
@@ -83,6 +84,7 @@ def apply_run_to(
         """,
         (job_id, *sorted(closure)),
     )
+    delete_shards(conn, job_id, closure)
     set_run_to_control(conn, job_id, target_node_key)
 
 
@@ -129,6 +131,7 @@ def mark_nodes_for_rerun(
         if descendant not in node_keys
     }
     affected_nodes = set(node_keys) | descendants
+    delete_shards(conn, job_id, affected_nodes)
     for descendant in descendants:
         conn.execute(
             """

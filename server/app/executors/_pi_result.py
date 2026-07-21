@@ -1,5 +1,6 @@
 import logging
 
+from server.app.executors._shard_contract import read_shard_output
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.workflows.pi_runner import PiRunResult
 
@@ -29,5 +30,10 @@ def to_execution_result(result: PiRunResult, context: ExecutionContext) -> Execu
         skill_version=result.skill_version,
         produced_artifacts=tuple(
             name for name in context.expected_outputs if (context.job_dir / name).is_file()
+        ),
+        output_json=(
+            read_shard_output(context.job_dir, context.runtime)
+            if result.status == "completed"
+            else ""
         ),
     )

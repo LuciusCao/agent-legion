@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 
@@ -58,6 +59,23 @@ def test_command_spec_contains_no_environment(
     )
     spec = builder.build_command_spec(builder.build_manifest(execution_context))
     assert "SECRET" not in json.dumps(spec)
+
+
+def test_manifest_carries_shard_fields(
+    skill_manager: SkillManager, execution_context: ExecutionContext
+) -> None:
+    builder = PiPayloadBuilder(
+        PiRuntimeConfig(),
+        skill_manager,
+        {"cap": RemoteCapabilityConfig(skill="video_knowledge/gen")},
+    )
+    context = replace(
+        execution_context,
+        runtime={"shard_index": 1, "shard_input": {"q": 2}},
+    )
+    manifest = builder.build_manifest(context)
+    assert manifest["shard_index"] == 1
+    assert manifest["shard_input"] == {"q": 2}
 
 
 def test_remote_config_payload_field_defaults_pi() -> None:

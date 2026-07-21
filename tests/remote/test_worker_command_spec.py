@@ -18,6 +18,9 @@ MANIFEST = {
     "skill": "wf/gen",
     "skill_version": "abc",
     "run_token": "tok123",
+    "bundle_mode": "refs",
+    "artifact_upload_url": "/api/artifacts",
+    "input_artifacts": {},
     "pi": {"binary": "pi", "timeout_seconds": 60, "environment": {}},
 }
 
@@ -26,13 +29,8 @@ def _make_bundle(tmp_path: Path, manifest: dict) -> Path:
     skill_src = tmp_path / "skill_src"
     skill_src.mkdir()
     (skill_src / "SKILL.md").write_text("# s", encoding="utf-8")
-    job_src = tmp_path / "job_src"
-    job_src.mkdir()
-    (job_src / "input.json").write_text("{}", encoding="utf-8")
     bundle = tmp_path / "e1.tar.gz"
-    build_bundle(
-        bundle, skill_dir=skill_src, job_dir=job_src, inputs=("input.json",), manifest=manifest
-    )
+    build_bundle(bundle, skill_dir=skill_src, manifest=manifest)
     return bundle
 
 
@@ -42,6 +40,12 @@ class StubClient:
 
     def download_bundle(self, claim: dict, dest: Path) -> None:
         dest.write_bytes(self._bundle.read_bytes())
+
+    def download_artifact(self, hash: str, dest: Path) -> None:
+        raise AssertionError("manifest has no input artifact refs")
+
+    def upload_artifact(self, data: bytes) -> str:
+        raise AssertionError("manifest declares no outputs")
 
     def heartbeat(self, execution_id: str) -> bool:
         return True

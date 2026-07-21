@@ -268,7 +268,7 @@ invariants:
   - id: EXEC-REMOTE-001
     statement: "Remote execution completion must be driven by broker completion callbacks; blocking a local thread waiting for a remote result (e.g. wait_result polling) is forbidden on the executor path."
     owner: workspace-executor
-    risk: high
+    risk: critical
     evidence:
       - kind: integration
         target: tests/executors/test_remote_nonblocking.py::test_execute_returns_immediately_without_waiting
@@ -279,6 +279,9 @@ invariants:
       - kind: contract
         target: tests/test_architecture_execution_decoupling.py
         gate: quick
+      - kind: integration
+        target: tests/full/test_remote_completion_e2e.py
+        gate: full
 
   - id: EXEC-KIND-001
     statement: "Executor kinds must resolve through the kinds registry (register_kind/build_executor); isinstance dispatch chains over executor config types are forbidden in registry.py."
@@ -307,8 +310,11 @@ invariants:
   - id: EXEC-SHARD-001
     statement: "Shard executions must go through ExecutorLeaseRepository.try_claim with one lease per shard; fan-out paths that bypass the capacity system are forbidden."
     owner: architecture
-    risk: high
+    risk: critical
     evidence:
       - kind: integration
         target: tests/workflows/test_sharding.py
         gate: quick
+      - kind: integration
+        target: tests/full/test_shard_fanout_e2e.py
+        gate: full

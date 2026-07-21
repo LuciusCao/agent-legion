@@ -84,20 +84,17 @@ class PiPayloadBuilder:
                 "environment": dict(run_config.environment),
             },
         }
+        shard_index = context.runtime.get("shard_index")
+        if shard_index is not None:
+            manifest["shard_index"] = shard_index
+            manifest["shard_input"] = context.runtime.get("shard_input")
         self._prepared[context.execution_id] = (skill_dir, manifest)
         return manifest
 
     def build_bundle_for(self, context: ExecutionContext, bundle_path: Path) -> None:
         skill_dir, manifest = self._prepared[context.execution_id]
-        skip = stage_input_artifacts(self._artifact_store, context, manifest)
-        build_bundle(
-            bundle_path,
-            skill_dir=skill_dir,
-            job_dir=context.job_dir,
-            inputs=context.inputs,
-            manifest=manifest,
-            skip_inputs=skip,
-        )
+        stage_input_artifacts(self._artifact_store, context, manifest)
+        build_bundle(bundle_path, skill_dir=skill_dir, manifest=manifest)
 
     def build_command_spec(self, manifest: dict[str, Any]) -> dict[str, Any]:
         return render_command_spec(manifest)
