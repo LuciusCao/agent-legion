@@ -18,7 +18,6 @@ from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.remote_broker import RemoteExecutionBroker
-from server.app.executors.remote_completion import RemoteCompletionHandler
 from server.app.executors.runtime_factory import build_execution_runtime
 from server.app.executors.sweeper import SweeperThread
 from server.app.http_middleware import add_http_middleware
@@ -26,6 +25,7 @@ from server.app.job_events import build_workspace_event_aggregator
 from server.app.jobs import JobQueries
 from server.app.local_handler_loader import build_local_handlers
 from server.app.pipeline.runners import list_openclaw_agents
+from server.app.remote_wiring import register_remote_completion
 from server.app.routes import create_router
 from server.app.services.artifact_store import ArtifactStore
 from server.app.services.executor_catalog import ExecutorCatalogService
@@ -156,24 +156,21 @@ def create_app(
             validate_settings(settings)
             agent_manager.discover()
             sync_workspace_pi_agents(job_db, settings, agent_manager)
+            executor_leases = ExecutorLeaseRepository(
+                job_db.path,
+                job_db=job_db,
+                job_event_manager=job_event_manager,
+                job_event_buffer=job_event_buffer,
+            )
+            register_remote_completion(
+                remote_broker,
+                executor_leases,
+                settings.jobs_dir,
+                artifact_store,
+            )
             if WorkflowWorkerThread.is_enabled(settings):
-                executor_leases = ExecutorLeaseRepository(
-                    job_db.path,
-                    job_db=job_db,
-                    job_event_manager=job_event_manager,
-                    job_event_buffer=job_event_buffer,
-                )
                 execution_runtime = build_execution_runtime(
                     executor_leases, executor_registry, settings.executor_runtime
-                )
-                # Submit-only remote executors finish leases via broker callbacks.
-                remote_broker.register_completion_callback(
-                    RemoteCompletionHandler(
-                        remote_broker,
-                        executor_leases,
-                        settings.jobs_dir,
-                        artifact_store=artifact_store,
-                    ).handle_completion
                 )
                 # The sweeper owns all lease hygiene (startup + interval sweeps,
                 # remote lease renewal). With sweeper_enabled=False an external
@@ -210,6 +207,7 @@ def create_app(
             sweeper_thread.stop()
         if workflow_worker_thread is not None:
             workflow_worker_thread.stop()
+        remote_broker.close()
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
     add_http_middleware(app, settings)

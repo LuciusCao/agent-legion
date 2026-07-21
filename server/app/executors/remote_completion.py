@@ -59,6 +59,14 @@ class RemoteCompletionHandler:
         if payload is None:
             logger.warning("remote completion %s has no stored payload; ignoring", execution_id)
             return
+        if self._leases.lease_status(payload.lease_id) != "active":
+            logger.info(
+                "lease %s no longer active; skipping result unpack for %s",
+                payload.lease_id,
+                execution_id,
+            )
+            self._cleanup_bundles(payload, outcome)
+            return
         result = self._to_result(execution_id, payload, outcome)
         if not self._leases.finish(payload.lease_id, result):
             # Duplicate report or a cancel race lost: the lease is already
@@ -117,6 +125,10 @@ class RemoteCompletionHandler:
         status = outcome.status
         error_message = outcome.error_message
         exit_code = outcome.exit_code
+        if status == "completed" and expected_outputs and not outcome.output_artifacts:
+            status = "failed"
+            exit_code = 1
+            error_message = "worker did not report output artifacts"
         if status == "completed" and exit_code == 0:
             model_error = self._scan_error(run_dir / "events.jsonl")
             if model_error:
@@ -140,6 +152,7 @@ class RemoteCompletionHandler:
             skill_version=skill_version,
             produced_artifacts=produced,
             runner=outcome.worker_id,
+            output_json=outcome.shard_output,
         )
 
     def _cleanup_bundles(self, payload: RemoteExecutionPayload, outcome: RemoteOutcome) -> None:

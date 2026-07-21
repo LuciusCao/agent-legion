@@ -261,6 +261,34 @@ def test_cli_returns_zero_on_success(tmp_path):
     assert read_baseline(root) == {"server/app/example.py": 20}
 
 
+def test_bump_raises_only_target_ceiling(tmp_path):
+    root = configured_repo(
+        tmp_path,
+        {"server/app/grows.py": 30, "server/app/other.py": 40},
+        baseline={"server/app/grows.py": 20, "server/app/other.py": 25},
+    )
+    result = ratchet_budgets(root, bump="server/app/grows.py")
+    assert any("other.py" in error for error in result.errors)
+    assert result.changed is True
+    assert read_baseline(root) == {
+        "server/app/grows.py": 40,
+        "server/app/other.py": 25,
+    }
+
+
+def test_bump_rejects_exempt_file(tmp_path):
+    root = configured_repo(
+        tmp_path,
+        {"server/app/exempt.py": 30},
+        baseline={"server/app/exempt.py": 20},
+    )
+    _write_file_budget_exemption(root, "server/app/exempt.py", 35)
+    result = ratchet_budgets(root, bump="server/app/exempt.py")
+    assert result.changed is False
+    assert "exempt" in result.errors[0]
+    assert read_baseline(root) == {"server/app/exempt.py": 20}
+
+
 def test_cli_returns_one_on_error(tmp_path):
     root = configured_repo(
         tmp_path,

@@ -48,6 +48,7 @@ class WorkflowsRuntimeConfig(BaseModel):
 
     enabled: bool = False
     pi: PiRuntimeConfig = Field(default_factory=PiRuntimeConfig)
+    submit_max_workers: int | None = Field(default=None, ge=1)
 
 
 class RemoteRuntimeConfig(BaseModel):
@@ -57,10 +58,7 @@ class RemoteRuntimeConfig(BaseModel):
     claim_timeout_seconds: float = Field(default=120.0, gt=0)
     requeue_limit: int = Field(default=3, ge=0)
     max_archive_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
-    # Fallback window: accept the global static worker_token on worker-facing
-    # endpoints while workers migrate to per-worker tokens. Revocation still
-    # wins over the window. Remove one version after per-worker tokens ship.
-    allow_legacy_worker_token: bool = True
+    min_worker_protocol_version: int = Field(default=1, ge=0)
 
 
 class ExecutorRuntimeConfig(BaseModel):

@@ -4,6 +4,7 @@ import logging
 from collections.abc import Mapping
 
 from server.app.executors._pi_skill import get_skill_version, prepare_execution, resolve_skill_dir
+from server.app.executors._shard_contract import shard_prompt_section
 from server.app.executors.cancellation import CancellationToken, SubprocessTracker
 from server.app.executors.config import PiCapabilityConfig, PiExecutorConfig
 from server.app.executors.kinds import ExecutorKind, RuntimeDependencies, register_kind
@@ -90,6 +91,7 @@ class PiExecutor:
 
             skill_version = get_skill_version(self.skill_manager, capability_config.skill)
             run_config, additional_prompt = resolve_node_pi_config(self.config, context.runtime)
+            additional_prompt = (additional_prompt or "") + shard_prompt_section(context.runtime)
 
             result = self._runner.run(
                 job=dict(context.job),
