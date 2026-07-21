@@ -143,3 +143,16 @@ def test_stream_preserves_chunk_truncation_before_sse_done():
     with pytest.raises(llm_gateway.requests.exceptions.ChunkedEncodingError):
         b"".join(llm_gateway._stream_upstream(fake))
     assert fake.closed is True
+
+
+def test_stream_normalizes_truncation_after_finish_reason():
+    final_event = b'data: {"choices":[{"delta":{"content":""},"finish_reason":"stop"}]}\n\n'
+    fake = FakeUpstreamResponse(
+        chunks=[final_event[:23], final_event[23:]],
+        stream_error=llm_gateway.requests.exceptions.ChunkedEncodingError(
+            "Response ended prematurely"
+        ),
+    )
+
+    assert b"".join(llm_gateway._stream_upstream(fake)) == final_event + b"data: [DONE]\n\n"
+    assert fake.closed is True

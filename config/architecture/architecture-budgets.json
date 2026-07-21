@@ -488,6 +488,7 @@
     "scripts/ratchet_architecture_budgets.py": 162,
     "scripts/remote/llm_gateway.py": 109,
     "scripts/remote/llm_gateway_config.py": 65,
+    "scripts/remote/llm_gateway_sse.py": 31,
     "scripts/remote/llm_gateway_stream.py": 35,
     "scripts/remote/worker.py": 442,
     "scripts/sqlite_import_support.py": 55,
