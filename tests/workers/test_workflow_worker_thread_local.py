@@ -10,6 +10,7 @@ from server.app.services.workflow_revision_format import serialize_definition
 from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 from server.app.workflows.execution_control import allowed_nodes
 from tests.helpers import make_workflow_worker
+from tests.postgres_support import TEST_DATABASE_URL
 from tests.workers.helpers import (
     RecordingExecutor,
     _local_node,
@@ -19,7 +20,7 @@ from tests.workers.helpers import (
 
 
 def test_worker_creates_shared_pool_per_executor_id(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     executor = RecordingExecutor("local-default")
     worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
 
@@ -35,7 +36,7 @@ def test_worker_creates_shared_pool_per_executor_id(tmp_path: Path) -> None:
 
 
 def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
@@ -72,7 +73,7 @@ def test_poll_submits_ready_local_node(tmp_path: Path) -> None:
 
 
 def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     block_event = threading.Event()
@@ -110,7 +111,7 @@ def test_poll_skips_duplicate_submissions(tmp_path: Path) -> None:
 
 
 def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
@@ -149,7 +150,7 @@ def test_poll_skips_paused_workspace(tmp_path: Path) -> None:
 
 
 def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
@@ -182,7 +183,7 @@ def test_poll_fails_node_without_binding(tmp_path: Path) -> None:
 
 
 def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
@@ -220,7 +221,7 @@ def test_poll_fails_node_with_unsupported_capability(tmp_path: Path) -> None:
 
 
 def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     executor = RecordingExecutor("local-default")
     worker = _make_worker(tmp_path, db_path, executor, [_make_definition([_local_node("fetch")])])
 
@@ -232,7 +233,7 @@ def test_stop_shuts_down_shared_pools(tmp_path: Path) -> None:
 
 
 def test_poll_skips_paused_job(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
@@ -270,7 +271,7 @@ def test_poll_skips_paused_job(tmp_path: Path) -> None:
 
 def test_poll_runs_only_target_closure_in_until_node_mode(tmp_path: Path) -> None:
 
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")
@@ -359,7 +360,7 @@ def test_make_workflow_worker_runs_question_comprehension_info_local_node(
             payload={"uuid": question_id},
         ),
     )
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     worker, definition = make_workflow_worker(tmp_path, queries)
     workspace = queries.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -401,7 +402,7 @@ def test_make_workflow_worker_runs_question_comprehension_info_local_node(
 def test_worker_uses_job_snapshot_definition_instead_of_catalog_definition(
     tmp_path: Path,
 ) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
     executor = RecordingExecutor("local-default")

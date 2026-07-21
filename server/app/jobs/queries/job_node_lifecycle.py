@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import sqlite3
+from typing import Any
 
+from server.app.db.connection import DatabaseConnection
 from server.app.jobs.queries.base import JobQueriesBase
 from server.app.workflows.definition import WorkflowDefinition
 
@@ -68,8 +69,8 @@ class JobNodeLifecycleQueriesMixin(JobQueriesBase):
 
     def _sync_job_status_after_node_run(
         self,
-        conn: sqlite3.Connection,
-        run: sqlite3.Row,
+        conn: DatabaseConnection,
+        run: dict[str, Any],
         status: str,
         definition: WorkflowDefinition | None,
     ) -> None:

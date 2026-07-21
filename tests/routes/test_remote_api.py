@@ -16,6 +16,7 @@ from server.app.executors.remote_broker import (
 )
 from server.app.routes.remote import create_remote_router
 from server.app.settings import Settings
+from tests.postgres_support import TEST_DATABASE_URL
 
 TOKEN = "test-token"
 HEADERS = {"X-Worker-Token": TOKEN, "X-Worker-Id": "w1"}
@@ -32,8 +33,8 @@ def remote_settings(settings):
 
 @pytest.fixture
 def rig(tmp_path, remote_settings):
-    init_db(tmp_path / "jobs.sqlite")
-    broker = RemoteExecutionBroker(tmp_path / "jobs.sqlite", tmp_path / "bundles")
+    init_db(TEST_DATABASE_URL)
+    broker = RemoteExecutionBroker(TEST_DATABASE_URL, tmp_path / "bundles")
     app = FastAPI()
     app.include_router(create_remote_router(broker, remote_settings), prefix="/api")
     HEADERS["X-Worker-Token"] = broker.issue_worker_token("w1", "mac-mini", ["cap_a"], 65)
@@ -70,8 +71,8 @@ def _settings_with_remote(settings: Settings, **updates: object) -> Settings:
 
 
 def _client_for(settings: Settings, tmp_path: Path) -> tuple[TestClient, RemoteExecutionBroker]:
-    init_db(tmp_path / "jobs.sqlite")
-    broker = RemoteExecutionBroker(tmp_path / "jobs.sqlite", tmp_path / "bundles")
+    init_db(TEST_DATABASE_URL)
+    broker = RemoteExecutionBroker(TEST_DATABASE_URL, tmp_path / "bundles")
     app = FastAPI()
     app.include_router(create_remote_router(broker, settings), prefix="/api")
     if settings.executor_runtime.remote.worker_token:
@@ -353,7 +354,7 @@ def test_result_rejects_path_traversal_execution_id(rig, tmp_path):
     )
     assert resp.status_code == 400
     outside = [p for p in tmp_path.rglob("*") if p.is_file() and broker.bundle_dir not in p.parents]
-    assert [p.name for p in outside] == ["jobs.sqlite"]
+    assert outside == []
 
 
 def test_claim_worker_id_mismatch_returns_400(rig):

@@ -1,12 +1,12 @@
 import json
 import shutil
-import sqlite3
 from pathlib import Path
 
 import pytest
 
 from server.app.db import Database
 from server.app.db.schema import init_db
+from server.app.db.transaction import write_transaction
 from server.app.jobs import JobQueries
 from server.app.pipeline.common import resolve_video_dir
 from server.app.services.job_artifacts import JobArtifactService
@@ -20,6 +20,7 @@ from server.app.services.workspace_executor_configuration import (
 )
 from server.app.settings import load_settings
 from server.app.storage_paths import resolve_data_path, resolve_job_dir
+from tests.postgres_support import TEST_DATABASE_URL
 
 VIDEO_ID = "knowledge_test123"
 WORKSPACE_ID = "default"
@@ -33,7 +34,7 @@ PACKAGE_NAME = "batch.zip"
 
 def _seed_old_root(old_root: Path) -> None:
     """Create files and a database under *old_root* with canonical relative paths."""
-    db_path = old_root / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
 
     # Managed directories (mirroring the canonical relative values stored below).
@@ -82,9 +83,7 @@ def _seed_old_root(old_root: Path) -> None:
     # Package used by PackageDeletionService.
     (package_dir / PACKAGE_NAME).write_bytes(b"fake package bytes")
 
-    conn = sqlite3.connect(db_path, check_same_thread=False)
-    try:
-        conn.execute("PRAGMA foreign_keys=ON")
+    with write_transaction(db_path) as conn:
         conn.execute(
             """
             insert into workspaces(id, name, default_workflow_key, default_entity)
@@ -161,10 +160,6 @@ def _seed_old_root(old_root: Path) -> None:
             """,
             (f"packages/{PACKAGE_NAME}", "batch", 1, 100, 0),
         )
-        conn.commit()
-        conn.execute("PRAGMA wal_checkpoint(FULL)")
-    finally:
-        conn.close()
 
 
 @pytest.fixture
@@ -175,7 +170,7 @@ def portable_roots(tmp_path: Path) -> tuple[Path, Path]:
     old_root.mkdir()
     _seed_old_root(old_root)
 
-    # Copy the database and managed tree to the new root.
+    # Copy the managed file tree to the new root; PostgreSQL remains shared.
     shutil.copytree(old_root, new_root)
 
     return old_root, new_root
@@ -186,8 +181,8 @@ def test_cross_root_path_portability(portable_roots: tuple[Path, Path]) -> None:
     old_root, new_root = portable_roots
 
     settings = load_settings(data_dir=new_root)
-    db = Database(new_root / "video_hive.sqlite", videos_dir=settings.videos_dir)
-    job_db = JobQueries(new_root / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
+    db = Database(TEST_DATABASE_URL, videos_dir=settings.videos_dir)
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir=settings.jobs_dir)
 
     # ------------------------------------------------------------------
     # 1. Database values are still the original canonical relative paths.

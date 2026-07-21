@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import sqlite3
 from datetime import UTC, datetime
+
+from psycopg.errors import SerializationFailure
 
 from server.app.executors import _lease_write_paths
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -19,7 +20,7 @@ def test_try_claim_retries_transient_lock_error(
     def flaky_claim_lease(conn, request, data_dir=None):
         calls["count"] += 1
         if calls["count"] == 1:
-            raise sqlite3.OperationalError("database is locked")
+            raise SerializationFailure("serialization failure")
         return real_claim_lease(conn, request, data_dir)
 
     monkeypatch.setattr(_lease_write_paths, "claim_lease", flaky_claim_lease)
@@ -39,7 +40,7 @@ def test_expire_stale_retries_transient_lock_error(
     def flaky_expire_stale_leases(conn, now):
         calls["count"] += 1
         if calls["count"] == 1:
-            raise sqlite3.OperationalError("database table is locked")
+            raise SerializationFailure("serialization failure")
         return real_expire_stale_leases(conn, now)
 
     monkeypatch.setattr(_lease_write_paths, "expire_stale_leases", flaky_expire_stale_leases)

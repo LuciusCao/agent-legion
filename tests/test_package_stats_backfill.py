@@ -6,6 +6,7 @@ from server.app.db import Database
 from server.app.main import create_app
 from server.app.services.package_stats_backfill import backfill_package_stats
 from server.app.settings import load_settings
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _make_package_zip(path, video_ids):
@@ -75,7 +76,7 @@ def test_backfill_skips_escaping_path_and_logs_warning(db, settings, caplog):
 def test_create_app_backfills_legacy_package_stats_at_startup(tmp_path):
     settings = load_settings(data_dir=tmp_path)
     _make_package_zip(settings.packages_dir / "legacy.zip", ["v1", "v2", "v3"])
-    db = Database(settings.data_dir / "video_hive.sqlite")
+    db = Database(TEST_DATABASE_URL)
     db.insert_package("packages/legacy.zip")
 
     create_app(data_dir=tmp_path, start_worker=False)

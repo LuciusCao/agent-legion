@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 CONFIG_FILE_KEYS: dict[str, frozenset[str]] = {
-    "app.yaml": frozenset({"data_dir", "server", "worker", "cleanup", "token_usage"}),
+    "app.yaml": frozenset({"database", "data_dir", "server", "worker", "cleanup", "token_usage"}),
     "video_hive.yaml": frozenset(
         {"asr", "cms", "resource_providers", "cleanup_video_after_assemble", "openclaw"}
     ),

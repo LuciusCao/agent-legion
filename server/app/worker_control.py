@@ -4,15 +4,14 @@ import os
 import socket
 import threading
 from datetime import UTC, datetime
-from pathlib import Path
 
-from server.app.db.retry import retried_on_sqlite_lock
+from server.app.db.retry import retried_on_database_conflict
 from server.app.db.transaction import read_connection, write_transaction
 
 
-@retried_on_sqlite_lock
-def _persist_pause(db_path: Path, scope: str, paused: bool, process_id: str) -> None:
-    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
+@retried_on_database_conflict
+def _persist_pause(db_path: str, scope: str, paused: bool, process_id: str) -> None:
+    now = datetime.now(UTC)
     with write_transaction(db_path) as conn:
         conn.execute(
             "insert into worker_control_state (scope, paused, updated_by, updated_at)"
@@ -27,7 +26,7 @@ class WorkspaceWorkerControl:
     persists in ``worker_control_state`` across processes/restarts; without it
     the control is in-memory only. Unknown workspaces default to paused."""
 
-    def __init__(self, db_path: Path | None = None, *, process_id: str | None = None) -> None:
+    def __init__(self, db_path: str | None = None, *, process_id: str | None = None) -> None:
         self._db_path = db_path
         self._process_id = process_id or f"{socket.gethostname()}:{os.getpid()}"
         self._paused: dict[str, bool] = {}

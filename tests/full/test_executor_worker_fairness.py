@@ -18,6 +18,7 @@ from tests.helpers.executor_worker import (
     make_registry,
     make_worker,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 class PerWorkspaceBlockingExecutor:
@@ -80,7 +81,7 @@ def test_shared_capacity_and_bounded_fairness(tmp_path: Path) -> None:
     * give workspace C at least one claim within a small number of polls;
     * allow workspace B to grow toward its allocation once A releases capacity.
     """
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
 
     ws_a = job_db.create_workspace(

@@ -21,6 +21,7 @@ from server.app.executors.local import (
     _watch_parent_token,
 )
 from server.app.executors.models import ExecutionContext
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture
@@ -179,7 +180,7 @@ def test_local_executor_execute_with_job_db_in_runtime(
 
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir()
-    job_db = JobQueries(tmp_path / "jobs.sqlite", jobs_dir)
+    job_db = JobQueries(TEST_DATABASE_URL, jobs_dir)
     executor = LocalExecutor("local", {"fetch": _test_handler_with_output}, job_db=job_db)
     result = executor.execute(replace(context, capability="fetch", expected_outputs=("out.json",)))
     assert result.status == "completed"
@@ -322,7 +323,7 @@ def test_run_handler_direct_rebuilds_job_db(tmp_path: Path) -> None:
         str(tmp_path),
         {
             "node_key": "fetch",
-            "_job_db_path": str(tmp_path / "jobs.sqlite"),
+            "_job_db_path": str(TEST_DATABASE_URL),
             "_jobs_dir": str(jobs_dir),
         },
         child_conn,

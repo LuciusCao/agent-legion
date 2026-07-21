@@ -30,6 +30,7 @@ class Settings:
     packages_dir: Path
     jobs_dir: Path
     config: dict[str, Any]
+    database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
     executor_runtime: ExecutorRuntimeConfig = field(
@@ -70,6 +71,7 @@ def _path_parser(value: str) -> str:
 # Reviewed mapping from environment variable to config path and parser.
 # Do not add arbitrary double-underscore mutation; every override is listed here.
 _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
+    "VIDEO_HIVE_DATABASE_URL": (("database", "url"), _str_parser),
     "VIDEO_HIVE_CMS_TOKEN": (("cms", "token"), _str_parser),
     "VIDEO_HIVE_CMS_TOKEN_GEN_SECRET": (("cms", "token_gen", "secret"), _str_parser),
     "VIDEO_HIVE_ASR_WHISPER_BINARY": (("asr", "whisper", "binary"), _path_parser),
@@ -148,6 +150,10 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         if env_data_dir:
             data_dir = Path(env_data_dir)
     resolved_data_dir = data_dir or root_dir / str(config.get("data_dir", "data"))
+    database_config = config.get("database", {})
+    database_url = str(database_config.get("url", "")) if isinstance(database_config, dict) else ""
+    if not database_url.startswith(("postgresql://", "postgres://")):
+        raise ValueError("database.url must be a PostgreSQL URL")
     videos_dir = resolved_data_dir / "videos"
     logs_dir = resolved_data_dir / "logs"
     packages_dir = resolved_data_dir / "packages"
@@ -158,6 +164,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
     return Settings(
         root_dir=root_dir,
+        database_url=database_url,
         data_dir=resolved_data_dir,
         videos_dir=videos_dir,
         logs_dir=logs_dir,

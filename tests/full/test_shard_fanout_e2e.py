@@ -39,8 +39,12 @@ def test_shard_fanout_aggregates_to_failed(tmp_path: Path) -> None:
     try:
         assert _poll_until(
             worker,
-            lambda: _node_status(job_db, job["id"], "review") == "failed",
+            lambda: (
+                len(rows := _node_shards(worker.leases.path, job["id"], "review")) == 4
+                and all(row["status"] in ("completed", "failed") for row in rows)
+            ),
         )
+        assert _node_status(job_db, job["id"], "review") == "failed"
         statuses = sorted(
             row["status"] for row in _node_shards(worker.leases.path, job["id"], "review")
         )

@@ -1,10 +1,9 @@
-"""Sqlite write/read paths for the RemoteExecutionBroker queue.
+"""PostgreSQL write/read paths for the remote execution queue.
 
 Each write function owns its connect-and-transact unit via
 ``server.app.db.transaction.write_transaction`` and is decorated with
-``retried_on_sqlite_lock`` so lock contention retries the whole unit on a
-fresh connection. Rows live in the ``remote_executions`` table (migration
-v021); ``outcome_json`` holds ``dataclasses.asdict(RemoteOutcome)`` with the
+PostgreSQL transaction conflicts retry the whole unit on a fresh connection.
+``outcome_json`` holds ``dataclasses.asdict(RemoteOutcome)`` with the
 ``command`` tuple serialized as a JSON list.
 """
 
@@ -13,12 +12,11 @@ from __future__ import annotations
 import json
 from collections.abc import Callable, Collection, Mapping
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from typing import Any
 
-from server.app.db.retry import retried_on_sqlite_lock
+from server.app.db.retry import retried_on_database_conflict
 from server.app.db.transaction import read_connection, write_transaction
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 
 _DONE_RETENTION = timedelta(hours=24)
 
@@ -45,69 +43,68 @@ def labels_satisfy(labels: Mapping[str, Any], requirements: Mapping[str, str]) -
     return True
 
 
-@retried_on_sqlite_lock
+@retried_on_database_conflict
 def claim_next(
-    db_path: Path,
+    db_path: str,
     worker_id: str,
     capabilities: Collection[str],
     now: str,
     *,
     label_requirements: Mapping[str, Mapping[str, str]] | None = None,
 ) -> dict[str, Any] | None:
-    """Atomically claim the oldest queued row matching ``capabilities``.
-
-    Registered workers are capped at their ``remote_workers.slots`` held
-    claims; unregistered workers keep the legacy no-slots behavior. When
-    ``label_requirements`` constrains a capability, candidates of that
-    capability are skipped unless the worker's stored labels satisfy every
-    constraint; the filter runs in memory inside this transaction, FIFO order
-    and the slots cap are untouched.
-    """
-    placeholders = ",".join("?" * len(capabilities))
+    """Claim the oldest eligible row without exceeding the worker's slots."""
+    if not capabilities:
+        return None
     with write_transaction(db_path) as conn:
+        # Prevent concurrent requests from oversubscribing this worker's slot
+        # count while allowing different workers to dequeue in parallel.
+        conn.execute(
+            "select pg_advisory_xact_lock(hashtext(?))",
+            (f"remote-worker-claim:{worker_id}",),
+        )
         row = conn.execute(
             "select slots, labels_json from remote_workers where worker_id = ?", (worker_id,)
         ).fetchone()
         worker_labels: Mapping[str, Any] = {}
         if row is not None:
-            held = conn.execute(
+            held_row = conn.execute(
                 "select count(*) as cnt from remote_executions"
                 " where state = 'claimed' and worker_id = ?",
                 (worker_id,),
-            ).fetchone()["cnt"]
+            ).fetchone()
+            held = int(held_row["cnt"]) if held_row is not None else 0
             if held >= row["slots"]:
                 return None
             worker_labels = json.loads(row["labels_json"] or "{}")
-        # Without constraints the legacy limit-1 fast path avoids scanning the queue.
-        limit = "" if label_requirements else " limit 1"
-        candidates = conn.execute(
-            f"select execution_id, capability from remote_executions"
-            f" where state = 'queued' and capability in ({placeholders})"
-            f" order by created_at{limit}",
-            tuple(capabilities),
-        ).fetchall()
-        for candidate in candidates:
-            requirements = (label_requirements or {}).get(candidate["capability"])
-            if requirements and not labels_satisfy(worker_labels, requirements):
-                continue
-            cursor = conn.execute(
-                "update remote_executions set state = 'claimed', worker_id = ?,"
-                " last_heartbeat_at = ?, updated_at = ?"
-                " where execution_id = ? and state = 'queued'",
-                (worker_id, now, now, candidate["execution_id"]),
+        eligible = [
+            capability
+            for capability in capabilities
+            if labels_satisfy(
+                worker_labels,
+                (label_requirements or {}).get(capability, {}),
             )
-            if cursor.rowcount == 0:
-                continue  # Lost a cross-connection race; try the next candidate.
-            entry = conn.execute(
-                "select * from remote_executions where execution_id = ?",
-                (candidate["execution_id"],),
-            ).fetchone()
-            return dict(entry)
-        return None
+        ]
+        if not eligible:
+            return None
+        candidate = conn.execute(
+            "select execution_id from remote_executions"
+            " where state = 'queued' and capability = any(?)"
+            " order by created_at, execution_id for update skip locked limit 1",
+            (eligible,),
+        ).fetchone()
+        if candidate is None:
+            return None
+        entry = conn.execute(
+            "update remote_executions set state = 'claimed', worker_id = ?,"
+            " last_heartbeat_at = ?, updated_at = ? where execution_id = ?"
+            " returning *",
+            (worker_id, now, now, candidate["execution_id"]),
+        ).fetchone()
+        return dict(entry) if entry is not None else None
 
 
-@retried_on_sqlite_lock
-def heartbeat_claim(db_path: Path, execution_id: str, worker_id: str, now: str) -> bool:
+@retried_on_database_conflict
+def heartbeat_claim(db_path: str, execution_id: str, worker_id: str, now: str) -> bool:
     with write_transaction(db_path) as conn:
         cursor = conn.execute(
             "update remote_executions set last_heartbeat_at = ?, updated_at = ?"
@@ -117,9 +114,9 @@ def heartbeat_claim(db_path: Path, execution_id: str, worker_id: str, now: str) 
         return cursor.rowcount > 0
 
 
-@retried_on_sqlite_lock
+@retried_on_database_conflict
 def finish_execution(
-    db_path: Path,
+    db_path: str,
     execution_id: str,
     worker_id: str,
     outcome_dict: dict[str, Any],
@@ -150,9 +147,9 @@ def finish_execution(
         return cursor.rowcount > 0
 
 
-@retried_on_sqlite_lock
+@retried_on_database_conflict
 def cancel_execution(
-    db_path: Path, execution_id: str, outcome_dict: dict[str, Any], now: str
+    db_path: str, execution_id: str, outcome_dict: dict[str, Any], now: str
 ) -> bool:
     """Finish a queued or claimed row as cancelled; no-op for unknown/done ids."""
     with write_transaction(db_path) as conn:
@@ -171,7 +168,7 @@ def cancel_execution(
         return cursor.rowcount > 0
 
 
-def bundle_name_for_claim(db_path: Path, execution_id: str, worker_id: str) -> str | None:
+def bundle_name_for_claim(db_path: str, execution_id: str, worker_id: str) -> str | None:
     with read_connection(db_path) as conn:
         row = conn.execute(
             "select bundle_name from remote_executions"
@@ -181,15 +178,15 @@ def bundle_name_for_claim(db_path: Path, execution_id: str, worker_id: str) -> s
     return row["bundle_name"] if row is not None else None
 
 
-@retried_on_sqlite_lock
+@retried_on_database_conflict
 def sweep(
-    db_path: Path, *, now: datetime, claim_timeout: timedelta, requeue_limit: int
+    db_path: str, *, now: datetime, claim_timeout: timedelta, requeue_limit: int
 ) -> list[str]:
     """Requeue stale claims, fail rows past the requeue limit, and delete done
     rows older than the retention window. Returns execution ids failed here."""
-    now_ts = _sqlite_timestamp(now)
-    cutoff = _sqlite_timestamp(now - claim_timeout)
-    done_cutoff = _sqlite_timestamp(now - _DONE_RETENTION)
+    now_ts = _database_timestamp(now)
+    cutoff = _database_timestamp(now - claim_timeout)
+    done_cutoff = _database_timestamp(now - _DONE_RETENTION)
     with write_transaction(db_path) as conn:
         stale = conn.execute(
             "select execution_id, worker_id, requeue_count from remote_executions"
@@ -238,12 +235,12 @@ class EntryHandle:
 
     Legacy unit tests age claims via ``broker._entries[id].last_heartbeat_at``
     and read ``requeue_count`` back; keep that attribute working against the
-    sqlite-backed queue. Production code must use the functions above.
+    PostgreSQL-backed queue. Production code must use the functions above.
     """
 
     _FIELDS = frozenset({"requeue_count", "last_heartbeat_at"})
 
-    def __init__(self, db_path: Path, execution_id: str) -> None:
+    def __init__(self, db_path: str, execution_id: str) -> None:
         object.__setattr__(self, "_db_path", db_path)
         object.__setattr__(self, "_execution_id", execution_id)
 
@@ -258,8 +255,8 @@ class EntryHandle:
         if row is None:
             raise AttributeError(name)
         value = row[name]
-        if name == "last_heartbeat_at" and value is not None:
-            value = datetime.strptime(value, "%Y-%m-%d %H:%M:%S.%f").replace(tzinfo=UTC)
+        if name == "last_heartbeat_at" and value is not None and not isinstance(value, datetime):
+            value = datetime.fromisoformat(str(value)).replace(tzinfo=UTC)
         return value
 
     def __setattr__(self, name: str, value: Any) -> None:
@@ -267,7 +264,7 @@ class EntryHandle:
             object.__setattr__(self, name, value)
             return
         if name == "last_heartbeat_at" and value is not None:
-            value = _sqlite_timestamp(value)
+            value = _database_timestamp(value)
         with write_transaction(self._db_path) as conn:
             conn.execute(
                 f"update remote_executions set {name} = ? where execution_id = ?",
@@ -278,7 +275,7 @@ class EntryHandle:
 class EntriesView:
     """Dict-like access to queue-row handles (legacy unit tests only)."""
 
-    def __init__(self, db_path: Path) -> None:
+    def __init__(self, db_path: str) -> None:
         self._db_path = db_path
 
     def __getitem__(self, execution_id: str) -> EntryHandle:

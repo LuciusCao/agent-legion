@@ -8,11 +8,12 @@ from server.app.services.artifact_store import (
     ArtifactNotFoundError,
     ArtifactStore,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture
 def store(tmp_path):
-    db_path = tmp_path / "test.db"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     return ArtifactStore(tmp_path / "artifacts", db_path)
 
@@ -20,7 +21,9 @@ def store(tmp_path):
 def _make_job(db_path, job_id: str) -> None:
     """artifact_refs.job_id has a real FK to jobs(id); create a minimal job row."""
     with write_transaction(db_path) as conn:
-        conn.execute("insert or ignore into workspaces(id, name) values ('ws', 'ws')")
+        conn.execute(
+            "insert into workspaces(id, name) values ('ws', 'ws') on conflict (id) do nothing"
+        )
         conn.execute(
             "insert into jobs(id, workspace_id, workflow_key, source_type, source_id,"
             " title, status, storage_dir) values (?, 'ws', 'wf', 's', 's1', 't', 'pending', 'd')",
@@ -72,8 +75,8 @@ def test_no_partial_file_after_failed_write(store, monkeypatch):
 
 
 def test_refs_lifecycle(store, tmp_path):
-    _make_job(tmp_path / "test.db", "job-1")
-    _make_job(tmp_path / "test.db", "job-2")
+    _make_job(TEST_DATABASE_URL, "job-1")
+    _make_job(TEST_DATABASE_URL, "job-2")
     h = store.put(b"referenced")
     store.add_ref("job-1", "node-a", "output.json", h)
     store.add_ref("job-1", "node-a", "output.json", h)  # 幂等

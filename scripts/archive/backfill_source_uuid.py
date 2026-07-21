@@ -29,11 +29,7 @@ def main():
     args = parser.parse_args()
 
     settings = load_settings()
-    db = Database(
-        settings.db_path
-        if hasattr(settings, "db_path")
-        else settings.data_dir / "video_hive.sqlite"
-    )
+    db = Database(settings.database_url)
     cms = settings.config.get("cms", {})
 
     if not cms:

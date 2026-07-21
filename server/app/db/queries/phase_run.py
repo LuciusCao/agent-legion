@@ -22,10 +22,11 @@ class PhaseRunQueriesMixin(VideoQueriesMixin):
                 """
                 insert into phase_runs(video_id, phase_key, status, command_json, log_path)
                 values (?, ?, 'running', ?, ?)
+                returning *
                 """,
                 (video_id, phase_key, json.dumps(command), log_path),
             )
-            row = conn.execute("select * from phase_runs where id=?", (cur.lastrowid,)).fetchone()
+            row = cur.fetchone()
         self._notify(video_id)
         return _phase_run_with_agent_session(dict(row))
 

@@ -21,8 +21,7 @@ logger = logging.getLogger(__name__)
 
 def main() -> int:
     settings = load_settings()
-    db_path = settings.data_dir / "video_hive.sqlite"
-    db = Database(db_path)
+    db = Database(settings.database_url)
     with db.connect() as conn:
         updated = backfill_node_run_dirs(conn, settings.data_dir)
     logger.info("Backfilled %s node run records", updated)

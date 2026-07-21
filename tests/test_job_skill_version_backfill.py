@@ -3,26 +3,14 @@ from __future__ import annotations
 import json
 from contextlib import closing
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.connection import connect_database
 from server.app.services.job_skill_version_backfill import backfill_node_run_skill_versions
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _setup(conn) -> None:
-    conn.executescript(
-        """
-        create table jobs (
-            id text primary key,
-            storage_dir text not null default ''
-        );
-        create table node_runs (
-            id integer primary key autoincrement,
-            job_id text not null,
-            node_key text not null,
-            status text not null,
-            run_dir text not null default '',
-            skill_version text not null default ''
-        );
-        """
+    conn.execute(
+        "insert into workspaces(id, name) values ('ws1', 'ws1') on conflict (id) do nothing"
     )
 
 
@@ -47,10 +35,11 @@ def test_backfill_reads_run_json_and_refreshes_manifest(tmp_path):
         encoding="utf-8",
     )
 
-    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         conn.execute(
-            "insert into jobs(id, storage_dir) values (?, ?)",
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
+            " values (?, 'ws1', 'wf', 'question', 'q1', ?)",
             ("job-1", "jobs/ws1/job-1"),
         )
         conn.execute(
@@ -78,10 +67,11 @@ def test_backfill_skips_missing_or_empty_run_json(tmp_path):
     run_dir.mkdir(parents=True)
     (run_dir / "run.json").write_text(json.dumps({"skill_version": ""}), encoding="utf-8")
 
-    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         conn.execute(
-            "insert into jobs(id, storage_dir) values (?, ?)",
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
+            " values (?, 'ws1', 'wf', 'question', 'q1', ?)",
             ("job-1", "jobs/ws1/job-1"),
         )
         conn.execute(
@@ -116,10 +106,11 @@ def test_backfill_refreshes_manifest_when_versions_already_persisted(tmp_path):
         encoding="utf-8",
     )
 
-    with closing(connect_sqlite(tmp_path / "db.sqlite")) as conn:
+    with closing(connect_database(TEST_DATABASE_URL)) as conn:
         _setup(conn)
         conn.execute(
-            "insert into jobs(id, storage_dir) values (?, ?)",
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id, storage_dir)"
+            " values (?, 'ws1', 'wf', 'question', 'q1', ?)",
             ("job-1", "jobs/ws1/job-1"),
         )
         conn.execute(

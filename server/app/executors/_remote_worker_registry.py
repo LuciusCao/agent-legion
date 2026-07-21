@@ -1,4 +1,4 @@
-"""SQLite worker registry and per-worker token store for remote execution."""
+"""PostgreSQL worker registry and per-worker token store for remote execution."""
 
 from __future__ import annotations
 
@@ -8,12 +8,11 @@ import json
 import secrets
 from collections.abc import Callable, Mapping
 from datetime import datetime
-from pathlib import Path
 from typing import Any
 
-from server.app.db.retry import retry_on_sqlite_lock
+from server.app.db.retry import retry_on_database_conflict
 from server.app.db.transaction import read_connection, write_transaction
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 
 
 def _validate_labels(labels: Mapping[str, Any]) -> None:
@@ -28,13 +27,13 @@ def _validate_labels(labels: Mapping[str, Any]) -> None:
 
 
 class WorkerRegistryStore:
-    def __init__(self, db_path: Path, now: Callable[[], datetime]) -> None:
+    def __init__(self, db_path: str, now: Callable[[], datetime]) -> None:
         self._db_path = db_path
         self._now = now
 
     def register(self, worker_id: str, name: str, capabilities: list[str], slots: int) -> None:
         def upsert() -> None:
-            now = _sqlite_timestamp(self._now())
+            now = _database_timestamp(self._now())
             self._write(
                 "insert into remote_workers"
                 " (worker_id, name, capabilities_json, slots, registered_at, last_seen_at)"
@@ -44,20 +43,20 @@ class WorkerRegistryStore:
                 (worker_id, name, json.dumps(capabilities), slots, now, now),
             )
 
-        retry_on_sqlite_lock(upsert)
+        retry_on_database_conflict(upsert)
 
     def touch(self, worker_id: str) -> None:
-        retry_on_sqlite_lock(
+        retry_on_database_conflict(
             lambda: self._write(
                 "update remote_workers set last_seen_at=? where worker_id=?",
-                (_sqlite_timestamp(self._now()), worker_id),
+                (_database_timestamp(self._now()), worker_id),
             )
         )
 
     def update_labels(self, worker_id: str, labels: Mapping[str, Any]) -> None:
         flat_labels = dict(labels)
         _validate_labels(flat_labels)
-        retry_on_sqlite_lock(
+        retry_on_database_conflict(
             lambda: self._write(
                 "update remote_workers set labels_json=? where worker_id=?",
                 (json.dumps(flat_labels), worker_id),
@@ -100,7 +99,7 @@ class WorkerRegistryStore:
         token_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
 
         def upsert() -> None:
-            now = _sqlite_timestamp(self._now())
+            now = _database_timestamp(self._now())
             self._write(
                 "insert into remote_workers"
                 " (worker_id, name, capabilities_json, slots, labels_json, token_hash,"
@@ -121,7 +120,7 @@ class WorkerRegistryStore:
                 ),
             )
 
-        retry_on_sqlite_lock(upsert)
+        retry_on_database_conflict(upsert)
         return f"{worker_id}.{secret}"
 
     def authenticate(self, token: str) -> dict[str, Any] | None:
@@ -152,11 +151,11 @@ class WorkerRegistryStore:
             with write_transaction(self._db_path) as conn:
                 cursor = conn.execute(
                     "update remote_workers set revoked_at=? where worker_id=?",
-                    (_sqlite_timestamp(self._now()), worker_id),
+                    (_database_timestamp(self._now()), worker_id),
                 )
                 return cursor.rowcount > 0
 
-        return retry_on_sqlite_lock(revoke_once)
+        return retry_on_database_conflict(revoke_once)
 
     def is_revoked(self, worker_id: str) -> bool:
         with read_connection(self._db_path) as conn:

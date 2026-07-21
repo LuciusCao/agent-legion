@@ -28,6 +28,8 @@ class BatchQueriesMixin(JobQueriesBase):
                 (batch_id, workspace_id, workflow_key, source_kind, payload_json),
             )
             row = conn.execute("select * from job_batches where id=?", (batch_id,)).fetchone()
+        if row is None:
+            raise RuntimeError("job batch upsert did not return a row")
         return dict(row)
 
     def get_batch(self, batch_id: str) -> dict[str, Any] | None:

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 import threading
 from collections.abc import Callable, Collection, Mapping
 from dataclasses import asdict, astuple, dataclass, field
@@ -10,9 +9,11 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
-from server.app.db.retry import retry_on_sqlite_lock
+from psycopg import IntegrityError
+
+from server.app.db.retry import retry_on_database_conflict
 from server.app.db.transaction import read_connection, write_transaction
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors._remote_completion_dispatcher import CompletionDispatcher
 from server.app.executors._remote_queue_store import (
     EntriesView,
@@ -73,7 +74,6 @@ class RemoteOutcome:
     skill_version: str = ""
     result_archive_name: str = ""
     worker_id: str = ""
-    # name -> "sha256:<hash>" for outputs the worker uploaded as artifacts.
     output_artifacts: Mapping[str, str] = field(default_factory=dict)
     shard_output: str = ""
 
@@ -83,7 +83,7 @@ def _utcnow() -> datetime:
 
 
 class RemoteExecutionBroker:
-    """Sqlite-backed remote execution queue and worker registry.
+    """PostgreSQL-backed remote execution queue and worker registry.
 
     Rows in ``remote_executions`` survive restarts; claims are atomic across
     processes; ``_done_events`` is only a same-process wake-up hint.
@@ -91,7 +91,7 @@ class RemoteExecutionBroker:
 
     def __init__(
         self,
-        db_path: Path,
+        db_path: str,
         bundle_dir: Path,
         *,
         claim_timeout_seconds: float = 120.0,
@@ -104,7 +104,6 @@ class RemoteExecutionBroker:
         self._claim_timeout = timedelta(seconds=claim_timeout_seconds)
         self._requeue_limit = requeue_limit
         self._now = time_source or _utcnow
-        # capability -> requires_labels constraints evaluated at dequeue time.
         self._label_requirements = {
             cap: dict(reqs) for cap, reqs in (capability_label_requirements or {}).items()
         }
@@ -112,14 +111,12 @@ class RemoteExecutionBroker:
         self._completion_callbacks: list[Callable[[str, RemoteOutcome], None]] = []
         self._dispatcher = CompletionDispatcher()
         self._workers = WorkerRegistryStore(db_path, self._now)
-        self._entries = EntriesView(db_path)  # legacy test handle; rows live in sqlite
+        self._entries = EntriesView(db_path)  # legacy test handle; rows live in PostgreSQL
         # Recover claims orphaned by a restart before serving new work.
         self.sweep_expired_claims()
 
     def register_completion_callback(self, callback: Callable[[str, RemoteOutcome], None]) -> None:
-        """Register a callback invoked (outside the write transaction) each time
-        an execution reaches a terminal state — result report, cancel, or
-        requeue-limit failure. Registration is a composition-layer concern."""
+        """Register a callback invoked after an execution commits terminal state."""
         self._completion_callbacks.append(callback)
 
     # ---- executor-facing ----
@@ -127,13 +124,12 @@ class RemoteExecutionBroker:
     def submit(self, payload: RemoteExecutionPayload) -> None:
         self.sweep_expired_claims()  # Any write path also triggers the done-row cleanup.
         try:
-            retry_on_sqlite_lock(lambda: self._insert_execution(payload))
-        except sqlite3.IntegrityError as exc:
+            retry_on_database_conflict(lambda: self._insert_execution(payload))
+        except IntegrityError as exc:
             raise ValueError(f"duplicate remote execution {payload.execution_id!r}") from exc
 
     def _insert_execution(self, payload: RemoteExecutionPayload) -> None:
-        now = _sqlite_timestamp(self._now())
-        # astuple 前 6 个字段与 insert 列顺序一致；manifest 与 command_spec 单独序列化。
+        now = _database_timestamp(self._now())
         values = (
             *astuple(payload)[:6],
             json.dumps(payload.manifest),
@@ -213,7 +209,7 @@ class RemoteExecutionBroker:
             status="cancelled", exit_code=-1, error_message="execution was cancelled"
         )
         if cancel_execution(
-            self._db_path, execution_id, asdict(outcome), _sqlite_timestamp(self._now())
+            self._db_path, execution_id, asdict(outcome), _database_timestamp(self._now())
         ):
             self._publish_completion(execution_id)
 
@@ -235,7 +231,7 @@ class RemoteExecutionBroker:
             self._db_path,
             worker_id,
             capabilities,
-            _sqlite_timestamp(self._now()),
+            _database_timestamp(self._now()),
             label_requirements=self._label_requirements or None,
         )
         if entry is None:
@@ -254,12 +250,16 @@ class RemoteExecutionBroker:
     def heartbeat(self, execution_id: str, worker_id: str) -> bool:
         self.sweep_expired_claims()
         return heartbeat_claim(
-            self._db_path, execution_id, worker_id, _sqlite_timestamp(self._now())
+            self._db_path, execution_id, worker_id, _database_timestamp(self._now())
         )
 
     def complete(self, execution_id: str, worker_id: str, outcome: RemoteOutcome) -> bool:
         finished = finish_execution(
-            self._db_path, execution_id, worker_id, asdict(outcome), _sqlite_timestamp(self._now())
+            self._db_path,
+            execution_id,
+            worker_id,
+            asdict(outcome),
+            _database_timestamp(self._now()),
         )
         if finished:
             self._publish_completion(execution_id)
@@ -278,7 +278,7 @@ class RemoteExecutionBroker:
             execution_id,
             worker_id,
             asdict(outcome),
-            _sqlite_timestamp(self._now()),
+            _database_timestamp(self._now()),
             before_update=publish_archive,
         )
         if finished:
@@ -288,7 +288,7 @@ class RemoteExecutionBroker:
     def bundle_name_for(self, execution_id: str, worker_id: str) -> str | None:
         return bundle_name_for_claim(self._db_path, execution_id, worker_id)
 
-    # ---- worker registry (sqlite) ----
+    # ---- worker registry ----
 
     def register_worker(
         self, worker_id: str, name: str, capabilities: list[str], slots: int

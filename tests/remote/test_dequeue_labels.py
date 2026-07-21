@@ -11,10 +11,8 @@ slots cap are unchanged, constraints only stack on top of them.
 
 from __future__ import annotations
 
-import contextlib
 import dataclasses
 import json
-import sqlite3
 from pathlib import Path
 
 import pytest
@@ -23,6 +21,7 @@ from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
 from server.app.db.schema import init_db
+from server.app.db.transaction import read_connection
 from server.app.executors.config import RemoteCapabilityConfig, load_executor_definitions
 from server.app.executors.remote_broker import (
     RemoteExecutionBroker,
@@ -30,6 +29,7 @@ from server.app.executors.remote_broker import (
     labels_satisfy,
 )
 from server.app.routes.remote import create_remote_router
+from tests.postgres_support import TEST_DATABASE_URL
 
 ADMIN_TOKEN = "admin-global-token"
 ADMIN_HEADERS = {"X-Worker-Token": ADMIN_TOKEN}
@@ -40,7 +40,7 @@ def _broker(
     tmp_path: Path,
     requirements: dict[str, dict[str, str]] | None = None,
 ) -> RemoteExecutionBroker:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     return RemoteExecutionBroker(
         db_path,
@@ -276,7 +276,7 @@ def _remote_settings(settings):
 
 @pytest.fixture
 def rig(tmp_path: Path, settings):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(
         db_path, tmp_path / "bundles", capability_label_requirements=REQUIRE_BIG_MEM
@@ -313,13 +313,13 @@ def _claim_via_api(client: TestClient, worker_id: str, token: str, **overrides):
     )
 
 
-def _labels_json(db_path: Path, worker_id: str) -> dict:
-    with contextlib.closing(sqlite3.connect(db_path)) as conn:
+def _labels_json(db_path: str, worker_id: str) -> dict:
+    with read_connection(db_path) as conn:
         row = conn.execute(
             "select labels_json from remote_workers where worker_id = ?", (worker_id,)
         ).fetchone()
     assert row is not None
-    return json.loads(row[0])
+    return json.loads(row["labels_json"])
 
 
 def test_claim_with_labels_updates_registry(rig) -> None:

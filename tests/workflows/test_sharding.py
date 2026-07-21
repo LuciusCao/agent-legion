@@ -34,6 +34,7 @@ from tests.helpers.executor_worker import (
     make_registry,
     make_worker,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 # ---------------------------------------------------------------------------
 # DB-level helpers (unit matrix 1-9)
@@ -41,7 +42,7 @@ from tests.helpers.executor_worker import (
 
 
 def _make_db(tmp_path: Path) -> Path:
-    db_path = tmp_path / "test.db"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     with write_transaction(db_path) as conn:
         conn.execute("insert into workspaces(id, name) values ('w1', 'ws')")
@@ -292,7 +293,7 @@ def _over_definition():
 
 
 def _make_e2e(tmp_path: Path, definition, executor, *, capacity: int = 10):
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     workspace = job_db.create_workspace("ws", default_workflow_key="test")
     capabilities = {node.capability for node in definition.nodes.values()}

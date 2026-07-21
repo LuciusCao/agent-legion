@@ -20,6 +20,7 @@ from server.app.workflows.definition import (
     WorkflowIntake,
     WorkflowNode,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 class FakeExecutor:
@@ -210,7 +211,7 @@ def _make_worker(
 
 
 def test_same_node_submitted_once(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
@@ -249,7 +250,7 @@ def test_same_node_submitted_once(tmp_path: Path) -> None:
 
 
 def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
@@ -289,7 +290,7 @@ def test_global_capacity_not_exceeded_across_workers(tmp_path: Path) -> None:
 
 
 def test_workspace_limit_does_not_reserve_unused_global_capacity(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws_a = job_db.create_workspace(
         "Workspace A", default_workflow_key="question_comprehension_info"
@@ -333,7 +334,7 @@ def test_workspace_limit_does_not_reserve_unused_global_capacity(tmp_path: Path)
 
 
 def test_two_agent_nodes_share_workspace_executor_limit(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
@@ -370,7 +371,7 @@ def test_two_agent_nodes_share_workspace_executor_limit(tmp_path: Path) -> None:
 
 
 def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws_a = job_db.create_workspace(
         "Workspace A", default_workflow_key="question_comprehension_info"
@@ -416,7 +417,7 @@ def test_local_node_limits_are_workspace_specific(tmp_path: Path) -> None:
 
 
 def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws_a = job_db.create_workspace(
         "Workspace A", default_workflow_key="question_comprehension_info"
@@ -470,7 +471,7 @@ def test_round_robin_allows_small_workspace_to_claim(tmp_path: Path) -> None:
 
 
 def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
@@ -503,7 +504,7 @@ def test_missing_binding_creates_failed_node_run(tmp_path: Path) -> None:
 
 
 def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
@@ -563,7 +564,7 @@ def test_target_completion_pauses_job_and_stops_further_claims(tmp_path: Path) -
 
 
 def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
@@ -613,7 +614,7 @@ def test_stale_target_snapshot_rejected_by_claim_transaction(tmp_path: Path) -> 
 
 
 def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 
@@ -648,7 +649,7 @@ def test_binding_to_unsupported_capability_creates_failed_node_run(tmp_path: Pat
 
 def test_global_capacity_enforced_by_lease_transaction(tmp_path: Path) -> None:
     """The lease repository itself rejects claims that would exceed global capacity."""
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace("Test WS", default_workflow_key="question_comprehension_info")
 

@@ -80,7 +80,8 @@ def test_local_node_limit_blocks_same_node_but_allows_other_local_node(
             (workspace_id, "question_comprehension_info", other_node_key, 1),
         )
         conn.execute(
-            "insert or ignore into job_nodes(job_id, node_key, status) values (?, ?, 'pending')",
+            "insert into job_nodes(job_id, node_key, status) values (?, ?, 'pending')"
+            " on conflict (job_id, node_key) do nothing",
             (job_id, other_node_key),
         )
 

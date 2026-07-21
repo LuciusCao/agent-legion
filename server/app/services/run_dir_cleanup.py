@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import logging
 import shutil
-import sqlite3
 from pathlib import Path
 
+from server.app.db.connection import DatabaseConnection
 from server.app.storage_paths import make_data_relative
 
 logger = logging.getLogger(__name__)
@@ -45,7 +45,7 @@ def find_extra_run_dirs(data_dir: Path, job_dir: Path, node_key: str) -> list[tu
 
 
 def cleanup_extra_runs_for_node(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     data_dir: Path,
     job_dir: Path,
     node_key: str,

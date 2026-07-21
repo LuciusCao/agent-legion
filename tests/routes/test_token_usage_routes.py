@@ -11,12 +11,13 @@ def workspace_and_job(client):
     job_id = "token_job_1"
     with job_db.connect() as conn:
         conn.execute(
-            "insert or ignore into workspaces(id, name, default_workflow_key) values (?, ?, ?)",
+            "insert into workspaces(id, name, default_workflow_key) values (?, ?, ?)"
+            " on conflict (id) do nothing",
             (workspace_id, "token_ws", "question_comprehension_info"),
         )
         conn.execute(
-            "insert or ignore into jobs(id, workspace_id, workflow_key, source_type, source_id) "
-            "values (?, ?, ?, ?, ?)",
+            "insert into jobs(id, workspace_id, workflow_key, source_type, source_id) "
+            "values (?, ?, ?, ?, ?) on conflict (id) do nothing",
             (job_id, workspace_id, "question_comprehension_info", "batch_by_ids", "Q001"),
         )
     return workspace_id, job_id
@@ -25,7 +26,9 @@ def workspace_and_job(client):
 def _insert_node_run(job_db, *, run_id, job_id, node_key, status="completed"):
     with job_db.connect() as conn:
         conn.execute(
-            "insert or replace into node_runs(id, job_id, node_key, status) values (?, ?, ?, ?)",
+            "insert into node_runs(id, job_id, node_key, status) values (?, ?, ?, ?)"
+            " on conflict (id) do update set job_id=excluded.job_id,"
+            " node_key=excluded.node_key, status=excluded.status",
             (run_id, job_id, node_key, status),
         )
 
@@ -48,10 +51,22 @@ def _insert_token_usage(
     with job_db.connect() as conn:
         conn.execute(
             """
-            insert or replace into node_run_token_usage(
+            insert into node_run_token_usage(
               node_run_id, job_id, workspace_id, node_key, provider, model, skill_version,
               message_count, input_tokens, output_tokens, cache_read_tokens, total_tokens
             ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            on conflict (node_run_id) do update set
+              job_id=excluded.job_id,
+              workspace_id=excluded.workspace_id,
+              node_key=excluded.node_key,
+              provider=excluded.provider,
+              model=excluded.model,
+              skill_version=excluded.skill_version,
+              message_count=excluded.message_count,
+              input_tokens=excluded.input_tokens,
+              output_tokens=excluded.output_tokens,
+              cache_read_tokens=excluded.cache_read_tokens,
+              total_tokens=excluded.total_tokens
             """,
             (
                 node_run_id,

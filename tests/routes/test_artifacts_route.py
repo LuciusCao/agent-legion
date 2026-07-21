@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from server.app.db.schema import init_db
 from server.app.routes.artifacts import create_artifacts_router
 from server.app.services.artifact_store import ArtifactStore
+from tests.postgres_support import TEST_DATABASE_URL
 
 TOKEN = "test-token"
 HEADERS = {"X-Worker-Token": TOKEN}
@@ -30,8 +31,8 @@ def remote_settings(settings):
 
 @pytest.fixture
 def rig(tmp_path, remote_settings):
-    init_db(tmp_path / "jobs.sqlite")
-    store = ArtifactStore(tmp_path / "artifacts", tmp_path / "jobs.sqlite")
+    init_db(TEST_DATABASE_URL)
+    store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
     app = FastAPI()
     app.include_router(
         create_artifacts_router(store, remote_settings, _WorkerAuthenticatorStub()),
@@ -64,8 +65,8 @@ def test_get_unauthorized_without_token(rig):
 
 
 def test_service_unavailable_without_configured_token(tmp_path, settings):
-    init_db(tmp_path / "jobs.sqlite")
-    store = ArtifactStore(tmp_path / "artifacts", tmp_path / "jobs.sqlite")
+    init_db(TEST_DATABASE_URL)
+    store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
     app = FastAPI()
     app.include_router(
         create_artifacts_router(store, settings, _WorkerAuthenticatorStub()), prefix="/api"
@@ -95,8 +96,8 @@ def test_post_413_when_too_large(tmp_path, settings):
     )
     runtime = settings.executor_runtime.model_copy(update={"remote": remote})
     small_settings = dataclasses.replace(settings, executor_runtime=runtime)
-    init_db(tmp_path / "jobs.sqlite")
-    store = ArtifactStore(tmp_path / "artifacts", tmp_path / "jobs.sqlite")
+    init_db(TEST_DATABASE_URL)
+    store = ArtifactStore(tmp_path / "artifacts", TEST_DATABASE_URL)
     app = FastAPI()
     app.include_router(
         create_artifacts_router(store, small_settings, _WorkerAuthenticatorStub()),

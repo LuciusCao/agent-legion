@@ -29,7 +29,7 @@ exemptions:
     requires_labels from the remote executor definitions into the broker.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 259
+  ceiling: 237
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
@@ -189,3 +189,42 @@ exemptions:
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase4-agent-collaboration.md#task-9
   ceiling: 113
+- check: architecture.file_budget
+  path: server/app/db/connection.py
+  reason: The PostgreSQL-only migration introduces the typed DB-API facade,
+    process-safe bounded pool registry, and parameter-marker normalization in
+    one connection boundary. Split the pool registry after the migration lands.
+  owner: database
+  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
+  ceiling: 102
+- check: architecture.file_budget
+  path: server/app/db/queries/video.py
+  reason: PostgreSQL timestamptz rows require accepting native datetime values
+    while retaining the public ISO projection. Extract timestamp projection
+    helpers with the next query-module split.
+  owner: database
+  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
+  ceiling: 384
+- check: architecture.file_budget
+  path: server/app/executors/_lease_claims.py
+  reason: Cross-replica capacity enforcement adds a transaction-scoped advisory
+    lock and PostgreSQL RETURNING handling. Extract capacity validation from the
+    claim transaction after rollout.
+  owner: workspace-executor
+  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
+  ceiling: 214
+- check: architecture.file_budget
+  path: server/app/jobs/queries/job_nodes.py
+  reason: PostgreSQL RETURNING paths now validate missing rows explicitly.
+    Extract node-run persistence when the query module is next split.
+  owner: database
+  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
+  ceiling: 353
+- check: architecture.file_budget
+  path: server/app/settings.py
+  reason: PostgreSQL-only configuration adds a validated database URL and its
+    explicit environment override. Extract database settings into the
+    configuration package after rollout.
+  owner: config
+  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
+  ceiling: 182

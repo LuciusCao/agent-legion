@@ -2,8 +2,8 @@
 
 Each function owns its connect-and-transact unit via
 ``server.app.db.transaction.write_transaction`` (commit on success, rollback
-on error), so the repository can retry the whole unit on transient SQLite
-lock errors and every attempt starts from a fresh connection.
+on error), so the repository can retry the whole unit on transient PostgreSQL
+transaction conflicts and every attempt starts from a fresh connection.
 """
 
 from __future__ import annotations
@@ -19,7 +19,7 @@ from server.app.executors._lease_lifecycle import (
     finish_lease,
     heartbeat_lease,
 )
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
     ExecutionResult,
@@ -81,7 +81,7 @@ def expire_stale(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
             "select job_id from executor_leases where status='active' and expires_at<=?",
-            (_sqlite_timestamp(now),),
+            (_database_timestamp(now),),
         ).fetchall()
         affected_job_ids = list({str(row["job_id"]) for row in rows})
         expired = expire_stale_leases(conn, now)
@@ -93,7 +93,7 @@ def expire_stale(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
 
 def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) -> list[str]:
     """Reset jobs stuck in 'running' with no active lease back to 'queued'."""
-    now_str = _sqlite_timestamp(now)
+    now_str = _database_timestamp(now)
     with write_transaction(repo.path) as conn:
         rows = conn.execute(
             """

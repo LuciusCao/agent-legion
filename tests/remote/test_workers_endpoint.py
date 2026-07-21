@@ -19,6 +19,7 @@ from fastapi.testclient import TestClient
 from server.app.db.schema import init_db
 from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.routes.remote import create_remote_router
+from tests.postgres_support import TEST_DATABASE_URL
 
 ADMIN_TOKEN = "admin-global-token"
 ADMIN_HEADERS = {"X-Worker-Token": ADMIN_TOKEN}
@@ -32,7 +33,7 @@ def _remote_settings(settings, *, worker_token: str = ADMIN_TOKEN):
 
 @pytest.fixture
 def rig(tmp_path: Path, settings):
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     app = FastAPI()
@@ -96,7 +97,7 @@ def test_workers_lists_revoked_workers(rig) -> None:
 
 
 def test_workers_503_when_remote_disabled(tmp_path: Path, settings) -> None:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     broker = RemoteExecutionBroker(db_path, tmp_path / "bundles")
     app = FastAPI()

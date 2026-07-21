@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from pathlib import Path
 
+from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import write_transaction
 from server.app.services.token_usage import (
     TokenUsageSummary,
@@ -16,14 +16,14 @@ logger = logging.getLogger(__name__)
 
 
 def parse_token_usage_for_lease(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     lease_id: str,
     data_dir: Path,
 ) -> TokenUsageSummary | None:
     """Read-only: parse events.jsonl for a finished lease and return its summary.
 
     This intentionally does not write to the database so that callers can keep
-    the parse step outside of a SQLite write transaction.
+    the parse step outside of a database write transaction.
     """
     lease = conn.execute(
         "select node_run_id, workspace_id from executor_leases where id=?", (lease_id,)
@@ -43,7 +43,7 @@ def parse_token_usage_for_lease(
 
 
 def persist_token_usage_for_lease(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     lease_id: str,
     data_dir: Path,
 ) -> None:
@@ -54,7 +54,7 @@ def persist_token_usage_for_lease(
 
 
 def capture_token_usage_after_lease_finish(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     lease_id: str,
     data_dir: Path,
 ) -> None:
@@ -65,9 +65,8 @@ def capture_token_usage_after_lease_finish(
             return
         # The caller hands us a read-only connection for the parse step; the
         # short persist transaction runs on its own connection to the same
-        # database file via the unified write_transaction helper.
-        db_file = conn.execute("pragma database_list").fetchone()["file"]
-        with write_transaction(Path(db_file)) as write_conn:
+        # PostgreSQL DSN via the unified write_transaction helper.
+        with write_transaction(conn.database_dsn) as write_conn:
             persist_node_run_usage(write_conn, summary)
     except Exception:
         logger.debug("Failed to capture token usage for lease %s", lease_id, exc_info=True)

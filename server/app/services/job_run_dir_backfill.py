@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import logging
-import sqlite3
 from pathlib import Path
 
+from server.app.db.connection import DatabaseConnection
 from server.app.services.job_run_dir_lookup import (
     build_job_dir_index,
     derive_run_dir_from_index,
@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 
 def backfill_node_run_dirs(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     data_dir: Path,
 ) -> int:
     """Derive and persist missing run_dir/session_dir for finished node runs."""
