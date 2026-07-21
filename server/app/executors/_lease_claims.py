@@ -1,23 +1,23 @@
 from __future__ import annotations
 
 import json
-import sqlite3
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from server.app.db.connection import DatabaseConnection
 from server.app.executors._lease_control import (
     _execution_control_rejects_claim,
     _read_job_execution_control,
 )
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors._path_canonicalization import canonicalize_data_path
 from server.app.executors.models import ClaimedExecution, LeaseClaimRequest
 from server.app.workflows.sharding import try_start_shard
 
 
 def claim_lease(
-    conn: sqlite3.Connection, request: LeaseClaimRequest, data_dir: Path | None = None
+    conn: DatabaseConnection, request: LeaseClaimRequest, data_dir: Path | None = None
 ) -> ClaimedExecution | None:
     """Attempt to claim a node run under capacity limits.
 
@@ -28,6 +28,14 @@ def claim_lease(
     lease_id = str(uuid.uuid4())
     execution_id = str(uuid.uuid4())
     now = datetime.now(UTC)
+
+    # Capacity is scoped to an executor. Serializing only competing claims for
+    # that executor makes the count-and-insert decision correct across API
+    # replicas without blocking unrelated executors.
+    conn.execute(
+        "select pg_advisory_xact_lock(hashtext(?))",
+        (f"executor-claim:{request.executor_id}",),
+    )
 
     current_control = _read_job_execution_control(conn, request.job_id)
     if _execution_control_rejects_claim(request, current_control):
@@ -87,23 +95,25 @@ def claim_lease(
                 f"persisted {limit_row['concurrency_limit']} vs requested {request.local_node_limit}"
             )
 
-    now_str = _sqlite_timestamp(now)
-    global_count = conn.execute(
+    now_str = _database_timestamp(now)
+    global_count_row = conn.execute(
         """
         select count(*) as cnt
         from executor_leases
         where executor_id=? and status='active' and expires_at>?
         """,
         (request.executor_id, now_str),
-    ).fetchone()["cnt"]
-    workspace_count = conn.execute(
+    ).fetchone()
+    workspace_count_row = conn.execute(
         """
         select count(*) as cnt
         from executor_leases
         where workspace_id=? and executor_id=? and status='active' and expires_at>?
         """,
         (request.workspace_id, request.executor_id, now_str),
-    ).fetchone()["cnt"]
+    ).fetchone()
+    global_count = int(global_count_row["cnt"]) if global_count_row is not None else 0
+    workspace_count = int(workspace_count_row["cnt"]) if workspace_count_row is not None else 0
 
     if global_count >= request.global_capacity:
         return None
@@ -111,14 +121,15 @@ def claim_lease(
         return None
 
     if request.local_node_limit is not None:
-        node_count = conn.execute(
+        node_count_row = conn.execute(
             """
             select count(*) as cnt
             from executor_leases
             where workspace_id=? and workflow_key=? and node_key=? and status='active' and expires_at>?
             """,
             (request.workspace_id, request.workflow_key, request.node_key, now_str),
-        ).fetchone()["cnt"]
+        ).fetchone()
+        node_count = int(node_count_row["cnt"]) if node_count_row is not None else 0
         if node_count >= request.local_node_limit:
             return None
 
@@ -151,12 +162,14 @@ def claim_lease(
             job_id, node_key, status, command_json, log_path, run_dir, session_dir, started_at
         )
         values (?, ?, 'running', ?, ?, '', '', ?)
+        returning id
         """,
         (request.job_id, request.node_key, json.dumps([]), log_path, now_str),
     )
-    if cursor.lastrowid is None:
-        raise sqlite3.OperationalError("node_runs insert did not produce a row id")
-    node_run_id = cursor.lastrowid
+    inserted = cursor.fetchone()
+    if inserted is None:
+        raise RuntimeError("node_runs insert did not return a row id")
+    node_run_id = int(inserted["id"])
     expires_at = now + timedelta(seconds=request.lease_ttl_seconds)
     conn.execute(
         """
@@ -177,7 +190,7 @@ def claim_lease(
             node_run_id,
             now_str,
             now_str,
-            _sqlite_timestamp(expires_at),
+            _database_timestamp(expires_at),
         ),
     )
 

@@ -57,6 +57,25 @@ def test_env_example_lists_all_basecms_variables():
         assert f"{key}=" in example, f"{key} is missing from .env.example"
 
 
+def test_database_url_environment_override(tmp_path, monkeypatch):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text("database: {url: postgresql://configured/app}\n", encoding="utf-8")
+    monkeypatch.setenv("VIDEO_HIVE_DATABASE_URL", "postgresql://override/test")
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.database_url == "postgresql://override/test"
+
+
+def test_sqlite_database_url_is_rejected(tmp_path, monkeypatch):
+    config_path = tmp_path / "app.yaml"
+    config_path.write_text("database: {url: data/app.sqlite}\n", encoding="utf-8")
+    monkeypatch.delenv("VIDEO_HIVE_DATABASE_URL", raising=False)
+
+    with pytest.raises(ValueError, match="PostgreSQL URL"):
+        load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+
 def test_basecms_env_takes_precedence_over_video_hive_cms_env(tmp_path, monkeypatch):
     from server.app.cms.auth import _token_gen_config
     from server.app.cms.client import get_token

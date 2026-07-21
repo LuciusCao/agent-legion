@@ -2,11 +2,10 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from pathlib import Path
 from threading import Lock
 from typing import Literal
 
-from server.app.db.retry import retried_on_sqlite_lock
+from server.app.db.retry import retried_on_database_conflict
 from server.app.db.transaction import write_transaction
 
 JobEventKind = Literal["updated", "created", "deleted"]
@@ -30,7 +29,7 @@ class CompactedJobEvents:
 
 
 class JobEventBuffer:
-    def __init__(self, db_path: Path | None = None, max_events: int = 10000) -> None:
+    def __init__(self, db_path: str | None = None, max_events: int = 10000) -> None:
         self._db_path = db_path
         self._max_events = max_events
         self._events: deque[JobEvent] = deque()
@@ -45,12 +44,14 @@ class JobEventBuffer:
         self._revision = self._bump_seq(self._db_path)  # drain_compacted 的 latest_revision 上界
         return self._revision
 
-    @retried_on_sqlite_lock
-    def _bump_seq(self, db_path: Path) -> int:
+    @retried_on_database_conflict
+    def _bump_seq(self, db_path: str) -> int:
         with write_transaction(db_path) as conn:
             row = conn.execute(
                 "update job_event_seq set value = value + 1 where id = 1 returning value"
             ).fetchone()
+        if row is None:
+            raise RuntimeError("job_event_seq singleton row is missing")
         return int(row["value"])
 
     def record_job_updated(self, workspace_id: str, job_id: str) -> int:

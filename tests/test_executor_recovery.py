@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.connection import connect_database
 from server.app.db.schema import init_db
 from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
@@ -21,29 +21,31 @@ from server.app.workflows.definition import (
     WorkflowIntake,
     WorkflowNode,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture
-def tmp_db(tmp_path: Path) -> Path:
-    path = tmp_path / "recovery.sqlite"
+def tmp_db(tmp_path: Path) -> str:
+    del tmp_path
+    path = TEST_DATABASE_URL
     init_db(path)
     return path
 
 
 @pytest.fixture
-def queries(tmp_db: Path) -> JobQueries:
-    jobs_dir = tmp_db.parent / "jobs"
+def queries(tmp_db: str, tmp_path: Path) -> JobQueries:
+    jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     return JobQueries(tmp_db, jobs_dir)
 
 
 @pytest.fixture
-def repo(tmp_db: Path) -> ExecutorLeaseRepository:
-    return ExecutorLeaseRepository(tmp_db)
+def repo(tmp_db: str, queries: JobQueries) -> ExecutorLeaseRepository:
+    return ExecutorLeaseRepository(tmp_db, data_dir=queries.jobs_dir.parent)
 
 
 @pytest.fixture
-def broker(tmp_db: Path, tmp_path: Path) -> RemoteExecutionBroker:
+def broker(tmp_db: str, tmp_path: Path) -> RemoteExecutionBroker:
     return RemoteExecutionBroker(tmp_db, tmp_path / "remote_bundles")
 
 
@@ -122,7 +124,7 @@ def _claim(workspace_id: str, job_id: str, repo: ExecutorLeaseRepository) -> Non
 
 def _set_expired(repo: ExecutorLeaseRepository, lease_id: str) -> None:
     past = datetime.now(UTC) - timedelta(seconds=10)
-    conn = connect_sqlite(repo.path)
+    conn = connect_database(repo.path)
     try:
         conn.execute(
             "update executor_leases set expires_at=? where id=?",
@@ -219,7 +221,7 @@ def test_fresh_repo_expire_stale_marks_recovery_state(
 
     _set_expired(repo, lease_id)
 
-    fresh_repo = ExecutorLeaseRepository(queries.path)
+    fresh_repo = ExecutorLeaseRepository(queries.path, data_dir=queries.jobs_dir.parent)
     expired = fresh_repo.expire_stale(datetime.now(UTC))
 
     assert expired == [lease_id]
@@ -291,7 +293,7 @@ def test_recovery_frees_global_and_workspace_capacity(
     lease_id = lease_row["id"]
     _set_expired(repo, lease_id)
 
-    fresh_repo = ExecutorLeaseRepository(queries.path)
+    fresh_repo = ExecutorLeaseRepository(queries.path, data_dir=queries.jobs_dir.parent)
     expired = fresh_repo.expire_stale(datetime.now(UTC))
     assert expired == [lease_id]
 
@@ -366,7 +368,7 @@ def test_recovery_is_idempotent(
     node_run_id = run_row["id"]
     _set_expired(repo, lease_id)
 
-    fresh_repo = ExecutorLeaseRepository(queries.path)
+    fresh_repo = ExecutorLeaseRepository(queries.path, data_dir=queries.jobs_dir.parent)
     first = fresh_repo.expire_stale(datetime.now(UTC))
     second = fresh_repo.expire_stale(datetime.now(UTC))
 

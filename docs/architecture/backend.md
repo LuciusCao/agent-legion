@@ -7,7 +7,7 @@ Agent Legion 后端基于 FastAPI，提供 REST API、SSE 事件推送和 WebSoc
 - Agent Legion DAG 工作流执行（Workspace / Job / Node）
 - 视频流水线（ intake → 下载 → 转录 → Agent 阶段 → 打包）
 - CMS 集成（知识库与题库查询）
-- SQLite 持久化与本地文件系统管理
+- PostgreSQL 持久化与本地文件系统管理
 
 ## Directory Structure
 
@@ -85,7 +85,7 @@ server/app/
 
 ## Key Decisions
 
-- 使用 SQLite 作为本地数据库，避免外部依赖。详见相关 spec。
+- PostgreSQL 是唯一运行时数据库，通过连接池支撑多进程、多设备并发协调。
 - Agent Legion DAG 是主要的执行模型；视频流水线作为 `video_knowledge` workflow 运行。
 - 所有文件 I/O 限制在 `data/` 目录内，由 `security.py` 做路径校验。
 - 路由、服务、执行器之间有明确的边界：Route 只做 HTTP 适配，Service 处理业务逻辑，Executor 通过租赁（lease）申请容量。详见 [AGENTS.md](../../AGENTS.md)。
@@ -348,13 +348,13 @@ server/app/
 
 ## Database
 
-- SQLite 同时服务视频 pipeline 与 Agent Legion workflow：
+- PostgreSQL 同时服务视频 pipeline 与 Agent Legion workflow：
   - `videos` — 旧版视频队列（迁移后仅读）
   - `workspaces` — Agent Legion workspace 定义（含 `default_workflow_key`, `cms_config_json`, `resource_config_json`, `default_entity`, `intake_config_json`）
   - `job_batches`, `jobs`, `job_nodes`, `node_runs` — DAG job 相关表
   - `workflow_revisions` — workflow 版本修订历史
   - `packages` — 已创建 package 路径
-- 初始化器使用轻量迁移（`alter table add column`），旧表可无损获得新列。
+- 初始化器在 PostgreSQL advisory lock 下按版本应用 schema；旧 SQLite 数据通过一次性离线导入器迁移。
 - `JobQueries.connect()` 与 `WorkspaceQueries.connect()` 是上下文管理器，确保 `conn.close()`。
 - `JobDeletionService` 级联删除 Job 记录、`node_runs`、本地 Job 目录与日志。
 - 存储路径以**相对 POSIX 路径**保存在 `settings.data_dir` 下（前缀为 `videos/`, `jobs/`, `logs/`, `packages/`），API 返回时投影为绝对路径。
@@ -367,7 +367,7 @@ Workflow Studio 提供可视化 workflow 编辑能力，与版本修订历史集
 
 - **Routes**: `routes/workflow_revisions.py`, `routes/workflow_draft_compare.py`
 - **Services**: `services/workflow_drafts.py`, `services/workflow_draft_publish.py`, `services/workflow_revision_format.py`, `services/job_workflow_versions.py`, `services/job_workflow_upgrade.py`
-- **DB**: `workflow_revisions` 表，迁移 `v016_workflow_revisions.py`, `v017_job_workflow_version.py`
+- **DB**: PostgreSQL `workflow_revisions` 表与版本化 schema 初始化
 - **Frontend**: `pages/WorkflowStudioPage.tsx`, `pages/workflowStudio/`
 
 ### Token Usage
@@ -464,5 +464,5 @@ UV_CACHE_DIR=.uv-cache uv run pytest -q --cov=server --cov-report=term-missing
 
 - 后端通过 `requests` 下载任意 URL；只在可信输入环境下运行。
 - OpenClaw 命令通过 `subprocess.Popen(argv, shell=False)` 执行，模板来自用户可写的 `config/video_hive.yaml`；`{prompt_text}` 替换前经 null 字节剔除与 `shlex.quote` 清洗，OpenClaw skill 仓库在每次运行前强制 checkout 回锁定 ref 并剥离 `GIT_*` 环境变量；仍需确保该配置文件不被未信任用户修改。
-- SQLite 与视频存储均为本地，**无认证层**；uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何人都可删除 job、下载产物、触发执行。
+- PostgreSQL 与视频存储部署在受信网络内，但应用本身仍**无认证层**；uvicorn 默认绑定 127.0.0.1，启动脚本与 Makefile 均显式固定 `--host 127.0.0.1`。不要用 `--host 0.0.0.0` 把开发服务器暴露到局域网或任何不可信网络——暴露后任何人都可删除 job、下载产物、触发执行。
 - `data/` 已加入 `.gitignore`，禁止提交运行时数据或密钥。

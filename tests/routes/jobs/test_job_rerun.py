@@ -535,7 +535,7 @@ def test_rerun_node_rejects_active_lease(tmp_path):
 
     from fastapi.testclient import TestClient
 
-    from server.app.executors._lease_transactions import _sqlite_timestamp
+    from server.app.executors._lease_transactions import _database_timestamp
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
@@ -576,9 +576,9 @@ def test_rerun_node_rejects_active_lease(tmp_path):
                     "question_comprehension_info",
                     "review_key_info",
                     run["id"],
-                    _sqlite_timestamp(now),
-                    _sqlite_timestamp(now),
-                    _sqlite_timestamp(now + timedelta(seconds=300)),
+                    _database_timestamp(now),
+                    _database_timestamp(now),
+                    _database_timestamp(now + timedelta(seconds=300)),
                 ),
             )
         resp = c.post(f"/api/jobs/{job_id}/nodes/review_key_info/rerun")
@@ -592,7 +592,7 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
 
     from fastapi.testclient import TestClient
 
-    from server.app.executors._lease_transactions import _sqlite_timestamp
+    from server.app.executors._lease_transactions import _database_timestamp
     from server.app.main import create_app
 
     app = create_app(data_dir=tmp_path, start_worker=False)
@@ -634,9 +634,9 @@ def test_rerun_node_expired_lease_not_blocking(tmp_path):
                     "question_comprehension_info",
                     "review_key_info",
                     run["id"],
-                    _sqlite_timestamp(now),
-                    _sqlite_timestamp(now),
-                    _sqlite_timestamp(now - timedelta(seconds=1)),
+                    _database_timestamp(now),
+                    _database_timestamp(now),
+                    _database_timestamp(now - timedelta(seconds=1)),
                 ),
             )
         resp = c.post(f"/api/jobs/{job_id}/nodes/review_key_info/rerun")

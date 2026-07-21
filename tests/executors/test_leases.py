@@ -6,12 +6,13 @@ from pathlib import Path
 
 import pytest
 
-from server.app.db.connection import connect_sqlite
+from server.app.db.connection import connect_database
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.jobs import JobQueries
 from server.app.services import token_usage_lease
 from tests.helpers.executor_worker import allocate, bind
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _write_events(run_dir: Path, events: list[dict]) -> None:
@@ -26,7 +27,7 @@ def lease_repo(tmp_path: Path):
     data_dir = tmp_path / "data"
     data_dir.mkdir(parents=True)
     jobs_dir = data_dir / "jobs"
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir)
     repo = ExecutorLeaseRepository(db_path, job_db=job_db, data_dir=data_dir)
     return repo, job_db, data_dir
@@ -103,7 +104,7 @@ def test_finish_lease_captures_token_usage(lease_repo):
 
     assert repo.finish(claimed.lease_id, result) is True
 
-    with closing(connect_sqlite(repo.path)) as conn, conn:
+    with closing(connect_database(repo.path)) as conn, conn:
         row = conn.execute("select * from node_run_token_usage").fetchone()
 
     assert row is not None
@@ -158,7 +159,7 @@ def test_finish_lease_missing_events_does_not_fail_lease(lease_repo):
 
     assert repo.finish(claimed.lease_id, result) is True
 
-    with closing(connect_sqlite(repo.path)) as conn, conn:
+    with closing(connect_database(repo.path)) as conn, conn:
         row = conn.execute("select * from node_run_token_usage").fetchone()
 
     assert row is None
@@ -210,7 +211,7 @@ def test_finish_lease_unparseable_events_does_not_fail_lease(lease_repo):
 
     assert repo.finish(claimed.lease_id, result) is True
 
-    with closing(connect_sqlite(repo.path)) as conn, conn:
+    with closing(connect_database(repo.path)) as conn, conn:
         row = conn.execute("select * from node_run_token_usage").fetchone()
 
     assert row is None
@@ -262,7 +263,7 @@ def test_finish_lease_parses_events_outside_write_transaction(lease_repo, monkey
     assert in_transaction_at["parse"] is False
     assert in_transaction_at["persist"] is True
 
-    with closing(connect_sqlite(repo.path)) as conn, conn:
+    with closing(connect_database(repo.path)) as conn, conn:
         row = conn.execute("select * from node_run_token_usage").fetchone()
 
     assert row is not None

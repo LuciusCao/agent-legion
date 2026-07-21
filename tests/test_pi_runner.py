@@ -9,6 +9,7 @@ from server.app.workflows.pi_command_builder import build_pi_command
 from server.app.workflows.pi_config import PiConfig
 from server.app.workflows.pi_runner import PiRunner
 from server.app.workflows.skill_version import resolve_skill_version
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_build_pi_command_uses_fresh_session_and_one_explicit_skill(tmp_path):
@@ -287,7 +288,7 @@ def test_run_persists_node_run_and_finishes_it(tmp_path, monkeypatch):
     )
     validator.chmod(0o755)
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, tmp_path / "jobs")
     workspace = job_db.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -349,7 +350,7 @@ def test_run_persists_skill_version(tmp_path, monkeypatch):
     )
     validator.chmod(0o755)
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, tmp_path / "jobs")
     workspace = job_db.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -558,7 +559,7 @@ def test_run_persists_relative_paths_while_result_stays_absolute(tmp_path, monke
     )
     validator.chmod(0o755)
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, tmp_path / "jobs")
     workspace = job_db.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -623,7 +624,7 @@ def test_run_cleans_up_old_run_dirs_on_retry(tmp_path, monkeypatch):
     )
     validator.chmod(0o755)
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, tmp_path / "jobs")
     workspace = job_db.create_workspace(
         "test_ws", default_workflow_key="question_comprehension_info"
@@ -657,7 +658,7 @@ def test_run_cleans_up_old_run_dirs_on_retry(tmp_path, monkeypatch):
     # Reset the node so the retry can start a fresh node run.
     with job_db.connect() as conn:
         conn.execute(
-            "update job_nodes set status='ready', finished_at='', error_message='' "
+            "update job_nodes set status='ready', finished_at=null, error_message='' "
             "where job_id=? and node_key=?",
             (job["id"], "extract_keywords"),
         )

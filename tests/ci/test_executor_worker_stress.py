@@ -17,6 +17,7 @@ from tests.helpers.executor_worker import (
     make_registry,
     make_worker,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 class BlockingExecutor:
@@ -53,7 +54,7 @@ class BlockingExecutor:
 @pytest.mark.parametrize("seed", range(25, 50))
 def test_fairness_under_randomized_insertion_order(tmp_path: Path, seed: int) -> None:
     """Repeat fairness semantic checks across randomized job insertion order."""
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
 
     ws_a = job_db.create_workspace(

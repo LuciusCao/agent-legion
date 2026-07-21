@@ -23,6 +23,7 @@ from tests.helpers.executor_worker import (
     make_registry,
     make_worker,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 GRACE = 0.5
 
@@ -121,7 +122,7 @@ def _make_nodes() -> list[Any]:
 @pytest.mark.slow
 @pytest.mark.full_gate
 def test_worker_cancellation_recovery_releases_capacity(tmp_path: Path) -> None:
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     ws = job_db.create_workspace(
         "Cancel Recovery", default_workflow_key="question_comprehension_info"

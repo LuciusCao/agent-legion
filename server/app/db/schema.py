@@ -1,181 +1,35 @@
-import sqlite3
+from __future__ import annotations
+
 from pathlib import Path
 
-from server.app.db.connection import connect_sqlite
-from server.app.db.migrations import MIGRATIONS, run_migrations
+from server.app.db.bootstrap import bootstrap_default_workspace
+from server.app.db.connection import DatabaseDsn
+from server.app.db.transaction import write_transaction
+
+SCHEMA_VERSION = 1
+_SCHEMA_FILE = Path(__file__).with_name("postgres_schema.sql")
 
 
-def _execute_statements(conn: sqlite3.Connection, sql: str) -> None:
-    """Split and execute a multi-statement SQL script within the current transaction."""
-    for statement in sql.split(";"):
-        statement = statement.strip()
-        if statement:
-            conn.execute(statement)
-
-
-def init_db(path: Path) -> None:
-    """Create tables and run lightweight migrations."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    conn = connect_sqlite(path)
-    try:
-        with conn:
-            _execute_statements(
-                conn,
-                """
-                create table if not exists videos (
-                  id text primary key,
-                  source_url text not null,
-                  title text not null,
-                  content_type text not null default 'knowledge',
-                  external_id text not null default '',
-                  knowledge_code text not null default '',
-                  question_id text not null default '',
-                  source_uuid text not null default '',
-                  storage_dir text not null default '',
-                  current_phase text not null default 'download',
-                  status text not null default 'queued',
-                  duration real not null default 0,
-                  error_message text not null default '',
-                  created_at text not null default current_timestamp,
-                  updated_at text not null default current_timestamp
-                );
-                create table if not exists phase_runs (
-                  id integer primary key autoincrement,
-                  video_id text not null,
-                  phase_key text not null,
-                  status text not null,
-                  started_at text not null default current_timestamp,
-                  finished_at text,
-                  command_json text not null default '[]',
-                  exit_code integer,
-                  log_path text not null default '',
-                  error_message text not null default '',
-                  foreign key(video_id) references videos(id) on delete cascade
-                );
-                create table if not exists transcription_runs (
-                  id integer primary key autoincrement,
-                  video_id text not null,
-                  provider text not null,
-                  status text not null,
-                  started_at text not null default current_timestamp,
-                  finished_at text,
-                  srt_entry_count integer not null default 0,
-                  validation_summary text not null default '',
-                  fallback_reason text not null default '',
-                  foreign key(video_id) references videos(id) on delete cascade
-                );
-                create table if not exists packages (
-                  id integer primary key autoincrement,
-                  path text not null,
-                  created_at text not null default current_timestamp
-                );
-                create table if not exists workspaces (
-                  id text primary key,
-                  name text not null,
-                  description text not null default '',
-                  default_workflow_key text not null default 'question_comprehension_info',
-                  cms_config_json text not null default '{}',
-                  resource_config_json text not null default '{}',
-                  created_at text not null default current_timestamp,
-                  updated_at text not null default current_timestamp,
-                  default_entity text not null default 'question',
-                  intake_config_json text not null default '{}'
-                );
-                create table if not exists job_batches (
-                  id text primary key,
-                  workspace_id text not null,
-                  workflow_key text not null,
-                  source_kind text not null,
-                  source_payload_json text not null default '{}',
-                  status text not null default 'created',
-                  created_count integer not null default 0,
-                  error_message text not null default '',
-                  created_at text not null default current_timestamp,
-                  foreign key(workspace_id) references workspaces(id) on delete cascade
-                );
-                create table if not exists jobs (
-                  id text primary key,
-                  workspace_id text not null,
-                  workflow_key text not null,
-                  source_type text not null,
-                  source_id text not null,
-                  batch_id text not null default '',
-                  title text not null default '',
-                  status text not null default 'queued',
-                  storage_dir text not null default '',
-                  error_message text not null default '',
-                  created_at text not null default current_timestamp,
-                  updated_at text not null default current_timestamp,
-                  execution_mode text not null default 'full' check(execution_mode in ('full', 'until_node')),
-                  target_node_key text,
-                  execution_paused integer not null default 0 check(execution_paused in (0, 1)),
-                  pause_reason text not null default '',
-                  workflow_revision_id text not null default '',
-                  workflow_version integer,
-                  workflow_definition_hash text not null default '',
-                  workflow_definition_snapshot_json text not null default '',
-                  outcome text not null default '',
-                  foreign key(workspace_id) references workspaces(id) on delete cascade
-                );
-                create table if not exists job_nodes (
-                  id integer primary key autoincrement,
-                  job_id text not null,
-                  node_key text not null,
-                  status text not null default 'pending',
-                  stale_reason text not null default '',
-                  error_message text not null default '',
-                  started_at text,
-                  finished_at text,
-                  created_at text not null default current_timestamp,
-                  unique(job_id, node_key),
-                  foreign key(job_id) references jobs(id) on delete cascade
-                );
-                create table if not exists node_runs (
-                  id integer primary key autoincrement,
-                  job_id text not null,
-                  node_key text not null,
-                  status text not null,
-                  started_at text not null default current_timestamp,
-                  finished_at text,
-                  command_json text not null default '[]',
-                  exit_code integer,
-                  log_path text not null default '',
-                  error_message text not null default '',
-                  run_dir text not null default '',
-                  session_dir text not null default '',
-                  foreign key(job_id) references jobs(id) on delete cascade
-                );
-                """,
-            )
-
-        run_migrations(conn, MIGRATIONS)
-
-        # Performance indexes for issue 012. These are created after migrations
-        # so that columns added by V003 (e.g. videos.content_type) are present.
-        _execute_statements(
-            conn,
+def init_db(database_dsn: DatabaseDsn) -> None:
+    """Initialize or upgrade the PostgreSQL schema under a migration lock."""
+    with write_transaction(database_dsn) as conn:
+        conn.execute("select pg_advisory_xact_lock(hashtext('agent-legion-schema'))")
+        conn.execute(
             """
-            create index if not exists idx_videos_status on videos(status);
-            create index if not exists idx_videos_content_type_external_id on videos(content_type, external_id);
-            create index if not exists idx_videos_created_at on videos(created_at);
-            create index if not exists idx_phase_runs_video_id on phase_runs(video_id);
-            create index if not exists idx_phase_runs_video_id_status on phase_runs(video_id, status);
-            create index if not exists idx_transcription_runs_video_id on transcription_runs(video_id);
-            create index if not exists idx_jobs_workflow_status on jobs(workflow_key, status);
-            create index if not exists idx_jobs_workflow_source on jobs(workflow_key, source_type, source_id);
-            create index if not exists idx_workspaces_created_at on workspaces(created_at);
-            create index if not exists idx_job_batches_workspace on job_batches(workspace_id, created_at);
-            create index if not exists idx_jobs_workspace_workflow_status on jobs(workspace_id, workflow_key, status);
-            create index if not exists idx_jobs_workspace_workflow_source on jobs(workspace_id, workflow_key, source_type, source_id);
-            create index if not exists idx_job_nodes_job_status on job_nodes(job_id, status);
-            create index if not exists idx_node_runs_job_id on node_runs(job_id);
-            create index if not exists idx_node_runs_status_finished_at on node_runs(status, finished_at);
-            create index if not exists idx_jobs_status on jobs(status);
-            create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
-            create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
-            create index if not exists idx_node_runs_run_dir on node_runs(run_dir);
-            create index if not exists idx_node_run_token_usage_job_id on node_run_token_usage(job_id);
-            """,
+            create table if not exists schema_migrations (
+              version integer primary key,
+              name text not null,
+              applied_at timestamptz not null default current_timestamp
+            )
+            """
         )
-    finally:
-        conn.close()
+        applied = conn.execute(
+            "select version from schema_migrations where version = ?", (SCHEMA_VERSION,)
+        ).fetchone()
+        if applied is None:
+            conn.execute(_SCHEMA_FILE.read_text(encoding="utf-8"))
+            conn.execute(
+                "insert into schema_migrations(version, name) values (?, ?)",
+                (SCHEMA_VERSION, "postgresql_control_plane"),
+            )
+        bootstrap_default_workspace(conn)

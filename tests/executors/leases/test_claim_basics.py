@@ -192,7 +192,7 @@ def test_finish_is_idempotent_and_updates_job_aggregate_status(
     )
     assert claim is not None
 
-    data_dir = queries.path.parent
+    data_dir = queries.jobs_dir.parent
     run_dir = data_dir / "jobs" / workspace_id / job_id / "runs" / "review_keywords" / "abc"
     session_dir = run_dir / "session"
     result = ExecutionResult(
@@ -232,7 +232,7 @@ def test_finish_compresses_persisted_pi_event_stream(
     )
     assert claim is not None
 
-    data_dir = queries.path.parent
+    data_dir = queries.jobs_dir.parent
     run_dir = data_dir / "jobs" / workspace_id / job_id / "runs" / "review_keywords" / "run-1"
     run_dir.mkdir(parents=True)
     events = run_dir / "events.jsonl"

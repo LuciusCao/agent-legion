@@ -1,6 +1,5 @@
 import asyncio
 import json
-import sqlite3
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
 from unittest.mock import MagicMock
@@ -8,9 +7,10 @@ from unittest.mock import MagicMock
 import pytest
 from fastapi import Request
 
+from server.app.db.connection import DatabaseConnection, connect_database
 from server.app.event_bus import _EVICTED, InProcessEventBus, workspace_channel
 from server.app.events import JobEventManager
-from server.app.executors.leases import ExecutorLeaseRepository, _sqlite_timestamp
+from server.app.executors.leases import ExecutorLeaseRepository, _database_timestamp
 from server.app.executors.models import ConfigurationFailureRequest, ExecutionResult
 from server.app.job_events import (
     build_job_patch_batch_payload,
@@ -25,6 +25,7 @@ from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
 )
 from server.app.settings import Settings
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 class FakeJobDB:
@@ -56,7 +57,7 @@ class FakeJobDB:
 
     @contextmanager
     def lease_guarded_mutation(self, job_id, now, *, reject_running_nodes):
-        yield MagicMock(spec=sqlite3.Connection)
+        yield MagicMock(spec=DatabaseConnection)
 
     @staticmethod
     def mark_nodes_for_rerun_in_transaction(conn, job_id, node_keys, downstream_map):
@@ -114,16 +115,17 @@ def _insert_workspace_job(conn):
 def _insert_lease(conn, lease_id, expires_at, status="active"):
     _insert_workspace_job(conn)
     now = datetime.now(UTC)
-    now_str = _sqlite_timestamp(now)
+    now_str = _database_timestamp(now)
     conn.execute("insert into job_nodes(job_id, node_key, status) values ('j1', 'n1', 'pending')")
     cursor = conn.execute(
         """
         insert into node_runs(job_id, node_key, status, started_at)
         values ('j1', 'n1', 'running', ?)
+        returning id
         """,
         (now_str,),
     )
-    node_run_id = cursor.lastrowid
+    node_run_id = cursor.fetchone()["id"]
     conn.execute(
         """
         insert into executor_leases(
@@ -138,7 +140,7 @@ def _insert_lease(conn, lease_id, expires_at, status="active"):
             status,
             now_str,
             now_str,
-            _sqlite_timestamp(expires_at),
+            _database_timestamp(expires_at),
         ),
     )
 
@@ -166,12 +168,12 @@ def test_broadcast_isolated_by_workspace(manager):
 
 def test_finish_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
     expires_at = datetime.now(UTC) + timedelta(hours=1)
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_lease(conn, "l1", expires_at)
         conn.commit()
@@ -190,11 +192,11 @@ def test_finish_broadcasts_job_updated(manager, tmp_path):
 
 def test_fail_without_lease_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_workspace_job(conn)
         conn.execute(
@@ -224,12 +226,12 @@ def test_fail_without_lease_broadcasts_job_updated(manager, tmp_path):
 
 def test_expire_stale_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
     expires_at = datetime.now(UTC) - timedelta(seconds=1)
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_lease(conn, "l1", expires_at)
         conn.commit()
@@ -248,11 +250,11 @@ def test_expire_stale_broadcasts_job_updated(manager, tmp_path):
 
 def test_recover_orphaned_running_jobs_broadcasts_job_updated(manager, tmp_path):
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_workspace_job(conn)
         conn.execute("update jobs set status='running' where id='j1'")
@@ -274,12 +276,12 @@ def test_finish_rollback_does_not_broadcast(manager, tmp_path, monkeypatch):
     from server.app.executors import _lease_write_paths
 
     lease_repo = ExecutorLeaseRepository(
-        tmp_path / "leases.sqlite",
+        TEST_DATABASE_URL,
         job_db=FakeJobDB(),
         job_event_manager=manager,
     )
     expires_at = datetime.now(UTC) + timedelta(hours=1)
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_lease(conn, "l1", expires_at)
         conn.commit()
@@ -324,7 +326,7 @@ def test_connect_evicts_oldest_at_capacity():
 def test_job_deletion_broadcasts_job_deleted(manager, tmp_path):
     from server.app.services.job_deletion import JobDeletionService
 
-    lease_repo = ExecutorLeaseRepository(tmp_path / "leases.sqlite")
+    lease_repo = ExecutorLeaseRepository(TEST_DATABASE_URL)
     settings = MagicMock(spec=Settings)
     settings.logs_dir = tmp_path / "logs"
     settings.jobs_dir = tmp_path / "jobs"
@@ -344,7 +346,7 @@ def test_job_deletion_broadcasts_job_deleted(manager, tmp_path):
 def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
     from server.app.services.job_deletion import JobDeletionService
 
-    lease_repo = ExecutorLeaseRepository(tmp_path / "leases.sqlite")
+    lease_repo = ExecutorLeaseRepository(TEST_DATABASE_URL)
     settings = MagicMock(spec=Settings)
     settings.logs_dir = tmp_path / "logs"
     settings.jobs_dir = tmp_path / "jobs"
@@ -353,7 +355,7 @@ def test_job_deletion_active_lease_does_not_broadcast(manager, tmp_path):
     service = JobDeletionService(FakeJobDB(), lease_repo, settings, job_event_manager=manager)
 
     expires_at = datetime.now(UTC) + timedelta(hours=1)
-    conn = sqlite3.connect(lease_repo.path)
+    conn = connect_database(lease_repo.path)
     try:
         _insert_lease(conn, "l1", expires_at)
         conn.commit()
@@ -467,7 +469,7 @@ def test_run_to_broadcasts_job_updated(manager, tmp_path):
     from server.app.services.job_execution import JobExecutionService
     from server.app.workflows.definition import WorkflowDefinition, WorkflowIntake, WorkflowNode
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     jobs_dir = tmp_path / "jobs"
     job_db = JobQueries(db_path, jobs_dir)
 

@@ -5,14 +5,14 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from server.app.db.retry import retry_on_sqlite_lock
+from server.app.db.retry import retry_on_database_conflict
 from server.app.db.schema import init_db
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.events import JobEventManager
 from server.app.executors import _lease_write_paths
 from server.app.executors._lease_control import active_lease_counts
 from server.app.executors._lease_lifecycle import fail_without_lease
-from server.app.executors._lease_transactions import _sqlite_timestamp
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors.models import (
     ClaimedExecution,
     ConfigurationFailureRequest,
@@ -24,13 +24,13 @@ from server.app.jobs import JobQueries
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ExecutorLeaseRepository", "_sqlite_timestamp"]
+__all__ = ["ExecutorLeaseRepository"]
 
 
 class ExecutorLeaseRepository:
     def __init__(
         self,
-        path: Path,
+        path: str,
         job_db: JobQueries | None = None,
         job_event_manager: JobEventManager | None = None,
         data_dir: Path | None = None,
@@ -39,7 +39,7 @@ class ExecutorLeaseRepository:
         self.path = path
         self.job_db = job_db
         self.job_event_manager = job_event_manager
-        self.data_dir = data_dir or path.parent
+        self.data_dir = data_dir
         self.job_event_buffer = job_event_buffer
         init_db(path)
 
@@ -63,15 +63,15 @@ class ExecutorLeaseRepository:
     # full connect-and-transact unit on a fresh connection.
 
     def try_claim(self, request: LeaseClaimRequest) -> ClaimedExecution | None:
-        return retry_on_sqlite_lock(lambda: _lease_write_paths.try_claim(self, request))
+        return retry_on_database_conflict(lambda: _lease_write_paths.try_claim(self, request))
 
     def heartbeat(self, lease_id: str, ttl_seconds: int) -> bool:
-        return retry_on_sqlite_lock(
+        return retry_on_database_conflict(
             lambda: _lease_write_paths.heartbeat(self, lease_id, ttl_seconds)
         )
 
     def finish(self, lease_id: str, result: ExecutionResult) -> bool:
-        return retry_on_sqlite_lock(lambda: _lease_write_paths.finish(self, lease_id, result))
+        return retry_on_database_conflict(lambda: _lease_write_paths.finish(self, lease_id, result))
 
     def fail_without_lease(
         self, request: ConfigurationFailureRequest, error_message: str
@@ -84,7 +84,7 @@ class ExecutorLeaseRepository:
         return run_id
 
     def expire_stale(self, now: datetime) -> list[str]:
-        return retry_on_sqlite_lock(lambda: _lease_write_paths.expire_stale(self, now))
+        return retry_on_database_conflict(lambda: _lease_write_paths.expire_stale(self, now))
 
     def active_counts(self, executor_id: str) -> dict[str, int]:
         with read_connection(self.path) as conn:
@@ -94,7 +94,7 @@ class ExecutorLeaseRepository:
         with read_connection(self.path) as conn:
             row = conn.execute(
                 "select 1 from executor_leases where job_id=? and status='active' and expires_at>? limit 1",
-                (job_id, _sqlite_timestamp(now)),
+                (job_id, _database_timestamp(now)),
             ).fetchone()
             return row is not None
 
@@ -102,12 +102,12 @@ class ExecutorLeaseRepository:
         with read_connection(self.path) as conn:
             row = conn.execute(
                 "select 1 from executor_leases where job_id=? and node_key=? and status='active' and expires_at>? limit 1",
-                (job_id, node_key, _sqlite_timestamp(now)),
+                (job_id, node_key, _database_timestamp(now)),
             ).fetchone()
             return row is not None
 
     def recover_orphaned_running_jobs(self, now: datetime) -> list[str]:
         """Reset jobs stuck in 'running' with no active lease back to 'queued'."""
-        return retry_on_sqlite_lock(
+        return retry_on_database_conflict(
             lambda: _lease_write_paths.recover_orphaned_running_jobs(self, now)
         )

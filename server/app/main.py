@@ -8,14 +8,12 @@ from fastapi import FastAPI
 
 from server.app.agents import AgentStatusManager
 from server.app.db import Database
-from server.app.db.migrations.report import MigrationBlockedError
+from server.app.db.connection import close_database_pools
 from server.app.db.notifications import NotificationHub
 from server.app.event_bus import InProcessEventBus
 from server.app.events import JobEventManager
-from server.app.executors.backup import legacy_backup_path
 from server.app.executors.config import RemoteExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.legacy_migration import finalize_legacy_executor_schema
 from server.app.executors.registry import ExecutorRegistry, RuntimeDependencies
 from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.remote_completion import RemoteCompletionHandler
@@ -44,7 +42,6 @@ from server.app.spa import mount_spa
 from server.app.startup_tasks import BackgroundTasks
 from server.app.worker_control import WorkspaceWorkerControl
 from server.app.workflow_worker_thread import WorkflowWorkerThread
-from server.app.workflows.registry import list_registered_workflows
 
 
 def build_executor_registry(
@@ -90,8 +87,8 @@ def create_app(
     )
     job_event_manager = JobEventManager(event_bus)
     hub = NotificationHub()
-    db = Database(settings.data_dir / "video_hive.sqlite", hub=hub, videos_dir=settings.videos_dir)
-    job_db = JobQueries(settings.data_dir / "video_hive.sqlite", jobs_dir=settings.jobs_dir)
+    db = Database(settings.database_url, hub=hub, videos_dir=settings.videos_dir)
+    job_db = JobQueries(settings.database_url, jobs_dir=settings.jobs_dir)
     workspace_worker_control = WorkspaceWorkerControl(db_path=job_db.path)
     # capability -> requires_labels from every remote executor definition,
     # for label-affinity filtering at dequeue time.
@@ -117,29 +114,6 @@ def create_app(
     job_event_buffer, workspace_event_aggregator = build_workspace_event_aggregator(
         job_db, settings, job_event_manager.bus
     )
-    definitions = list_registered_workflows(settings.root_dir)
-    with job_db.connect() as conn:
-        try:
-            finalize_legacy_executor_schema(
-                conn,
-                definitions,
-                settings.executor_definitions,
-                backup_path=legacy_backup_path(job_db.path),
-            )
-        except MigrationBlockedError as exc:
-            check_cmd = (
-                "UV_CACHE_DIR=.uv-cache uv run python "
-                "scripts/finalize-workspace-executor-migration.py --check"
-            )
-            logging.getLogger(__name__).error(
-                "Workspace executor finalization blocked:\n%s\n\nRun: %s",
-                exc.report.to_json(),
-                check_cmd,
-            )
-            raise RuntimeError(
-                f"Workspace executor finalization blocked: {exc.report.to_json()}. "
-                f"Run `{check_cmd}` for details."
-            ) from exc
     backfill_package_stats(db, settings)
     workflow_worker_thread: WorkflowWorkerThread | None = None
     sweeper_thread: SweeperThread | None = None
@@ -160,6 +134,7 @@ def create_app(
                 executor_leases = ExecutorLeaseRepository(
                     job_db.path,
                     job_db=job_db,
+                    data_dir=settings.data_dir,
                     job_event_manager=job_event_manager,
                     job_event_buffer=job_event_buffer,
                 )
@@ -204,12 +179,15 @@ def create_app(
                 except Exception:
                     logging.getLogger(__name__).exception("workflow worker failed to start")
         background_tasks.start(app)
-        yield
-        background_tasks.stop(app)
-        if sweeper_thread is not None:
-            sweeper_thread.stop()
-        if workflow_worker_thread is not None:
-            workflow_worker_thread.stop()
+        try:
+            yield
+        finally:
+            background_tasks.stop(app)
+            if sweeper_thread is not None:
+                sweeper_thread.stop()
+            if workflow_worker_thread is not None:
+                workflow_worker_thread.stop()
+            close_database_pools()
 
     app = FastAPI(title="Agent Legion", lifespan=lifespan)
     add_http_middleware(app, settings)

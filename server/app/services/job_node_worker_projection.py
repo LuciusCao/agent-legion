@@ -11,12 +11,10 @@ is the representative value (a badge only needs one).
 
 from __future__ import annotations
 
-from pathlib import Path
-
 from server.app.db.transaction import read_connection
 
 
-def claimed_worker_map(db_path: Path, job_id: str) -> dict[str, str]:
+def claimed_worker_map(db_path: str, job_id: str) -> dict[str, str]:
     """Map ``node_key`` to the worker that claimed its active remote execution."""
     with read_connection(db_path) as conn:
         rows = conn.execute(

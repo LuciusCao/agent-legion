@@ -14,6 +14,7 @@ from server.app.executors.remote_broker import (
     RemoteExecutionPayload,
     RemoteOutcome,
 )
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _now() -> datetime:
@@ -22,7 +23,7 @@ def _now() -> datetime:
 
 @pytest.fixture
 def broker(tmp_path: Path) -> RemoteExecutionBroker:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     init_db(db_path)
     return RemoteExecutionBroker(db_path, tmp_path / "bundles", claim_timeout_seconds=60.0)
 

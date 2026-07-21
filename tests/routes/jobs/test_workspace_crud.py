@@ -1,3 +1,6 @@
+from tests.postgres_support import TEST_DATABASE_URL
+
+
 def test_startup_creates_question_comprehension_workspace(client):
     with client as c:
         response = c.get("/api/workspaces")
@@ -184,7 +187,7 @@ def test_delete_workspace_returns_404_for_unknown_workspace(tmp_path):
 def test_create_workspace_stores_default_entity_and_intake_config(tmp_path):
     from server.app.jobs import JobQueries
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "Intake WS",
@@ -200,7 +203,7 @@ def test_create_workspace_stores_default_entity_and_intake_config(tmp_path):
 def test_create_workspace_uses_default_entity_and_intake_config_defaults(tmp_path):
     from server.app.jobs import JobQueries
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     workspace = queries.create_workspace(
         "Default WS", default_workflow_key="question_comprehension_info"
@@ -213,7 +216,7 @@ def test_create_workspace_uses_default_entity_and_intake_config_defaults(tmp_pat
 def test_update_workspace_persists_default_entity_and_intake_config(tmp_path):
     from server.app.jobs import JobQueries
 
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     queries = JobQueries(db_path, tmp_path / "jobs")
     created = queries.create_workspace(
         "Update WS", default_workflow_key="question_comprehension_info"

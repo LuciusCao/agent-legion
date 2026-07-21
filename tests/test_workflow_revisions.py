@@ -15,10 +15,11 @@ from server.app.services.workflow_revision_format import (
 )
 from server.app.services.workflow_revisions import WorkflowRevisionService
 from server.app.workflows.definition import load_workflow_definition
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_publish_and_get_active_revision(tmp_path: Path) -> None:
-    queries = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     service = WorkflowRevisionService(queries)
@@ -36,7 +37,7 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
 
 
 def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
-    queries = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     service = WorkflowRevisionService(queries)
@@ -85,7 +86,7 @@ edges: []
 
 
 def test_publish_validation_reports_missing_executor_binding(tmp_path: Path) -> None:
-    queries = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
 
@@ -100,7 +101,7 @@ def test_publish_validation_reports_missing_executor_binding(tmp_path: Path) -> 
 
 
 def test_failed_publish_validation_preserves_active_revision(tmp_path: Path) -> None:
-    queries = JobQueries(tmp_path / "jobs.sqlite", tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     service = WorkflowRevisionService(queries)

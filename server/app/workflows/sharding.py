@@ -15,9 +15,10 @@ transactions or connections.
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import UTC, datetime
 from typing import Literal
+
+from server.app.db.connection import DatabaseConnection
 
 ShardStatus = Literal["pending", "running", "completed", "failed"]
 
@@ -28,13 +29,12 @@ class ShardLimitExceeded(Exception):
     """Raised when a shard fan-out exceeds the node's ``max_shards`` limit."""
 
 
-def _now() -> str:
-    # Same UTC format as executors._lease_transactions._sqlite_timestamp.
-    return datetime.now(UTC).strftime("%Y-%m-%d %H:%M:%S.%f")
+def _now() -> datetime:
+    return datetime.now(UTC)
 
 
 def materialize_shards(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     job_id: str,
     node_key: str,
     inputs: list[dict],
@@ -44,7 +44,7 @@ def materialize_shards(
     """Insert one pending shard row per input in a single executemany batch.
 
     Idempotent: re-materializing the same (job_id, node_key) is a no-op for
-    existing rows (``insert or ignore``). Returns the total number of shard
+    existing rows (``on conflict do nothing``). Returns the total number of shard
     rows for the node after the call. Raises :class:`ShardLimitExceeded`
     before writing anything when ``inputs`` exceeds ``max_shards``.
     """
@@ -54,8 +54,8 @@ def materialize_shards(
         )
     conn.executemany(
         """
-        insert or ignore into node_shards(job_id, node_key, shard_index, input_json)
-        values (?, ?, ?, ?)
+        insert into node_shards(job_id, node_key, shard_index, input_json)
+        values (?, ?, ?, ?) on conflict(job_id, node_key, shard_index) do nothing
         """,
         [(job_id, node_key, index, json.dumps(item)) for index, item in enumerate(inputs)],
     )
@@ -63,10 +63,10 @@ def materialize_shards(
         "select count(*) as cnt from node_shards where job_id=? and node_key=?",
         (job_id, node_key),
     ).fetchone()
-    return int(row["cnt"])
+    return int(row["cnt"]) if row is not None else 0
 
 
-def aggregate_shard_state(conn: sqlite3.Connection, job_id: str, node_key: str) -> ShardStatus:
+def aggregate_shard_state(conn: DatabaseConnection, job_id: str, node_key: str) -> ShardStatus:
     """Collapse shard statuses into the node's aggregate state.
 
     Precedence: all completed -> ``completed``; any failed -> ``failed`` (a
@@ -91,7 +91,7 @@ def aggregate_shard_state(conn: sqlite3.Connection, job_id: str, node_key: str) 
 
 
 def on_shard_finished(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     job_id: str,
     node_key: str,
     shard_index: int,
@@ -117,12 +117,12 @@ def on_shard_finished(
 
 
 def try_start_shard(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     job_id: str,
     node_key: str,
     shard_index: int,
     execution_id: str,
-    started_at: str,
+    started_at: datetime | str,
 ) -> bool:
     """Flip one pending shard to running under its own execution_id.
 
@@ -157,7 +157,7 @@ def try_start_shard(
     return True
 
 
-def has_pending_shards(conn: sqlite3.Connection, job_id: str, node_key: str) -> bool:
+def has_pending_shards(conn: DatabaseConnection, job_id: str, node_key: str) -> bool:
     """Return True when the node still has pending shards to dispatch.
 
     The ready layer uses this to keep offering a shard node whose aggregate
@@ -173,7 +173,7 @@ def has_pending_shards(conn: sqlite3.Connection, job_id: str, node_key: str) -> 
 
 
 def shard_index_for_execution(
-    conn: sqlite3.Connection, job_id: str, node_key: str, execution_id: str
+    conn: DatabaseConnection, job_id: str, node_key: str, execution_id: str
 ) -> int | None:
     """Return the shard index claimed under ``execution_id``, or None."""
     row = conn.execute(
@@ -183,7 +183,7 @@ def shard_index_for_execution(
     return int(row["shard_index"]) if row is not None else None
 
 
-def failed_shard_error(conn: sqlite3.Connection, job_id: str, node_key: str) -> str:
+def failed_shard_error(conn: DatabaseConnection, job_id: str, node_key: str) -> str:
     """Return the first failed shard's error message (deterministic aggregate error)."""
     row = conn.execute(
         """
@@ -196,7 +196,7 @@ def failed_shard_error(conn: sqlite3.Connection, job_id: str, node_key: str) -> 
     return str(row["error_message"]) if row is not None else ""
 
 
-def read_shard_outputs(conn: sqlite3.Connection, job_id: str, node_key: str) -> list[str]:
+def read_shard_outputs(conn: DatabaseConnection, job_id: str, node_key: str) -> list[str]:
     """Return shard ``output_json`` payloads ordered by shard_index."""
     rows = conn.execute(
         "select output_json from node_shards where job_id=? and node_key=? order by shard_index",

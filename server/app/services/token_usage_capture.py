@@ -1,14 +1,14 @@
 from __future__ import annotations
 
-import sqlite3
 from pathlib import Path
 from typing import Any
 
+from server.app.db.connection import DatabaseConnection
 from server.app.services.token_usage import parse_run_usage, persist_node_run_usage
 
 
 def capture_and_persist_token_usage(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     run_dir: Path,
     node_run: dict[str, Any],
     workspace_id: str = "",
@@ -20,7 +20,7 @@ def capture_and_persist_token_usage(
 
 
 def capture_and_persist_token_usage_for_lease(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     lease: dict[str, Any],
     data_dir: Path,
 ) -> None:

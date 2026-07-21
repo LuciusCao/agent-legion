@@ -4,10 +4,11 @@ import pytest
 
 from server.app.jobs.queries import JobQueries
 from server.app.workflows.definition import load_workflow_definition
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def test_create_batch_and_question_jobs(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     workspace = queries.create_workspace(
         "default", default_workflow_key="question_comprehension_info"
     )
@@ -42,7 +43,7 @@ def test_create_batch_and_question_jobs(tmp_path):
 
 
 def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     workspace = queries.create_workspace(
         "Math Sprint", default_workflow_key="question_comprehension_info"
@@ -81,7 +82,7 @@ def test_workspaces_isolate_jobs_with_same_source_id(tmp_path):
 
 
 def test_node_run_lifecycle(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
         workflow_key="question_comprehension_info",
@@ -105,7 +106,7 @@ def test_node_run_lifecycle(tmp_path):
 
 
 def test_start_node_run_claims_each_node_only_once(tmp_path):
-    db_path = tmp_path / "video_hive.sqlite"
+    db_path = TEST_DATABASE_URL
     first = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     second = JobQueries(db_path, jobs_dir=tmp_path / "jobs")
     first.create_workspace("default", default_workflow_key="question_comprehension_info")
@@ -128,7 +129,7 @@ def test_start_node_run_claims_each_node_only_once(tmp_path):
 
 
 def test_create_job_rejects_identity_collision(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     queries.create_job(
         workflow_key="question_comprehension_info",
@@ -153,7 +154,7 @@ def test_create_job_rejects_identity_collision(tmp_path):
 
 
 def test_start_node_run_rejects_missing_node(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
         workflow_key="question_comprehension_info",
@@ -172,7 +173,7 @@ def test_start_node_run_rejects_missing_node(tmp_path):
 
 
 def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     definition = load_workflow_definition(Path("config/workflows/question_comprehension_info.yaml"))
     job = queries.create_job(
@@ -215,7 +216,7 @@ def test_mark_node_for_rerun_marks_downstream_stale(tmp_path):
 
 
 def test_mark_node_for_rerun_rejects_missing_persisted_node(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
         workflow_key="question_comprehension_info",
@@ -232,7 +233,7 @@ def test_mark_node_for_rerun_rejects_missing_persisted_node(tmp_path):
 
 
 def test_start_node_run_clears_stale_reason(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
         workflow_key="question_comprehension_info",
@@ -260,7 +261,7 @@ def test_start_node_run_clears_stale_reason(tmp_path):
 
 
 def test_start_node_run_persists_run_and_session_directories(tmp_path):
-    queries = JobQueries(tmp_path / "video_hive.sqlite", jobs_dir=tmp_path / "jobs")
+    queries = JobQueries(TEST_DATABASE_URL, jobs_dir=tmp_path / "jobs")
     queries.create_workspace("default", default_workflow_key="question_comprehension_info")
     job = queries.create_job(
         workflow_key="question_comprehension_info",

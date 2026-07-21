@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import json
 import logging
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from server.app.db.connection import DatabaseConnection
 from server.app.storage_paths import ManagedPathError, resolve_data_path
 
 logger = logging.getLogger(__name__)
@@ -19,7 +19,7 @@ class SkillVersionBackfillResult:
 
 
 def backfill_node_run_skill_versions(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     data_dir: Path,
 ) -> SkillVersionBackfillResult:
     """Backfill empty node_runs.skill_version values from run.json files."""
@@ -68,7 +68,7 @@ def _read_run_skill_version(data_dir: Path, run_dir: str, run_id: int) -> str:
 
 
 def _refresh_manifests(
-    conn: sqlite3.Connection,
+    conn: DatabaseConnection,
     data_dir: Path,
     job_ids: set[str],
 ) -> int:
@@ -88,7 +88,7 @@ def _refresh_manifests(
     return updated
 
 
-def _job_versions(conn: sqlite3.Connection, job_id: str) -> dict[str, str]:
+def _job_versions(conn: DatabaseConnection, job_id: str) -> dict[str, str]:
     rows = conn.execute(
         """
         select node_key, skill_version
@@ -104,7 +104,7 @@ def _job_versions(conn: sqlite3.Connection, job_id: str) -> dict[str, str]:
     return versions
 
 
-def _jobs_with_persisted_versions(conn: sqlite3.Connection) -> set[str]:
+def _jobs_with_persisted_versions(conn: DatabaseConnection) -> set[str]:
     rows = conn.execute(
         "select distinct job_id from node_runs where skill_version != ''"
     ).fetchall()

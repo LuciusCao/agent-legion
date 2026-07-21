@@ -7,6 +7,7 @@ dependencies = [
   "fastapi",
   "filelock",
   "funasr>=1.3.1",
+  "psycopg[binary,pool]>=3.2",
   "pydantic",
   "pyyaml",
   "requests",

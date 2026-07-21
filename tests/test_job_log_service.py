@@ -13,6 +13,7 @@ from server.app.services.job_log_raw import MAX_RAW_LOG_BYTES, PayloadTooLargeEr
 from server.app.services.job_logs import JobLogService
 from server.app.settings import Settings
 from server.app.storage_paths import make_data_relative
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 def _create_job_with_run(
@@ -42,7 +43,7 @@ def _create_job_with_run(
 
 @pytest.fixture
 def log_service(tmp_path: Path) -> tuple[JobLogService, Settings, JobQueries]:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     logs_dir = tmp_path / "logs"
@@ -64,7 +65,7 @@ def log_service(tmp_path: Path) -> tuple[JobLogService, Settings, JobQueries]:
 def log_service_with_secret_config(
     tmp_path: Path,
 ) -> tuple[JobLogService, Settings, JobQueries]:
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     jobs_dir = tmp_path / "jobs"
     jobs_dir.mkdir(parents=True, exist_ok=True)
     logs_dir = tmp_path / "logs"

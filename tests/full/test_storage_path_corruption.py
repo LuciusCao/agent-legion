@@ -1,6 +1,6 @@
 """Full-gate evidence for SECURITY-PATH-001.
 
-Creates real SQLite records with malicious ``storage_dir`` values and exercises
+Creates real PostgreSQL records with malicious ``storage_dir`` values and exercises
 public delete/read services. Asserts that:
 
 - failure is closed (no unhandled crash);
@@ -24,6 +24,7 @@ from server.app.services.video_actions import delete_video_record
 from server.app.settings import Settings
 from server.app.storage_paths import ManagedPathError
 from tests.helpers import ensure_legacy_workspace_tables
+from tests.postgres_support import TEST_DATABASE_URL
 
 pytestmark = pytest.mark.full_gate
 
@@ -109,7 +110,7 @@ def _create_job_with_malicious_storage(job_db: JobQueries, malicious_storage_dir
 
 def test_video_delete_rejects_outside_sibling_storage(tmp_path: Path) -> None:
     settings = _video_settings(tmp_path)
-    db = Database(settings.data_dir / "video_hive.sqlite")
+    db = Database(TEST_DATABASE_URL)
 
     outside = tmp_path / "outside"
     outside.mkdir()
@@ -131,7 +132,7 @@ def test_video_delete_rejects_outside_sibling_storage(tmp_path: Path) -> None:
 
 def test_video_delete_rejects_symlink_escape_storage(tmp_path: Path) -> None:
     settings = _video_settings(tmp_path)
-    db = Database(settings.data_dir / "video_hive.sqlite")
+    db = Database(TEST_DATABASE_URL)
 
     outside = tmp_path / "outside_target"
     outside.mkdir()
@@ -156,7 +157,7 @@ def test_video_delete_rejects_symlink_escape_storage(tmp_path: Path) -> None:
 
 def test_video_delete_rejects_root_itself_storage(tmp_path: Path) -> None:
     settings = _video_settings(tmp_path)
-    db = Database(settings.data_dir / "video_hive.sqlite")
+    db = Database(TEST_DATABASE_URL)
 
     video_id = _create_video_with_malicious_storage(
         db,
@@ -172,7 +173,7 @@ def test_video_delete_rejects_root_itself_storage(tmp_path: Path) -> None:
 
 def test_job_delete_rejects_outside_sibling_storage(tmp_path: Path) -> None:
     settings = _job_settings(tmp_path)
-    job_db_path = settings.data_dir / "jobs.sqlite"
+    job_db_path = TEST_DATABASE_URL
     job_db = JobQueries(job_db_path, settings.jobs_dir)
     ensure_legacy_workspace_tables(job_db)
     lease_repo = ExecutorLeaseRepository(job_db.path)
@@ -199,7 +200,7 @@ def test_job_delete_rejects_outside_sibling_storage(tmp_path: Path) -> None:
 
 def test_job_delete_rejects_symlink_escape_storage(tmp_path: Path) -> None:
     settings = _job_settings(tmp_path)
-    job_db_path = settings.data_dir / "jobs.sqlite"
+    job_db_path = TEST_DATABASE_URL
     job_db = JobQueries(job_db_path, settings.jobs_dir)
     ensure_legacy_workspace_tables(job_db)
     lease_repo = ExecutorLeaseRepository(job_db.path)
@@ -229,7 +230,7 @@ def test_job_delete_rejects_symlink_escape_storage(tmp_path: Path) -> None:
 
 def test_job_artifact_read_rejects_outside_storage(tmp_path: Path) -> None:
     settings = _job_settings(tmp_path)
-    job_db_path = settings.data_dir / "jobs.sqlite"
+    job_db_path = TEST_DATABASE_URL
     job_db = JobQueries(job_db_path, settings.jobs_dir)
     ensure_legacy_workspace_tables(job_db)
     service = JobArtifactService(job_db)
@@ -253,7 +254,7 @@ def test_job_artifact_read_rejects_outside_storage(tmp_path: Path) -> None:
 
 def test_job_artifact_read_rejects_symlink_escape_storage(tmp_path: Path) -> None:
     settings = _job_settings(tmp_path)
-    job_db_path = settings.data_dir / "jobs.sqlite"
+    job_db_path = TEST_DATABASE_URL
     job_db = JobQueries(job_db_path, settings.jobs_dir)
     ensure_legacy_workspace_tables(job_db)
     service = JobArtifactService(job_db)

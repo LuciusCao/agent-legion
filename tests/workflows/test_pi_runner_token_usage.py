@@ -9,6 +9,7 @@ import pytest
 from server.app.jobs import JobQueries
 from server.app.workflows.pi_config import PiConfig
 from server.app.workflows.pi_runner import PiRunner
+from tests.postgres_support import TEST_DATABASE_URL
 
 
 @pytest.fixture
@@ -75,7 +76,7 @@ def test_pi_runner_captures_token_usage(skill_dir: Path, tmp_path: Path, monkeyp
     jobs_dir = data_dir / "jobs"
     job_dir = jobs_dir / "ws-1" / "job-1"
     job_dir.mkdir(parents=True)
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir)
     _setup_job(job_db)
 
@@ -125,7 +126,7 @@ def test_pi_runner_token_usage_failure_does_not_fail_run(
     jobs_dir = data_dir / "jobs"
     job_dir = jobs_dir / "ws-1" / "job-1"
     job_dir.mkdir(parents=True)
-    db_path = tmp_path / "jobs.sqlite"
+    db_path = TEST_DATABASE_URL
     job_db = JobQueries(db_path, jobs_dir)
     _setup_job(job_db)
 
