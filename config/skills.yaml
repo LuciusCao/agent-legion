@@ -19,10 +19,10 @@ skills:
     ref: v1.0.1
   video_knowledge/generate_interactions:
     repo: file:///Users/user/.agents/skills/agent-legion/video_knowledge/generate_interactions
-    ref: v1.0.1
+    ref: v1.0.2
   video_knowledge/review_subtitles:
     repo: file:///Users/user/.agents/skills/agent-legion/video_knowledge/review_subtitles
     ref: v1.0.2
   video_knowledge/review_video_content:
     repo: file:///Users/user/.agents/skills/agent-legion/video_knowledge/review_video_content
-    ref: v1.0.1
+    ref: v1.0.3

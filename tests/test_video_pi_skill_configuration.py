@@ -17,13 +17,13 @@ VIDEO_SKILLS = {
     },
     "video_knowledge/generate_interactions": {
         "repo": "file:///Users/user/.agents/skills/agent-legion/video_knowledge/generate_interactions",
-        "ref": "v1.0.1",
-        "commit": "d1314b8bade2edb3a7ee634d53ba020e3d052596",
+        "ref": "v1.0.2",
+        "commit": "afb50c54ec0f1f87851c39debe306a3e027c07b4",
     },
     "video_knowledge/review_video_content": {
         "repo": "file:///Users/user/.agents/skills/agent-legion/video_knowledge/review_video_content",
-        "ref": "v1.0.1",
-        "commit": "9fa830e36370dfe7e1e3dcc48c01b0c3d086802b",
+        "ref": "v1.0.3",
+        "commit": "b319ca1fa1a93d14b1c59469655ff0aaeaecc6a5",
     },
 }
 
