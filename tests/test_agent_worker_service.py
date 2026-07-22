@@ -11,6 +11,7 @@ import pytest
 import yaml
 from fastapi.testclient import TestClient
 
+import scripts.agent_worker_service as service_module
 import scripts.agent_worker_service_state as state_module
 from scripts.agent_worker_service import create_app
 from scripts.agent_worker_service_state import (
@@ -215,6 +216,88 @@ def test_local_api_partial_update_keeps_unspecified_fields(tmp_path: Path) -> No
     assert config["max_concurrency"] == 9
     assert config["worker_id"] == "worker-1"
     assert config["host_url"] == "http://host.test:8000"
+
+
+def _make_revoke_harness(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[WorkerConfigStore, FakeSupervisor, Any, list[tuple[str, str, str]]]:
+    token_file = tmp_path / "register-token"
+    token_file.write_text("management-token\n", encoding="utf-8")
+    store = WorkerConfigStore(tmp_path / "state")
+    store.write(validate_config({**_config(), "register_token_file": str(token_file)}))
+    supervisor = FakeSupervisor(store)
+    calls: list[tuple[str, str, str]] = []
+
+    class FakeHostClient:
+        def __init__(self, host: str) -> None:
+            self.host = host
+
+        def revoke(self, worker_id: str, management_token: str) -> None:
+            calls.append((self.host, worker_id, management_token))
+
+    monkeypatch.setattr(service_module, "Client", FakeHostClient)
+    return store, supervisor, create_app(supervisor, tmp_path), calls
+
+
+def test_put_config_revokes_previous_worker_id_before_restart(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, supervisor, app, calls = _make_revoke_harness(tmp_path, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={**public_config(store.read()), "worker_id": "worker-2"},
+            headers=_auth(store),
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["config"]["worker_id"] == "worker-2"
+    # 旧 Host 地址 + 旧 worker_id + register_token_file 里的 management token。
+    assert calls == [("http://host.test:8000", "worker-1", "management-token")]
+    assert supervisor.restarts == 1
+
+
+def test_put_config_without_worker_id_change_does_not_revoke(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, supervisor, app, calls = _make_revoke_harness(tmp_path, monkeypatch)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={**public_config(store.read()), "name": "Renamed Worker"},
+            headers=_auth(store),
+        )
+
+    assert response.status_code == 200
+    assert response.json()["config"]["name"] == "Renamed Worker"
+    assert calls == []
+    assert supervisor.restarts == 1
+
+
+def test_put_config_revoke_failure_still_saves_and_restarts(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store, supervisor, app, calls = _make_revoke_harness(tmp_path, monkeypatch)
+
+    def failing_revoke(self: Any, worker_id: str, management_token: str) -> None:
+        calls.append((self.host, worker_id, management_token))
+        raise RuntimeError("connection refused")
+
+    monkeypatch.setattr(service_module.Client, "revoke", failing_revoke)
+
+    with TestClient(app) as client:
+        response = client.put(
+            "/api/config",
+            json={**public_config(store.read()), "worker_id": "worker-2"},
+            headers=_auth(store),
+        )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["config"]["worker_id"] == "worker-2"
+    assert calls == [("http://host.test:8000", "worker-1", "management-token")]
+    assert supervisor.restarts == 1
 
 
 def test_api_requires_bearer_token_except_health(tmp_path: Path) -> None:

@@ -281,6 +281,47 @@ def test_agent_register_token_management_api(tmp_path: Path) -> None:
         assert unknown.status_code == 404
 
 
+def test_agent_worker_revoke_api(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+    _seed_request(app.state.job_db, job_id="job-1", limit=2)
+
+    with TestClient(app) as client:
+        # Management endpoints require the global management token.
+        unauthenticated = client.post("/api/agent-workers/home-mini/revoke")
+        assert unauthenticated.status_code == 401
+        wrong = client.post(
+            "/api/agent-workers/home-mini/revoke",
+            headers={"X-Agent-Worker-Register-Token": "nope"},
+        )
+        assert wrong.status_code == 401
+
+        # Unknown worker_id is a 404.
+        unknown = client.post("/api/agent-workers/no-such/revoke", headers=_MANAGEMENT)
+        assert unknown.status_code == 404
+
+        token = _register(client)["worker_token"]
+        revoked = client.post("/api/agent-workers/home-mini/revoke", headers=_MANAGEMENT)
+        assert revoked.status_code == 200, revoked.text
+        assert revoked.json() == {"worker_id": "home-mini", "revoked": True}
+
+        # The revoked Worker's credential is dead: authenticate rejects it, so
+        # the claim poll fails before ever reaching the broker.
+        claim = client.post(
+            "/api/agent-executions/claim",
+            headers={"X-Agent-Worker-Token": token},
+            json={"worker_id": "home-mini"},
+        )
+        assert claim.status_code in (401, 409)
+
+        listed = client.get("/api/agent-workers").json()["workers"]
+        assert listed[0]["revoked"] is True
+
+        # Re-revoke is idempotent: the row still exists, so it succeeds again.
+        again = client.post("/api/agent-workers/home-mini/revoke", headers=_MANAGEMENT)
+        assert again.status_code == 200
+        assert again.json() == {"worker_id": "home-mini", "revoked": True}
+
+
 def test_register_with_scoped_token_stores_and_returns_scope(tmp_path: Path) -> None:
     app = _make_app(tmp_path)
     _seed_request(app.state.job_db, job_id="job-1", limit=2)

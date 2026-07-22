@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 import secrets
 from contextlib import asynccontextmanager
 from pathlib import Path
@@ -14,7 +15,10 @@ from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import FileResponse, HTMLResponse
 from pydantic import BaseModel
 
+from scripts.agent_worker import Client
 from scripts.agent_worker_service_state import WorkerConfigStore, WorkerSupervisor, public_config
+
+logger = logging.getLogger(__name__)
 
 
 class WorkerConfigPayload(BaseModel):
@@ -29,6 +33,21 @@ class WorkerConfigPayload(BaseModel):
     poll_interval_seconds: float | None = None
     heartbeat_interval_seconds: float | None = None
     shutdown_grace_seconds: float | None = None
+
+
+def _revoke_previous_worker(config: dict[str, Any]) -> None:
+    """Best-effort：改 worker_id 前在 Host 上吊销旧注册。
+
+    失败只记 warning 不阻断保存——退化为旧行为（旧 worker_id 无心跳后离线残留）。"""
+    host_url = str(config.get("host_url", ""))
+    worker_id = str(config.get("worker_id", ""))
+    if not host_url or not worker_id:
+        return
+    try:
+        token = Path(str(config["register_token_file"])).read_text(encoding="utf-8").strip()
+        Client(host_url).revoke(worker_id, token)
+    except Exception as exc:  # noqa: BLE001 — best-effort，任何失败都不阻断保存
+        logger.warning("吊销旧 Worker %s 失败，继续保存新配置：%s", worker_id, exc)
 
 
 def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
@@ -78,7 +97,12 @@ def create_app(supervisor: WorkerSupervisor, ui_dir: Path) -> FastAPI:
     @app.put("/api/config", dependencies=guarded)
     def put_config(payload: WorkerConfigPayload) -> dict[str, Any]:
         try:
-            config = supervisor.store.update_public(payload.model_dump(exclude_none=True))
+            fields = payload.model_dump(exclude_none=True)
+            previous = supervisor.store.read(require_identity=False)
+            new_worker_id = fields.get("worker_id")
+            if new_worker_id is not None and new_worker_id != previous["worker_id"]:
+                _revoke_previous_worker(previous)
+            config = supervisor.store.update_public(fields)
             supervisor.restart()
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc

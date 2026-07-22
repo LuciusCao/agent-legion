@@ -91,6 +91,16 @@ class Client:
         self.token = str(json.loads(body)["worker_token"])
         return self.token
 
+    def revoke(self, worker_id: str, management_token: str) -> None:
+        """Revoke a Worker registration on the Host (same credential as register)."""
+        status, body = self.request(
+            "POST",
+            f"/api/agent-workers/{worker_id}/revoke",
+            headers={"X-Agent-Worker-Register-Token": management_token},
+        )
+        if status != 200:
+            raise RuntimeError(f"Agent Worker revoke failed: HTTP {status}: {body[:300]!r}")
+
     def claim(self, worker_id: str) -> dict[str, Any] | None:
         status, body = self.request(
             "POST",
