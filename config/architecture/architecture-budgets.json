@@ -20,6 +20,8 @@
     "frontend/src/components/AgentRoutingSection.tsx": 188,
     "frontend/src/components/AgentStatusIndicator.module.css": 84,
     "frontend/src/components/AgentStatusIndicator.tsx": 82,
+    "frontend/src/components/AgentWorkerStatusList.module.css": 47,
+    "frontend/src/components/AgentWorkerStatusList.tsx": 63,
     "frontend/src/components/AppBar.module.css": 37,
     "frontend/src/components/AppBar.tsx": 60,
     "frontend/src/components/AppBarSubtitle.module.css": 33,

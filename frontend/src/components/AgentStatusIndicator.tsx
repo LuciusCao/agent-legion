@@ -3,6 +3,7 @@ import { IconButton, Switch } from '@mui/material'
 import { MaterialIcon } from './MaterialIcon'
 import { AgentConnectionDot } from './AgentConnectionDot'
 import { useUiStore } from '../stores/uiStore'
+import { AgentWorkerStatusList } from './AgentWorkerStatusList'
 import styles from './AgentStatusIndicator.module.css'
 
 export interface AgentStatusIndicatorProps {
@@ -53,6 +54,8 @@ export function AgentStatusIndicator({
           <span className={styles.controlLabel}>自动调度</span>
           <Switch checked={!workerPaused} onChange={togglePause} />
         </div>
+        <div className={styles.divider} />
+        <AgentWorkerStatusList workspaceId={workspaceId} />
         <div className={styles.divider} />
         {agents.length === 0 ? (
           <div className={styles.empty}>暂无可用 Worker</div>

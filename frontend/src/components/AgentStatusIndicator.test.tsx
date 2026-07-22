@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, act } from '@testing-library/react'
 import { AgentStatusIndicator } from './AgentStatusIndicator'
-import { useExecutorsStore } from '../stores/executorsStore'
+import { useExecutorsStore, type WorkerSummary } from '../stores/executorsStore'
 import { createMockUiState } from '../testing/fixtures'
 import { makeAgentStatus } from '../testing/workspaceFixtures'
 import type { AgentStatus } from '../types'
@@ -9,6 +9,24 @@ import type { AgentStatus } from '../types'
 const fetchWorkerStatusMock = vi.fn()
 const setWorkerPausedMock = vi.fn()
 const showToastMock = vi.fn()
+const refreshWorkersMock = vi.fn()
+
+function makeWorker(overrides: Partial<WorkerSummary> = {}): WorkerSummary {
+  return {
+    worker_id: 'worker-1',
+    name: 'Company Mac',
+    runtimes: ['pi'],
+    max_concurrency: 10,
+    labels: {},
+    protocol_version: 1,
+    registered_at: '2026-07-22 02:13:04',
+    last_seen_at: '2026-07-22 02:15:31',
+    online: true,
+    revoked: false,
+    allowed_workspaces: [],
+    ...overrides,
+  }
+}
 
 let mockWorkerPausedByWorkspace: Record<string, boolean> = {}
 let mockAgents: AgentStatus[] = [
@@ -41,7 +59,12 @@ describe('AgentStatusIndicator', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockWorkerPausedByWorkspace = {}
-    useExecutorsStore.setState({ workers: [], connectionStatus: {} })
+    useExecutorsStore.setState({
+      workers: [],
+      connectionStatus: {},
+      refreshWorkers: refreshWorkersMock,
+    })
+    refreshWorkersMock.mockResolvedValue(undefined)
     mockAgents = [
       makeAgentStatus({
         id: 'main',
@@ -161,5 +184,78 @@ describe('AgentStatusIndicator', () => {
     expect(
       screen.queryByTestId('agents-connection-status')
     ).not.toBeInTheDocument()
+  })
+
+  it('refreshes registered workers on mount', () => {
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    expect(refreshWorkersMock).toHaveBeenCalled()
+  })
+
+  it('shows online and offline chips with last-seen heartbeat', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({ worker_id: 'w-online', name: 'Online Mac', online: true }),
+        makeWorker({
+          worker_id: 'w-offline',
+          name: 'Offline Mac',
+          online: false,
+          last_seen_at: '2026-07-22 01:00:00',
+        }),
+      ],
+    })
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    expect(screen.getByText('已注册 Worker')).toBeInTheDocument()
+    expect(screen.getByText('Online Mac')).toBeInTheDocument()
+    expect(screen.getByText('Offline Mac')).toBeInTheDocument()
+    expect(screen.getByText('在线')).toHaveAttribute(
+      'title',
+      '最近心跳 2026-07-22 02:15:31'
+    )
+    expect(screen.getByText('离线')).toHaveAttribute(
+      'title',
+      '最近心跳 2026-07-22 01:00:00'
+    )
+  })
+
+  it('filters workers by allowed workspaces; empty list means all workspaces', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({ worker_id: 'w-global', name: 'Global Mac' }),
+        makeWorker({
+          worker_id: 'w-scoped',
+          name: 'Scoped Mac',
+          allowed_workspaces: ['ws1'],
+        }),
+        makeWorker({
+          worker_id: 'w-other',
+          name: 'Other Mac',
+          allowed_workspaces: ['ws2'],
+        }),
+      ],
+    })
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    expect(screen.getByText('Global Mac')).toBeInTheDocument()
+    expect(screen.getByText('Scoped Mac')).toBeInTheDocument()
+    expect(screen.queryByText('Other Mac')).not.toBeInTheDocument()
+  })
+
+  it('does not show revoked workers', () => {
+    useExecutorsStore.setState({
+      workers: [
+        makeWorker({
+          worker_id: 'w-revoked',
+          name: 'Revoked Mac',
+          revoked: true,
+        }),
+      ],
+    })
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    expect(screen.queryByText('Revoked Mac')).not.toBeInTheDocument()
+    expect(screen.getByText('暂无已注册 Worker')).toBeInTheDocument()
+  })
+
+  it('shows empty state when no registered worker matches', () => {
+    render(<AgentStatusIndicator workspaceId="ws1" />)
+    expect(screen.getByText('暂无已注册 Worker')).toBeInTheDocument()
   })
 })
