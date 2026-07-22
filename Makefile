@@ -26,6 +26,11 @@ dev-backend: ## 启动后端开发服务器 (127.0.0.1:8000)
 dev-frontend: ## 启动前端开发服务器
 	cd $(FRONTEND_DIR) && $(NPM) run dev
 
+AGENT_WORKER_CONFIG ?= config/agent-worker.yaml
+.PHONY: dev-worker
+dev-worker: ## 启动本机 Agent Worker（配置见 config/agent-worker.yaml）
+	$(UV) run python scripts/agent_worker.py --config "$(AGENT_WORKER_CONFIG)"
+
 .PHONY: llm-gateway
 llm-gateway: ## 从 Pi models.json 读取凭据并启动远程 LLM 网关
 	$(UV) run python scripts/remote/llm_gateway.py \

@@ -126,6 +126,31 @@ def test_run_execution_pre_spawn_failure_reports_failed(tmp_path: Path) -> None:
     assert "host unreachable" in client.reports[0]["error_message"]
 
 
+def test_run_execution_model_error_with_exit_zero_reports_failed(tmp_path: Path) -> None:
+    # Pi exits 0 even when the model call fails (e.g. provider 401); the
+    # worker must scan its own events file and report the real error instead
+    # of "completed" with no artifacts.
+    event = json.dumps(
+        {
+            "message": {
+                "role": "assistant",
+                "stopReason": "error",
+                "errorMessage": "401: Authentication Fails",
+            }
+        }
+    )
+    script = _write_executable(
+        tmp_path / "fake_pi",
+        f"#!/usr/bin/env python3\nprint({event!r})\n",
+    )
+    client = FakeClient(_make_bundle(tmp_path, _manifest([script])))
+    _run(client, tmp_path / "work")
+    assert len(client.reports) == 1
+    report = client.reports[0]
+    assert report["status"] == "failed"
+    assert "401" in report["error_message"]
+
+
 def test_run_execution_heartbeat_409_kills_run_and_skips_report(tmp_path: Path) -> None:
     script = _write_executable(
         tmp_path / "sleeper", "#!/usr/bin/env python3\nimport time\ntime.sleep(60)\n"
