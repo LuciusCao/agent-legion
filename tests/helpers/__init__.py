@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -137,6 +136,16 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
             shutil.copy2(src_file, workflows_dst / src_file.name)
 
     from server.app import main as app_main
+    from server.app.agent_catalog import load_agent_definitions
+    from server.app.configuration import load_application_config
+    from tests.postgres_support import TEST_DATABASE_URL
+
+    # The app boots against the isolated test schema with the real Agent
+    # catalog: the Settings defaults (public dev database_url, empty catalog)
+    # would otherwise make startup sync wipe the dev database's agent state.
+    agent_definitions = load_agent_definitions(
+        load_application_config(real_root).config.get("agents", {})
+    )
 
     def fake_load_settings(
         data_dir: Path | None = None, config_path: Path | None = None
@@ -150,9 +159,8 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
             packages_dir=resolved / "packages",
             jobs_dir=resolved / "jobs",
             config={},
-            database_url=os.environ.get(
-                "VIDEO_HIVE_DATABASE_URL", "postgresql://127.0.0.1:5432/agent_legion"
-            ),
+            database_url=TEST_DATABASE_URL,
+            agent_definitions=agent_definitions,
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)

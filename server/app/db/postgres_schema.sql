@@ -127,6 +127,16 @@ create table if not exists workspace_node_capacities (
   primary key(workspace_id, workflow_key, node_key)
 );
 
+-- Workspace-level Agent execution capacity (supersedes per-node
+-- workspace_node_capacities for Agent routing; the node table remains only
+-- as a legacy projection that publish now prunes). A workspace WITHOUT a row
+-- has no configured Agent limit and is treated as unlimited at claim time.
+create table if not exists workspace_agent_capacities (
+  workspace_id text primary key references workspaces(id) on delete cascade,
+  max_concurrency integer not null check(max_concurrency > 0),
+  updated_at timestamptz not null default current_timestamp
+);
+
 create table if not exists job_batches (
   id text primary key,
   workspace_id text not null references workspaces(id) on delete cascade,
@@ -263,8 +273,27 @@ create table if not exists agent_workers (
   labels_json text not null default '{}',
   protocol_version integer not null,
   token_hash text not null,
+  -- Server-resolved workspace admission scope: '[]' means all workspaces
+  -- (the pre-v7 behavior for already-registered workers). Populated only from
+  -- the registration credential (global register token or scoped token),
+  -- never from Worker-supplied fields.
+  allowed_workspaces_json text not null default '[]',
   registered_at timestamptz not null,
   last_seen_at timestamptz not null,
+  revoked_at timestamptz
+);
+alter table agent_workers add column if not exists allowed_workspaces_json text not null default '[]';
+
+-- Workspace-scoped Agent Worker registration tokens (EXEC-WORKERACL-001).
+-- workspace_id NULL means the token admits Workers to ALL workspaces; a
+-- scoped row admits only its workspace. Only token_hash is stored; the
+-- plaintext is returned exactly once at issuance.
+create table if not exists agent_register_tokens (
+  id text primary key,
+  token_hash text not null,
+  workspace_id text references workspaces(id) on delete cascade,
+  label text not null default '',
+  created_at timestamptz not null default current_timestamp,
   revoked_at timestamptz
 );
 
@@ -380,3 +409,15 @@ create index if not exists idx_node_run_token_usage_skill_version on node_run_to
 create index if not exists idx_node_runs_run_dir on node_runs(run_dir);
 create index if not exists idx_node_run_token_usage_job_id on node_run_token_usage(job_id);
 create index if not exists idx_artifact_refs_hash on artifact_refs(hash);
+
+-- One-time seed (schema v6): the legacy per-workspace `pi` executor
+-- allocation was the de-facto workspace-level Agent limit before
+-- workspace_agent_capacities existed. This runs only inside the
+-- version-gated replay (once per SCHEMA_VERSION bump) and uses
+-- `on conflict do nothing`, so values an operator later edits through
+-- workspace settings are never overwritten by a later replay.
+insert into workspace_agent_capacities(workspace_id, max_concurrency)
+select workspace_id, concurrency_limit
+from workspace_executor_allocations
+where executor_id = 'pi'
+on conflict(workspace_id) do nothing;

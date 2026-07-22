@@ -113,3 +113,28 @@ def test_sync_agent_definitions_replaces_enabled_catalog(job_db) -> None:
         ).fetchone()
     assert disabled is not None
     assert disabled["enabled"] == 0
+
+
+def test_sync_agent_definitions_refuses_empty_catalog_over_enabled_rows(job_db) -> None:
+    # The autouse fixture already synced the configured catalog (enabled rows exist).
+    with pytest.raises(ValueError, match="empty Agent catalog"):
+        sync_agent_definitions(TEST_DATABASE_URL, {})
+
+    with job_db.connect() as conn:
+        enabled = conn.execute(
+            "select count(*) as c from agent_definitions where enabled=1"
+        ).fetchone()
+    assert enabled["c"] > 0
+
+
+def test_sync_agent_definitions_allows_empty_catalog_when_nothing_enabled(job_db) -> None:
+    with job_db.connect() as conn:
+        conn.execute("update agent_definitions set enabled=0")
+
+    sync_agent_definitions(TEST_DATABASE_URL, {})
+
+    with job_db.connect() as conn:
+        remaining = conn.execute(
+            "select count(*) as c from agent_definitions where enabled=1"
+        ).fetchone()
+    assert remaining["c"] == 0

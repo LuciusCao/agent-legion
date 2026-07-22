@@ -85,8 +85,25 @@ def sync_agent_definitions(
     database_dsn: DatabaseDsn,
     definitions: Mapping[str, AgentDefinition],
 ) -> None:
-    """Persist the configured Agent Catalog as an immutable execution snapshot source."""
+    """Persist the configured Agent Catalog as an immutable execution snapshot source.
+
+    Fail-fast guard: an empty mapping combined with already-enabled rows means the
+    `agents:` configuration section regressed (wrong file, bad merge, failed
+    load). Disabling every Agent silently would cascade into route pruning and
+    fall back to legacy executor bindings, so refuse the sync instead.
+    """
     with write_transaction(database_dsn) as conn:
+        if not definitions:
+            enabled_row = conn.execute(
+                "select count(*) as c from agent_definitions where enabled=1"
+            ).fetchone()
+            enabled_count = int(enabled_row["c"]) if enabled_row is not None else 0
+            if enabled_count:
+                raise ValueError(
+                    f"empty Agent catalog would disable {enabled_count} enabled Agent"
+                    " Definition(s); refusing to sync — check the `agents:`"
+                    " configuration section"
+                )
         conn.execute("update agent_definitions set enabled=0, updated_at=current_timestamp")
         for agent_id, definition in definitions.items():
             definition_json = json.dumps(

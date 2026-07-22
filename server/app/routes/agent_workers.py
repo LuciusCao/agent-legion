@@ -4,6 +4,7 @@ import hmac
 import json
 import re
 import uuid
+from pathlib import PurePosixPath
 from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -23,6 +24,7 @@ _LEASE_HEADER = "x-agent-lease-id"
 _MAX_COMMAND_PARTS = 64
 _MAX_OUTPUT_ARTIFACTS = 128
 _MAX_ERROR_MESSAGE_CHARS = 4000
+_MAX_RUN_DIR_CHARS = 256
 
 
 class RegisterAgentWorkerRequest(BaseModel):
@@ -38,6 +40,37 @@ class RegisterAgentWorkerRequest(BaseModel):
 
 class RegisterAgentWorkerResponse(BaseModel):
     worker_token: str
+    # Server-resolved workspace admission scope; [] means all workspaces.
+    allowed_workspaces: list[str]
+
+
+class CreateAgentRegisterTokenRequest(BaseModel):
+    workspace_id: str | None = Field(default=None, max_length=128)
+    label: str = Field(default="", max_length=128)
+
+
+class AgentRegisterTokenCreatedResponse(BaseModel):
+    token_id: str
+    # Plaintext, returned exactly once at issuance.
+    register_token: str
+    workspace_id: str | None
+    label: str
+
+
+class AgentRegisterTokenSummary(BaseModel):
+    token_id: str
+    workspace_id: str | None
+    label: str
+    created_at: str
+    revoked: bool
+
+
+class AgentRegisterTokensResponse(BaseModel):
+    tokens: list[AgentRegisterTokenSummary]
+
+
+class AgentRegisterTokenRevokeResponse(BaseModel):
+    revoked: bool
 
 
 class ClaimAgentExecutionRequest(BaseModel):
@@ -51,8 +84,13 @@ class AgentWorkerSummary(BaseModel):
     max_concurrency: int
     labels: dict[str, str]
     protocol_version: int
+    # Server-side workspace admission scope; [] means all workspaces.
+    allowed_workspaces: list[str]
     registered_at: str
     last_seen_at: str
+    # True while the Worker's last authenticated call is within the online
+    # threshold; registered-but-silent Workers show as offline.
+    online: bool
     revoked: bool
 
 
@@ -100,18 +138,29 @@ def _parse_result_metadata(raw: str) -> tuple[AgentOutcome, dict[str, Any]]:
     if any(not _ARTIFACT_REF.fullmatch(ref) for ref in output_artifacts.values()):
         raise ValueError("invalid output artifact reference")
     error_message = str(metadata.get("error_message", ""))[:_MAX_ERROR_MESSAGE_CHARS]
+    run_dir_raw = metadata.get("run_dir", "")
+    if not isinstance(run_dir_raw, str) or len(run_dir_raw) > _MAX_RUN_DIR_CHARS:
+        raise ValueError("invalid run_dir")
+    run_dir_relative = PurePosixPath(run_dir_raw)
+    run_dir = ""
+    if run_dir_raw:
+        if run_dir_relative.is_absolute() or ".." in run_dir_relative.parts:
+            raise ValueError("invalid run_dir")
+        run_dir = run_dir_relative.as_posix()
     outcome = AgentOutcome(
         status=status,  # type: ignore[arg-type]
         exit_code=exit_code,
         error_message=error_message,
         command=tuple(str(part) for part in command_raw),
         output_artifacts=output_artifacts,
+        run_dir=run_dir,
     )
     record = {
         "status": status,
         "exit_code": exit_code,
         "error_message": error_message,
         "output_artifacts": output_artifacts,
+        "run_dir": run_dir,
     }
     return outcome, record
 
@@ -131,6 +180,22 @@ def create_agent_workers_router(
         supplied = request.headers.get("x-agent-worker-register-token", "")
         if not hmac.compare_digest(supplied, config.register_token):
             raise HTTPException(status_code=401, detail="invalid Agent Worker registration token")
+
+    def resolve_registration_scope(request: Request) -> list[str]:
+        """Resolve the presented registration credential to a workspace scope.
+
+        The global register token admits Workers to ALL workspaces ([]); a
+        scoped register token (agent_register_tokens) admits only its
+        workspace. Anything else is rejected."""
+        supplied = request.headers.get("x-agent-worker-register-token", "")
+        if not supplied:
+            raise HTTPException(status_code=401, detail="missing Agent Worker registration token")
+        if config.register_token and hmac.compare_digest(supplied, config.register_token):
+            return []
+        scope = registry.resolve_register_scope(supplied)
+        if scope is None:
+            raise HTTPException(status_code=401, detail="invalid Agent Worker registration token")
+        return scope
 
     def authorize_worker(request: Request, worker_id: str | None = None) -> dict[str, Any]:
         token = request.headers.get("x-agent-worker-token", "")
@@ -163,15 +228,56 @@ def create_agent_workers_router(
         status_code=201,
         response_model=RegisterAgentWorkerResponse,
     )
-    def register(payload: RegisterAgentWorkerRequest, request: Request) -> dict[str, str]:
-        authorize_management(request)
+    def register(
+        payload: RegisterAgentWorkerRequest, request: Request
+    ) -> RegisterAgentWorkerResponse:
+        scope = resolve_registration_scope(request)
         if payload.protocol_version < config.min_protocol_version:
             raise HTTPException(status_code=400, detail="unsupported Agent Worker protocol")
         try:
-            token = registry.issue_token(**payload.model_dump())
+            token = registry.issue_token(**payload.model_dump(), allowed_workspaces=scope)
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc)) from exc
-        return {"worker_token": token}
+        return RegisterAgentWorkerResponse(worker_token=token, allowed_workspaces=scope)
+
+    @router.post(
+        "/agent-register-tokens",
+        status_code=201,
+        response_model=AgentRegisterTokenCreatedResponse,
+    )
+    def create_register_token(
+        payload: CreateAgentRegisterTokenRequest, request: Request
+    ) -> AgentRegisterTokenCreatedResponse:
+        authorize_management(request)
+        try:
+            token_id, plaintext = registry.issue_register_token(
+                workspace_id=payload.workspace_id, label=payload.label
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        return AgentRegisterTokenCreatedResponse(
+            token_id=token_id,
+            register_token=plaintext,
+            workspace_id=payload.workspace_id,
+            label=payload.label,
+        )
+
+    @router.get("/agent-register-tokens", response_model=AgentRegisterTokensResponse)
+    def list_register_tokens(request: Request) -> AgentRegisterTokensResponse:
+        authorize_management(request)
+        return AgentRegisterTokensResponse.model_validate(
+            {"tokens": registry.list_register_tokens()}
+        )
+
+    @router.post(
+        "/agent-register-tokens/{token_id}/revoke",
+        response_model=AgentRegisterTokenRevokeResponse,
+    )
+    def revoke_register_token(token_id: str, request: Request) -> AgentRegisterTokenRevokeResponse:
+        authorize_management(request)
+        if not registry.revoke_register_token(token_id):
+            raise HTTPException(status_code=404, detail="Agent register token not found")
+        return AgentRegisterTokenRevokeResponse(revoked=True)
 
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers() -> AgentWorkersResponse:

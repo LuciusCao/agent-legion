@@ -54,3 +54,10 @@ def test_node_max_concurrency_is_optional_for_local_compatibility() -> None:
     raw["nodes"]["agent"].pop("max_concurrency")
     definition = workflow_definition_from_mapping(raw)
     assert definition.nodes["agent"].max_concurrency is None
+
+
+def test_node_max_concurrency_is_deprecated_but_still_parsed() -> None:
+    """Agent capacity is workspace-level; a declared value parses (snapshot
+    compatibility) but no longer gates Agent routing or capacity."""
+    definition = workflow_definition_from_mapping(_workflow())
+    assert definition.nodes["agent"].max_concurrency == 20

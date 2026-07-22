@@ -114,5 +114,15 @@ export function executorActions(set: SettingStoreSet) {
         return { ...nextState, isDirty: computeDirty(nextState) }
       })
     },
+    setAgentCapacity(capacity: number) {
+      set((state) => {
+        const executorConfiguration = {
+          ...state.executorConfiguration,
+          agent_capacity: capacity,
+        }
+        const nextState = { ...state, executorConfiguration }
+        return { ...nextState, isDirty: computeDirty(nextState) }
+      })
+    },
   }
 }

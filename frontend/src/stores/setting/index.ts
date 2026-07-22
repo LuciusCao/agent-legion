@@ -29,6 +29,7 @@ export const useSettingStore = create<SettingState>((set, get) => ({
   executorConfiguration: defaultExecutorConfiguration,
   originalExecutorConfiguration: null,
   pendingAllocationRemoval: null,
+  agentRoutes: [],
 
   setWorkspaceId(id) {
     set({ workspaceId: id })

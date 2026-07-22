@@ -302,9 +302,118 @@ describe('settingStore', () => {
   it('fetchSettings keeps defaults on 404', async () => {
     const err = Object.assign(new Error('Not Found'), { status: 404 })
     mockApi.mockRejectedValueOnce(err)
+    mockApi.mockResolvedValue({})
     await useSettingStore.getState().fetchSettings('ws1')
     expect(useSettingStore.getState().settings).toEqual(defaultState.settings)
     expect(useSettingStore.getState().saveError).toBeNull()
+  })
+
+  it('fetchSettings hydrates agent_capacity into executorConfiguration', async () => {
+    mockApi.mockImplementation((path: string) => {
+      if (path === '/api/workspaces/ws1') {
+        return Promise.resolve({
+          workspace: { name: 'Test Workspace', description: '' },
+        })
+      }
+      return Promise.resolve({})
+    })
+    mockGetExecutorCatalog.mockResolvedValue({ executors: [] })
+    mockGetWorkspaceExecutorConfiguration.mockResolvedValue({
+      allocations: [],
+      bindings: [],
+      node_limits: [],
+      migration_warnings: [],
+      agent_capacity: 7,
+    })
+
+    await useSettingStore.getState().fetchSettings('ws1')
+
+    const state = useSettingStore.getState()
+    expect(state.executorConfiguration.agent_capacity).toBe(7)
+    expect(state.originalExecutorConfiguration?.agent_capacity).toBe(7)
+    expect(state.isDirty).toBe(false)
+  })
+
+  it('setAgentCapacity updates executorConfiguration and marks dirty', () => {
+    useSettingStore.setState({
+      originalSettings: defaultSettings,
+      executorConfiguration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+        agent_capacity: null,
+      },
+      originalExecutorConfiguration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+        agent_capacity: null,
+      },
+    })
+
+    useSettingStore.getState().setAgentCapacity(5)
+
+    const state = useSettingStore.getState()
+    expect(state.executorConfiguration.agent_capacity).toBe(5)
+    expect(state.isDirty).toBe(true)
+  })
+
+  it('saveAll sends agent_capacity only when it is set', async () => {
+    mockApi.mockResolvedValue({
+      workspace: { name: 'Test', description: '' },
+      settings: defaultSettings,
+      executor_configuration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+        agent_capacity: 6,
+      },
+    })
+    useSettingStore.setState({
+      executorConfiguration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+        agent_capacity: 6,
+      },
+    })
+
+    await useSettingStore.getState().saveAll()
+    let body = JSON.parse(mockApi.mock.calls[0][1]?.body as string)
+    expect(body.agent_capacity).toBe(6)
+    expect(
+      useSettingStore.getState().executorConfiguration.agent_capacity
+    ).toBe(6)
+
+    mockApi.mockClear()
+    mockApi.mockResolvedValue({
+      workspace: { name: 'Test', description: '' },
+      settings: defaultSettings,
+      executor_configuration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+        agent_capacity: null,
+      },
+    })
+    useSettingStore.setState({
+      executorConfiguration: {
+        allocations: [],
+        bindings: [],
+        node_limits: [],
+        migration_warnings: [],
+        agent_capacity: null,
+      },
+    })
+
+    await useSettingStore.getState().saveAll()
+    body = JSON.parse(mockApi.mock.calls[0][1]?.body as string)
+    expect('agent_capacity' in body).toBe(false)
   })
 
   it('fetchSettings clears stale saveError on success', async () => {
@@ -583,7 +692,10 @@ describe('settingStore', () => {
     const state = useSettingStore.getState()
     expect(state.workspaceName).toBe('Saved')
     expect(state.originalWorkspaceName).toBe('Saved')
-    expect(state.originalExecutorConfiguration).toEqual(responseConfiguration)
+    expect(state.originalExecutorConfiguration).toEqual({
+      ...responseConfiguration,
+      agent_capacity: null,
+    })
     expect(state.isDirty).toBe(false)
   })
 

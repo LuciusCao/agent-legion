@@ -267,6 +267,30 @@ class WorkspaceQueriesMixin(JobQueriesBase):
         with self.connect() as conn:
             return get_workspace_executor_configuration(conn, workspace_id)
 
+    def get_workspace_agent_capacity(self, workspace_id: str) -> int | None:
+        """Current workspace-level Agent concurrency limit; None when unset."""
+        with self._connect_read() as conn:
+            row = conn.execute(
+                "select max_concurrency from workspace_agent_capacities where workspace_id=?",
+                (workspace_id,),
+            ).fetchone()
+        return int(row["max_concurrency"]) if row is not None else None
+
+    def set_workspace_agent_capacity(self, workspace_id: str, max_concurrency: int) -> None:
+        if max_concurrency <= 0:
+            raise ValueError("Agent capacity must be a positive integer")
+        with self.connect() as conn:
+            conn.execute(
+                """
+                insert into workspace_agent_capacities(workspace_id, max_concurrency, updated_at)
+                values (?, ?, current_timestamp)
+                on conflict(workspace_id) do update set
+                  max_concurrency=excluded.max_concurrency,
+                  updated_at=current_timestamp
+                """,
+                (workspace_id, max_concurrency),
+            )
+
     def get_workspace_executor_runtime_counts(self, workspace_id: str) -> list[dict[str, Any]]:
         """Return per-executor allocation, binding, and active-lease counts.
 

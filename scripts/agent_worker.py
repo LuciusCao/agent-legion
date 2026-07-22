@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """Agent Legion Worker: concurrent pull supervisor for Pi/OpenClaw Agent executions."""
 
+# ruff: noqa: E402
+
 from __future__ import annotations
 
 import argparse
@@ -11,6 +13,7 @@ import os
 import shutil
 import signal
 import subprocess
+import sys
 import tarfile
 import threading
 import time
@@ -21,6 +24,12 @@ from pathlib import Path, PurePosixPath
 from typing import Any
 
 import yaml
+
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from server.app.workflows.pi_protocol import detect_model_error
 
 PROTOCOL_VERSION = 1
 CLAIM_BACKOFF_CAP_SECONDS = 60.0
@@ -324,7 +333,15 @@ def run_execution(
                             tar.add(output_path, arcname=str(name))
                     tar.add(run_dir, arcname=str(run_dir.relative_to(job_dir)))
                 if exit_code == 0:
-                    status, error = "completed", ""
+                    # Pi exits 0 even when the model call fails (e.g. provider
+                    # 401). The events file is worker-local and trustworthy, so
+                    # scan it here and report the real failure instead of a
+                    # misleading "missing outputs".
+                    model_error = detect_model_error(events)
+                    if model_error:
+                        status, error = "failed", model_error
+                    else:
+                        status, error = "completed", ""
                 elif shutdown.is_set():
                     status, error = "cancelled", "Agent Worker is shutting down"
                 else:
@@ -335,6 +352,10 @@ def run_execution(
                     "error_message": error,
                     "command": command,
                     "output_artifacts": outputs,
+                    # Host-side observability (DAG log view + token usage) reads
+                    # events.jsonl from this dir after the archive is unpacked;
+                    # it never feeds success/failure decisions.
+                    "run_dir": PurePosixPath(run_dir.relative_to(job_dir)).as_posix(),
                 }
     except Exception as exc:
         metadata["error_message"] = str(exc)

@@ -25,16 +25,18 @@ exemptions:
     artifact store, completion handler, and Host scheduler in one lifecycle.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 237
+  ceiling: 248
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
     in worker_control_state (upsert on pause/resume, uncached reads on is_paused);
-    the single cohesive class outgrows the in-memory-era baseline and the budget
-    will be re-ratcheted if the module shrinks.
+    reset_all_to_paused runs once at control-plane startup because resume state
+    must not survive a restart. The single cohesive class outgrows the
+    in-memory-era baseline and the budget will be re-ratcheted if the module
+    shrinks.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase2-state-externalization.md#task-8
-  ceiling: 58
+  ceiling: 83
 - check: architecture.file_budget
   path: server/app/agents.py
   reason: Task 9 of the phase1 event-bus plan routes agent WS broadcasts through
@@ -45,7 +47,7 @@ exemptions:
     agent_idle) and buffers per-agent incremental events between flushes.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 282
+  ceiling: 325
 - check: architecture.file_budget
   path: frontend/src/components/QuestionContentPanel.tsx
   reason: Task 2 of the socratic-question-inline-display plan adds the local SocraticQuestion
@@ -64,12 +66,13 @@ exemptions:
 - check: architecture.file_budget
   path: server/app/jobs/queries/workflow_revisions.py
   reason: Task 1 of the workflow-studio-ux-refinement plan adds the get_workflow_revision
-    query; Agent Legion now atomically materializes Agent routes and node capacities
-    with revision publication, pruning rows absent from the new projection. Extract
-    the projection write helper after rollout.
+    query; Agent Legion atomically materializes Agent routes with revision publication
+    (per-node capacities were replaced by workspace-level workspace_agent_capacities),
+    pruning rows absent from the new projection. Extract the projection write helper
+    after rollout.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-02-workflow-studio-change-review.md#task-1
-  ceiling: 253
+  ceiling: 216
 - check: architecture.file_budget
   path: server/app/routes/workflow_revisions.py
   reason: Task 1 of the workflow-studio-ux-refinement plan adds the revision detail
@@ -153,7 +156,7 @@ exemptions:
   reason: Composition adds the Agent Worker control-plane router and artifact authentication dependency.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 105
+  ceiling: 110
 - check: architecture.file_budget
   path: server/app/routes/artifacts.py
   reason: Artifact routes authenticate the per-Worker token used by Agent execution transport.
@@ -168,11 +171,14 @@ exemptions:
   ceiling: 69
 - check: architecture.file_budget
   path: server/app/services/workflow_revisions.py
-  reason: Active revisions reconcile Agent routes and Workflow Node capacity projections
-    at Host startup, warning and skipping revisions whose capability mapping is ambiguous.
+  reason: Active revisions reconcile Agent routes at Host startup (capacity is
+    workspace-level via workspace_agent_capacities), warning and skipping revisions
+    whose capability mapping is ambiguous, and skipping the reconcile entirely
+    when the catalog has zero enabled definitions so routes are never pruned by
+    an empty-catalog regression.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 123
+  ceiling: 132
 - check: architecture.file_budget
   path: server/app/workflow_worker_schedule.py
   reason: Scheduler dispatches Agent nodes to the persistent queue while retaining Host-local handler claims.
