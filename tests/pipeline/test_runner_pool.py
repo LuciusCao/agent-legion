@@ -6,7 +6,7 @@ import subprocess
 import pytest
 
 from server.app.pipeline.runners import RunnerPool, discover_openclaw_agents
-from server.app.services.video_execution import build_default_providers
+from server.app.services.transcription_providers import build_default_providers
 from server.app.settings import load_settings
 
 

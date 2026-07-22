@@ -30,10 +30,10 @@ class TestWorkspaceVideoHiveBoundary:
             ),
             (
                 "server/app/services/job_execution.py",
-                "from server.app.services.video_actions import delete_video\n"
+                "from server.app.services.interaction_stats import compute_stats\n"
                 "class JobExecutionService:\n"
-                "    def run(self): delete_video('x')\n",
-                "video_actions",
+                "    def run(self): compute_stats('x')\n",
+                "interaction_stats",
             ),
         ],
     )

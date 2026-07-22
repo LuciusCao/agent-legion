@@ -13,7 +13,6 @@ from server.app.services.job_artifacts import JobArtifactService
 from server.app.services.job_logs import JobLogService
 from server.app.services.job_queries import JobQueryService
 from server.app.services.package_deletion import PackageDeletionService
-from server.app.services.video_read import VideoReadService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workspace_executor_configuration import (
     WorkspaceExecutorConfigurationService,
@@ -241,11 +240,6 @@ def test_cross_root_path_portability(portable_roots: tuple[Path, Path]) -> None:
     # ------------------------------------------------------------------
     # 3. Service reads resolve to *new_root*.
     # ------------------------------------------------------------------
-    read_service = VideoReadService(db, settings)
-    detail = read_service.get_video_detail(VIDEO_ID)
-    assert detail is not None
-    assert detail["interaction_stats"] == {"click": {"passed": 1, "total": 1}}
-
     artifact_service = JobArtifactService(job_db)
     artifact = artifact_service.read(JOB_ID, "result.json")
     assert artifact["content"] == '{"ok": true}'
