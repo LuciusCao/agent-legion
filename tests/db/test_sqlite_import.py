@@ -65,3 +65,53 @@ def test_import_refuses_a_populated_target(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="target PostgreSQL database is not empty"):
         importer.import_database(source, TEST_DATABASE_URL, truncate=False)
+
+
+def test_import_preserves_naive_utc_timestamps(tmp_path: Path) -> None:
+    """Naive SQLite timestamps are UTC; the import must not reinterpret them
+    in the PostgreSQL server timezone."""
+    source = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(source) as conn:
+        conn.executescript(
+            """
+            create table workspaces(id text primary key, name text not null, created_at text);
+            insert into workspaces(id, name, created_at)
+              values ('workspace-1', 'Workspace 1', '2026-01-01 12:00:00.123456');
+            """
+        )
+
+    _importer().import_database(source, TEST_DATABASE_URL, truncate=False)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute(
+            "select created_at from workspaces where id=?", ("workspace-1",)
+        ).fetchone()
+    assert row is not None
+    assert row["created_at"] == "2026-01-01 12:00:00.123456"
+
+
+def test_import_rejects_orphan_artifact_refs(tmp_path: Path) -> None:
+    """PostgreSQL enforces artifact_refs.hash -> artifacts(hash); SQLite did
+    not, so the importer must fail fast before modifying the target."""
+    source = tmp_path / "legacy.sqlite"
+    with sqlite3.connect(source) as conn:
+        conn.executescript(
+            """
+            create table artifacts(hash text primary key, size integer not null);
+            create table artifact_refs(
+              job_id text not null, node_key text not null, name text not null,
+              hash text not null
+            );
+            insert into artifacts(hash, size) values ('known-hash', 10);
+            insert into artifact_refs(job_id, node_key, name, hash)
+              values ('job-1', 'node-1', 'bundle.zip', 'missing-hash');
+            """
+        )
+
+    with pytest.raises(RuntimeError, match="artifact_refs rows whose hash"):
+        _importer().import_database(source, TEST_DATABASE_URL, truncate=False)
+
+    with read_connection(TEST_DATABASE_URL) as conn:
+        row = conn.execute("select count(*) as cnt from artifact_refs").fetchone()
+    assert row is not None
+    assert row["cnt"] == 0

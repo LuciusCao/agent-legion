@@ -42,6 +42,19 @@ def validate_workflow_for_publish(
     }
     allocated = {allocation["executor_id"] for allocation in configuration.get("allocations", [])}
     for node in definition.nodes.values():
+        if node.max_concurrency is not None:
+            with job_db._connect_read() as conn:
+                row = conn.execute(
+                    "select count(*) as cnt from agent_definitions"
+                    " where enabled=1 and capability=?",
+                    (node.capability,),
+                ).fetchone()
+            count = int(row["cnt"]) if row is not None else 0
+            if count != 1:
+                errors.append(
+                    f"Agent capability {node.capability} must resolve to exactly one enabled Agent"
+                )
+            continue
         executor_id = bindings.get((definition.key, node.key))
         if not executor_id:
             errors.append(f"missing executor binding for {definition.key}.{node.key}")

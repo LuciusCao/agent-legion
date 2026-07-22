@@ -65,6 +65,30 @@ def claim_next_candidate(
     return False
 
 
+def _fail_node_config(
+    worker: WorkflowWorkerThread,
+    workspace_id: str,
+    job: dict[str, Any],
+    workflow_key: str,
+    node: WorkflowNode,
+    log_path: Path,
+    message: str,
+) -> bool:
+    """Fail a node that can never run due to configuration, without a lease."""
+    worker.leases.fail_without_lease(
+        ConfigurationFailureRequest(
+            workspace_id=workspace_id,
+            job_id=job["id"],
+            workflow_key=workflow_key,
+            node_key=node.key,
+            capability=node.capability,
+            log_path=str(log_path),
+        ),
+        message,
+    )
+    return True
+
+
 def try_claim_and_submit(
     worker: WorkflowWorkerThread,
     workspace: dict[str, Any],
@@ -91,54 +115,78 @@ def try_claim_and_submit(
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     with worker.job_db._connect_read() as conn:
+        route = conn.execute(
+            """
+            select target_kind, target_id from workspace_node_routes
+            where workspace_id=? and workflow_key=? and node_key=?
+            """,
+            (workspace_id, workflow_key, node_key),
+        ).fetchone()
+        if node.max_concurrency is not None:
+            if route is None or route["target_kind"] != "agent":
+                return _fail_node_config(
+                    worker, workspace_id, job, workflow_key, node, log_path, "No Agent route"
+                )
+            agent_id = str(route["target_id"])
+            definition_config = worker.settings.agent_definitions.get(agent_id)
+            if definition_config is None or definition_config.capability != node.capability:
+                return _fail_node_config(
+                    worker,
+                    workspace_id,
+                    job,
+                    workflow_key,
+                    node,
+                    log_path,
+                    f"Invalid Agent route {agent_id!r}",
+                )
+            if worker.agent_dispatch is None:
+                raise RuntimeError("Agent dispatch service is not configured")
+            try:
+                return worker.agent_dispatch.enqueue(
+                    agent_id=agent_id,
+                    definition=definition_config,
+                    workspace=workspace,
+                    job=job,
+                    workflow_key=workflow_key,
+                    node=node,
+                    job_dir=job_dir,
+                    log_path=log_path,
+                    inputs=inputs,
+                )
+            except ValueError as exc:
+                # Route/definition/capacity drift must fail THIS node, not
+                # abort the whole poll pass and starve every workspace.
+                return _fail_node_config(
+                    worker, workspace_id, job, workflow_key, node, log_path, str(exc)
+                )
+
         binding = get_binding(conn, workspace_id, workflow_key, node_key)
         if binding is None:
-            worker.leases.fail_without_lease(
-                ConfigurationFailureRequest(
-                    workspace_id=workspace_id,
-                    job_id=job["id"],
-                    workflow_key=workflow_key,
-                    node_key=node_key,
-                    capability=node.capability,
-                    log_path=str(log_path),
-                ),
-                "No Executor binding",
+            return _fail_node_config(
+                worker, workspace_id, job, workflow_key, node, log_path, "No Executor binding"
             )
-            return True
 
         executor_id = binding["executor_id"]
         try:
             executor = worker.registry.require(executor_id, node.capability)
         except Exception as exc:
-            worker.leases.fail_without_lease(
-                ConfigurationFailureRequest(
-                    workspace_id=workspace_id,
-                    job_id=job["id"],
-                    workflow_key=workflow_key,
-                    node_key=node_key,
-                    capability=node.capability,
-                    log_path=str(log_path),
-                ),
-                str(exc),
+            return _fail_node_config(
+                worker, workspace_id, job, workflow_key, node, log_path, str(exc)
             )
-            return True
 
         local_node_limit: int | None = None
         if executor.kind == "local":
             local_node_limit = get_local_node_limit(conn, workspace_id, workflow_key, node_key)
         elif has_local_node_limit(conn, workspace_id, workflow_key, node_key):
-            worker.leases.fail_without_lease(
-                ConfigurationFailureRequest(
-                    workspace_id=workspace_id,
-                    job_id=job["id"],
-                    workflow_key=workflow_key,
-                    node_key=node_key,
-                    capability=node.capability,
-                    log_path=str(log_path),
-                ),
+            return _fail_node_config(
+                worker,
+                workspace_id,
+                job,
+                workflow_key,
+                node,
+                log_path,
                 "Node limits are not supported for agent executors",
             )
-            return True
 
     global_capacity = worker.registry.global_capacity(executor_id)
     if global_capacity is None:

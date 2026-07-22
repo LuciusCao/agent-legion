@@ -224,6 +224,25 @@ def test_load_settings_rejects_malformed_executor_yaml(tmp_path, monkeypatch):
     assert "global_capacity" in message
 
 
+def test_load_settings_builds_agent_catalog(tmp_path, monkeypatch):
+    config_path = tmp_path / "workflow.yaml"
+    config_path.write_text(
+        "database: {url: postgresql://configured/app}\n"
+        "agents:\n"
+        "  key-info-v1:\n"
+        "    capability: generate_key_info\n"
+        "    runtime: pi\n"
+        "    skill: question/generate_key_info\n",
+        encoding="utf-8",
+    )
+    monkeypatch.delenv("VIDEO_HIVE_DATABASE_URL", raising=False)
+
+    settings = load_settings(data_dir=tmp_path / "data", config_path=config_path)
+
+    assert settings.agent_definitions["key-info-v1"].capability == "generate_key_info"
+    assert settings.agent_definitions["key-info-v1"].runtime == "pi"
+
+
 def test_load_settings_exposes_executor_definitions(tmp_path, monkeypatch):
     config_path = tmp_path / "workflow.yaml"
     config_path.write_text(

@@ -1,3 +1,54 @@
+agents:
+  question-key-info-v1:
+    capability: generate_key_info
+    runtime: pi
+    skill: question_comprehension_info/generate_key_info
+    tools: [read, write, bash]
+  question-key-info-review-v1:
+    capability: review_key_info
+    runtime: pi
+    skill: question_comprehension_info/review_key_info
+    tools: [read, write, bash]
+  question-possible-errors-v1:
+    capability: generate_possible_errors
+    runtime: pi
+    skill: question_comprehension_info/generate_possible_errors
+    tools: [read, write, bash]
+  question-possible-errors-review-v1:
+    capability: review_possible_errors
+    runtime: pi
+    skill: question_comprehension_info/review_possible_errors
+    tools: [read, write, bash]
+  question-difficulty-v1:
+    capability: assess_comprehension_difficulty
+    runtime: pi
+    skill: question_comprehension_info/assess_comprehension_difficulty
+    tools: [read, write, bash]
+  video-subtitle-review-v1:
+    capability: review_subtitles
+    runtime: pi
+    skill: video_knowledge/review_subtitles
+    tools: [read, write, bash]
+  video-chapter-generation-v1:
+    capability: generate_chapters
+    runtime: pi
+    skill: video_knowledge/generate_chapters
+    tools: [read, write, bash]
+  video-interaction-generation-v1:
+    capability: generate_interactions
+    runtime: pi
+    skill: video_knowledge/generate_interactions
+    tools: [read, write, bash]
+  video-content-review-v1:
+    capability: review_video_content
+    runtime: pi
+    skill: video_knowledge/review_video_content
+    tools: [read, write, bash]
+agent_workers:
+  register_token: ""
+  register_token_file: ""
+  max_archive_bytes: 67108864
+  min_protocol_version: 1
 executors:
   local-default:
     kind: local
@@ -21,76 +72,6 @@ executors:
         handler: video_knowledge.assemble_video_metadata
       package_video_job:
         handler: video_knowledge.package_video_job
-  pi:
-    kind: pi
-    global_capacity: 128
-    capabilities:
-      generate_key_info:
-        skill: question_comprehension_info/generate_key_info
-        tools:
-        - read
-        - write
-        - bash
-      review_key_info:
-        skill: question_comprehension_info/review_key_info
-        tools:
-        - read
-        - write
-        - bash
-      generate_possible_errors:
-        skill: question_comprehension_info/generate_possible_errors
-        tools:
-        - read
-        - write
-        - bash
-      review_possible_errors:
-        skill: question_comprehension_info/review_possible_errors
-        tools:
-        - read
-        - write
-        - bash
-      assess_comprehension_difficulty:
-        skill: question_comprehension_info/assess_comprehension_difficulty
-        tools:
-        - read
-        - write
-        - bash
-      review_subtitles:
-        skill: video_knowledge/review_subtitles
-        tools:
-        - read
-        - write
-        - bash
-      generate_chapters:
-        skill: video_knowledge/generate_chapters
-        tools:
-        - read
-        - write
-        - bash
-      generate_interactions:
-        skill: video_knowledge/generate_interactions
-        tools:
-        - read
-        - write
-        - bash
-      review_video_content:
-        skill: video_knowledge/review_video_content
-        tools:
-        - read
-        - write
-        - bash
-  # Remote executors may constrain which workers a capability is routed to via
-  # `requires_labels` (worker labels arrive at register/claim time). Values are
-  # either ">=<int>" (numeric) or a literal (exact match); all must hold:
-  #   remote-gpu:
-  #     kind: remote
-  #     global_capacity: 4
-  #     capabilities:
-  #       transcribe_video:
-  #         skill: video_knowledge/transcribe_video
-  #         requires_labels:
-  #           mem_gb: ">=16"
-  #           device: mac-mini
 heartbeat_interval_seconds: 10
 lease_ttl_seconds: 90
 heartbeat_failure_threshold: 3

@@ -398,3 +398,68 @@ def test_question_comprehension_info_batch_by_knowledge_resolves_questions(tmp_p
     assert [job["source_type"] for job in body["jobs"]] == ["question", "question"]
     assert [job["title"] for job in body["jobs"]] == ["题目一", "题目二"]
     assert all(job["workflow_key"] == "question_comprehension_info" for job in body["jobs"])
+
+
+def test_async_batch_chunk_failure_is_recorded_and_remaining_chunks_continue(tmp_path, monkeypatch):
+    """Regression: one failing chunk must not terminally fail the whole async
+    batch — the error is recorded, remaining values are still processed, and
+    no jobs are duplicated."""
+    from fastapi.testclient import TestClient
+
+    from server.app.cms.question import CmsQuestionDetail
+    from server.app.main import create_app
+    from server.app.services.job_intake_queue import JobIntakeQueue
+
+    def fake_fetch_question_detail(question_id, api_url=None, token=None):
+        if question_id == "Q002":
+            raise RuntimeError("cms boom")
+        return CmsQuestionDetail(
+            question_id=question_id,
+            title=f"Title {question_id}",
+            normalized={"stem": f"Stem {question_id}"},
+            payload={"uuid": question_id},
+        )
+
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.fetch_question_detail",
+        fake_fetch_question_detail,
+    )
+    monkeypatch.setattr(
+        "server.app.services.job_intake_resolution.get_token", lambda env, config: "token"
+    )
+    monkeypatch.setattr("server.app.services.job_intake_queue.INTAKE_QUEUE_CHUNK_SIZE", 1)
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    intake_queue = JobIntakeQueue(app.state.job_db, app.state.settings, app.state.job_event_buffer)
+    monkeypatch.setattr(
+        "server.app.services.job_intake_queue.JobIntakeQueue.consume_once",
+        lambda self: False,
+    )
+    with TestClient(app) as c:
+        ws_id = _create_workspace(c)
+        response = c.post(
+            f"/api/workspaces/{ws_id}/job-batches",
+            json={
+                "workflow_key": "question_comprehension_info",
+                "source_kind": "batch_by_ids",
+                "question_ids": ["Q001", "Q002", "Q003"],
+                "knowledge_codes": [],
+                "async_processing": True,
+            },
+        )
+        assert response.status_code == 200
+        batch_id = response.json()["batch"]["id"]
+
+        for _ in range(3):
+            claimed = app.state.job_db.claim_intake_batch()
+            assert claimed is not None
+            intake_queue._consume_chunk(claimed)
+
+        completed = app.state.job_db.get_batch(batch_id)
+        assert completed is not None
+        assert completed["status"] == "completed"
+        assert completed["created_count"] == 2
+        assert "cms boom" in completed["error_message"]
+        jobs = app.state.job_db.list_jobs(workspace_id=ws_id)
+        assert sorted(job["source_id"] for job in jobs) == ["Q001", "Q003"]

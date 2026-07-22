@@ -1,15 +1,4 @@
-"""Standalone lease sweeper (phase 3, task 8).
-
-The sweeper owns all periodic lease hygiene so the workflow worker thread only
-claims and runs work (Decision 11). Each tick it sweeps expired remote claims,
-expires stale leases, recovers orphaned running jobs, and renews the leases
-backing live remote executions (Decision 6) — without that renewal, submit-only
-remote leases would be expired while their executions are still in flight.
-
-The sweeper is safe to run in multiple replicas: every step funnels through
-PostgreSQL transactions with conditional writes, so expiry and claim requeues
-stay single-winner across processes.
-"""
+"""Lease hygiene for Host-local handlers and Agent Worker claims."""
 
 from __future__ import annotations
 
@@ -17,20 +6,19 @@ import logging
 import threading
 from datetime import UTC, datetime
 
+from server.app.agent_broker import AgentExecutionBroker
 from server.app.executors.leases import ExecutorLeaseRepository
-from server.app.executors.remote_broker import RemoteExecutionBroker
 
 logger = logging.getLogger(__name__)
 
 
 class SweeperThread:
-    """Periodically expire stale leases, recover orphaned jobs, sweep remote claims,
-    and renew leases backing live remote executions (Decision 6/11)."""
+    """Expire stale local leases, recover jobs, and requeue lost Agent claims."""
 
     def __init__(
         self,
         leases: ExecutorLeaseRepository,
-        broker: RemoteExecutionBroker,
+        broker: AgentExecutionBroker,
         interval_seconds: float = 5.0,
         lease_ttl_seconds: int = 90,
     ) -> None:
@@ -60,16 +48,25 @@ class SweeperThread:
         try:
             self._broker.sweep_expired_claims()
         except Exception:
-            logger.exception("remote claim sweep failed")
+            logger.exception("Agent claim sweep failed")
+        try:
+            stale = self._broker.fail_stale_definition_requests()
+            if stale:
+                logger.warning(
+                    "failed Agent requests pinned to stale definitions: %s", ", ".join(stale)
+                )
+        except Exception:
+            logger.exception("Agent stale-definition sweep failed")
+        try:
+            reaped = self._broker.reap_terminal_bundles()
+            if reaped:
+                logger.info("reaped %d terminal Agent bundle/archive files", reaped)
+        except Exception:
+            logger.exception("Agent bundle reap failed")
         try:
             expired = self._leases.expire_stale(now)
             if expired:
                 logger.warning("expired stale workflow executions: %s", ", ".join(expired))
-                for lease_id in expired:
-                    try:
-                        self._broker.cancel_by_lease(lease_id)
-                    except Exception:
-                        logger.exception("remote cancel failed for expired lease %s", lease_id)
         except Exception:
             logger.exception("lease expiry sweep failed")
         try:
@@ -78,16 +75,6 @@ class SweeperThread:
                 logger.warning("recovered orphaned running jobs: %s", ", ".join(recovered))
         except Exception:
             logger.exception("orphaned job recovery failed")
-        try:
-            active_lease_ids = self._broker.active_lease_ids()
-        except Exception:
-            logger.exception("active remote lease listing failed")
-            return
-        for lease_id in active_lease_ids:
-            try:
-                self._leases.heartbeat(lease_id, self._lease_ttl_seconds)
-            except Exception:
-                logger.exception("lease renewal failed for %s", lease_id)
 
     def stop(self, timeout: float = 3.0) -> None:
         self._stop_event.set()

@@ -224,10 +224,12 @@ class FakeShardExecutor:
         executor_id: str = "local-default",
         gate: threading.Event | None = None,
         fail_shards: set[int] | None = None,
+        parse_items: list | None = None,
     ) -> None:
         self.id = executor_id
         self._gate = gate
         self._fail_shards = fail_shards or set()
+        self._parse_items = parse_items
         self.contexts: list[ExecutionContext] = []
         self.merged_shards: list | None = None
         self._lock = threading.Lock()
@@ -239,9 +241,10 @@ class FakeShardExecutor:
         with self._lock:
             self.contexts.append(context)
         if context.node_key == "parse":
-            (context.job_dir / "questions.json").write_text(
-                json.dumps([{"q": i} for i in range(4)]), encoding="utf-8"
+            items = (
+                self._parse_items if self._parse_items is not None else [{"q": i} for i in range(4)]
             )
+            (context.job_dir / "questions.json").write_text(json.dumps(items), encoding="utf-8")
             return ExecutionResult(status="completed", exit_code=0)
         if context.node_key == "aggregate":
             shards_path = context.job_dir / f"{context.node_key}.shards.json"
@@ -559,5 +562,28 @@ def test_apply_run_to_clears_shard_rows(tmp_path):
                 frozenset({"parse", "review"}),
             )
         assert _node_shards(db_path, job["id"], "review") == []
+    finally:
+        worker.stop()
+
+
+def test_empty_shard_over_completes_node_and_reduce_gets_empty_array(tmp_path):
+    """空 fan-out（shard.over 解析为空数组）：节点直接 completed、零 lease、
+    reduce 收到空数组，job 正常 completed（修复前节点会永久挂起）。"""
+    executor = FakeShardExecutor(parse_items=[])
+    worker, job_db, job, job_dir = _make_e2e(tmp_path, _over_definition(), executor)
+    db_path = worker.leases.path
+    try:
+        ok = _poll_until(worker, lambda: _node_status(job_db, job["id"], "review") == "completed")
+        assert ok, "空 fan-out 的 shard 节点未推进到 completed"
+        assert _node_shards(db_path, job["id"], "review") == []
+        assert _lease_rows(db_path, job["id"], "review") == []
+        ok = _poll_until(
+            worker, lambda: _node_status(job_db, job["id"], "aggregate") == "completed"
+        )
+        assert ok, "reduce 节点未在空 fan-out 后完成"
+        content = json.loads((job_dir / "aggregate.shards.json").read_text(encoding="utf-8"))
+        assert content == []
+        assert executor.merged_shards == []
+        assert job_db.get_job(job["id"])["status"] == "completed"
     finally:
         worker.stop()

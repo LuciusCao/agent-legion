@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest'
-import { render, screen, waitFor, act } from '@testing-library/react'
+import { render, screen, act } from '@testing-library/react'
 import { ExecutorBindingSection } from './ExecutorBindingSection'
 import { useSettingStore } from '../stores/settingStore'
 
@@ -9,18 +9,6 @@ const catalog = [
     kind: 'local' as const,
     capabilities: ['fetch_questions', 'clean_and_parse', 'mark_question'],
     global_capacity: 4,
-  },
-  {
-    id: 'pi-review',
-    kind: 'pi' as const,
-    capabilities: ['review_keywords', 'review_difficulty'],
-    global_capacity: 2,
-  },
-  {
-    id: 'openclaw-generate',
-    kind: 'openclaw' as const,
-    capabilities: ['generate_distractors', 'review_keywords'],
-    global_capacity: 3,
   },
 ]
 
@@ -35,7 +23,7 @@ const workflowDefinition = {
       key: 'fetch_questions',
       label: '获取题目',
       capability: 'fetch_questions',
-      runner: 'local' as const,
+      max_concurrency: null,
       after: [],
       inputs: [],
       outputs: ['questions.json'],
@@ -44,7 +32,7 @@ const workflowDefinition = {
       key: 'review_keywords',
       label: '审核关键词',
       capability: 'review_keywords',
-      runner: 'agent' as const,
+      max_concurrency: 20,
       after: ['extract_keywords'],
       inputs: ['keywords.json'],
       outputs: ['keywords_review.json'],
@@ -53,7 +41,7 @@ const workflowDefinition = {
       key: 'generate_distractors',
       label: '生成干扰项',
       capability: 'generate_distractors',
-      runner: 'agent' as const,
+      max_concurrency: 20,
       after: ['review_difficulty'],
       inputs: ['difficulty.json'],
       outputs: ['distractors.json'],
@@ -62,7 +50,7 @@ const workflowDefinition = {
       key: 'unsupported_node',
       label: '未支持节点',
       capability: 'unsupported_capability',
-      runner: 'agent' as const,
+      max_concurrency: null,
       after: [],
       inputs: [],
       outputs: [],
@@ -110,16 +98,6 @@ describe('ExecutorBindingSection', () => {
             workspace_id: 'ws1',
             concurrency_limit: 4,
           },
-          {
-            executor_id: 'pi-review',
-            workspace_id: 'ws1',
-            concurrency_limit: 2,
-          },
-          {
-            executor_id: 'openclaw-generate',
-            workspace_id: 'ws1',
-            concurrency_limit: 3,
-          },
         ],
         bindings: [],
         node_limits: [],
@@ -128,13 +106,15 @@ describe('ExecutorBindingSection', () => {
     })
   })
 
-  it('includes an explicit unbound option for each workflow node', () => {
+  it('shows only local nodes and hides Agent-routed nodes', () => {
     render(<ExecutorBindingSection />)
 
-    for (const node of workflowDefinition.nodes) {
-      const input = getSelectInput(node.key)
-      expect(input).toBeInTheDocument()
-    }
+    expect(getSelectInput('fetch_questions')).toBeInTheDocument()
+    expect(getSelectInput('unsupported_node')).toBeInTheDocument()
+    expect(screen.queryByTestId('binding-select-review_keywords')).toBeNull()
+    expect(
+      screen.queryByTestId('binding-select-generate_distractors')
+    ).toBeNull()
   })
 
   it('includes only allocated executors whose capabilities contain the node capability', () => {
@@ -144,54 +124,14 @@ describe('ExecutorBindingSection', () => {
     expect(getSelectInput('fetch_questions').value).toBe('')
     changeSelectValue('fetch_questions', 'local-default')
     expect(getSelectInput('fetch_questions').value).toBe('local-default')
-
-    expect(getSelectInput('review_keywords').value).toBe('')
-    changeSelectValue('review_keywords', 'pi-review')
-    expect(getSelectInput('review_keywords').value).toBe('pi-review')
-
-    expect(getSelectInput('generate_distractors').value).toBe('')
-    changeSelectValue('generate_distractors', 'openclaw-generate')
-    expect(getSelectInput('generate_distractors').value).toBe(
-      'openclaw-generate'
-    )
   })
 
-  it('allows switching the same node between compatible pi and openclaw executors', async () => {
-    render(<ExecutorBindingSection />)
-
-    changeSelectValue('review_keywords', 'pi-review')
-    await waitFor(() => {
-      expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
-        [
-          {
-            workflow_key: 'sample_workflow',
-            node_key: 'review_keywords',
-            executor_id: 'pi-review',
-          },
-        ]
-      )
-    })
-
-    changeSelectValue('review_keywords', 'openclaw-generate')
-    await waitFor(() => {
-      expect(useSettingStore.getState().executorConfiguration.bindings).toEqual(
-        [
-          {
-            workflow_key: 'sample_workflow',
-            node_key: 'review_keywords',
-            executor_id: 'openclaw-generate',
-          },
-        ]
-      )
-    })
-  })
-
-  it('does not use legacy runner or agent engine to filter options', () => {
+  it('matches local nodes by capability, independent of executor implementation', () => {
     useSettingStore.setState({
       executorCatalog: [
         ...catalog,
         {
-          id: 'legacy-agent',
+          id: 'alternate-local',
           kind: 'pi' as const,
           capabilities: ['fetch_questions'],
           global_capacity: 1,
@@ -205,7 +145,7 @@ describe('ExecutorBindingSection', () => {
             concurrency_limit: 4,
           },
           {
-            executor_id: 'legacy-agent',
+            executor_id: 'alternate-local',
             workspace_id: 'ws1',
             concurrency_limit: 1,
           },
@@ -222,8 +162,8 @@ describe('ExecutorBindingSection', () => {
     changeSelectValue('fetch_questions', 'local-default')
     expect(getSelectInput('fetch_questions').value).toBe('local-default')
 
-    changeSelectValue('fetch_questions', 'legacy-agent')
-    expect(getSelectInput('fetch_questions').value).toBe('legacy-agent')
+    changeSelectValue('fetch_questions', 'alternate-local')
+    expect(getSelectInput('fetch_questions').value).toBe('alternate-local')
   })
 
   it('displays a warning when no allocated executor supports the capability', () => {

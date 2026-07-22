@@ -8,7 +8,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from server.app.executors.config import ExecutorConfig, RemoteExecutorConfig
+from server.app.executors.config import ExecutorConfig, PiExecutorConfig
 
 
 class PiRuntimeConfig(BaseModel):
@@ -48,17 +48,15 @@ class WorkflowsRuntimeConfig(BaseModel):
 
     enabled: bool = False
     pi: PiRuntimeConfig = Field(default_factory=PiRuntimeConfig)
-    submit_max_workers: int | None = Field(default=None, ge=1)
 
 
-class RemoteRuntimeConfig(BaseModel):
+class AgentWorkersRuntimeConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    worker_token: str = ""
-    claim_timeout_seconds: float = Field(default=120.0, gt=0)
-    requeue_limit: int = Field(default=3, ge=0)
+    register_token: str = ""
+    register_token_file: str = ""
     max_archive_bytes: int = Field(default=64 * 1024 * 1024, gt=0)
-    min_worker_protocol_version: int = Field(default=1, ge=0)
+    min_protocol_version: int = Field(default=1, ge=1)
 
 
 class ExecutorRuntimeConfig(BaseModel):
@@ -74,7 +72,7 @@ class ExecutorRuntimeConfig(BaseModel):
     openclaw: OpenClawRuntimeConfig = Field(
         default_factory=lambda: OpenClawRuntimeConfig(command_template=("openclaw",))
     )
-    remote: RemoteRuntimeConfig = Field(default_factory=RemoteRuntimeConfig)
+    agent_workers: AgentWorkersRuntimeConfig = Field(default_factory=AgentWorkersRuntimeConfig)
 
 
 class StartupValidationError(Exception):
@@ -164,8 +162,7 @@ def validate_runtime(
     Disabled runtimes require nothing. Enabled executors require their executable
     or working directory to exist. Selected ASR providers require their files;
     ``auto`` needs at least one usable provider. CMS credentials are required only
-    when a CMS-backed resource provider is enabled. A remote worker token is
-    required only when a remote executor is defined.
+    when a CMS-backed resource provider is enabled.
     """
     errors: list[tuple[str, str]] = []
 
@@ -224,7 +221,10 @@ def validate_runtime(
     if provider == "auto" and not (_whisper_usable() or _sensevoice_usable()):
         errors.append(("asr.provider", "auto mode requires at least one usable ASR provider"))
 
-    if runtime.workflows.enabled:
+    if runtime.workflows.enabled and any(
+        isinstance(definition, PiExecutorConfig)
+        for definition in (executor_definitions or {}).values()
+    ):
         pi_binary = str(runtime.workflows.pi.binary or "")
         if not pi_binary:
             errors.append(("workflows.pi.binary", "missing pi binary"))
@@ -235,17 +235,6 @@ def validate_runtime(
     openclaw_cwd = str(runtime.openclaw.cwd or ".")
     if not _expand(openclaw_cwd).is_dir():
         errors.append(("openclaw.cwd", "openclaw working directory does not exist"))
-
-    if not runtime.remote.worker_token and any(
-        isinstance(definition, RemoteExecutorConfig)
-        for definition in (executor_definitions or {}).values()
-    ):
-        errors.append(
-            (
-                "remote.worker_token",
-                "required when a remote executor is defined (set VIDEO_HIVE_REMOTE_WORKER_TOKEN)",
-            )
-        )
 
     if _cms_resource_enabled(config) and not _cms_token_available(config):
         cms_config = config.get("cms") or {}

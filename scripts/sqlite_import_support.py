@@ -1,10 +1,28 @@
 from __future__ import annotations
 
+import sqlite3
 from collections.abc import Sequence
 from typing import Any
 
 import psycopg
 from psycopg import sql
+
+
+def count_orphan_artifact_refs(source: sqlite3.Connection, source_tables: set[str]) -> int:
+    """Count artifact_refs rows whose hash has no matching artifacts row.
+
+    PostgreSQL enforces ``artifact_refs.hash -> artifacts(hash)`` while SQLite
+    did not, so legacy databases can contain orphans that would abort the copy.
+    """
+    if "artifact_refs" not in source_tables:
+        return 0
+    if "artifacts" not in source_tables:
+        row = source.execute("select count(*) from artifact_refs").fetchone()
+        return int(row[0])
+    row = source.execute(
+        "select count(*) from artifact_refs where hash not in (select hash from artifacts)"
+    ).fetchone()
+    return int(row[0])
 
 
 def populated_tables(conn: psycopg.Connection[Any], tables: Sequence[str]) -> list[str]:
