@@ -21,3 +21,4 @@ tools/content-uploader/config.dev.yaml
 stress-results/
 deploy/secrets/
 deploy/worker.home.yaml
+config/agent-worker.yaml
