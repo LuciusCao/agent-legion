@@ -10,14 +10,16 @@ import { ChipList } from './DagNodeChips'
 import { MaterialIcon } from './MaterialIcon'
 import { DagNodeDefinitionMeta } from './DagNodeDefinitionMeta'
 import { DagNodeExecutorBadge } from './DagNodeExecutorBadge'
+import type { ExecutorKind } from '../jobTypes'
 import styles from './DagNode.module.css'
 
 export interface DagNodeData extends Record<string, unknown> {
   label: string
   status: DagNodeStatus
   duration?: number
-  executorKind?: 'local' | 'pi' | 'openclaw' | 'remote' | null
+  executorKind?: ExecutorKind | null
   executorId?: string | null
+  agentId?: string | null
   workerId?: string | null
   nodeKey?: string
   capability?: string

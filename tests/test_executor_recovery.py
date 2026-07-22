@@ -4,13 +4,13 @@ from pathlib import Path
 
 import pytest
 
+from server.app.agent_broker import AgentExecutionBroker
 from server.app.db.connection import connect_database
 from server.app.db.schema import init_db
 from server.app.executors.config import LocalCapabilityConfig, LocalExecutorConfig
 from server.app.executors.leases import ExecutorLeaseRepository
 from server.app.executors.models import ExecutionResult, LeaseClaimRequest
 from server.app.executors.registry import ExecutorRegistry
-from server.app.executors.remote_broker import RemoteExecutionBroker
 from server.app.executors.runtime import ExecutionRuntime
 from server.app.executors.sweeper import SweeperThread
 from server.app.jobs.queries import JobQueries
@@ -45,8 +45,8 @@ def repo(tmp_db: str, queries: JobQueries) -> ExecutorLeaseRepository:
 
 
 @pytest.fixture
-def broker(tmp_db: str, tmp_path: Path) -> RemoteExecutionBroker:
-    return RemoteExecutionBroker(tmp_db, tmp_path / "remote_bundles")
+def broker(tmp_db: str, tmp_path: Path) -> AgentExecutionBroker:
+    return AgentExecutionBroker(tmp_db, bundle_dir=tmp_path / "agent_bundles")
 
 
 def _local_node(key: str) -> WorkflowNode:
@@ -238,7 +238,7 @@ def test_fresh_repo_expire_stale_marks_recovery_state(
 def test_fresh_sweeper_start_expires_stale_leases(
     queries: JobQueries,
     repo: ExecutorLeaseRepository,
-    broker: RemoteExecutionBroker,
+    broker: AgentExecutionBroker,
 ) -> None:
     workspace_id, job_id = _setup_workspace(queries, "fresh-worker")
     _claim(workspace_id, job_id, repo)
@@ -319,7 +319,7 @@ def test_recovery_does_not_resubmit_failed_node(
     tmp_path: Path,
     queries: JobQueries,
     repo: ExecutorLeaseRepository,
-    broker: RemoteExecutionBroker,
+    broker: AgentExecutionBroker,
 ) -> None:
     workspace_id, job_id = _setup_workspace(queries, "no-resubmit")
     _claim(workspace_id, job_id, repo)

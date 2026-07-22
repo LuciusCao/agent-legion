@@ -1,10 +1,9 @@
 """Shared Pi protocol builders: prompt, command, model-error scanning.
 
-Single server-side implementation consumed by the local Pi runner (via the
-legacy wrappers in pi_prompt.py / pi_command_builder.py / pi_runner.py), the
-remote executor payload builder, and the remote worker. ``environment`` from
-``manifest["pi"]`` is deliberately never part of a command spec: it may carry
-API keys, and command lines are persisted and shipped to workers.
+Single server-side implementation consumed by the local Pi runner and Agent
+Worker bundle builder. ``environment`` from ``manifest["pi"]`` is deliberately
+never part of a command spec: it may carry API keys, and command lines are
+persisted and shipped to workers.
 """
 
 from __future__ import annotations
@@ -25,7 +24,7 @@ PROMPT_FILE_PLACEHOLDER = "{prompt_file}"
 
 def build_prompt(manifest: dict[str, Any], *, job_dir: Path, skill_dir: Path) -> str:
     lines = [
-        "Execute the loaded node skill for this Video Hive workflow job.",
+        "Execute the loaded node skill for this Agent Legion workflow job.",
         "",
         f"Job ID: {manifest['job_id']}",
         f"Node: {manifest['node_key']}",
@@ -140,7 +139,7 @@ def detect_model_error(events_file: Path) -> str | None:
 
 
 def render_command_spec(manifest: dict[str, Any]) -> dict[str, Any]:
-    """Render prompt/command with path placeholders for remote payload shipping.
+    """Render prompt/command with path placeholders for Agent bundle shipping.
 
     The returned spec never includes ``pi.environment``; workers merge env from
     the manifest themselves.

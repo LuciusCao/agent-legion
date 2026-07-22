@@ -23,9 +23,17 @@ export function parseAgentsWsMessage(data: string): AgentsWsMessage | null {
     | AgentStatus[]
     | AgentsSnapshotEnvelope
     | AgentUpdateEnvelope
+    | null
   if (Array.isArray(parsed)) return parsed
-  if (parsed.type === 'snapshot') return parsed.agents
-  if (parsed.type === 'agent_busy' || parsed.type === 'agent_idle') {
+  if (parsed === null || typeof parsed !== 'object') return null
+  if (parsed.type === 'snapshot') {
+    return Array.isArray(parsed.agents) ? parsed.agents : null
+  }
+  if (
+    (parsed.type === 'agent_busy' || parsed.type === 'agent_idle') &&
+    parsed.agent !== null &&
+    typeof parsed.agent === 'object'
+  ) {
     return parsed
   }
   return null

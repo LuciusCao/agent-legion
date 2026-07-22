@@ -146,17 +146,18 @@ describe('deriveJobDetailPresentation', () => {
 })
 
 describe('toDagNodes', () => {
-  it('maps executor_id / worker_id onto dag nodes', () => {
+  it('maps logical Agent and physical Worker separately onto dag nodes', () => {
     const nodes = toDagNodes([
       makeNode('generate', 'running', {
-        executor_kind: 'remote',
-        executor_id: 'remote-exec-1',
+        executor_kind: 'pi',
+        agent_id: 'key-info-generator',
         worker_id: 'worker-abc123',
       }),
     ])
 
-    expect(nodes[0].executorKind).toBe('remote')
-    expect(nodes[0].executorId).toBe('remote-exec-1')
+    expect(nodes[0].executorKind).toBe('pi')
+    expect(nodes[0].agentId).toBe('key-info-generator')
+    expect(nodes[0].executorId).toBeNull()
     expect(nodes[0].workerId).toBe('worker-abc123')
   })
 
@@ -165,6 +166,7 @@ describe('toDagNodes', () => {
 
     expect(nodes[0].executorKind).toBeNull()
     expect(nodes[0].executorId).toBeNull()
+    expect(nodes[0].agentId).toBeNull()
     expect(nodes[0].workerId).toBeNull()
   })
 })

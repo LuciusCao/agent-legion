@@ -4,6 +4,108 @@
  */
 
 export interface paths {
+  '/api/agent-executions/claim': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Claim */
+    post: operations['claim_api_agent_executions_claim_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-executions/{execution_id}/bundle': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Bundle */
+    get: operations['bundle_api_agent_executions__execution_id__bundle_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-executions/{execution_id}/heartbeat': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Heartbeat */
+    post: operations['heartbeat_api_agent_executions__execution_id__heartbeat_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-executions/{execution_id}/result': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Result */
+    post: operations['result_api_agent_executions__execution_id__result_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-workers': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Workers */
+    get: operations['list_workers_api_agent_workers_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-workers/register': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Register */
+    post: operations['register_api_agent_workers_register_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agents': {
     parameters: {
       query?: never
@@ -395,132 +497,6 @@ export interface paths {
     head?: never
     /** Update Package */
     patch: operations['update_package_api_packages__package_id__patch']
-    trace?: never
-  }
-  '/api/remote/claim': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Claim */
-    post: operations['claim_api_remote_claim_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/remote/executions/{execution_id}/bundle': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /** Download Bundle */
-    get: operations['download_bundle_api_remote_executions__execution_id__bundle_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/remote/executions/{execution_id}/heartbeat': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Heartbeat */
-    post: operations['heartbeat_api_remote_executions__execution_id__heartbeat_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/remote/executions/{execution_id}/result': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Report Result */
-    post: operations['report_result_api_remote_executions__execution_id__result_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/remote/workers': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    /**
-     * List Workers
-     * @description Page-facing read-only worker registry (phase 4, Decision 10).
-     *
-     *     The executors store polls this from the same-origin page context, so
-     *     unlike the worker-action endpoints it takes no worker token; it still
-     *     reports 503 while remote execution is disabled.
-     */
-    get: operations['list_workers_api_remote_workers_get']
-    put?: never
-    post?: never
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/remote/workers/register': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Register Worker Token */
-    post: operations['register_worker_token_api_remote_workers_register_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
-    trace?: never
-  }
-  '/api/remote/workers/{worker_id}/revoke': {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    get?: never
-    put?: never
-    /** Revoke Worker Token */
-    post: operations['revoke_worker_token_api_remote_workers__worker_id__revoke_post']
-    delete?: never
-    options?: never
-    head?: never
-    patch?: never
     trace?: never
   }
   '/api/resource-providers': {
@@ -1133,6 +1109,29 @@ export interface components {
       revision: components['schemas']['WorkflowRevisionSummary']
       workflow: components['schemas']['WorkflowDefinitionResponse']
     }
+    /** AgentClaimResponse */
+    AgentClaimResponse: {
+      /** Agent Id */
+      agent_id: string
+      /** Bundle Url */
+      bundle_url: string
+      /** Execution Id */
+      execution_id: string
+      /** Job Id */
+      job_id: string
+      /** Lease Id */
+      lease_id: string
+      /** Manifest */
+      manifest: {
+        [key: string]: unknown
+      }
+      /** Node Key */
+      node_key: string
+      /** Workflow Key */
+      workflow_key: string
+      /** Workspace Id */
+      workspace_id: string
+    }
     /** AgentStatusResponse */
     AgentStatusResponse: {
       /** Busy */
@@ -1163,6 +1162,34 @@ export interface components {
       id: string
       /** Name */
       name: string
+    }
+    /** AgentWorkerSummary */
+    AgentWorkerSummary: {
+      /** Labels */
+      labels: {
+        [key: string]: string
+      }
+      /** Last Seen At */
+      last_seen_at: string
+      /** Max Concurrency */
+      max_concurrency: number
+      /** Name */
+      name: string
+      /** Protocol Version */
+      protocol_version: number
+      /** Registered At */
+      registered_at: string
+      /** Revoked */
+      revoked: boolean
+      /** Runtimes */
+      runtimes: string[]
+      /** Worker Id */
+      worker_id: string
+    }
+    /** AgentWorkersResponse */
+    AgentWorkersResponse: {
+      /** Workers */
+      workers: components['schemas']['AgentWorkerSummary'][]
     }
     /** AgentsResponse */
     AgentsResponse: {
@@ -1200,39 +1227,10 @@ export interface components {
       /** Target Node Key */
       target_node_key: string
     }
-    /** ClaimRequest */
-    ClaimRequest: {
-      /** Capabilities */
-      capabilities: string[]
-      /** Labels */
-      labels?: {
-        [key: string]: unknown
-      }
+    /** ClaimAgentExecutionRequest */
+    ClaimAgentExecutionRequest: {
       /** Worker Id */
       worker_id: string
-      /** Worker Version */
-      worker_version?: number | null
-    }
-    /** ClaimResponse */
-    ClaimResponse: {
-      /** Bundle Url */
-      bundle_url: string
-      /** Capability */
-      capability: string
-      /** Command Spec */
-      command_spec?: {
-        [key: string]: unknown
-      } | null
-      /** Execution Id */
-      execution_id: string
-      /** Job Id */
-      job_id: string
-      /** Manifest */
-      manifest: {
-        [key: string]: unknown
-      }
-      /** Node Key */
-      node_key: string
     }
     /** CmsServiceStatus */
     CmsServiceStatus: {
@@ -1336,7 +1334,7 @@ export interface components {
        * Kind
        * @enum {string}
        */
-      kind: 'local' | 'pi' | 'openclaw' | 'remote'
+      kind: 'local' | 'pi' | 'openclaw'
     }
     /** ExecutorRuntimeStatus */
     ExecutorRuntimeStatus: {
@@ -1474,6 +1472,8 @@ export interface components {
     JobNodeResponse: {
       /** After */
       after: string[]
+      /** Agent Id */
+      agent_id?: string | null
       /** Capability */
       capability: string
       /** Created At */
@@ -1483,7 +1483,7 @@ export interface components {
       /** Executor Id */
       executor_id?: string | null
       /** Executor Kind */
-      executor_kind?: ('local' | 'pi' | 'openclaw' | 'remote') | null
+      executor_kind?: ('local' | 'pi' | 'openclaw') | null
       /** Finished At */
       finished_at?: string | null
       /** Id */
@@ -1766,26 +1766,38 @@ export interface components {
       /** Stem */
       stem?: string | null
     }
-    /** RemoteWorkerSummaryResponse */
-    RemoteWorkerSummaryResponse: {
-      /** Capabilities */
-      capabilities: string[]
+    /** RegisterAgentWorkerRequest */
+    RegisterAgentWorkerRequest: {
+      /**
+       * Image Version
+       * @default
+       */
+      image_version: string
       /** Labels */
-      labels: {
+      labels?: {
         [key: string]: unknown
       }
-      /** Last Seen At */
-      last_seen_at: string
-      /** Name */
+      /** Max Concurrency */
+      max_concurrency: number
+      /**
+       * Name
+       * @default
+       */
       name: string
-      /** Registered At */
-      registered_at: string
-      /** Revoked */
-      revoked: boolean
-      /** Slots */
-      slots: number
+      /**
+       * Protocol Version
+       * @default 1
+       */
+      protocol_version: number
+      /** Runtimes */
+      runtimes: string[]
       /** Worker Id */
       worker_id: string
+    }
+    /** RegisterAgentWorkerResponse */
+    RegisterAgentWorkerResponse: {
+      /** Worker Token */
+      worker_token: string
     }
     /**
      * ResourceBinding
@@ -2136,34 +2148,6 @@ export interface components {
       /** Paused */
       paused: boolean
     }
-    /** WorkerTokenRegisterRequest */
-    WorkerTokenRegisterRequest: {
-      /** Capabilities */
-      capabilities: string[]
-      /** Labels */
-      labels?: {
-        [key: string]: unknown
-      }
-      /**
-       * Name
-       * @default
-       */
-      name: string
-      /** Slots */
-      slots: number
-      /** Worker Id */
-      worker_id: string
-    }
-    /** WorkerTokenRegisterResponse */
-    WorkerTokenRegisterResponse: {
-      /** Worker Token */
-      worker_token: string
-    }
-    /** WorkersResponse */
-    WorkersResponse: {
-      /** Workers */
-      workers: components['schemas']['RemoteWorkerSummaryResponse'][]
-    }
     /** WorkflowCompareSummary */
     WorkflowCompareSummary: {
       /** Edge Changes */
@@ -2400,6 +2384,8 @@ export interface components {
       key: string
       /** Label */
       label: string
+      /** Max Concurrency */
+      max_concurrency?: number | null
       /** Outputs */
       outputs: string[]
       terminal?: components['schemas']['WorkflowTerminalResponse'] | null
@@ -2797,6 +2783,181 @@ export interface components {
 }
 export type $defs = Record<string, never>
 export interface operations {
+  claim_api_agent_executions_claim_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['ClaimAgentExecutionRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentClaimResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  bundle_api_agent_executions__execution_id__bundle_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        execution_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': unknown
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  heartbeat_api_agent_executions__execution_id__heartbeat_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        execution_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  result_api_agent_executions__execution_id__result_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        execution_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      204: {
+        headers: {
+          [name: string]: unknown
+        }
+        content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_workers_api_agent_workers_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentWorkersResponse']
+        }
+      }
+    }
+  }
+  register_api_agent_workers_register_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['RegisterAgentWorkerRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['RegisterAgentWorkerResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
   list_agents_api_agents_get: {
     parameters: {
       query?: never
@@ -3509,210 +3670,6 @@ export interface operations {
         content: {
           'application/json': components['schemas']['PackageUpdateResponse']
         }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  claim_api_remote_claim_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['ClaimRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['ClaimResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  download_bundle_api_remote_executions__execution_id__bundle_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        execution_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/gzip': unknown
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  heartbeat_api_remote_executions__execution_id__heartbeat_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        execution_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  report_result_api_remote_executions__execution_id__result_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        execution_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown
-        }
-        content?: never
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  list_workers_api_remote_workers_get: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      200: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkersResponse']
-        }
-      }
-    }
-  }
-  register_worker_token_api_remote_workers_register_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path?: never
-      cookie?: never
-    }
-    requestBody: {
-      content: {
-        'application/json': components['schemas']['WorkerTokenRegisterRequest']
-      }
-    }
-    responses: {
-      /** @description Successful Response */
-      201: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['WorkerTokenRegisterResponse']
-        }
-      }
-      /** @description Validation Error */
-      422: {
-        headers: {
-          [name: string]: unknown
-        }
-        content: {
-          'application/json': components['schemas']['HTTPValidationError']
-        }
-      }
-    }
-  }
-  revoke_worker_token_api_remote_workers__worker_id__revoke_post: {
-    parameters: {
-      query?: never
-      header?: never
-      path: {
-        worker_id: string
-      }
-      cookie?: never
-    }
-    requestBody?: never
-    responses: {
-      /** @description Successful Response */
-      204: {
-        headers: {
-          [name: string]: unknown
-        }
-        content?: never
       }
       /** @description Validation Error */
       422: {

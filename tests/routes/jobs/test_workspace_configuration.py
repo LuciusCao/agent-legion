@@ -136,7 +136,7 @@ def test_workspace_configuration_rejects_invalid_binding_without_partial_update(
     assert config == original_config
 
 
-def test_app_startup_preserves_executor_configuration_for_workspace(tmp_path):
+def test_app_startup_preserves_local_executor_configuration_for_workspace(tmp_path):
     from fastapi.testclient import TestClient
 
     from server.app.jobs import JobQueries
@@ -154,7 +154,6 @@ def test_app_startup_preserves_executor_configuration_for_workspace(tmp_path):
         ws_id,
         [
             {"executor_id": "local-default", "concurrency_limit": 1},
-            {"executor_id": "pi", "concurrency_limit": 3},
         ],
         [],
         [],
@@ -165,7 +164,4 @@ def test_app_startup_preserves_executor_configuration_for_workspace(tmp_path):
         response = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
 
     assert response.status_code == 200
-    assert {row["executor_id"] for row in response.json()["allocations"]} == {
-        "local-default",
-        "pi",
-    }
+    assert {row["executor_id"] for row in response.json()["allocations"]} == {"local-default"}

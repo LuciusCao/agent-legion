@@ -2,15 +2,19 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+from server.app.db.transaction import write_transaction
 from server.app.executors._lease_claims import claim_lease
 from server.app.executors._lease_control import _sync_job_status
+from server.app.executors._lease_write_paths import _recover_orphaned_job
 from server.app.executors.leases import ExecutorLeaseRepository, _database_timestamp
 from server.app.executors.models import (
+    ExecutionResult,
     LeaseClaimRequest,
 )
 from server.app.jobs import JobQueries
 from tests.executors.leases.helpers import (
     _bind_executor_to_node,
+    _claim_request,
     _setup_workspace,
 )
 
@@ -320,3 +324,84 @@ def test_recover_orphaned_running_jobs_marks_running_node_runs_failed(
     assert run["status"] == "failed"
     assert run["error_message"] == "orphaned recovery"
     assert run["finished_at"] is not None
+
+
+def test_recover_skips_job_when_lease_claimed_concurrently(
+    repo_a: ExecutorLeaseRepository, queries: JobQueries
+) -> None:
+    """Replay the race: candidate SELECT sees an orphaned job, then a claim
+    for another node of the same job commits before the recovery UPDATE.
+
+    The guarded per-job recovery must leave the freshly claimed node (and the
+    still-orphaned one) untouched; the next sweep recovers the orphan once the
+    lease is gone.
+    """
+    workspace_id, job_id = _setup_workspace(
+        queries,
+        "ws-recover-race",
+        "exec-recover-race",
+        2,
+        node_keys=["node_a", "node_b"],
+        local_limit=None,
+    )
+    _bind_executor_to_node(
+        queries,
+        workspace_id,
+        "exec-recover-race",
+        2,
+        node_key="node_b",
+        local_limit=None,
+        workflow_key="question_comprehension_info",
+    )
+    # Orphaned state: job running, node_a running with no lease; node_b pending.
+    with queries.connect() as conn:
+        conn.execute(
+            "update job_nodes set status='running' where job_id=? and node_key=?",
+            (job_id, "node_a"),
+        )
+        conn.execute("update jobs set status='running' where id=?", (job_id,))
+        conn.execute("commit")
+
+    now_str = _database_timestamp(datetime.now(UTC))
+    with write_transaction(queries.path) as conn1:
+        candidates = conn1.execute(
+            """
+            select j.id
+            from jobs j
+            where j.status='running'
+              and not exists (
+                  select 1 from executor_leases l
+                  where l.job_id = j.id and l.status='active'
+              )
+            """
+        ).fetchall()
+        assert job_id in [str(row["id"]) for row in candidates]
+        # A concurrent claim for node_b commits between SELECT and UPDATE.
+        claim = repo_a.try_claim(
+            _claim_request(
+                workspace_id,
+                job_id,
+                node_key="node_b",
+                executor_id="exec-recover-race",
+                local_node_limit=None,
+            )
+        )
+        assert claim is not None
+        assert _recover_orphaned_job(conn1, job_id, now_str) is False
+
+    node_a = queries.get_job_node(job_id, "node_a")
+    assert node_a is not None and node_a["status"] == "running"
+    node_b = queries.get_job_node(job_id, "node_b")
+    assert node_b is not None and node_b["status"] == "running"
+    with queries.connect() as conn:
+        run = conn.execute(
+            "select status from node_runs where id=?", (claim.node_run_id,)
+        ).fetchone()
+    assert run is not None and run["status"] == "running"
+
+    # Once the lease is released, the next sweep recovers the orphan normally.
+    assert repo_a.finish(claim.lease_id, ExecutionResult(status="completed", exit_code=0))
+    recovered = repo_a.recover_orphaned_running_jobs(datetime.now(UTC))
+    assert recovered == [job_id]
+    node_a = queries.get_job_node(job_id, "node_a")
+    assert node_a is not None and node_a["status"] == "pending"

@@ -19,8 +19,6 @@ class PiExecutor:
     """Adapter that runs Pi agent nodes through the persistence-neutral PiRunner."""
 
     kind = "pi"
-    # Run-to-completion adapter; submit_only is the remote-executor opt-out.
-    submit_only = False
 
     def __init__(
         self,

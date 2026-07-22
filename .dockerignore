@@ -1,0 +1,13 @@
+.git
+.worktrees
+.venv
+.uv-cache
+data
+frontend/node_modules
+frontend/dist
+**/__pycache__
+*.pyc
+.env
+**/.env
+secrets
+**/secrets

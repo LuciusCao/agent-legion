@@ -82,18 +82,18 @@ describe('DagNode', () => {
     expect(screen.getByTestId(`dag-icon-${status}`)).toBeInTheDocument()
   })
 
-  it('renders executor badge with short worker id and full title', () => {
+  it('renders Agent and Worker identity separately in the badge', () => {
     renderWithProvider({
       ...baseData,
-      executorKind: 'remote',
-      executorId: 'remote-exec-1',
+      executorKind: 'pi',
+      agentId: 'key-info-generator',
       workerId: 'worker-abc123def456',
     })
     const badge = screen.getByTestId('dag-node-executor-badge')
     expect(badge).toHaveTextContent('abc123de')
     expect(badge).toHaveAttribute(
       'title',
-      'remote-exec-1 / worker-abc123def456'
+      'key-info-generator / worker-abc123def456'
     )
   })
 
@@ -108,8 +108,20 @@ describe('DagNode', () => {
     expect(badge).toHaveAttribute('title', 'local-default')
   })
 
-  it('renders no executor badge when both executorId and workerId are missing', () => {
-    renderWithProvider({ ...baseData, executorId: null, workerId: null })
+  it('renders the Agent while a request is queued without a Worker', () => {
+    renderWithProvider({ ...baseData, agentId: 'key-info-generator' })
+    expect(screen.getByTestId('dag-node-executor-badge')).toHaveTextContent(
+      'key-info-generator'
+    )
+  })
+
+  it('renders no executor badge when all execution identities are missing', () => {
+    renderWithProvider({
+      ...baseData,
+      agentId: null,
+      executorId: null,
+      workerId: null,
+    })
     expect(
       screen.queryByTestId('dag-node-executor-badge')
     ).not.toBeInTheDocument()

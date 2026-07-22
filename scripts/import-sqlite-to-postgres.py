@@ -21,7 +21,11 @@ import psycopg
 from psycopg import sql
 from psycopg.rows import dict_row
 
-from scripts.sqlite_import_support import ensure_empty, remove_schema_bootstrap
+from scripts.sqlite_import_support import (
+    count_orphan_artifact_refs,
+    ensure_empty,
+    remove_schema_bootstrap,
+)
 from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
 
@@ -43,8 +47,6 @@ TABLES: tuple[str, ...] = (
     "workspace_packages",
     "workflow_revisions",
     "node_run_token_usage",
-    "remote_workers",
-    "remote_executions",
     "worker_control_state",
     "artifacts",
     "artifact_refs",
@@ -151,12 +153,23 @@ def import_database(sqlite_path: Path, postgres_url: str, *, truncate: bool) -> 
     ):
         source.row_factory = sqlite3.Row
         source.execute("begin")
+        # Legacy SQLite timestamps are naive UTC strings; without this the
+        # timestamptz casts below would reinterpret them in the server timezone.
+        target.execute("set timezone = 'UTC'")
+        source_tables = _sqlite_tables(source)
+        orphan_refs = count_orphan_artifact_refs(source, source_tables)
+        if orphan_refs:
+            raise RuntimeError(
+                f"source SQLite database has {orphan_refs} artifact_refs rows whose hash"
+                " is missing from artifacts; PostgreSQL enforces this foreign key."
+                " Delete the orphan rows (or restore the missing artifacts) in the"
+                " SQLite file, then re-run the import. No target data was modified."
+            )
         if truncate:
             _truncate(target)
         else:
             remove_schema_bootstrap(target, TABLES)
             ensure_empty(target, TABLES)
-        source_tables = _sqlite_tables(source)
         counts = {table: _copy_table(source, target, table, source_tables) for table in TABLES}
         if "job_event_seq" in source_tables:
             row = source.execute("select value from job_event_seq where id=1").fetchone()

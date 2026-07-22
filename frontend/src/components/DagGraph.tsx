@@ -15,6 +15,7 @@ import { buildRfEdges, DagEdgeLabels } from './DagEdgeLabels'
 import { DagNode as DagNodeComponent } from './DagNode'
 import type { DagNodeData } from './DagNode'
 import type { DagNodeStatus } from './dagNodeStatus'
+import type { ExecutorKind } from '../jobTypes'
 import { NodeDetailsPanel } from './NodeDetailsPanel'
 import { filterRelevantRuns } from '../helpers'
 import { estimateDagNodeHeight } from './dagNodeHeight'
@@ -31,8 +32,9 @@ export interface DagGraphNode {
   status: DagNodeStatus
   created_at: string
   duration?: number
-  executorKind?: 'local' | 'pi' | 'openclaw' | 'remote' | null
+  executorKind?: ExecutorKind | null
   executorId?: string | null
+  agentId?: string | null
   workerId?: string | null
   capability?: string
   topologyBadges?: Array<'entry' | 'branch' | 'terminal'>
@@ -50,7 +52,6 @@ export interface DagGraphEdge {
 
 export type DagNode = DagGraphNode
 export type DagEdge = DagGraphEdge
-
 export interface NodeRunSummary {
   id: number
   node_key: string
@@ -78,7 +79,7 @@ const nodeTypes = { dagNode: DagNodeComponent }
 type NormalizedExecutorKind = NonNullable<DagNodeData['executorKind']>
 
 function normalizeExecutorKind(
-  kind?: 'local' | 'pi' | 'openclaw' | 'remote' | null
+  kind?: ExecutorKind | null
 ): DagNodeData['executorKind'] {
   if (!kind) return null
   return kind as NormalizedExecutorKind
@@ -114,6 +115,7 @@ function computeLayout(nodes: DagGraphNode[], edges: DagGraphEdge[]) {
         duration: node.duration,
         executorKind: normalizeExecutorKind(node.executorKind),
         executorId: node.executorId ?? null,
+        agentId: node.agentId ?? null,
         workerId: node.workerId ?? null,
         nodeKey: node.capability ? node.key : undefined,
         capability: node.capability,

@@ -72,8 +72,17 @@ class InProcessEventBus:
         for queue in list(queues):
             try:
                 queue.put_nowait(payload)
+            except asyncio.QueueFull:
+                # Slow subscriber falling QUEUE_MAXSIZE events behind: evict it
+                # with the sentinel (dropping the oldest queued item to make
+                # room) so its stream ends and the client reconnects/resyncs,
+                # instead of leaving it on a heartbeat-only zombie connection.
+                with contextlib.suppress(Exception):
+                    queue.get_nowait()
+                    queue.put_nowait(_EVICTED)
+                dead.add(queue)
             except Exception:
-                # QueueFull 或任何异常都视为死连接。
+                # 其他异常视为死连接，直接移除。
                 dead.add(queue)
         for queue in dead:
             self.unsubscribe(channel, queue)

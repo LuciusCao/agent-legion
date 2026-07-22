@@ -11,6 +11,7 @@ node row stays the aggregate authority).
 
 from __future__ import annotations
 
+from datetime import UTC, datetime
 from typing import Any
 
 from server.app.db.connection import DatabaseConnection
@@ -18,6 +19,7 @@ from server.app.executors._lease_control import (
     _pause_job_on_target_completion,
     _sync_job_status,
 )
+from server.app.executors._lease_transactions import _database_timestamp
 from server.app.executors.models import ExecutionResult
 from server.app.workflows.sharding import (
     ShardStatus,
@@ -66,4 +68,33 @@ def finish_shard_execution(
         _sync_job_status(conn, lease["job_id"])
         if aggregate == "completed":
             _pause_job_on_target_completion(conn, lease["job_id"], lease["node_key"], now_str)
+    return True
+
+
+def complete_empty_shard_node(
+    conn: DatabaseConnection,
+    job_id: str,
+    node_key: str,
+    now_str: str | None = None,
+) -> bool:
+    """Complete a shard node whose fan-out materialized zero shard rows.
+
+    Zero shards aggregate to a completed node with empty outputs — the reduce
+    fan-in then reads an empty array, matching ordinary empty-list map
+    semantics. The status guard makes a concurrent completion/claim a no-op
+    for the loser. Returns True when this call advanced the node.
+    """
+    now_str = now_str or _database_timestamp(datetime.now(UTC))
+    cursor = conn.execute(
+        """
+        update job_nodes
+        set status='completed', error_message='', finished_at=?
+        where job_id=? and node_key=? and status in ('pending', 'ready', 'stale')
+        """,
+        (now_str, job_id, node_key),
+    )
+    if cursor.rowcount == 0:
+        return False
+    _sync_job_status(conn, job_id)
+    _pause_job_on_target_completion(conn, job_id, node_key, now_str)
     return True

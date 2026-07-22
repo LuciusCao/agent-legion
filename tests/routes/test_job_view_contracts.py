@@ -17,7 +17,7 @@ def test_node_run_response_has_runner_default():
     assert run.runner == ""
 
 
-def test_job_node_response_accepts_remote_executor_kind():
+def test_job_node_response_keeps_agent_and_worker_separate():
     node = JobNodeResponse(
         id=1,
         job_id="j1",
@@ -31,7 +31,10 @@ def test_job_node_response_accepts_remote_executor_kind():
         after=[],
         inputs=[],
         outputs=[],
-        executor_id="pi-remote",
-        executor_kind="remote",
+        executor_kind="pi",
+        agent_id="key-info-generator",
+        worker_id="home-mac-mini-1",
     )
-    assert node.executor_kind == "remote"
+    assert node.executor_kind == "pi"
+    assert node.agent_id == "key-info-generator"
+    assert node.worker_id == "home-mac-mini-1"

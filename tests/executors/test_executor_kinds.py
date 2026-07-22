@@ -92,4 +92,3 @@ def test_runtime_dependencies_defaults() -> None:
     deps = RuntimeDependencies()
     assert deps.pi_runtime.binary == "pi"
     assert deps.cancellation_grace_seconds == 5
-    assert deps.remote_broker is None

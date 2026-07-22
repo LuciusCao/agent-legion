@@ -108,6 +108,46 @@ def test_proxy_passthrough_upstream_error(monkeypatch):
     assert b"rate limited" in resp.content
 
 
+def test_proxy_requires_gateway_token_when_configured(monkeypatch):
+    fake = FakeUpstreamResponse(chunks=[b"data: ok\n\n"])
+    monkeypatch.setattr(llm_gateway.requests, "post", lambda *a, **k: fake)
+    app = llm_gateway.create_gateway_app("https://llm.example.com", "k", gateway_token="tok123")
+    client = TestClient(app)
+
+    assert client.post("/v1/chat/completions", json={}).status_code == 401
+    resp = client.post("/v1/chat/completions", json={}, headers={"X-Gateway-Token": "wrong"})
+    assert resp.status_code == 401
+
+
+def test_proxy_accepts_gateway_token_via_header_or_bearer(monkeypatch):
+    fake = FakeUpstreamResponse(chunks=[b"data: ok\n\n"])
+    monkeypatch.setattr(llm_gateway.requests, "post", lambda *a, **k: fake)
+    app = llm_gateway.create_gateway_app("https://llm.example.com", "k", gateway_token="tok123")
+    client = TestClient(app)
+
+    resp = client.post("/v1/chat/completions", json={}, headers={"X-Gateway-Token": "tok123"})
+    assert resp.status_code == 200
+    resp = client.post("/v1/chat/completions", json={}, headers={"Authorization": "Bearer tok123"})
+    assert resp.status_code == 200
+
+
+def test_proxy_rejects_path_traversal(monkeypatch):
+    called = []
+
+    def fake_post(url, **kwargs):
+        called.append(url)
+        return FakeUpstreamResponse()
+
+    monkeypatch.setattr(llm_gateway.requests, "post", fake_post)
+    app = llm_gateway.create_gateway_app("https://llm.example.com", "k")
+    client = TestClient(app)
+    # httpx normalizes literal ".." away client-side; percent-encoded dots
+    # survive to the server and are decoded into the path parameter.
+    assert client.post("/v1/%2E%2E/admin", json={}).status_code == 400
+    assert client.post("/v1/foo/%2E%2E/%2E%2E/admin", json={}).status_code == 400
+    assert called == []
+
+
 def test_proxy_upstream_unreachable(monkeypatch):
     def boom(*a, **k):
         raise llm_gateway.requests.ConnectionError("no route")

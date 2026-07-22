@@ -70,7 +70,12 @@ export function useWorkspaceEvents(
       onEvent: (_type, data) => {
         const event = new MessageEvent('message', { data })
         if (snapshotLoadingRef.current) {
-          enqueuePendingEvent(pendingEventsRef, event, maxPendingEvents)
+          if (!enqueuePendingEvent(pendingEventsRef, event, maxPendingEvents)) {
+            // Queue overflowed: drop it and resync from a fresh snapshot
+            // rather than silently losing patch revisions.
+            pendingEventsRef.current = []
+            void loadSnapshot()
+          }
         } else {
           processEvent(event)
         }

@@ -4,7 +4,7 @@ from server.app.jobs import JobQueries
 from server.app.services.job_errors import NotFoundError
 from server.app.services.job_node_executor_resolver import resolve_node_executors
 from server.app.services.job_node_ordering import ordered_job_nodes
-from server.app.services.job_node_worker_projection import claimed_worker_map
+from server.app.services.job_node_worker_projection import agent_route_map, claimed_worker_map
 from server.app.services.job_patch_query_summaries import summarize_paginated_jobs
 from server.app.services.job_path_projection import resolve_record_paths
 from server.app.services.job_query_presenters import (
@@ -139,11 +139,15 @@ class JobQueryService:
             self.settings,
         )
         worker_map = claimed_worker_map(self.job_db.path, job_id)
+        agent_map = agent_route_map(
+            self.job_db.path, str(job["workspace_id"]), str(job["workflow_key"])
+        )
         for node in nodes_with_definition:
             executor_id, executor_kind = executor_map.get(node["node_key"], (None, None))
             node["executor_id"] = executor_id
             node["executor_kind"] = executor_kind
             node["worker_id"] = worker_map.get(node["node_key"])
+            node["agent_id"] = agent_map.get(node["node_key"])
         return {
             "job": self._job_summary(job, nodes, definition),
             "nodes": nodes_with_definition,

@@ -5,7 +5,94 @@ from typing import Any
 from server.app.jobs.queries.base import JobQueriesBase
 
 
+def _delete_stale_projection_rows(
+    conn,
+    workspace_id: str,
+    workflow_key: str,
+    keep_route_nodes: set[str],
+    keep_capacity_nodes: set[str],
+) -> None:
+    """Remove route/capacity rows absent from the new projection.
+
+    ``workspace_node_routes``/``workspace_node_capacities`` are materialized
+    projections of the current published revision, so rows for nodes that lost
+    their Agent routing (or were removed) must not survive a republish. Only
+    ``target_kind='agent'`` routes are pruned; handler routes are owned by a
+    different write path.
+    """
+    if keep_route_nodes:
+        placeholders = ", ".join("?" for _ in keep_route_nodes)
+        conn.execute(
+            "delete from workspace_node_routes"
+            " where workspace_id=? and workflow_key=? and target_kind='agent'"
+            f" and node_key not in ({placeholders})",
+            (workspace_id, workflow_key, *sorted(keep_route_nodes)),
+        )
+    else:
+        conn.execute(
+            "delete from workspace_node_routes"
+            " where workspace_id=? and workflow_key=? and target_kind='agent'",
+            (workspace_id, workflow_key),
+        )
+    if keep_capacity_nodes:
+        placeholders = ", ".join("?" for _ in keep_capacity_nodes)
+        conn.execute(
+            "delete from workspace_node_capacities"
+            " where workspace_id=? and workflow_key=?"
+            f" and node_key not in ({placeholders})",
+            (workspace_id, workflow_key, *sorted(keep_capacity_nodes)),
+        )
+    else:
+        conn.execute(
+            "delete from workspace_node_capacities where workspace_id=? and workflow_key=?",
+            (workspace_id, workflow_key),
+        )
+
+
 class WorkflowRevisionQueriesMixin(JobQueriesBase):
+    def materialize_agent_routes(
+        self,
+        *,
+        workspace_id: str,
+        workflow_key: str,
+        revision_id: str,
+        agent_routes: dict[str, str],
+        node_capacities: dict[str, int],
+    ) -> None:
+        with self.connect() as conn:
+            for node_key, agent_id in agent_routes.items():
+                conn.execute(
+                    """
+                    insert into workspace_node_routes(
+                      workspace_id, workflow_key, node_key, target_kind, target_id
+                    ) values (?, ?, ?, 'agent', ?)
+                    on conflict(workspace_id, workflow_key, node_key) do update set
+                      target_kind='agent', target_id=excluded.target_id
+                    """,
+                    (workspace_id, workflow_key, node_key, agent_id),
+                )
+            for node_key, max_concurrency in node_capacities.items():
+                conn.execute(
+                    """
+                    insert into workspace_node_capacities(
+                      workspace_id, workflow_key, node_key, max_concurrency,
+                      source_revision_id, updated_at
+                    ) values (?, ?, ?, ?, ?, current_timestamp)
+                    on conflict(workspace_id, workflow_key, node_key) do update set
+                      max_concurrency=excluded.max_concurrency,
+                      source_revision_id=excluded.source_revision_id,
+                      updated_at=current_timestamp
+                    """,
+                    (workspace_id, workflow_key, node_key, max_concurrency, revision_id),
+                )
+            _delete_stale_projection_rows(
+                conn,
+                workspace_id,
+                workflow_key,
+                keep_route_nodes=set(agent_routes),
+                keep_capacity_nodes=set(node_capacities),
+            )
+
     def create_workflow_revision(
         self,
         *,
@@ -16,6 +103,8 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
         status: str,
         definition_json: str,
         definition_hash: str,
+        agent_routes: dict[str, str] | None = None,
+        node_capacities: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         with self.connect() as conn:
             if status == "active":
@@ -45,6 +134,39 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
                     status,
                 ),
             )
+            for node_key, agent_id in (agent_routes or {}).items():
+                conn.execute(
+                    """
+                    insert into workspace_node_routes(
+                      workspace_id, workflow_key, node_key, target_kind, target_id
+                    ) values (?, ?, ?, 'agent', ?)
+                    on conflict(workspace_id, workflow_key, node_key) do update set
+                      target_kind='agent', target_id=excluded.target_id
+                    """,
+                    (workspace_id, workflow_key, node_key, agent_id),
+                )
+            for node_key, max_concurrency in (node_capacities or {}).items():
+                conn.execute(
+                    """
+                    insert into workspace_node_capacities(
+                      workspace_id, workflow_key, node_key, max_concurrency,
+                      source_revision_id, updated_at
+                    ) values (?, ?, ?, ?, ?, current_timestamp)
+                    on conflict(workspace_id, workflow_key, node_key) do update set
+                      max_concurrency=excluded.max_concurrency,
+                      source_revision_id=excluded.source_revision_id,
+                      updated_at=current_timestamp
+                    """,
+                    (workspace_id, workflow_key, node_key, max_concurrency, revision_id),
+                )
+            if agent_routes is not None or node_capacities is not None:
+                _delete_stale_projection_rows(
+                    conn,
+                    workspace_id,
+                    workflow_key,
+                    keep_route_nodes=set(agent_routes or {}),
+                    keep_capacity_nodes=set(node_capacities or {}),
+                )
             row = conn.execute(
                 "select * from workflow_revisions where id=?", (revision_id,)
             ).fetchone()
@@ -66,6 +188,18 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
                 (workspace_id, workflow_key),
             ).fetchone()
         return dict(row) if row else None
+
+    def list_active_workflow_revisions(self) -> list[dict[str, Any]]:
+        """All active revisions across workspaces (at most one per workspace/workflow)."""
+        with self._connect_read() as conn:
+            rows = conn.execute(
+                """
+                select * from workflow_revisions
+                where status='active'
+                order by workspace_id, workflow_key
+                """,
+            ).fetchall()
+        return [dict(row) for row in rows]
 
     def get_workflow_revision(
         self,

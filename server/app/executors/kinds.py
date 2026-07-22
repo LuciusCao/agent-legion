@@ -12,7 +12,6 @@ from server.app.executors.runtime_config import OpenClawRuntimeConfig, PiRuntime
 from server.app.skills.manager import SkillManager
 
 if TYPE_CHECKING:
-    from server.app.executors.remote_broker import RemoteExecutionBroker
     from server.app.services.artifact_store import ArtifactStore
 
 
@@ -51,7 +50,6 @@ class RuntimeDependencies:
     settings_config: Mapping[str, Any] | None = None
     job_db: Any | None = None
     cancellation_grace_seconds: int = 5
-    remote_broker: RemoteExecutionBroker | None = None
     artifact_store: ArtifactStore | None = None
 
 

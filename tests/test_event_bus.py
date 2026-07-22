@@ -27,14 +27,17 @@ def test_publish_isolated_by_channel():
     assert q2.empty()
 
 
-def test_bounded_queue_drops_dead_subscriber():
+def test_bounded_queue_evicts_slow_subscriber_with_sentinel():
     bus = InProcessEventBus()
     queue = bus.subscribe("dashboard")
     for _ in range(bus.QUEUE_MAXSIZE):
         bus.publish("dashboard", "x")
-    bus.publish("dashboard", "overflow")  # 队满 → 订阅者被移除
+    bus.publish("dashboard", "overflow")  # 队满 → 驱逐并投递哨兵
     bus.publish("dashboard", "after-removal")
-    assert queue.qsize() == bus.QUEUE_MAXSIZE  # 不再增长
+    items = [queue.get_nowait() for _ in range(queue.qsize())]
+    # 最旧事件被丢弃以腾出位置，哨兵让流结束、客户端重连后 resync。
+    assert items[-1] is _EVICTED
+    assert len(items) == bus.QUEUE_MAXSIZE
     assert "dashboard" not in bus._subscribers or queue not in bus._subscribers.get(
         "dashboard", set()
     )

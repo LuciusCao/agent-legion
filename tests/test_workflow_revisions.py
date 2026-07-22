@@ -1,5 +1,7 @@
+import logging
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from server.app.jobs.queries import JobQueries
@@ -14,7 +16,11 @@ from server.app.services.workflow_revision_format import (
     workflow_definition_to_response_payload,
 )
 from server.app.services.workflow_revisions import WorkflowRevisionService
-from server.app.workflows.definition import load_workflow_definition
+from server.app.workflows.definition import (
+    WorkflowDefinition,
+    load_workflow_definition,
+    workflow_definition_from_mapping,
+)
 from tests.postgres_support import TEST_DATABASE_URL
 
 
@@ -34,6 +40,149 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
     assert active["status"] == "active"
     assert active["definition_hash"]
     assert active["definition_json"]
+    with queries._connect_read() as conn:
+        route = conn.execute(
+            "select target_kind, target_id from workspace_node_routes"
+            " where workspace_id=? and workflow_key=? and node_key='generate_key_info'",
+            (workspace["id"], definition.key),
+        ).fetchone()
+        capacity = conn.execute(
+            "select max_concurrency, source_revision_id from workspace_node_capacities"
+            " where workspace_id=? and workflow_key=? and node_key='generate_key_info'",
+            (workspace["id"], definition.key),
+        ).fetchone()
+    assert route is not None
+    assert dict(route) == {"target_kind": "agent", "target_id": "question-key-info-v1"}
+    assert capacity is not None
+    assert capacity["max_concurrency"] == 20
+    assert capacity["source_revision_id"] == revision["id"]
+
+
+def _agent_nodes_definition(*, review_as_local: bool) -> WorkflowDefinition:
+    review_node: dict = {"capability": "review_key_info", "after": ["generate_key_info"]}
+    if not review_as_local:
+        review_node["max_concurrency"] = 10
+    return workflow_definition_from_mapping(
+        {
+            "key": "question_comprehension_info",
+            "label": "QCI",
+            "nodes": {
+                "generate_key_info": {
+                    "capability": "generate_key_info",
+                    "max_concurrency": 20,
+                },
+                "review_key_info": review_node,
+            },
+        }
+    )
+
+
+def _route_and_capacity_rows(queries: JobQueries, workspace_id: str, workflow_key: str) -> dict:
+    with queries._connect_read() as conn:
+        routes = conn.execute(
+            "select node_key, target_kind, target_id from workspace_node_routes"
+            " where workspace_id=? and workflow_key=?",
+            (workspace_id, workflow_key),
+        ).fetchall()
+        capacities = conn.execute(
+            "select node_key, max_concurrency from workspace_node_capacities"
+            " where workspace_id=? and workflow_key=?",
+            (workspace_id, workflow_key),
+        ).fetchall()
+    return {
+        "routes": {row["node_key"]: (row["target_kind"], row["target_id"]) for row in routes},
+        "capacities": {row["node_key"]: row["max_concurrency"] for row in capacities},
+    }
+
+
+def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    service = WorkflowRevisionService(queries)
+    service.publish_workspace_revision(
+        workspace["id"], _agent_nodes_definition(review_as_local=False)
+    )
+    video_definition = load_workflow_definition(Path("config/workflows/video_knowledge.yaml"))
+    service.publish_workspace_revision(workspace["id"], video_definition)
+
+    service.publish_workspace_revision(
+        workspace["id"], _agent_nodes_definition(review_as_local=True)
+    )
+
+    question_rows = _route_and_capacity_rows(
+        queries, workspace["id"], "question_comprehension_info"
+    )
+    assert question_rows["routes"] == {"generate_key_info": ("agent", "question-key-info-v1")}
+    assert question_rows["capacities"] == {"generate_key_info": 20}
+    video_rows = _route_and_capacity_rows(queries, workspace["id"], "video_knowledge")
+    assert set(video_rows["routes"]) == {
+        "subtitle_review",
+        "chapter_generate",
+        "interaction_generate",
+        "content_review",
+    }
+    assert set(video_rows["capacities"]) == set(video_rows["routes"])
+
+
+def test_reconcile_warns_and_skips_on_ambiguous_capability(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    service = WorkflowRevisionService(queries)
+    service.publish_workspace_revision(
+        workspace["id"], _agent_nodes_definition(review_as_local=False)
+    )
+    # Simulate catalog/DB desync: a second enabled definition for the same capability.
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into agent_definitions("
+            " agent_id, capability, runtime, definition_json, definition_hash, enabled)"
+            " values ('question-key-info-v2', 'generate_key_info', 'pi', '{}', 'hash-v2', 1)"
+        )
+
+    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
+        service.reconcile_active_agent_routes()
+
+    warnings = [
+        record
+        for record in caplog.records
+        if "Agent route migration skipped" in record.getMessage()
+    ]
+    # The bootstrap workspace carries an active revision for the same workflow,
+    # so it warns too; what matters is that boot survives and our workspace warns.
+    assert warnings
+    assert any(workspace["id"] in record.getMessage() for record in warnings)
+    # The ambiguous revision was skipped: its previously materialized rows are untouched.
+    rows = _route_and_capacity_rows(queries, workspace["id"], "question_comprehension_info")
+    assert rows["routes"]["generate_key_info"] == ("agent", "question-key-info-v1")
+
+
+def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Path) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    service = WorkflowRevisionService(queries)
+    service.publish_workspace_revision(
+        workspace["id"], _agent_nodes_definition(review_as_local=False)
+    )
+    video_definition = load_workflow_definition(Path("config/workflows/video_knowledge.yaml"))
+    service.publish_workspace_revision(workspace["id"], video_definition)
+    # Simulate a pre-cutover active revision: no materialized routes/capacities.
+    with queries.connect() as conn:
+        conn.execute(
+            "delete from workspace_node_routes where workspace_id=? and workflow_key=?",
+            (workspace["id"], "video_knowledge"),
+        )
+        conn.execute(
+            "delete from workspace_node_capacities where workspace_id=? and workflow_key=?",
+            (workspace["id"], "video_knowledge"),
+        )
+
+    service.reconcile_active_agent_routes()
+
+    video_rows = _route_and_capacity_rows(queries, workspace["id"], "video_knowledge")
+    assert video_rows["routes"]["subtitle_review"] == ("agent", "video-subtitle-review-v1")
+    assert video_rows["capacities"]["subtitle_review"] == 20
 
 
 def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:

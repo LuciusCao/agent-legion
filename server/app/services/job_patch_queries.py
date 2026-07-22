@@ -50,9 +50,13 @@ class JobPatchQueryService(JobQueryService):
         limit: int = 200,
         cursor: str | None = None,
     ) -> dict[str, Any]:
+        # Sample the revision watermark BEFORE reading jobs: events recorded
+        # after this point carry a higher revision, so the client's patches
+        # always apply on top of this snapshot instead of being dropped as
+        # already-covered while the snapshot actually missed the change.
+        revision = self._job_event_buffer.current_revision() if self._job_event_buffer else 0
         jobs, next_cursor = list_jobs_paginated(self.job_db, workspace_id, limit, cursor)
         jobs = summarize_paginated_jobs(self, self.job_db, jobs)
-        revision = getattr(self._job_event_buffer, "_revision", 0) if self._job_event_buffer else 0
         return {
             "workspace_id": workspace_id,
             "revision": revision,
