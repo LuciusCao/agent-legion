@@ -13,4 +13,6 @@ class WorkspaceExecutorConfigurationService:
         if self.job_db.get_workspace(workspace_id) is None:
             raise NotFoundError("Workspace not found")
         configuration = self.job_db.get_workspace_executor_configuration(workspace_id)
-        return configuration_with_warnings(self.job_db, workspace_id, configuration)
+        result = configuration_with_warnings(self.job_db, workspace_id, configuration)
+        result["agent_capacity"] = self.job_db.get_workspace_agent_capacity(workspace_id)
+        return result

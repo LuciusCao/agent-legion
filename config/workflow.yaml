@@ -46,7 +46,7 @@ agents:
     tools: [read, write, bash]
 agent_workers:
   register_token: ""
-  register_token_file: ""
+  register_token_file: "deploy/secrets/agent_worker_register_token"
   max_archive_bytes: 67108864
   min_protocol_version: 1
 executors:
@@ -79,7 +79,7 @@ workflows:
   enabled: true
   pi:
     binary: pi
-    provider: deepseek
+    provider: gateway
     model: your-model-b
     thinking: low
     timeout_seconds: 900

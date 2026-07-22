@@ -24,7 +24,7 @@ class WorkflowRevisionService:
         definition_json = serialize_definition(definition)
         version = self.job_db.next_workflow_revision_version(workspace_id, definition.key)
         revision_id = f"{workspace_id}:{definition.key}:v{version}"
-        agent_routes, node_capacities = self._agent_routes(definition)
+        agent_routes = self._agent_routes(definition)
         return self.job_db.create_workflow_revision(
             revision_id=revision_id,
             workspace_id=workspace_id,
@@ -34,17 +34,14 @@ class WorkflowRevisionService:
             definition_json=definition_json,
             definition_hash=definition_hash(definition_json),
             agent_routes=agent_routes,
-            node_capacities=node_capacities,
         )
 
-    def _agent_routes(
-        self, definition: WorkflowDefinition
-    ) -> tuple[dict[str, str], dict[str, int]]:
-        agent_nodes = [
-            node for node in definition.nodes.values() if node.max_concurrency is not None
-        ]
-        if not agent_nodes:
-            return {}, {}
+    def _agent_routes(self, definition: WorkflowDefinition) -> dict[str, str]:
+        """Route every node whose capability resolves to exactly one enabled Agent.
+
+        Agent capacity is workspace-level (workspace_agent_capacities), so no
+        per-node capacities are materialized; nodes whose capability matches no
+        enabled Agent keep their handler/executor path."""
         with self.job_db._connect_read() as conn:
             rows = conn.execute(
                 "select agent_id, capability from agent_definitions where enabled=1"
@@ -53,18 +50,16 @@ class WorkflowRevisionService:
         for row in rows:
             by_capability.setdefault(str(row["capability"]), []).append(str(row["agent_id"]))
         routes: dict[str, str] = {}
-        capacities: dict[str, int] = {}
-        for node in agent_nodes:
+        for node in definition.nodes.values():
             candidates = by_capability.get(node.capability, [])
-            if len(candidates) != 1:
+            if len(candidates) > 1:
                 raise ValueError(
                     f"Agent node {node.key!r} capability {node.capability!r} must resolve to"
                     f" exactly one enabled Agent; found {len(candidates)}"
                 )
-            routes[node.key] = candidates[0]
-            assert node.max_concurrency is not None
-            capacities[node.key] = node.max_concurrency
-        return routes, capacities
+            if len(candidates) == 1:
+                routes[node.key] = candidates[0]
+        return routes
 
     def get_active(self, workspace_id: str, workflow_key: str) -> dict:
         revision = self.job_db.get_active_workflow_revision(workspace_id, workflow_key)
@@ -86,7 +81,23 @@ class WorkflowRevisionService:
         enabled Agent (catalog/DB desync) is skipped with a migration warning
         instead of aborting startup, matching the "no auto-migration on
         ambiguous mapping" rule.
+
+        When the catalog has zero enabled definitions, skip entirely: routes
+        derived from an empty catalog would be empty too, and materializing
+        them would prune every existing route (see the empty-catalog guard in
+        ``sync_agent_definitions``).
         """
+        with self.job_db._connect_read() as conn:
+            enabled_row = conn.execute(
+                "select count(*) as c from agent_definitions where enabled=1"
+            ).fetchone()
+        enabled_count = int(enabled_row["c"]) if enabled_row is not None else 0
+        if not enabled_count:
+            logger.warning(
+                "Agent route reconcile skipped: no enabled Agent Definitions; "
+                "keeping existing workspace_node_routes"
+            )
+            return
         for revision in self.job_db.list_active_workflow_revisions():
             workspace_id = str(revision["workspace_id"])
             workflow_key = str(revision["workflow_key"])
@@ -94,7 +105,7 @@ class WorkflowRevisionService:
                 definition = workflow_definition_from_dict(
                     json.loads(str(revision["definition_json"]))
                 )
-                routes, capacities = self._agent_routes(definition)
+                routes = self._agent_routes(definition)
             except ValueError as exc:
                 logger.warning(
                     "Agent route migration skipped for workspace %s workflow %s (revision %s): %s",
@@ -107,7 +118,5 @@ class WorkflowRevisionService:
             self.job_db.materialize_agent_routes(
                 workspace_id=workspace_id,
                 workflow_key=workflow_key,
-                revision_id=str(revision["id"]),
                 agent_routes=routes,
-                node_capacities=capacities,
             )

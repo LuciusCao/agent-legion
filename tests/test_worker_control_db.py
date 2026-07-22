@@ -24,10 +24,33 @@ def test_default_is_paused(db_path):
 def test_pause_state_visible_across_instances(db_path):
     a = WorkspaceWorkerControl(db_path=db_path)
     a.resume("ws1")
-    b = WorkspaceWorkerControl(db_path=db_path)  # 模拟另一进程/重启
+    b = WorkspaceWorkerControl(db_path=db_path)  # 模拟另一进程
     assert b.is_paused("ws1") is False
     b.pause("ws1")
     assert a.is_paused("ws1") is True
+
+
+def test_reset_all_to_paused_clears_persisted_resume(db_path):
+    a = WorkspaceWorkerControl(db_path=db_path)
+    a.resume("ws1")
+    assert a.is_paused("ws1") is False
+
+    a.reset_all_to_paused()
+
+    b = WorkspaceWorkerControl(db_path=db_path)
+    assert b.is_paused("ws1") is True
+
+
+def test_app_startup_resets_dispatch_to_paused(tmp_path: Path):
+    from server.app.main import create_app
+
+    app1 = create_app(data_dir=tmp_path / "d1", start_worker=False)
+    control1 = app1.state.workspace_worker_control
+    control1.resume("question_comprehension")
+    assert control1.is_paused("question_comprehension") is False
+
+    app2 = create_app(data_dir=tmp_path / "d2", start_worker=False)
+    assert app2.state.workspace_worker_control.is_paused("question_comprehension") is True
 
 
 def test_updated_by_recorded(db_path):

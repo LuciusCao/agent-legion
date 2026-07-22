@@ -35,7 +35,7 @@ def _seed_request(
     job_id: str,
     workspace_id: str = "test-workspace",
     node_key: str = "generate",
-    limit: int = 20,
+    workspace_cap: int | None = 20,
 ) -> str:
     definition = _definition()
     sync_agent_definitions(TEST_DATABASE_URL, {"generator-v1": definition})
@@ -56,13 +56,14 @@ def _seed_request(
             " on conflict(workspace_id, workflow_key, node_key) do nothing",
             (workspace_id, node_key),
         )
-        conn.execute(
-            "insert into workspace_node_capacities(workspace_id, workflow_key, node_key, max_concurrency)"
-            " values (?, 'questions', ?, ?)"
-            " on conflict(workspace_id, workflow_key, node_key) do update"
-            " set max_concurrency=excluded.max_concurrency",
-            (workspace_id, node_key, limit),
-        )
+        if workspace_cap is not None:
+            conn.execute(
+                "insert into workspace_agent_capacities(workspace_id, max_concurrency)"
+                " values (?, ?)"
+                " on conflict(workspace_id) do update"
+                " set max_concurrency=excluded.max_concurrency",
+                (workspace_id, workspace_cap),
+            )
     broker = AgentExecutionBroker(TEST_DATABASE_URL)
     execution_id = broker.enqueue(
         AgentExecutionRequest(
@@ -72,7 +73,7 @@ def _seed_request(
             node_key=node_key,
             agent_id="generator-v1",
             agent_definition_hash=definition.definition_hash(),
-            node_concurrency_limit=limit,
+            node_concurrency_limit=0,
             manifest={"job_id": job_id, "log_path": f"logs/{job_id}.log"},
         )
     )
@@ -99,9 +100,9 @@ def _claimed_count(job_db) -> int:
 
 
 def test_two_workers_racing_for_last_node_slot_exactly_one_wins(job_db) -> None:
-    """Node at 19/20: two concurrent claims must serialize on the node domain."""
+    """Workspace at 19/20: two concurrent claims must serialize on the workspace domain."""
     for index in range(25):
-        _seed_request(job_db, job_id=f"race-job-{index}", limit=20)
+        _seed_request(job_db, job_id=f"race-job-{index}", workspace_cap=20)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)
     for worker_id in ("worker-1", "worker-2", "worker-3"):
         _register(registry, worker_id)
@@ -241,6 +242,69 @@ def test_claim_skips_paused_job_and_cancels_failed_job(job_db) -> None:
     with job_db.connect() as conn:
         conn.execute("update jobs set execution_paused=0 where id='paused-job'")
     assert broker.claim("worker-1") is not None
+
+
+def test_cross_node_same_workspace_race_exactly_one_winner(job_db) -> None:
+    """Two DIFFERENT nodes of the SAME workspace share one workspace cap:
+    with cap=1, a cross-node oversell race yields exactly one winner."""
+    _seed_request(job_db, job_id="xn-job-a", node_key="generate-a", workspace_cap=1)
+    _seed_request(job_db, job_id="xn-job-b", node_key="generate-b", workspace_cap=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    for worker_id in ("worker-1", "worker-2"):
+        _register(registry, worker_id)
+
+    barrier = threading.Barrier(2)
+    results: dict[str, object] = {}
+
+    def race(worker_id: str) -> None:
+        barrier.wait(timeout=10)
+        results[worker_id] = AgentExecutionBroker(TEST_DATABASE_URL).claim(worker_id)
+
+    threads = [threading.Thread(target=race, args=(w,)) for w in ("worker-1", "worker-2")]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(timeout=30)
+        assert not thread.is_alive()
+
+    winners = [claim for claim in results.values() if claim is not None]
+    assert len(winners) == 1
+    assert _claimed_count(job_db) == 1
+
+
+def test_different_workspaces_do_not_block_each_other(job_db) -> None:
+    """A saturated workspace must not block claims in another workspace."""
+    _seed_request(job_db, job_id="ws-a-job-1", workspace_id="ws-a", workspace_cap=1)
+    _seed_request(job_db, job_id="ws-a-job-2", workspace_id="ws-a", workspace_cap=1)
+    _seed_request(job_db, job_id="ws-b-job-1", workspace_id="ws-b", workspace_cap=1)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register(registry, "worker-1", max_concurrency=4)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    first = broker.claim("worker-1")
+    second = broker.claim("worker-1")
+    third = broker.claim("worker-1")
+
+    claimed_workspaces = {
+        claim.workspace_id for claim in (first, second, third) if claim is not None
+    }
+    # ws-a saturates after one claim; ws-b still gets its slot.
+    assert claimed_workspaces == {"ws-a", "ws-b"}
+    assert _claimed_count(job_db) == 2
+
+
+def test_workspace_without_capacity_row_is_unlimited(job_db) -> None:
+    """Documented fallback: no workspace_agent_capacities row = no limit."""
+    for index in range(12):
+        _seed_request(job_db, job_id=f"uncapped-job-{index}", workspace_cap=None)
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register(registry, "worker-1", max_concurrency=12)
+    broker = AgentExecutionBroker(TEST_DATABASE_URL)
+
+    claims = [broker.claim("worker-1") for _ in range(12)]
+
+    assert all(claim is not None for claim in claims)
+    assert _claimed_count(job_db) == 12
 
 
 def test_stale_definition_requests_are_failed_by_sweeper(job_db) -> None:

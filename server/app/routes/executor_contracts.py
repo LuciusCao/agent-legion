@@ -31,6 +31,21 @@ class WorkspaceExecutorConfigurationResponse(BaseModel):
     bindings: list[NodeBindingRequest]
     node_limits: list[NodeLimitRequest]
     migration_warnings: list[str]
+    agent_capacity: int | None = None
+
+
+class WorkspaceAgentRouteEntry(BaseModel):
+    workflow_key: str
+    node_key: str
+    node_label: str
+    capability: str
+    agent_id: str
+    agent_skill: str
+    max_concurrency: int | None
+
+
+class WorkspaceAgentRoutesResponse(BaseModel):
+    routes: list[WorkspaceAgentRouteEntry]
 
 
 class WorkspaceSettingsPayload(BaseModel):
@@ -60,9 +75,12 @@ class WorkspaceConfigurationRequest(BaseModel):
     executor_allocations: list[ExecutorAllocationRequest] = Field(default_factory=list)
     node_bindings: list[NodeBindingRequest] = Field(default_factory=list)
     node_limits: list[NodeLimitRequest] = Field(default_factory=list)
+    # Workspace-level Agent concurrency limit; null/absent leaves it unchanged.
+    agent_capacity: int | None = Field(default=None, ge=1)
 
 
 class WorkspaceConfigurationResponse(BaseModel):
     workspace: WorkspaceRecord
     settings: WorkspaceSettingsPayload
     executor_configuration: WorkspaceExecutorConfigurationResponse
+    agent_capacity: int | None = None

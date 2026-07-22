@@ -5,6 +5,7 @@ import { useSettingStore } from '../stores/settingStore'
 import { AppShell } from '../layouts/AppShell'
 import { AppBar } from '../components/AppBar'
 import { ExecutorAllocationSection } from '../components/ExecutorAllocationSection'
+import { AgentRoutingSection } from '../components/AgentRoutingSection'
 import { ExecutorBindingSection } from '../components/ExecutorBindingSection'
 import { LocalNodeLimitSection } from '../components/LocalNodeLimitSection'
 import { MaterialIcon } from '../components/MaterialIcon'
@@ -190,6 +191,11 @@ export function SettingsPage() {
             <h2 className={styles.sectionTitle}>节点绑定</h2>
             <hr className={styles.sectionDivider} />
             <ExecutorBindingSection />
+          </section>
+          <section id="agent-routing" className={styles.section}>
+            <h2 className={styles.sectionTitle}>Agent 执行</h2>
+            <hr className={styles.sectionDivider} />
+            <AgentRoutingSection />
           </section>
           {hasLocalNodes && (
             <section id="local-node-concurrency" className={styles.section}>

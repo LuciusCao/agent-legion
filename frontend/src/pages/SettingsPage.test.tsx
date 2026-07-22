@@ -14,6 +14,7 @@ import { useSettingStore } from '../stores/settingStore'
 import type { SettingState } from '../stores/settingStore'
 import type { WorkspaceSettings } from '../types'
 import { useUiStore } from '../stores/uiStore'
+import { useExecutorsStore } from '../stores/executorsStore'
 import { useWorkspaceStore } from '../stores/workspaceStore'
 import { makeWorkspace } from '../testing/workspaceFixtures'
 import { api, fetchWorkflows } from '../api'
@@ -69,6 +70,7 @@ const defaultState: SettingState = {
   },
   originalExecutorConfiguration: null,
   pendingAllocationRemoval: null,
+  agentRoutes: [],
   setWorkspaceId: vi.fn(),
   setWorkspaceName: vi.fn((name: string) => {
     useSettingStore.setState({ workspaceName: name, isDirty: true })
@@ -88,6 +90,7 @@ const defaultState: SettingState = {
   cancelExecutorRemoval: vi.fn(),
   setNodeBinding: vi.fn(),
   setNodeLimit: vi.fn(),
+  setAgentCapacity: vi.fn(),
   fetchSettings: vi.fn().mockResolvedValue(undefined),
   fetchGlobalServices: vi.fn().mockResolvedValue(undefined),
   fetchResourceProviders: vi.fn().mockResolvedValue(undefined),
@@ -122,6 +125,13 @@ describe('SettingsPage', () => {
   beforeEach(() => {
     useSettingStore.setState(defaultState)
     useUiStore.setState({ toast: null })
+    // Stub the worker refresh so its debounced api('/api/agent-workers')
+    // call never lands in the shared mocked api call history.
+    useExecutorsStore.setState({
+      workers: [],
+      connectionStatus: {},
+      refreshWorkers: vi.fn().mockResolvedValue(undefined),
+    })
     useWorkspaceStore.setState({
       workspaces: [
         makeWorkspace({
@@ -143,7 +153,7 @@ describe('SettingsPage', () => {
     mockFetchWorkflows.mockResolvedValue({ workflows: [] })
   })
 
-  it('renders all seven sections in order', async () => {
+  it('renders all sections in order', async () => {
     useSettingStore.setState({
       workflowDefinition: {
         key: 'question_content',
@@ -207,6 +217,7 @@ describe('SettingsPage', () => {
       '工作流',
       '执行器分配',
       '节点绑定',
+      'Agent 执行',
       '本地节点并发',
       '危险操作',
     ])

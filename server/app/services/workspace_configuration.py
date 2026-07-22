@@ -113,6 +113,7 @@ class WorkspaceConfigurationService:
         executor_allocations: list[dict[str, Any]],
         node_bindings: list[dict[str, Any]],
         node_limits: list[dict[str, Any]],
+        agent_capacity: int | None = None,
     ) -> dict[str, Any]:
         workspace = self._workspace(workspace_id)
         current = workspace_settings_payload(workspace)
@@ -127,6 +128,9 @@ class WorkspaceConfigurationService:
             allocations=executor_allocations,
             bindings=node_bindings,
             node_limits=node_limits,
+            agent_capabilities={
+                definition.capability for definition in self.settings.agent_definitions.values()
+            },
         )
         name_value = workspace_patch.get("name")
         name: str = name_value if name_value is not None else str(workspace["name"])
@@ -137,6 +141,8 @@ class WorkspaceConfigurationService:
             else str(workspace.get("description") or "")
         )
         resource_config, intake_config = _build_settings_config(current, settings_patch)
+        if agent_capacity is not None and agent_capacity <= 0:
+            raise InvalidOperationError("Agent capacity must be a positive integer")
         try:
             saved_workspace = self.job_db.update_workspace_configuration(
                 workspace_id,
@@ -150,6 +156,10 @@ class WorkspaceConfigurationService:
                 node_bindings=node_bindings,
                 node_limits=node_limits,
             )
+            # None means "leave unchanged" — the workspace keeps any
+            # previously saved (or schema-seeded) Agent capacity.
+            if agent_capacity is not None:
+                self.job_db.set_workspace_agent_capacity(workspace_id, agent_capacity)
         except ValueError as exc:
             raise InvalidOperationError(str(exc)) from exc
         WorkflowRevisionService(self.job_db).ensure_active_revision(workspace_id, workflow)
@@ -160,6 +170,7 @@ class WorkspaceConfigurationService:
             "executor_configuration": configuration_with_warnings(
                 self.job_db, workspace_id, executor_configuration
             ),
+            "agent_capacity": self.job_db.get_workspace_agent_capacity(workspace_id),
         }
 
     def update_section(

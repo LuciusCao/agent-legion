@@ -28,6 +28,7 @@ from .worker import create_worker_router
 from .workflow_catalog import create_workflow_catalog_router
 from .workflow_resource_providers import create_workflow_resource_providers_router
 from .workflow_revisions import create_workflow_revisions_router
+from .workspace_agent_routes import create_workspace_agent_routes_router
 from .workspace_configuration import create_workspace_configuration_router
 from .workspace_executors import create_workspace_executors_router
 from .workspace_settings import create_workspace_settings_router
@@ -91,6 +92,7 @@ def create_router(
             executor_catalog, workspace_executor_configuration, settings
         )
     )
+    router.include_router(create_workspace_agent_routes_router(job_db, settings))
     include_job_routes(
         router,
         job_db,

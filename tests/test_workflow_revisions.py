@@ -53,15 +53,14 @@ def test_publish_and_get_active_revision(tmp_path: Path) -> None:
         ).fetchone()
     assert route is not None
     assert dict(route) == {"target_kind": "agent", "target_id": "question-key-info-v1"}
-    assert capacity is not None
-    assert capacity["max_concurrency"] == 20
-    assert capacity["source_revision_id"] == revision["id"]
+    # Agent capacity is workspace-level now; publish no longer writes per-node rows.
+    assert capacity is None
 
 
 def _agent_nodes_definition(*, review_as_local: bool) -> WorkflowDefinition:
-    review_node: dict = {"capability": "review_key_info", "after": ["generate_key_info"]}
-    if not review_as_local:
-        review_node["max_concurrency"] = 10
+    # Agent routing is capability-driven: review_as_local gives the node a
+    # capability no enabled Agent implements, so it keeps the handler path.
+    review_capability = "local_review" if review_as_local else "review_key_info"
     return workflow_definition_from_mapping(
         {
             "key": "question_comprehension_info",
@@ -69,9 +68,11 @@ def _agent_nodes_definition(*, review_as_local: bool) -> WorkflowDefinition:
             "nodes": {
                 "generate_key_info": {
                     "capability": "generate_key_info",
-                    "max_concurrency": 20,
                 },
-                "review_key_info": review_node,
+                "review_key_info": {
+                    "capability": review_capability,
+                    "after": ["generate_key_info"],
+                },
             },
         }
     )
@@ -104,6 +105,14 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
     )
     video_definition = load_workflow_definition(Path("config/workflows/video_knowledge.yaml"))
     service.publish_workspace_revision(workspace["id"], video_definition)
+    # Legacy projection: a stale per-node capacity row must be pruned by the
+    # next publish even though publish no longer writes such rows.
+    with queries.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_capacities(workspace_id, workflow_key, node_key, max_concurrency)"
+            " values (?, 'question_comprehension_info', 'generate_key_info', 20)",
+            (workspace["id"],),
+        )
 
     service.publish_workspace_revision(
         workspace["id"], _agent_nodes_definition(review_as_local=True)
@@ -113,7 +122,7 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
         queries, workspace["id"], "question_comprehension_info"
     )
     assert question_rows["routes"] == {"generate_key_info": ("agent", "question-key-info-v1")}
-    assert question_rows["capacities"] == {"generate_key_info": 20}
+    assert question_rows["capacities"] == {}
     video_rows = _route_and_capacity_rows(queries, workspace["id"], "video_knowledge")
     assert set(video_rows["routes"]) == {
         "subtitle_review",
@@ -121,7 +130,7 @@ def test_republish_deletes_stale_agent_route_and_capacity_rows(tmp_path: Path) -
         "interaction_generate",
         "content_review",
     }
-    assert set(video_rows["capacities"]) == set(video_rows["routes"])
+    assert video_rows["capacities"] == {}
 
 
 def test_reconcile_warns_and_skips_on_ambiguous_capability(
@@ -158,6 +167,27 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     assert rows["routes"]["generate_key_info"] == ("agent", "question-key-info-v1")
 
 
+def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    service = WorkflowRevisionService(queries)
+    service.publish_workspace_revision(
+        workspace["id"], _agent_nodes_definition(review_as_local=False)
+    )
+    # Simulate the empty-catalog regression: every definition disabled.
+    with queries.connect() as conn:
+        conn.execute("update agent_definitions set enabled=0")
+
+    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
+        service.reconcile_active_agent_routes()
+
+    assert any("no enabled Agent Definitions" in record.getMessage() for record in caplog.records)
+    rows = _route_and_capacity_rows(queries, workspace["id"], "question_comprehension_info")
+    assert rows["routes"]["generate_key_info"] == ("agent", "question-key-info-v1")
+
+
 def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
@@ -182,7 +212,7 @@ def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Pat
 
     video_rows = _route_and_capacity_rows(queries, workspace["id"], "video_knowledge")
     assert video_rows["routes"]["subtitle_review"] == ("agent", "video-subtitle-review-v1")
-    assert video_rows["capacities"]["subtitle_review"] == 20
+    assert video_rows["capacities"] == {}
 
 
 def test_create_job_stores_workflow_revision_snapshot(tmp_path: Path) -> None:
