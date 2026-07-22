@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from typing import Any
-
-from server.app.db.queries.video import VideoQueriesMixin, _iso
+from server.app.db.queries.video import VideoQueriesMixin
 
 
 class TranscriptionQueriesMixin(VideoQueriesMixin):
@@ -39,19 +37,6 @@ class TranscriptionQueriesMixin(VideoQueriesMixin):
                 ),
             )
         self._notify(video_id)
-
-    def list_transcription_runs(self, video_id: str) -> list[dict[str, Any]]:
-        with self._connect_read() as conn:
-            rows = [
-                dict(row)
-                for row in conn.execute(
-                    "select * from transcription_runs where video_id=? order by id", (video_id,)
-                )
-            ]
-            for row in rows:
-                row["started_at"] = _iso(row["started_at"]) or ""
-                row["finished_at"] = _iso(row["finished_at"])
-            return rows
 
     def clear_transcription_runs(self, video_id: str) -> None:
         with self.connect() as conn:

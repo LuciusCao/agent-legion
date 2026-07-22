@@ -119,14 +119,6 @@ exemptions:
   remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
   ceiling: 102
 - check: architecture.file_budget
-  path: server/app/db/queries/video.py
-  reason: PostgreSQL timestamptz rows require accepting native datetime values
-    while retaining the public ISO projection. Extract timestamp projection
-    helpers with the next query-module split.
-  owner: database
-  remove_when: docs/superpowers/plans/2026-07-21-postgresql-control-plane.md
-  ceiling: 384
-- check: architecture.file_budget
   path: server/app/executors/_lease_claims.py
   reason: Cross-replica capacity enforcement adds a transaction-scoped advisory
     lock and PostgreSQL RETURNING handling. Extract capacity validation from the

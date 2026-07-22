@@ -18,9 +18,7 @@ _WORKSPACE_MODULE_PREFIXES = tuple(
     """server/app/routes/jobs.py server/app/routes/job_artifacts.py server/app/routes/job_batches.py server/app/routes/workspace_ server/app/services/job_ server/app/services/workspace_ server/app/services/executor_catalog.py server/app/services/workflow_catalog.py""".split()
 )
 
-_VIDEO_HIVE_MODULE_PREFIXES = tuple(
-    """server.app.pipeline. server.app.services.interaction_stats""".split()
-)
+_VIDEO_HIVE_MODULE_PREFIXES = tuple("""server.app.pipeline.""".split())
 
 _VIDEO_HIVE_EXACT = frozenset({"server.app.pipeline"})
 _VIDEO_HIVE_EXCEPTIONS: set[tuple[str, str]] = set()

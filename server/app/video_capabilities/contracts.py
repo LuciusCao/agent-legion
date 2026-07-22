@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from dataclasses import dataclass, field
-from pathlib import Path
+from dataclasses import dataclass
 from typing import Any, Literal
 
 
@@ -38,20 +37,3 @@ class VideoKnowledgeInput:
             source_url=str(value.get("source_url") or ""),
             title=str(value.get("title") or ""),
         )
-
-
-@dataclass(frozen=True)
-class ArtifactRef:
-    name: str
-    path: Path
-    media_type: str
-
-
-@dataclass(frozen=True)
-class VideoNodeContext:
-    entity_id: str
-    storage_dir: Path
-    input: VideoKnowledgeInput
-    inputs: Mapping[str, ArtifactRef] = field(default_factory=dict)
-    config: Mapping[str, Any] = field(default_factory=dict)
-    resources: Mapping[str, Any] = field(default_factory=dict)

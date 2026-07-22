@@ -28,13 +28,6 @@ class TestWorkspaceVideoHiveBoundary:
                 "router = APIRouter()\n",
                 "download",
             ),
-            (
-                "server/app/services/job_execution.py",
-                "from server.app.services.interaction_stats import compute_stats\n"
-                "class JobExecutionService:\n"
-                "    def run(self): compute_stats('x')\n",
-                "interaction_stats",
-            ),
         ],
     )
     def test_rejects_video_hive_imports(self, tmp_path, rel_path, source, expected_fragment):
