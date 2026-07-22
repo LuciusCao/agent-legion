@@ -2,12 +2,29 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { TokenUsageRunDetail } from './TokenUsageRunDetail'
 import * as jobApi from '../jobApi'
+import type { NodeRun } from '../jobTypes'
 
 vi.mock('../jobApi', () => ({
   fetchRunTokenUsage: vi.fn(),
 }))
 
 const mockFetchRunTokenUsage = vi.mocked(jobApi.fetchRunTokenUsage)
+
+function makeRun(status: string): NodeRun {
+  return {
+    id: 1,
+    job_id: 'j1',
+    node_key: 'extract',
+    status,
+    command_json: '',
+    error_message: '',
+    log_path: '',
+    run_dir: '',
+    runner: 'pi',
+    session_dir: '',
+    started_at: '2026-07-22 02:00:00',
+  }
+}
 
 const mockUsageResponse = {
   job_id: 'j1',
@@ -45,7 +62,7 @@ describe('TokenUsageRunDetail', () => {
   it('shows compact token summary after loading', async () => {
     mockFetchRunTokenUsage.mockResolvedValue(mockUsageResponse)
 
-    render(<TokenUsageRunDetail jobId="j1" runId={1} />)
+    render(<TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />)
     await waitFor(() => {
       expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
     })
@@ -57,7 +74,7 @@ describe('TokenUsageRunDetail', () => {
   it('expands to show provider, model, skill version and breakdowns', async () => {
     mockFetchRunTokenUsage.mockResolvedValue(mockUsageResponse)
 
-    render(<TokenUsageRunDetail jobId="j1" runId={1} />)
+    render(<TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />)
     await waitFor(() => {
       expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
     })
@@ -84,7 +101,7 @@ describe('TokenUsageRunDetail', () => {
       usage: { ...mockUsageResponse.usage, is_complete: false },
     })
 
-    render(<TokenUsageRunDetail jobId="j1" runId={1} />)
+    render(<TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />)
     await waitFor(() => {
       expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
     })
@@ -102,7 +119,7 @@ describe('TokenUsageRunDetail', () => {
       reason: 'no token usage recorded for run',
     })
 
-    render(<TokenUsageRunDetail jobId="j1" runId={1} />)
+    render(<TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />)
     await waitFor(() => {
       expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
     })
@@ -117,7 +134,7 @@ describe('TokenUsageRunDetail', () => {
   it('shows missing usage message when fetch fails', async () => {
     mockFetchRunTokenUsage.mockRejectedValue(new Error('network error'))
 
-    render(<TokenUsageRunDetail jobId="j1" runId={1} />)
+    render(<TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />)
     await waitFor(() => {
       expect(mockFetchRunTokenUsage).toHaveBeenCalledWith('j1', 1)
     })
@@ -128,8 +145,33 @@ describe('TokenUsageRunDetail', () => {
   it('renders nothing but the compact button while loading', () => {
     mockFetchRunTokenUsage.mockImplementation(() => new Promise(() => {}))
 
-    render(<TokenUsageRunDetail jobId="j1" runId={1} />)
+    render(<TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />)
 
     expect(screen.getByText('Token 用量...')).toBeInTheDocument()
+  })
+
+  it('refetches and shows new data when status changes from running to completed', async () => {
+    mockFetchRunTokenUsage.mockResolvedValue({
+      job_id: 'j1',
+      run_id: 1,
+      usage: null,
+      reason: null,
+    })
+
+    const { rerender } = render(
+      <TokenUsageRunDetail jobId="j1" run={makeRun('running')} />
+    )
+    await waitFor(() => {
+      expect(screen.getByText('无 token 数据')).toBeInTheDocument()
+    })
+
+    mockFetchRunTokenUsage.mockResolvedValue(mockUsageResponse)
+    rerender(<TokenUsageRunDetail jobId="j1" run={makeRun('completed')} />)
+
+    await waitFor(() => {
+      expect(screen.getByText(/Token: 1,250/)).toBeInTheDocument()
+    })
+    expect(mockFetchRunTokenUsage).toHaveBeenCalledTimes(2)
+    expect(mockFetchRunTokenUsage).toHaveBeenLastCalledWith('j1', 1)
   })
 })

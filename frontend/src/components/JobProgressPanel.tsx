@@ -228,7 +228,7 @@ export function JobProgressPanel({
 
                   {run && (
                     <div className={styles.tokenUsageRow}>
-                      <TokenUsageRunDetail jobId={jobId} runId={run.id} />
+                      <TokenUsageRunDetail jobId={jobId} run={run} />
                     </div>
                   )}
                 </div>
