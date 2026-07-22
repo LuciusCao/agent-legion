@@ -45,7 +45,7 @@ exemptions:
     agent_idle) and buffers per-agent incremental events between flushes.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 282
+  ceiling: 325
 - check: architecture.file_budget
   path: frontend/src/components/QuestionContentPanel.tsx
   reason: Task 2 of the socratic-question-inline-display plan adds the local SocraticQuestion
@@ -179,10 +179,12 @@ exemptions:
   path: server/app/services/workflow_revisions.py
   reason: Active revisions reconcile Agent routes at Host startup (capacity is
     workspace-level via workspace_agent_capacities), warning and skipping revisions
-    whose capability mapping is ambiguous.
+    whose capability mapping is ambiguous, and skipping the reconcile entirely
+    when the catalog has zero enabled definitions so routes are never pruned by
+    an empty-catalog regression.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-21-agent-definition-worker-routing.md
-  ceiling: 106
+  ceiling: 132
 - check: architecture.file_budget
   path: server/app/workflow_worker_schedule.py
   reason: Scheduler dispatches Agent nodes to the persistent queue while retaining Host-local handler claims.

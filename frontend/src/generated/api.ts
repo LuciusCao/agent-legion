@@ -1263,6 +1263,8 @@ export interface components {
       max_concurrency: number
       /** Name */
       name: string
+      /** Online */
+      online: boolean
       /** Protocol Version */
       protocol_version: number
       /** Registered At */

@@ -167,6 +167,27 @@ def test_reconcile_warns_and_skips_on_ambiguous_capability(
     assert rows["routes"]["generate_key_info"] == ("agent", "question-key-info-v1")
 
 
+def test_reconcile_skips_and_keeps_routes_when_catalog_fully_disabled(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
+    workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")
+    service = WorkflowRevisionService(queries)
+    service.publish_workspace_revision(
+        workspace["id"], _agent_nodes_definition(review_as_local=False)
+    )
+    # Simulate the empty-catalog regression: every definition disabled.
+    with queries.connect() as conn:
+        conn.execute("update agent_definitions set enabled=0")
+
+    with caplog.at_level(logging.WARNING, logger="server.app.services.workflow_revisions"):
+        service.reconcile_active_agent_routes()
+
+    assert any("no enabled Agent Definitions" in record.getMessage() for record in caplog.records)
+    rows = _route_and_capacity_rows(queries, workspace["id"], "question_comprehension_info")
+    assert rows["routes"]["generate_key_info"] == ("agent", "question-key-info-v1")
+
+
 def test_reconcile_covers_active_revisions_beyond_default_workflow(tmp_path: Path) -> None:
     queries = JobQueries(TEST_DATABASE_URL, tmp_path / "jobs")
     workspace = queries.create_workspace("ws1", default_workflow_key="question_comprehension_info")

@@ -81,7 +81,23 @@ class WorkflowRevisionService:
         enabled Agent (catalog/DB desync) is skipped with a migration warning
         instead of aborting startup, matching the "no auto-migration on
         ambiguous mapping" rule.
+
+        When the catalog has zero enabled definitions, skip entirely: routes
+        derived from an empty catalog would be empty too, and materializing
+        them would prune every existing route (see the empty-catalog guard in
+        ``sync_agent_definitions``).
         """
+        with self.job_db._connect_read() as conn:
+            enabled_row = conn.execute(
+                "select count(*) as c from agent_definitions where enabled=1"
+            ).fetchone()
+        enabled_count = int(enabled_row["c"]) if enabled_row is not None else 0
+        if not enabled_count:
+            logger.warning(
+                "Agent route reconcile skipped: no enabled Agent Definitions; "
+                "keeping existing workspace_node_routes"
+            )
+            return
         for revision in self.job_db.list_active_workflow_revisions():
             workspace_id = str(revision["workspace_id"])
             workflow_key = str(revision["workflow_key"])

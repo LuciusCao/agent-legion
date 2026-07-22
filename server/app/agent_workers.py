@@ -7,7 +7,7 @@ import re
 import secrets
 import uuid
 from collections.abc import Mapping, Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from server.app.db.connection import DatabaseDsn
@@ -25,6 +25,9 @@ _MAX_LABEL_KEY_LENGTH = 64
 _MAX_LABEL_VALUE_LENGTH = 256
 _MAX_CONCURRENCY = 1024
 _MAX_TOKEN_LABEL_LENGTH = 128
+# A Worker is "online" while its last authenticated call (claim poll every few
+# seconds, or an execution heartbeat) is fresher than this threshold.
+_ONLINE_THRESHOLD_SECONDS = 30
 
 
 def _validate_labels(labels: Mapping[str, Any]) -> dict[str, str]:
@@ -212,7 +215,15 @@ class AgentWorkerRegistry:
         digest = hashlib.sha256(secret.encode()).hexdigest()
         if not hmac.compare_digest(digest, row["token_hash"]):
             return None
-        return _worker_payload(row)
+        # Every Worker API call authenticates, and an idle Worker polls claim
+        # every few seconds, so this is the liveness signal behind `online`.
+        with write_transaction(self.database_dsn) as conn:
+            conn.execute(
+                "update agent_workers set last_seen_at=current_timestamp where worker_id=?",
+                (worker_id,),
+            )
+        # Reflect the just-written timestamp so this call already reads online.
+        return _worker_payload({**row, "last_seen_at": datetime.now(UTC)})
 
     def list_workers(self) -> list[dict[str, Any]]:
         with read_connection(self.database_dsn) as conn:
@@ -229,6 +240,15 @@ class AgentWorkerRegistry:
 
 
 def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
+    last_seen_at = row["last_seen_at"]
+    if isinstance(last_seen_at, str):
+        last_seen_at = datetime.fromisoformat(last_seen_at)
+    if last_seen_at is not None and last_seen_at.tzinfo is None:
+        last_seen_at = last_seen_at.replace(tzinfo=UTC)
+    online = bool(
+        last_seen_at is not None
+        and datetime.now(UTC) - last_seen_at <= timedelta(seconds=_ONLINE_THRESHOLD_SECONDS)
+    )
     return {
         "worker_id": row["worker_id"],
         "name": row["name"],
@@ -239,5 +259,6 @@ def _worker_payload(row: Mapping[str, Any]) -> dict[str, Any]:
         "allowed_workspaces": json.loads(row["allowed_workspaces_json"] or "[]"),
         "registered_at": row["registered_at"],
         "last_seen_at": row["last_seen_at"],
+        "online": online,
         "revoked": row["revoked_at"] is not None,
     }

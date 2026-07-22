@@ -305,3 +305,31 @@ def test_register_with_scoped_token_stores_and_returns_scope(tmp_path: Path) -> 
         # Re-registering with the global credential refreshes the scope.
         refreshed = _register(client, worker_id="scoped-worker")
         assert refreshed["allowed_workspaces"] == []
+
+
+def test_worker_online_flag_tracks_last_seen(tmp_path: Path) -> None:
+    app = _make_app(tmp_path)
+
+    with TestClient(app) as client:
+        token = _register(client)["worker_token"]
+        workers = client.get("/api/agent-workers").json()["workers"]
+        assert workers[0]["online"] is True
+
+        # Age the Worker beyond the online threshold: registered but offline.
+        with app.state.job_db.connect() as conn:
+            conn.execute(
+                "update agent_workers set last_seen_at = current_timestamp - interval '1 hour'"
+            )
+        workers = client.get("/api/agent-workers").json()["workers"]
+        assert workers[0]["online"] is False
+
+        # Any authenticated Worker call (here: an empty claim poll) refreshes
+        # last_seen_at and flips the Worker back online.
+        response = client.post(
+            "/api/agent-executions/claim",
+            headers={"X-Agent-Worker-Token": token},
+            json={"worker_id": "home-mini"},
+        )
+        assert response.status_code == 204
+        workers = client.get("/api/agent-workers").json()["workers"]
+        assert workers[0]["online"] is True
