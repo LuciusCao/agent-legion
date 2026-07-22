@@ -186,11 +186,18 @@ def test_cross_root_path_portability(portable_roots: tuple[Path, Path]) -> None:
     # ------------------------------------------------------------------
     # 1. Database values are still the original canonical relative paths.
     # ------------------------------------------------------------------
-    video = db.get_video(VIDEO_ID)
+    with db._connect_read() as conn:
+        row = conn.execute("select * from videos where id=?", (VIDEO_ID,)).fetchone()
+        video = dict(row) if row else None
+        phase_runs = [
+            dict(r)
+            for r in conn.execute(
+                "select * from phase_runs where video_id=? order by id", (VIDEO_ID,)
+            )
+        ]
     assert video is not None
     assert video["storage_dir"] == f"videos/{VIDEO_ID}"
 
-    phase_runs = db.list_phase_runs(VIDEO_ID)
     assert len(phase_runs) == 1
     assert phase_runs[0]["log_path"] == f"logs/{VIDEO_ID}-download.log"
 

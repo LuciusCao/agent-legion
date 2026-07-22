@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from typing import cast
 
 from server.app.db.queries.video import VideoQueriesMixin, _iso, _phase_run_with_agent_session
 from server.app.records import PhaseRunRecord
@@ -82,17 +81,3 @@ class PhaseRunQueriesMixin(VideoQueriesMixin):
             phase_run["started_at"] = _iso(phase_run["started_at"]) or ""
             phase_run["finished_at"] = _iso(phase_run["finished_at"])
             return phase_run
-
-    def list_phase_runs(self, video_id: str) -> list[PhaseRunRecord]:
-        with self._connect_read() as conn:
-            rows = [
-                dict(row)
-                for row in conn.execute(
-                    "select * from phase_runs where video_id=? order by id", (video_id,)
-                )
-            ]
-            for row in rows:
-                row["started_at"] = _iso(row["started_at"]) or ""
-                row["finished_at"] = _iso(row["finished_at"])
-                _phase_run_with_agent_session(row)
-            return cast(list[PhaseRunRecord], rows)
