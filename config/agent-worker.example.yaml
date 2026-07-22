@@ -1,3 +1,7 @@
+# 该 YAML 仅作为首次启动的引导配置。Worker Service 导入后，可在
+# http://127.0.0.1:8787 页面中修改并立即应用。导入后再修改本文件不会自动
+# 生效（status 的 mounted_config_diverged 会提示分叉）；控制台与 API（除
+# /api/health 外）由状态目录下自动生成的 control_token（0600）保护。
 host_url: http://agent-legion-host:8000
 worker_id: home-mac-mini-1
 name: Home Mac mini

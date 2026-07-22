@@ -58,6 +58,9 @@ services:
       - ./worker.company.yaml:/etc/agent-legion/worker.yaml:ro
       - ${PI_CONFIG_DIR:-../pi-config}:/root/.pi/agent:ro
       - worker-data:/var/lib/agent-legion-worker
+      - worker-control:/var/lib/agent-legion-worker-control
+    ports:
+      - ${AGENT_WORKER_UI_BIND:-127.0.0.1}:8787:8787
     environment:
       # Optional shared token for the tailnet-bound LLM gateway; the worker
       # supervisor passes it through to Pi subprocesses. Set it in deploy/.env
@@ -66,7 +69,9 @@ services:
       AGENT_WORKER_IMAGE_VERSION: ${AGENT_WORKER_IMAGE_VERSION:-agent-legion-worker:local}
     stop_grace_period: 30s
     healthcheck:
-      test: [CMD-SHELL, "pgrep -f agent_worker.py > /dev/null"]
+      # Healthy = 服务可达，且控制面未进入 failed，且（Worker 进程在跑或尚未配置）。
+      # control_token 在首次启动前可能不存在，此时只探 /api/health。
+      test: [CMD-SHELL, "python3 -c \"import json,pathlib,urllib.request; base='http://127.0.0.1:8787'; urllib.request.urlopen(base+'/api/health',timeout=2); p=pathlib.Path('/var/lib/agent-legion-worker-control/control_token'); s=json.loads(urllib.request.urlopen(urllib.request.Request(base+'/api/status',headers={'Authorization':'Bearer '+p.read_text().strip()}),timeout=2).read()) if p.is_file() else {}; assert not s.get('failed'),'worker failed'; assert s.get('worker_running') or not s.get('configured'),'worker not running'\""]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -84,3 +89,4 @@ volumes:
   postgres-data:
   host-data:
   worker-data:
+  worker-control:

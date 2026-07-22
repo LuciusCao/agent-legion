@@ -249,6 +249,7 @@ invariants:
       - kind: integration
         target: tests/test_agent_broker.py
         gate: quick
+
       - kind: integration
         target: tests/test_job_event_buffer_db.py
         gate: quick
@@ -258,6 +259,15 @@ invariants:
       - kind: contract
         target: tests/ci/test_postgres_only_runtime.py
         gate: ci_extended
+
+  - id: CONFIG-WORKER-001
+    statement: "Worker Service keeps registration secrets outside its UI/API, imports legacy YAML into a separate writable control volume, preserves non-public runtime settings on edits, publishes its control port on host loopback by default, and requires the local control token on every endpoint except /api/health (the port remains reachable inside the compose network)."
+    owner: agent-worker
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_worker_service.py
+        gate: quick
 
   - id: EXEC-AGENTCLAIM-001
     statement: "An Agent Node may enter running only when a compatible Worker atomically claims it under both the Workspace-level Agent capacity (workspace_agent_capacities; a workspace without a row is unlimited) and the Worker machine-wide capacity; queued requests consume neither capacity."
