@@ -98,6 +98,11 @@ class AgentWorkersResponse(BaseModel):
     workers: list[AgentWorkerSummary]
 
 
+class AgentWorkerRevokeResponse(BaseModel):
+    worker_id: str
+    revoked: bool
+
+
 class AgentClaimResponse(BaseModel):
     execution_id: str
     lease_id: str
@@ -278,6 +283,16 @@ def create_agent_workers_router(
         if not registry.revoke_register_token(token_id):
             raise HTTPException(status_code=404, detail="Agent register token not found")
         return AgentRegisterTokenRevokeResponse(revoked=True)
+
+    @router.post(
+        "/agent-workers/{worker_id}/revoke",
+        response_model=AgentWorkerRevokeResponse,
+    )
+    def revoke_worker(worker_id: str, request: Request) -> AgentWorkerRevokeResponse:
+        authorize_management(request)
+        if not registry.revoke(worker_id):
+            raise HTTPException(status_code=404, detail="Agent Worker not found")
+        return AgentWorkerRevokeResponse(worker_id=worker_id, revoked=True)
 
     @router.get("/agent-workers", response_model=AgentWorkersResponse)
     def list_workers() -> AgentWorkersResponse:
