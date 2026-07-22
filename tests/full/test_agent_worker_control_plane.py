@@ -136,6 +136,9 @@ def test_http_claim_cycle_releases_capacity_and_updates_panel(tmp_path: Path) ->
     node, and mirror busy/idle into the workspace Agent panel."""
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.agent_workers.register_token = "management-secret"
+    # Dispatch defaults to paused after every startup; resume the seeded
+    # workspace the way an operator would.
+    app.state.workspace_worker_control.resume("test-workspace")
     _seed_request(app.state.job_db, job_id="job-e2e", limit=2)
 
     with TestClient(app) as client:

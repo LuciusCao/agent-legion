@@ -439,6 +439,31 @@ def _register_worker(registry: AgentWorkerRegistry, worker_id: str = "worker-1")
     )
 
 
+def test_paused_workspace_requests_are_not_claimed(job_db) -> None:
+    _seed_request(job_db, job_id="job-1")
+    registry = AgentWorkerRegistry(TEST_DATABASE_URL)
+    _register_worker(registry)
+    paused = {"test-workspace": True}
+    broker = AgentExecutionBroker(
+        TEST_DATABASE_URL, is_workspace_paused=lambda ws: paused.get(ws, False)
+    )
+
+    # Paused: the queued request stays queued and the node stays pending.
+    assert broker.claim("worker-1") is None
+    assert job_db.get_job_node("job-1", "generate")["status"] == "pending"
+    with job_db._connect_read() as conn:
+        state = conn.execute(
+            "select state from agent_execution_requests where job_id='job-1'"
+        ).fetchone()
+    assert state["state"] == "queued"
+
+    # Resume: the same request becomes claimable.
+    paused["test-workspace"] = False
+    claimed = broker.claim("worker-1")
+    assert claimed is not None
+    assert claimed.workspace_id == "test-workspace"
+
+
 def test_claim_and_done_mirror_worker_status_panel(job_db) -> None:
     _seed_request(job_db, job_id="job-1", limit=3)
     registry = AgentWorkerRegistry(TEST_DATABASE_URL)

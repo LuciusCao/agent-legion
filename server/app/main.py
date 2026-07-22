@@ -102,6 +102,7 @@ def create_app(
         lease_ttl_seconds=settings.executor_runtime.lease_ttl_seconds,
         bundle_dir=settings.data_dir / "agent_bundles",
         agent_status=agent_manager,
+        is_workspace_paused=workspace_worker_control.is_paused,
     )
     agent_dispatch = AgentDispatchService(settings, agent_broker, artifact_store)
     executor_registry = build_executor_registry(settings, job_db, artifact_store=artifact_store)

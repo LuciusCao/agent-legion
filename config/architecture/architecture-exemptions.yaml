@@ -25,7 +25,7 @@ exemptions:
     artifact store, completion handler, and Host scheduler in one lifecycle.
   owner: workspace-executor
   remove_when: docs/superpowers/plans/2026-07-18-phase1-legacy-retirement-event-bus.md#task-9
-  ceiling: 237
+  ceiling: 248
 - check: architecture.file_budget
   path: server/app/worker_control.py
   reason: Task 8 of the phase2 state-externalization plan persists pause state
