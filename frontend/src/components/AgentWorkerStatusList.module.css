@@ -1,0 +1,37 @@
+.sectionLabel {
+  padding: 2px 0;
+  font-size: 12px;
+  color: #74777f;
+  white-space: nowrap;
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 6px 0;
+  color: #1a1c1e;
+  white-space: nowrap;
+}
+
+.chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.chipOnline {
+  background: #e6f4ea;
+  color: #1e7e34;
+}
+
+.chipOffline {
+  background: #f0f0f0;
+  color: #74777f;
+}
+
+.empty {
+  color: #43474e;
+  white-space: nowrap;
+}
