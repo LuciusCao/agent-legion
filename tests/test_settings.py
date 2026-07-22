@@ -71,6 +71,9 @@ def test_sqlite_database_url_is_rejected(tmp_path, monkeypatch):
     config_path = tmp_path / "app.yaml"
     config_path.write_text("database: {url: data/app.sqlite}\n", encoding="utf-8")
     monkeypatch.delenv("VIDEO_HIVE_DATABASE_URL", raising=False)
+    # Worktrees carry a real VIDEO_HIVE_DATABASE_URL in the project .env;
+    # skip it so the yaml value below is the one under test.
+    monkeypatch.setenv("VIDEO_HIVE_SKIP_DOTENV", "1")
 
     with pytest.raises(ValueError, match="PostgreSQL URL"):
         load_settings(data_dir=tmp_path / "data", config_path=config_path)

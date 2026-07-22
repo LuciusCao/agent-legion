@@ -167,6 +167,79 @@ def test_app_startup_preserves_local_executor_configuration_for_workspace(tmp_pa
     assert {row["executor_id"] for row in response.json()["allocations"]} == {"local-default"}
 
 
+def test_workspace_configuration_put_lazily_cleans_retired_executor_residue(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as c:
+        ws_id = _create_workspace(c, "residue", "question_comprehension_info")
+        # Seed rows left behind by the retired `pi` Executor alongside valid
+        # local-default rows, bypassing PUT validation like the legacy writers did.
+        app.state.job_db.replace_workspace_executor_configuration(
+            ws_id,
+            [
+                {"executor_id": "pi", "concurrency_limit": 2},
+                {"executor_id": "local-default", "concurrency_limit": 8},
+            ],
+            [
+                {
+                    "workflow_key": "question_comprehension_info",
+                    "node_key": "clean_and_parse",
+                    "executor_id": "pi",
+                },
+                {
+                    "workflow_key": "question_comprehension_info",
+                    "node_key": "fetch_questions",
+                    "executor_id": "local-default",
+                },
+            ],
+            [
+                {
+                    "workflow_key": "question_comprehension_info",
+                    "node_key": "clean_and_parse",
+                    "concurrency_limit": 1,
+                },
+                {
+                    "workflow_key": "question_comprehension_info",
+                    "node_key": "fetch_questions",
+                    "concurrency_limit": 2,
+                },
+            ],
+        )
+
+        # The frontend saves by echoing back what GET returned.
+        loaded = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
+        assert loaded.status_code == 200
+        config = loaded.json()
+        response = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={
+                "settings": {"workflowKey": "question_comprehension_info"},
+                "executor_allocations": [
+                    {
+                        "executor_id": row["executor_id"],
+                        "concurrency_limit": row["concurrency_limit"],
+                    }
+                    for row in config["allocations"]
+                ],
+                "node_bindings": config["bindings"],
+                "node_limits": config["node_limits"],
+            },
+        )
+        assert response.status_code == 200
+
+    # The successful full replace physically removed the retired Executor rows.
+    persisted = app.state.job_db.get_workspace_executor_configuration(ws_id)
+    assert {row["executor_id"] for row in persisted["allocations"]} == {"local-default"}
+    assert {row["executor_id"] for row in persisted["bindings"]} == {"local-default"}
+    assert [(row["workflow_key"], row["node_key"]) for row in persisted["node_limits"]] == [
+        ("question_comprehension_info", "fetch_questions")
+    ]
+
+
 def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
     from fastapi.testclient import TestClient
 

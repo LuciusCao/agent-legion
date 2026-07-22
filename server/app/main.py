@@ -204,7 +204,9 @@ def create_app(
     app.state.workspace_event_aggregator = workspace_event_aggregator
     workflow_catalog = WorkflowCatalogService(settings)
     executor_catalog = ExecutorCatalogService(settings)
-    workspace_executor_configuration = WorkspaceExecutorConfigurationService(job_db)
+    workspace_executor_configuration = WorkspaceExecutorConfigurationService(
+        job_db, settings.executor_definitions
+    )
     workspace_configuration = WorkspaceConfigurationService(
         job_db, settings, agent_manager, workflow_catalog
     )

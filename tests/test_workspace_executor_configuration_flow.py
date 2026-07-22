@@ -57,6 +57,68 @@ def flow_client(tmp_path):
         yield client
 
 
+def test_get_filters_retired_executor_residue(tmp_path) -> None:
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    with TestClient(app) as client:
+        workspace_response = client.post(
+            "/api/workspaces",
+            json={"name": "Residue Workspace", "default_workflow_key": WORKFLOW_KEY},
+        )
+        assert workspace_response.status_code == 200
+        workspace_id = workspace_response.json()["workspace"]["id"]
+
+        # Seed rows left behind by the retired `pi` Executor alongside valid
+        # local-default rows, bypassing PUT validation like the legacy writers did.
+        app.state.job_db.replace_workspace_executor_configuration(
+            workspace_id,
+            [
+                {"executor_id": "pi", "concurrency_limit": 2},
+                {"executor_id": "local-default", "concurrency_limit": 8},
+            ],
+            [
+                {
+                    "workflow_key": WORKFLOW_KEY,
+                    "node_key": "clean_and_parse",
+                    "executor_id": "pi",
+                },
+                {
+                    "workflow_key": WORKFLOW_KEY,
+                    "node_key": "fetch_questions",
+                    "executor_id": "local-default",
+                },
+            ],
+            [
+                {
+                    "workflow_key": WORKFLOW_KEY,
+                    "node_key": "clean_and_parse",
+                    "concurrency_limit": 1,
+                },
+                {
+                    "workflow_key": WORKFLOW_KEY,
+                    "node_key": "fetch_questions",
+                    "concurrency_limit": 2,
+                },
+            ],
+        )
+
+        config = _get_config(client, workspace_id)
+
+    assert config["allocations"] == [
+        {"executor_id": "local-default", "workspace_id": workspace_id, "concurrency_limit": 8},
+    ]
+    assert config["bindings"] == [
+        {
+            "workflow_key": WORKFLOW_KEY,
+            "node_key": "fetch_questions",
+            "executor_id": "local-default",
+        },
+    ]
+    # The clean_and_parse limit is dropped with its filtered binding.
+    assert config["node_limits"] == [
+        {"workflow_key": WORKFLOW_KEY, "node_key": "fetch_questions", "concurrency_limit": 2},
+    ]
+
+
 def test_workspace_executor_configuration_lifecycle(flow_client: TestClient) -> None:
     client = flow_client
 
