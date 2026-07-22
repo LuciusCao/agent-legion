@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -172,6 +173,9 @@ def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
             packages_dir=resolved / "packages",
             jobs_dir=resolved / "jobs",
             config={},
+            database_url=os.environ.get(
+                "VIDEO_HIVE_DATABASE_URL", "postgresql://127.0.0.1:5432/agent_legion"
+            ),
         )
 
     monkeypatch.setattr(app_main, "load_settings", fake_load_settings)
