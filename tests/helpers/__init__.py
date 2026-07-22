@@ -90,13 +90,6 @@ class GoodProvider(TranscriptionProvider):
         )
 
 
-class TestProvider(TranscriptionProvider):
-    name = "sensevoice"
-
-    def transcribe(self, video_path: Path, output_path: Path, title: str) -> None:
-        output_path.write_text("1\n00:00:00,000 --> 00:00:02,000\n测试字幕\n", encoding="utf-8")
-
-
 class ChapterRunner:
     def __init__(self) -> None:
         self.calls = 0
@@ -123,22 +116,6 @@ class ChapterRunner:
                 "command": ["openclaw", phase_key, video_id],
             },
         )()
-
-
-class InputItem:
-    def __init__(
-        self,
-        url: str = "",
-        title: str = "",
-        content_type: str = "knowledge",
-        external_id: str = "",
-        source_uuid: str = "",
-    ):
-        self.url = url
-        self.title = title
-        self.content_type = content_type
-        self.external_id = external_id
-        self.source_uuid = source_uuid
 
 
 def setup_spa_app(tmp_path: Path, monkeypatch: Any) -> tuple[Path, Path]:
