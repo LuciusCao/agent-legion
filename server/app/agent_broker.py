@@ -5,7 +5,7 @@ import json
 import re
 import time
 import uuid
-from collections.abc import Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -70,6 +70,7 @@ class AgentExecutionBroker:
         bundle_dir: Path | None = None,
         requeue_limit: int = 3,
         agent_status: AgentStatusManager | None = None,
+        is_workspace_paused: Callable[[str], bool] | None = None,
     ) -> None:
         self.database_dsn = database_dsn
         self.lease_ttl_seconds = lease_ttl_seconds
@@ -79,6 +80,10 @@ class AgentExecutionBroker:
         # mirrored into the /api/agents feed so the workspace panel shows
         # distributed executions, not only in-process runners.
         self.agent_status = agent_status
+        # Workspace pause must gate the pull side too: queued requests of a
+        # paused workspace stay queued (never claimed) until resume, matching
+        # the job-level pause re-check below.
+        self.is_workspace_paused = is_workspace_paused
         # Rotating cursor for bounded cross-workspace fairness (EXEC-FAIRNESS
         # style): each claim pass starts candidate evaluation at the next
         # workspace instead of always at the globally oldest request.
@@ -255,11 +260,21 @@ class AgentExecutionBroker:
         ).fetchall()
         cursor = next(self._fairness_counter)
         attempts = 0
+        pause_cache: dict[str, bool] = {}
         for selected in _fair_candidate_order(candidates, cursor):
             if attempts >= _MAX_CLAIM_ATTEMPTS:
                 break
+            selected_workspace = str(selected["workspace_id"])
+            if selected_workspace not in pause_cache:
+                check = self.is_workspace_paused
+                pause_cache[selected_workspace] = (
+                    bool(check(selected_workspace)) if check is not None else False
+                )
+            if pause_cache[selected_workspace]:
+                # Paused workspace: keep the request queued for resume.
+                continue
             if (
-                (allowed_workspaces and str(selected["workspace_id"]) not in allowed_workspaces)
+                (allowed_workspaces and selected_workspace not in allowed_workspaces)
                 or selected["runtime"] not in runtimes
                 or not _labels_satisfy(
                     labels, json.loads(selected["definition_json"]).get("requires_labels", {})

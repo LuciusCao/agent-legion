@@ -16,6 +16,9 @@ _MANAGEMENT = {"X-Agent-Worker-Register-Token": "management-secret"}
 def _make_app(tmp_path: Path):
     app = create_app(data_dir=tmp_path, start_worker=False)
     app.state.settings.executor_runtime.agent_workers.register_token = "management-secret"
+    # Workspace dispatch defaults to paused (reset at every startup); the
+    # operator resume is part of the environment these tests exercise.
+    app.state.workspace_worker_control.resume("test-workspace")
     return app
 
 
