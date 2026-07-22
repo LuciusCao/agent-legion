@@ -302,6 +302,41 @@ def test_create_workspace_seeds_active_workflow_revision(workspace_service, job_
     assert active["version"] == 1
 
 
+def _save(workspace_service, workspace_id: str, agent_capacity: int | None = None):
+    return workspace_service.replace_configuration(
+        workspace_id,
+        workspace_patch={},
+        settings_patch={"workflowKey": "question_comprehension_info"},
+        executor_allocations=[],
+        node_bindings=[],
+        node_limits=[],
+        agent_capacity=agent_capacity,
+    )
+
+
+def test_agent_capacity_defaults_to_unset(workspace_service, workspace):
+    result = _save(workspace_service, workspace["id"])
+    assert result["agent_capacity"] is None
+    assert workspace_service.job_db.get_workspace_agent_capacity(workspace["id"]) is None
+
+
+def test_replace_configuration_saves_agent_capacity_and_omission_leaves_it(
+    workspace_service, workspace
+):
+    result = _save(workspace_service, workspace["id"], agent_capacity=6)
+    assert result["agent_capacity"] == 6
+    assert workspace_service.job_db.get_workspace_agent_capacity(workspace["id"]) == 6
+
+    unchanged = _save(workspace_service, workspace["id"])
+    assert unchanged["agent_capacity"] == 6
+
+
+def test_replace_configuration_rejects_non_positive_agent_capacity(workspace_service, workspace):
+    with pytest.raises(InvalidOperationError, match="Agent capacity"):
+        _save(workspace_service, workspace["id"], agent_capacity=0)
+    assert workspace_service.job_db.get_workspace_agent_capacity(workspace["id"]) is None
+
+
 def test_update_workflow_seeds_revision_for_new_workflow(workspace_service, job_db):
     workspace = workspace_service.create(
         {"name": "WS", "default_workflow_key": "question_comprehension_info"}

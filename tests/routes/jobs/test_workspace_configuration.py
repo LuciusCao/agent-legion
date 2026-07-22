@@ -165,3 +165,55 @@ def test_app_startup_preserves_local_executor_configuration_for_workspace(tmp_pa
 
     assert response.status_code == 200
     assert {row["executor_id"] for row in response.json()["allocations"]} == {"local-default"}
+
+
+def test_workspace_configuration_agent_capacity_round_trip(tmp_path):
+    from fastapi.testclient import TestClient
+
+    from server.app.main import create_app
+
+    app = create_app(data_dir=tmp_path, start_worker=False)
+    app.state.settings.executor_runtime.workflows.enabled = True
+    with TestClient(app) as c:
+        ws_id = _create_workspace(c, "capacity", "question_comprehension_info")
+        saved = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={
+                "settings": {"workflowKey": "question_comprehension_info"},
+                "executor_allocations": [],
+                "node_bindings": [],
+                "node_limits": [],
+                "agent_capacity": 7,
+            },
+        )
+        assert saved.status_code == 200
+        assert saved.json()["agent_capacity"] == 7
+
+        loaded = c.get(f"/api/workspaces/{ws_id}/executor-configuration")
+        assert loaded.status_code == 200
+        assert loaded.json()["agent_capacity"] == 7
+
+        # Omitting agent_capacity leaves the saved value unchanged.
+        omitted = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={
+                "settings": {"workflowKey": "question_comprehension_info"},
+                "executor_allocations": [],
+                "node_bindings": [],
+                "node_limits": [],
+            },
+        )
+        assert omitted.status_code == 200
+        assert omitted.json()["agent_capacity"] == 7
+
+        invalid = c.put(
+            f"/api/workspaces/{ws_id}/configuration",
+            json={
+                "settings": {"workflowKey": "question_comprehension_info"},
+                "executor_allocations": [],
+                "node_bindings": [],
+                "node_limits": [],
+                "agent_capacity": 0,
+            },
+        )
+        assert invalid.status_code == 422

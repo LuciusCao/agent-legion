@@ -122,11 +122,9 @@ def try_claim_and_submit(
             """,
             (workspace_id, workflow_key, node_key),
         ).fetchone()
-        if node.max_concurrency is not None:
-            if route is None or route["target_kind"] != "agent":
-                return _fail_node_config(
-                    worker, workspace_id, job, workflow_key, node, log_path, "No Agent route"
-                )
+        # Agent routing is decided by the materialized workspace_node_routes
+        # projection, not by any node-level declaration.
+        if route is not None and route["target_kind"] == "agent":
             agent_id = str(route["target_id"])
             definition_config = worker.settings.agent_definitions.get(agent_id)
             if definition_config is None or definition_config.capability != node.capability:

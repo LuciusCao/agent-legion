@@ -36,6 +36,11 @@ export function saveActions(set: SettingStoreSet, get: () => SettingState) {
               ),
               node_bindings: executorConfiguration.bindings,
               node_limits: executorConfiguration.node_limits,
+              // null = unset: omit so the backend keeps the stored value
+              // (absent/null agent_capacity means "unchanged" on the PUT).
+              ...(executorConfiguration.agent_capacity != null
+                ? { agent_capacity: executorConfiguration.agent_capacity }
+                : {}),
             }),
           }
         )

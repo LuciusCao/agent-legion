@@ -269,7 +269,7 @@ invariants:
         gate: ci_extended
 
   - id: EXEC-AGENTCLAIM-001
-    statement: "An Agent Node may enter running only when a compatible Worker atomically claims it under both the Workflow Node workspace capacity and the Worker machine-wide capacity; queued requests consume neither capacity."
+    statement: "An Agent Node may enter running only when a compatible Worker atomically claims it under both the Workspace-level Agent capacity (workspace_agent_capacities; a workspace without a row is unlimited) and the Worker machine-wide capacity; queued requests consume neither capacity."
     owner: workspace-executor
     risk: critical
     evidence:
@@ -296,6 +296,21 @@ invariants:
         gate: quick
       - kind: integration
         target: tests/full/test_agent_worker_control_plane.py::test_agent_definition_catalog_snapshot_lifecycle
+        gate: full
+
+  - id: EXEC-WORKERACL-001
+    statement: "A Worker can only claim Agent executions for workspaces in its server-side registration scope (agent_workers.allowed_workspaces_json, resolved from the presented registration credential: global register token = all workspaces, scoped register token = its workspace); claim must use only this stored snapshot and never Worker-supplied workspace fields."
+    owner: workspace-executor
+    risk: high
+    evidence:
+      - kind: integration
+        target: tests/test_agent_broker.py
+        gate: quick
+      - kind: integration
+        target: tests/routes/test_agent_workers.py
+        gate: quick
+      - kind: integration
+        target: tests/full/test_agent_worker_control_plane.py::test_scoped_register_token_lifecycle
         gate: full
 
   - id: EXEC-KIND-001

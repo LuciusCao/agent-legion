@@ -34,6 +34,7 @@ def test_schema_initialization_is_idempotent() -> None:
         "agent_execution_requests",
         "workspace_node_routes",
         "workspace_node_capacities",
+        "workspace_agent_capacities",
     } <= names
 
 
