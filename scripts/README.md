@@ -34,8 +34,6 @@
 
 | 脚本 | 用途 |
 |------|------|
-| `finalize-workspace-executor-migration.py` | Phase 6 Workspace Executor 迁移最终化；`--check` 只读，`--apply` 执行迁移。 |
-| `migrate-video-hive-to-agent-legion.py` | 从旧 Video Hive 运行时迁移数据到 Agent Legion Workspace Jobs。 |
 | `generate-api-types.sh` | 导出后端 OpenAPI 并生成 `frontend/src/generated/api.ts`；`--check` 只做漂移检查。 |
 | `export_openapi.py` | 不启动 Worker 导出 OpenAPI 模式。 |
 | `install-git-hooks.sh` | 配置 worktree 兼容的版本化 pre-commit / pre-push 钩子。 |
