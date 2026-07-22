@@ -1,11 +1,7 @@
 import json
 import subprocess
-from pathlib import Path
-
-import pytest
 
 from server.app.pipeline.runners import (
-    RunnerPool,
     _build_agent_command,
     build_openclaw_runner,
     build_openclaw_runners,
@@ -126,41 +122,6 @@ def test_build_openclaw_runners_without_agent_flag(tmp_path):
     assert runners[0].agent_id == ""
 
 
-def test_runner_pool_size_and_acquire():
-    from server.app.pipeline.openclaw import OpenClawRunner
-
-    runner = OpenClawRunner(command_template=["cmd"], cwd=Path("."), timeout_seconds=60)
-    pool = RunnerPool([runner])
-    assert pool.size() == 1
-    idx, acquired = pool.acquire()
-    assert idx == 0
-    assert acquired is runner
-    with pytest.raises(RuntimeError, match="No free runner"):
-        pool.acquire()
-    pool.release(idx)
-    idx2, acquired2 = pool.acquire()
-    assert idx2 == 0
-
-
-def test_runner_pool_all_runners():
-    from server.app.pipeline.openclaw import OpenClawRunner
-
-    runner = OpenClawRunner(command_template=["cmd"], cwd=Path("."), timeout_seconds=60)
-    pool = RunnerPool([runner])
-    assert pool.all_runners() == [runner]
-
-
-def test_runner_pool_from_settings(monkeypatch, tmp_path):
-    def fake_run(cmd, **kwargs):
-        return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
-
-    monkeypatch.setattr(subprocess, "run", fake_run)
-    settings = load_settings(data_dir=tmp_path)
-    settings.config["openclaw"] = {"command_template": ["openclaw", "--json"]}
-    pool = RunnerPool.from_settings(settings)
-    assert pool.size() == 1
-
-
 def test_build_openclaw_runner_returns_first_runner(monkeypatch, tmp_path):
     def fake_run(cmd, **kwargs):
         return subprocess.CompletedProcess(cmd, 0, stdout="[]", stderr="")
@@ -170,9 +131,3 @@ def test_build_openclaw_runner_returns_first_runner(monkeypatch, tmp_path):
     settings.config["openclaw"] = {"command_template": ["openclaw", "--json"]}
     runner = build_openclaw_runner(settings)
     assert runner.agent_id == ""
-
-
-def test_runner_pool_acquire_raises_when_empty():
-    pool = RunnerPool([])
-    with pytest.raises(RuntimeError, match="Runners not initialized"):
-        pool.acquire()

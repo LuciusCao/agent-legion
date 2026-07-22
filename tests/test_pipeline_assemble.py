@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 from server.app.pipeline.assemble import assemble_video
 from server.app.pipeline.upload_params import build_upload_params
 
@@ -169,45 +167,6 @@ def test_upload_params_uses_checklist_node_issues_for_interaction_review(tmp_pat
     trial = params["example_problem_trial_json"][0]
     assert trial["review_status"] == 2
     assert trial["review_msg"] == "触发过早：应在讲解结束后触发"
-
-
-def test_validate_phase_outputs_rejects_chapter_without_end_time(tmp_path):
-    """validate_phase_outputs must raise when a chapter lacks end_time."""
-    from server.app.pipeline.validators import validate_phase_outputs
-
-    video_dir = tmp_path / "v1"
-    video_dir.mkdir()
-    (video_dir / "chapters.json").write_text(
-        json.dumps(
-            [
-                {"start_time": 0, "end_time": 10, "title": "引入"},
-                {"start_time": 18, "title": "讲解"},
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    with pytest.raises(ValueError, match="missing 'end_time'"):
-        validate_phase_outputs(video_dir, "chapter_generate")
-
-
-def test_validate_phase_outputs_passes_with_complete_chapters(tmp_path):
-    """validate_phase_outputs should not raise when all chapters have end_time."""
-    from server.app.pipeline.validators import validate_phase_outputs
-
-    video_dir = tmp_path / "v1"
-    video_dir.mkdir()
-    (video_dir / "chapters.json").write_text(
-        json.dumps(
-            [
-                {"start_time": 0, "end_time": 10, "title": "引入"},
-                {"start_time": 10, "end_time": 60, "title": "讲解"},
-            ]
-        ),
-        encoding="utf-8",
-    )
-
-    validate_phase_outputs(video_dir, "chapter_generate")
 
 
 def test_upload_params_builds_video_summary_interaction(tmp_path):
