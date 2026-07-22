@@ -13,6 +13,7 @@ const workerA: WorkerSummary = {
   registered_at: '2026-07-20T00:00:00Z',
   last_seen_at: '2026-07-20T01:00:00Z',
   revoked: false,
+  allowed_workspaces: [],
 }
 
 function mockWorkersFetch(workers: WorkerSummary[]) {

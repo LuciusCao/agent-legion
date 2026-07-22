@@ -8,6 +8,10 @@ import type {
   ExecutorDefinition,
   WorkspaceExecutorConfiguration,
 } from '../../executorTypes'
+import type { components } from '../../generated/api'
+
+export type WorkspaceAgentRouteEntry =
+  components['schemas']['WorkspaceAgentRouteEntry']
 
 export type TestStatus = {
   state: 'idle' | 'testing' | 'success' | 'failed'
@@ -33,10 +37,12 @@ export type SettingState = {
   executorConfiguration: WorkspaceExecutorConfiguration
   originalExecutorConfiguration: WorkspaceExecutorConfiguration | null
   pendingAllocationRemoval: string | null
+  agentRoutes: WorkspaceAgentRouteEntry[]
   setWorkspaceId: (id: string) => void
   setWorkspaceName: (name: string) => void
   setWorkspaceDescription: (description: string) => void
   setSettings: (s: Partial<WorkspaceSettings>) => void
+  setAgentCapacity: (capacity: number) => void
   setExecutorAllocation: (executorId: string, limit: number) => void
   requestExecutorRemoval: (executorId: string) => void
   confirmExecutorRemoval: () => void
@@ -81,6 +87,8 @@ export const defaultExecutorConfiguration: WorkspaceExecutorConfiguration = {
   bindings: [],
   node_limits: [],
   migration_warnings: [],
+  // Workspace-level agent concurrency cap; null = unset = unlimited.
+  agent_capacity: null,
 }
 
 export function normalizeExecutorConfiguration(
@@ -91,6 +99,7 @@ export function normalizeExecutorConfiguration(
     bindings: config?.bindings ?? [],
     node_limits: config?.node_limits ?? [],
     migration_warnings: config?.migration_warnings ?? [],
+    agent_capacity: config?.agent_capacity ?? null,
   }
 }
 

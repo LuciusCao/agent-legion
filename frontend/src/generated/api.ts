@@ -72,6 +72,41 @@ export interface paths {
     patch?: never
     trace?: never
   }
+  '/api/agent-register-tokens': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** List Register Tokens */
+    get: operations['list_register_tokens_api_agent_register_tokens_get']
+    put?: never
+    /** Create Register Token */
+    post: operations['create_register_token_api_agent_register_tokens_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
+  '/api/agent-register-tokens/{token_id}/revoke': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    get?: never
+    put?: never
+    /** Revoke Register Token */
+    post: operations['revoke_register_token_api_agent_register_tokens__token_id__revoke_post']
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/agent-workers': {
     parameters: {
       query?: never
@@ -638,6 +673,23 @@ export interface paths {
     patch: operations['update_workspace_api_workspaces__workspace_id__patch']
     trace?: never
   }
+  '/api/workspaces/{workspace_id}/agent-routes': {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    /** Get Workspace Agent Routes */
+    get: operations['get_workspace_agent_routes_api_workspaces__workspace_id__agent_routes_get']
+    put?: never
+    post?: never
+    delete?: never
+    options?: never
+    head?: never
+    patch?: never
+    trace?: never
+  }
   '/api/workspaces/{workspace_id}/configuration': {
     parameters: {
       query?: never
@@ -1132,6 +1184,40 @@ export interface components {
       /** Workspace Id */
       workspace_id: string
     }
+    /** AgentRegisterTokenCreatedResponse */
+    AgentRegisterTokenCreatedResponse: {
+      /** Label */
+      label: string
+      /** Register Token */
+      register_token: string
+      /** Token Id */
+      token_id: string
+      /** Workspace Id */
+      workspace_id: string | null
+    }
+    /** AgentRegisterTokenRevokeResponse */
+    AgentRegisterTokenRevokeResponse: {
+      /** Revoked */
+      revoked: boolean
+    }
+    /** AgentRegisterTokenSummary */
+    AgentRegisterTokenSummary: {
+      /** Created At */
+      created_at: string
+      /** Label */
+      label: string
+      /** Revoked */
+      revoked: boolean
+      /** Token Id */
+      token_id: string
+      /** Workspace Id */
+      workspace_id: string | null
+    }
+    /** AgentRegisterTokensResponse */
+    AgentRegisterTokensResponse: {
+      /** Tokens */
+      tokens: components['schemas']['AgentRegisterTokenSummary'][]
+    }
     /** AgentStatusResponse */
     AgentStatusResponse: {
       /** Busy */
@@ -1165,6 +1251,8 @@ export interface components {
     }
     /** AgentWorkerSummary */
     AgentWorkerSummary: {
+      /** Allowed Workspaces */
+      allowed_workspaces: string[]
       /** Labels */
       labels: {
         [key: string]: string
@@ -1247,6 +1335,16 @@ export interface components {
     }
     /** ContinueJobRequest */
     ContinueJobRequest: Record<string, never>
+    /** CreateAgentRegisterTokenRequest */
+    CreateAgentRegisterTokenRequest: {
+      /**
+       * Label
+       * @default
+       */
+      label: string
+      /** Workspace Id */
+      workspace_id?: string | null
+    }
     /** DeleteJobResponse */
     DeleteJobResponse: {
       /** Deleted */
@@ -1796,6 +1894,8 @@ export interface components {
     }
     /** RegisterAgentWorkerResponse */
     RegisterAgentWorkerResponse: {
+      /** Allowed Workspaces */
+      allowed_workspaces: string[]
       /** Worker Token */
       worker_token: string
     }
@@ -2465,8 +2565,32 @@ export interface components {
       /** Workflows */
       workflows: components['schemas']['WorkflowSummaryResponse'][]
     }
+    /** WorkspaceAgentRouteEntry */
+    WorkspaceAgentRouteEntry: {
+      /** Agent Id */
+      agent_id: string
+      /** Agent Skill */
+      agent_skill: string
+      /** Capability */
+      capability: string
+      /** Max Concurrency */
+      max_concurrency: number | null
+      /** Node Key */
+      node_key: string
+      /** Node Label */
+      node_label: string
+      /** Workflow Key */
+      workflow_key: string
+    }
+    /** WorkspaceAgentRoutesResponse */
+    WorkspaceAgentRoutesResponse: {
+      /** Routes */
+      routes: components['schemas']['WorkspaceAgentRouteEntry'][]
+    }
     /** WorkspaceConfigurationRequest */
     WorkspaceConfigurationRequest: {
+      /** Agent Capacity */
+      agent_capacity?: number | null
       /** Description */
       description?: string | null
       /** Executor Allocations */
@@ -2481,6 +2605,8 @@ export interface components {
     }
     /** WorkspaceConfigurationResponse */
     WorkspaceConfigurationResponse: {
+      /** Agent Capacity */
+      agent_capacity?: number | null
       executor_configuration: components['schemas']['WorkspaceExecutorConfigurationResponse']
       settings: components['schemas']['WorkspaceSettingsPayload']
       workspace: components['schemas']['WorkspaceRecord']
@@ -2539,6 +2665,8 @@ export interface components {
     }
     /** WorkspaceExecutorConfigurationResponse */
     WorkspaceExecutorConfigurationResponse: {
+      /** Agent Capacity */
+      agent_capacity?: number | null
       /** Allocations */
       allocations: components['schemas']['ExecutorAllocationResponse'][]
       /** Bindings */
@@ -2893,6 +3021,90 @@ export interface operations {
           [name: string]: unknown
         }
         content?: never
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  list_register_tokens_api_agent_register_tokens_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentRegisterTokensResponse']
+        }
+      }
+    }
+  }
+  create_register_token_api_agent_register_tokens_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path?: never
+      cookie?: never
+    }
+    requestBody: {
+      content: {
+        'application/json': components['schemas']['CreateAgentRegisterTokenRequest']
+      }
+    }
+    responses: {
+      /** @description Successful Response */
+      201: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentRegisterTokenCreatedResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  revoke_register_token_api_agent_register_tokens__token_id__revoke_post: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        token_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['AgentRegisterTokenRevokeResponse']
+        }
       }
       /** @description Validation Error */
       422: {
@@ -3983,6 +4195,37 @@ export interface operations {
         }
         content: {
           'application/json': components['schemas']['WorkspaceResponse']
+        }
+      }
+      /** @description Validation Error */
+      422: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['HTTPValidationError']
+        }
+      }
+    }
+  }
+  get_workspace_agent_routes_api_workspaces__workspace_id__agent_routes_get: {
+    parameters: {
+      query?: never
+      header?: never
+      path: {
+        workspace_id: string
+      }
+      cookie?: never
+    }
+    requestBody?: never
+    responses: {
+      /** @description Successful Response */
+      200: {
+        headers: {
+          [name: string]: unknown
+        }
+        content: {
+          'application/json': components['schemas']['WorkspaceAgentRoutesResponse']
         }
       }
       /** @description Validation Error */

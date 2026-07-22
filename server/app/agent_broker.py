@@ -36,6 +36,8 @@ class AgentExecutionRequest:
     node_key: str
     agent_id: str
     agent_definition_hash: str
+    # Legacy node-level limit declared by the workflow (0 = unset). Enforcement
+    # is workspace-level; the broker only stores an audit snapshot.
     node_concurrency_limit: int
     manifest: Mapping[str, Any]
     execution_id: str = ""
@@ -84,8 +86,8 @@ class AgentExecutionBroker:
         return row is not None
 
     def enqueue(self, request: AgentExecutionRequest) -> str | None:
-        if request.node_concurrency_limit <= 0:
-            raise ValueError("node_concurrency_limit must be positive")
+        if request.node_concurrency_limit < 0:
+            raise ValueError("node_concurrency_limit must not be negative")
         execution_id = request.execution_id or str(uuid.uuid4())
         try:
             with write_transaction(self.database_dsn) as conn:
@@ -110,19 +112,16 @@ class AgentExecutionBroker:
                 ):
                     raise ValueError("Agent definition is unavailable or changed before enqueue")
                 capacity = conn.execute(
-                    """
-                    select max_concurrency from workspace_node_capacities
-                    where workspace_id=? and workflow_key=? and node_key=?
-                    """,
-                    (request.workspace_id, request.workflow_key, request.node_key),
+                    "select max_concurrency from workspace_agent_capacities where workspace_id=?",
+                    (request.workspace_id,),
                 ).fetchone()
-                if (
-                    capacity is None
-                    or int(capacity["max_concurrency"]) != request.node_concurrency_limit
-                ):
-                    raise ValueError(
-                        "workspace node capacity is unavailable or changed before enqueue"
-                    )
+                # Audit-only snapshot of the governing limit at enqueue time:
+                # the legacy node-level value when the workflow still declares
+                # one, else the current workspace-level cap; 1 records "no
+                # configured limit (unlimited)". Never used for enforcement.
+                stored_limit = request.node_concurrency_limit
+                if stored_limit <= 0:
+                    stored_limit = int(capacity["max_concurrency"]) if capacity is not None else 1
                 conn.execute(
                     """
                     insert into agent_execution_requests(
@@ -139,7 +138,7 @@ class AgentExecutionBroker:
                         request.node_key,
                         request.agent_id,
                         request.agent_definition_hash,
-                        request.node_concurrency_limit,
+                        stored_limit,
                         json.dumps(dict(request.manifest), ensure_ascii=False, sort_keys=True),
                     ),
                 )
@@ -169,6 +168,11 @@ class AgentExecutionBroker:
             raise ValueError("unknown or revoked Agent Worker")
         runtimes = set(json.loads(worker["runtimes_json"]))
         labels = json.loads(worker["labels_json"])
+        # Workspace admission scope from the server-side registration snapshot
+        # (EXEC-WORKERACL-001): [] means all workspaces; a non-empty list
+        # restricts this Worker to those workspaces. Never trust Worker-
+        # supplied fields for this.
+        allowed_workspaces = set(json.loads(worker["allowed_workspaces_json"] or "[]"))
         worker_active = conn.execute(
             "select count(*) as cnt from agent_execution_requests"
             " where worker_id=? and state='claimed'",
@@ -179,7 +183,9 @@ class AgentExecutionBroker:
             return None
         # Candidates are read WITHOUT row locks (a bounded per-workspace window
         # keeps small workspaces visible behind a deep queue); only the single
-        # row actually being claimed is locked below, by PK.
+        # row actually being claimed is locked below, by PK. Capacity is
+        # workspace-level: a workspace without a workspace_agent_capacities row
+        # has no configured limit and is treated as unlimited.
         candidates = conn.execute(
             """
             select * from (
@@ -190,14 +196,12 @@ class AgentExecutionBroker:
                      ) as workspace_rank
               from agent_execution_requests r
               join agent_definitions d on d.agent_id=r.agent_id and d.definition_hash=r.agent_definition_hash and d.enabled=1
-              join workspace_node_capacities c on c.workspace_id=r.workspace_id
-                and c.workflow_key=r.workflow_key and c.node_key=r.node_key
+              left join workspace_agent_capacities w on w.workspace_id=r.workspace_id
               where r.state='queued'
                 and (
                   select count(*) from agent_execution_requests active
-                  where active.workspace_id=r.workspace_id and active.workflow_key=r.workflow_key
-                    and active.node_key=r.node_key and active.state='claimed'
-                ) < c.max_concurrency
+                  where active.workspace_id=r.workspace_id and active.state='claimed'
+                ) < coalesce(w.max_concurrency, 2147483647)
             ) windowed
             where workspace_rank <= ?
             order by queued_at, execution_id
@@ -210,8 +214,12 @@ class AgentExecutionBroker:
         for selected in _fair_candidate_order(candidates, cursor):
             if attempts >= _MAX_CLAIM_ATTEMPTS:
                 break
-            if selected["runtime"] not in runtimes or not _labels_satisfy(
-                labels, json.loads(selected["definition_json"]).get("requires_labels", {})
+            if (
+                (allowed_workspaces and str(selected["workspace_id"]) not in allowed_workspaces)
+                or selected["runtime"] not in runtimes
+                or not _labels_satisfy(
+                    labels, json.loads(selected["definition_json"]).get("requires_labels", {})
+                )
             ):
                 continue
             attempts += 1
@@ -239,30 +247,27 @@ class AgentExecutionBroker:
             if job["status"] not in _RUNNABLE_JOB_STATUSES:
                 self._cancel_request(conn, selected["execution_id"])
                 continue
-            node_domain = (
-                f"agent-node:{selected['workspace_id']}:"
-                f"{selected['workflow_key']}:{selected['node_key']}"
-            )
-            conn.execute("select pg_advisory_xact_lock(hashtext(?))", (node_domain,))
+            # Fixed lock order across all capacity domains: the workspace-level
+            # Agent capacity domain first, then the Worker machine domain.
+            ws_domain = f"agent-ws:{selected['workspace_id']}"
+            conn.execute("select pg_advisory_xact_lock(hashtext(?))", (ws_domain,))
             conn.execute(
                 "select pg_advisory_xact_lock(hashtext(?))", (f"agent-worker:{worker_id}",)
             )
 
             capacity = conn.execute(
-                "select max_concurrency from workspace_node_capacities"
-                " where workspace_id=? and workflow_key=? and node_key=?",
-                (selected["workspace_id"], selected["workflow_key"], selected["node_key"]),
+                "select max_concurrency from workspace_agent_capacities where workspace_id=?",
+                (selected["workspace_id"],),
             ).fetchone()
-            if capacity is None:
-                return None
-            node_active = conn.execute(
-                "select count(*) as cnt from agent_execution_requests"
-                " where workspace_id=? and workflow_key=? and node_key=? and state='claimed'",
-                (selected["workspace_id"], selected["workflow_key"], selected["node_key"]),
-            ).fetchone() or {"cnt": 0}
-            if int(node_active["cnt"]) >= int(capacity["max_concurrency"]):
-                # Lost the race for this node's last slot; try the next one.
-                continue
+            if capacity is not None:
+                ws_active = conn.execute(
+                    "select count(*) as cnt from agent_execution_requests"
+                    " where workspace_id=? and state='claimed'",
+                    (selected["workspace_id"],),
+                ).fetchone() or {"cnt": 0}
+                if int(ws_active["cnt"]) >= int(capacity["max_concurrency"]):
+                    # Lost the race for this workspace's last slot; try the next.
+                    continue
 
             updated = conn.execute(
                 "update job_nodes set status='running', stale_reason='', error_message='',"

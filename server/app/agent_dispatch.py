@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import uuid
 from dataclasses import asdict
 from pathlib import Path
@@ -17,6 +18,8 @@ from server.app.skills.manager import SkillManager
 from server.app.workflows.pi_config import PiConfig
 from server.app.workflows.pi_protocol import render_command_spec
 from server.app.workflows.schema import WorkflowNode
+
+logger = logging.getLogger(__name__)
 
 
 class AgentDispatchService:
@@ -50,10 +53,14 @@ class AgentDispatchService:
         log_path: Path,
         inputs: tuple[str, ...],
     ) -> bool:
-        if node.max_concurrency is None:
-            raise ValueError(f"Agent node {node.key!r} must declare max_concurrency")
         if self.broker.has_active_request(str(job["id"]), node.key):
             return False
+        if node.max_concurrency is not None:
+            logger.warning(
+                "Agent node %s declares deprecated max_concurrency; workspace-level"
+                " Agent capacity governs and the value is ignored",
+                node.key,
+            )
         if definition.runtime != "pi":
             raise ValueError(f"Agent runtime {definition.runtime!r} is not implemented yet")
         execution_id = str(uuid.uuid4())
@@ -118,7 +125,9 @@ class AgentDispatchService:
                     node_key=node.key,
                     agent_id=agent_id,
                     agent_definition_hash=definition.definition_hash(),
-                    node_concurrency_limit=node.max_concurrency,
+                    node_concurrency_limit=node.max_concurrency
+                    if node.max_concurrency is not None
+                    else 0,
                     manifest=manifest,
                     execution_id=execution_id,
                 )

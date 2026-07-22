@@ -3,6 +3,7 @@ import {
   getExecutorCatalog,
   getWorkspaceExecutorConfiguration,
 } from '../../../executorApi'
+import type { components } from '../../../generated/api'
 import type {
   WorkspaceSettings,
   GlobalServiceStatus,
@@ -18,6 +19,9 @@ import {
   type SettingStoreSet,
 } from '../state'
 
+type WorkspaceAgentRoutesResponse =
+  components['schemas']['WorkspaceAgentRoutesResponse']
+
 export function loadActions(set: SettingStoreSet, get: () => SettingState) {
   return {
     async fetchSettings(workspaceId: string) {
@@ -28,6 +32,7 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
           settingsResult,
           catalogResult,
           executorConfigurationResult,
+          agentRoutesResult,
         ] = await Promise.all([
           api<WorkspaceResponse>(
             `/api/workspaces/${encodeURIComponent(workspaceId)}`
@@ -38,6 +43,9 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
           >(`/api/workspaces/${encodeURIComponent(workspaceId)}/settings`),
           getExecutorCatalog(),
           getWorkspaceExecutorConfiguration(workspaceId),
+          api<WorkspaceAgentRoutesResponse>(
+            `/api/workspaces/${encodeURIComponent(workspaceId)}/agent-routes`
+          ).catch(() => null),
         ])
         const workspaceData = workspaceResult?.workspace
         const data =
@@ -63,6 +71,7 @@ export function loadActions(set: SettingStoreSet, get: () => SettingState) {
             executorCatalog: nextCatalog,
             executorConfiguration: nextExecutorConfiguration,
             originalExecutorConfiguration: nextExecutorConfiguration,
+            agentRoutes: agentRoutesResult?.routes ?? [],
           }
           return { ...nextState, isDirty: computeDirty(nextState) }
         })

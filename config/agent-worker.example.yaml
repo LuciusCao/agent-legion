@@ -6,6 +6,11 @@ max_concurrency: 10
 labels:
   os: macos
   arch: arm64
+# The Worker NEVER declares workspaces: its workspace admission scope is
+# defined entirely by the registration token presented at register time
+# (global management token = all workspaces; a scoped token from
+# POST /api/agent-register-tokens = that workspace only). The server stores
+# the resolved scope and enforces it at claim.
 register_token_file: /run/secrets/agent_worker_register_token
 work_root: /var/lib/agent-legion-worker
 poll_interval_seconds: 2

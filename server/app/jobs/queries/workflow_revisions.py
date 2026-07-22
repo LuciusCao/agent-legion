@@ -55,9 +55,7 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
         *,
         workspace_id: str,
         workflow_key: str,
-        revision_id: str,
         agent_routes: dict[str, str],
-        node_capacities: dict[str, int],
     ) -> None:
         with self.connect() as conn:
             for node_key, agent_id in agent_routes.items():
@@ -71,26 +69,14 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
                     """,
                     (workspace_id, workflow_key, node_key, agent_id),
                 )
-            for node_key, max_concurrency in node_capacities.items():
-                conn.execute(
-                    """
-                    insert into workspace_node_capacities(
-                      workspace_id, workflow_key, node_key, max_concurrency,
-                      source_revision_id, updated_at
-                    ) values (?, ?, ?, ?, ?, current_timestamp)
-                    on conflict(workspace_id, workflow_key, node_key) do update set
-                      max_concurrency=excluded.max_concurrency,
-                      source_revision_id=excluded.source_revision_id,
-                      updated_at=current_timestamp
-                    """,
-                    (workspace_id, workflow_key, node_key, max_concurrency, revision_id),
-                )
+            # No workspace_node_capacities writes: Agent capacity is
+            # workspace-level now. The prune clears legacy per-node rows.
             _delete_stale_projection_rows(
                 conn,
                 workspace_id,
                 workflow_key,
                 keep_route_nodes=set(agent_routes),
-                keep_capacity_nodes=set(node_capacities),
+                keep_capacity_nodes=set(),
             )
 
     def create_workflow_revision(
@@ -104,7 +90,6 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
         definition_json: str,
         definition_hash: str,
         agent_routes: dict[str, str] | None = None,
-        node_capacities: dict[str, int] | None = None,
     ) -> dict[str, Any]:
         with self.connect() as conn:
             if status == "active":
@@ -145,27 +130,15 @@ class WorkflowRevisionQueriesMixin(JobQueriesBase):
                     """,
                     (workspace_id, workflow_key, node_key, agent_id),
                 )
-            for node_key, max_concurrency in (node_capacities or {}).items():
-                conn.execute(
-                    """
-                    insert into workspace_node_capacities(
-                      workspace_id, workflow_key, node_key, max_concurrency,
-                      source_revision_id, updated_at
-                    ) values (?, ?, ?, ?, ?, current_timestamp)
-                    on conflict(workspace_id, workflow_key, node_key) do update set
-                      max_concurrency=excluded.max_concurrency,
-                      source_revision_id=excluded.source_revision_id,
-                      updated_at=current_timestamp
-                    """,
-                    (workspace_id, workflow_key, node_key, max_concurrency, revision_id),
-                )
-            if agent_routes is not None or node_capacities is not None:
+            if agent_routes is not None:
+                # No workspace_node_capacities writes (workspace-level Agent
+                # capacity); the prune clears legacy per-node rows.
                 _delete_stale_projection_rows(
                     conn,
                     workspace_id,
                     workflow_key,
                     keep_route_nodes=set(agent_routes or {}),
-                    keep_capacity_nodes=set(node_capacities or {}),
+                    keep_capacity_nodes=set(),
                 )
             row = conn.execute(
                 "select * from workflow_revisions where id=?", (revision_id,)
