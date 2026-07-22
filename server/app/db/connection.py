@@ -87,11 +87,10 @@ def connect_database(dsn: DatabaseDsn) -> DatabaseConnection:
     if not dsn.startswith(("postgresql://", "postgres://")):
         raise ValueError("VIDEO_HIVE_DATABASE_URL must be a PostgreSQL URL")
     pool = _pool_for(dsn)
-    try:
-        return DatabaseConnection(pool.getconn(), pool, dsn)
-    except Exception:
-        close_database_pools()
-        raise
+    # A failed checkout (pool timeout or unreachable server) must not tear down
+    # any pool: ConnectionPool recovers on its own, and other threads may still
+    # hold healthy connections checked out from it.
+    return DatabaseConnection(pool.getconn(), pool, dsn)
 
 
 def close_database_pools() -> None:

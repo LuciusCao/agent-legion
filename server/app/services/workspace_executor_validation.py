@@ -41,6 +41,10 @@ def validate_workspace_executor_configuration(
             raise InvalidOperationError(f"Duplicate Node binding {workflow_key}.{node_key}")
         if workflow_key != workflow.key or node_key not in workflow.nodes:
             raise InvalidOperationError(f"Unknown Workflow Node {workflow_key}.{node_key}")
+        if workflow.nodes[node_key].max_concurrency is not None:
+            raise InvalidOperationError(
+                f"Agent Node {workflow_key}.{node_key} is routed by Agent ID, not Executor binding"
+            )
         executor_id = str(binding["executor_id"])
         if executor_id not in allocation_by_id:
             raise InvalidOperationError(

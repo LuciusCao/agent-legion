@@ -6,8 +6,6 @@ from typing import Any
 import pytest
 
 from server.app.executors._lease_transactions import _database_timestamp
-from server.app.executors.config import RemoteCapabilityConfig, RemoteExecutorConfig
-from server.app.executors.remote_broker import RemoteExecutionBroker, RemoteExecutionPayload
 from server.app.services.job_queries import JobQueryService
 from server.app.services.workflow_catalog import WorkflowCatalogService
 from server.app.services.workflow_revisions import WorkflowRevisionService
@@ -313,7 +311,7 @@ def test_job_query_service_detail_lists_artifacts_from_relative_storage_dir(
     assert detail["artifacts"] == ["result.json"]
 
 
-def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, job_db):
+def test_job_detail_resolves_local_executor_id_and_kind_from_settings(query_service, job_db):
     workspace = job_db.create_workspace(
         "default", default_workflow_key="question_comprehension_info"
     )
@@ -336,14 +334,8 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
         workspace["id"],
         allocations=[
             {"executor_id": "local-default", "concurrency_limit": 1},
-            {"executor_id": "pi", "concurrency_limit": 1},
         ],
         bindings=[
-            {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "question_understanding",
-                "executor_id": "pi",
-            },
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_package",
@@ -356,8 +348,8 @@ def test_job_detail_resolves_executor_id_and_kind_from_settings(query_service, j
     detail = query_service.detail(job["id"])
 
     nodes = {node["node_key"]: node for node in detail["nodes"]}
-    assert nodes["question_understanding"]["executor_id"] == "pi"
-    assert nodes["question_understanding"]["executor_kind"] == "pi"
+    assert nodes["question_understanding"]["executor_id"] is None
+    assert nodes["question_understanding"]["executor_kind"] is None
     assert nodes["assemble_package"]["executor_id"] == "local-default"
     assert nodes["assemble_package"]["executor_kind"] == "local"
 
@@ -385,18 +377,12 @@ def test_job_detail_resolves_executor_binding_for_job_workflow_only(query_servic
         workspace["id"],
         allocations=[
             {"executor_id": "local-default", "concurrency_limit": 1},
-            {"executor_id": "pi", "concurrency_limit": 1},
         ],
         bindings=[
             {
                 "workflow_key": "question_comprehension_info",
                 "node_key": "assemble_package",
                 "executor_id": "local-default",
-            },
-            {
-                "workflow_key": "question_comprehension_info",
-                "node_key": "assemble_comprehension_info",
-                "executor_id": "pi",
             },
         ],
         node_limits=[],
@@ -642,24 +628,15 @@ def _create_two_node_job(job_db) -> dict[str, Any]:
     return job
 
 
-def _bind_remote_executor(job_db, settings, workspace_id: str, node_key: str) -> None:
-    settings.executor_definitions["remote-test"] = RemoteExecutorConfig(
-        kind="remote",
-        global_capacity=2,
-        capabilities={"cap_a": RemoteCapabilityConfig(skill="video_knowledge/transcribe_video")},
-    )
-    job_db.replace_workspace_executor_configuration(
-        workspace_id,
-        allocations=[{"executor_id": "remote-test", "concurrency_limit": 2}],
-        bindings=[
-            {
-                "workflow_key": "question_comprehension_info",
-                "node_key": node_key,
-                "executor_id": "remote-test",
-            }
-        ],
-        node_limits=[],
-    )
+def _bind_agent(job_db, workspace_id: str, node_key: str) -> None:
+    with job_db.connect() as conn:
+        conn.execute(
+            "insert into workspace_node_routes(workspace_id, workflow_key, node_key, target_kind, target_id)"
+            " values (?, 'question_comprehension_info', ?, 'agent', 'question-key-info-v1')"
+            " on conflict(workspace_id, workflow_key, node_key) do update set"
+            " target_kind='agent', target_id=excluded.target_id",
+            (workspace_id, node_key),
+        )
 
 
 def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_id: str) -> None:
@@ -680,7 +657,7 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
             (
                 f"lease-{execution_id}",
                 execution_id,
-                "remote-test",
+                "agent:question-key-info-v1",
                 job["workspace_id"],
                 job["id"],
                 job["workflow_key"],
@@ -693,66 +670,72 @@ def _insert_active_lease(job_db, job: dict[str, Any], node_key: str, execution_i
         )
 
 
-def _submit_remote_execution(job_db, settings, execution_id: str, job, node_key: str):
-    broker = RemoteExecutionBroker(job_db.path, settings.data_dir / "remote_bundles")
-    broker.submit(
-        RemoteExecutionPayload(
-            execution_id=execution_id,
-            lease_id=f"lease-{execution_id}",
-            job_id=job["id"],
-            node_key=node_key,
-            capability="cap_a",
-            bundle_name=f"{execution_id}.tar.gz",
-            manifest={"job_id": job["id"], "node_key": node_key},
+def _insert_agent_request(job_db, execution_id: str, job, node_key: str) -> None:
+    with job_db.connect() as conn:
+        definition = conn.execute(
+            "select definition_hash from agent_definitions where agent_id='question-key-info-v1'"
+        ).fetchone()
+        conn.execute(
+            "insert into agent_execution_requests(execution_id, workspace_id, job_id, workflow_key,"
+            " node_key, agent_id, agent_definition_hash, node_concurrency_limit, queued_at, manifest_json)"
+            " values (?, ?, ?, ?, ?, 'question-key-info-v1', ?, 20, current_timestamp, '{}')",
+            (
+                execution_id,
+                job["workspace_id"],
+                job["id"],
+                job["workflow_key"],
+                node_key,
+                definition["definition_hash"],
+            ),
         )
-    )
-    return broker
 
 
-def test_job_detail_projects_claimed_remote_worker(query_service, job_db, settings):
+def test_job_detail_projects_agent_and_claimed_worker(query_service, job_db):
     job = _create_two_node_job(job_db)
-    _bind_remote_executor(job_db, settings, job["workspace_id"], "question_understanding")
-    _insert_active_lease(job_db, job, "question_understanding", "exec-remote-1")
-    broker = _submit_remote_execution(
-        job_db, settings, "exec-remote-1", job, "question_understanding"
-    )
-    claimed = broker.dequeue("worker-mac-1", ["cap_a"])
-    assert claimed is not None and claimed.execution_id == "exec-remote-1"
+    _bind_agent(job_db, job["workspace_id"], "question_understanding")
+    _insert_active_lease(job_db, job, "question_understanding", "exec-agent-1")
+    _insert_agent_request(job_db, "exec-agent-1", job, "question_understanding")
+    with job_db.connect() as conn:
+        conn.execute(
+            "update agent_execution_requests set state='claimed', worker_id='worker-mac-1'"
+            " where execution_id='exec-agent-1'"
+        )
 
     detail = query_service.detail(job["id"])
 
     nodes = {node["node_key"]: node for node in detail["nodes"]}
-    assert nodes["question_understanding"]["executor_id"] == "remote-test"
-    assert nodes["question_understanding"]["executor_kind"] == "remote"
+    assert nodes["question_understanding"]["agent_id"] == "question-key-info-v1"
+    assert nodes["question_understanding"]["executor_id"] is None
     assert nodes["question_understanding"]["worker_id"] == "worker-mac-1"
     assert nodes["assemble_package"]["worker_id"] is None
 
 
-def test_job_detail_worker_id_none_while_execution_queued(query_service, job_db, settings):
+def test_job_detail_worker_id_none_while_agent_execution_queued(query_service, job_db):
     job = _create_two_node_job(job_db)
-    _bind_remote_executor(job_db, settings, job["workspace_id"], "question_understanding")
-    _insert_active_lease(job_db, job, "question_understanding", "exec-remote-2")
-    _submit_remote_execution(job_db, settings, "exec-remote-2", job, "question_understanding")
+    _bind_agent(job_db, job["workspace_id"], "question_understanding")
+    _insert_active_lease(job_db, job, "question_understanding", "exec-agent-2")
+    _insert_agent_request(job_db, "exec-agent-2", job, "question_understanding")
 
     detail = query_service.detail(job["id"])
 
     nodes = {node["node_key"]: node for node in detail["nodes"]}
-    assert nodes["question_understanding"]["executor_kind"] == "remote"
+    assert nodes["question_understanding"]["agent_id"] == "question-key-info-v1"
     assert nodes["question_understanding"]["worker_id"] is None
 
 
-def test_job_detail_worker_id_none_after_lease_released(query_service, job_db, settings):
+def test_job_detail_worker_id_none_after_agent_lease_released(query_service, job_db):
     job = _create_two_node_job(job_db)
-    _bind_remote_executor(job_db, settings, job["workspace_id"], "question_understanding")
-    _insert_active_lease(job_db, job, "question_understanding", "exec-remote-3")
-    broker = _submit_remote_execution(
-        job_db, settings, "exec-remote-3", job, "question_understanding"
-    )
-    assert broker.dequeue("worker-mac-2", ["cap_a"]) is not None
+    _bind_agent(job_db, job["workspace_id"], "question_understanding")
+    _insert_active_lease(job_db, job, "question_understanding", "exec-agent-3")
+    _insert_agent_request(job_db, "exec-agent-3", job, "question_understanding")
     with job_db.connect() as conn:
         conn.execute(
+            "update agent_execution_requests set state='claimed', worker_id='worker-mac-2'"
+            " where execution_id='exec-agent-3'"
+        )
+        conn.execute(
             "update executor_leases set status='released' where execution_id=?",
-            ("exec-remote-3",),
+            ("exec-agent-3",),
         )
 
     detail = query_service.detail(job["id"])

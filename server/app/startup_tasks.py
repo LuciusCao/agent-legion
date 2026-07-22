@@ -39,7 +39,8 @@ class BackgroundTasks:
             consume_intake_batches(self._job_intake_queue)
         )
 
-    def stop(self, app: FastAPI) -> None:
+    async def stop(self, app: FastAPI, timeout_seconds: float = 5.0) -> None:
+        tasks: list[asyncio.Task] = []
         for attr in (
             "workspace_event_aggregator_task",
             "agent_status_flush_task",
@@ -48,3 +49,9 @@ class BackgroundTasks:
             task = getattr(app.state, attr, None)
             if task is not None:
                 task.cancel()
+                tasks.append(task)
+        if tasks:
+            # Wait for cancellation to settle before lifespan teardown closes
+            # database pools; in-flight thread work (asyncio.to_thread) is not
+            # interruptible, so bound the wait and let the timeout win.
+            await asyncio.wait(tasks, timeout=timeout_seconds)

@@ -6,9 +6,10 @@ const originalFetch = global.fetch
 const workerA: WorkerSummary = {
   worker_id: 'worker-abc123def456',
   name: 'GPU Box A',
-  capabilities: ['review_keywords'],
-  slots: 2,
-  labels: { gpu: true },
+  runtimes: ['pi'],
+  max_concurrency: 2,
+  labels: { gpu: 'true' },
+  protocol_version: 1,
   registered_at: '2026-07-20T00:00:00Z',
   last_seen_at: '2026-07-20T01:00:00Z',
   revoked: false,
@@ -16,7 +17,7 @@ const workerA: WorkerSummary = {
 
 function mockWorkersFetch(workers: WorkerSummary[]) {
   return vi.fn().mockImplementation((url: string) => {
-    if (url === '/api/remote/workers') {
+    if (url === '/api/agent-workers') {
       return Promise.resolve({
         ok: true,
         headers: new Headers({ 'content-type': 'application/json' }),
@@ -79,6 +80,23 @@ describe('executorsStore', () => {
     await vi.advanceTimersByTimeAsync(750)
     await promise
 
+    expect(useExecutorsStore.getState().workers).toEqual([workerA])
+  })
+
+  it('resolves the superseded promise when a newer refreshWorkers call wins', async () => {
+    vi.useFakeTimers()
+    global.fetch = mockWorkersFetch([workerA])
+
+    const first = useExecutorsStore.getState().refreshWorkers()
+    await vi.advanceTimersByTimeAsync(400)
+    const second = useExecutorsStore.getState().refreshWorkers()
+
+    // The superseded promise settles immediately instead of hanging forever.
+    await first
+    await vi.advanceTimersByTimeAsync(750)
+    await second
+
+    expect(global.fetch).toHaveBeenCalledTimes(1)
     expect(useExecutorsStore.getState().workers).toEqual([workerA])
   })
 

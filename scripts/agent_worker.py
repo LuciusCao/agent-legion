@@ -1,0 +1,448 @@
+#!/usr/bin/env python3
+"""Agent Legion Worker: concurrent pull supervisor for Pi/OpenClaw Agent executions."""
+
+from __future__ import annotations
+
+import argparse
+import contextlib
+import hashlib
+import json
+import os
+import shutil
+import signal
+import subprocess
+import tarfile
+import threading
+import time
+import urllib.error
+import urllib.request
+from concurrent.futures import Future, ThreadPoolExecutor
+from pathlib import Path, PurePosixPath
+from typing import Any
+
+import yaml
+
+PROTOCOL_VERSION = 1
+CLAIM_BACKOFF_CAP_SECONDS = 60.0
+
+
+class WorkerAuthError(RuntimeError):
+    """Server rejected this Worker as unknown or revoked; re-registration is required."""
+
+
+class Client:
+    def __init__(self, host: str, token: str = "", timeout: float = 30) -> None:
+        self.host = host.rstrip("/")
+        self.token = token
+        self.timeout = timeout
+
+    def request(
+        self,
+        method: str,
+        path: str,
+        *,
+        data: bytes | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> tuple[int, bytes]:
+        request = urllib.request.Request(
+            f"{self.host}{path}",
+            method=method,
+            data=data,
+            headers={
+                **({"X-Agent-Worker-Token": self.token} if self.token else {}),
+                **(headers or {}),
+            },
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=self.timeout) as response:
+                return response.status, response.read()
+        except urllib.error.HTTPError as exc:
+            return exc.code, exc.read()
+
+    def register(self, config: dict[str, Any], management_token: str) -> str:
+        payload = {
+            "worker_id": config["worker_id"],
+            "name": config.get("name", config["worker_id"]),
+            "runtimes": config["runtimes"],
+            "max_concurrency": config["max_concurrency"],
+            "labels": config.get("labels", {}),
+            "protocol_version": PROTOCOL_VERSION,
+        }
+        status, body = self.request(
+            "POST",
+            "/api/agent-workers/register",
+            data=json.dumps(payload).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "X-Agent-Worker-Register-Token": management_token,
+            },
+        )
+        if status != 201:
+            raise RuntimeError(f"Agent Worker registration failed: HTTP {status}: {body[:300]!r}")
+        self.token = str(json.loads(body)["worker_token"])
+        return self.token
+
+    def claim(self, worker_id: str) -> dict[str, Any] | None:
+        status, body = self.request(
+            "POST",
+            "/api/agent-executions/claim",
+            data=json.dumps({"worker_id": worker_id}).encode(),
+            headers={"Content-Type": "application/json"},
+        )
+        if status == 204:
+            return None
+        if status in (401, 409):
+            raise WorkerAuthError(f"HTTP {status}: {body[:300]!r}")
+        if status != 200:
+            raise RuntimeError(f"Agent claim failed: HTTP {status}: {body[:300]!r}")
+        return json.loads(body)
+
+    def download(self, path: str, destination: Path) -> None:
+        status, body = self.request("GET", path)
+        if status != 200:
+            raise RuntimeError(f"download failed: {path}: HTTP {status}")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(body)
+
+    def upload_artifact(self, path: Path) -> str:
+        status, body = self.request("POST", "/api/artifacts", data=path.read_bytes())
+        if status != 201:
+            raise RuntimeError(f"artifact upload failed: HTTP {status}: {body[:200]!r}")
+        return f"sha256:{json.loads(body)['hash']}"
+
+    def heartbeat(self, execution_id: str, lease_id: str) -> int:
+        status, _ = self.request(
+            "POST",
+            f"/api/agent-executions/{execution_id}/heartbeat",
+            headers={"X-Agent-Lease-Id": lease_id},
+        )
+        return status
+
+    def report(
+        self, execution_id: str, lease_id: str, metadata: dict[str, Any], archive: Path
+    ) -> None:
+        status, body = self.request(
+            "POST",
+            f"/api/agent-executions/{execution_id}/result",
+            data=archive.read_bytes(),
+            headers={
+                "X-Agent-Result": json.dumps(metadata, ensure_ascii=True),
+                "X-Agent-Lease-Id": lease_id,
+            },
+        )
+        if status != 204:
+            raise RuntimeError(f"Agent result failed: HTTP {status}: {body[:300]!r}")
+
+
+def safe_extract(archive: Path, destination: Path) -> dict[str, Any]:
+    with tarfile.open(archive, "r:gz") as tar:
+        for member in tar.getmembers():
+            path = PurePosixPath(member.name)
+            if path.is_absolute() or ".." in path.parts or member.islnk() or member.issym():
+                raise ValueError(f"unsafe Agent bundle member: {member.name!r}")
+        tar.extractall(destination, filter="data")
+    return json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
+
+
+def substitute(value: str, paths: dict[str, str]) -> str:
+    for key, replacement in paths.items():
+        value = value.replace("{" + key + "}", replacement)
+    return value
+
+
+def heartbeat_loop(
+    client: Client,
+    execution_id: str,
+    lease_id: str,
+    stop: threading.Event,
+    interval: float,
+    ownership_lost: threading.Event,
+) -> None:
+    """Beat until stopped; only 401/409 (ownership lost) stops the thread."""
+    while not stop.wait(interval):
+        try:
+            status = client.heartbeat(execution_id, lease_id)
+        except Exception as exc:  # transient network error: keep beating
+            print(f"heartbeat error for {execution_id}: {exc}", flush=True)
+            continue
+        if status in (401, 409):
+            print(f"heartbeat lost ownership for {execution_id}: HTTP {status}", flush=True)
+            ownership_lost.set()
+            return
+        if status != 204:
+            print(f"heartbeat unexpected status for {execution_id}: HTTP {status}", flush=True)
+
+
+def terminate(proc: subprocess.Popen[bytes], grace_seconds: float) -> None:
+    """Best-effort process-group SIGTERM then SIGKILL; never raises."""
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGTERM)
+    try:
+        proc.wait(timeout=grace_seconds)
+        return
+    except subprocess.TimeoutExpired:
+        pass
+    with contextlib.suppress(ProcessLookupError):
+        os.killpg(proc.pid, signal.SIGKILL)
+    try:
+        proc.wait(timeout=grace_seconds)
+    except subprocess.TimeoutExpired:
+        print(f"Agent process {proc.pid} did not exit after SIGKILL", flush=True)
+
+
+def _wait_for_exit(
+    proc: subprocess.Popen[bytes],
+    timeout: float,
+    shutdown: threading.Event,
+    shutdown_grace: float,
+    ownership_lost: threading.Event,
+) -> tuple[int, bool]:
+    """Poll the child, reacting to shutdown/ownership loss. Returns (exit_code, report)."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if ownership_lost.is_set():
+            terminate(proc, 5)
+            return 1, False
+        if shutdown.is_set():
+            terminate(proc, shutdown_grace)
+            return 130, True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            terminate(proc, 5)
+            return 124, True
+        try:
+            return proc.wait(timeout=min(0.5, remaining)), True
+        except subprocess.TimeoutExpired:
+            continue
+
+
+def run_execution(
+    client: Client,
+    claim: dict[str, Any],
+    work_root: Path,
+    environment: dict[str, str],
+    heartbeat_interval: float,
+    shutdown: threading.Event,
+    shutdown_grace: float,
+) -> None:
+    execution_id = str(claim["execution_id"])
+    lease_id = str(claim["lease_id"])
+    execution_dir = work_root / execution_id
+    bundle = execution_dir / "bundle.tar.gz"
+    extracted = execution_dir / "bundle"
+    job_dir = execution_dir / "job"
+    run_dir = job_dir / "runs" / str(claim["node_key"]) / "worker"
+    session_dir = run_dir / "session"
+    prompt_file = run_dir / "prompt.md"
+    archive = execution_dir / "result.tar.gz"
+    if execution_dir.exists():
+        # Stale dir from a crashed run or a re-claimed execution: drop it.
+        print(f"removing stale execution dir for {execution_id}", flush=True)
+        shutil.rmtree(execution_dir, ignore_errors=True)
+    execution_dir.mkdir(parents=True)
+    job_dir.mkdir(parents=True)
+    run_dir.mkdir(parents=True)
+    session_dir.mkdir(parents=True)
+    stop_heartbeat = threading.Event()
+    ownership_lost = threading.Event()
+    heartbeat: threading.Thread | None = None
+    proc: subprocess.Popen[bytes] | None = None
+    report_result = True
+    metadata: dict[str, Any] = {"status": "failed", "exit_code": 1}
+    try:
+        client.download(str(claim["bundle_url"]), bundle)
+        manifest = safe_extract(bundle, extracted)
+        for name, ref in manifest.get("input_artifacts", {}).items():
+            digest = str(ref).split(":", 1)[-1]
+            target = job_dir / PurePosixPath(str(name))
+            client.download(f"/api/artifacts/{digest}", target)
+            if hashlib.sha256(target.read_bytes()).hexdigest() != digest:
+                raise RuntimeError(f"artifact digest mismatch: {name}")
+        command_spec = manifest["command_spec"]
+        prompt_file.write_text(str(command_spec["prompt"]), encoding="utf-8")
+        paths = {
+            "job_dir": str(job_dir),
+            "skill_dir": str(extracted / "skill"),
+            "session_dir": str(session_dir),
+            "session_name": f"agent-legion-{execution_id}",
+            "prompt_file": str(prompt_file),
+        }
+        command = [substitute(str(part), paths) for part in command_spec["command"]]
+        heartbeat = threading.Thread(
+            target=heartbeat_loop,
+            args=(
+                client,
+                execution_id,
+                lease_id,
+                stop_heartbeat,
+                heartbeat_interval,
+                ownership_lost,
+            ),
+            daemon=True,
+        )
+        heartbeat.start()
+        if shutdown.is_set():
+            metadata = {
+                "status": "cancelled",
+                "exit_code": 130,
+                "error_message": "Agent Worker is shutting down",
+                "command": command,
+                "output_artifacts": {},
+            }
+        else:
+            events = run_dir / "events.jsonl"
+            env = {**os.environ, **environment}
+            # LLM gateway token: pi reads it via the provider's apiKey
+            # "$LLM_GATEWAY_TOKEN" interpolation; keep the worker env authoritative.
+            if gateway_token := os.environ.get("LLM_GATEWAY_TOKEN", ""):
+                env["LLM_GATEWAY_TOKEN"] = gateway_token
+            else:
+                env.pop("LLM_GATEWAY_TOKEN", None)
+            with events.open("wb") as output:
+                proc = subprocess.Popen(
+                    command,
+                    cwd=job_dir,
+                    env=env,
+                    stdout=output,
+                    stderr=subprocess.STDOUT,
+                    start_new_session=True,
+                )
+                timeout = int(manifest.get("pi", {}).get("timeout_seconds", 600))
+                exit_code, report_result = _wait_for_exit(
+                    proc, timeout, shutdown, shutdown_grace, ownership_lost
+                )
+            if report_result:
+                outputs: dict[str, str] = {}
+                for name in manifest.get("expected_outputs", []):
+                    output_path = job_dir / PurePosixPath(str(name))
+                    if output_path.is_file():
+                        outputs[str(name)] = client.upload_artifact(output_path)
+                with tarfile.open(archive, "w:gz") as tar:
+                    for name in manifest.get("expected_outputs", []):
+                        output_path = job_dir / PurePosixPath(str(name))
+                        if output_path.is_file():
+                            tar.add(output_path, arcname=str(name))
+                    tar.add(run_dir, arcname=str(run_dir.relative_to(job_dir)))
+                if exit_code == 0:
+                    status, error = "completed", ""
+                elif shutdown.is_set():
+                    status, error = "cancelled", "Agent Worker is shutting down"
+                else:
+                    status, error = "failed", f"Agent process exited {exit_code}"
+                metadata = {
+                    "status": status,
+                    "exit_code": exit_code,
+                    "error_message": error,
+                    "command": command,
+                    "output_artifacts": outputs,
+                }
+    except Exception as exc:
+        metadata["error_message"] = str(exc)
+    finally:
+        stop_heartbeat.set()
+        if heartbeat is not None:
+            heartbeat.join(timeout=2)
+        if proc is not None and proc.poll() is None:
+            terminate(proc, 5)
+    try:
+        if report_result:
+            if not archive.exists():
+                with tarfile.open(archive, "w:gz"):
+                    pass
+            client.report(execution_id, lease_id, metadata, archive)
+    except Exception as exc:
+        print(f"Agent result report failed for {execution_id}: {exc}", flush=True)
+    shutil.rmtree(execution_dir, ignore_errors=True)
+
+
+def load_config(path: Path) -> dict[str, Any]:
+    config = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(config, dict):
+        raise ValueError("worker config must be a mapping")
+    return config
+
+
+def clean_work_root(work_root: Path) -> None:
+    """Drop execution dirs left behind by a crashed supervisor."""
+    work_root.mkdir(parents=True, exist_ok=True)
+    for child in work_root.iterdir():
+        if child.is_dir():
+            shutil.rmtree(child, ignore_errors=True)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Run an Agent Legion Worker")
+    parser.add_argument("--config", type=Path, default=Path("config/agent-worker.yaml"))
+    args = parser.parse_args()
+    config = load_config(args.config)
+    token_file = Path(str(config["register_token_file"]))
+    management_token = token_file.read_text(encoding="utf-8").strip()
+    client = Client(str(config["host_url"]))
+    client.register(config, management_token)
+    max_concurrency = int(config["max_concurrency"])
+    work_root = Path(str(config.get("work_root", "data/agent-worker"))).resolve()
+    clean_work_root(work_root)
+    environment = {str(key): str(value) for key, value in config.get("environment", {}).items()}
+    interval = float(config.get("heartbeat_interval_seconds", 15))
+    poll_interval = float(config.get("poll_interval_seconds", 2))
+    shutdown_grace = float(config.get("shutdown_grace_seconds", 25))
+    stop = threading.Event()
+    signal.signal(signal.SIGTERM, lambda *_: stop.set())
+    signal.signal(signal.SIGINT, lambda *_: stop.set())
+    active: set[Future[None]] = set()
+    backoff = poll_interval
+    pool = ThreadPoolExecutor(max_workers=max_concurrency, thread_name_prefix="agent-execution")
+    try:
+        while not stop.is_set():
+            completed = {future for future in active if future.done()}
+            active -= completed
+            for future in completed:
+                try:
+                    future.result()
+                except Exception as exc:
+                    print(f"Agent execution failed: {exc}", flush=True)
+            available = max_concurrency - len(active)
+            claimed = False
+            try:
+                for _ in range(available):
+                    if stop.is_set():
+                        break
+                    claim = client.claim(str(config["worker_id"]))
+                    if claim is None:
+                        break
+                    claimed = True
+                    active.add(
+                        pool.submit(
+                            run_execution,
+                            client,
+                            claim,
+                            work_root,
+                            environment,
+                            interval,
+                            stop,
+                            shutdown_grace,
+                        )
+                    )
+            except WorkerAuthError as exc:
+                print(
+                    f"Agent Worker rejected by server: {exc}; re-register required",
+                    flush=True,
+                )
+                return 2
+            except Exception as exc:
+                print(f"Agent claim error: {exc}; retrying in {backoff:.1f}s", flush=True)
+                stop.wait(backoff)
+                backoff = min(backoff * 2, CLAIM_BACKOFF_CAP_SECONDS)
+                continue
+            backoff = poll_interval
+            stop.wait(0.2 if claimed else poll_interval)
+    finally:
+        stop.set()
+        # Bounded: run_execution watches `stop` and kills children within
+        # shutdown_grace, so this never blocks past grace + report time.
+        pool.shutdown(wait=True)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

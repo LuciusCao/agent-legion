@@ -22,6 +22,9 @@ export function ExecutorBindingSection() {
   if (!workflowDefinition) return null
 
   const workflowKey = workflowDefinition.key
+  const localNodes = workflowDefinition.nodes.filter(
+    (node) => node.max_concurrency == null
+  )
 
   const handleChange = (nodeKey: string) => (event: SelectChangeEvent) => {
     const value = event.target.value
@@ -50,7 +53,7 @@ export function ExecutorBindingSection() {
           gap: 12,
         }}
       >
-        {workflowDefinition.nodes.map((node) => {
+        {localNodes.map((node) => {
           const currentBinding = executorConfiguration.bindings.find(
             (b) => b.workflow_key === workflowKey && b.node_key === node.key
           )

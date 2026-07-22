@@ -4,7 +4,7 @@ import logging
 from collections.abc import Mapping
 from pathlib import Path
 
-from server.app.executors.config import PiCapabilityConfig, RemoteCapabilityConfig
+from server.app.executors.config import PiCapabilityConfig
 from server.app.executors.models import ExecutionContext, ExecutionResult
 from server.app.skills.manager import SkillManager
 from server.app.workflows.skill_version import resolve_skill_version
@@ -19,9 +19,9 @@ def get_skill_version(skill_manager: SkillManager, skill: str) -> str:
 
 def prepare_execution(
     cancelled: set[str],
-    capabilities: Mapping[str, PiCapabilityConfig | RemoteCapabilityConfig],
+    capabilities: Mapping[str, PiCapabilityConfig],
     context: ExecutionContext,
-) -> tuple[PiCapabilityConfig | RemoteCapabilityConfig | None, ExecutionResult | None]:
+) -> tuple[PiCapabilityConfig | None, ExecutionResult | None]:
     """Return the capability config, or an early result if the run cannot start."""
     if context.execution_id in cancelled:
         cancelled.discard(context.execution_id)

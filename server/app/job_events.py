@@ -12,6 +12,8 @@ from server.app.job_event_buffer import JobEventBuffer
 if TYPE_CHECKING:
     from server.app.jobs import JobQueries
 
+logger = logging.getLogger(__name__)
+
 
 class _JobQueries(Protocol):
     def list_patch_summaries(
@@ -77,9 +79,18 @@ class WorkspaceJobEventAggregator:
             workspace_stats,
         )
 
-    async def run(self, interval_seconds: float = 0.5) -> None:
+    async def run(
+        self, interval_seconds: float = 0.5, failure_backoff_seconds: float = 1.0
+    ) -> None:
         while True:
-            await asyncio.to_thread(self.flush_once)
+            try:
+                await asyncio.to_thread(self.flush_once)
+            except Exception:
+                # A transient failure (e.g. DB hiccup) must not kill the event
+                # pipeline: log, back off, and keep flushing.
+                logger.exception("workspace event flush failed; retrying after backoff")
+                await asyncio.sleep(failure_backoff_seconds)
+                continue
             await asyncio.sleep(interval_seconds)
 
 
@@ -151,7 +162,7 @@ def record_job_update(
         if workspace_id:
             job_event_buffer.record_job_updated(workspace_id, job_id)
     except Exception:
-        logging.getLogger(__name__).exception("Failed to record job update for %s", job_id)
+        logger.exception("Failed to record job update for %s", job_id)
 
 
 def broadcast_job_update(
@@ -171,4 +182,4 @@ def broadcast_job_update(
         stats = job_db.count_jobs_by_status(workspace_id)
         job_event_manager.broadcast_job_updated(workspace_id, job_id, stats)
     except Exception:
-        logging.getLogger(__name__).exception("Failed to broadcast job update for %s", job_id)
+        logger.exception("Failed to broadcast job update for %s", job_id)

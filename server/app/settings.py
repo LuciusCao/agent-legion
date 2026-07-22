@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Any, cast
 from urllib.parse import urlencode
 
+from server.app.agent_catalog import AgentDefinition, load_agent_definitions
 from server.app.configuration import load_application_config
 from server.app.configuration.cors import CorsSettings, load_cors_settings
 from server.app.executors.config import (
@@ -33,6 +34,7 @@ class Settings:
     database_url: str = "postgresql://127.0.0.1:5432/agent_legion"
     cors: CorsSettings = field(default_factory=CorsSettings)
     executor_definitions: dict[str, ExecutorConfig] = field(default_factory=dict)
+    agent_definitions: dict[str, AgentDefinition] = field(default_factory=dict)
     executor_runtime: ExecutorRuntimeConfig = field(
         default_factory=lambda: ExecutorRuntimeConfig(
             workflows=WorkflowsRuntimeConfig(),
@@ -79,7 +81,12 @@ _ENV_OVERRIDES: dict[str, tuple[tuple[str, ...], Callable[[str], Any]]] = {
     "VIDEO_HIVE_ASR_SENSEVOICE_MODEL_DIR": (("asr", "sensevoice", "model_dir"), _path_parser),
     "VIDEO_HIVE_PI_BINARY": (("workflows", "pi", "binary"), _path_parser),
     "VIDEO_HIVE_OPENCLAW_CWD": (("openclaw", "cwd"), _path_parser),
-    "VIDEO_HIVE_REMOTE_WORKER_TOKEN": (("remote", "worker_token"), _str_parser),
+    "AGENT_LEGION_WORKER_REGISTER_TOKEN": (("agent_workers", "register_token"), _str_parser),
+    "AGENT_LEGION_WORKER_REGISTER_TOKEN_FILE": (
+        ("agent_workers", "register_token_file"),
+        _path_parser,
+    ),
+    "AGENT_LEGION_DATABASE_URL": (("database", "url"), _str_parser),
 }
 
 
@@ -161,7 +168,13 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
     for path in [resolved_data_dir, videos_dir, logs_dir, packages_dir, jobs_dir]:
         path.mkdir(parents=True, exist_ok=True)
     executor_definitions = cast(dict[str, ExecutorConfig], load_executor_definitions(config.get("executors", {})))  # fmt: skip
+    agent_definitions = load_agent_definitions(config.get("agents", {}))
     executor_runtime = ExecutorRuntimeConfig.model_validate(config)
+    token_file = executor_runtime.agent_workers.register_token_file
+    if token_file and not executor_runtime.agent_workers.register_token:
+        executor_runtime.agent_workers.register_token = (
+            Path(token_file).read_text(encoding="utf-8").strip()
+        )
     return Settings(
         root_dir=root_dir,
         database_url=database_url,
@@ -173,6 +186,7 @@ def load_settings(data_dir: Path | None = None, config_path: Path | None = None)
         config=config,
         cors=load_cors_settings(config),
         executor_definitions=executor_definitions,
+        agent_definitions=agent_definitions,
         executor_runtime=executor_runtime,
     )
 

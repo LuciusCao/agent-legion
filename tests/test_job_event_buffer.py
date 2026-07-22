@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 
 from server.app.job_events import JobEventBuffer, WorkspaceJobEventAggregator
@@ -50,6 +51,90 @@ def test_marks_workspace_for_resync_when_buffer_overflows():
     drained = buffer.drain_compacted()
     assert drained.resync_workspace_ids == {"ws1"}
     assert drained.latest_revision == 3
+
+
+def test_concurrent_recorders_get_unique_ordered_revisions():
+    """Regression: concurrent recorders must never regress ``_revision`` and
+    the deque must stay in strictly increasing revision order (previously the
+    DB bump happened outside the lock, so a slower thread could overwrite a
+    higher revision and reorder appends)."""
+    import threading
+
+    buffer = JobEventBuffer(max_events=10000)
+    barrier = threading.Barrier(4)
+    issued: list[int] = []
+    issued_lock = threading.Lock()
+
+    def worker() -> None:
+        barrier.wait(5)
+        for _ in range(25):
+            revision = buffer.record("ws1", "jobx", "updated")
+            with issued_lock:
+                issued.append(revision)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(15)
+
+    assert len(issued) == 100
+    assert sorted(issued) == list(range(1, 101))
+    events = buffer.drain()
+    revisions = [event.revision for event in events]
+    assert revisions == sorted(revisions)
+    assert buffer.current_revision() == 100
+
+
+def test_drain_reports_max_revision_of_drained_batch():
+    buffer = JobEventBuffer(max_events=10)
+
+    buffer.record_job_updated("ws1", "job1")
+    buffer.record_job_updated("ws1", "job2")
+    assert buffer.drain_compacted().latest_revision == 2
+
+    buffer.record_job_updated("ws1", "job3")
+    drained = buffer.drain_compacted()
+    assert drained.latest_revision == 3
+
+    # Empty drain keeps the watermark instead of resetting it.
+    assert buffer.drain_compacted().latest_revision == 3
+
+
+def test_record_jobs_created_empty_returns_current_revision():
+    buffer = JobEventBuffer(max_events=10)
+    assert buffer.record_jobs_created("ws1", []) == 0
+    buffer.record_job_updated("ws1", "job1")
+    assert buffer.record_jobs_created("ws1", []) == 1
+
+
+def test_aggregator_run_survives_flush_failure(monkeypatch):
+    buffer = JobEventBuffer(max_events=10)
+    queries = FakeJobQueries()
+    bus = FakeEventBus()
+    aggregator = WorkspaceJobEventAggregator(buffer, queries, bus)
+    calls = 0
+
+    def flaky_flush() -> None:
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise RuntimeError("transient db failure")
+
+    monkeypatch.setattr(aggregator, "flush_once", flaky_flush)
+
+    async def _run() -> None:
+        task = asyncio.create_task(
+            aggregator.run(interval_seconds=0.01, failure_backoff_seconds=0.01)
+        )
+        await asyncio.sleep(0.2)
+        task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await task
+
+    asyncio.run(_run())
+
+    assert calls >= 2  # 失败后继续 flush，而不是任务悄悄退出
 
 
 class FakeJobQueries:

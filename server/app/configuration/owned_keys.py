@@ -8,10 +8,11 @@ CONFIG_FILE_KEYS: dict[str, frozenset[str]] = {
     "workflow.yaml": frozenset(
         {
             "executors",
+            "agents",
+            "agent_workers",
             "heartbeat_failure_threshold",
             "heartbeat_interval_seconds",
             "lease_ttl_seconds",
-            "remote",
             "sweeper_enabled",
             "sweeper_interval_seconds",
             "workflows",

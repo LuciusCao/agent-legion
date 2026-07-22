@@ -38,13 +38,14 @@ WHITELIST: set[str] = {
     # AgentStatusManager payloads key incremental WS envelopes by "agent" (Decision 8
     # of the phase4 agent-collaboration plan); the literal is its own status domain.
     str(ROOT / "server" / "app" / "agents.py"),
+    # Same WS envelope domain on the client: parses agent_busy/agent_idle payloads.
+    str(ROOT / "frontend" / "src" / "stores" / "agentsWsMessages.ts"),
     # Job detail panel picks the new NodeRunResponse.runner API field (run provenance).
     str(ROOT / "frontend" / "src" / "components" / "NodeDetailsPanel.tsx"),
 }
 
 FORBIDDEN_PATTERNS = {
     "node.runner literal": r"['\"]runner['\"]",
-    "node.agent literal": r"['\"]agent['\"]",
     "pipeline_config_json column": "pipeline_config_json",
     "workspace_agent_assignments table": "workspace_agent_assignments",
     "workspace_executor_bootstrap_state table": "workspace_executor_bootstrap_state",

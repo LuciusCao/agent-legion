@@ -1,0 +1,8 @@
+host_url: http://192.0.2.1:8000
+worker_id: home-mac-mini-1
+name: Home Mac mini
+runtimes: [pi]
+max_concurrency: 10
+labels: {os: linux, arch: arm64, location: home}
+register_token_file: /run/secrets/agent_worker_register_token
+work_root: /var/lib/agent-legion-worker

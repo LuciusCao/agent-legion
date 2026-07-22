@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Any
 
 from server.app.db.connection import DatabaseConnection
 from server.app.executors._lease_control import (
@@ -162,81 +163,102 @@ def fail_without_lease(
 
 def expire_stale_leases(conn: DatabaseConnection, now: datetime) -> list[str]:
     now_str = _database_timestamp(now)
+    # Agent Worker leases ('agent:%') are owned by the Agent broker sweep
+    # (requeue-with-retry semantics); expiring them here would fail the node
+    # and job while the broker later requeues the request, leaving the job
+    # failed with a permanently queued request.
     rows = conn.execute(
         """
         select id, job_id, node_key, node_run_id, execution_id
         from executor_leases
-        where status='active' and expires_at<=?
+        where status='active' and expires_at<=? and not starts_with(executor_id, 'agent:')
         """,
         (now_str,),
     ).fetchall()
     expired: list[str] = []
     for row in rows:
-        expired.append(row["id"])
-        conn.execute(
-            "update executor_leases set status='expired' where id=?",
-            (row["id"],),
-        )
-        conn.execute(
-            """
-            update node_runs
-            set status='failed', error_message='lease expired', finished_at=?
-            where id=?
-            """,
-            (now_str, row["node_run_id"]),
-        )
-        shard_index = shard_index_for_execution(
+        if _expire_lease_row(conn, row, now_str):
+            expired.append(row["id"])
+    return expired
+
+
+def _expire_lease_row(conn: DatabaseConnection, row: dict[str, Any], now_str: str) -> bool:
+    """Expire one stale lease row; False when it left the stale set concurrently.
+
+    The guard predicates are re-evaluated by PostgreSQL against the newest
+    committed row version when a concurrent finish/heartbeat touched the row
+    after this transaction's SELECT, so a lease that was released or renewed
+    in between is left untouched instead of being clobbered to 'expired'.
+    """
+    cursor = conn.execute(
+        """
+        update executor_leases set status='expired'
+        where id=? and status='active' and expires_at<=?
+        """,
+        (row["id"], now_str),
+    )
+    if cursor.rowcount == 0:
+        return False
+    conn.execute(
+        """
+        update node_runs
+        set status='failed', error_message='lease expired', finished_at=?
+        where id=?
+        """,
+        (now_str, row["node_run_id"]),
+    )
+    shard_index = shard_index_for_execution(
+        conn,
+        str(row["job_id"]),
+        str(row["node_key"]),
+        str(row["execution_id"]),
+    )
+    if shard_index is not None:
+        aggregate = on_shard_finished(
             conn,
             str(row["job_id"]),
             str(row["node_key"]),
-            str(row["execution_id"]),
+            shard_index,
+            "failed",
+            error_message="lease expired",
         )
-        if shard_index is not None:
-            aggregate = on_shard_finished(
+        if aggregate in ("completed", "failed"):
+            error_message = failed_shard_error(
                 conn,
                 str(row["job_id"]),
                 str(row["node_key"]),
-                shard_index,
-                "failed",
-                error_message="lease expired",
             )
-            if aggregate in ("completed", "failed"):
-                error_message = failed_shard_error(
-                    conn,
-                    str(row["job_id"]),
-                    str(row["node_key"]),
-                )
-                conn.execute(
-                    """
-                    update job_nodes
-                    set status=?, stale_reason='', error_message=?, finished_at=?
-                    where job_id=? and node_key=?
-                    """,
-                    (
-                        aggregate,
-                        error_message,
-                        now_str,
-                        row["job_id"],
-                        row["node_key"],
-                    ),
-                )
-                _sync_job_status(conn, str(row["job_id"]))
-            continue
-        conn.execute(
-            """
-            update job_nodes
-            set status='failed', stale_reason='', error_message='lease expired', finished_at=?
-            where job_id=? and node_key=?
-            """,
-            (now_str, row["job_id"], row["node_key"]),
-        )
-        _sync_job_status(conn, row["job_id"])
-        conn.execute(
-            """
-            update jobs
-            set status='failed', updated_at=?
-            where id=? and status != 'failed'
-            """,
-            (now_str, row["job_id"]),
-        )
-    return expired
+            conn.execute(
+                """
+                update job_nodes
+                set status=?, stale_reason='', error_message=?, finished_at=?
+                where job_id=? and node_key=?
+                """,
+                (
+                    aggregate,
+                    error_message,
+                    now_str,
+                    row["job_id"],
+                    row["node_key"],
+                ),
+            )
+            _sync_job_status(conn, str(row["job_id"]))
+        return True
+    conn.execute(
+        """
+        update job_nodes
+        set status='failed', stale_reason='', error_message='lease expired', finished_at=?
+        where job_id=? and node_key=?
+        """,
+        (now_str, row["job_id"], row["node_key"]),
+    )
+    _sync_job_status(conn, row["job_id"])
+    conn.execute(
+        """
+        update jobs
+        set status='failed', updated_at=?
+        where id=? and status != 'failed'
+        """,
+        (now_str, row["job_id"]),
+    )
+    return True

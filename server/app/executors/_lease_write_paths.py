@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from server.app.db.connection import DatabaseConnection
 from server.app.db.transaction import read_connection, write_transaction
 from server.app.executors._lease_claims import claim_lease
 from server.app.executors._lease_control import _sync_job_status
@@ -106,44 +107,73 @@ def recover_orphaned_running_jobs(repo: ExecutorLeaseRepository, now: datetime) 
               )
             """
         ).fetchall()
-        recovered = [str(row["id"]) for row in rows]
-        if recovered:
-            placeholders = ",".join("?" * len(recovered))
-            running_nodes = conn.execute(
-                f"""
-                select job_id, node_key from job_nodes
-                where job_id in ({placeholders}) and status='running'
-                """,
-                recovered,
-            ).fetchall()
-            conn.execute(
-                f"""
-                update job_nodes
-                set status='pending',
-                    stale_reason='',
-                    error_message='',
-                    started_at=null,
-                    finished_at=null,
-                    created_at=current_timestamp
-                where job_id in ({placeholders}) and status='running'
-                """,
-                recovered,
-            )
-            for row in running_nodes:
-                delete_shards(conn, str(row["job_id"]), [str(row["node_key"])])
-            conn.execute(
-                f"""
-                update node_runs
-                set status='failed',
-                    error_message='orphaned recovery',
-                    finished_at=?
-                where job_id in ({placeholders}) and status='running'
-                """,
-                (now_str, *recovered),
-            )
-            for job_id in recovered:
-                _sync_job_status(conn, job_id)
+        recovered: list[str] = []
+        for row in rows:
+            job_id = str(row["id"])
+            if _recover_orphaned_job(conn, job_id, now_str):
+                recovered.append(job_id)
     # Broadcast only after the commit has succeeded, never inside the tx.
     for job_id in recovered:
         repo._broadcast_job_update(job_id)
     return recovered
+
+
+def _recover_orphaned_job(conn: DatabaseConnection, job_id: str, now_str: str) -> bool:
+    """Reset one orphaned job's running nodes; False when a lease appeared.
+
+    The ``not exists`` predicate rides on the UPDATE itself so PostgreSQL
+    re-evaluates it against the latest committed leases: a node claimed
+    concurrently after the candidate SELECT is never reset to 'pending'
+    (which would double-execute it while its lease stays active).
+    """
+    reset = conn.execute(
+        """
+        update job_nodes
+        set status='pending',
+            stale_reason='',
+            error_message='',
+            started_at=null,
+            finished_at=null,
+            created_at=current_timestamp
+        where job_id=? and status='running'
+          and not exists (
+              select 1 from executor_leases l
+              where l.job_id = job_nodes.job_id and l.status='active'
+          )
+        returning node_key
+        """,
+        (job_id,),
+    ).fetchall()
+    if not reset:
+        # A concurrently claimed lease blocks the reset; the sweeper retries
+        # next tick. A job with no running nodes at all only needs its status
+        # resynced (stale 'running' with no lease).
+        lease = conn.execute(
+            "select 1 from executor_leases where job_id=? and status='active' limit 1",
+            (job_id,),
+        ).fetchone()
+        if lease is not None:
+            return False
+        _sync_job_status(conn, job_id)
+        return True
+    # The reset above holds row locks on this job's running nodes until
+    # commit, so no claim for those nodes can interleave with these follow-up
+    # writes. A claim for a *different* (non-running) node of the same job can
+    # still land in between, so the node_runs update carries the same guard.
+    delete_shards(conn, job_id, [str(row["node_key"]) for row in reset])
+    conn.execute(
+        """
+        update node_runs
+        set status='failed',
+            error_message='orphaned recovery',
+            finished_at=?
+        where job_id=? and status='running'
+          and not exists (
+              select 1 from executor_leases l
+              where l.job_id = node_runs.job_id and l.status='active'
+          )
+        """,
+        (now_str, job_id),
+    )
+    _sync_job_status(conn, job_id)
+    return True

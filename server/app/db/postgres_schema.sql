@@ -65,7 +65,7 @@ create table if not exists batches (
 create table if not exists workspaces (
   id text primary key,
   name text not null,
-  default_workflow_key text not null default 'question_content',
+  default_workflow_key text not null default 'question_comprehension_info',
   created_at timestamptz not null default current_timestamp,
   updated_at timestamptz not null default current_timestamp,
   cms_config_json text not null default '{}',
@@ -95,6 +95,35 @@ create table if not exists workspace_node_limits (
   workflow_key text not null,
   node_key text not null,
   concurrency_limit integer not null check(concurrency_limit > 0),
+  primary key(workspace_id, workflow_key, node_key)
+);
+
+create table if not exists agent_definitions (
+  agent_id text primary key,
+  capability text not null,
+  runtime text not null,
+  definition_json text not null,
+  definition_hash text not null,
+  enabled integer not null default 1 check(enabled in (0, 1)),
+  updated_at timestamptz not null default current_timestamp
+);
+
+create table if not exists workspace_node_routes (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  node_key text not null,
+  target_kind text not null check(target_kind in ('handler_executor', 'agent')),
+  target_id text not null,
+  primary key(workspace_id, workflow_key, node_key)
+);
+
+create table if not exists workspace_node_capacities (
+  workspace_id text not null references workspaces(id) on delete cascade,
+  workflow_key text not null,
+  node_key text not null,
+  max_concurrency integer not null check(max_concurrency > 0),
+  source_revision_id text not null default '',
+  updated_at timestamptz not null default current_timestamp,
   primary key(workspace_id, workflow_key, node_key)
 );
 
@@ -226,35 +255,53 @@ create table if not exists node_run_token_usage (
   updated_at timestamptz not null default current_timestamp
 );
 
-create table if not exists remote_workers (
+create table if not exists agent_workers (
   worker_id text primary key,
   name text not null default '',
-  capabilities_json text not null,
-  slots integer not null,
+  runtimes_json text not null,
+  max_concurrency integer not null check(max_concurrency > 0),
+  labels_json text not null default '{}',
+  protocol_version integer not null,
+  token_hash text not null,
   registered_at timestamptz not null,
   last_seen_at timestamptz not null,
-  token_hash text not null default '',
-  labels_json text not null default '{}',
   revoked_at timestamptz
 );
 
-create table if not exists remote_executions (
+create table if not exists agent_execution_requests (
   execution_id text primary key,
-  lease_id text not null,
-  job_id text not null,
+  workspace_id text not null references workspaces(id) on delete cascade,
+  job_id text not null references jobs(id) on delete cascade,
+  workflow_key text not null,
   node_key text not null,
-  capability text not null,
-  bundle_name text not null,
-  manifest_json text not null,
-  state text not null default 'queued',
+  agent_id text not null,
+  agent_definition_hash text not null,
+  node_concurrency_limit integer not null check(node_concurrency_limit > 0),
+  state text not null default 'queued'
+    check(state in ('queued', 'claimed', 'done', 'cancelled')),
   worker_id text,
-  requeue_count integer not null default 0,
-  last_heartbeat_at timestamptz,
-  outcome_json text,
-  created_at timestamptz not null,
-  updated_at timestamptz not null,
-  command_spec_json text
+  lease_id text,
+  node_run_id bigint,
+  attempt integer not null default 0,
+  queued_at timestamptz not null,
+  claimed_at timestamptz,
+  heartbeat_at timestamptz,
+  finished_at timestamptz,
+  manifest_json text not null,
+  outcome_json text
 );
+alter table agent_execution_requests add column if not exists lease_id text;
+alter table agent_execution_requests add column if not exists node_run_id bigint;
+
+create index if not exists idx_agent_requests_claim
+  on agent_execution_requests(state, queued_at, execution_id);
+create index if not exists idx_agent_requests_node_active
+  on agent_execution_requests(workspace_id, workflow_key, node_key, state);
+create index if not exists idx_agent_requests_worker_active
+  on agent_execution_requests(worker_id, state);
+create unique index if not exists idx_agent_requests_one_active_node
+  on agent_execution_requests(job_id, node_key)
+  where state in ('queued', 'claimed');
 
 create table if not exists job_event_seq (
   id integer primary key check(id = 1),
@@ -322,6 +369,9 @@ create index if not exists idx_executor_leases_workspace_active on executor_leas
 create index if not exists idx_executor_leases_workflow_node_active on executor_leases(workspace_id, workflow_key, node_key, status, expires_at);
 create index if not exists idx_executor_leases_status_expires_at on executor_leases(status, expires_at);
 create index if not exists idx_executor_leases_job_status on executor_leases(job_id, status);
+
+drop table if exists remote_executions;
+drop table if exists remote_workers;
 create index if not exists idx_workspace_packages_workspace_id on workspace_packages(workspace_id, created_at desc);
 create index if not exists idx_workflow_revisions_active on workflow_revisions(workspace_id, workflow_key, status);
 create index if not exists idx_node_run_token_usage_workspace on node_run_token_usage(workspace_id, node_key);
@@ -329,5 +379,4 @@ create index if not exists idx_node_run_token_usage_model on node_run_token_usag
 create index if not exists idx_node_run_token_usage_skill_version on node_run_token_usage(skill_version);
 create index if not exists idx_node_runs_run_dir on node_runs(run_dir);
 create index if not exists idx_node_run_token_usage_job_id on node_run_token_usage(job_id);
-create index if not exists idx_remote_executions_dequeue on remote_executions(capability, created_at, execution_id) where state = 'queued';
 create index if not exists idx_artifact_refs_hash on artifact_refs(hash);

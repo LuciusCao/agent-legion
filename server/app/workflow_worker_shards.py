@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from server.app.db.transaction import write_transaction
+from server.app.executors._lease_shards import complete_empty_shard_node
 from server.app.executors.models import (
     ConfigurationFailureRequest,
     ExecutionContext,
@@ -108,11 +109,19 @@ def claim_shard_node(
             return True
         try:
             with write_transaction(worker.leases.path) as conn:
-                materialize_shards(conn, job["id"], node_key, inputs, max_shards=shard.max_shards)
+                total = materialize_shards(
+                    conn, job["id"], node_key, inputs, max_shards=shard.max_shards
+                )
+                if total == 0:
+                    # Empty fan-out: zero shards aggregate to a completed node
+                    # with empty outputs; the reduce fan-in reads an empty array.
+                    complete_empty_shard_node(conn, job["id"], node_key)
         except ShardLimitExceeded as exc:
             _fail_node(worker, workspace_id, job, workflow_key, node, log_path, str(exc))
             return True
         rows = _read_shard_rows(worker, job["id"], node_key)
+        if not rows:
+            return True  # empty fan-out; the node was resolved above
 
     running = sum(1 for row in rows if row["status"] == "running")
     claimed_any = False

@@ -57,37 +57,13 @@ def test_catalog_exposes_normalized_yaml_definitions(service: ExecutorCatalogSer
     }
 
 
-def test_catalog_exposes_video_pi_agent_capabilities(service: ExecutorCatalogService) -> None:
+def test_executor_catalog_does_not_expose_agent_runtimes(
+    service: ExecutorCatalogService,
+) -> None:
     result = service.catalog()
     executors_by_id = {executor["id"]: executor for executor in result["executors"]}
-    capabilities_by_executor = {
-        executor["id"]: set(executor["capabilities"]) for executor in result["executors"]
-    }
 
     assert "pi-video-main" not in executors_by_id
     assert "pi-default" not in executors_by_id
-    assert executors_by_id["pi"]["kind"] == "pi"
-    details_by_name = {
-        detail["name"]: detail for detail in executors_by_id["pi"]["capability_details"]
-    }
-    assert {
-        "generate_key_info",
-        "review_key_info",
-        "generate_possible_errors",
-        "review_possible_errors",
-        "assess_comprehension_difficulty",
-        "review_subtitles",
-        "generate_chapters",
-        "generate_interactions",
-        "review_video_content",
-    }.issubset(capabilities_by_executor["pi"])
-    assert details_by_name["generate_key_info"] == {
-        "name": "generate_key_info",
-        "skill": "question_comprehension_info/generate_key_info",
-        "tools": ["read", "write", "bash"],
-        "skill_ref": "v1.3.8",
-        "skill_commit": "5c5eae72064abde37bfc4b07a4b2f7e9637c473d",
-        "provider": "deepseek",
-        "model": "your-model-b",
-        "thinking": "low",
-    }
+    assert "pi" not in executors_by_id
+    assert set(executors_by_id) == {"local-default"}

@@ -19,13 +19,15 @@ with psycopg.connect(BASE_DATABASE_URL, autocommit=True) as _bootstrap_conn:
         sql.SQL("create schema if not exists {}").format(sql.Identifier(TEST_SCHEMA))
     )
 
+from server.app.agent_catalog import load_agent_definitions, sync_agent_definitions
 from server.app.agents import AgentStatusManager
+from server.app.configuration import load_application_config
 from server.app.db import Database
 from server.app.db.connection import close_database_pools
 from server.app.db.schema import init_db
 from server.app.jobs import JobQueries
 from server.app.main import create_app
-from server.app.settings import load_settings
+from server.app.settings import PROJECT_ROOT, load_settings
 
 _CMS_ENV_KEYS = (
     "BASECMS_BASE_URL",
@@ -61,6 +63,8 @@ def _isolate_postgres_database():
             f"test database: {exc}"
         )
     init_db(TEST_DATABASE_URL)
+    configured = load_application_config(PROJECT_ROOT).config
+    sync_agent_definitions(TEST_DATABASE_URL, load_agent_definitions(configured.get("agents", {})))
     yield
     close_database_pools()
 
